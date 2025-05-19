@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::err::Error;
 use crate::fnc;
 use crate::sql::operator::Operator;
 use crate::sql::value::Value;
@@ -10,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-use super::operator::BindingPower;
 use super::ControlFlow;
 use super::FlowResult;
+use super::operator::BindingPower;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 
@@ -117,7 +118,9 @@ impl Expression {
 				Operator::Add => v.compute(stk, ctx, opt, doc).await,
 				Operator::Neg => Ok(fnc::operate::neg(v.compute(stk, ctx, opt, doc).await?)?),
 				Operator::Not => Ok(fnc::operate::not(v.compute(stk, ctx, opt, doc).await?)?),
-				o => Err(ControlFlow::from(fail!("Invalid operator '{o:?}' encountered"))),
+				o => Err(ControlFlow::from(anyhow::Error::new(Error::unreachable(format_args!(
+					"Invalid operator '{o:?}' encountered",
+				))))),
 			},
 			// This is a binary expression: test != NONE
 			Self::Binary {
@@ -192,7 +195,11 @@ impl Expression {
 					Operator::Knn(_, _) | Operator::Ann(_, _) => {
 						fnc::operate::knn(stk, ctx, opt, doc, self).await
 					}
-					o => Err(fail!("Invalid operator '{o:?}' encountered")),
+					o => {
+						return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
+							format_args!("Invalid operator '{o:?}' encountered"),
+						))));
+					}
 				};
 				res.map_err(ControlFlow::from)
 			}

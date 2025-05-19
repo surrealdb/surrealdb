@@ -6,10 +6,10 @@ use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
-use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
-use crate::sql::order::Ordering;
 use crate::sql::Value;
+use crate::sql::order::Ordering;
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 pub(super) enum Results {
@@ -30,7 +30,7 @@ impl Results {
 		stm: &Statement<'_>,
 		start: Option<u32>,
 		limit: Option<u32>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		if stm.expr().is_some() && stm.group().is_some() {
 			return Ok(Self::Groups(GroupsCollector::new(stm)));
 		}
@@ -68,7 +68,7 @@ impl Results {
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
 		val: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		match self {
 			Self::None => {}
 			Self::Memory(s) => {
@@ -96,7 +96,7 @@ impl Results {
 
 	#[cfg(not(target_family = "wasm"))]
 	#[cfg_attr(not(storage), expect(unused_variables))]
-	pub(super) async fn sort(&mut self, orders: &Ordering) -> Result<(), Error> {
+	pub(super) async fn sort(&mut self, orders: &Ordering) -> Result<()> {
 		match self {
 			#[cfg(storage)]
 			Self::File(f) => f.sort(orders),
@@ -126,7 +126,7 @@ impl Results {
 		skip: Option<usize>,
 		start: Option<u32>,
 		limit: Option<u32>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let start = if skip.is_some() {
 			None
 		} else {
@@ -161,7 +161,7 @@ impl Results {
 		}
 	}
 
-	pub(super) async fn take(&mut self) -> Result<Vec<Value>, Error> {
+	pub(super) async fn take(&mut self) -> Result<Vec<Value>> {
 		Ok(match self {
 			Self::Memory(m) => m.take_vec(),
 			Self::MemoryOrdered(c) => c.take_vec(),

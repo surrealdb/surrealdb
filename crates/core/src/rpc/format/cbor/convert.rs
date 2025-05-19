@@ -7,7 +7,6 @@ use std::iter::once;
 use std::ops::Bound;
 use std::ops::Deref;
 
-use crate::sql::id::range::IdRange;
 use crate::sql::Array;
 use crate::sql::Datetime;
 use crate::sql::DecimalExt;
@@ -22,6 +21,7 @@ use crate::sql::Range;
 use crate::sql::Thing;
 use crate::sql::Uuid;
 use crate::sql::Value;
+use crate::sql::id::range::IdRange;
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 const TAG_SPEC_DATETIME: u64 = 0;
@@ -172,9 +172,11 @@ impl TryFrom<Cbor> for Value {
 							let tb = match Value::try_from(Cbor(v.remove(0))) {
 								Ok(Value::Strand(tb)) => tb.0,
 								Ok(Value::Table(tb)) => tb.0,
-								_ => return Err(
-									"Expected the tb of a Record Id to be a String or Table value",
-								),
+								_ => {
+									return Err(
+										"Expected the tb of a Record Id to be a String or Table value",
+									);
+								}
 							};
 
 							let id = Id::try_from(v.remove(0))?;
@@ -241,9 +243,11 @@ impl TryFrom<Cbor> for Value {
 
 							let exterior = match lines.first() {
 								Some(v) => v,
-								_ => return Err(
-									"Expected a CBOR array with at least one Geometry Line values",
-								),
+								_ => {
+									return Err(
+										"Expected a CBOR array with at least one Geometry Line values",
+									);
+								}
 							};
 							let interiors = Vec::from(&lines[1..]);
 
@@ -412,7 +416,7 @@ impl TryFrom<Value> for Cbor {
 						Id::Array(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Object(v) => Cbor::try_from(Value::from(v))?.0,
 						Id::Generate(_) => {
-							return Err("Cannot encode an ungenerated Record ID into CBOR")
+							return Err("Cannot encode an ungenerated Record ID into CBOR");
 						}
 						Id::Range(v) => Data::Tag(TAG_RANGE, Box::new(Data::try_from(*v)?)),
 					},

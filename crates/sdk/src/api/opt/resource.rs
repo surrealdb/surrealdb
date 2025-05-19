@@ -1,6 +1,6 @@
 use crate::{
-	api::{err::Error, Result},
 	Object, RecordId, RecordIdKey, Value,
+	api::{Result, err::Error},
 };
 use std::ops::{self, Bound};
 use surrealdb_core::sql::{

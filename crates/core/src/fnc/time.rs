@@ -2,12 +2,13 @@ use crate::err::Error;
 use crate::sql::datetime::Datetime;
 use crate::sql::duration::Duration;
 use crate::sql::value::Value;
+use anyhow::Result;
 use chrono::offset::TimeZone;
 use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
 
 use super::args::Optional;
 
-pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
+pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
 	match chrono::Duration::from_std(*duration) {
 		Ok(d) => {
 			let floor_to_ceil = |floor: DateTime<Utc>| -> Option<DateTime<Utc>> {
@@ -21,159 +22,167 @@ pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 			if d.is_zero() {
 				return Ok(Value::Datetime(val));
 			}
-			let result = val
-				.duration_trunc(d)
-				.ok()
-				.and_then(floor_to_ceil);
+			let result = val.duration_trunc(d).ok().and_then(floor_to_ceil);
 
 			match result {
 				Some(v) => Ok(v.into()),
-				_ => Err(Error::InvalidArguments {
+				_ => Err(anyhow::Error::new(Error::InvalidArguments {
 					name: String::from("time::ceil"),
-					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-				}),
+					message: String::from(
+						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+					),
+				})),
 			}
-		},
-		_ => Err(Error::InvalidArguments {
+		}
+		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: String::from("time::ceil"),
-			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-		}),
+			message: String::from(
+				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+			),
+		})),
 	}
 }
 
-pub fn day((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn day((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.day().into(),
 		None => Datetime::default().day().into(),
 	})
 }
 
-pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
+pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value> {
 	match chrono::Duration::from_std(*duration) {
 		Ok(d) => {
 			// Check for zero duration
 			if d.is_zero() {
 				return Ok(Value::Datetime(val));
 			}
-			match val.duration_trunc(d){
+			match val.duration_trunc(d) {
 				Ok(v) => Ok(v.into()),
-				_ => Err(Error::InvalidArguments {
+				_ => Err(anyhow::Error::new(Error::InvalidArguments {
 					name: String::from("time::floor"),
-					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-				}),
+					message: String::from(
+						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+					),
+				})),
 			}
-		},
-		_ => Err(Error::InvalidArguments {
+		}
+		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: String::from("time::floor"),
-			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-		}),
+			message: String::from(
+				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+			),
+		})),
 	}
 }
 
-pub fn format((val, format): (Datetime, String)) -> Result<Value, Error> {
+pub fn format((val, format): (Datetime, String)) -> Result<Value> {
 	Ok(val.format(&format).to_string().into())
 }
 
-pub fn group((val, group): (Datetime, String)) -> Result<Value, Error> {
+pub fn group((val, group): (Datetime, String)) -> Result<Value> {
 	match group.as_str() {
-		"year" => Ok(Utc
-			.with_ymd_and_hms(val.year(), 1, 1, 0,0,0)
-			.earliest()
-			.unwrap()
-			.into()),
-		"month" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), 1, 0,0,0)
-			.earliest()
-			.unwrap()
-			.into()),
+		"year" => Ok(Utc.with_ymd_and_hms(val.year(), 1, 1, 0, 0, 0).earliest().unwrap().into()),
+		"month" => {
+			Ok(Utc.with_ymd_and_hms(val.year(), val.month(), 1, 0, 0, 0).earliest().unwrap().into())
+		}
 		"day" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), val.day(), 0,0,0)
+			.with_ymd_and_hms(val.year(), val.month(), val.day(), 0, 0, 0)
 			.earliest()
 			.unwrap()
 			.into()),
 		"hour" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(),0,0)
+			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), 0, 0)
 			.earliest()
 			.unwrap()
 			.into()),
 		"minute" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), val.minute(),0)
+			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), val.minute(), 0)
 			.earliest()
 			.unwrap()
 			.into()),
 		"second" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), val.minute(), val.second())
+			.with_ymd_and_hms(
+				val.year(),
+				val.month(),
+				val.day(),
+				val.hour(),
+				val.minute(),
+				val.second(),
+			)
 			.earliest()
 			.unwrap()
 			.into()),
-		_ => Err(Error::InvalidArguments {
+		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: String::from("time::group"),
-			message: String::from("The second argument must be a string, and can be one of 'year', 'month', 'day', 'hour', 'minute', or 'second'."),
-		}),
+			message: String::from(
+				"The second argument must be a string, and can be one of 'year', 'month', 'day', 'hour', 'minute', or 'second'.",
+			),
+		})),
 	}
 }
 
-pub fn hour((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn hour((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.hour().into(),
 		None => Datetime::default().hour().into(),
 	})
 }
 
-pub fn max((array,): (Vec<Datetime>,)) -> Result<Value, Error> {
+pub fn max((array,): (Vec<Datetime>,)) -> Result<Value> {
 	Ok(match array.into_iter().max() {
 		Some(v) => v.into(),
 		None => Value::None,
 	})
 }
 
-pub fn min((array,): (Vec<Datetime>,)) -> Result<Value, Error> {
+pub fn min((array,): (Vec<Datetime>,)) -> Result<Value> {
 	Ok(match array.into_iter().min() {
 		Some(v) => v.into(),
 		None => Value::None,
 	})
 }
 
-pub fn minute((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn minute((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.minute().into(),
 		None => Datetime::default().minute().into(),
 	})
 }
 
-pub fn month((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn month((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.month().into(),
 		None => Datetime::default().month().into(),
 	})
 }
 
-pub fn nano((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn nano((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.timestamp_nanos_opt().unwrap_or_default().into(),
 		None => Datetime::default().timestamp_nanos_opt().unwrap_or_default().into(),
 	})
 }
 
-pub fn millis((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn millis((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.timestamp_millis().into(),
 		None => Datetime::default().timestamp_millis().into(),
 	})
 }
 
-pub fn micros((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn micros((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.timestamp_micros().into(),
 		None => Datetime::default().timestamp_micros().into(),
 	})
 }
 
-pub fn now(_: ()) -> Result<Value, Error> {
+pub fn now(_: ()) -> Result<Value> {
 	Ok(Datetime::default().into())
 }
 
-pub fn round((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
+pub fn round((val, duration): (Datetime, Duration)) -> Result<Value> {
 	match chrono::Duration::from_std(*duration) {
 		Ok(d) => {
 			// Check for zero duration
@@ -182,59 +191,63 @@ pub fn round((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 			}
 			match val.duration_round(d) {
 				Ok(v) => Ok(v.into()),
-				_ => Err(Error::InvalidArguments {
+				_ => Err(anyhow::Error::new(Error::InvalidArguments {
 					name: String::from("time::round"),
-					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-				}),
+					message: String::from(
+						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+					),
+				})),
 			}
-		},
-		_ => Err(Error::InvalidArguments {
+		}
+		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: String::from("time::round"),
-			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-		}),
+			message: String::from(
+				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+			),
+		})),
 	}
 }
 
-pub fn second((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn second((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.second().into(),
 		None => Datetime::default().second().into(),
 	})
 }
 
-pub fn timezone(_: ()) -> Result<Value, Error> {
+pub fn timezone(_: ()) -> Result<Value> {
 	Ok(Local::now().offset().to_string().into())
 }
 
-pub fn unix((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn unix((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.timestamp().into(),
 		None => Datetime::default().timestamp().into(),
 	})
 }
 
-pub fn wday((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn wday((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.weekday().number_from_monday().into(),
 		None => Datetime::default().weekday().number_from_monday().into(),
 	})
 }
 
-pub fn week((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn week((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.iso_week().week().into(),
 		None => Datetime::default().iso_week().week().into(),
 	})
 }
 
-pub fn yday((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn yday((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.ordinal().into(),
 		None => Datetime::default().ordinal().into(),
 	})
 }
 
-pub fn year((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+pub fn year((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 	Ok(match val {
 		Some(v) => v.year().into(),
 		None => Datetime::default().year().into(),
@@ -242,11 +255,11 @@ pub fn year((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
 }
 
 pub mod is {
-	use crate::err::Error;
 	use crate::fnc::args::Optional;
 	use crate::sql::{Datetime, Value};
+	use anyhow::Result;
 
-	pub fn leap_year((Optional(val),): (Optional<Datetime>,)) -> Result<Value, Error> {
+	pub fn leap_year((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 		Ok(match val {
 			Some(v) => v.naive_utc().date().leap_year().into(),
 			None => Datetime::default().naive_utc().date().leap_year().into(),
@@ -258,11 +271,12 @@ pub mod from {
 
 	use crate::err::Error;
 	use crate::sql::datetime::Datetime;
-	use crate::sql::{value::Value, Uuid};
+	use crate::sql::{Uuid, value::Value};
+	use anyhow::Result;
 	use chrono::DateTime;
 	use ulid::Ulid;
 
-	pub fn nanos((val,): (i64,)) -> Result<Value, Error> {
+	pub fn nanos((val,): (i64,)) -> Result<Value> {
 		const NANOS_PER_SEC: i64 = 1_000_000_000;
 
 		let seconds = val.div_euclid(NANOS_PER_SEC);
@@ -270,78 +284,88 @@ pub mod from {
 
 		match DateTime::from_timestamp(seconds, nanoseconds) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::nanos"),
-				message: String::from("The argument must be a number of nanoseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
-			}),
+				message: String::from(
+					"The argument must be a number of nanoseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
+			})),
 		}
 	}
 
-	pub fn micros((val,): (i64,)) -> Result<Value, Error> {
+	pub fn micros((val,): (i64,)) -> Result<Value> {
 		match DateTime::from_timestamp_micros(val) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::micros"),
-				message: String::from("The argument must be a number of microseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
-			}),
+				message: String::from(
+					"The argument must be a number of microseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
+			})),
 		}
 	}
 
-	pub fn millis((val,): (i64,)) -> Result<Value, Error> {
+	pub fn millis((val,): (i64,)) -> Result<Value> {
 		match DateTime::from_timestamp_millis(val) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::millis"),
-				message: String::from("The argument must be a number of milliseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
-			}),
+				message: String::from(
+					"The argument must be a number of milliseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
+			})),
 		}
 	}
 
-	pub fn secs((val,): (i64,)) -> Result<Value, Error> {
+	pub fn secs((val,): (i64,)) -> Result<Value> {
 		match DateTime::from_timestamp(val, 0) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::secs"),
-				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
-			}),
+				message: String::from(
+					"The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
+			})),
 		}
 	}
 
-	pub fn unix((val,): (i64,)) -> Result<Value, Error> {
+	pub fn unix((val,): (i64,)) -> Result<Value> {
 		match DateTime::from_timestamp(val, 0) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::unix"),
-				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
-			}),
+				message: String::from(
+					"The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
+			})),
 		}
 	}
 
-	pub fn ulid((val,): (String,)) -> Result<Value, Error> {
+	pub fn ulid((val,): (String,)) -> Result<Value> {
 		match Ulid::from_string(&val) {
 			Ok(v) => Ok(Datetime::from(DateTime::from(v.datetime())).into()),
-			_ => Err(Error::InvalidArguments {
+			_ => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::ulid"),
 				message: String::from(
 					"The first argument must be a string, containing a valid ULID.",
 				),
-			}),
+			})),
 		}
 	}
 
-	pub fn uuid((val,): (Uuid,)) -> Result<Value, Error> {
+	pub fn uuid((val,): (Uuid,)) -> Result<Value> {
 		match val.0.get_timestamp() {
 			Some(v) => {
 				let (s, ns) = v.to_unix();
 				match Datetime::try_from((s as i64, ns)) {
 					Ok(v) => Ok(v.into()),
-					_ => Err(fail!("Failed to convert UUID Timestamp to Datetime.")),
+					_ => fail!("Failed to convert UUID Timestamp to Datetime."),
 				}
 			}
-			None => Err(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::uuid"),
 				message: String::from("The first argument must be a v1, v6 or v7 UUID."),
-			}),
+			})),
 		}
 	}
 }

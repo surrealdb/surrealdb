@@ -31,8 +31,8 @@ pub use user::RemoveUserStatement;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::Value;
+use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -70,22 +70,22 @@ impl RemoveStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match self {
-			Self::Namespace(ref v) => v.compute(ctx, opt).await,
-			Self::Database(ref v) => v.compute(ctx, opt).await,
-			Self::Function(ref v) => v.compute(ctx, opt).await,
-			Self::Access(ref v) => v.compute(ctx, opt).await,
-			Self::Param(ref v) => v.compute(ctx, opt).await,
-			Self::Table(ref v) => v.compute(ctx, opt).await,
-			Self::Event(ref v) => v.compute(ctx, opt).await,
-			Self::Field(ref v) => v.compute(ctx, opt).await,
-			Self::Index(ref v) => v.compute(ctx, opt).await,
-			Self::Analyzer(ref v) => v.compute(ctx, opt).await,
-			Self::User(ref v) => v.compute(ctx, opt).await,
-			Self::Model(ref v) => v.compute(ctx, opt).await,
-			Self::Bucket(ref v) => v.compute(ctx, opt).await,
-			Self::Sequence(ref v) => v.compute(ctx, opt).await,
+			Self::Namespace(v) => v.compute(ctx, opt).await,
+			Self::Database(v) => v.compute(ctx, opt).await,
+			Self::Function(v) => v.compute(ctx, opt).await,
+			Self::Access(v) => v.compute(ctx, opt).await,
+			Self::Param(v) => v.compute(ctx, opt).await,
+			Self::Table(v) => v.compute(ctx, opt).await,
+			Self::Event(v) => v.compute(ctx, opt).await,
+			Self::Field(v) => v.compute(ctx, opt).await,
+			Self::Index(v) => v.compute(ctx, opt).await,
+			Self::Analyzer(v) => v.compute(ctx, opt).await,
+			Self::User(v) => v.compute(ctx, opt).await,
+			Self::Model(v) => v.compute(ctx, opt).await,
+			Self::Bucket(v) => v.compute(ctx, opt).await,
+			Self::Sequence(v) => v.compute(ctx, opt).await,
 		}
 	}
 }

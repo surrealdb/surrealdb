@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{Cond, Data, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
+use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -40,7 +41,7 @@ impl UpsertStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
@@ -57,13 +58,20 @@ impl UpsertStatement {
 		// Loop over the upsert targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| match e {
-				Error::InvalidStatementTarget {
-					value: v,
-				} => Error::UpsertStatement {
-					value: v,
-				},
-				e => e,
+			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| {
+				if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
+					let Ok(Error::InvalidStatementTarget {
+						value,
+					}) = e.downcast()
+					else {
+						unreachable!()
+					};
+					anyhow::Error::new(Error::UpsertStatement {
+						value,
+					})
+				} else {
+					e
+				}
 			})?;
 		}
 		// Attach the query planner to the context
@@ -71,9 +79,7 @@ impl UpsertStatement {
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
-		if ctx.is_timedout().await? {
-			return Err(Error::QueryTimedout);
-		}
+		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 		// Output the results
 		match res {
 			// This is a single record result
@@ -81,7 +87,7 @@ impl UpsertStatement {
 				// There was exactly one result
 				1 => Ok(a.remove(0)),
 				// There were no results
-				_ => Err(Error::SingleOnlyOutput),
+				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
 			},
 			// This is standard query result
 			v => Ok(v),

@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Write};
 
-use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
+use crate::sql::fmt::{Fmt, Pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Ident, Part, Value};
 

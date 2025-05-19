@@ -1,5 +1,5 @@
-use crate::rpc::request::Request;
 use crate::rpc::RpcError;
+use crate::rpc::request::Request;
 use crate::sql::Value;
 use crate::syn;
 

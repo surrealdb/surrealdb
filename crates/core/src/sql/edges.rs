@@ -1,16 +1,16 @@
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::table::Tables;
 use crate::sql::thing::Thing;
 use crate::{ctx::Context, sql::dir::Dir};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::graph::GraphSubjects;
 use super::Value;
+use super::graph::GraphSubjects;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Edges";
 
@@ -48,7 +48,7 @@ impl Edges {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		Ok(Value::Edges(Box::new(Self {
 			dir: self.dir.clone(),
 			from: self.from.clone(),

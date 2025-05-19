@@ -1,20 +1,20 @@
 use crate::dbs::Options;
-use crate::err::Error;
+use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
 };
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
-use crate::idx::planner::StatementContext;
 use crate::kvs::Transaction;
+use crate::sql::FlowResultExt as _;
 use crate::sql::index::Index;
 use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
-use crate::sql::FlowResultExt as _;
 use crate::sql::{
-	order::{OrderList, Ordering},
 	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Part, Subquery, Table, Value,
 	With,
+	order::{OrderList, Ordering},
 };
+use anyhow::Result;
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -43,7 +43,7 @@ impl Tree {
 		stk: &mut Stk,
 		stm_ctx: &'a StatementContext<'a>,
 		table: &'a Table,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let mut b = TreeBuilder::new(stm_ctx, table);
 		if let Some(cond) = stm_ctx.cond {
 			b.eval_cond(stk, cond).await?;
@@ -130,11 +130,7 @@ impl<'a> TreeBuilder<'a> {
 		}
 	}
 
-	async fn lazy_load_schema_resolver(
-		&mut self,
-		tx: &Transaction,
-		table: &Table,
-	) -> Result<(), Error> {
+	async fn lazy_load_schema_resolver(&mut self, tx: &Transaction, table: &Table) -> Result<()> {
 		if self.schemas.contains_key(table) {
 			return Ok(());
 		}
@@ -143,7 +139,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	async fn eval_order(&mut self) -> Result<(), Error> {
+	async fn eval_order(&mut self) -> Result<()> {
 		if let Some(o) = self.first_order {
 			if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
 				for (ixr, id_col) in &irf {
@@ -162,7 +158,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	async fn eval_cond(&mut self, stk: &mut Stk, cond: &Cond) -> Result<(), Error> {
+	async fn eval_cond(&mut self, stk: &mut Stk, cond: &Cond) -> Result<()> {
 		self.root = Some(self.eval_value(stk, 0, &cond.0).await?);
 		self.knn_condition = if self.knn_expressions.is_empty() {
 			None
@@ -172,12 +168,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	async fn eval_value(
-		&mut self,
-		stk: &mut Stk,
-		group: GroupRef,
-		v: &Value,
-	) -> Result<Node, Error> {
+	async fn eval_value(&mut self, stk: &mut Stk, group: GroupRef, v: &Value) -> Result<Node> {
 		match v {
 			Value::Expression(e) => self.eval_expression(stk, group, e).await,
 			Value::Idiom(i) => self.eval_idiom(stk, group, i).await,
@@ -203,7 +194,7 @@ impl<'a> TreeBuilder<'a> {
 		}
 	}
 
-	async fn compute(&self, stk: &mut Stk, v: &Value, n: Node) -> Result<Node, Error> {
+	async fn compute(&self, stk: &mut Stk, v: &Value, n: Node) -> Result<Node> {
 		Ok(if n == Node::Computable {
 			match v.compute(stk, self.ctx.ctx, self.ctx.opt, None).await {
 				Ok(v) => Node::Computed(v.into()),
@@ -214,7 +205,7 @@ impl<'a> TreeBuilder<'a> {
 		})
 	}
 
-	async fn eval_array(&mut self, stk: &mut Stk, a: &Array) -> Result<Node, Error> {
+	async fn eval_array(&mut self, stk: &mut Stk, a: &Array) -> Result<Node> {
 		self.leaf_nodes_count += 1;
 		let mut values = Vec::with_capacity(a.len());
 		for v in &a.0 {
@@ -227,7 +218,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
 	}
 
-	async fn eval_idiom(&mut self, stk: &mut Stk, gr: GroupRef, i: &Idiom) -> Result<Node, Error> {
+	async fn eval_idiom(&mut self, stk: &mut Stk, gr: GroupRef, i: &Idiom) -> Result<Node> {
 		self.leaf_nodes_count += 1;
 		// Check if the idiom has already been resolved
 		if let Some(node) = self.resolved_idioms.get(i).cloned() {
@@ -249,7 +240,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(n)
 	}
 
-	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
+	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node> {
 		let tx = self.ctx.ctx.tx();
 		self.lazy_load_schema_resolver(&tx, self.table).await?;
 		let i = Arc::new(i.clone());
@@ -311,7 +302,7 @@ impl<'a> TreeBuilder<'a> {
 		tx: &Transaction,
 		fields: &[DefineFieldStatement],
 		idiom: &Arc<Idiom>,
-	) -> Result<Option<RecordOptions>, Error> {
+	) -> Result<Option<RecordOptions>> {
 		for field in fields.iter() {
 			if let Some(Kind::Record(tables)) = &field.kind {
 				if idiom.starts_with(&field.name.0) {
@@ -356,7 +347,7 @@ impl<'a> TreeBuilder<'a> {
 		stk: &mut Stk,
 		group: GroupRef,
 		e: &Expression,
-	) -> Result<Node, Error> {
+	) -> Result<Node> {
 		match e {
 			Expression::Unary {
 				..
@@ -466,7 +457,7 @@ impl<'a> TreeBuilder<'a> {
 		p: IdiomPosition,
 		local_irs: &LocalIndexRefs,
 		remote_irs: Option<&RemoteIndexRefs>,
-	) -> Result<Option<IndexOption>, Error> {
+	) -> Result<Option<IndexOption>> {
 		if let Some(remote_irs) = remote_irs {
 			let mut remote_ios = Vec::with_capacity(remote_irs.len());
 			for (id, irs) in remote_irs.iter() {
@@ -495,7 +486,7 @@ impl<'a> TreeBuilder<'a> {
 		n: &Node,
 		e: &Arc<Expression>,
 		p: IdiomPosition,
-	) -> Result<Option<IndexOption>, Error> {
+	) -> Result<Option<IndexOption>> {
 		let mut res = None;
 		for (ixr, col) in irs.iter() {
 			let op = match &ixr.index {
@@ -543,7 +534,7 @@ impl<'a> TreeBuilder<'a> {
 		exp: &Arc<Expression>,
 		op: &Operator,
 		n: &Node,
-	) -> Result<Option<IndexOperator>, Error> {
+	) -> Result<Option<IndexOperator>> {
 		if let Operator::Knn(k, None) = op {
 			if let Node::Computed(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
@@ -559,7 +550,7 @@ impl<'a> TreeBuilder<'a> {
 		exp: &Arc<Expression>,
 		op: &Operator,
 		n: &Node,
-	) -> Result<Option<IndexOperator>, Error> {
+	) -> Result<Option<IndexOperator>> {
 		if let Operator::Ann(k, ef) = op {
 			if let Node::Computed(v) = n {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
@@ -570,12 +561,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(None)
 	}
 
-	fn eval_bruteforce_knn(
-		&mut self,
-		id: &Idiom,
-		val: &Node,
-		exp: &Arc<Expression>,
-	) -> Result<(), Error> {
+	fn eval_bruteforce_knn(&mut self, id: &Idiom, val: &Node, exp: &Arc<Expression>) -> Result<()> {
 		if let Operator::Knn(k, Some(d)) = exp.operator() {
 			if let Node::Computed(v) = val {
 				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
@@ -646,7 +632,7 @@ impl<'a> TreeBuilder<'a> {
 		None
 	}
 
-	async fn eval_subquery(&mut self, stk: &mut Stk, s: &Subquery) -> Result<Node, Error> {
+	async fn eval_subquery(&mut self, stk: &mut Stk, s: &Subquery) -> Result<Node> {
 		self.group_sequence += 1;
 		match s {
 			Subquery::Value(v) => stk.run(|stk| self.eval_value(stk, self.group_sequence, v)).await,
@@ -726,7 +712,7 @@ struct SchemaCache {
 }
 
 impl SchemaCache {
-	async fn new(opt: &Options, table: &Table, tx: &Transaction) -> Result<Self, Error> {
+	async fn new(opt: &Options, table: &Table, tx: &Transaction) -> Result<Self> {
 		let (ns, db) = opt.ns_db()?;
 		let indexes = tx.all_tb_indexes(ns, db, table).await?;
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;

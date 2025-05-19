@@ -9,6 +9,7 @@ use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Value};
 
+use anyhow::{Result, bail};
 use api::ApiConfig;
 use graphql::GraphQLConfig;
 use revision::revisioned;
@@ -41,7 +42,7 @@ impl DefineConfigStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Config(ConfigKind::GraphQL), &Base::Db)?;
 		// Fetch the transaction
@@ -57,7 +58,7 @@ impl DefineConfigStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::CgAlreadyExists {
+				bail!(Error::CgAlreadyExists {
 					name: cg.to_string(),
 				});
 			}
@@ -79,17 +80,17 @@ impl ConfigInner {
 		ConfigKind::from(self).to_string()
 	}
 
-	pub fn try_into_graphql(self) -> Result<GraphQLConfig, Error> {
+	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
 		match self {
 			ConfigInner::GraphQL(g) => Ok(g),
-			c => Err(fail!("found {c} when a graphql config was expected")),
+			c => fail!("found {c} when a graphql config was expected"),
 		}
 	}
 
-	pub fn try_into_api(&self) -> Result<&ApiConfig, Error> {
+	pub fn try_into_api(&self) -> Result<&ApiConfig> {
 		match self {
 			ConfigInner::Api(a) => Ok(a),
-			c => Err(fail!("found {c} when a api config was expected")),
+			c => fail!("found {c} when a api config was expected"),
 		}
 	}
 }

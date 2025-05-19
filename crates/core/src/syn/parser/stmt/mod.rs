@@ -5,29 +5,29 @@ use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
+	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 	access::{
 		AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 		AccessStatementShow, Subject,
 	},
-	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
 use crate::sql::{Duration, Fields, Ident, Param};
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
-use crate::syn::token::{t, Glued, TokenKind};
+use crate::syn::token::{Glued, TokenKind, t};
 use crate::{
 	sql::{
-		statements::{
-			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-			CommitStatement, ContinueStatement, ForeachStatement, InfoStatement, OutputStatement,
-			UseStatement,
-		},
 		Expression, Operator, Statement, Statements, Value,
+		statements::{
+			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
+			ForeachStatement, InfoStatement, OutputStatement, UseStatement,
+			analyze::AnalyzeStatement,
+		},
 	},
 	syn::parser::mac::unexpected,
 };
 
-use super::{mac::expected, ParseResult, Parser};
+use super::{ParseResult, Parser, mac::expected};
 
 mod alter;
 mod create;
@@ -326,7 +326,7 @@ impl Parser<'_> {
 				} = *x
 				{
 					return Statement::Set(crate::sql::statements::SetStatement {
-						name: x.0 .0,
+						name: x.0.0,
 						what: r,
 						kind: None,
 					});
@@ -347,7 +347,7 @@ impl Parser<'_> {
 				} = *x
 				{
 					return Entry::Set(crate::sql::statements::SetStatement {
-						name: x.0 .0,
+						name: x.0.0,
 						what: r,
 						kind: None,
 					});
@@ -740,7 +740,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `LET` to already be consumed.
 	pub(super) async fn parse_let_stmt(&mut self, ctx: &mut Stk) -> ParseResult<SetStatement> {
-		let name = self.next_token_value::<Param>()?.0 .0;
+		let name = self.next_token_value::<Param>()?.0.0;
 		let kind = if self.eat(t!(":")) {
 			Some(self.parse_inner_kind(ctx).await?)
 		} else {
@@ -786,7 +786,9 @@ impl Parser<'_> {
 			TokenKind::Glued(_) => {
 				// This panic can be upheld within this function, just make sure you don't call
 				// glue here and the `next()` before this peek should eat any glued value.
-				panic!("A glued number token would truncate the timestamp so no gluing is allowed before this production.");
+				panic!(
+					"A glued number token would truncate the timestamp so no gluing is allowed before this production."
+				);
 			}
 			_ => unexpected!(self, next, "a version stamp or a date-time"),
 		};

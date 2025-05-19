@@ -3,14 +3,15 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::idx::IndexKeyBase;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::TransactionType;
 use crate::sql::index::{HnswParams, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Index, Part, Thing, Value};
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 pub(crate) struct IndexOperation<'a> {
@@ -43,7 +44,7 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	pub(crate) async fn compute(&mut self, stk: &mut Stk) -> Result<(), Error> {
+	pub(crate) async fn compute(&mut self, stk: &mut Stk) -> Result<()> {
 		// Index operation dispatching
 		match &self.ix.index {
 			Index::Uniq => self.index_unique().await,
@@ -54,17 +55,17 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
+	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, None))
 	}
 
-	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
+	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
 	}
 
-	async fn index_unique(&mut self) -> Result<(), Error> {
+	async fn index_unique(&mut self) -> Result<()> {
 		// Lock the transaction
 		let tx = self.ctx.tx();
 		let mut txn = tx.lock().await;
@@ -74,8 +75,13 @@ impl<'a> IndexOperation<'a> {
 			for o in i {
 				let key = self.get_unique_index_key(&o)?;
 				match txn.delc(key, Some(revision::to_vec(self.rid)?)).await {
-					Err(Error::TxConditionNotMet) => Ok(()),
-					Err(e) => Err(e),
+					Err(e) => {
+						if matches!(e.downcast_ref::<Error>(), Some(Error::TxConditionNotMet)) {
+							Ok(())
+						} else {
+							Err(e)
+						}
+					}
 					Ok(v) => Ok(v),
 				}?
 			}
@@ -98,7 +104,7 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_non_unique(&mut self) -> Result<(), Error> {
+	async fn index_non_unique(&mut self) -> Result<()> {
 		// Lock the transaction
 		let tx = self.ctx.tx();
 		let mut txn = tx.lock().await;
@@ -108,8 +114,13 @@ impl<'a> IndexOperation<'a> {
 			for o in i {
 				let key = self.get_non_unique_index_key(&o)?;
 				match txn.delc(key, Some(revision::to_vec(self.rid)?)).await {
-					Err(Error::TxConditionNotMet) => Ok(()),
-					Err(e) => Err(e),
+					Err(e) => {
+						if matches!(e.downcast_ref::<Error>(), Some(Error::TxConditionNotMet)) {
+							Ok(())
+						} else {
+							Err(e)
+						}
+					}
 					Ok(v) => Ok(v),
 				}?
 			}
@@ -130,18 +141,18 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<(), Error> {
-		Err(Error::IndexExists {
+	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<()> {
+		Err(anyhow::Error::new(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
 			value: match n.len() {
 				1 => n.first().unwrap().to_string(),
 				_ => n.to_string(),
 			},
-		})
+		}))
 	}
 
-	async fn index_full_text(&mut self, stk: &mut Stk, p: &SearchParams) -> Result<(), Error> {
+	async fn index_full_text(&mut self, stk: &mut Stk, p: &SearchParams) -> Result<()> {
 		let (ns, db) = self.opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 
@@ -156,7 +167,7 @@ impl<'a> IndexOperation<'a> {
 		ft.finish(self.ctx).await
 	}
 
-	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<(), Error> {
+	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {
 		let txn = self.ctx.tx();
 		let (ns, db) = self.opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
@@ -172,7 +183,7 @@ impl<'a> IndexOperation<'a> {
 		mt.finish(&txn).await
 	}
 
-	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<(), Error> {
+	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {
 		let txn = self.ctx.tx();
 		let hnsw =
 			self.ctx.get_index_stores().get_index_hnsw(self.ctx, self.opt, self.ix, p).await?;

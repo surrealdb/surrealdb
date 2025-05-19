@@ -2,9 +2,9 @@ use std::ops::RangeInclusive;
 use std::{char, mem};
 
 use crate::syn::{
-	error::{bail, syntax_error, SyntaxError},
-	lexer::{unicode::chars, Lexer},
-	token::{t, Token},
+	error::{SyntaxError, bail, syntax_error},
+	lexer::{Lexer, unicode::chars},
+	token::{Token, t},
 };
 
 pub fn strand(lexer: &mut Lexer, start: Token) -> Result<String, SyntaxError> {

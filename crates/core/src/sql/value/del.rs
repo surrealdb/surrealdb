@@ -2,12 +2,14 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
+use crate::sql::FlowResultExt as _;
 use crate::sql::array::Abolish;
 use crate::sql::part::DestructurePart;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
-use crate::sql::FlowResultExt as _;
+use anyhow::Result;
+use anyhow::ensure;
 use reblessive::tree::Stk;
 use std::collections::HashSet;
 
@@ -21,7 +23,7 @@ impl Value {
 		ctx: &Context,
 		opt: &Options,
 		path: &[Part],
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		match path.first() {
 			// Get the current value at path
 			Some(p) => match self {
@@ -93,11 +95,12 @@ impl Value {
 					},
 					Part::Destructure(parts) => {
 						for part in parts {
-							if matches!(part, DestructurePart::Aliased(_, _)) {
-								return Err(Error::UnsupportedDestructure {
+							ensure!(
+								!matches!(part, DestructurePart::Aliased(_, _)),
+								Error::UnsupportedDestructure {
 									variant: "An aliased".into(),
-								});
-							}
+								}
+							);
 
 							let path = [part.path().as_slice(), path.next()].concat();
 							stk.run(|stk| self.del(stk, ctx, opt, &path)).await?;

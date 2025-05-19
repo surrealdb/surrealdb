@@ -5,6 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Idiom, Value};
 use crate::syn;
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -71,7 +72,7 @@ impl Fetch {
 		ctx: &Context,
 		opt: &Options,
 		idioms: &mut Vec<Idiom>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let strand_or_idiom = |v: Value| match v {
 			Value::Strand(s) => Ok(Idiom::from(s.0)),
 			Value::Idiom(i) => Ok(i.clone()),
@@ -114,7 +115,7 @@ impl Fetch {
 							Value::Strand(s) => syn::idiom(s.as_str())?,
 							Value::Idiom(i) => i,
 							v => {
-								return Err(Error::InvalidFetch {
+								bail!(Error::InvalidFetch {
 									value: v,
 								})
 							}
@@ -123,14 +124,14 @@ impl Fetch {
 					}
 					Ok(())
 				} else {
-					Err(Error::InvalidFetch {
+					Err(anyhow::Error::new(Error::InvalidFetch {
 						value: Value::Function(f.clone()),
-					})
+					}))
 				}
 			}
-			v => Err(Error::InvalidFetch {
+			v => Err(anyhow::Error::new(Error::InvalidFetch {
 				value: v.clone(),
-			}),
+			})),
 		}
 	}
 }

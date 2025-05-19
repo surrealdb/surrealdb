@@ -1,16 +1,16 @@
 use super::Content;
-use crate::err::Error;
 use crate::sql;
 use crate::sql::Object;
 use crate::sql::Value;
-use serde::de::IntoDeserializer;
+use anyhow::Result;
 use serde::Deserialize;
+use serde::de::IntoDeserializer;
 use serde_content::Data;
 use serde_content::Expected;
 use serde_content::Unexpected;
 use std::collections::BTreeMap;
 
-pub(super) fn to_value(content: Content) -> Result<Value, Error> {
+pub(super) fn to_value(content: Content) -> Result<Value> {
 	match content {
 		Content::Enum(v) => match v.name.as_ref() {
 			sql::expression::TOKEN => {

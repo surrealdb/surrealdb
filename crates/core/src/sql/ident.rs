@@ -1,5 +1,5 @@
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{escape::EscapeIdent, strand::no_nul_bytes, Value};
+use crate::sql::{Value, escape::EscapeIdent, strand::no_nul_bytes};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

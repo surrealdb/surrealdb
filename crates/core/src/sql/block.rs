@@ -1,7 +1,7 @@
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
+use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
@@ -18,8 +18,8 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
-use super::statements::InfoStatement;
 use super::FlowResult;
+use super::statements::InfoStatement;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 

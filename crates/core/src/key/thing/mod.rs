@@ -1,9 +1,9 @@
 //! Stores a record document
-use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
+use crate::kvs::{KeyEncode, impl_key};
 use crate::sql::Id;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -25,13 +25,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
 	Thing::new(ns, db, tb, id.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>, Error> {
+pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"*\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>, Error> {
+pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"*\xff");
 	Ok(k)

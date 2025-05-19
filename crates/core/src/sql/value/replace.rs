@@ -1,14 +1,16 @@
 use crate::err::Error;
 use crate::sql::value::Value;
+use anyhow::{Result, ensure};
 
 impl Value {
-	pub(crate) fn replace(&mut self, val: Value) -> Result<(), Error> {
+	pub(crate) fn replace(&mut self, val: Value) -> Result<()> {
 		// If this value is not an object, then error
-		if !val.is_object() {
-			return Err(Error::InvalidContent {
+		ensure!(
+			val.is_object(),
+			Error::InvalidContent {
 				value: val,
-			});
-		}
+			}
+		);
 		// Otherwise replace the current value
 		*self = val;
 		Ok(())

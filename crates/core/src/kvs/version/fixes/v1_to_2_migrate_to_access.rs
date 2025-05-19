@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
 use crate::{
-	err::Error,
 	kvs::{KeyEncode as _, Transaction},
 	sql::{
+		AccessType, Ident,
 		access_type::{JwtAccessVerify, JwtAccessVerifyKey},
 		statements::{
-			define::{DefineScopeStatement, DefineTokenStatement},
 			DefineAccessStatement,
+			define::{DefineScopeStatement, DefineTokenStatement},
 		},
-		AccessType, Ident,
 	},
 };
+use anyhow::Result;
 
-pub async fn v1_to_2_migrate_to_access(tx: Arc<Transaction>) -> Result<(), Error> {
+pub async fn v1_to_2_migrate_to_access(tx: Arc<Transaction>) -> Result<()> {
 	for ns in tx.all_ns().await?.iter() {
 		let ns = ns.name.as_str();
 		migrate_ns_tokens(tx.clone(), ns).await?;
@@ -32,7 +32,7 @@ pub async fn v1_to_2_migrate_to_access(tx: Arc<Transaction>) -> Result<(), Error
 	Ok(())
 }
 
-async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<(), Error> {
+async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<()> {
 	// Find all tokens on the namespace level
 	let mut beg = crate::key::namespace::all::new(ns).encode()?;
 	beg.extend_from_slice(&[b'!', b't', b'k', 0x00]);
@@ -77,7 +77,7 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<(), Error> 
 	Ok(())
 }
 
-async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(), Error> {
+async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<()> {
 	// Find all tokens on the namespace level
 	let mut beg = crate::key::database::all::new(ns, db).encode()?;
 	beg.extend_from_slice(&[b'!', b't', b'k', 0x00]);
@@ -122,11 +122,7 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 	Ok(())
 }
 
-async fn collect_db_scope_keys(
-	tx: Arc<Transaction>,
-	ns: &str,
-	db: &str,
-) -> Result<Vec<Vec<u8>>, Error> {
+async fn collect_db_scope_keys(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<Vec<Vec<u8>>> {
 	// Find all tokens on the namespace level
 	let mut beg = crate::key::database::all::new(ns, db).encode()?;
 	beg.extend_from_slice(&[b'!', b's', b'c', 0x00]);
@@ -159,7 +155,7 @@ async fn migrate_db_scope_key(
 	ns: &str,
 	db: &str,
 	key: Vec<u8>,
-) -> Result<DefineAccessStatement, Error> {
+) -> Result<DefineAccessStatement> {
 	// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
 	let sc: DefineScopeStatement =
 		revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
@@ -184,7 +180,7 @@ async fn migrate_sc_tokens(
 	ns: &str,
 	db: &str,
 	ac: DefineAccessStatement,
-) -> Result<(), Error> {
+) -> Result<()> {
 	let name = ac.name.clone();
 	// Find all tokens on the namespace level
 	// 0xb1 = ±
@@ -219,9 +215,15 @@ async fn migrate_sc_tokens(
 
 	println!("\n==================");
 	println!("NS: `{ns}`, DB: `{db}`, SC: `{}`", ac.name);
-	println!("Can not automatically merge scope tokens scope into the new scope-converted access method.");
-	println!("Logging the merged access definitions individually, with their names joined together like `scope_token`.");
-	println!("The old tokens will be removed from the datastore, but no fixes will be applied. They need manual resolution.");
+	println!(
+		"Can not automatically merge scope tokens scope into the new scope-converted access method."
+	);
+	println!(
+		"Logging the merged access definitions individually, with their names joined together like `scope_token`."
+	);
+	println!(
+		"The old tokens will be removed from the datastore, but no fixes will be applied. They need manual resolution."
+	);
 	println!("==================\n");
 
 	// Log example merged accesses

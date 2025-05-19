@@ -20,7 +20,7 @@ use crate::sql::{ControlFlow, FlowResult, FlowResultExt as _, Function};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
-use super::idiom_recursion::{compute_idiom_recursion, Recursion};
+use super::idiom_recursion::{Recursion, compute_idiom_recursion};
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -36,7 +36,7 @@ impl Value {
 	) -> FlowResult<Self> {
 		// Limit recursion depth.
 		if path.len() > (*MAX_COMPUTATION_DEPTH).try_into().unwrap_or(usize::MAX) {
-			return Err(ControlFlow::from(Error::ComputationDepthExceeded));
+			return Err(ControlFlow::from(anyhow::Error::new(Error::ComputationDepthExceeded)));
 		}
 		match path.first() {
 			// The knowledge of the current value is not relevant to Part::Recurse
@@ -62,9 +62,9 @@ impl Value {
 						if instruction.is_some() {
 							match path.find_recursion_plan() {
 								Some(_) => {
-									return Err(ControlFlow::from(
+									return Err(ControlFlow::Err(anyhow::Error::new(
 										Error::RecursionInstructionPlanConflict,
-									))
+									)));
 								}
 								_ => (path, None, after),
 							}
@@ -106,7 +106,9 @@ impl Value {
 			// ensure we can process them efficiently. When encountering a
 			// recursion part, it will find the repeat recurse part and handle
 			// it. If we find one in any unsupported scenario, we throw an error.
-			Some(Part::RepeatRecurse) => Err(ControlFlow::from(Error::UnsupportedRepeatRecurse)),
+			Some(Part::RepeatRecurse) => {
+				Err(ControlFlow::Err(anyhow::Error::new(Error::UnsupportedRepeatRecurse)))
+			}
 			Some(Part::Doc) => {
 				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE
 				let v = match doc {
@@ -276,28 +278,37 @@ impl Value {
 								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
 							})
 							.await;
-						let res = match &res {
+
+						let res = match res {
 							Ok(_) => res,
-							Err(Error::InvalidFunction {
-								..
-							}) => match v.get(name) {
-								Some(v) => {
-									let fnc = Function::Anonymous(v.clone(), args, true);
-									match stk
-										.run(|stk| fnc.compute(stk, ctx, opt, doc))
-										.await
-										.catch_return()
-									{
-										Ok(v) => Ok(v),
-										Err(Error::InvalidFunction {
-											..
-										}) => res,
-										e => e,
+							Err(e) => {
+								if matches!(e.downcast_ref(), Some(Error::InvalidFunction { .. })) {
+									if let Some(v) = v.get(name) {
+										let fnc = Function::Anonymous(v.clone(), args, true);
+										match stk
+											.run(|stk| fnc.compute(stk, ctx, opt, doc))
+											.await
+											.catch_return()
+										{
+											Ok(v) => Ok(v),
+											Err(e) => {
+												if matches!(
+													e.downcast_ref(),
+													Some(Error::InvalidFunction { .. })
+												) {
+													Ok(Value::None)
+												} else {
+													Err(e)
+												}
+											}
+										}
+									} else {
+										Err(e)
 									}
+								} else {
+									Err(e)
 								}
-								None => res,
-							},
-							_ => res,
+							}
 						}?;
 
 						stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
@@ -639,8 +650,9 @@ mod tests {
 			.await
 			.catch_return()
 			.unwrap_err();
+
 		assert!(
-			matches!(err, Error::ComputationDepthExceeded),
+			matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
 			"expected computation depth exceeded, got {:?}",
 			err
 		);

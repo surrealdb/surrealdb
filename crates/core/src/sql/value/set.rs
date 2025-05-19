@@ -2,11 +2,11 @@ use std::collections::btree_map::Entry;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use crate::sql::{FlowResultExt as _, Object};
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 impl Value {
@@ -20,7 +20,7 @@ impl Value {
 		opt: &Options,
 		path: &[Part],
 		val: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if path.is_empty() {
 			*self = val;
 			return Ok(());
@@ -265,7 +265,7 @@ impl Value {
 		place: &mut Value,
 		mut val: Value,
 		path: &[Part],
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		for p in path.iter().rev() {
 			let name = match p {
 				Part::Graph(x) => x.to_raw(),
@@ -499,7 +499,9 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something.other['inner']");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = Value::parse("{ test: { something: [{ age: 34, other: { inner: true } }, { age: 36, other: { inner: true } }] } }");
+		let res = Value::parse(
+			"{ test: { something: [{ age: 34, other: { inner: true } }, { age: 36, other: { inner: true } }] } }",
+		);
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true)))
@@ -514,7 +516,9 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something.other[city:london]");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = Value::parse("{ test: { something: [{ age: 34, other: { 'city:london': true } }, { age: 36, other: { 'city:london': true } }] } }");
+		let res = Value::parse(
+			"{ test: { something: [{ age: 34, other: { 'city:london': true } }, { age: 36, other: { 'city:london': true } }] } }",
+		);
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true)))

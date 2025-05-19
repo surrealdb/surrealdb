@@ -1,12 +1,13 @@
 use crate::err::Error;
+use crate::idx::VersionedStore;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
-use crate::idx::VersionedStore;
 use crate::kvs::{Key, Transaction, Val};
 use crate::sql::{Object, Value};
 #[cfg(debug_assertions)]
 use ahash::HashSet;
-use revision::{revisioned, Revisioned};
+use anyhow::{Result, bail};
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
@@ -40,7 +41,7 @@ pub struct BState {
 }
 
 impl VersionedStore for BState {
-	fn try_from(val: Val) -> Result<Self, Error> {
+	fn try_from(val: Val) -> Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -50,7 +51,7 @@ impl VersionedStore for BState {
 				Err(_) => match BState1::deserialize_revisioned(&mut val.as_slice()) {
 					Ok(b_old) => Ok(b_old.into()),
 					// Otherwise we return the initial error
-					Err(_) => Err(Error::Revision(e)),
+					Err(_) => Err(anyhow::Error::new(Error::Revision(e))),
 				},
 			},
 		}
@@ -162,7 +163,7 @@ where
 		self.keys_mut().compile();
 	}
 
-	fn try_from_val(val: Val) -> Result<Self, Error> {
+	fn try_from_val(val: Val) -> Result<Self> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(val);
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
 		let keys = BK::read_from(&mut c)?;
@@ -172,11 +173,11 @@ where
 				Ok(BTreeNode::Internal(keys, child))
 			}
 			2u8 => Ok(BTreeNode::Leaf(keys)),
-			_ => Err(Error::CorruptedIndex("BTreeNode::try_from_val")),
+			_ => Err(anyhow::Error::new(Error::CorruptedIndex("BTreeNode::try_from_val"))),
 		}
 	}
 
-	fn try_into_val(&self) -> Result<Val, Error> {
+	fn try_into_val(&self) -> Result<Val> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(Vec::new());
 		match self {
 			BTreeNode::Internal(keys, child) => {
@@ -216,7 +217,7 @@ where
 		key: Key,
 		payload: Payload,
 		node: BTreeNode<BK>,
-	) -> Result<Option<Payload>, Error> {
+	) -> Result<Option<Payload>> {
 		match self {
 			BTreeNode::Internal(keys, children) => {
 				if let BTreeNode::Internal(append_keys, mut append_children) = node {
@@ -224,7 +225,7 @@ where
 					children.append(&mut append_children);
 					Ok(keys.insert(key, payload))
 				} else {
-					Err(Error::CorruptedIndex("BTree::append(1)"))
+					Err(anyhow::Error::new(Error::CorruptedIndex("BTree::append(1)")))
 				}
 			}
 			BTreeNode::Leaf(keys) => {
@@ -232,7 +233,7 @@ where
 					keys.append(append_keys);
 					Ok(keys.insert(key, payload))
 				} else {
-					Err(Error::CorruptedIndex("BTree::append(2)"))
+					Err(anyhow::Error::new(Error::CorruptedIndex("BTree::append(2)")))
 				}
 			}
 		}
@@ -290,7 +291,7 @@ where
 		tx: &Transaction,
 		store: &BTreeStore<BK>,
 		searched_key: &Key,
-	) -> Result<Option<Payload>, Error> {
+	) -> Result<Option<Payload>> {
 		let mut next_node = self.state.root;
 		while let Some(node_id) = next_node.take() {
 			let current = store.get_node(tx, node_id).await?;
@@ -310,7 +311,7 @@ where
 		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		searched_key: &Key,
-	) -> Result<Option<Payload>, Error> {
+	) -> Result<Option<Payload>> {
 		let mut next_node = self.state.root;
 		while let Some(node_id) = next_node.take() {
 			let current = store.get_node_mut(tx, node_id).await?;
@@ -333,7 +334,7 @@ where
 		store: &mut BTreeStore<BK>,
 		key: Key,
 		payload: Payload,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if let Some(root_id) = self.state.root {
 			// We already have a root node
 			let root = store.get_node_mut(tx, root_id).await?;
@@ -371,7 +372,7 @@ where
 		node_id: NodeId,
 		key: Key,
 		payload: Payload,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let mut next_node_id = Some(node_id);
 		while let Some(node_id) = next_node_id.take() {
 			let mut node = store.get_node_mut(tx, node_id).await?;
@@ -417,7 +418,7 @@ where
 		mut parent_node: StoredNode<BTreeNode<BK>>,
 		idx: usize,
 		child_node: BStoredNode<BK>,
-	) -> Result<SplitResult, Error> {
+	) -> Result<SplitResult> {
 		let (left_node, right_node, median_key, median_payload) = match child_node.n {
 			BTreeNode::Internal(keys, children) => self.split_internal_node(keys, children)?,
 			BTreeNode::Leaf(keys) => self.split_leaf_node(keys)?,
@@ -461,7 +462,7 @@ where
 		&mut self,
 		keys: BK,
 		mut left_children: Vec<NodeId>,
-	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload), Error> {
+	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload)> {
 		let r = keys.split_keys()?;
 		let right_children = left_children.split_off(r.median_idx + 1);
 		let left_node = BTreeNode::Internal(r.left, left_children);
@@ -472,7 +473,7 @@ where
 	fn split_leaf_node(
 		&mut self,
 		keys: BK,
-	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload), Error> {
+	) -> Result<(BTreeNode<BK>, BTreeNode<BK>, Key, Payload)> {
 		let r = keys.split_keys()?;
 		let left_node = BTreeNode::Leaf(r.left);
 		let right_node = BTreeNode::Leaf(r.right);
@@ -484,7 +485,7 @@ where
 		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		key_to_delete: Key,
-	) -> Result<Option<Payload>, Error> {
+	) -> Result<Option<Payload>> {
 		let mut deleted_payload = None;
 
 		if let Some(root_id) = self.state.root {
@@ -571,7 +572,7 @@ where
 								if let Some(root_id) = self.state.root {
 									// Delete the old root node
 									if root_id != node.id {
-										return Err(fail!("BTree::delete"));
+										fail!("BTree::delete")
 									}
 								}
 								store.remove_node(node.id, node.key).await?;
@@ -597,7 +598,7 @@ where
 		keys: &mut BK,
 		children: &mut Vec<NodeId>,
 		key_to_delete: Key,
-	) -> Result<(bool, Key, NodeId), Error> {
+	) -> Result<(bool, Key, NodeId)> {
 		#[cfg(debug_assertions)]
 		debug!(
 			"Delete from internal - key_to_delete: {} - keys: {keys}",
@@ -672,7 +673,7 @@ where
 		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		node: StoredNode<BTreeNode<BK>>,
-	) -> Result<(Key, Payload), Error> {
+	) -> Result<(Key, Payload)> {
 		let mut next_node = Some(node);
 		while let Some(node) = next_node.take() {
 			match &node.n {
@@ -683,8 +684,9 @@ where
 					next_node.replace(node);
 				}
 				BTreeNode::Leaf(k) => {
-					let (key, payload) =
-						k.get_last_key().ok_or_else(|| fail!("BTree::find_highest(1)"))?;
+					let (key, payload) = k
+						.get_last_key()
+						.ok_or_else(|| Error::unreachable("BTree::find_highest(1)"))?;
 					#[cfg(debug_assertions)]
 					debug!("Find highest: {} - node: {}", String::from_utf8_lossy(&key), node);
 					store.set_node(node, false).await?;
@@ -692,7 +694,7 @@ where
 				}
 			}
 		}
-		Err(fail!("BTree::find_highest(2)"))
+		fail!("BTree::find_highest(2)")
 	}
 
 	async fn find_lowest(
@@ -700,7 +702,7 @@ where
 		tx: &Transaction,
 		store: &mut BTreeStore<BK>,
 		node: StoredNode<BTreeNode<BK>>,
-	) -> Result<(Key, Payload), Error> {
+	) -> Result<(Key, Payload)> {
 		let mut next_node = Some(node);
 		while let Some(node) = next_node.take() {
 			match &node.n {
@@ -711,8 +713,9 @@ where
 					next_node.replace(node);
 				}
 				BTreeNode::Leaf(k) => {
-					let (key, payload) =
-						k.get_first_key().ok_or_else(|| fail!("BTree::find_lowest(1)"))?;
+					let (key, payload) = k
+						.get_first_key()
+						.ok_or_else(|| Error::unreachable("BTree::find_lowest(1)"))?;
 					#[cfg(debug_assertions)]
 					debug!("Find lowest: {} - node: {}", String::from_utf8_lossy(&key), node.id);
 					store.set_node(node, false).await?;
@@ -720,7 +723,7 @@ where
 				}
 			}
 		}
-		Err(fail!("BTree::find_lowest(2)"))
+		fail!("BTree::find_lowest(2)")
 	}
 
 	async fn deleted_traversal(
@@ -731,11 +734,11 @@ where
 		children: &mut Vec<NodeId>,
 		key_to_delete: Key,
 		is_main_key: bool,
-	) -> Result<(bool, bool, Key, NodeId), Error> {
+	) -> Result<(bool, bool, Key, NodeId)> {
 		// CLRS 3 Determine the root x.ci that must contain k
 		let child_idx = keys.get_child_idx(&key_to_delete);
 		let child_id = match children.get(child_idx) {
-			None => return Err(Error::CorruptedIndex("deleted_traversal:invalid_child_idx")),
+			None => bail!(Error::CorruptedIndex("deleted_traversal:invalid_child_idx")),
 			Some(&child_id) => child_id,
 		};
 		#[cfg(debug_assertions)]
@@ -767,7 +770,9 @@ where
 				} else {
 					// CLRS 3b successor
 					#[cfg(debug_assertions)]
-					debug!("CLRS: 3b merge - keys: {keys} - xci_child: {child_stored_node} - right_sibling_child: {right_child_stored_node}");
+					debug!(
+						"CLRS: 3b merge - keys: {keys} - xci_child: {child_stored_node} - right_sibling_child: {right_child_stored_node}"
+					);
 					Self::merge_nodes(
 						store,
 						keys,
@@ -788,7 +793,9 @@ where
 				let left_child_stored_node = store.get_node_mut(tx, children[child_idx]).await?;
 				return if left_child_stored_node.n.keys().len() >= self.state.minimum_degree {
 					#[cfg(debug_assertions)]
-					debug!("CLRS: 3a - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}",);
+					debug!(
+						"CLRS: 3a - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}",
+					);
 					Self::delete_adjust_predecessor(
 						store,
 						keys,
@@ -802,7 +809,9 @@ where
 				} else {
 					// CLRS 3b predecessor
 					#[cfg(debug_assertions)]
-					debug!("CLRS: 3b merge - keys: {keys} - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}");
+					debug!(
+						"CLRS: 3b merge - keys: {keys} - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}"
+					);
 					Self::merge_nodes(
 						store,
 						keys,
@@ -830,7 +839,7 @@ where
 		is_main_key: bool,
 		mut child_stored_node: BStoredNode<BK>,
 		mut right_child_stored_node: BStoredNode<BK>,
-	) -> Result<(bool, bool, Key, NodeId), Error> {
+	) -> Result<(bool, bool, Key, NodeId)> {
 		let (ascending_key, ascending_payload) =
 			right_child_stored_node
 				.n
@@ -876,7 +885,7 @@ where
 		is_main_key: bool,
 		mut left_child_stored_node: BStoredNode<BK>,
 		mut child_stored_node: BStoredNode<BK>,
-	) -> Result<(bool, bool, Key, NodeId), Error> {
+	) -> Result<(bool, bool, Key, NodeId)> {
 		let (ascending_key, ascending_payload) = left_child_stored_node
 			.n
 			.keys()
@@ -928,7 +937,7 @@ where
 		is_main_key: bool,
 		mut left_child: BStoredNode<BK>,
 		right_child: BStoredNode<BK>,
-	) -> Result<(bool, bool, Key, NodeId), Error> {
+	) -> Result<(bool, bool, Key, NodeId)> {
 		#[cfg(debug_assertions)]
 		debug!("Keys: {keys}");
 		let descending_key =
@@ -954,7 +963,7 @@ where
 		&self,
 		tx: &Transaction,
 		store: &BTreeStore<BK>,
-	) -> Result<BStatistics, Error> {
+	) -> Result<BStatistics> {
 		let mut stats = BStatistics::default();
 		#[cfg(debug_assertions)]
 		let mut keys = HashSet::default();
@@ -994,14 +1003,14 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::err::Error;
+	use crate::idx::VersionedStore;
 	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::trees::btree::{
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
-	use crate::idx::VersionedStore;
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
+	use anyhow::Result;
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use std::cmp::Ordering;
@@ -1507,24 +1516,24 @@ mod tests {
 		t: &mut BTree<BK>,
 		mut st: BTreeStore<BK>,
 		tx: Transaction,
-		mut gen: u64,
+		mut r#gen: u64,
 		info: String,
-	) -> Result<u64, Error>
+	) -> Result<u64>
 	where
 		BK: BKeys + Clone + Debug,
 	{
 		if st.finish(&tx).await?.is_some() {
 			t.state.generation += 1;
 		}
-		gen += 1;
-		assert_eq!(t.state.generation, gen, "{}", info);
+		r#gen += 1;
+		assert_eq!(t.state.generation, r#gen, "{}", info);
 		tx.commit().await?;
-		Ok(gen)
+		Ok(r#gen)
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	#[test(tokio::test)]
-	async fn test_btree_clrs_deletion_test() -> Result<(), Error> {
+	async fn test_btree_clrs_deletion_test() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 		let mut check_generation = 0;
@@ -1630,7 +1639,7 @@ mod tests {
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
 	#[test(tokio::test)]
-	async fn test_btree_fill_and_empty() -> Result<(), Error> {
+	async fn test_btree_fill_and_empty() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
 		let mut t = BTree::<TrieKeys>::new(BState::new(3));
 
@@ -1706,7 +1715,7 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
-	async fn test_delete_adjust() -> Result<(), Error> {
+	async fn test_delete_adjust() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
 		let mut t = BTree::<FstKeys>::new(BState::new(3));
 
@@ -1867,7 +1876,7 @@ mod tests {
 		t: &BTree<BK>,
 		tx: &Transaction,
 		st: &mut BTreeStore<BK>,
-	) -> Result<(usize, BTreeMap<String, Payload>), Error>
+	) -> Result<(usize, BTreeMap<String, Payload>)>
 	where
 		BK: BKeys + Clone + Debug,
 	{
@@ -1968,7 +1977,7 @@ mod tests {
 			tx: &Transaction,
 			st: &mut BTreeStore<BK>,
 			inspect_func: F,
-		) -> Result<usize, Error>
+		) -> Result<usize>
 		where
 			F: Fn(usize, usize, NodeId, Arc<BStoredNode<BK>>),
 		{
@@ -1997,7 +2006,7 @@ mod tests {
 			tx: &Transaction,
 			st: &mut BTreeStore<BK>,
 			mut inspect_func: F,
-		) -> Result<usize, Error>
+		) -> Result<usize>
 		where
 			F: FnMut(usize, usize, NodeId, &BStoredNode<BK>),
 		{

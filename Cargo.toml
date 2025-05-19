@@ -3,11 +3,11 @@ members = [".", "crates/core", "crates/sdk"]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
-edition = "2021"
+edition = "2024"
 license-file = "LICENSE"
 publish = false
 version = "3.0.0"
-rust-version = "1.84.0"
+rust-version = "1.85.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -58,6 +58,7 @@ tikv = { version = "0.3.0-surreal.1", default-features = false, package = "surre
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
 ahash = "0.8.11"
 ammonia = "4.0.0"
+anyhow = "1.0.97"
 arbitrary = "1.3.2"
 argon2 = "0.5.2"
 arrayvec = "0.7.6"
@@ -230,6 +231,7 @@ revision = { workspace = true, features = [
 ] }
 
 # Crates only used by the root surrealdb crate
+anyhow.workspace = true
 arc-swap = "1.7.1"
 axum = { version = "0.7.5", features = ["tracing", "ws"] }
 axum-extra = { version = "0.9.3", features = [

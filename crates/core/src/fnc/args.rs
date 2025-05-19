@@ -2,6 +2,7 @@ use std::vec::IntoIter;
 
 use crate::err::Error;
 use crate::sql::value::{Cast as CastTrait, Coerce, Value};
+use anyhow::{Result, bail};
 
 /// The number of arguments a function takes.
 #[derive(Debug)]
@@ -69,11 +70,11 @@ pub trait FromArg: Sized {
 	fn arity() -> Arity;
 	/// Convert a collection of argument values into a certain argument format, failing if there are
 	/// too many or too few arguments, or if one of the arguments could not be converted.
-	fn from_arg(name: &str, args: &mut Args) -> Result<Self, Error>;
+	fn from_arg(name: &str, args: &mut Args) -> Result<Self>;
 }
 
 pub trait FromArgs: Sized {
-	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error>;
+	fn from_args(name: &str, args: Vec<Value>) -> Result<Self>;
 }
 
 /// A wrapper type for optional arguments, as opposed to Option which might also indicate None being a
@@ -88,7 +89,7 @@ impl<T: FromArg> FromArg for Optional<T> {
 		res
 	}
 
-	fn from_arg(name: &str, arg: &mut Args) -> Result<Self, Error> {
+	fn from_arg(name: &str, arg: &mut Args) -> Result<Self> {
 		if !arg.has_next() {
 			return Ok(Optional(None));
 		}
@@ -116,7 +117,7 @@ impl<T: Coerce> FromArg for Rest<T> {
 		}
 	}
 
-	fn from_arg(name: &str, iter: &mut Args) -> Result<Self, Error> {
+	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
 		let mut res = Vec::new();
 		while let Some((idx, x)) = iter.next() {
 			let v = x.coerce_to::<T>().map_err(|e| Error::InvalidArguments {
@@ -137,7 +138,7 @@ impl<T: Coerce> FromArg for T {
 		}
 	}
 
-	fn from_arg(name: &str, iter: &mut Args) -> Result<Self, Error> {
+	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
 		// The error should not happen when called with the FromArgs traits as the arity is already
 		// checked.
 		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidArguments {
@@ -164,7 +165,7 @@ impl<T: CastTrait> FromArg for Cast<T> {
 		}
 	}
 
-	fn from_arg(name: &str, iter: &mut Args) -> Result<Self, Error> {
+	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
 		// The error should not happen when called with the FromArgs traits as the arity is already
 		// checked.
 		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidArguments {
@@ -181,7 +182,7 @@ impl<T: CastTrait> FromArg for Cast<T> {
 }
 
 impl<T: FromArg> FromArgs for T {
-	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
+	fn from_args(name: &str, args: Vec<Value>) -> Result<Self> {
 		let arity = T::arity();
 
 		if args.len() < arity.lower || arity.upper.map(|x| args.len() > x).unwrap_or(false) {
@@ -203,7 +204,7 @@ impl<T: FromArg> FromArgs for T {
 				format!("Expected {} or more arguments", arity.lower)
 			};
 
-			return Err(Error::InvalidArguments {
+			bail!(Error::InvalidArguments {
 				name: name.to_owned(),
 				message,
 			});
@@ -223,7 +224,7 @@ pub struct Any(pub Vec<Value>);
 // Take ownership of the raw arguments collection, and assume responsibility of validating the
 // number of arguments and converting them as necessary.
 impl FromArgs for Any {
-	fn from_args(_name: &str, args: Vec<Value>) -> Result<Self, Error> {
+	fn from_args(_name: &str, args: Vec<Value>) -> Result<Self> {
 		Ok(Any(args))
 	}
 }
@@ -242,7 +243,7 @@ macro_rules! impl_tuple {
 			}
 
 			#[allow(non_snake_case)]
-			fn from_arg(_name: &str, _iter: &mut Args) -> Result<Self, Error>
+			fn from_arg(_name: &str, _iter: &mut Args) -> Result<Self>
 			{
 				Ok(( $(
 					$T::from_arg(_name,_iter)?,

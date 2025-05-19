@@ -1,8 +1,9 @@
 use crate::err::Error;
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::idx::IndexKeyBase;
 use crate::kvs::{Transaction, Val};
+use anyhow::Result;
 
 pub(super) type Position = u32;
 
@@ -23,7 +24,7 @@ impl Offsets {
 		doc_id: DocId,
 		term_id: TermId,
 		offsets: OffsetRecords,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let key = self.index_key_base.new_bo_key(doc_id, term_id)?;
 		let val: Val = offsets.try_into()?;
 		tx.set(key, val, None).await?;
@@ -35,7 +36,7 @@ impl Offsets {
 		tx: &Transaction,
 		doc_id: DocId,
 		term_id: TermId,
-	) -> Result<Option<OffsetRecords>, Error> {
+	) -> Result<Option<OffsetRecords>> {
 		let key = self.index_key_base.new_bo_key(doc_id, term_id)?;
 		if let Some(val) = tx.get(key, None).await? {
 			let offsets = val.try_into()?;
@@ -50,7 +51,7 @@ impl Offsets {
 		tx: &Transaction,
 		doc_id: DocId,
 		term_id: TermId,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let key = self.index_key_base.new_bo_key(doc_id, term_id)?;
 		tx.del(key).await
 	}

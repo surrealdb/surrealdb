@@ -4,9 +4,9 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::sql::{
-	array::Uniq as _, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, DecimalExt,
-	Duration, File, Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table,
-	Thing, Uuid, Value,
+	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Ident, Kind, Literal,
+	Number, Object, Range, Regex, Strand, Table, Thing, Uuid, Value, array::Uniq as _,
+	kind::HasKind, value::Null,
 };
 
 #[derive(Clone, Debug)]
@@ -59,7 +59,10 @@ impl fmt::Display for CastError {
 			CastError::RangeSizeLimit {
 				value,
 			} => {
-				write!(f, "Casting range `{value}` to an array would create an array larger then the max allocation limit.")
+				write!(
+					f,
+					"Casting range `{value}` to an array would create an array larger then the max allocation limit."
+				)
 			}
 		}
 	}
@@ -160,7 +163,7 @@ impl Cast for i64 {
 			Value::Number(Number::Int(_)) => true,
 			Value::Number(Number::Float(v)) => v.fract() == 0.0,
 			Value::Number(Number::Decimal(v)) => v.is_integer() || i64::try_from(*v).is_ok(),
-			Value::Strand(ref v) => v.parse::<i64>().is_ok(),
+			Value::Strand(v) => v.parse::<i64>().is_ok(),
 			_ => false,
 		}
 	}
@@ -200,7 +203,7 @@ impl Cast for f64 {
 		match v {
 			Value::Number(Number::Int(_) | Number::Float(_)) => true,
 			Value::Number(Number::Decimal(v)) => v.is_integer() || i64::try_from(*v).is_ok(),
-			Value::Strand(ref v) => v.parse::<f64>().is_ok(),
+			Value::Strand(v) => v.parse::<f64>().is_ok(),
 			_ => false,
 		}
 	}
@@ -241,7 +244,7 @@ impl Cast for Decimal {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Number(_) => true,
-			Value::Strand(ref v) => v.parse::<f64>().is_ok(),
+			Value::Strand(v) => v.parse::<f64>().is_ok(),
 			_ => false,
 		}
 	}

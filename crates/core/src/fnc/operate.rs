@@ -1,170 +1,170 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::TryRem;
 use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
 use crate::sql::{Expression, Thing};
+use anyhow::Result;
 use reblessive::tree::Stk;
 
-pub fn neg(a: Value) -> Result<Value, Error> {
+pub fn neg(a: Value) -> Result<Value> {
 	a.try_neg()
 }
 
-pub fn not(a: Value) -> Result<Value, Error> {
+pub fn not(a: Value) -> Result<Value> {
 	super::not::not((a,))
 }
 
-pub fn or(a: Value, b: Value) -> Result<Value, Error> {
+pub fn or(a: Value, b: Value) -> Result<Value> {
 	Ok(match a.is_truthy() {
 		true => a,
 		false => b,
 	})
 }
 
-pub fn and(a: Value, b: Value) -> Result<Value, Error> {
+pub fn and(a: Value, b: Value) -> Result<Value> {
 	Ok(match a.is_truthy() {
 		true => b,
 		false => a,
 	})
 }
 
-pub fn tco(a: Value, b: Value) -> Result<Value, Error> {
+pub fn tco(a: Value, b: Value) -> Result<Value> {
 	Ok(match a.is_truthy() {
 		true => a,
 		false => b,
 	})
 }
 
-pub fn nco(a: Value, b: Value) -> Result<Value, Error> {
+pub fn nco(a: Value, b: Value) -> Result<Value> {
 	Ok(match a.is_some() {
 		true => a,
 		false => b,
 	})
 }
 
-pub fn add(a: Value, b: Value) -> Result<Value, Error> {
+pub fn add(a: Value, b: Value) -> Result<Value> {
 	a.try_add(b)
 }
 
-pub fn sub(a: Value, b: Value) -> Result<Value, Error> {
+pub fn sub(a: Value, b: Value) -> Result<Value> {
 	a.try_sub(b)
 }
 
-pub fn mul(a: Value, b: Value) -> Result<Value, Error> {
+pub fn mul(a: Value, b: Value) -> Result<Value> {
 	a.try_mul(b)
 }
 
-pub fn div(a: Value, b: Value) -> Result<Value, Error> {
+pub fn div(a: Value, b: Value) -> Result<Value> {
 	Ok(a.try_div(b).unwrap_or(f64::NAN.into()))
 }
 
-pub fn rem(a: Value, b: Value) -> Result<Value, Error> {
+pub fn rem(a: Value, b: Value) -> Result<Value> {
 	a.try_rem(b)
 }
 
-pub fn pow(a: Value, b: Value) -> Result<Value, Error> {
+pub fn pow(a: Value, b: Value) -> Result<Value> {
 	a.try_pow(b)
 }
 
-pub fn exact(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn exact(a: &Value, b: &Value) -> Result<Value> {
 	Ok(Value::from(a == b))
 }
 
-pub fn equal(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn equal(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.equal(b).into())
 }
 
-pub fn not_equal(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn not_equal(a: &Value, b: &Value) -> Result<Value> {
 	Ok((!a.equal(b)).into())
 }
 
-pub fn all_equal(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn all_equal(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.all_equal(b).into())
 }
 
-pub fn any_equal(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn any_equal(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.any_equal(b).into())
 }
 
-pub fn like(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn like(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.fuzzy(b).into())
 }
 
-pub fn not_like(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn not_like(a: &Value, b: &Value) -> Result<Value> {
 	Ok((!a.fuzzy(b)).into())
 }
 
-pub fn all_like(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn all_like(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.all_fuzzy(b).into())
 }
 
-pub fn any_like(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn any_like(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.any_fuzzy(b).into())
 }
 
-pub fn less_than(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn less_than(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.lt(b).into())
 }
 
-pub fn less_than_or_equal(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn less_than_or_equal(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.le(b).into())
 }
 
-pub fn more_than(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn more_than(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.gt(b).into())
 }
 
-pub fn more_than_or_equal(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn more_than_or_equal(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.ge(b).into())
 }
 
-pub fn contain(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn contain(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.contains(b).into())
 }
 
-pub fn not_contain(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn not_contain(a: &Value, b: &Value) -> Result<Value> {
 	Ok((!a.contains(b)).into())
 }
 
-pub fn contain_all(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn contain_all(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.contains_all(b).into())
 }
 
-pub fn contain_any(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn contain_any(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.contains_any(b).into())
 }
 
-pub fn contain_none(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn contain_none(a: &Value, b: &Value) -> Result<Value> {
 	Ok((!a.contains_any(b)).into())
 }
 
-pub fn inside(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn inside(a: &Value, b: &Value) -> Result<Value> {
 	Ok(b.contains(a).into())
 }
 
-pub fn not_inside(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn not_inside(a: &Value, b: &Value) -> Result<Value> {
 	Ok((!b.contains(a)).into())
 }
 
-pub fn inside_all(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn inside_all(a: &Value, b: &Value) -> Result<Value> {
 	Ok(b.contains_all(a).into())
 }
 
-pub fn inside_any(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn inside_any(a: &Value, b: &Value) -> Result<Value> {
 	Ok(b.contains_any(a).into())
 }
 
-pub fn inside_none(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn inside_none(a: &Value, b: &Value) -> Result<Value> {
 	Ok((!b.contains_any(a)).into())
 }
 
-pub fn outside(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn outside(a: &Value, b: &Value) -> Result<Value> {
 	Ok((!a.intersects(b)).into())
 }
 
-pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
+pub fn intersects(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.intersects(b).into())
 }
 
@@ -219,7 +219,7 @@ pub(crate) async fn matches(
 	exp: &Expression,
 	l: Value,
 	r: Value,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	let res = match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => true,
 		ExecutorOption::None => false,
@@ -234,7 +234,7 @@ pub(crate) async fn knn(
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	exp: &Expression,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
 		ExecutorOption::None => Ok(Value::Bool(false)),

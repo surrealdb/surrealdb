@@ -143,7 +143,9 @@ mod tests {
 	#[test]
 	fn walk_array_field_embedded() {
 		let idi = Idiom::parse("test.something[*].tags");
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			(Idiom::parse("test.something[0].tags"), Value::parse("['code', 'databases']")),
 			(Idiom::parse("test.something[1].tags"), Value::parse("['design', 'operations']")),
@@ -154,7 +156,9 @@ mod tests {
 	#[test]
 	fn walk_array_field_embedded_index() {
 		let idi = Idiom::parse("test.something[*].tags[1]");
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			(Idiom::parse("test.something[0].tags[1]"), Value::from("databases")),
 			(Idiom::parse("test.something[1].tags[1]"), Value::from("operations")),
@@ -165,7 +169,9 @@ mod tests {
 	#[test]
 	fn walk_array_field_embedded_index_all() {
 		let idi = Idiom::parse("test.something[*].tags[*]");
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			(Idiom::parse("test.something[0].tags[0]"), Value::from("code")),
 			(Idiom::parse("test.something[0].tags[1]"), Value::from("databases")),

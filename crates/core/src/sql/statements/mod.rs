@@ -32,8 +32,10 @@ pub(crate) mod r#use;
 pub use self::access::{AccessGrant, AccessStatement};
 pub use self::analyze::AnalyzeStatement;
 pub use self::begin::BeginStatement;
+pub use self::r#break::BreakStatement;
 pub use self::cancel::CancelStatement;
 pub use self::commit::CommitStatement;
+pub use self::r#continue::ContinueStatement;
 pub use self::create::CreateStatement;
 pub use self::delete::DeleteStatement;
 pub use self::foreach::ForeachStatement;
@@ -44,9 +46,6 @@ pub use self::kill::KillStatement;
 pub use self::live::LiveStatement;
 pub use self::option::OptionStatement;
 pub use self::output::OutputStatement;
-pub use self::r#break::BreakStatement;
-pub use self::r#continue::ContinueStatement;
-pub use self::r#use::UseStatement;
 pub use self::relate::RelateStatement;
 pub use self::select::SelectStatement;
 pub use self::set::SetStatement;
@@ -55,6 +54,7 @@ pub use self::sleep::SleepStatement;
 pub use self::throw::ThrowStatement;
 pub use self::update::UpdateStatement;
 pub use self::upsert::UpsertStatement;
+pub use self::r#use::UseStatement;
 
 pub use self::alter::{AlterStatement, AlterTableStatement};
 

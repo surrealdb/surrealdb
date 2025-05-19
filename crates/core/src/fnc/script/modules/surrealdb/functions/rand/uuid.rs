@@ -1,4 +1,4 @@
-use js::{prelude::Rest, Ctx};
+use js::{Ctx, prelude::Rest};
 
 use super::super::run;
 use crate::sql::value::Value;

@@ -1,16 +1,16 @@
-use crate::err::Error;
 use crate::sql::value::Value;
+use anyhow::Result;
 use md5::Digest;
 use md5::Md5;
 use sha1::Sha1;
 use sha2::Sha256;
 use sha2::Sha512;
 
-pub fn blake3((arg,): (String,)) -> Result<Value, Error> {
+pub fn blake3((arg,): (String,)) -> Result<Value> {
 	Ok(blake3::hash(arg.as_bytes()).to_string().into())
 }
 
-pub fn md5((arg,): (String,)) -> Result<Value, Error> {
+pub fn md5((arg,): (String,)) -> Result<Value> {
 	let mut hasher = Md5::new();
 	hasher.update(arg.as_str());
 	let val = hasher.finalize();
@@ -18,7 +18,7 @@ pub fn md5((arg,): (String,)) -> Result<Value, Error> {
 	Ok(val.into())
 }
 
-pub fn sha1((arg,): (String,)) -> Result<Value, Error> {
+pub fn sha1((arg,): (String,)) -> Result<Value> {
 	let mut hasher = Sha1::new();
 	hasher.update(arg.as_str());
 	let val = hasher.finalize();
@@ -26,7 +26,7 @@ pub fn sha1((arg,): (String,)) -> Result<Value, Error> {
 	Ok(val.into())
 }
 
-pub fn sha256((arg,): (String,)) -> Result<Value, Error> {
+pub fn sha256((arg,): (String,)) -> Result<Value> {
 	let mut hasher = Sha256::new();
 	hasher.update(arg.as_str());
 	let val = hasher.finalize();
@@ -34,7 +34,7 @@ pub fn sha256((arg,): (String,)) -> Result<Value, Error> {
 	Ok(val.into())
 }
 
-pub fn sha512((arg,): (String,)) -> Result<Value, Error> {
+pub fn sha512((arg,): (String,)) -> Result<Value> {
 	let mut hasher = Sha512::new();
 	hasher.update(arg.as_str());
 	let val = hasher.finalize();
@@ -48,7 +48,7 @@ const COST_ALLOWANCE: u32 = 4;
 /// Like verify_password, but takes a closure to determine whether the cost of performing the
 /// operation is not too high.
 macro_rules! bounded_verify_password {
-	($algo: ident, $instance: expr, $password: expr, $hash: expr, $bound: expr) => {
+	($algo: ident, $instance: expr_2021, $password: expr_2021, $hash: expr_2021, $bound: expr_2021) => {
 		if let (Some(salt), Some(expected_output)) = (&$hash.salt, &$hash.hash) {
 			if let Some(params) =
 				<$algo as PasswordHasher>::Params::try_from($hash).ok().filter($bound)
@@ -76,7 +76,7 @@ macro_rules! bounded_verify_password {
 		}
 	};
 
-	($algo: ident, $password: expr, $hash: expr, $bound: expr) => {
+	($algo: ident, $password: expr_2021, $hash: expr_2021, $bound: expr_2021) => {
 		bounded_verify_password!($algo, $algo::default(), $password, $hash, $bound)
 	};
 }
@@ -84,15 +84,15 @@ macro_rules! bounded_verify_password {
 pub mod argon2 {
 
 	use super::COST_ALLOWANCE;
-	use crate::err::Error;
 	use crate::sql::value::Value;
+	use anyhow::Result;
 	use argon2::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Argon2,
+		password_hash::{PasswordHash, PasswordHasher, SaltString},
 	};
 	use rand::rngs::OsRng;
 
-	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		type Params<'a> = <Argon2<'a> as PasswordHasher>::Params;
 		Ok(PasswordHash::new(&hash)
 			.ok()
@@ -107,7 +107,7 @@ pub mod argon2 {
 			.into())
 	}
 
-	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
+	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let algo = Argon2::default();
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = algo.hash_password(pass.as_ref(), &salt).unwrap().to_string();
@@ -117,13 +117,13 @@ pub mod argon2 {
 
 pub mod bcrypt {
 
-	use crate::err::Error;
 	use crate::fnc::crypto::COST_ALLOWANCE;
 	use crate::sql::value::Value;
+	use anyhow::Result;
 	use bcrypt::HashParts;
 	use std::str::FromStr;
 
-	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		let parts = match HashParts::from_str(&hash) {
 			Ok(parts) => parts,
 			Err(_) => return Ok(Value::Bool(false)),
@@ -139,7 +139,7 @@ pub mod bcrypt {
 		})
 	}
 
-	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
+	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap();
 		Ok(hash.into())
 	}
@@ -148,15 +148,15 @@ pub mod bcrypt {
 pub mod pbkdf2 {
 
 	use super::COST_ALLOWANCE;
-	use crate::err::Error;
 	use crate::sql::value::Value;
+	use anyhow::Result;
 	use pbkdf2::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Pbkdf2,
+		password_hash::{PasswordHash, PasswordHasher, SaltString},
 	};
 	use rand::rngs::OsRng;
 
-	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		type Params = <Pbkdf2 as PasswordHasher>::Params;
 		Ok(PasswordHash::new(&hash)
 			.ok()
@@ -173,7 +173,7 @@ pub mod pbkdf2 {
 			.into())
 	}
 
-	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
+	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = Pbkdf2.hash_password(pass.as_ref(), &salt).unwrap().to_string();
 		Ok(hash.into())
@@ -182,15 +182,15 @@ pub mod pbkdf2 {
 
 pub mod scrypt {
 
-	use crate::err::Error;
 	use crate::sql::value::Value;
+	use anyhow::Result;
 	use rand::rngs::OsRng;
 	use scrypt::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Scrypt,
+		password_hash::{PasswordHash, PasswordHasher, SaltString},
 	};
 
-	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		type Params = <Scrypt as PasswordHasher>::Params;
 		Ok(PasswordHash::new(&hash)
 			.ok()
@@ -208,7 +208,7 @@ pub mod scrypt {
 			.into())
 	}
 
-	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
+	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = Scrypt.hash_password(pass.as_ref(), &salt).unwrap().to_string();
 		Ok(hash.into())

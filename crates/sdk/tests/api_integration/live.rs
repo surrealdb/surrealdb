@@ -14,17 +14,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Result;
 use futures::Stream;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use surrealdb::method::QueryStream;
-use surrealdb::opt::Resource;
 use surrealdb::Action;
-use surrealdb::Error;
 use surrealdb::Notification;
 use surrealdb::RecordId;
 use surrealdb::Value;
+use surrealdb::method::QueryStream;
+use surrealdb::opt::Resource;
 use surrealdb_core::sql::Value as CoreValue;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -499,10 +499,7 @@ pub async fn live_select_with_fetch(new_db: impl CreateDb) {
 	drop(permit);
 }
 
-async fn receive_all_pending_notifications<
-	S: Stream<Item = Result<Notification<I>, Error>> + Unpin,
-	I,
->(
+async fn receive_all_pending_notifications<S: Stream<Item = Result<Notification<I>>> + Unpin, I>(
 	stream: Arc<RwLock<S>>,
 	timeout: Duration,
 ) -> Vec<Notification<I>> {

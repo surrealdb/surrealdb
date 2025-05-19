@@ -1,6 +1,6 @@
+use crate::sql::Value;
 use crate::sql::duration::Duration;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

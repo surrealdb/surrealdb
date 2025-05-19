@@ -1,8 +1,8 @@
 use std::ops::Deref;
 
-use crate::sql::statements::define::config::graphql::TableConfig;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{statements::UseStatement, Cond, Ident, Idiom, Limit, Part, Start, Table, Value};
+use crate::sql::statements::define::config::graphql::TableConfig;
+use crate::sql::{Cond, Ident, Idiom, Limit, Part, Start, Table, Value, statements::UseStatement};
 
 pub trait IntoExt<T> {
 	fn intox(self) -> T;

@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::highlighter::HighlightParams;
@@ -9,6 +10,7 @@ use crate::idx::ft::scorer::BM25Scorer;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
+use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
 	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
@@ -25,16 +27,15 @@ use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-use crate::idx::planner::IterationStage;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
-use crate::idx::IndexKeyBase;
 use crate::kvs::TransactionType;
 use crate::sql::index::{Distance, Index};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{
 	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
 };
+use anyhow::{Result, ensure};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -118,7 +119,7 @@ impl InnerQueryExecutor {
 		knns: KnnExpressions,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
 		let mut ft_map = HashMap::default();
@@ -156,11 +157,12 @@ impl InnerQueryExecutor {
 					};
 					if let Some(e) = ft_entry {
 						if let Matches(_, Some(mr)) = e.0.index_option.op() {
-							if mr_entries.insert(*mr, e.clone()).is_some() {
-								return Err(Error::DuplicatedMatchRef {
+							ensure!(
+								mr_entries.insert(*mr, e.clone()).is_none(),
+								Error::DuplicatedMatchRef {
 									mr: *mr,
-								});
-							}
+								}
+							);
 						}
 						exp_entries.insert(exp, e);
 					}
@@ -266,7 +268,7 @@ impl QueryExecutor {
 		thg: &Thing,
 		doc: Option<&CursorDoc>,
 		exp: &Expression,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
 			if let Some(results) = e {
 				return Ok(results.contains(exp, thg).into());
@@ -331,7 +333,7 @@ impl QueryExecutor {
 		&self,
 		opt: &Options,
 		ir: IteratorRef,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Result<Option<ThingIterator>> {
 		if let Some(it_entry) = self.0.it_entries.get(ir) {
 			match it_entry {
 				IteratorEntry::Single(_, io) => self.new_single_iterator(opt, ir, io).await,
@@ -349,7 +351,7 @@ impl QueryExecutor {
 		opt: &Options,
 		irf: IteratorRef,
 		io: &IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Result<Option<ThingIterator>> {
 		let ixr = io.ix_ref();
 		match ixr.index {
 			Index::Idx => Ok(self.new_index_iterator(opt, irf, ixr, io.clone()).await?),
@@ -368,7 +370,7 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		ix: &IndexReference,
 		io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Result<Option<ThingIterator>> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
 				let variants = Self::get_equal_variants_from_value(value);
@@ -486,7 +488,7 @@ impl QueryExecutor {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		array: &Array,
-	) -> Result<ThingIterator, Error> {
+	) -> Result<ThingIterator> {
 		let (ns, db) = opt.ns_db()?;
 		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, array)?))
 	}
@@ -716,7 +718,7 @@ impl QueryExecutor {
 		ix: &DefineIndexStatement,
 		from: &RangeValue,
 		to: &RangeValue,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Result<Option<ThingIterator>> {
 		match ix.index {
 			Index::Idx => {
 				let ranges = Self::get_ranges_variants(from, to);
@@ -782,7 +784,7 @@ impl QueryExecutor {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange,
-	) -> Result<ThingIterator, Error> {
+	) -> Result<ThingIterator> {
 		let (ns, db) = opt.ns_db()?;
 		Ok(ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, range)?))
 	}
@@ -792,7 +794,7 @@ impl QueryExecutor {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
-	) -> Result<ThingIterator, Error> {
+	) -> Result<ThingIterator> {
 		let (ns, db) = opt.ns_db()?;
 		Ok(ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, range)?))
 	}
@@ -802,7 +804,7 @@ impl QueryExecutor {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		ranges: &[IteratorRange],
-	) -> Result<ThingIterator, Error> {
+	) -> Result<ThingIterator> {
 		let mut iterators = VecDeque::with_capacity(ranges.len());
 		for range in ranges {
 			iterators.push_back(Self::new_index_range_iterator(ir, opt, ix, range)?);
@@ -815,7 +817,7 @@ impl QueryExecutor {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		ranges: &[IteratorRange<'_>],
-	) -> Result<ThingIterator, Error> {
+	) -> Result<ThingIterator> {
 		let mut iterators = VecDeque::with_capacity(ranges.len());
 		for range in ranges {
 			iterators.push_back(Self::new_unique_range_iterator(ir, opt, ix, range)?);
@@ -829,7 +831,7 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		ixr: &IndexReference,
 		io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Result<Option<ThingIterator>> {
 		Ok(match io.op() {
 			IndexOperator::Equality(values) => {
 				let variants = Self::get_equal_variants_from_value(values);
@@ -886,7 +888,7 @@ impl QueryExecutor {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		array: &Array,
-	) -> Result<ThingIterator, Error> {
+	) -> Result<ThingIterator> {
 		let (ns, db) = opt.ns_db()?;
 		if ix.cols.len() > 1 {
 			// If the index is unique and the index is a composite index,
@@ -902,7 +904,7 @@ impl QueryExecutor {
 		&self,
 		ir: IteratorRef,
 		io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
 			if let Matches(_, _) = io.op() {
 				if let Some(fti) = self.0.ft_map.get(io.ix_ref()) {
@@ -942,7 +944,7 @@ impl QueryExecutor {
 		opt: &Options,
 		irf: IteratorRef,
 		ios: &[IndexOption],
-	) -> Result<VecDeque<ThingIterator>, Error> {
+	) -> Result<VecDeque<ThingIterator>> {
 		let mut iterators = VecDeque::with_capacity(ios.len());
 		for io in ios {
 			if let Some(it) = Box::pin(self.new_single_iterator(opt, irf, io)).await? {
@@ -962,7 +964,7 @@ impl QueryExecutor {
 		exp: &Expression,
 		l: Value,
 		r: Value,
-	) -> Result<bool, Error> {
+	) -> Result<bool> {
 		if let Some(ft) = self.0.exp_entries.get(exp) {
 			let ix = ft.0.index_option.ix_ref();
 			if self.0.table.eq(&ix.what.0) {
@@ -972,17 +974,12 @@ impl QueryExecutor {
 		}
 
 		// If no previous case were successful, we end up with a user error
-		Err(Error::NoIndexFoundForMatch {
+		Err(anyhow::Error::new(Error::NoIndexFoundForMatch {
 			exp: exp.to_string(),
-		})
+		}))
 	}
 
-	async fn matches_with_doc_id(
-		&self,
-		ctx: &Context,
-		thg: &Thing,
-		ft: &FtEntry,
-	) -> Result<bool, Error> {
+	async fn matches_with_doc_id(&self, ctx: &Context, thg: &Thing, ft: &FtEntry) -> Result<bool> {
 		// TODO ask emmanual
 		let doc_key = revision::to_vec(thg)?;
 		let tx = ctx.tx();
@@ -1018,7 +1015,7 @@ impl QueryExecutor {
 		ft: &FtEntry,
 		l: Value,
 		r: Value,
-	) -> Result<bool, Error> {
+	) -> Result<bool> {
 		// If the query terms contains terms that are unknown in the index
 		// of if there are no terms in the query
 		// we are sure that it does not match any document
@@ -1060,7 +1057,7 @@ impl QueryExecutor {
 		thg: &Thing,
 		hlp: HighlightParams,
 		doc: &Value,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(hlp.match_ref()) {
 			if let Some(id) = e.0.index_option.id_ref() {
 				let tx = ctx.tx();
@@ -1077,7 +1074,7 @@ impl QueryExecutor {
 		thg: &Thing,
 		match_ref: Value,
 		partial: bool,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
 			let tx = ctx.tx();
 			let res = ft.extract_offsets(&tx, thg, &e.0.query_terms_list, partial).await;
@@ -1092,7 +1089,7 @@ impl QueryExecutor {
 		match_ref: &Value,
 		rid: &Thing,
 		ir: Option<&Arc<IteratorRecord>>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(scorer) = &e.0.scorer {
 				let tx = ctx.tx();
@@ -1140,7 +1137,7 @@ impl FtEntry {
 		opt: &Options,
 		ft: &FtIndex,
 		io: IndexOption,
-	) -> Result<Option<Self>, Error> {
+	) -> Result<Option<Self>> {
 		if let Matches(qs, _) = io.op() {
 			let (terms_list, terms_set) =
 				ft.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
@@ -1177,7 +1174,7 @@ impl MtEntry {
 		o: &[Number],
 		k: u32,
 		cond: Option<Arc<Cond>>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let cond_checker = if let Some(cond) = cond {
 			MTreeConditionChecker::new_cond(ctx, opt, cond)
 		} else {
@@ -1206,7 +1203,7 @@ impl HnswEntry {
 		n: u32,
 		ef: u32,
 		cond: Option<Arc<Cond>>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let cond_checker = if let Some(cond) = cond {
 			HnswConditionChecker::new_cond(ctx, opt, cond)
 		} else {

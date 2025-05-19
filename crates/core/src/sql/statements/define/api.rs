@@ -3,16 +3,17 @@ use crate::api::path::Path;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::fmt::{pretty_indent, Fmt};
+use crate::sql::fmt::{Fmt, pretty_indent};
 use crate::sql::{Base, FlowResultExt as _, Object, Strand, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-use super::config::api::ApiConfig;
 use super::CursorDoc;
+use super::config::api::ApiConfig;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -36,7 +37,7 @@ impl DefineApiStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
 		// Fetch the transaction
@@ -47,7 +48,7 @@ impl DefineApiStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::ApAlreadyExists {
+				bail!(Error::ApAlreadyExists {
 					value: self.path.to_string(),
 				});
 			}

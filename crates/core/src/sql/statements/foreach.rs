@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::range::TypedRange;
-use crate::sql::{block::Entry, Block, Param, Value};
+use crate::sql::{Block, Param, Value, block::Entry};
 use crate::sql::{ControlFlow, FlowResult};
 
 use reblessive::tree::Stk;
@@ -57,7 +57,8 @@ impl ForeachStatement {
 		let iter = match data {
 			Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
 			Value::Range(r) => {
-				let r = r.coerce_to_typed::<i64>().map_err(Error::from)?;
+				let r =
+					r.coerce_to_typed::<i64>().map_err(Error::from).map_err(anyhow::Error::new)?;
 				ForeachIter::Range(r.map(Value::from))
 			}
 			Value::Future(fut) => {
@@ -67,24 +68,26 @@ impl ForeachStatement {
 				match result {
 					Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
 					v => {
-						return Err(ControlFlow::from(Error::InvalidStatementTarget {
-							value: v.to_string(),
-						}));
+						return Err(ControlFlow::from(anyhow::Error::new(
+							Error::InvalidStatementTarget {
+								value: v.to_string(),
+							},
+						)));
 					}
 				}
 			}
 
 			v => {
-				return Err(ControlFlow::from(Error::InvalidStatementTarget {
+				return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidStatementTarget {
 					value: v.to_string(),
-				}))
+				})));
 			}
 		};
 
 		// Loop over the values
 		for v in iter {
 			if ctx.is_timedout().await? {
-				return Err(ControlFlow::from(Error::QueryTimedout));
+				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout)));
 			}
 			// Duplicate context
 			let ctx = MutableContext::new(ctx).freeze();

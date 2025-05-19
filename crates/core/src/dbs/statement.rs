@@ -12,6 +12,7 @@ use crate::sql::order::Ordering;
 use crate::sql::output::Output;
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
+use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::access::AccessStatement;
 use crate::sql::statements::create::CreateStatement;
 use crate::sql::statements::delete::DeleteStatement;
@@ -22,8 +23,8 @@ use crate::sql::statements::select::SelectStatement;
 use crate::sql::statements::show::ShowStatement;
 use crate::sql::statements::update::UpdateStatement;
 use crate::sql::statements::upsert::UpsertStatement;
-use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Explain, Permission, Timeout, With};
+use anyhow::Result;
 use std::borrow::Cow;
 use std::fmt;
 

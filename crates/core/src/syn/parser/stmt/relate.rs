@@ -1,11 +1,11 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{statements::RelateStatement, Subquery, Value},
+	sql::{Subquery, Value, statements::RelateStatement},
 	syn::{
 		parser::{
-			mac::{expected, expected_whitespace, unexpected},
 			ParseResult, Parser,
+			mac::{expected, expected_whitespace, unexpected},
 		},
 		token::t,
 	},

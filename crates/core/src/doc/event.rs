@@ -2,9 +2,9 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
-use crate::err::Error;
-use crate::sql::value::Value;
 use crate::sql::FlowResultExt as _;
+use crate::sql::value::Value;
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 impl Document {
@@ -19,7 +19,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check import
 		if opt.import {
 			return Ok(());

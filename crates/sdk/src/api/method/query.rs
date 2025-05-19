@@ -1,22 +1,23 @@
-use super::{live, Stream};
+use super::{Stream, live};
+use crate::api::Connection;
+use crate::api::ExtraFeatures;
+use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt;
-use crate::api::Connection;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
 use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
 use crate::value::Notification;
 use crate::{Surreal, Value};
+use anyhow::bail;
+use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::SelectAll;
-use futures::StreamExt;
 use indexmap::IndexMap;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
@@ -24,7 +25,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::sql::{
-	self, to_value as to_core_value, Object as CoreObject, Statement, Value as CoreValue,
+	self, Object as CoreObject, Statement, Value as CoreValue, to_value as to_core_value,
 };
 
 /// A query future
@@ -152,7 +153,7 @@ where
 					}
 
 					let mut query = sql::Query::default();
-					query.0 .0 = query_statements;
+					query.0.0 = query_statements;
 
 					let mut response = router
 						.execute_query(Command::Query {
@@ -171,16 +172,15 @@ where
 						let res = match result {
 							Ok(id) => {
 								let CoreValue::Uuid(uuid) = id else {
-									return Err(Error::InternalError(
+									bail!(Error::InternalError(
 										"successfull live query did not return a uuid".to_string(),
-									)
-									.into());
+									));
 								};
 								live::register(router, uuid.0).await.map(|rx| {
 									Stream::new(self.client.inner.clone().into(), uuid.0, Some(rx))
 								})
 							}
-							Err(_) => Err(crate::Error::from(Error::NotLiveQuery(idx))),
+							Err(_) => Err(anyhow::Error::new(Error::NotLiveQuery(idx))),
 						};
 						response.live_queries.insert(idx, res);
 					}
@@ -505,7 +505,7 @@ impl Response {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take_errors(&mut self) -> HashMap<usize, crate::Error> {
+	pub fn take_errors(&mut self) -> HashMap<usize, anyhow::Error> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.results {
 			if result.1.is_err() {
@@ -660,7 +660,7 @@ impl WithStats<Response> {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take_errors(&mut self) -> HashMap<usize, (Stats, crate::Error)> {
+	pub fn take_errors(&mut self) -> HashMap<usize, (Stats, anyhow::Error)> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.0.results {
 			if result.1.is_err() {
@@ -723,7 +723,7 @@ impl WithStats<Response> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{value::to_value, Error::Api};
+	use crate::value::to_value;
 	use serde::Deserialize;
 	use surrealdb_core::sql::Value as CoreValue;
 
@@ -987,13 +987,18 @@ mod tests {
 			results: to_map(vec![Ok(vec![true, false].into())]),
 			..Response::new()
 		};
-		let Err(Api(Error::LossyTake(Response {
+
+		let Err(e) = response.take::<Option<bool>>(0) else {
+			panic!("silently dropping records not allowed");
+		};
+		let Ok(Error::LossyTake(Response {
 			results: mut map,
 			..
-		}))): Result<Option<bool>> = response.take(0)
+		})) = e.downcast()
 		else {
 			panic!("silently dropping records not allowed");
 		};
+
 		let records = map.swap_remove(&0).unwrap().1.unwrap();
 		assert_eq!(records, vec![true, false].into());
 	}
@@ -1017,7 +1022,7 @@ mod tests {
 			results: to_map(response),
 			..Response::new()
 		};
-		let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err()
+		let Some(Error::ConnectionUninitialised) = response.check().unwrap_err().downcast_ref()
 		else {
 			panic!("check did not return the first error");
 		};
@@ -1045,13 +1050,13 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		let crate::Error::Api(Error::DuplicateRequestId(0)) = errors[&10] else {
+		let Some(Error::DuplicateRequestId(0)) = errors[&10].downcast_ref() else {
 			panic!("index `10` is not `DuplicateRequestId`");
 		};
-		let crate::Error::Api(Error::BackupsNotSupported) = errors[&7] else {
+		let Some(Error::BackupsNotSupported) = errors[&7].downcast_ref() else {
 			panic!("index `7` is not `BackupsNotSupported`");
 		};
-		let crate::Error::Api(Error::ConnectionUninitialised) = errors[&3] else {
+		let Some(Error::ConnectionUninitialised) = errors[&3].downcast_ref() else {
 			panic!("index `3` is not `ConnectionUninitialised`");
 		};
 		let Some(value): Option<i32> = response.take(2).unwrap() else {

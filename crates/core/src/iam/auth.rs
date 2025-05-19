@@ -1,8 +1,9 @@
 use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use super::{is_allowed, Action, Actor, Error, Level, Resource, Role};
+use super::{Action, Actor, Error, Level, Resource, Role, is_allowed};
 
 /// Specifies the current authentication for the datastore execution context.
 #[revisioned(revision = 1)]
@@ -89,8 +90,10 @@ impl Auth {
 	//
 
 	/// Checks if the current auth is allowed to perform an action on a given resource
-	pub fn is_allowed(&self, action: Action, res: &Resource) -> Result<(), Error> {
+	pub fn is_allowed(&self, action: Action, res: &Resource) -> Result<()> {
 		is_allowed(&self.actor, &action, res, None)
+			.map_err(crate::err::Error::from)
+			.map_err(anyhow::Error::new)
 	}
 
 	/// Checks if the current actor has a given role

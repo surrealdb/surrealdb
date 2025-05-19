@@ -3,15 +3,15 @@ use reblessive::Stk;
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{
-		graph::GraphSubject,
-		id::{range::IdRange, Gen},
 		Id, Ident, Param, Range, Thing,
+		graph::GraphSubject,
+		id::{Gen, range::IdRange},
 	},
 	syn::{
 		error::bail,
 		lexer::compound,
 		parser::mac::{expected, expected_whitespace, unexpected},
-		token::{t, Glued, TokenKind},
+		token::{Glued, TokenKind, t},
 	},
 };
 use std::{cmp::Ordering, ops::Bound};
@@ -370,11 +370,11 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
+	use crate::sql::Value;
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
-	use crate::sql::Value;
-	use crate::syn::parser::ParserSettings;
 	use crate::syn::Parse as _;
+	use crate::syn::parser::ParserSettings;
 
 	fn thing(i: &str) -> ParseResult<Thing> {
 		let mut parser = Parser::new(i.as_bytes());

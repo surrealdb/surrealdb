@@ -122,13 +122,13 @@ impl From<Vec<Statement>> for Query {
 impl Deref for Query {
 	type Target = Vec<Statement>;
 	fn deref(&self) -> &Self::Target {
-		&self.0 .0
+		&self.0.0
 	}
 }
 
 impl DerefMut for Query {
 	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0 .0
+		&mut self.0.0
 	}
 }
 

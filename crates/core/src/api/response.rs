@@ -1,6 +1,6 @@
 use http::{
-	header::{ACCEPT, CONTENT_TYPE},
 	HeaderMap, StatusCode,
+	header::{ACCEPT, CONTENT_TYPE},
 };
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
 	sql::{Object, Value},
 };
 
-use super::{err::ApiError, invocation::ApiInvocation};
+use super::{convert, err::ApiError, invocation::ApiInvocation};
 
 #[derive(Debug)]
 pub struct ApiResponse {
@@ -69,13 +69,13 @@ impl TryFrom<Value> for ApiResponse {
 }
 
 impl TryInto<Value> for ApiResponse {
-	type Error = Error;
-	fn try_into(self) -> Result<Value, Error> {
+	type Error = anyhow::Error;
+	fn try_into(self) -> Result<Value, Self::Error> {
 		Ok(Value::Object(
 			map! {
 				"raw" => Value::from(self.raw.unwrap_or(false)),
 				"status" => Value::from(self.status.as_u16() as i64),
-				"headers" => Value::Object(self.headers.try_into()?),
+				"headers" => Value::Object(convert::headermap_to_object(self.headers)?),
 				"body", if let Some(body) = self.body => body,
 			}
 			.into(),

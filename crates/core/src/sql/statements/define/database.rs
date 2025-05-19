@@ -4,7 +4,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{changefeed::ChangeFeed, Base, Ident, Strand, Value};
+use crate::sql::{Base, Ident, Strand, Value, changefeed::ChangeFeed};
+use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -32,7 +33,7 @@ impl DefineDatabaseStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 		// Get the NS
@@ -44,7 +45,7 @@ impl DefineDatabaseStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::DbAlreadyExists {
+				bail!(Error::DbAlreadyExists {
 					name: self.name.to_string(),
 				});
 			}

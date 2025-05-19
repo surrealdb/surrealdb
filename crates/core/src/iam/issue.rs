@@ -1,11 +1,13 @@
 use crate::err::Error;
-use crate::sql::duration::Duration;
 use crate::sql::Algorithm;
+use crate::sql::duration::Duration;
+use anyhow::Result;
+use anyhow::bail;
 use chrono::Duration as ChronoDuration;
 use chrono::Utc;
 use jsonwebtoken::EncodingKey;
 
-pub(crate) fn config(alg: Algorithm, key: &str) -> Result<EncodingKey, Error> {
+pub(crate) fn config(alg: Algorithm, key: &str) -> Result<EncodingKey> {
 	match alg {
 		Algorithm::Hs256 => Ok(EncodingKey::from_secret(key.as_ref())),
 		Algorithm::Hs384 => Ok(EncodingKey::from_secret(key.as_ref())),
@@ -23,7 +25,7 @@ pub(crate) fn config(alg: Algorithm, key: &str) -> Result<EncodingKey, Error> {
 	}
 }
 
-pub(crate) fn expiration(d: Option<Duration>) -> Result<Option<i64>, Error> {
+pub(crate) fn expiration(d: Option<Duration>) -> Result<Option<i64>> {
 	let exp = match d {
 		Some(v) => {
 			// The defined duration must be valid
@@ -31,9 +33,9 @@ pub(crate) fn expiration(d: Option<Duration>) -> Result<Option<i64>, Error> {
 				// The resulting expiration must be valid
 				Ok(d) => match Utc::now().checked_add_signed(d) {
 					Some(exp) => Some(exp.timestamp()),
-					None => return Err(Error::AccessInvalidExpiration),
+					None => bail!(Error::AccessInvalidExpiration),
 				},
-				Err(_) => return Err(Error::AccessInvalidDuration),
+				Err(_) => bail!(Error::AccessInvalidDuration),
 			}
 		}
 		_ => None,

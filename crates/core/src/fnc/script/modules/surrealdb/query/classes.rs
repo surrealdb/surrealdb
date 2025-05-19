@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use crate::sql::{self, Value as SurValue};
 
 use js::{
+	Array, Ctx, Exception, FromJs, JsLifetime, Result, Value,
 	class::Trace,
 	prelude::{Coerced, Opt},
-	Array, Ctx, Exception, FromJs, JsLifetime, Result, Value,
 };
 
 #[js::class]

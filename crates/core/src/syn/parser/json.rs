@@ -7,7 +7,7 @@ use crate::{
 	syn::{
 		lexer::compound::{self, Numeric},
 		parser::mac::{expected, pop_glued},
-		token::{t, Glued, Span, TokenKind},
+		token::{Glued, Span, TokenKind, t},
 	},
 };
 

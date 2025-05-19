@@ -1,10 +1,10 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
+use crate::sql::FlowResultExt as _;
 use crate::sql::number::Number;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
-use crate::sql::FlowResultExt as _;
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 impl Value {
@@ -16,7 +16,7 @@ impl Value {
 		opt: &Options,
 		path: &[Part],
 		val: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		match self.get(stk, ctx, opt, None, path).await.catch_return()? {
 			Value::Number(v) => match val {
 				Value::Number(x) => self.set(stk, ctx, opt, path, Value::from(v - x)).await,

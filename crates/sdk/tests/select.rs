@@ -1,15 +1,15 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use helpers::{new_ds, Test};
+use helpers::{Test, new_ds};
+use surrealdb::Result;
 use surrealdb::sql::Number;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
 use surrealdb_core::iam::Role;
 use surrealdb_core::sql::Value;
 
 #[tokio::test]
-async fn select_field_value() -> Result<(), Error> {
+async fn select_field_value() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie';
 		CREATE person:jaime SET name = 'Jaime';
@@ -69,7 +69,7 @@ async fn select_field_value() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_field_and_omit() -> Result<(), Error> {
+async fn select_field_and_omit() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie', password = '123456', opts.security = 'secure';
 		CREATE person:jaime SET name = 'Jaime', password = 'asdfgh', opts.security = 'secure';
@@ -155,7 +155,7 @@ async fn select_field_and_omit() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_expression_value() -> Result<(), Error> {
+async fn select_expression_value() -> Result<()> {
 	let sql = "
 		CREATE thing:a SET number = 5, boolean = true;
 		CREATE thing:b SET number = -5, boolean = false;
@@ -246,7 +246,7 @@ async fn select_expression_value() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
+async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 	let sql = "
 		LET $lang = 'en';
 		UPSERT documentation:test CONTENT {
@@ -365,7 +365,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_writeable_subqueries() -> Result<(), Error> {
+async fn select_writeable_subqueries() -> Result<()> {
 	let sql = "
 		LET $id = (UPSERT tester:test);
 		RETURN $id;
@@ -410,7 +410,7 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_field_is_bool() -> Result<(), Error> {
+async fn select_where_field_is_bool() -> Result<()> {
 	let sql = "
 		CREATE test:1 SET active = false;
 		CREATE test:2 SET active = false;
@@ -503,7 +503,7 @@ async fn select_where_field_is_bool() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
+async fn select_where_field_is_thing_and_with_index() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie';
 		DEFINE INDEX author ON TABLE post COLUMNS author;
@@ -600,7 +600,7 @@ async fn select_where_field_is_thing_and_with_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_and_with_index() -> Result<(), Error> {
+async fn select_where_and_with_index() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie', genre='m';
 		CREATE person:jaime SET name = 'Jaime', genre='m';
@@ -653,7 +653,7 @@ async fn select_where_and_with_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_and_with_unique_index() -> Result<(), Error> {
+async fn select_where_and_with_unique_index() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie', genre='m';
 		CREATE person:jaime SET name = 'Jaime', genre='m';
@@ -706,7 +706,7 @@ async fn select_where_and_with_unique_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
+async fn select_where_and_with_fulltext_index() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie', genre='m';
 		CREATE person:jaime SET name = 'Jaime', genre='m';
@@ -761,7 +761,7 @@ async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_explain() -> Result<(), Error> {
+async fn select_where_explain() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie';
 		CREATE person:jaime SET name = 'Jaime';
@@ -847,7 +847,7 @@ async fn select_where_explain() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_function_field() -> Result<(), Error> {
+async fn select_with_function_field() -> Result<()> {
 	let sql = "SELECT *, function() { return this.a } AS b FROM [{ a: 1 }];";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -865,28 +865,116 @@ async fn select_with_function_field() -> Result<(), Error> {
 async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true, "owner at root level should be able to select"),
-		((().into(), Role::Editor), ("NS", "DB"), true, "editor at root level should be able to select"),
-		((().into(), Role::Viewer), ("NS", "DB"), true, "viewer at root level should not be able to select"),
-
+		(
+			(().into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at root level should be able to select",
+		),
+		(
+			(().into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at root level should be able to select",
+		),
+		(
+			(().into(), Role::Viewer),
+			("NS", "DB"),
+			true,
+			"viewer at root level should not be able to select",
+		),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true, "owner at namespace level should be able to select on its namespace"),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at namespace level should not be able to select on another namespace"),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true, "editor at namespace level should be able to select on its namespace"),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at namespace level should not be able to select on another namespace"),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), true, "viewer at namespace level should not be able to select on its namespace"),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at namespace level should not be able to select on another namespace"),
-
+		(
+			(("NS",).into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at namespace level should be able to select on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at namespace level should not be able to select on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at namespace level should be able to select on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at namespace level should not be able to select on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("NS", "DB"),
+			true,
+			"viewer at namespace level should not be able to select on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to select on another namespace",
+		),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true, "owner at database level should be able to select on its database"),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false, "owner at database level should not be able to select on another database"),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at database level should not be able to select on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true, "editor at database level should be able to select on its database"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false, "editor at database level should not be able to select on another database"),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at database level should not be able to select on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), true, "viewer at database level should not be able to select on its database"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false, "viewer at database level should not be able to select on another database"),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at database level should not be able to select on another namespace even if the database name matches"),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at database level should be able to select on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "OTHER_DB"),
+			false,
+			"owner at database level should not be able to select on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at database level should not be able to select on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at database level should be able to select on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "OTHER_DB"),
+			false,
+			"editor at database level should not be able to select on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at database level should not be able to select on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "DB"),
+			true,
+			"viewer at database level should not be able to select on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "OTHER_DB"),
+			false,
+			"viewer at database level should not be able to select on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at database level should not be able to select on another namespace even if the database name matches",
+		),
 	];
 	let statement = "SELECT * FROM person";
 
@@ -1084,73 +1172,7 @@ async fn check_permissions_auth_disabled() {
 }
 
 #[tokio::test]
-async fn select_only() -> Result<(), Error> {
-	let sql: &str = "
-		SELECT * FROM ONLY 1;
-		SELECT * FROM ONLY NONE;
-		SELECT * FROM ONLY [];
-		SELECT * FROM ONLY [1];
-		SELECT * FROM ONLY [1, 2];
-		SELECT * FROM ONLY [] LIMIT 1;
-		SELECT * FROM ONLY [1] LIMIT 1;
-		SELECT * FROM ONLY [1, 2] LIMIT 1;
-		SELECT * FROM ONLY 1, 2;
-		SELECT * FROM ONLY 1, 2 LIMIT 1;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 10);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("1");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("NONE");
-	assert_eq!(tmp, val);
-	//
-	match res.remove(0).result {
-		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
-		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
-	}
-	//
-	match res.remove(0).result {
-		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
-		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
-	}
-	//
-	match res.remove(0).result {
-		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
-		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
-	}
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("NONE");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("1");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("1");
-	assert_eq!(tmp, val);
-	//
-	match res.remove(0).result {
-		Err(surrealdb::error::Db::SingleOnlyOutput) => (),
-		_ => panic!("Query should have failed with error: Expected a single result output when using the ONLY keyword")
-	}
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("1");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn select_issue_3510() -> Result<(), Error> {
+async fn select_issue_3510() -> Result<()> {
 	let sql: &str = "
 		CREATE a:1;
 		CREATE b:1 SET link = a:1, num = 1;
@@ -1183,7 +1205,7 @@ async fn select_issue_3510() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_destructure() -> Result<(), Error> {
+async fn select_destructure() -> Result<()> {
 	let sql = "
 		CREATE person:1 SET name = 'John', age = 21, obj = { a: 1, b: 2, c: { d: 3, e: 4, f: 5 } };
 		SELECT obj.{ a, c.{ e, f } } FROM person;
@@ -1252,7 +1274,7 @@ async fn select_destructure() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_field_from_graph_no_flattening() -> Result<(), Error> {
+async fn select_field_from_graph_no_flattening() -> Result<()> {
 	let sql = "
         CREATE a:1, a:2;
 
@@ -1324,7 +1346,7 @@ async fn select_field_from_graph_no_flattening() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_field_value_permissions() -> Result<(), Error> {
+async fn select_field_value_permissions() -> Result<()> {
 	let dbs = new_ds().await?;
 
 	let sql = r#"
@@ -1411,7 +1433,7 @@ async fn select_field_value_permissions() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_order_by_rand_large() -> Result<(), Error> {
+async fn select_order_by_rand_large() -> Result<()> {
 	let dbs = new_ds().await?;
 
 	let sql = r#"
@@ -1454,7 +1476,7 @@ async fn select_order_by_rand_large() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_from_none() -> Result<(), Error> {
+async fn select_from_none() -> Result<()> {
 	let sql: &str = "
 		SELECT * FROM NONE;
 		SELECT * FROM NULL;

@@ -4,8 +4,9 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	iam::Action,
-	sql::{ident::Ident, value::Value, Permission},
+	sql::{Permission, ident::Ident, value::Value},
 };
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -55,7 +56,7 @@ impl Param {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Find the variable by name
 		match self.as_str() {
 			// This is a special param
@@ -77,45 +78,40 @@ impl Param {
 					let (ns, db) = opt.ns_db()?;
 					let val = ctx.tx().get_db_param(ns, db, v).await;
 					// Check if the param has been set globally
-					match val {
-						// The param has been set globally
-						Ok(val) => {
-							// Check permissions
-							if opt.check_perms(Action::View)? {
-								match &val.permissions {
-									Permission::Full => (),
-									Permission::None => {
-										return Err(Error::ParamPermissions {
-											name: v.to_owned(),
-										})
-									}
-									Permission::Specific(e) => {
-										// Disable permissions
-										let opt = &opt.new_with_perms(false);
-										// Process the PERMISSION clause
-										if !e
-											.compute(stk, ctx, opt, doc)
-											.await
-											.catch_return()?
-											.is_truthy()
-										{
-											return Err(Error::ParamPermissions {
-												name: v.to_owned(),
-											});
-										}
-									}
+					let val = match val {
+						Ok(x) => x,
+						Err(e) => {
+							if matches!(e.downcast_ref(), Some(Error::PaNotFound { .. })) {
+								return Ok(Value::None);
+							} else {
+								return Err(e);
+							}
+						}
+					};
+
+					if opt.check_perms(Action::View)? {
+						match &val.permissions {
+							Permission::Full => (),
+							Permission::None => {
+								bail!(Error::ParamPermissions {
+									name: v.to_owned(),
+								})
+							}
+							Permission::Specific(e) => {
+								// Disable permissions
+								let opt = &opt.new_with_perms(false);
+								// Process the PERMISSION clause
+								if !e.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy()
+								{
+									bail!(Error::ParamPermissions {
+										name: v.to_owned(),
+									});
 								}
 							}
-							// Return the computed value
-							val.value.compute(stk, ctx, opt, doc).await.catch_return()
 						}
-						// The param has not been set globally
-						Err(Error::PaNotFound {
-							..
-						}) => Ok(Value::None),
-						// There was another request error
-						Err(e) => Err(e),
 					}
+					// Return the computed value
+					val.value.compute(stk, ctx, opt, doc).await.catch_return()
 				}
 			},
 		}
@@ -124,6 +120,6 @@ impl Param {
 
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", &self.0 .0)
+		write!(f, "${}", &self.0.0)
 	}
 }

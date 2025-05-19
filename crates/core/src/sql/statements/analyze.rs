@@ -3,14 +3,15 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::idx::IndexKeyBase;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::IndexKeyBase;
 use crate::kvs::TransactionType;
+use crate::sql::Base;
 use crate::sql::ident::Ident;
 use crate::sql::index::Index;
 use crate::sql::value::Value;
-use crate::sql::Base;
+use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -32,7 +33,7 @@ impl AnalyzeStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match self {
 			AnalyzeStatement::Idx(tb, idx) => {
 				// Allowed to run?
@@ -55,9 +56,9 @@ impl AnalyzeStatement {
 						mt.statistics(&tx).await?.into()
 					}
 					_ => {
-						return Err(Error::FeatureNotYetImplemented {
-							feature: "Statistics on unique and non-unique indexes.".to_string(),
-						})
+						bail!(Error::Unimplemented(
+							"Statistics on unique and non-unique indexes.".to_string()
+						))
 					}
 				};
 				// Return the result object

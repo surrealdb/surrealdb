@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
 use crate::sql::{Data, FlowResultExt as _, Output, Timeout, Value};
+use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -39,7 +40,7 @@ impl RelateStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
@@ -67,13 +68,13 @@ impl RelateStatement {
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								_ => {
-									return Err(Error::RelateStatementIn {
+									bail!(Error::RelateStatementIn {
 										value: v.to_string(),
 									})
 								}
 							},
 							v => {
-								return Err(Error::RelateStatementIn {
+								bail!(Error::RelateStatementIn {
 									value: v.to_string(),
 								})
 							}
@@ -83,13 +84,13 @@ impl RelateStatement {
 				Value::Object(v) => match v.rid() {
 					Some(v) => out.push(v),
 					None => {
-						return Err(Error::RelateStatementIn {
+						bail!(Error::RelateStatementIn {
 							value: v.to_string(),
 						})
 					}
 				},
 				v => {
-					return Err(Error::RelateStatementIn {
+					bail!(Error::RelateStatementIn {
 						value: v.to_string(),
 					})
 				}
@@ -109,13 +110,13 @@ impl RelateStatement {
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								None => {
-									return Err(Error::RelateStatementId {
+									bail!(Error::RelateStatementId {
 										value: v.to_string(),
 									})
 								}
 							},
 							v => {
-								return Err(Error::RelateStatementId {
+								bail!(Error::RelateStatementId {
 									value: v.to_string(),
 								})
 							}
@@ -125,13 +126,13 @@ impl RelateStatement {
 				Value::Object(v) => match v.rid() {
 					Some(v) => out.push(v),
 					None => {
-						return Err(Error::RelateStatementId {
+						bail!(Error::RelateStatementId {
 							value: v.to_string(),
 						})
 					}
 				},
 				v => {
-					return Err(Error::RelateStatementId {
+					bail!(Error::RelateStatementId {
 						value: v.to_string(),
 					})
 				}
@@ -161,7 +162,7 @@ impl RelateStatement {
 					},
 					// The relation can not be any other type
 					v => {
-						return Err(Error::RelateStatementOut {
+						bail!(Error::RelateStatementOut {
 							value: v.to_string(),
 						})
 					}
@@ -173,9 +174,7 @@ impl RelateStatement {
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
-		if ctx.is_timedout().await? {
-			return Err(Error::QueryTimedout);
-		}
+		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 		// Output the results
 		match res {
 			// This is a single record result
@@ -183,7 +182,7 @@ impl RelateStatement {
 				// There was exactly one result
 				1 => Ok(a.remove(0)),
 				// There were no results
-				_ => Err(Error::SingleOnlyOutput),
+				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
 			},
 			// This is standard query result
 			v => Ok(v),

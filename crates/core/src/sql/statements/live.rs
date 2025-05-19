@@ -6,6 +6,7 @@ use crate::iam::Auth;
 use crate::kvs::Live;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
+use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -82,7 +83,7 @@ impl LiveStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Is realtime enabled?
 		opt.realtime()?;
 		// Valid options?
@@ -134,7 +135,7 @@ impl LiveStatement {
 				txn.clear();
 			}
 			v => {
-				return Err(Error::LiveStatement {
+				bail!(Error::LiveStatement {
 					value: v.to_string(),
 				});
 			}
@@ -177,8 +178,9 @@ mod tests {
 	use crate::sql::Thing;
 	use crate::sql::Value;
 	use crate::syn::Parse;
+	use anyhow::Result;
 
-	pub async fn new_ds() -> Result<Datastore, crate::err::Error> {
+	pub async fn new_ds() -> Result<Datastore> {
 		Ok(Datastore::new("memory")
 			.await?
 			.with_capabilities(Capabilities::all())

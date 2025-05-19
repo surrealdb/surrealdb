@@ -3,9 +3,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::Base;
 use crate::sql::ident::Ident;
 use crate::sql::value::Value;
-use crate::sql::Base;
+use anyhow::Result;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -33,7 +34,7 @@ impl RebuildStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		match self {
 			Self::Index(s) => s.compute(stk, ctx, opt, doc).await,
 		}
@@ -66,28 +67,30 @@ impl RebuildIndexStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		let future = async {
-			// Allowed to run?
-			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-			// Get the index definition
-			let (ns, db) = opt.ns_db()?;
-			let mut ix =
-				ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?.as_ref().clone();
-			ix.overwrite = true;
-			ix.if_not_exists = false;
-			// Rebuild the index
-			ix.compute(stk, ctx, opt, doc).await?;
-			// Ok all good
-			Ok(Value::None)
-		}
-		.await;
-		match future {
-			Err(Error::IxNotFound {
-				..
-			}) if self.if_exists => Ok(Value::None),
-			v => v,
-		}
+	) -> Result<Value> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
+		// Get the index definition
+		let (ns, db) = opt.ns_db()?;
+		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await;
+		let ix = match res {
+			Ok(x) => x,
+			Err(e) => {
+				if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+					return Ok(Value::None);
+				} else {
+					return Err(e);
+				}
+			}
+		};
+		let mut ix = ix.as_ref().clone();
+
+		ix.overwrite = true;
+		ix.if_not_exists = false;
+		// Rebuild the index
+		ix.compute(stk, ctx, opt, doc).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 

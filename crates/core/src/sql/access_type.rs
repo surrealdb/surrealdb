@@ -1,10 +1,11 @@
 use super::Value;
 use crate::err::Error;
-use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineAccessStatement;
-use crate::sql::{escape::QuoteStr, Algorithm};
-use revision::revisioned;
+use crate::sql::statements::info::InfoStructure;
+use crate::sql::{Algorithm, escape::QuoteStr};
+use anyhow::Result;
 use revision::Error as RevisionError;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
@@ -166,10 +167,10 @@ impl Jwt for JwtAccess {
 impl Display for JwtAccess {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.verify {
-			JwtAccessVerify::Key(ref v) => {
+			JwtAccessVerify::Key(v) => {
 				write!(f, "ALGORITHM {} KEY {}", v.alg, QuoteStr(&v.key))?;
 			}
-			JwtAccessVerify::Jwks(ref v) => {
+			JwtAccessVerify::Jwks(v) => {
 				write!(f, "URL {}", QuoteStr(&v.url),)?;
 			}
 		}

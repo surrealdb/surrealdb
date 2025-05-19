@@ -1,6 +1,6 @@
-use crate::rpc::format::cbor::Cbor;
 use crate::rpc::Method;
 use crate::rpc::RpcError;
+use crate::rpc::format::cbor::Cbor;
 use crate::sql::Array;
 use crate::sql::Number;
 use crate::sql::Part;

@@ -6,6 +6,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, FlowResultExt as _, Ident, Permission, Strand, Value};
+use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -35,7 +36,7 @@ impl DefineParamStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 
@@ -49,7 +50,7 @@ impl DefineParamStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::PaAlreadyExists {
+				bail!(Error::PaAlreadyExists {
 					name: self.name.to_string(),
 				});
 			}

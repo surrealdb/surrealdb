@@ -5,14 +5,15 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	escape::QuoteStr, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand, Value,
+	Base, Duration, Ident, Strand, Value, escape::QuoteStr, fmt::Fmt, user::UserDuration,
 };
+use anyhow::{Result, bail};
 use argon2::{
-	password_hash::{PasswordHasher, SaltString},
 	Argon2,
+	password_hash::{PasswordHasher, SaltString},
 };
 
-use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
+use rand::{Rng, distributions::Alphanumeric, rngs::OsRng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -106,7 +107,7 @@ impl DefineUserStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 		// Check the statement type
@@ -119,7 +120,7 @@ impl DefineUserStatement {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite {
-						return Err(Error::UserRootAlreadyExists {
+						bail!(Error::UserRootAlreadyExists {
 							name: self.name.to_string(),
 						});
 					}
@@ -150,7 +151,7 @@ impl DefineUserStatement {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite {
-						return Err(Error::UserNsAlreadyExists {
+						bail!(Error::UserNsAlreadyExists {
 							name: self.name.to_string(),
 							ns: opt.ns()?.into(),
 						});
@@ -184,7 +185,7 @@ impl DefineUserStatement {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite {
-						return Err(Error::UserDbAlreadyExists {
+						bail!(Error::UserDbAlreadyExists {
 							name: self.name.to_string(),
 							ns: ns.into(),
 							db: db.into(),
@@ -212,7 +213,7 @@ impl DefineUserStatement {
 				Ok(Value::None)
 			}
 			// Other levels are not supported
-			_ => Err(Error::InvalidLevel(self.base.to_string())),
+			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
 		}
 	}
 }

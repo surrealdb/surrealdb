@@ -33,7 +33,7 @@ impl<R> ReadableStream<R> {
 
 impl<R: Clone + 'static + Send + Sync> ReadableStream<R> {
 	/// Turn the current stream into two separate streams.
-	pub fn tee(&mut self) -> (ReadableStream<R>, impl Future<Output = ()>) {
+	pub fn tee(&mut self) -> (ReadableStream<R>, impl Future<Output = ()> + use<R>) {
 		// replace the stream with a channel driven by as task.
 		// TODO: figure out how backpressure works in the stream API.
 

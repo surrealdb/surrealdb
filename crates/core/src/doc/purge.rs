@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::ctx::MutableContext;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::doc::CursorValue;
 use crate::doc::Document;
@@ -10,6 +10,11 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode;
+use crate::sql::Data;
+use crate::sql::FlowResultExt as _;
+use crate::sql::Operator;
+use crate::sql::Part;
+use crate::sql::Thing;
 use crate::sql::dir::Dir;
 use crate::sql::edges::Edges;
 use crate::sql::graph::GraphSubjects;
@@ -20,11 +25,7 @@ use crate::sql::reference::ReferenceDeleteStrategy;
 use crate::sql::statements::DeleteStatement;
 use crate::sql::statements::UpdateStatement;
 use crate::sql::value::{Value, Values};
-use crate::sql::Data;
-use crate::sql::FlowResultExt as _;
-use crate::sql::Operator;
-use crate::sql::Part;
-use crate::sql::Thing;
+use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 
@@ -35,7 +36,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check if changed
 		if !self.changed() {
 			return Ok(());
@@ -118,7 +119,7 @@ impl Document {
 									id: r#ref.fk.clone(),
 								};
 
-								return Err(Error::DeleteRejectedByReference(
+								bail!(Error::DeleteRejectedByReference(
 									rid.to_string(),
 									thing.to_string(),
 								));

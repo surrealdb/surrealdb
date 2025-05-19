@@ -3,10 +3,11 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
-	escape::EscapeKey,
-	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Operation, Thing, Value,
+	escape::EscapeKey,
+	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
+use anyhow::{Result, bail};
 use http::{HeaderMap, HeaderName, HeaderValue};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -50,23 +51,6 @@ impl FromIterator<(String, Value)> for Object {
 impl From<BTreeMap<String, String>> for Object {
 	fn from(v: BTreeMap<String, String>) -> Self {
 		Self(v.into_iter().map(|(k, v)| (k, Value::from(v))).collect())
-	}
-}
-
-impl TryFrom<HeaderMap> for Object {
-	type Error = Error;
-	fn try_from(v: HeaderMap) -> Result<Self, Error> {
-		Ok(Self(
-			v.into_iter()
-				.map(|(k, v)| {
-					if let Some(k) = k {
-						Ok((k.to_string(), Value::from(v.to_str()?)))
-					} else {
-						Err(Error::Unreachable("Encountered a header without a name".into()))
-					}
-				})
-				.collect::<Result<BTreeMap<String, Value>, Error>>()?,
-		))
 	}
 }
 
@@ -200,68 +184,66 @@ impl Object {
 		}
 	}
 	/// Convert this object to a diff-match-patch operation
-	pub fn to_operation(&self) -> Result<Operation, Error> {
-		match self.get("op") {
-			Some(op_val) => match self.get("path") {
-				Some(path_val) => {
-					let path = path_val.jsonpath();
-
-					let from =
-						self.get("from").map(|value| value.jsonpath()).ok_or(Error::InvalidPatch {
-							message: String::from("'from' key missing"),
-						});
-
-					let value = self.get("value").cloned().ok_or(Error::InvalidPatch {
-						message: String::from("'value' key missing"),
-					});
-
-					match op_val.clone().as_string().as_str() {
-						// Add operation
-						"add" => Ok(Operation::Add {
-							path,
-							value: value?,
-						}),
-						// Remove operation
-						"remove" => Ok(Operation::Remove {
-							path,
-						}),
-						// Replace operation
-						"replace" => Ok(Operation::Replace {
-							path,
-							value: value?,
-						}),
-						// Change operation
-						"change" => Ok(Operation::Change {
-							path,
-							value: value?,
-						}),
-						// Copy operation
-						"copy" => Ok(Operation::Copy {
-							path,
-							from: from?,
-						}),
-						// Move operation
-						"move" => Ok(Operation::Move {
-							path,
-							from: from?,
-						}),
-						// Test operation
-						"test" => Ok(Operation::Test {
-							path,
-							value: value?,
-						}),
-						unknown_op => Err(Error::InvalidPatch {
-							message: format!("unknown op '{unknown_op}'"),
-						}),
-					}
-				}
-				_ => Err(Error::InvalidPatch {
-					message: String::from("'path' key missing"),
-				}),
-			},
-			_ => Err(Error::InvalidPatch {
+	pub fn to_operation(&self) -> Result<Operation> {
+		let Some(op_val) = self.get("op") else {
+			bail!(Error::InvalidPatch {
 				message: String::from("'op' key missing"),
+			})
+		};
+		let Some(path_val) = self.get("path") else {
+			bail!(Error::InvalidPatch {
+				message: String::from("'path' key missing"),
+			})
+		};
+		let path = path_val.jsonpath();
+
+		let from =
+			self.get("from").map(|value| value.jsonpath()).ok_or_else(|| Error::InvalidPatch {
+				message: String::from("'from' key missing"),
+			});
+
+		let value = self.get("value").cloned().ok_or_else(|| Error::InvalidPatch {
+			message: String::from("'value' key missing"),
+		});
+
+		match op_val.clone().as_string().as_str() {
+			// Add operation
+			"add" => Ok(Operation::Add {
+				path,
+				value: value?,
 			}),
+			// Remove operation
+			"remove" => Ok(Operation::Remove {
+				path,
+			}),
+			// Replace operation
+			"replace" => Ok(Operation::Replace {
+				path,
+				value: value?,
+			}),
+			// Change operation
+			"change" => Ok(Operation::Change {
+				path,
+				value: value?,
+			}),
+			// Copy operation
+			"copy" => Ok(Operation::Copy {
+				path,
+				from: from?,
+			}),
+			// Move operation
+			"move" => Ok(Operation::Move {
+				path,
+				from: from?,
+			}),
+			// Test operation
+			"test" => Ok(Operation::Test {
+				path,
+				value: value?,
+			}),
+			unknown_op => Err(anyhow::Error::new(Error::InvalidPatch {
+				message: format!("unknown op '{unknown_op}'"),
+			})),
 		}
 	}
 }
@@ -289,7 +271,7 @@ impl Object {
 	}
 
 	/// Validate that a Object contains only computed Values
-	pub(crate) fn validate_computed(&self) -> Result<(), Error> {
+	pub(crate) fn validate_computed(&self) -> Result<()> {
 		self.values().try_for_each(|v| v.validate_computed())
 	}
 }
@@ -338,9 +320,9 @@ impl Display for Object {
 
 mod no_nul_bytes_in_keys {
 	use serde::{
+		Deserializer, Serializer,
 		de::{self, Visitor},
 		ser::SerializeMap,
-		Deserializer, Serializer,
 	};
 	use std::{collections::BTreeMap, fmt};
 

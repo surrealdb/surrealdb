@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Base, Ident, Timeout, Value};
+use anyhow::Result;
 
 use crate::key::database::sq::Sq;
 use revision::revisioned;
@@ -22,7 +23,7 @@ pub struct AlterSequenceStatement {
 }
 
 impl AlterSequenceStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Get the NS and DB
@@ -32,13 +33,16 @@ impl AlterSequenceStatement {
 		// Get the sequence definition
 		let mut sq = match txn.get_db_sequence(ns, db, &self.name).await {
 			Ok(tb) => tb.deref().clone(),
-			Err(Error::SeqNotFound {
-				..
-			}) if self.if_exists => return Ok(Value::None),
-			Err(v) => return Err(v),
+			Err(e) => {
+				if self.if_exists && matches!(e.downcast_ref(), Some(Error::SeqNotFound { .. })) {
+					return Ok(Value::None);
+				} else {
+					return Err(e);
+				}
+			}
 		};
 		// Process the statement
-		if let Some(ref timeout) = &self.timeout {
+		if let Some(timeout) = &self.timeout {
 			if timeout.is_zero() {
 				sq.timeout = None;
 			} else {

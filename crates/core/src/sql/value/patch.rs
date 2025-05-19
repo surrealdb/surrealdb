@@ -2,9 +2,10 @@ use crate::err::Error;
 use crate::sql::operation::Operation;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
+use anyhow::{Result, ensure};
 
 impl Value {
-	pub(crate) fn patch(&mut self, ops: Value) -> Result<(), Error> {
+	pub(crate) fn patch(&mut self, ops: Value) -> Result<()> {
 		// Create a new object for testing and patching
 		let mut new = self.clone();
 		// Loop over the patch operations and apply them
@@ -105,12 +106,13 @@ impl Value {
 					value,
 				} => {
 					let val = new.pick(&path);
-					if value != val {
-						return Err(Error::PatchTest {
+					ensure!(
+						value == val,
+						Error::PatchTest {
 							expected: value.to_string(),
 							got: val.to_string(),
-						});
-					}
+						}
+					);
 				}
 			}
 		}
@@ -186,7 +188,9 @@ mod tests {
 	#[tokio::test]
 	async fn patch_test_simple() {
 		let mut val = Value::parse("{ test: { other: 'test', something: 123 }, temp: true }");
-		let ops = Value::parse("[{ op: 'remove', path: '/test/something' }, { op: 'test', path: '/temp', value: true }]");
+		let ops = Value::parse(
+			"[{ op: 'remove', path: '/test/something' }, { op: 'test', path: '/temp', value: true }]",
+		);
 		let res = Value::parse("{ test: { other: 'test' }, temp: true }");
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
@@ -251,7 +255,9 @@ mod tests {
 	#[tokio::test]
 	async fn patch_test_embedded() {
 		let mut val = Value::parse("{ test: { other: 'test', something: 123 }, temp: true }");
-		let ops = Value::parse("[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 123 }]");
+		let ops = Value::parse(
+			"[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 123 }]",
+		);
 		let res = Value::parse("{ test: { something: 123 }, temp: true }");
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
@@ -269,7 +275,9 @@ mod tests {
 	async fn patch_test_invalid() {
 		let mut val = Value::parse("{ test: { other: 'test', something: 123 }, temp: true }");
 		let should = val.clone();
-		let ops = Value::parse("[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 'not same' }]");
+		let ops = Value::parse(
+			"[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 'not same' }]",
+		);
 		assert!(val.patch(ops).is_err());
 		// It is important to test if patches applied even if test operation fails
 		assert_eq!(val, should);

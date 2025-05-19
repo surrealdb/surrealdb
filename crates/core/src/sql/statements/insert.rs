@@ -6,6 +6,7 @@ use crate::idx::planner::RecordStrategy;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::{Data, FlowResultExt as _, Id, Output, Table, Thing, Timeout, Value, Version};
+use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -43,7 +44,7 @@ impl InsertStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
@@ -70,7 +71,7 @@ impl InsertStatement {
 			Some(into) => match into.compute(stk, &ctx, opt, doc).await.catch_return()? {
 				Value::Table(into) => Some(into),
 				v => {
-					return Err(Error::InsertStatement {
+					bail!(Error::InsertStatement {
 						value: v.to_string(),
 					})
 				}
@@ -113,22 +114,20 @@ impl InsertStatement {
 						i.ingest(iterable(id, v, self.relation)?)
 					}
 					v => {
-						return Err(Error::InsertStatement {
+						bail!(Error::InsertStatement {
 							value: v.to_string(),
 						})
 					}
 				}
 			}
-			v => return Err(fail!("Unknown data clause type in INSERT statement: {v:?}")),
+			v => fail!("Unknown data clause type in INSERT statement: {v:?}"),
 		}
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
-		if ctx.is_timedout().await? {
-			return Err(Error::QueryTimedout);
-		}
+		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 		// Output the results
 		Ok(res)
 	}
@@ -166,14 +165,14 @@ impl fmt::Display for InsertStatement {
 	}
 }
 
-fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
+fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable> {
 	match relation {
 		false => Ok(Iterable::Mergeable(id, v)),
 		true => {
 			let f = match v.pick(&*IN) {
 				Value::Thing(v) => v,
 				v => {
-					return Err(Error::InsertStatementIn {
+					bail!(Error::InsertStatementIn {
 						value: v.to_string(),
 					})
 				}
@@ -181,7 +180,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 			let w = match v.pick(&*OUT) {
 				Value::Thing(v) => v,
 				v => {
-					return Err(Error::InsertStatementOut {
+					bail!(Error::InsertStatementOut {
 						value: v.to_string(),
 					})
 				}
@@ -191,7 +190,7 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable, Error> {
 	}
 }
 
-fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing, Error> {
+fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing> {
 	match into {
 		Some(into) => v.rid().generate(into, true),
 		None => match v.rid() {
@@ -199,14 +198,14 @@ fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing, Error> {
 				Thing {
 					id: Id::Generate(_),
 					..
-				} => Err(Error::InsertStatementId {
+				} => Err(anyhow::Error::new(Error::InsertStatementId {
 					value: v.to_string(),
-				}),
+				})),
 				v => Ok(v),
 			},
-			v => Err(Error::InsertStatementId {
+			v => Err(anyhow::Error::new(Error::InsertStatementId {
 				value: v.to_string(),
-			}),
+			})),
 		},
 	}
 }

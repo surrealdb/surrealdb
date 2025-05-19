@@ -4,12 +4,13 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::iam::Action;
+use crate::sql::Permission;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::operator::BindingPower;
 use crate::sql::script::Script;
 use crate::sql::value::Value;
-use crate::sql::Permission;
+use anyhow::Result;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -36,6 +37,7 @@ pub enum Function {
 		fields_name = "OldAnonymousFields"
 	)]
 	Anonymous(Value, Vec<Value>),
+	/// Fields are: the function object itself, it's arguments and whether the arguments are calculated.
 	#[revision(start = 2)]
 	Anonymous(Value, Vec<Value>, bool),
 	// Add new variants here
@@ -105,7 +107,7 @@ impl Function {
 		}
 	}
 	/// Convert this function to an aggregate
-	pub fn aggregate(&self, val: Value) -> Result<Self, Error> {
+	pub fn aggregate(&self, val: Value) -> Result<Self> {
 		match self {
 			Self::Normal(n, a) => {
 				let mut a = a.to_owned();
@@ -118,7 +120,7 @@ impl Function {
 				}
 				Ok(Self::Normal(n.to_owned(), a))
 			}
-			_ => Err(fail!("Encountered a non-aggregate function: {self:?}")),
+			_ => fail!("Encountered a non-aggregate function: {self:?}"),
 		}
 	}
 	/// Check if this function is a custom function
@@ -269,10 +271,10 @@ impl Function {
 
 						Ok(stk.run(|stk| closure.compute(stk, ctx, opt, doc, a)).await?)
 					}
-					v => Err(ControlFlow::from(Error::InvalidFunction {
+					v => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidFunction {
 						name: "ANONYMOUS".to_string(),
 						message: format!("'{}' is not a function", v.kindof()),
-					})),
+					}))),
 				}
 			}
 			Self::Custom(s, x) => {
@@ -288,18 +290,22 @@ impl Function {
 					match &val.permissions {
 						Permission::Full => (),
 						Permission::None => {
-							return Err(ControlFlow::from(Error::FunctionPermissions {
-								name: s.to_owned(),
-							}))
+							return Err(ControlFlow::from(anyhow::Error::new(
+								Error::FunctionPermissions {
+									name: s.to_owned(),
+								},
+							)));
 						}
 						Permission::Specific(e) => {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Process the PERMISSION clause
 							if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
-								return Err(ControlFlow::from(Error::FunctionPermissions {
-									name: s.to_owned(),
-								}));
+								return Err(ControlFlow::from(anyhow::Error::new(
+									Error::FunctionPermissions {
+										name: s.to_owned(),
+									},
+								)));
 							}
 						}
 					}
@@ -316,14 +322,14 @@ impl Function {
 				});
 				// Check the necessary arguments are passed
 				if x.len() < min_args_len || max_args_len < x.len() {
-					return Err(ControlFlow::from(Error::InvalidArguments {
+					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
 						name: format!("fn::{}", val.name),
 						message: match (min_args_len, max_args_len) {
 							(1, 1) => String::from("The function expects 1 argument."),
 							(r, t) if r == t => format!("The function expects {r} arguments."),
 							(r, t) => format!("The function expects {r} to {t} arguments."),
 						},
-					}));
+					})));
 				}
 				// Compute the function arguments
 				let a = stk
@@ -339,7 +345,10 @@ impl Function {
 				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
 					ctx.add_value(
 						name.to_raw(),
-						val.coerce_to_kind(kind).map_err(Error::from)?.into(),
+						val.coerce_to_kind(kind)
+							.map_err(Error::from)
+							.map_err(anyhow::Error::new)?
+							.into(),
 					);
 				}
 				let ctx = ctx.freeze();
@@ -354,6 +363,7 @@ impl Function {
 							name: val.name.to_string(),
 							error: Box::new(e),
 						})
+						.map_err(anyhow::Error::new)
 						.map_err(ControlFlow::from)
 				} else {
 					Ok(result)
@@ -378,7 +388,7 @@ impl Function {
 				}
 				#[cfg(not(feature = "scripting"))]
 				{
-					Err(ControlFlow::Err(Box::new(Error::InvalidScript {
+					Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidScript {
 						message: String::from("Embedded functions are not enabled."),
 					})))
 				}

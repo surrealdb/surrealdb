@@ -14,6 +14,10 @@
 
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
+// TODO: Remove
+// This is added to keep the move anyhow PR somewhat smaller. This should be removed in a follow-up
+// PR.
+#![allow(clippy::large_enum_variant)]
 
 #[macro_use]
 extern crate tracing;
@@ -58,8 +62,8 @@ pub mod ent;
 
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
-	pub use async_channel::bounded;
-	pub use async_channel::unbounded;
 	pub use async_channel::Receiver;
 	pub use async_channel::Sender;
+	pub use async_channel::bounded;
+	pub use async_channel::unbounded;
 }

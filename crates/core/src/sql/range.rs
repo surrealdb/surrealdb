@@ -5,10 +5,10 @@ use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::operator::BindingPower;
 use crate::sql::Value;
+use crate::sql::operator::BindingPower;
 use crate::syn;
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -279,13 +279,13 @@ impl Range {
 	}
 
 	/// Validate that a Range contains only computed Values
-	pub fn validate_computed(&self) -> Result<(), Error> {
+	pub fn validate_computed(&self) -> Result<()> {
 		match &self.beg {
-			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
 			Bound::Unbounded => {}
 		}
 		match &self.end {
-			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
 			Bound::Unbounded => {}
 		}
 

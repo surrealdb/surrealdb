@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::statements::access;
 use crate::sql::{Base, Ident, Thing, Value};
+use anyhow::Result;
 use reblessive;
 
 // Execute the AUTHENTICATE clause for a record access method
@@ -12,7 +13,7 @@ pub async fn authenticate_record(
 	kvs: &Datastore,
 	session: &Session,
 	authenticate: &Value,
-) -> Result<Thing, Error> {
+) -> Result<Thing> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => match val.record() {
 			// If the AUTHENTICATE clause returns a record, authentication continues with that record
@@ -20,26 +21,28 @@ pub async fn authenticate_record(
 			// If the AUTHENTICATE clause returns anything else, authentication fails generically
 			_ => {
 				debug!("Authentication attempt as record user rejected by AUTHENTICATE clause");
-				Err(Error::InvalidAuth)
+				Err(anyhow::Error::new(Error::InvalidAuth))
 			}
 		},
 		Err(e) => {
-			match e {
+			match e.downcast_ref() {
 				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
-				Error::Thrown(_) => Err(e),
+				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Error::Tx(_) | Error::TxFailure | Error::TxRetryable => {
+				Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
 					debug!("Unexpected error found while executing AUTHENTICATE clause: {e}");
-					Err(Error::UnexpectedAuth)
+					Err(anyhow::Error::new(Error::UnexpectedAuth))
 				}
 				// Otherwise, return a generic error unless it should be forwarded
-				e => {
-					debug!("Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}");
+				_ => {
+					debug!(
+						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
+					);
 					if *INSECURE_FORWARD_ACCESS_ERRORS {
 						Err(e)
 					} else {
-						Err(Error::InvalidAuth)
+						Err(anyhow::Error::new(Error::InvalidAuth))
 					}
 				}
 			}
@@ -52,7 +55,7 @@ pub async fn authenticate_generic(
 	kvs: &Datastore,
 	session: &Session,
 	authenticate: &Value,
-) -> Result<(), Error> {
+) -> Result<()> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => {
 			match val {
@@ -61,27 +64,29 @@ pub async fn authenticate_generic(
 				// If the AUTHENTICATE clause returns anything else, authentication fails generically
 				_ => {
 					debug!("Authentication attempt as system user rejected by AUTHENTICATE clause");
-					Err(Error::InvalidAuth)
+					Err(anyhow::Error::new(Error::InvalidAuth))
 				}
 			}
 		}
 		Err(e) => {
-			match e {
+			match e.downcast_ref() {
 				// If the AUTHENTICATE clause throws a specific error, authentication fails with that error
-				Error::Thrown(_) => Err(e),
+				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Error::Tx(_) | Error::TxFailure | Error::TxRetryable => {
+				Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
 					debug!("Unexpected error found while executing an AUTHENTICATE clause: {e}");
-					Err(Error::UnexpectedAuth)
+					Err(anyhow::Error::new(Error::UnexpectedAuth))
 				}
 				// Otherwise, return a generic error unless it should be forwarded
-				e => {
-					debug!("Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}");
+				_ => {
+					debug!(
+						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
+					);
 					if *INSECURE_FORWARD_ACCESS_ERRORS {
 						Err(e)
 					} else {
-						Err(Error::InvalidAuth)
+						Err(anyhow::Error::new(Error::InvalidAuth))
 					}
 				}
 			}
@@ -96,7 +101,7 @@ pub async fn create_refresh_token_record(
 	ns: &str,
 	db: &str,
 	rid: Thing,
-) -> Result<String, Error> {
+) -> Result<String> {
 	let stmt = access::AccessStatementGrant {
 		ac,
 		base: Some(Base::Db),
@@ -118,7 +123,7 @@ pub async fn create_refresh_token_record(
 	// Return the key string from the bearer grant
 	match grant.grant {
 		access::Grant::Bearer(bearer) => Ok(bearer.key.as_string()),
-		_ => Err(Error::AccessMethodMismatch),
+		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 	}
 }
 
@@ -129,7 +134,7 @@ pub async fn revoke_refresh_token_record(
 	ac: Ident,
 	ns: &str,
 	db: &str,
-) -> Result<(), Error> {
+) -> Result<()> {
 	let stmt = access::AccessStatementRevoke {
 		ac,
 		base: Some(Base::Db),

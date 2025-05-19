@@ -1,5 +1,6 @@
 use crate::ctx::Context;
 use ahash::{HashMap, HashMapExt, HashSet};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
@@ -48,7 +49,7 @@ impl MTreeIndex {
 		ikb: IndexKeyBase,
 		p: &MTreeParams,
 		tt: TransactionType,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let doc_ids = Arc::new(RwLock::new(
 			DocIds::new(txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
@@ -84,7 +85,7 @@ impl MTreeIndex {
 		txn: &Transaction,
 		rid: &Thing,
 		content: &[Value],
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Resolve the doc_id
 		let mut doc_ids = self.doc_ids.write().await;
 		let resolved = doc_ids.resolve_doc_id(txn, revision::to_vec(rid)?).await?;
@@ -109,7 +110,7 @@ impl MTreeIndex {
 		txn: &Transaction,
 		rid: &Thing,
 		content: &[Value],
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let mut doc_ids = self.doc_ids.write().await;
 		let doc_id = doc_ids.remove_doc(txn, revision::to_vec(rid)?).await?;
 		drop(doc_ids);
@@ -135,7 +136,7 @@ impl MTreeIndex {
 		v: &[Number],
 		k: usize,
 		mut chk: MTreeConditionChecker<'_>,
-	) -> Result<VecDeque<KnnIteratorResult>, Error> {
+	) -> Result<VecDeque<KnnIteratorResult>> {
 		// Extract the vector
 		let vector = Vector::try_from_vector(self.vector_type, v)?;
 		vector.check_dimension(self.dim)?;
@@ -158,13 +159,13 @@ impl MTreeIndex {
 		res
 	}
 
-	pub(crate) async fn statistics(&self, tx: &Transaction) -> Result<MtStatistics, Error> {
+	pub(crate) async fn statistics(&self, tx: &Transaction) -> Result<MtStatistics> {
 		Ok(MtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(tx).await?,
 		})
 	}
 
-	pub async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
+	pub async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		let mut doc_ids = self.doc_ids.write().await;
 		doc_ids.finish(tx).await?;
 		drop(doc_ids);
@@ -204,7 +205,7 @@ impl MTree {
 		doc_ids: &DocIds,
 		stk: &mut Stk,
 		chk: &mut MTreeConditionChecker<'_>,
-	) -> Result<KnnResult, Error> {
+	) -> Result<KnnResult> {
 		#[cfg(debug_assertions)]
 		debug!("knn_search - pt: {:?} - k: {}", search.pt, search.k);
 		let mut queue = BinaryHeap::new();
@@ -221,7 +222,7 @@ impl MTree {
 			{
 				debug!("Visit node id: {}", id);
 				if visited_nodes.insert(id, node.n.len()).is_some() {
-					return Err(fail!("MTree::knn_search"));
+					fail!("MTree::knn_search")
 				}
 			}
 			match node.n {
@@ -297,7 +298,7 @@ impl MTree {
 		store: &mut MTreeStore,
 		obj: SharedVector,
 		id: DocId,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		#[cfg(debug_assertions)]
 		debug!("Insert - obj: {:?} - doc: {}", obj, id);
 		// First we check if we already have the object. In this case we just append the doc.
@@ -323,7 +324,7 @@ impl MTree {
 		store: &mut MTreeStore,
 		obj: SharedVector,
 		id: DocId,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let new_root_id = self.new_node_id();
 		let p = ObjectProperties::new_root(id);
 		let mut objects = LeafMap::with_capacity(1);
@@ -341,18 +342,12 @@ impl MTree {
 		p1: RoutingProperties,
 		o2: SharedVector,
 		p2: RoutingProperties,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let new_root_id = self.new_node_id();
 		#[cfg(debug_assertions)]
 		debug!(
 			"New internal root - node: {} - e1.node: {} - e1.obj: {:?} - e1.radius: {} - e2.node: {} - e2.obj: {:?} - e2.radius: {}",
-			new_root_id,
-			p1.node,
-			o1,
-			p1.radius,
-			p2.node,
-			o2,
-			p2.radius
+			new_root_id, p1.node, o1, p1.radius, p2.node, o2, p2.radius
 		);
 		let mut entries = InternalMap::new();
 		entries.insert(o1, p1);
@@ -369,7 +364,7 @@ impl MTree {
 		store: &mut MTreeStore,
 		object: &SharedVector,
 		id: DocId,
-	) -> Result<bool, Error> {
+	) -> Result<bool> {
 		let mut queue = BinaryHeap::new();
 		if let Some(root_id) = self.state.root {
 			queue.push(root_id);
@@ -409,7 +404,7 @@ impl MTree {
 		parent_center: &Option<SharedVector>,
 		object: SharedVector,
 		doc: DocId,
-	) -> Result<InsertionResult, Error> {
+	) -> Result<InsertionResult> {
 		#[cfg(debug_assertions)]
 		debug!("insert_at_node - node: {} - doc: {} - obj: {:?}", node.id, doc, object);
 		match node.n {
@@ -447,7 +442,7 @@ impl MTree {
 		parent_center: &Option<SharedVector>,
 		object: SharedVector,
 		doc_id: DocId,
-	) -> Result<InsertionResult, Error> {
+	) -> Result<InsertionResult> {
 		// Choose `best` subtree entry ObestSubstree from N;
 		let (best_entry_obj, mut best_entry) = self.find_closest(&node, &object)?;
 		let best_node = store.get_node_mut(tx, best_entry.node).await?;
@@ -533,7 +528,7 @@ impl MTree {
 		&self,
 		node: &InternalNode,
 		object: &SharedVector,
-	) -> Result<(SharedVector, RoutingProperties), Error> {
+	) -> Result<(SharedVector, RoutingProperties)> {
 		let mut closest = None;
 		let mut dist = f64::MAX;
 		for (o, p) in node {
@@ -548,7 +543,7 @@ impl MTree {
 		if let Some((o, p)) = closest {
 			Ok((o, p))
 		} else {
-			Err(fail!("MTree::find_closest"))
+			fail!("MTree::find_closest")
 		}
 	}
 
@@ -562,7 +557,7 @@ impl MTree {
 		parent_center: &Option<SharedVector>,
 		object: SharedVector,
 		doc_id: DocId,
-	) -> Result<InsertionResult, Error> {
+	) -> Result<InsertionResult> {
 		match node.entry(object) {
 			Entry::Occupied(mut e) => {
 				e.get_mut().docs.insert(doc_id);
@@ -611,7 +606,7 @@ impl MTree {
 		node_id: NodeId,
 		node_key: Key,
 		mut node: N,
-	) -> Result<(SharedVector, RoutingProperties, SharedVector, RoutingProperties), Error>
+	) -> Result<(SharedVector, RoutingProperties, SharedVector, RoutingProperties)>
 	where
 		N: NodeVectors + Debug,
 	{
@@ -655,7 +650,7 @@ impl MTree {
 
 		#[cfg(debug_assertions)]
 		if p1.node == p2.node {
-			return Err(fail!("MTree::split_node"));
+			fail!("MTree::split_node")
 		}
 		Ok((o1, p1, o2, p2))
 	}
@@ -664,7 +659,7 @@ impl MTree {
 	fn compute_distances_and_promoted_objects(
 		&self,
 		objects: &[SharedVector],
-	) -> Result<(DistanceCache, SharedVector, SharedVector), Error> {
+	) -> Result<(DistanceCache, SharedVector, SharedVector)> {
 		let mut promo = None;
 		let mut max_dist = 0f64;
 		let n = objects.len();
@@ -698,7 +693,7 @@ impl MTree {
 			assert_eq!(dist_cache.len(), n * n - n);
 		}
 		match promo {
-			None => Err(fail!("MTree::compute_distances_and_promoted_objects")),
+			None => fail!("MTree::compute_distances_and_promoted_objects"),
 			Some((p1, p2)) => Ok((DistanceCache(dist_cache), p1, p2)),
 		}
 	}
@@ -715,7 +710,7 @@ impl MTree {
 		&self,
 		node: &LeafNode,
 		parent: &Option<SharedVector>,
-	) -> Result<f64, Error> {
+	) -> Result<f64> {
 		Ok(if let Some(p) = parent {
 			let mut max_dist = 0f64;
 			for o in node.keys() {
@@ -727,7 +722,7 @@ impl MTree {
 		})
 	}
 
-	fn calculate_distance(&self, v1: &SharedVector, v2: &SharedVector) -> Result<f64, Error> {
+	fn calculate_distance(&self, v1: &SharedVector, v2: &SharedVector) -> Result<f64> {
 		if v1.eq(v2) {
 			return Ok(0.0);
 		}
@@ -735,11 +730,11 @@ impl MTree {
 		if dist.is_finite() {
 			Ok(dist)
 		} else {
-			Err(Error::InvalidVectorDistance {
+			Err(anyhow::Error::new(Error::InvalidVectorDistance {
 				left: v1.clone(),
 				right: v2.clone(),
 				dist,
-			})
+			}))
 		}
 	}
 
@@ -750,7 +745,7 @@ impl MTree {
 		store: &mut MTreeStore,
 		object: SharedVector,
 		doc_id: DocId,
-	) -> Result<bool, Error> {
+	) -> Result<bool> {
 		let mut deleted = false;
 		if let Some(root_id) = self.state.root {
 			let root_node = store.get_node_mut(tx, root_id).await?;
@@ -767,7 +762,10 @@ impl MTree {
 						}
 						1 => {
 							store.remove_node(sn.id, sn.key).await?;
-							let e = n.values().next().ok_or_else(|| fail!("MTree::delete"))?;
+							let e = n
+								.values()
+								.next()
+								.ok_or_else(|| Error::unreachable("MTree::delete"))?;
 							self.set_root(Some(e.node));
 							return Ok(deleted);
 						}
@@ -799,7 +797,7 @@ impl MTree {
 		object: SharedVector,
 		id: DocId,
 		deleted: &mut bool,
-	) -> Result<DeletionResult, Error> {
+	) -> Result<DeletionResult> {
 		#[cfg(debug_assertions)]
 		debug!("delete_at_node ID: {} - obj: {:?}", node.id, object);
 		// Delete ( Od:LeafEntry, N:Node)
@@ -850,7 +848,7 @@ impl MTree {
 		od: SharedVector,
 		id: DocId,
 		deleted: &mut bool,
-	) -> Result<DeletionResult, Error> {
+	) -> Result<DeletionResult> {
 		#[cfg(debug_assertions)]
 		debug!("delete_node_internal ID: {} - DocID: {} - obj: {:?}", node_id, id, od);
 		let mut on_objs = Vec::new();
@@ -942,7 +940,7 @@ impl MTree {
 		node_key: Key,
 		n_node: InternalNode,
 		n_updated: bool,
-	) -> Result<DeletionResult, Error> {
+	) -> Result<DeletionResult> {
 		// If (N is underflown)
 		if n_node.len() < self.minimum {
 			// Return N
@@ -964,7 +962,7 @@ impl MTree {
 		node_key: Key,
 		node: MTreeNode,
 		updated: bool,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		store.set_node(StoredNode::new(node, node_id, node_key, 0), updated).await?;
 		Ok(())
 	}
@@ -979,7 +977,7 @@ impl MTree {
 		on_obj: SharedVector,
 		p: MStoredNode,
 		p_updated: bool,
-	) -> Result<bool, Error> {
+	) -> Result<bool> {
 		#[cfg(debug_assertions)]
 		debug!("deletion_underflown Node ID: {}", p.id);
 		let min = f64::NAN;
@@ -1034,7 +1032,7 @@ impl MTree {
 		onn_obj: SharedVector,
 		mut onn_entry: RoutingProperties,
 		mut onn_child: MStoredNode,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		#[cfg(debug_assertions)]
 		debug!("deletion_underflown - fit into Node ID: {}", onn_child.id);
 		// Remove On from N;
@@ -1099,7 +1097,7 @@ impl MTree {
 		onn_obj: SharedVector,
 		mut p: MStoredNode,
 		onn_child: MStoredNode,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		#[cfg(debug_assertions)]
 		debug!("deletion_underflown - delete_underflown_redistribute Node ID: {}", p.id);
 		// Remove On and Onn from N;
@@ -1137,7 +1135,7 @@ impl MTree {
 		od: SharedVector,
 		id: DocId,
 		deleted: &mut bool,
-	) -> Result<DeletionResult, Error> {
+	) -> Result<DeletionResult> {
 		#[cfg(debug_assertions)]
 		debug!("delete_node_leaf - n_id: {} - obj: {:?} - doc: {}", node_id, od, id);
 		let mut entry_removed = false;
@@ -1210,21 +1208,21 @@ impl MTreeNode {
 		}
 	}
 
-	fn internal(self) -> Result<InternalNode, Error> {
+	fn internal(self) -> Result<InternalNode> {
 		match self {
 			MTreeNode::Internal(n) => Ok(n),
-			MTreeNode::Leaf(_) => Err(fail!("MTreeNode::internal")),
+			MTreeNode::Leaf(_) => fail!("MTreeNode::internal"),
 		}
 	}
 
-	fn leaf(self) -> Result<LeafNode, Error> {
+	fn leaf(self) -> Result<LeafNode> {
 		match self {
-			MTreeNode::Internal(_) => Err(fail!("MTreeNode::lead")),
+			MTreeNode::Internal(_) => fail!("MTreeNode::lead"),
 			MTreeNode::Leaf(n) => Ok(n),
 		}
 	}
 
-	fn merge(&mut self, other: MTreeNode) -> Result<(), Error> {
+	fn merge(&mut self, other: MTreeNode) -> Result<()> {
 		match (self, other) {
 			(MTreeNode::Internal(s), MTreeNode::Internal(o)) => {
 				Self::merge_internal(s, o);
@@ -1234,7 +1232,7 @@ impl MTreeNode {
 				Self::merge_leaf(s, o);
 				Ok(())
 			}
-			(_, _) => Err(fail!("MTreeNode::merge")),
+			(_, _) => fail!("MTreeNode::merge"),
 		}
 	}
 
@@ -1281,7 +1279,7 @@ trait NodeVectors: Sized {
 		distances: &DistanceCache,
 		p: SharedVector,
 		a: Vec<SharedVector>,
-	) -> Result<(Self, f64, SharedVector), Error>;
+	) -> Result<(Self, f64, SharedVector)>;
 
 	fn into_mtree_node(self) -> MTreeNode;
 }
@@ -1300,12 +1298,13 @@ impl NodeVectors for LeafNode {
 		distances: &DistanceCache,
 		p: SharedVector,
 		a: Vec<SharedVector>,
-	) -> Result<(Self, f64, SharedVector), Error> {
+	) -> Result<(Self, f64, SharedVector)> {
 		let mut n = LeafNode::new();
 		let mut r = 0f64;
 		for o in a {
-			let mut props =
-				self.remove(&o).ok_or_else(|| fail!("NodeVectors/LeafNode::extract_node)"))?;
+			let mut props = self
+				.remove(&o)
+				.ok_or_else(|| Error::unreachable("NodeVectors/LeafNode::extract_node)"))?;
 			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
 			if dist > r {
 				r = dist;
@@ -1335,12 +1334,13 @@ impl NodeVectors for InternalNode {
 		distances: &DistanceCache,
 		p: SharedVector,
 		a: Vec<SharedVector>,
-	) -> Result<(Self, f64, SharedVector), Error> {
+	) -> Result<(Self, f64, SharedVector)> {
 		let mut n = InternalNode::new();
 		let mut max_r = 0f64;
 		for o in a {
-			let mut props =
-				self.remove(&o).ok_or_else(|| fail!("NodeVectors/InternalNode::extract_node"))?;
+			let mut props = self
+				.remove(&o)
+				.ok_or_else(|| Error::unreachable("NodeVectors/InternalNode::extract_node"))?;
 			let dist = *distances.0.get(&(o.clone(), p.clone())).unwrap_or(&0f64);
 			let r = dist + props.radius;
 			if r > max_r {
@@ -1361,7 +1361,7 @@ pub type InternalNode = InternalMap;
 pub type LeafNode = LeafMap;
 
 impl TreeNode for MTreeNode {
-	fn try_from_val(val: Val) -> Result<Self, Error> {
+	fn try_from_val(val: Val) -> Result<Self> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(val);
 		let node_type: u8 = bincode::deserialize_from(&mut c)?;
 		match node_type {
@@ -1373,11 +1373,11 @@ impl TreeNode for MTreeNode {
 				let entries: InternalNode = bincode::deserialize_from(c)?;
 				Ok(MTreeNode::Internal(entries))
 			}
-			_ => Err(Error::CorruptedIndex("MTreeNode::try_from_val")),
+			_ => Err(anyhow::Error::new(Error::CorruptedIndex("MTreeNode::try_from_val"))),
 		}
 	}
 
-	fn try_into_val(&self) -> Result<Val, Error> {
+	fn try_into_val(&self) -> Result<Val> {
 		let mut c: Cursor<Vec<u8>> = Cursor::new(Vec::new());
 		match self {
 			MTreeNode::Leaf(objects) => {
@@ -1467,21 +1467,20 @@ impl VersionedStore for MState {}
 
 #[cfg(test)]
 mod tests {
-
 	use crate::ctx::{Context, MutableContext};
-	use crate::err::Error;
+	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::{DocId, DocIds};
 	use crate::idx::planner::checker::MTreeConditionChecker;
 	use crate::idx::trees::knn::tests::TestCollection;
 	use crate::idx::trees::mtree::{MState, MTree, MTreeNode, MTreeSearchContext, MTreeStore};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
 	use crate::idx::trees::vector::SharedVector;
-	use crate::idx::IndexKeyBase;
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::index::{Distance, VectorType};
 	use ahash::{HashMap, HashMapExt, HashSet};
+	use anyhow::Result;
 	use reblessive::tree::Stk;
 	use std::collections::VecDeque;
 	use test_log::test;
@@ -1508,7 +1507,7 @@ mod tests {
 		tx: &Transaction,
 		mut st: TreeStore<MTreeNode>,
 		commit: bool,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if let Some(new_cache) = st.finish(tx).await? {
 			assert!(new_cache.len() > 0, "new_cache.len() = {}", new_cache.len());
 			t.state.generation += 1;
@@ -1528,7 +1527,7 @@ mod tests {
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
-	) -> Result<HashMap<DocId, SharedVector>, Error> {
+	) -> Result<HashMap<DocId, SharedVector>> {
 		let mut map = HashMap::with_capacity(collection.len());
 		let mut c = 0;
 		for (doc_id, obj) in collection.to_vec_ref() {
@@ -1556,7 +1555,7 @@ mod tests {
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
-	) -> Result<HashMap<DocId, SharedVector>, Error> {
+	) -> Result<HashMap<DocId, SharedVector>> {
 		let mut map = HashMap::with_capacity(collection.len());
 		{
 			let (ctx, mut st) = new_operation(ds, t, TransactionType::Write, cache_size).await;
@@ -1582,7 +1581,7 @@ mod tests {
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let mut all_deleted = true;
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let deleted = {
@@ -1639,7 +1638,7 @@ mod tests {
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let (ctx, mut st) = new_operation(ds, t, TransactionType::Read, cache_size).await;
 		let max_knn = 20.max(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
@@ -1690,7 +1689,7 @@ mod tests {
 		t: &mut MTree,
 		map: &HashMap<DocId, SharedVector>,
 		cache_size: usize,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let (ctx, st) = new_operation(ds, t, TransactionType::Read, cache_size).await;
 		for obj in map.values() {
 			let mut chk = MTreeConditionChecker::new(&ctx);
@@ -1731,7 +1730,7 @@ mod tests {
 		check_full: bool,
 		check_delete: bool,
 		cache_size: usize,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		for distance in [Distance::Euclidean, Distance::Cosine, Distance::Manhattan] {
 			if distance == Distance::Cosine && vector_type == VectorType::F64 {
 				// Tests based on Cosine distance with F64 may fail due to float rounding errors
@@ -1777,7 +1776,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	#[ignore]
-	async fn test_mtree_unique_xs() -> Result<(), Error> {
+	async fn test_mtree_unique_xs() -> Result<()> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -1810,7 +1809,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	#[ignore]
-	async fn test_mtree_unique_xs_full_cache() -> Result<(), Error> {
+	async fn test_mtree_unique_xs_full_cache() -> Result<()> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -1843,7 +1842,7 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[ignore]
-	async fn test_mtree_unique_small() -> Result<(), Error> {
+	async fn test_mtree_unique_small() -> Result<()> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -1867,7 +1866,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn test_mtree_unique_normal() -> Result<(), Error> {
+	async fn test_mtree_unique_normal() -> Result<()> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -1891,7 +1890,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn test_mtree_unique_normal_full_cache() -> Result<(), Error> {
+	async fn test_mtree_unique_normal_full_cache() -> Result<()> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -1915,7 +1914,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn test_mtree_unique_normal_small_cache() -> Result<(), Error> {
+	async fn test_mtree_unique_normal_small_cache() -> Result<()> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -1940,7 +1939,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	#[ignore]
-	async fn test_mtree_random_xs() -> Result<(), Error> {
+	async fn test_mtree_random_xs() -> Result<()> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -1979,7 +1978,7 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[ignore]
-	async fn test_mtree_random_small() -> Result<(), Error> {
+	async fn test_mtree_random_small() -> Result<()> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -2003,7 +2002,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn test_mtree_random_normal() -> Result<(), Error> {
+	async fn test_mtree_random_normal() -> Result<()> {
 		let mut stack = reblessive::tree::TreeStack::new();
 		stack
 			.enter(|stk| async {
@@ -2068,7 +2067,7 @@ mod tests {
 		tx: &Transaction,
 		st: &mut MTreeStore,
 		t: &MTree,
-	) -> Result<CheckedProperties, Error> {
+	) -> Result<CheckedProperties> {
 		debug!("CheckTreeProperties");
 		let mut node_ids = HashSet::default();
 		let mut checks = CheckedProperties::default();
@@ -2125,7 +2124,11 @@ mod tests {
 						if let Some(center) = center.as_ref() {
 							let pd = t.calculate_distance(center, o)?;
 							debug!("calc_dist: {:?} {:?} = {}", center, &o, pd);
-							assert_eq!(pd, p.parent_dist, "Invalid parent distance ({}): {} - Expected: {} - Node Id: {} - Obj: {:?} - Center: {:?}", p.parent_dist, t.distance, pd, node_id, o, center);
+							assert_eq!(
+								pd, p.parent_dist,
+								"Invalid parent distance ({}): {} - Expected: {} - Node Id: {} - Obj: {:?} - Center: {:?}",
+								p.parent_dist, t.distance, pd, node_id, o, center
+							);
 						}
 						checks.doc_count += p.docs.len() as usize;
 					}

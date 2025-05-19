@@ -127,7 +127,7 @@ impl IntoIterator for Object {
 
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {
-			iter: self.0 .0.into_iter(),
+			iter: self.0.0.into_iter(),
 		}
 	}
 }

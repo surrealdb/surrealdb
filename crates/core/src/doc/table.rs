@@ -19,6 +19,7 @@ use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use crate::sql::{Cond, FlowResultExt as _, Function, Groups, View};
+use anyhow::{Result, bail};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -59,7 +60,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check import
 		if opt.import {
 			return Ok(());
@@ -293,7 +294,7 @@ impl Document {
 		opt: &Options,
 		group: &Groups,
 		doc: &CursorDoc,
-	) -> Result<Vec<Value>, Error> {
+	) -> Result<Vec<Value>> {
 		Ok(stk
 			.scope(|scope| {
 				try_join_all(group.iter().map(|v| {
@@ -314,7 +315,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		exp: &Fields,
-	) -> Result<Data, Error> {
+	) -> Result<Data> {
 		let mut data = exp.compute(stk, ctx, opt, Some(&self.current), false).await?;
 		data.cut(ID.as_ref());
 		Ok(Data::ReplaceExpression(data))
@@ -326,7 +327,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		fdc: FieldDataContext<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		//
 		let (set_ops, del_ops) = self.fields(stk, ctx, opt, &fdc).await?;
 		//
@@ -380,7 +381,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		fdc: &FieldDataContext<'_>,
-	) -> Result<(Ops, Ops), Error> {
+	) -> Result<(Ops, Ops)> {
 		let mut set_ops: Ops = vec![];
 		let mut del_ops: Ops = vec![];
 		//
@@ -413,7 +414,7 @@ impl Document {
 							let val = match val {
 								val @ Value::Datetime(_) => val,
 								val => {
-									return Err(Error::InvalidAggregation {
+									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
 										table: fdc.ft.name.to_raw(),
 										message: format!(
@@ -432,7 +433,7 @@ impl Document {
 							let val = match val {
 								val @ Value::Datetime(_) => val,
 								val => {
-									return Err(Error::InvalidAggregation {
+									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
 										table: fdc.ft.name.to_raw(),
 										message: format!(
@@ -451,7 +452,7 @@ impl Document {
 							let val = match val {
 								val @ Value::Number(_) => val,
 								val => {
-									return Err(Error::InvalidAggregation {
+									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
 										table: fdc.ft.name.to_raw(),
 										message: format!(
@@ -470,7 +471,7 @@ impl Document {
 							let val = match val {
 								val @ Value::Number(_) => val,
 								val => {
-									return Err(Error::InvalidAggregation {
+									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
 										table: fdc.ft.name.to_raw(),
 										message: format!(
@@ -489,7 +490,7 @@ impl Document {
 							let val = match val {
 								val @ Value::Number(_) => val,
 								val => {
-									return Err(Error::InvalidAggregation {
+									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
 										table: fdc.ft.name.to_raw(),
 										message: format!(
@@ -508,7 +509,7 @@ impl Document {
 							let val = match val {
 								val @ Value::Number(_) => val.coerce_to::<Decimal>()?.into(),
 								val => {
-									return Err(Error::InvalidAggregation {
+									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
 										table: fdc.ft.name.to_raw(),
 										message: format!(
@@ -519,7 +520,7 @@ impl Document {
 							};
 							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						f => return Err(fail!("Unexpected function {f:?} encountered")),
+						f => fail!("Unexpected function {f:?} encountered"),
 					},
 					_ => {
 						let val =
@@ -533,7 +534,7 @@ impl Document {
 	}
 
 	/// Set the field in the foreign table
-	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) -> Result<(), Error> {
+	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) -> Result<()> {
 		ops.push((key, Operator::Equal, val));
 		// Everything ok
 		Ok(())
@@ -546,7 +547,7 @@ impl Document {
 		act: &FieldAction,
 		key: Idiom,
 		val: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		match act {
 			FieldAction::Add => {
 				set_ops.push((key.clone(), Operator::Inc, val));
@@ -570,7 +571,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -626,7 +627,7 @@ impl Document {
 		field: &Field,
 		key: Idiom,
 		val: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -683,7 +684,7 @@ impl Document {
 		act: &FieldAction,
 		key: Idiom,
 		val: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Key for the value count
 		let mut key_c = Idiom::from(vec![Part::from("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
@@ -760,7 +761,7 @@ impl Document {
 		field: &Field,
 		key: &Idiom,
 		val: Value,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Build the condition merging the optional user provided condition and the group
 		let mut iter = fdc.groups.0.iter().enumerate();
 		let cond = if let Some((i, g)) = iter.next() {
@@ -810,9 +811,9 @@ impl Document {
 				..
 			} => match alias.0.first() {
 				Some(Part::Field(ident)) => ident.clone(),
-				p => return Err(fail!("Unexpected ident type encountered: {p:?}")),
+				p => fail!("Unexpected ident type encountered: {p:?}"),
 			},
-			f => return Err(fail!("Unexpected field type encountered: {f:?}")),
+			f => fail!("Unexpected field type encountered: {f:?}"),
 		};
 		let compute_query = Value::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
 		Ok(Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
