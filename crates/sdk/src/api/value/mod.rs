@@ -450,7 +450,6 @@ pub enum Action {
 	Create,
 	Update,
 	Delete,
-	Killed,
 }
 
 impl Action {
@@ -460,7 +459,6 @@ impl Action {
 			CoreAction::Create => Self::Create,
 			CoreAction::Update => Self::Update,
 			CoreAction::Delete => Self::Delete,
-			CoreAction::Killed => Self::Killed,
 			_ => panic!("unimplemented variant of action"),
 		}
 	}
