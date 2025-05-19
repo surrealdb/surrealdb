@@ -408,7 +408,7 @@ async fn export_file(
 	};
 
 	if let Err(error) = res {
-		if let Some(surrealdb_core::err::Error::Channel(ref message)) = error.downcast_ref() {
+		if let Some(surrealdb_core::err::Error::Channel(message)) = error.downcast_ref() {
 			// This is not really an error. Just logging it for improved visibility.
 			trace!("{message}");
 			return Ok(());
