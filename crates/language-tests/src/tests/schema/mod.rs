@@ -11,7 +11,7 @@ use surrealdb_core::{
 		Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 		RouteTarget, Targets,
 	},
-	sql::{Thing, Value as CoreValue},
+	expr::{Thing, Value as CoreValue},
 	syn,
 };
 

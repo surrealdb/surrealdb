@@ -1,9 +1,9 @@
 use crate::err::Error;
+use crate::expr::{Object, Value};
 use crate::idx::VersionedStore;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
 use crate::kvs::{Key, Transaction, Val};
-use crate::sql::{Object, Value};
 #[cfg(debug_assertions)]
 use ahash::HashSet;
 use anyhow::{Result, bail};

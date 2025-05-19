@@ -1,8 +1,8 @@
 //! Stores a record document
+use crate::expr::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::{KeyEncode, impl_key};
-use crate::sql::Id;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 

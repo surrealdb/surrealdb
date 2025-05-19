@@ -21,8 +21,8 @@ use std::collections::BTreeMap;
 use std::str;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
+use surrealdb::expr::Value;
 use surrealdb::iam::check::check_ns_db;
-use surrealdb::sql::Value;
 use surrealdb_core::kvs::Datastore;
 use tower_http::limit::RequestBodyLimitLayer;
 

@@ -2,6 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::index::{Distance, Index};
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{
+	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
+};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
@@ -30,11 +35,6 @@ use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
-use crate::sql::index::{Distance, Index};
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{
-	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
-};
 use anyhow::{Result, ensure};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;

@@ -25,7 +25,7 @@ use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{
+use surrealdb_core::expr::{
 	Object as CoreObject, Param, Query, Statement, Value as CoreValue,
 	from_value as from_core_value, statements::OutputStatement,
 };

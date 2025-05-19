@@ -1,6 +1,6 @@
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{Constant, Function, Value},
+	expr::{Constant, Function, Value},
 	syn::{
 		error::{MessageKind, bail},
 		parser::{SyntaxError, mac::expected, unexpected},

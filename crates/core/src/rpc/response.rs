@@ -1,7 +1,7 @@
 use crate::dbs;
 use crate::dbs::Notification;
-use crate::sql;
-use crate::sql::Value;
+use crate::expr;
+use crate::expr::Value;
 use revision::revisioned;
 use serde::Serialize;
 
@@ -12,7 +12,7 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
 pub enum Data {
-	/// Generally methods return a `sql::Value`
+	/// Generally methods return a `expr::Value`
 	Other(Value),
 	/// The query methods, `query` and `query_with` return a `Vec` of responses
 	Query(Vec<dbs::Response>),
@@ -50,8 +50,8 @@ impl TryFrom<Data> for Value {
 
 	fn try_from(val: Data) -> Result<Self, Self::Error> {
 		match val {
-			Data::Query(v) => sql::to_value(v),
-			Data::Live(v) => sql::to_value(v),
+			Data::Query(v) => expr::to_value(v),
+			Data::Live(v) => expr::to_value(v),
 			Data::Other(v) => Ok(v),
 		}
 	}

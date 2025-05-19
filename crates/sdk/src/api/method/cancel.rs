@@ -3,7 +3,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::method::BoxFuture;
 use std::future::IntoFuture;
-use surrealdb_core::sql::statements::CancelStatement;
+use surrealdb_core::expr::statements::CancelStatement;
 
 /// A transaction cancellation future
 #[derive(Debug)]

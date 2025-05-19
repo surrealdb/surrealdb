@@ -1,9 +1,9 @@
 use crate::err::Error;
-use crate::sql::statements::DefineEventStatement;
-use crate::sql::statements::DefineFieldStatement;
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::statements::LiveStatement;
+use crate::expr::statements::DefineEventStatement;
+use crate::expr::statements::DefineFieldStatement;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::statements::DefineTableStatement;
+use crate::expr::statements::LiveStatement;
 use anyhow::Result;
 use std::any::Any;
 use std::sync::Arc;

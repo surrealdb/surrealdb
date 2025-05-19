@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, ops::Bound, sync::LazyLock};
 
 use rust_decimal::Decimal;
-use surrealdb_core::sql::{
+use surrealdb_core::expr::{
 	Array, Block, Bytes, Cast, Closure, Constant, Datetime, Duration, Edges, Expression, File,
 	Function, Future, Geometry, Id, IdRange, Idiom, Mock, Model, Number, Object, Param, Query,
 	Range, Regex, Subquery, Thing, Uuid, Value,

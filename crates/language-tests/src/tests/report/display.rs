@@ -15,7 +15,7 @@ use super::{
 	TestReport, TestValueExpectation, TypeMismatchReport, ValueMismatchKind,
 };
 use similar::{Algorithm, TextDiff};
-use surrealdb_core::sql::Value as SurValue;
+use surrealdb_core::expr::Value as SurValue;
 
 type Fmt<'a> = IndentFormatter<&'a mut String>;
 

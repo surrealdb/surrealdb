@@ -1,8 +1,8 @@
+use crate::expr::{Number, Value};
 use crate::fnc::util::math::vector::{
 	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
 	Subtract,
 };
-use crate::sql::{Number, Value};
 use anyhow::Result;
 
 pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
@@ -53,13 +53,13 @@ pub mod distance {
 	use crate::ctx::Context;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;
+	use crate::expr::{Number, Value};
 	use crate::fnc::args::Optional;
 	use crate::fnc::get_execution_context;
 	use crate::fnc::util::math::vector::{
 		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
 	};
 	use crate::idx::planner::IterationStage;
-	use crate::sql::{Number, Value};
 	use anyhow::Result;
 
 	pub fn chebyshev((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
@@ -116,8 +116,8 @@ pub mod distance {
 pub mod similarity {
 
 	use crate::err::Error;
+	use crate::expr::{Number, Value};
 	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
-	use crate::sql::{Number, Value};
 	use anyhow::Result;
 
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
@@ -142,7 +142,7 @@ pub mod similarity {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::Number;
+	use crate::expr::Number;
 	use rust_decimal::Decimal;
 
 	#[test]

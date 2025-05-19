@@ -28,7 +28,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -647,8 +647,8 @@ mod tests {
 	use rand::{Rng, thread_rng};
 	use std::io::Write;
 	use std::time::SystemTime;
+	use surrealdb_core::expr::{Array, Value};
 	use surrealdb_core::rpc::format::cbor::Cbor;
-	use surrealdb_core::sql::{Array, Value};
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {

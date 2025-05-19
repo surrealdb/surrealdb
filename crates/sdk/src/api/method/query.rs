@@ -24,7 +24,7 @@ use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::sql::{
+use surrealdb_core::expr::{
 	self, Object as CoreObject, Statement, Value as CoreValue, to_value as to_core_value,
 };
 
@@ -152,7 +152,7 @@ where
 						return Err(Error::LiveQueriesNotSupported.into());
 					}
 
-					let mut query = sql::Query::default();
+					let mut query = expr::Query::default();
 					query.0.0 = query_statements;
 
 					let mut response = router
@@ -725,7 +725,7 @@ mod tests {
 	use super::*;
 	use crate::value::to_value;
 	use serde::Deserialize;
-	use surrealdb_core::sql::Value as CoreValue;
+	use surrealdb_core::expr::Value as CoreValue;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {

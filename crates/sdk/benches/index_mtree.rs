@@ -10,12 +10,12 @@ use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::{Read, Write};
 use surrealdb_core::ctx::MutableContext;
+use surrealdb_core::expr::index::{Distance, MTreeParams, VectorType};
+use surrealdb_core::expr::{Id, Number, Thing, Value};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::MTreeConditionChecker;
 use surrealdb_core::idx::trees::mtree::MTreeIndex;
 use surrealdb_core::kvs::{Transaction, TransactionType};
-use surrealdb_core::sql::index::{Distance, MTreeParams, VectorType};
-use surrealdb_core::sql::{Id, Number, Thing, Value};
 use tokio::runtime::{Builder, Runtime};
 use tokio::task;
 

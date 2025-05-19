@@ -5,8 +5,8 @@ use helpers::{Test, new_ds};
 use surrealdb::Result;
 use surrealdb::sql::Number;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::expr::Value;
 use surrealdb_core::iam::Role;
-use surrealdb_core::sql::Value;
 
 #[tokio::test]
 async fn select_field_value() -> Result<()> {

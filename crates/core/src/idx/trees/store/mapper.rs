@@ -1,8 +1,8 @@
 use crate::err::Error;
+use crate::expr::Filter;
+use crate::expr::statements::DefineAnalyzerStatement;
 use crate::iam::file::is_path_allowed;
 use crate::idx::ft::analyzer::mapper::Mapper;
-use crate::sql::Filter;
-use crate::sql::statements::DefineAnalyzerStatement;
 use ahash::HashSet;
 use anyhow::{Result, bail};
 use dashmap::DashMap;

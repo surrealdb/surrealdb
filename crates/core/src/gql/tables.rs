@@ -2,16 +2,16 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use crate::dbs::Session;
+use crate::expr::order::{OrderList, Ordering};
+use crate::expr::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
+use crate::expr::{self, Table};
+use crate::expr::{Cond, Fields};
+use crate::expr::{Expression, Value as SqlValue};
+use crate::expr::{Idiom, Kind};
+use crate::expr::{Statement, Thing};
 use crate::gql::ext::TryAsExt;
 use crate::gql::schema::{kind_to_type, unwrap_type};
 use crate::kvs::{Datastore, Transaction};
-use crate::sql::order::{OrderList, Ordering};
-use crate::sql::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
-use crate::sql::{self, Table};
-use crate::sql::{Cond, Fields};
-use crate::sql::{Expression, Value as SqlValue};
-use crate::sql::{Idiom, Kind};
-use crate::sql::{Statement, Thing};
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
 use async_graphql::dynamic::FieldFuture;
@@ -30,13 +30,13 @@ use crate::gql::utils::{ErasedRecord, GQLTx, GqlValueUtils, field_val_erase_owne
 
 macro_rules! order {
 	(asc, $field:expr_2021) => {{
-		let mut tmp = sql::Order::default();
+		let mut tmp = expr::Order::default();
 		tmp.value = $field.into();
 		tmp.direction = true;
 		tmp
 	}};
 	(desc, $field:expr_2021) => {{
-		let mut tmp = sql::Order::default();
+		let mut tmp = expr::Order::default();
 		tmp.value = $field.into();
 		tmp
 	}};
@@ -192,7 +192,7 @@ pub async fn process_tbs(
                         SelectStatement {
                             what: vec![SqlValue::Table(tb_name.intox())].into(),
                             expr: Fields(
-                                vec![sql::Field::Single {
+                                vec![expr::Field::Single {
                                     expr: SqlValue::Idiom(Idiom::from("id")),
                                     alias: None,
                                 }],
@@ -529,10 +529,10 @@ fn val_from_filter(
 	cond
 }
 
-fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, GqlError> {
+fn parse_op(name: impl AsRef<str>) -> Result<expr::Operator, GqlError> {
 	match name.as_ref() {
-		"eq" => Ok(sql::Operator::Equal),
-		"ne" => Ok(sql::Operator::NotEqual),
+		"eq" => Ok(expr::Operator::Equal),
+		"ne" => Ok(expr::Operator::NotEqual),
 		op => Err(resolver_error(format!("Unsupported op: {op}"))),
 	}
 }
@@ -542,7 +542,7 @@ fn negate(filter: &GqlValue, fds: &[DefineFieldStatement]) -> Result<SqlValue, G
 	let inner_cond = val_from_filter(obj, fds)?;
 
 	Ok(Expression::Unary {
-		o: sql::Operator::Not,
+		o: expr::Operator::Not,
 		v: inner_cond,
 	}
 	.into())
@@ -563,8 +563,8 @@ fn aggregate(
 		AggregateOp::Or => "OR",
 	};
 	let op = match op {
-		AggregateOp::And => sql::Operator::And,
-		AggregateOp::Or => sql::Operator::Or,
+		AggregateOp::And => expr::Operator::And,
+		AggregateOp::Or => expr::Operator::Or,
 	};
 	let list =
 		filter.as_list().ok_or(resolver_error(format!("Value of {op_str} should be a list")))?;
@@ -607,14 +607,14 @@ fn binop(
 		return Err(resolver_error("Field Filter must have one item"));
 	}
 
-	let lhs = sql::Value::Idiom(field_name.intox());
+	let lhs = expr::Value::Idiom(field_name.intox());
 
 	let (k, v) = obj.iter().next().unwrap();
 	let op = parse_op(k)?;
 
 	let rhs = gql_to_sql_kind(v, fd.kind.clone().unwrap_or_default())?;
 
-	let expr = sql::Expression::Binary {
+	let expr = expr::Expression::Binary {
 		l: lhs,
 		o: op,
 		r: rhs,

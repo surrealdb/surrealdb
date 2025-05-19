@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{
+	expr::{
 		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Value,
 		graph::GraphSubjects,
 		part::{DestructurePart, Recurse, RecurseInstruction},
@@ -752,7 +752,7 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::{Expression, Id, Number, Object, Operator, Param, Strand, Thing};
+	use crate::expr::{Expression, Id, Number, Object, Operator, Param, Strand, Thing};
 	use crate::syn::Parse;
 
 	use super::*;

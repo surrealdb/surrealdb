@@ -2,8 +2,8 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::{
 	api::context::InvocationContext,
+	expr::{Object, Strand, Value},
 	fnc::args::Optional,
-	sql::{Object, Strand, Value},
 };
 use anyhow::Result;
 

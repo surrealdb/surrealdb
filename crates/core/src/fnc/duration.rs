@@ -1,5 +1,5 @@
-use crate::sql::duration::Duration;
-use crate::sql::value::Value;
+use crate::expr::duration::Duration;
+use crate::expr::value::Value;
 use anyhow::Result;
 
 pub fn days((val,): (Duration,)) -> Result<Value> {
@@ -41,8 +41,8 @@ pub fn years((val,): (Duration,)) -> Result<Value> {
 pub mod from {
 
 	use crate::err::Error;
-	use crate::sql::duration::Duration;
-	use crate::sql::value::Value;
+	use crate::expr::duration::Duration;
+	use crate::expr::value::Value;
 	use anyhow::Result;
 
 	pub fn days((val,): (i64,)) -> Result<Value> {

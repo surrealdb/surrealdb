@@ -18,7 +18,7 @@ use surrealdb::opt::{PatchOp, PatchOps};
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
 use surrealdb::{error::Api as ApiError, error::Db as DbError};
-use surrealdb_core::sql::{Id, Value as CoreValue};
+use surrealdb_core::expr::{Id, Value as CoreValue};
 use ulid::Ulid;
 
 use crate::api_integration::NS;

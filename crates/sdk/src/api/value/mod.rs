@@ -10,7 +10,7 @@ use std::{
 };
 use surrealdb_core::{
 	dbs::Action as CoreAction,
-	sql::{
+	expr::{
 		Array as CoreArray, Datetime as CoreDatetime, Id as CoreId, Number as CoreNumber,
 		Thing as CoreThing, Value as CoreValue,
 	},
@@ -22,11 +22,11 @@ mod obj;
 pub use obj::{IntoIter, Iter, IterMut, Object};
 
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
-	surrealdb_core::sql::from_value(value.0)
+	surrealdb_core::expr::from_value(value.0)
 }
 
 pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value> {
-	Ok(Value(surrealdb_core::sql::to_value(value)?))
+	Ok(Value(surrealdb_core::expr::to_value(value)?))
 }
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
@@ -484,7 +484,7 @@ impl Notification<CoreValue> {
 	where
 		R: DeserializeOwned,
 	{
-		let data = surrealdb_core::sql::from_value(self.data)?;
+		let data = surrealdb_core::expr::from_value(self.data)?;
 		Ok(Notification {
 			query_id: self.query_id,
 			action: self.action,

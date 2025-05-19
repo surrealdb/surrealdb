@@ -1,5 +1,5 @@
-use crate::sql::Statement;
-use crate::sql::Value as CoreValue;
+use crate::expr::Statement;
+use crate::expr::Value as CoreValue;
 use anyhow::Result;
 use revision::Revisioned;
 use revision::revisioned;

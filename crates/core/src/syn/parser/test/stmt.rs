@@ -1,5 +1,5 @@
 use crate::{
-	sql::{
+	expr::{
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
@@ -1827,7 +1827,7 @@ fn parse_define_table() {
 			name: Ident("name".to_string()),
 			drop: true,
 			full: true,
-			view: Some(crate::sql::View {
+			view: Some(crate::expr::View {
 				expr: Fields(
 					vec![Field::Single {
 						expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
@@ -1841,7 +1841,7 @@ fn parse_define_table() {
 			}),
 			permissions: Permissions {
 				select: Permission::Specific(Value::Expression(Box::new(
-					crate::sql::Expression::Binary {
+					crate::expr::Expression::Binary {
 						l: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_owned()))])),
 						o: Operator::Equal,
 						r: Value::Number(Number::Int(1))
@@ -2128,7 +2128,7 @@ fn parse_delete() {
 		res,
 		Statement::Delete(DeleteStatement {
 			only: true,
-			what: Values(vec![Value::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
+			what: Values(vec![Value::Mock(crate::expr::Mock::Range("foo".to_string(), 32, 64))]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Value::Number(Number::Int(2)))),
 			output: Some(Output::After),

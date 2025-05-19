@@ -14,14 +14,14 @@ use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
 use crate::{
 	dbs::{QueryType, Response, capabilities::MethodTarget},
-	rpc::args::Take,
-	sql::{
+	expr::{
 		Array, Fields, Function, Model, Output, Query, Strand, Value,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
 	},
+	rpc::args::Take,
 };
 
 #[expect(async_fn_in_trait)]
@@ -429,7 +429,7 @@ pub trait RpcProtocolV1: RpcContext {
 				false => Some(what.could_be_table()),
 				true => None,
 			},
-			data: crate::sql::Data::SingleExpression(data),
+			data: crate::expr::Data::SingleExpression(data),
 			output: Some(Output::After),
 			..Default::default()
 		}
@@ -466,7 +466,7 @@ pub trait RpcProtocolV1: RpcContext {
 			} else {
 				Some(what.could_be_table())
 			},
-			data: crate::sql::Data::SingleExpression(data),
+			data: crate::expr::Data::SingleExpression(data),
 			output: Some(Output::After),
 			..Default::default()
 		}
@@ -507,7 +507,7 @@ pub trait RpcProtocolV1: RpcContext {
 			data: if data.is_none_or_null() {
 				None
 			} else {
-				Some(crate::sql::Data::ContentExpression(data))
+				Some(crate::expr::Data::ContentExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()
@@ -546,7 +546,7 @@ pub trait RpcProtocolV1: RpcContext {
 			data: if data.is_none_or_null() {
 				None
 			} else {
-				Some(crate::sql::Data::ContentExpression(data))
+				Some(crate::expr::Data::ContentExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()
@@ -587,7 +587,7 @@ pub trait RpcProtocolV1: RpcContext {
 			data: if data.is_none_or_null() {
 				None
 			} else {
-				Some(crate::sql::Data::ContentExpression(data))
+				Some(crate::expr::Data::ContentExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()
@@ -628,7 +628,7 @@ pub trait RpcProtocolV1: RpcContext {
 			data: if data.is_none_or_null() {
 				None
 			} else {
-				Some(crate::sql::Data::MergeExpression(data))
+				Some(crate::expr::Data::MergeExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()
@@ -666,7 +666,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let sql = UpdateStatement {
 			only: what.is_thing_single(),
 			what: vec![what.could_be_table()].into(),
-			data: Some(crate::sql::Data::PatchExpression(data)),
+			data: Some(crate::expr::Data::PatchExpression(data)),
 			output: if diff.is_true() {
 				Some(Output::Diff)
 			} else {
@@ -712,7 +712,7 @@ pub trait RpcProtocolV1: RpcContext {
 			data: if data.is_none_or_null() {
 				None
 			} else {
-				Some(crate::sql::Data::ContentExpression(data))
+				Some(crate::expr::Data::ContentExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()

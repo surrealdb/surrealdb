@@ -1,8 +1,8 @@
 use crate::ctx::Context;
+use crate::expr::index::HnswParams;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::kvs::Key;
-use crate::sql::index::HnswParams;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;

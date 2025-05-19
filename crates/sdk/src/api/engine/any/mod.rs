@@ -307,7 +307,7 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 
-	use surrealdb_core::sql::Object;
+	use surrealdb_core::expr::Object;
 
 	use super::*;
 	use crate::Value;

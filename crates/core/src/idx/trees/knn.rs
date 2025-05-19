@@ -616,11 +616,11 @@ pub struct KnnResult {
 
 #[cfg(test)]
 pub(super) mod tests {
+	use crate::expr::index::{Distance, VectorType};
+	use crate::expr::{Array, Number, Value};
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::sql::index::{Distance, VectorType};
-	use crate::sql::{Array, Number, Value};
 	use crate::syn::Parse;
 	#[cfg(debug_assertions)]
 	use ahash::HashMap;

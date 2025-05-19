@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use surrealdb_core::sql::{Value as CoreValue, from_value as from_core_value};
+use surrealdb_core::expr::{Value as CoreValue, from_value as from_core_value};
 
 mod cmd;
 pub(crate) use cmd::Command;

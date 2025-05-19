@@ -47,20 +47,20 @@ use std::{
 	mem,
 	sync::Arc,
 };
+use surrealdb_core::expr::Function;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::sql::Function;
 use surrealdb_core::{
 	dbs::{Response, Session},
-	iam,
-	kvs::Datastore,
-	sql::{
+	expr::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
 			UpdateStatement, UpsertStatement,
 		},
 	},
+	iam,
+	kvs::Datastore,
 };
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
@@ -78,7 +78,7 @@ use tokio::{
 };
 
 #[cfg(feature = "ml")]
-use surrealdb_core::sql::Model;
+use surrealdb_core::expr::Model;
 
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::api::conn::MlExportConfig;
@@ -86,10 +86,10 @@ use crate::api::conn::MlExportConfig;
 use futures::StreamExt;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
+	expr::statements::{DefineModelStatement, DefineStatement},
 	iam::{Action, ResourceKind, check::check_ns_db},
 	kvs::{LockType, TransactionType},
 	ml::storage::surml_file::SurMlFile,
-	sql::statements::{DefineModelStatement, DefineStatement},
 };
 
 use super::resource_to_values;

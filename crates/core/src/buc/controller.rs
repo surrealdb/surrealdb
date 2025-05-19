@@ -3,8 +3,8 @@ use crate::{
 	dbs::Options,
 	doc::CursorDoc,
 	err,
+	expr::{Bytes, File, FlowResultExt, Permission, Value, statements::define::BucketDefinition},
 	iam::Action,
-	sql::{Bytes, File, FlowResultExt, Permission, Value, statements::define::BucketDefinition},
 };
 use anyhow::{Result, bail, ensure};
 use core::fmt;

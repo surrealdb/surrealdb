@@ -1,9 +1,9 @@
 use reblessive::Stk;
 
-use crate::sql::statements::alter::{AlterFieldStatement, AlterSequenceStatement};
+use crate::expr::statements::alter::{AlterFieldStatement, AlterSequenceStatement};
 use crate::syn::error::bail;
 use crate::{
-	sql::{
+	expr::{
 		TableType,
 		statements::{AlterStatement, AlterTableStatement},
 	},

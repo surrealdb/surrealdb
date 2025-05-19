@@ -1,6 +1,6 @@
+use crate::expr::Value;
 use crate::rpc::RpcError;
 use crate::rpc::request::Request;
-use crate::sql::Value;
 use crate::syn;
 
 use super::ResTrait;

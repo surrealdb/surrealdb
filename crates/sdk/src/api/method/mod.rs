@@ -18,8 +18,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use surrealdb_core::sql::Value as CoreValue;
-use surrealdb_core::sql::to_value as to_core_value;
+use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::to_value as to_core_value;
 use surrealdb_core::syn;
 
 pub(crate) mod live;

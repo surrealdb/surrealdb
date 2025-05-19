@@ -2,11 +2,11 @@
 
 use reblessive::Stk;
 
-use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
-use crate::sql::{Explain, Fetch, With};
+use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
+use crate::expr::{Explain, Fetch, With};
 use crate::syn::error::bail;
 use crate::{
-	sql::{
+	expr::{
 		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
 		Permission, Permissions, Tables, Timeout, Value, View,
 		changefeed::ChangeFeed,

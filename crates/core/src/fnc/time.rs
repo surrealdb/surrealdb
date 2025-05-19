@@ -1,7 +1,7 @@
 use crate::err::Error;
-use crate::sql::datetime::Datetime;
-use crate::sql::duration::Duration;
-use crate::sql::value::Value;
+use crate::expr::datetime::Datetime;
+use crate::expr::duration::Duration;
+use crate::expr::value::Value;
 use anyhow::Result;
 use chrono::offset::TimeZone;
 use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
@@ -255,8 +255,8 @@ pub fn year((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 }
 
 pub mod is {
+	use crate::expr::{Datetime, Value};
 	use crate::fnc::args::Optional;
-	use crate::sql::{Datetime, Value};
 	use anyhow::Result;
 
 	pub fn leap_year((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
@@ -270,8 +270,8 @@ pub mod is {
 pub mod from {
 
 	use crate::err::Error;
-	use crate::sql::datetime::Datetime;
-	use crate::sql::{Uuid, value::Value};
+	use crate::expr::datetime::Datetime;
+	use crate::expr::{Uuid, value::Value};
 	use anyhow::Result;
 	use chrono::DateTime;
 	use ulid::Ulid;

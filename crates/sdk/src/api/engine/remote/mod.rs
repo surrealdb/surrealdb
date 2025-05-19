@@ -19,7 +19,7 @@ use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;
@@ -158,7 +158,7 @@ where
 		value.serialize_revisioned(&mut buf)?;
 		return Ok(buf);
 	}
-	surrealdb_core::sql::serde::serialize(value)
+	surrealdb_core::expr::serde::serialize(value)
 		.map_err(surrealdb_core::err::Error::from)
 		.map_err(anyhow::Error::new)
 }
@@ -173,7 +173,7 @@ where
 			.map_err(surrealdb_core::err::Error::from)
 			.map_err(anyhow::Error::new);
 	}
-	surrealdb_core::sql::serde::deserialize(bytes)
+	surrealdb_core::expr::serde::deserialize(bytes)
 		.map_err(surrealdb_core::err::Error::from)
 		.map_err(anyhow::Error::new)
 }

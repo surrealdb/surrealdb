@@ -25,7 +25,7 @@ use surrealdb::RecordId;
 use surrealdb::Value;
 use surrealdb::method::QueryStream;
 use surrealdb::opt::Resource;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;

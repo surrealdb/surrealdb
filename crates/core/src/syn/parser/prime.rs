@@ -3,7 +3,7 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser, mac::pop_glued};
 use crate::{
-	sql::{
+	expr::{
 		Array, Closure, Dir, Duration, Function, Geometry, Ident, Idiom, Kind, Mock, Number, Param,
 		Part, Script, Strand, Subquery, Table, Value,
 	},
@@ -77,7 +77,7 @@ impl Parser<'_> {
 				expected!(self, t!(">"));
 				let start = expected!(self, t!("{")).span;
 				let block = self.parse_block(ctx, start).await?;
-				Ok(Value::Future(Box::new(super::sql::Future(block))))
+				Ok(Value::Future(Box::new(super::expr::Future(block))))
 			}
 			t!("|") => {
 				let start = self.pop_peek().span;
@@ -224,7 +224,7 @@ impl Parser<'_> {
 					self.expect_closing_delimiter(t!(">"), token.span)?;
 					let next = expected!(self, t!("{")).span;
 					let block = self.parse_block(ctx, next).await?;
-					Value::Future(Box::new(super::sql::Future(block)))
+					Value::Future(Box::new(super::expr::Future(block)))
 				} else {
 					unexpected!(self, token, "expected either a `<-` or a future")
 				}

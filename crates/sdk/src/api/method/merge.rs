@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
 
 /// A merge future
 #[derive(Debug)]

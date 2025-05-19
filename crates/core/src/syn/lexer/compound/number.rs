@@ -5,11 +5,11 @@ use std::{
 	time::Duration,
 };
 
-use crate::sql::number::decimal::DecimalExt;
+use crate::expr::number::decimal::DecimalExt;
 use rust_decimal::Decimal;
 
 use crate::{
-	sql::{
+	expr::{
 		Number,
 		duration::{
 			SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,

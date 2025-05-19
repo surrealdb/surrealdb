@@ -5,7 +5,7 @@ use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb_core::dbs::Capabilities;
 use surrealdb_core::dbs::capabilities::{FuncTarget, Targets};
-use surrealdb_core::sql::{Array, Number, Object, Value};
+use surrealdb_core::expr::{Array, Number, Object, Value};
 use tokio::runtime::Runtime;
 
 fn bench_with_or_without_index(c: &mut Criterion) {

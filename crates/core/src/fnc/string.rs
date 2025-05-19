@@ -1,8 +1,8 @@
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
+use crate::expr::Regex;
+use crate::expr::value::Value;
 use crate::fnc::util::string;
-use crate::sql::Regex;
-use crate::sql::value::Value;
 use anyhow::{Result, ensure};
 
 use super::args::{Any, Cast, Optional};
@@ -185,7 +185,7 @@ pub fn words((string,): (String,)) -> Result<Value> {
 pub mod distance {
 
 	use crate::err::Error;
-	use crate::sql::Value;
+	use crate::expr::Value;
 	use anyhow::Result;
 
 	use strsim;
@@ -237,7 +237,7 @@ pub mod distance {
 }
 
 pub mod html {
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use anyhow::Result;
 
 	pub fn encode((arg,): (String,)) -> Result<Value> {
@@ -251,9 +251,9 @@ pub mod html {
 
 pub mod is {
 	use crate::err::Error;
+	use crate::expr::value::Value;
+	use crate::expr::{Datetime, Thing};
 	use crate::fnc::args::Optional;
-	use crate::sql::value::Value;
-	use crate::sql::{Datetime, Thing};
 	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;
 	use regex::Regex;
@@ -363,8 +363,8 @@ pub mod is {
 
 pub mod similarity {
 
+	use crate::expr::Value;
 	use crate::fnc::util::string::fuzzy::Fuzzy;
-	use crate::sql::Value;
 	use anyhow::Result;
 
 	use strsim;
@@ -399,7 +399,7 @@ pub mod similarity {
 pub mod semver {
 
 	use crate::err::Error;
-	use crate::sql::Value;
+	use crate::expr::Value;
 	use anyhow::Result;
 	use semver::Version;
 
@@ -443,8 +443,8 @@ pub mod semver {
 	}
 
 	pub mod inc {
+		use crate::expr::Value;
 		use crate::fnc::string::semver::parse_version;
-		use crate::sql::Value;
 		use anyhow::Result;
 
 		pub fn major((version,): (String,)) -> Result<Value> {
@@ -479,8 +479,8 @@ pub mod semver {
 	}
 
 	pub mod set {
+		use crate::expr::Value;
 		use crate::fnc::string::semver::parse_version;
-		use crate::sql::Value;
 		use anyhow::Result;
 
 		pub fn major((version, value): (String, i64)) -> Result<Value> {
@@ -523,8 +523,8 @@ pub mod semver {
 mod tests {
 	use super::{contains, matches, replace, slice};
 	use crate::{
+		expr::Value,
 		fnc::args::{Cast, Optional},
-		sql::Value,
 	};
 
 	#[test]

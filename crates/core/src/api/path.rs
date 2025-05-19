@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	err::Error,
-	sql::{
+	expr::{
 		Kind, Object, Value,
 		fmt::{Fmt, fmt_separated_by},
 	},

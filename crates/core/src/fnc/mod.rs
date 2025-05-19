@@ -4,9 +4,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
+use crate::expr::Thing;
+use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::Thing;
-use crate::sql::value::Value;
 use anyhow::Result;
 use reblessive::tree::Stk;
 pub mod api;
@@ -1582,7 +1582,7 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::{
 		dbs::capabilities::ExperimentalTarget,
-		sql::{Function, Query, Statement, Value, statements::OutputStatement},
+		expr::{Function, Query, Statement, Value, statements::OutputStatement},
 	};
 
 	#[tokio::test]
@@ -1646,7 +1646,7 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::sql::Value;
+				use crate::expr::Value;
 
 				let name = name.replace("::", ".");
 				let sql =

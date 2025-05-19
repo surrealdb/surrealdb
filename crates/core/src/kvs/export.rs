@@ -2,12 +2,12 @@ use super::KeyDecode as _;
 use super::Transaction;
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
+use crate::expr::Value;
+use crate::expr::paths::EDGE;
+use crate::expr::paths::IN;
+use crate::expr::paths::OUT;
+use crate::expr::statements::DefineTableStatement;
 use crate::key::thing;
-use crate::sql::Value;
-use crate::sql::paths::EDGE;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
-use crate::sql::statements::DefineTableStatement;
 use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
@@ -438,7 +438,7 @@ impl Transaction {
 		version: Option<u64>,
 	) -> String {
 		// Inject the id field into the document before processing.
-		let rid = crate::sql::Thing::from((k.tb, k.id.clone()));
+		let rid = crate::expr::Thing::from((k.tb, k.id.clone()));
 		v.def(&rid);
 		// Match on the value to determine if it is a graph edge record or a normal record.
 		match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {

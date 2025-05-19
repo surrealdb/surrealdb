@@ -4,7 +4,7 @@ use reblessive::Stack;
 use rust_decimal::Decimal;
 
 use crate::{
-	sql::{
+	expr::{
 		Array, Constant, Expression, Geometry, Id, Ident, Idiom, Number, Object, Operator, Part,
 		Query, Statement, Statements, Strand, Thing, Value,
 	},

@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::sql::Algorithm;
-use crate::sql::duration::Duration;
+use crate::expr::Algorithm;
+use crate::expr::duration::Duration;
 use anyhow::Result;
 use anyhow::bail;
 use chrono::Duration as ChronoDuration;

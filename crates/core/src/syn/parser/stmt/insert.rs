@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Data, Idiom, Subquery, Value, statements::InsertStatement},
+	expr::{Data, Idiom, Subquery, Value, statements::InsertStatement},
 	syn::{
 		error::bail,
 		parser::{ParseResult, Parser, mac::expected},
