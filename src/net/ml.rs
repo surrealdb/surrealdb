@@ -68,7 +68,8 @@ mod implementation {
 			buffer.extend_from_slice(&chunk?);
 		}
 		// Check that the SurrealML file is valid
-		let file = SurMlFile::from_bytes(buffer).map_err(ResponseError)?;
+		let file =
+			SurMlFile::from_bytes(buffer).map_err(anyhow::Error::new).map_err(ResponseError)?;
 
 		// reject the file if there is no model name or version
 		if file.header.name.to_string() == "" || file.header.version.to_string() == "" {
