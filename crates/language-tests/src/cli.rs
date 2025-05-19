@@ -155,7 +155,7 @@ pub fn parse() -> ArgMatches {
         .subcommand(
             Command::new("test").alias("run")
                 .about("Run surrealdb tests")
-                .arg(arg!([filter] "Filter the tests by their path"))
+                .arg(arg!([filter] "Filter the tests by their path").num_args(0..))
                 .arg(arg!(--path <PATH> "The path to tests directory").default_value("./tests"))
                 .arg(
                     arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
@@ -177,7 +177,7 @@ pub fn parse() -> ArgMatches {
 		.subcommand(
 			Command::new("upgrade")
 			.about("Run surrealdb upgrade tests")
-			.arg(arg!([filter] "Filter the tests by their path"))
+			.arg(arg!([filter] "Filter the tests by their path").num_args(0..))
 			.arg(arg!(--path <PATH> "The path to the tests directory").default_value("./tests"))
 			.arg(
 				arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")

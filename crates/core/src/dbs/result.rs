@@ -12,6 +12,7 @@ use crate::sql::order::Ordering;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+#[derive(Debug)]
 pub(super) enum Results {
 	None,
 	Memory(MemoryCollector),

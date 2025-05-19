@@ -15,7 +15,7 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(super) struct MemoryCollector(Vec<Value>);
 
 impl MemoryCollector {
@@ -61,6 +61,7 @@ impl From<Vec<Value>> for MemoryCollector {
 pub(super) const DEFAULT_BATCH_SIZE: usize = 1024;
 
 /// The struct MemoryRandom represents an in-memory store that aggregates data randomly.
+#[derive(Debug)]
 pub(in crate::dbs) struct MemoryRandom {
 	/// Collected values
 	values: Vec<Value>,
@@ -172,6 +173,7 @@ impl MemoryRandom {
 }
 
 /// The struct MemoryOrdered represents an in-memory store that aggregates ordered data.
+#[derive(Debug)]
 pub(in crate::dbs) struct MemoryOrdered {
 	/// Collected values
 	values: Vec<Value>,
@@ -306,6 +308,16 @@ pub(super) struct MemoryOrderedLimit {
 	orders: Arc<OrderList>,
 	/// The finalized result
 	result: Option<Vec<Value>>,
+}
+
+impl std::fmt::Debug for MemoryOrderedLimit {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("MemoryOrderedLimit")
+			.field("limit", &self.limit)
+			.field("orders", &self.orders)
+			.field("result", &self.result)
+			.finish()
+	}
 }
 
 impl MemoryOrderedLimit {
