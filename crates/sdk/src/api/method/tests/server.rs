@@ -3,7 +3,7 @@ use crate::api::Response as QueryResponse;
 use crate::api::conn::{Command, DbResponse, Route};
 use crate::opt::Resource;
 use async_channel::Receiver;
-use surrealdb_core::sql::{Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {

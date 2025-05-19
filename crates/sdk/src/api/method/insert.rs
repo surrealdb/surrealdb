@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
 
 use super::insert_relation::InsertRelation;
 use super::validate_data;

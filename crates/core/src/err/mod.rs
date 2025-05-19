@@ -1,12 +1,12 @@
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
+use crate::expr::idiom::Idiom;
+use crate::expr::index::Distance;
+use crate::expr::thing::Thing;
+use crate::expr::value::{CastError, CoerceError, Value};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
-use crate::sql::idiom::Idiom;
-use crate::sql::index::Distance;
-use crate::sql::thing::Thing;
-use crate::sql::value::{CastError, CoerceError, Value};
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
@@ -1077,7 +1077,7 @@ pub enum Error {
 	#[error("A node task has failed: {0}")]
 	NodeAgent(&'static str),
 
-	/// The supplied type could not be serialiazed into `sql::Value`
+	/// The supplied type could not be serialiazed into `expr::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
 

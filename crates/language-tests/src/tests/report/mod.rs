@@ -10,7 +10,7 @@ use crate::tests::{
 };
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::sql::Value as SurValue;
+use surrealdb_core::expr::Value as SurValue;
 use surrealdb_core::syn::error::RenderedError;
 
 mod display;

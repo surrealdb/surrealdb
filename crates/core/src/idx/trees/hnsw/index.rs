@@ -1,3 +1,5 @@
+use crate::expr::index::{HnswParams, VectorType};
+use crate::expr::{Id, Number, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
@@ -8,8 +10,6 @@ use crate::idx::trees::hnsw::{ElementId, HnswSearch};
 use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
-use crate::sql::index::{HnswParams, VectorType};
-use crate::sql::{Id, Number, Value};
 #[cfg(debug_assertions)]
 use ahash::HashMap;
 use anyhow::Result;

@@ -19,14 +19,14 @@ use http::header::CONTENT_TYPE;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::capabilities::RouteTarget;
+use surrealdb::expr::Value;
+use surrealdb::expr::statements::FindApi;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::cbor;
 use surrealdb::rpc::format::json;
 use surrealdb::rpc::format::revision;
-use surrealdb::sql::Value;
-use surrealdb::sql::statements::FindApi;
 use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::{
 	body::ApiBody, invocation::ApiInvocation, method::Method as ApiMethod,

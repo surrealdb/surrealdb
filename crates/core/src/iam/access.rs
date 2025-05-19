@@ -2,9 +2,9 @@ use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::ctx::MutableContext;
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::expr::statements::access;
+use crate::expr::{Base, Ident, Thing, Value};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::statements::access;
-use crate::sql::{Base, Ident, Thing, Value};
 use anyhow::Result;
 use reblessive;
 

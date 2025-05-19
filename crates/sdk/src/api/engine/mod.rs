@@ -20,7 +20,7 @@ use futures::Stream;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::sql::Values as CoreValues;
+use surrealdb_core::expr::Values as CoreValues;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]

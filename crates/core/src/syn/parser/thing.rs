@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{
+	expr::{
 		Id, Ident, Param, Range, Thing,
 		graph::GraphSubject,
 		id::{Gen, range::IdRange},
@@ -370,9 +370,9 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
-	use crate::sql::Value;
-	use crate::sql::array::Array;
-	use crate::sql::object::Object;
+	use crate::expr::Value;
+	use crate::expr::array::Array;
+	use crate::expr::object::Object;
 	use crate::syn::Parse as _;
 	use crate::syn::parser::ParserSettings;
 
@@ -566,7 +566,7 @@ mod tests {
 
 	#[test]
 	fn weird_things() {
-		use crate::sql;
+		use crate::expr;
 
 		fn assert_ident_parses_correctly(ident: &str) {
 			let thing = format!("t:{}", ident);
@@ -593,8 +593,8 @@ mod tests {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
-					sql::Thing {
+				expr::Query(expr::Statements(vec![expr::Statement::Value(expr::Value::Thing(
+					expr::Thing {
 						tb: "t".to_string(),
 						id: Id::from(ident.to_string())
 					}

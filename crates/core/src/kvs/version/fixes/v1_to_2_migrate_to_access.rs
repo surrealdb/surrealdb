@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-	kvs::{KeyEncode as _, Transaction},
-	sql::{
+	expr::{
 		AccessType, Ident,
 		access_type::{JwtAccessVerify, JwtAccessVerifyKey},
 		statements::{
@@ -10,6 +9,7 @@ use crate::{
 			define::{DefineScopeStatement, DefineTokenStatement},
 		},
 	},
+	kvs::{KeyEncode as _, Transaction},
 };
 use anyhow::Result;
 

@@ -1,5 +1,5 @@
 use super::args::Optional;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use anyhow::Result;
 
 pub fn count((Optional(arg),): (Optional<Value>,)) -> Result<Value> {

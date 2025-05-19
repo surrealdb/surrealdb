@@ -1,5 +1,5 @@
-use crate::sql::geometry::Geometry;
-use crate::sql::value::Value;
+use crate::expr::geometry::Geometry;
+use crate::expr::value::Value;
 use anyhow::Result;
 use geo::algorithm::bearing::HaversineBearing;
 use geo::algorithm::centroid::Centroid;
@@ -52,10 +52,10 @@ pub fn distance((v, w): (Geometry, Geometry)) -> Result<Value> {
 pub mod hash {
 
 	use crate::err::Error;
+	use crate::expr::geometry::Geometry;
+	use crate::expr::value::Value;
 	use crate::fnc::args::Optional;
 	use crate::fnc::util::geo;
-	use crate::sql::geometry::Geometry;
-	use crate::sql::value::Value;
 	use anyhow::{Result, bail};
 
 	pub fn encode((arg, Optional(len)): (Geometry, Optional<i64>)) -> Result<Value> {
@@ -85,8 +85,8 @@ pub mod hash {
 }
 
 pub mod is {
-	use crate::sql::geometry::Geometry;
-	use crate::sql::value::Value;
+	use crate::expr::geometry::Geometry;
+	use crate::expr::value::Value;
 	use anyhow::Result;
 
 	pub fn valid((arg,): (Geometry,)) -> Result<Value> {

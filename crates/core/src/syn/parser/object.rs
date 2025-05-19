@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Block, Geometry, Object, Strand, Value},
+	expr::{Block, Geometry, Object, Strand, Value},
 	syn::{
 		error::bail,
 		lexer::compound,

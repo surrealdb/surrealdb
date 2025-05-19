@@ -1,12 +1,12 @@
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
+use crate::expr::{Cond, FlowResultExt as _, Thing, Value};
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
-use crate::sql::{Cond, FlowResultExt as _, Thing, Value};
 use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;

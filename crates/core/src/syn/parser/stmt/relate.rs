@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Subquery, Value, statements::RelateStatement},
+	expr::{Subquery, Value, statements::RelateStatement},
 	syn::{
 		parser::{
 			ParseResult, Parser,

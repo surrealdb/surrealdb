@@ -1,13 +1,13 @@
 use crate::ctx::Context;
-use crate::sql::paths::AC;
-use crate::sql::paths::DB;
-use crate::sql::paths::ID;
-use crate::sql::paths::IP;
-use crate::sql::paths::NS;
-use crate::sql::paths::OR;
-use crate::sql::paths::RD;
-use crate::sql::paths::TK;
-use crate::sql::value::Value;
+use crate::expr::paths::AC;
+use crate::expr::paths::DB;
+use crate::expr::paths::ID;
+use crate::expr::paths::IP;
+use crate::expr::paths::NS;
+use crate::expr::paths::OR;
+use crate::expr::paths::RD;
+use crate::expr::paths::TK;
+use crate::expr::value::Value;
 use anyhow::Result;
 
 pub fn ac(ctx: &Context, _: ()) -> Result<Value> {

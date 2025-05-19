@@ -1,5 +1,5 @@
-use crate::sql::Array;
-use crate::sql::Value;
+use crate::expr::Array;
+use crate::expr::Value;
 
 use super::error::RpcError;
 

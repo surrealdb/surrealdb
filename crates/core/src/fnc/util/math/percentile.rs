@@ -1,4 +1,4 @@
-use crate::sql::number::{Number, Sorted};
+use crate::expr::number::{Number, Sorted};
 
 pub trait Percentile {
 	/// Gets the N percentile, averaging neighboring records if non-exact

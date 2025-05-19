@@ -15,6 +15,7 @@ use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
 };
 use crate::err::Error;
+use crate::expr::{Base, FlowResultExt as _, Query, Value, statements::DefineUserStatement};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -27,7 +28,6 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::{Base, FlowResultExt as _, Query, Value, statements::DefineUserStatement};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
 #[allow(unused_imports)]
@@ -899,7 +899,7 @@ impl Datastore {
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
 	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::sql::parse;
+	/// use surrealdb_core::expr::parse;
 	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
@@ -948,8 +948,8 @@ impl Datastore {
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
 	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::sql::Future;
-	/// use surrealdb_core::sql::Value;
+	/// use surrealdb_core::expr::Future;
+	/// use surrealdb_core::expr::Value;
 	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
@@ -1024,8 +1024,8 @@ impl Datastore {
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
 	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::sql::Future;
-	/// use surrealdb_core::sql::Value;
+	/// use surrealdb_core::expr::Future;
+	/// use surrealdb_core::expr::Value;
 	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
@@ -1221,14 +1221,14 @@ impl Datastore {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::FlowResultExt as _;
+	use crate::expr::FlowResultExt as _;
 
 	use super::*;
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<()> {
+		use crate::expr::{Expression, Future, Number, Operator, Value};
 		use crate::kvs::Datastore;
-		use crate::sql::{Expression, Future, Number, Operator, Value};
 		use reblessive::{Stack, Stk};
 
 		// build query manually to bypass query limits.

@@ -7,14 +7,14 @@ use std::io::{BufRead, BufReader};
 use std::time::Duration;
 use surrealdb::sql::index::Distance;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::expr::index::{HnswParams, VectorType};
+use surrealdb_core::expr::{Array, Id, Number, Thing, Value, value};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};
 use surrealdb_core::idx::trees::hnsw::index::HnswIndex;
 use surrealdb_core::kvs::LockType::Optimistic;
 use surrealdb_core::kvs::TransactionType::{Read, Write};
 use surrealdb_core::kvs::{Datastore, Transaction};
-use surrealdb_core::sql::index::{HnswParams, VectorType};
-use surrealdb_core::sql::{Array, Id, Number, Thing, Value, value};
 use tokio::runtime::{Builder, Runtime};
 
 const EF_CONSTRUCTION: u16 = 150;

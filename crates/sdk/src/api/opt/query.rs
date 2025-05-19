@@ -11,7 +11,7 @@ use futures::stream::select_all;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
-use surrealdb_core::sql::{
+use surrealdb_core::expr::{
 	self, Statement, Statements, Value as CoreValue, from_value as from_core_value, statements::*,
 };
 
@@ -32,8 +32,8 @@ pub(crate) mod into_query {
 	}
 }
 
-impl IntoQuery for sql::Query {}
-impl into_query::Sealed for sql::Query {
+impl IntoQuery for expr::Query {}
+impl into_query::Sealed for expr::Query {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
 			query: self.0.0,

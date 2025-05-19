@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::dbs::Session;
+use crate::expr;
+use crate::expr::Geometry;
+use crate::expr::Kind;
+use crate::expr::kind::Literal;
+use crate::expr::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
 use crate::kvs::Datastore;
-use crate::sql;
-use crate::sql::Geometry;
-use crate::sql::Kind;
-use crate::sql::kind::Literal;
-use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use async_graphql::Name;
 use async_graphql::Value as GqlValue;
 use async_graphql::dynamic::Interface;
@@ -25,11 +25,11 @@ use serde_json::Number;
 use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
+use crate::expr::Value as SqlValue;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::NamedContainer;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
-use crate::sql::Value as SqlValue;
 
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
@@ -191,12 +191,12 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 		SqlValue::Null => GqlValue::Null,
 		SqlValue::Bool(b) => GqlValue::Boolean(b),
 		SqlValue::Number(n) => match n {
-			crate::sql::Number::Int(i) => GqlValue::Number(i.into()),
-			crate::sql::Number::Float(f) => GqlValue::Number(
+			crate::expr::Number::Int(i) => GqlValue::Number(i.into()),
+			crate::expr::Number::Float(f) => GqlValue::Number(
 				Number::from_f64(f)
 					.ok_or(resolver_error("unimplemented: graceful NaN and Inf handling"))?,
 			),
-			num @ crate::sql::Number::Decimal(_) => GqlValue::String(num.to_string()),
+			num @ crate::expr::Number::Decimal(_) => GqlValue::String(num.to_string()),
 		},
 		SqlValue::Strand(s) => GqlValue::String(s.0),
 		d @ SqlValue::Duration(_) => GqlValue::String(d.to_string()),
@@ -433,23 +433,23 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Decimal => match val {
 			GqlValue::Number(n) => {
 				if let Some(int) = n.as_i64() {
-					Ok(SqlValue::Number(sql::Number::Decimal(int.into())))
+					Ok(SqlValue::Number(expr::Number::Decimal(int.into())))
 				} else if let Some(d) = n.as_f64().and_then(Decimal::from_f64) {
-					Ok(SqlValue::Number(sql::Number::Decimal(d)))
+					Ok(SqlValue::Number(expr::Number::Decimal(d)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
+					Ok(SqlValue::Number(expr::Number::Decimal(uint.into())))
 				} else {
 					Err(type_error(kind, val))
 				}
 			}
 			GqlValue::String(s) => match syn::value(s) {
 				Ok(SqlValue::Number(n)) => match n {
-					sql::Number::Int(i) => Ok(SqlValue::Number(sql::Number::Decimal(i.into()))),
-					sql::Number::Float(f) => match Decimal::from_f64(f) {
-						Some(d) => Ok(SqlValue::Number(sql::Number::Decimal(d))),
+					expr::Number::Int(i) => Ok(SqlValue::Number(expr::Number::Decimal(i.into()))),
+					expr::Number::Float(f) => match Decimal::from_f64(f) {
+						Some(d) => Ok(SqlValue::Number(expr::Number::Decimal(d))),
 						None => Err(type_error(kind, val)),
 					},
-					sql::Number::Decimal(d) => Ok(SqlValue::Number(sql::Number::Decimal(d))),
+					expr::Number::Decimal(d) => Ok(SqlValue::Number(expr::Number::Decimal(d))),
 				},
 				_ => Err(type_error(kind, val)),
 			},
@@ -465,21 +465,21 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Float => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
-					Ok(SqlValue::Number(sql::Number::Float(i as f64)))
+					Ok(SqlValue::Number(expr::Number::Float(i as f64)))
 				} else if let Some(f) = n.as_f64() {
-					Ok(SqlValue::Number(sql::Number::Float(f)))
+					Ok(SqlValue::Number(expr::Number::Float(f)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SqlValue::Number(sql::Number::Float(uint as f64)))
+					Ok(SqlValue::Number(expr::Number::Float(uint as f64)))
 				} else {
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
 			GqlValue::String(s) => match syn::value(s) {
 				Ok(SqlValue::Number(n)) => match n {
-					sql::Number::Int(int) => Ok(SqlValue::Number(sql::Number::Float(int as f64))),
-					sql::Number::Float(float) => Ok(SqlValue::Number(sql::Number::Float(float))),
-					sql::Number::Decimal(d) => match d.try_into() {
-						Ok(f) => Ok(SqlValue::Number(sql::Number::Float(f))),
+					expr::Number::Int(int) => Ok(SqlValue::Number(expr::Number::Float(int as f64))),
+					expr::Number::Float(float) => Ok(SqlValue::Number(expr::Number::Float(float))),
+					expr::Number::Decimal(d) => match d.try_into() {
+						Ok(f) => Ok(SqlValue::Number(expr::Number::Float(f))),
 						_ => Err(type_error(kind, val)),
 					},
 				},
@@ -490,23 +490,23 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Int => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
-					Ok(SqlValue::Number(sql::Number::Int(i)))
+					Ok(SqlValue::Number(expr::Number::Int(i)))
 				} else {
 					Err(type_error(kind, val))
 				}
 			}
 			GqlValue::String(s) => match syn::value(s) {
 				Ok(SqlValue::Number(n)) => match n {
-					sql::Number::Int(int) => Ok(SqlValue::Number(sql::Number::Int(int))),
-					sql::Number::Float(float) => {
+					expr::Number::Int(int) => Ok(SqlValue::Number(expr::Number::Int(int))),
+					expr::Number::Float(float) => {
 						if float.fract() == 0.0 {
-							Ok(SqlValue::Number(sql::Number::Int(float as i64)))
+							Ok(SqlValue::Number(expr::Number::Int(float as i64)))
 						} else {
 							Err(type_error(kind, val))
 						}
 					}
-					sql::Number::Decimal(d) => match d.try_into() {
-						Ok(i) => Ok(SqlValue::Number(sql::Number::Int(i))),
+					expr::Number::Decimal(d) => match d.try_into() {
+						Ok(i) => Ok(SqlValue::Number(expr::Number::Int(i))),
 						_ => Err(type_error(kind, val)),
 					},
 				},
@@ -517,11 +517,11 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Number => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
-					Ok(SqlValue::Number(sql::Number::Int(i)))
+					Ok(SqlValue::Number(expr::Number::Int(i)))
 				} else if let Some(f) = n.as_f64() {
-					Ok(SqlValue::Number(sql::Number::Float(f)))
+					Ok(SqlValue::Number(expr::Number::Float(f)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
+					Ok(SqlValue::Number(expr::Number::Decimal(uint.into())))
 				} else {
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}

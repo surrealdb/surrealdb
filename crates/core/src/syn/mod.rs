@@ -4,7 +4,7 @@ use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
 	dbs::{Capabilities, capabilities::ExperimentalTarget},
 	err::Error,
-	sql::{
+	expr::{
 		Block, Datetime, Duration, Fetchs, Fields, Idiom, Kind, Output, Query, Range, Subquery,
 		Thing, Value,
 	},

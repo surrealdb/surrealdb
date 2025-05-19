@@ -1,6 +1,6 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::sql::{Bytes, Object, Strand, Value};
+use crate::expr::{Bytes, Object, Strand, Value};
 use crate::syn;
 
 use anyhow::{Context as _, Result, bail};

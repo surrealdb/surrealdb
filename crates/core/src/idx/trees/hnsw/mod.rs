@@ -14,12 +14,12 @@ use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use anyhow::Result;
 
+use crate::expr::index::HnswParams;
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, Val};
-use crate::sql::index::HnswParams;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
@@ -430,6 +430,8 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::ctx::{Context, MutableContext};
+	use crate::expr::index::{Distance, HnswParams, VectorType};
+	use crate::expr::{Id, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
@@ -441,8 +443,6 @@ mod tests {
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use crate::sql::index::{Distance, HnswParams, VectorType};
-	use crate::sql::{Id, Value};
 	use ahash::{HashMap, HashSet};
 	use anyhow::Result;
 	use ndarray::Array1;

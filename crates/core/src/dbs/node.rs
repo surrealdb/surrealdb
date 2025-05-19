@@ -1,5 +1,5 @@
-use crate::sql::Value;
-use crate::sql::statements::info::InfoStructure;
+use crate::expr::Value;
+use crate::expr::statements::info::InfoStructure;
 use revision::Error;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

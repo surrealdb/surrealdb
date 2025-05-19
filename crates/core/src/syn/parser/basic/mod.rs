@@ -1,5 +1,5 @@
 use crate::{
-	sql::{
+	expr::{
 		Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid,
 		language::Language,
 	},
@@ -230,11 +230,11 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::{Ident, Part};
+	use crate::expr::{Ident, Part};
 
 	#[test]
 	fn identifiers() {
-		use crate::sql;
+		use crate::expr;
 
 		fn assert_ident_parses_correctly(ident: &str) {
 			use crate::syn::Parser;
@@ -249,8 +249,8 @@ mod test {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Idiom(
-					sql::Idiom(vec![Part::Field(Ident(ident.to_string()))])
+				expr::Query(expr::Statements(vec![expr::Statement::Value(expr::Value::Idiom(
+					expr::Idiom(vec![Part::Field(Ident(ident.to_string()))])
 				))]))
 			)
 		}

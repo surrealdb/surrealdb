@@ -6,7 +6,7 @@ use crate::api::method::Cancel;
 use crate::api::method::Commit;
 use std::future::IntoFuture;
 use std::ops::Deref;
-use surrealdb_core::sql::statements::BeginStatement;
+use surrealdb_core::expr::statements::BeginStatement;
 
 /// A beginning of a transaction
 #[derive(Debug)]

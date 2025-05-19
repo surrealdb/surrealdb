@@ -1,3 +1,4 @@
+use crate::expr::index::HnswParams;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
@@ -6,7 +7,6 @@ use crate::idx::trees::hnsw::docs::VecDocs;
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
-use crate::sql::index::HnswParams;
 use anyhow::Result;
 use reblessive::tree::Stk;
 

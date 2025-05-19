@@ -14,9 +14,9 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{self, connect};
+use surrealdb::expr::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
-use surrealdb::sql::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::{Notification, Response, Value};
 
 #[derive(Args, Debug)]

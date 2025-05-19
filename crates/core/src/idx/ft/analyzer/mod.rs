@@ -1,6 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::statements::DefineAnalyzerStatement;
+use crate::expr::{FlowResultExt as _, Value};
+use crate::expr::{Function, Strand};
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::doclength::DocLength;
@@ -8,9 +11,6 @@ use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::store::IndexStores;
-use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::{FlowResultExt as _, Value};
-use crate::sql::{Function, Strand};
 use anyhow::{Result, bail};
 use filter::Filter;
 use reblessive::tree::Stk;
@@ -314,7 +314,7 @@ mod tests {
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::{
-		sql::{Statement, statements::DefineStatement},
+		expr::{Statement, statements::DefineStatement},
 		syn,
 	};
 	use std::sync::Arc;

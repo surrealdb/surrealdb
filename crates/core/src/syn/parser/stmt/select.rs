@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{
+	expr::{
 		Field, Fields, Idioms, Limit, Order, Split, Splits, Start, Values, Version,
 		order::{OrderList, Ordering},
 		statements::SelectStatement,

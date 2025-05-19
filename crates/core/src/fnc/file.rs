@@ -4,7 +4,7 @@ use crate::{
 	buc::{BucketController, store::ObjectKey},
 	ctx::Context,
 	dbs::Options,
-	sql::{File, Object, Strand, Value},
+	expr::{File, Object, Strand, Value},
 };
 use anyhow::Result;
 

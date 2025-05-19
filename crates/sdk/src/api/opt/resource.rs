@@ -3,13 +3,13 @@ use crate::{
 	api::{Result, err::Error},
 };
 use std::ops::{self, Bound};
-use surrealdb_core::sql::{
+use surrealdb_core::expr::{
 	Edges as CoreEdges, Id as CoreId, IdRange as CoreIdRange, Table as CoreTable,
 	Thing as CoreThing,
 };
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 
 /// A wrapper type to assert that you ment to use a string as a table name.
 ///

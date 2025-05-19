@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::Value;
+use crate::expr::Value;
 use anyhow::Result;
 
 /// Return the next value for a given sequence.

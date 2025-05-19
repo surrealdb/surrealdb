@@ -1,9 +1,9 @@
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
+use crate::expr::Base;
+use crate::expr::statements::define::{DefineIndexStatement, DefineTableStatement};
 use crate::iam::{Action, Auth, ResourceKind};
-use crate::sql::Base;
-use crate::sql::statements::define::{DefineIndexStatement, DefineTableStatement};
 use anyhow::{Result, bail};
 use async_channel::Sender;
 use std::sync::Arc;

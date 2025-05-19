@@ -7,12 +7,12 @@ use serde::{Serialize, ser::SerializeMap as _};
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
+use surrealdb_core::expr::{Array as CoreArray, Object as CoreObject, Query, Value as CoreValue};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::sql::{Array as CoreArray, Object as CoreObject, Query, Value as CoreValue};
 use uuid::Uuid;
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::sql::Table as CoreTable;
+use surrealdb_core::expr::Table as CoreTable;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -125,7 +125,7 @@ impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		use crate::api::engine::resource_to_values;
-		use surrealdb_core::sql::{
+		use surrealdb_core::expr::{
 			Data, Output,
 			statements::{UpdateStatement, UpsertStatement},
 		};
@@ -455,7 +455,7 @@ impl Command {
 
 /// A struct which will be serialized as a map to behave like the previously used BTreeMap.
 ///
-/// This struct serializes as if it is a surrealdb_core::sql::Value::Object.
+/// This struct serializes as if it is a surrealdb_core::expr::Value::Object.
 #[derive(Debug)]
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
@@ -654,7 +654,7 @@ mod test {
 	use std::io::Cursor;
 
 	use revision::Revisioned;
-	use surrealdb_core::sql::{Number, Value};
+	use surrealdb_core::expr::{Number, Value};
 
 	use super::RouterRequest;
 

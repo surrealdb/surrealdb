@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::sql::{
+use surrealdb_core::expr::{
 	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, Statement, Table,
 	Value as CoreValue, statements::LiveStatement,
 };
@@ -69,7 +69,7 @@ where
 				let mut idiom = Idiom::default();
 				idiom.0 = vec![Part::from(ident)];
 				let mut cond = Cond::default();
-				cond.0 = surrealdb_core::sql::Value::Expression(Box::new(Expression::new(
+				cond.0 = surrealdb_core::expr::Value::Expression(Box::new(Expression::new(
 					idiom.into(),
 					Operator::Equal,
 					record.into(),

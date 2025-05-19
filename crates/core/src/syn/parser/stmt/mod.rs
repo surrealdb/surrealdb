@@ -1,22 +1,22 @@
 use reblessive::Stk;
 
-use crate::sql::block::Entry;
-use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
-use crate::sql::statements::show::{ShowSince, ShowStatement};
-use crate::sql::statements::sleep::SleepStatement;
-use crate::sql::statements::{
+use crate::expr::block::Entry;
+use crate::expr::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
+use crate::expr::statements::show::{ShowSince, ShowStatement};
+use crate::expr::statements::sleep::SleepStatement;
+use crate::expr::statements::{
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 	access::{
 		AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 		AccessStatementShow, Subject,
 	},
 };
-use crate::sql::{Duration, Fields, Ident, Param};
+use crate::expr::{Duration, Fields, Ident, Param};
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
 use crate::syn::token::{Glued, TokenKind, t};
 use crate::{
-	sql::{
+	expr::{
 		Expression, Operator, Statement, Statements, Value,
 		statements::{
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
@@ -325,7 +325,7 @@ impl Parser<'_> {
 					r,
 				} = *x
 				{
-					return Statement::Set(crate::sql::statements::SetStatement {
+					return Statement::Set(crate::expr::statements::SetStatement {
 						name: x.0.0,
 						what: r,
 						kind: None,
@@ -346,7 +346,7 @@ impl Parser<'_> {
 					r,
 				} = *x
 				{
-					return Entry::Set(crate::sql::statements::SetStatement {
+					return Entry::Set(crate::expr::statements::SetStatement {
 						name: x.0.0,
 						what: r,
 						kind: None,

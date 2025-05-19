@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::statements::IfelseStatement,
+	expr::statements::IfelseStatement,
 	syn::{
 		parser::{
 			ParseResult, Parser,

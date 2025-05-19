@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Function, Ident, Model, Value},
+	expr::{Function, Ident, Model, Value},
 	syn::{
 		error::syntax_error,
 		parser::mac::{expected, expected_whitespace, unexpected},
@@ -117,7 +117,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod test {
 	use crate::{
-		sql::{Script, Value},
+		expr::{Script, Value},
 		syn::{self, Parse},
 	};
 

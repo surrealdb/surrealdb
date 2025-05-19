@@ -1,10 +1,10 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::value::TryRem;
+use crate::expr::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
+use crate::expr::{Expression, Thing};
 use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::value::TryRem;
-use crate::sql::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
-use crate::sql::{Expression, Thing};
 use anyhow::Result;
 use reblessive::tree::Stk;
 

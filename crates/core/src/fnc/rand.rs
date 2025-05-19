@@ -1,8 +1,8 @@
 use crate::cnf::ID_CHARS;
 use crate::err::Error;
-use crate::sql::uuid::Uuid;
-use crate::sql::value::Value;
-use crate::sql::{Datetime, Duration, Number};
+use crate::expr::uuid::Uuid;
+use crate::expr::value::Value;
+use crate::expr::{Datetime, Duration, Number};
 use anyhow::{Result, bail, ensure};
 use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
@@ -303,10 +303,10 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 
 pub mod uuid {
 
+	use crate::expr::Datetime;
+	use crate::expr::uuid::Uuid;
+	use crate::expr::value::Value;
 	use crate::fnc::args::Optional;
-	use crate::sql::Datetime;
-	use crate::sql::uuid::Uuid;
-	use crate::sql::value::Value;
 	use anyhow::Result;
 
 	pub fn v4(_: ()) -> Result<Value> {

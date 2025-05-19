@@ -1,6 +1,6 @@
 use crate::ctx::Context;
-use crate::sql::Duration;
-use crate::sql::Value;
+use crate::expr::Duration;
+use crate::expr::Value;
 use anyhow::Result;
 
 /// Sleep during the provided duration parameter.

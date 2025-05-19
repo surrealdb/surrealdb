@@ -1,4 +1,4 @@
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use anyhow::Result;
 use md5::Digest;
 use md5::Md5;
@@ -84,7 +84,7 @@ macro_rules! bounded_verify_password {
 pub mod argon2 {
 
 	use super::COST_ALLOWANCE;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use anyhow::Result;
 	use argon2::{
 		Argon2,
@@ -117,8 +117,8 @@ pub mod argon2 {
 
 pub mod bcrypt {
 
+	use crate::expr::value::Value;
 	use crate::fnc::crypto::COST_ALLOWANCE;
-	use crate::sql::value::Value;
 	use anyhow::Result;
 	use bcrypt::HashParts;
 	use std::str::FromStr;
@@ -148,7 +148,7 @@ pub mod bcrypt {
 pub mod pbkdf2 {
 
 	use super::COST_ALLOWANCE;
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use anyhow::Result;
 	use pbkdf2::{
 		Pbkdf2,
@@ -182,7 +182,7 @@ pub mod pbkdf2 {
 
 pub mod scrypt {
 
-	use crate::sql::value::Value;
+	use crate::expr::value::Value;
 	use anyhow::Result;
 	use rand::rngs::OsRng;
 	use scrypt::{
