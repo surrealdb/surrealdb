@@ -1,5 +1,4 @@
 //! Methods to use when interacting with a SurrealDB instance
-use self::query::ValidQuery;
 use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
@@ -253,7 +252,6 @@ where
 	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<C, Self> {
 		Connect {
 			surreal: Surreal::init(),
-			#[expect(deprecated)]
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -335,7 +333,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: to_core_value(value).map_err(Into::into),
+			value: to_core_value(value),
 		}
 	}
 
@@ -645,31 +643,13 @@ where
 		let result = match query.as_str() {
 			Some(surql) => self.inner.router.extract().and_then(|router| {
 				let capabilities = &router.config.capabilities;
-				#[expect(deprecated)]
 				syn::parse_with_capabilities(surql, capabilities)
-					.map_err(Into::into)
-					.and_then(opt::IntoQuery::into_query)
+					.map(opt::into_query::Sealed::into_query)
 			}),
-			#[expect(deprecated)]
-			None => query.into_query(),
+			None => Ok(query.into_query()),
 		};
-		let inner = match result {
-			Ok(query) => Ok(ValidQuery::Normal {
-				query,
-				register_live_queries: true,
-				bindings: Default::default(),
-			}),
-			Err(crate::Error::Api(crate::api::err::Error::RawQuery(query))) => {
-				Ok(ValidQuery::Raw {
-					query,
-					bindings: Default::default(),
-				})
-			}
-			Err(error) => Err(error),
-		};
-
 		Query {
-			inner,
+			inner: result.map(|x| x.0),
 			client: Cow::Borrowed(self),
 		}
 	}
@@ -716,7 +696,6 @@ where
 	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
 		Select {
 			client: Cow::Borrowed(self),
-			#[expect(deprecated)]
 			resource: resource.into_resource(),
 			response_type: PhantomData,
 			query_type: PhantomData,
@@ -772,7 +751,6 @@ where
 	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
 		Create {
 			client: Cow::Borrowed(self),
-			#[expect(deprecated)]
 			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
@@ -918,7 +896,6 @@ where
 	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
 		Insert {
 			client: Cow::Borrowed(self),
-			#[expect(deprecated)]
 			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
@@ -1077,7 +1054,6 @@ where
 	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
 		Upsert {
 			client: Cow::Borrowed(self),
-			#[expect(deprecated)]
 			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
@@ -1236,7 +1212,6 @@ where
 	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
 		Update {
 			client: Cow::Borrowed(self),
-			#[expect(deprecated)]
 			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
@@ -1269,7 +1244,6 @@ where
 	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
 		Delete {
 			client: Cow::Borrowed(self),
-			#[expect(deprecated)]
 			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
@@ -1317,7 +1291,6 @@ where
 	pub fn run<R>(&self, function: impl IntoFn) -> Run<C, R> {
 		Run {
 			client: Cow::Borrowed(self),
-			#[expect(deprecated)]
 			function: function.into_fn(),
 			args: Ok(serde_content::Value::Tuple(vec![])),
 			response_type: PhantomData,
@@ -1394,7 +1367,6 @@ where
 	pub fn export<R>(&self, target: impl IntoExportDestination<R>) -> Export<C, R> {
 		Export {
 			client: Cow::Borrowed(self),
-			#[expect(deprecated)]
 			target: target.into_export_destination(),
 			ml_config: None,
 			db_config: None,

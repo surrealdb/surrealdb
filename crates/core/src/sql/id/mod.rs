@@ -5,6 +5,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{escape::EscapeRid, Array, Number, Object, Strand, Thing, Uuid, Value};
+use anyhow::Result;
 use nanoid::nanoid;
 use range::IdRange;
 use reblessive::tree::Stk;
@@ -143,21 +144,21 @@ impl From<IdRange> for Id {
 }
 
 impl TryFrom<(Bound<Id>, Bound<Id>)> for Id {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_from(v: (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
-		Ok(Self::Range(Box::new(v.try_into()?)))
+		v.try_into().map(|x| Id::Range(Box::new(x)))
 	}
 }
 
 impl TryFrom<Range> for Id {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_from(v: Range) -> Result<Self, Self::Error> {
-		Ok(Id::Range(Box::new(v.try_into()?)))
+		v.try_into().map(|x| Id::Range(Box::new(x)))
 	}
 }
 
 impl TryFrom<Value> for Id {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_from(v: Value) -> Result<Self, Self::Error> {
 		match v {
 			Value::Number(Number::Int(v)) => Ok(v.into()),
@@ -165,9 +166,9 @@ impl TryFrom<Value> for Id {
 			Value::Array(v) => Ok(v.into()),
 			Value::Object(v) => Ok(v.into()),
 			Value::Range(v) => v.deref().to_owned().try_into(),
-			v => Err(Error::IdInvalid {
+			v => Err(anyhow::Error::new(Error::IdInvalid {
 				value: v.kindof().to_string(),
-			}),
+			})),
 		}
 	}
 }
@@ -247,18 +248,18 @@ impl Id {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Id, Error> {
+	) -> Result<Id> {
 		match self {
 			Id::Number(v) => Ok(Id::Number(*v)),
 			Id::String(v) => Ok(Id::String(v.clone())),
 			Id::Uuid(v) => Ok(Id::Uuid(*v)),
 			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
 				Value::Array(v) => Ok(Id::Array(v)),
-				v => Err(fail!("Expected a Value::Array but found {v:?}")),
+				v => fail!("Expected a Value::Array but found {v:?}"),
 			},
 			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
 				Value::Object(v) => Ok(Id::Object(v)),
-				v => Err(fail!("Expected a Value::Object but found {v:?}")),
+				v => fail!("Expected a Value::Object but found {v:?}"),
 			},
 			Id::Generate(v) => match v {
 				Gen::Rand => Ok(Self::rand()),

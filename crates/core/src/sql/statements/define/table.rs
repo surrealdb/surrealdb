@@ -13,6 +13,7 @@ use crate::sql::{
 	Value, Values, View,
 };
 use crate::sql::{Idiom, Kind, TableType};
+use anyhow::{bail, Result};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -66,7 +67,7 @@ impl DefineTableStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
@@ -78,7 +79,7 @@ impl DefineTableStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::TbAlreadyExists {
+				bail!(Error::TbAlreadyExists {
 					name: self.name.to_string(),
 				});
 			}
@@ -95,11 +96,16 @@ impl DefineTableStatement {
 				}
 				_ => None,
 			},
-			// Don't persist the `IF NOT EXISTS` clause to schema
+			// Don't persist the `IF NOT EXISTS` clause to the schema
 			if_not_exists: false,
 			overwrite: false,
 			..self.clone()
 		};
+		// Make sure we are refreshing the caches
+		dt.cache_fields_ts = Uuid::now_v7();
+		dt.cache_events_ts = Uuid::now_v7();
+		dt.cache_indexes_ts = Uuid::now_v7();
+		dt.cache_tables_ts = Uuid::now_v7();
 		// Add table relational fields
 		Self::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		// Set the table definition
@@ -187,7 +193,7 @@ impl DefineTableStatement {
 		ns: &str,
 		db: &str,
 		tb: &mut DefineTableStatement,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Add table relational fields
 		if let TableType::Relation(rel) = &tb.kind {
 			// Set the `in` field as a DEFINE FIELD definition

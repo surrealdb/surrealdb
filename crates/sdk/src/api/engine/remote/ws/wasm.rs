@@ -2,7 +2,7 @@ use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
 use crate::api::conn::DbResponse;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
-use crate::api::conn::{Command, Connection, RequestData};
+use crate::api::conn::{self, Command, RequestData};
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::engine::remote::Response;
@@ -11,12 +11,12 @@ use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
-use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 use crate::{Action, Notification};
+use anyhow::Result;
 use async_channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
@@ -48,8 +48,7 @@ type MessageSink = SplitSink<WsStream, Message>;
 type RouterState = super::RouterState<MessageSink, MessageStream>;
 
 impl crate::api::Connection for Client {}
-
-impl Connection for Client {
+impl conn::Sealed for Client {
 	fn connect(
 		mut address: Endpoint,
 		capacity: usize,

@@ -24,12 +24,15 @@ use crate::api::err::Error;
 use crate::{
 	api::{
 		conn::{Command, DbResponse, RequestData},
-		Connect, Response as QueryResponse, Result, Surreal,
+		Connect, Response as QueryResponse, Surreal,
 	},
 	method::Stats,
 	opt::{IntoEndpoint, Table},
 	value::Notification,
+	Result,
 };
+#[cfg(not(target_family = "wasm"))]
+use anyhow::bail;
 use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
@@ -151,43 +154,6 @@ type LiveQueryMap = HashMap<Uuid, Sender<Notification<CoreValue>>>;
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-mem")))]
 #[derive(Debug)]
 pub struct Mem;
-
-/// File database
-///
-/// # Examples
-///
-/// Instantiating a file-backed instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::File;
-///
-/// let db = Surreal::new::<File>("path/to/database-folder").await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Instantiating a file-backed strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::File;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<File>(("path/to/database-folder", config)).await?;
-/// # Ok(())
-/// # }
-/// ```
-#[cfg(feature = "kv-rocksdb")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-rocksdb")))]
-#[derive(Debug)]
-#[deprecated]
-pub struct File;
 
 /// RocksDB database
 ///
@@ -378,7 +344,6 @@ impl Surreal<Db> {
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
-			#[expect(deprecated)]
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -398,7 +363,7 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 				map.insert(index, (stats, Ok(value)));
 			}
 			Err(error) => {
-				map.insert(index, (stats, Err(error.into())));
+				map.insert(index, (stats, Err(error)));
 			}
 		};
 	}
@@ -443,12 +408,13 @@ async fn export_file(
 	};
 
 	if let Err(error) = res {
-		if let crate::error::Db::Channel(message) = error {
+		if let Some(surrealdb_core::err::Error::Channel(ref message)) = error.downcast_ref() {
 			// This is not really an error. Just logging it for improved visibility.
 			trace!("{message}");
 			return Ok(());
 		}
-		return Err(error.into());
+
+		return Err(error);
 	}
 	Ok(())
 }
@@ -483,21 +449,19 @@ async fn export_ml(
 }
 
 #[cfg(not(target_family = "wasm"))]
-async fn copy<'a, R, W>(
-	path: PathBuf,
-	reader: &'a mut R,
-	writer: &'a mut W,
-) -> std::result::Result<(), crate::Error>
+async fn copy<'a, R, W>(path: PathBuf, reader: &'a mut R, writer: &'a mut W) -> Result<()>
 where
 	R: tokio::io::AsyncRead + Unpin + ?Sized,
 	W: tokio::io::AsyncWrite + Unpin + ?Sized,
 {
-	io::copy(reader, writer).await.map(|_| ()).map_err(|error| {
-		crate::Error::Api(crate::error::Api::FileRead {
+	io::copy(reader, writer)
+		.await
+		.map(|_| ())
+		.map_err(|error| crate::error::Api::FileRead {
 			path,
 			error,
 		})
-	})
+		.map_err(anyhow::Error::new)
 }
 
 async fn kill_live_query(
@@ -944,11 +908,10 @@ async fn router(
 			let mut file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
-					return Err(Error::FileOpen {
+					bail!(Error::FileOpen {
 						path,
 						error,
-					}
-					.into());
+					});
 				}
 			};
 
@@ -970,7 +933,7 @@ async fn router(
 					Ok(0) => Poll::Ready(None),
 					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
 					Err(e) => {
-						let error = CoreError::QueryStream(e.to_string());
+						let error = anyhow::Error::new(CoreError::QueryStream(e.to_string()));
 						Poll::Ready(Some(Err(error)))
 					}
 				}

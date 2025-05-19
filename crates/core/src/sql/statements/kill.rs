@@ -1,9 +1,10 @@
-use crate::dbs::Options;
+use crate::dbs::{Action, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::kvs::Live;
 use crate::sql::Value;
 use crate::{ctx::Context, sql::FlowResultExt as _, sql::Uuid};
+use anyhow::{bail, Result};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -28,7 +29,7 @@ impl KillStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Is realtime enabled?
 		opt.realtime()?;
 		// Valid options?
@@ -37,7 +38,7 @@ impl KillStatement {
 		let lid = match self.id.compute(stk, ctx, opt, None).await.catch_return()?.cast_to::<Uuid>()
 		{
 			Err(_) => {
-				return Err(Error::KillStatement {
+				bail!(Error::KillStatement {
 					value: self.id.to_string(),
 				})
 			}
@@ -70,10 +71,19 @@ impl KillStatement {
 				txn.clear();
 			}
 			None => {
-				return Err(Error::KillStatement {
+				bail!(Error::KillStatement {
 					value: self.id.to_string(),
 				});
 			}
+		}
+		if let Some(chn) = opt.sender.as_ref() {
+			chn.send(Notification {
+				id: lid.into(),
+				action: Action::Killed,
+				record: Value::None,
+				result: Value::None,
+			})
+			.await?;
 		}
 		// Return the query id
 		Ok(Value::None)

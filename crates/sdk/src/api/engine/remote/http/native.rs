@@ -1,5 +1,5 @@
 use super::Client;
-use crate::api::conn::Connection;
+use crate::api::conn;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
@@ -20,8 +20,7 @@ use tokio::sync::watch;
 use url::Url;
 
 impl crate::api::Connection for Client {}
-
-impl Connection for Client {
+impl conn::Sealed for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let headers = super::default_headers();

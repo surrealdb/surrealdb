@@ -12,6 +12,9 @@ use crate::sql::paths::OUT;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 use crate::sql::FlowResultExt as _;
+use anyhow::bail;
+use anyhow::ensure;
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
@@ -28,56 +31,61 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the table for this document
 		let tb = self.tb(ctx, opt).await?;
 		// Determine the type of statement
 		match stm {
 			Statement::Create(_) => {
-				if !tb.allows_normal() {
-					return Err(Error::TableCheck {
+				ensure!(
+					tb.allows_normal(),
+					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
 						target_type: tb.kind.to_string(),
-					});
-				}
+					}
+				);
 			}
 			Statement::Upsert(_) => {
-				if !tb.allows_normal() {
-					return Err(Error::TableCheck {
+				ensure!(
+					tb.allows_normal(),
+					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
 						target_type: tb.kind.to_string(),
-					});
-				}
+					}
+				);
 			}
 			Statement::Relate(_) => {
-				if !tb.allows_relation() {
-					return Err(Error::TableCheck {
+				ensure!(
+					tb.allows_relation(),
+					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: true,
 						target_type: tb.kind.to_string(),
-					});
-				}
+					}
+				);
 			}
 			Statement::Insert(_) => match self.extras {
 				Workable::Relate(_, _, _) => {
-					if !tb.allows_relation() {
-						return Err(Error::TableCheck {
+					ensure!(
+						tb.allows_relation(),
+						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: true,
 							target_type: tb.kind.to_string(),
-						});
-					}
+						}
+					);
 				}
 				_ => {
-					if !tb.allows_normal() {
-						return Err(Error::TableCheck {
+					ensure!(
+						tb.allows_normal(),
+						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: false,
 							target_type: tb.kind.to_string(),
-						});
-					}
+						}
+					);
 				}
 			},
 			_ => {}
@@ -118,7 +126,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the record id
 		let rid = self.id()?;
 		// Don't bother checking if we generated the document id
@@ -126,11 +134,12 @@ impl Document {
 			return Ok(());
 		}
 		// You cannot store a range id as the id field on a document
-		if rid.is_range() {
-			return Err(Error::IdInvalid {
+		ensure!(
+			!rid.is_range(),
+			Error::IdInvalid {
 				value: rid.to_string(),
-			});
-		}
+			}
+		);
 		// This is a CREATE, UPSERT, UPDATE statement
 		if let Workable::Normal = &self.extras {
 			// This is a CONTENT, MERGE or SET clause
@@ -140,7 +149,7 @@ impl Document {
 					match field {
 						// You cannot store a range id as the id field on a document
 						Value::Thing(v) if v.is_range() => {
-							return Err(Error::IdInvalid {
+							bail!(Error::IdInvalid {
 								value: v.to_string(),
 							})
 						}
@@ -150,7 +159,7 @@ impl Document {
 						v if rid.id.is(&v) => (),
 						// The id field does not match
 						v => {
-							return Err(Error::IdMismatch {
+							bail!(Error::IdMismatch {
 								value: v.to_string(),
 							})
 						}
@@ -167,7 +176,7 @@ impl Document {
 					match field {
 						// You cannot store a range id as the id field on a document
 						Value::Thing(v) if v.is_range() => {
-							return Err(Error::IdInvalid {
+							bail!(Error::IdInvalid {
 								value: v.to_string(),
 							})
 						}
@@ -179,7 +188,7 @@ impl Document {
 						v if v.is_none() => (),
 						// The id field does not match
 						v => {
-							return Err(Error::IdMismatch {
+							bail!(Error::IdMismatch {
 								value: v.to_string(),
 							})
 						}
@@ -190,7 +199,7 @@ impl Document {
 					match field {
 						// You cannot store a range id as the in field on a document
 						Value::Thing(v) if v.is_range() => {
-							return Err(Error::InInvalid {
+							bail!(Error::InInvalid {
 								value: v.to_string(),
 							})
 						}
@@ -200,7 +209,7 @@ impl Document {
 						v if l.id.is(&v) => (),
 						// The in field does not match
 						v => {
-							return Err(Error::InMismatch {
+							bail!(Error::InMismatch {
 								value: v.to_string(),
 							})
 						}
@@ -211,7 +220,7 @@ impl Document {
 					match field {
 						// You cannot store a range id as the out field on a document
 						Value::Thing(v) if v.is_range() => {
-							return Err(Error::OutInvalid {
+							bail!(Error::OutInvalid {
 								value: v.to_string(),
 							})
 						}
@@ -221,7 +230,7 @@ impl Document {
 						v if r.id.is(&v) => (),
 						// The out field does not match
 						v => {
-							return Err(Error::OutMismatch {
+							bail!(Error::OutMismatch {
 								value: v.to_string(),
 							})
 						}
@@ -239,7 +248,7 @@ impl Document {
 				{
 					// You cannot store a range id as the id field on a document
 					Value::Thing(v) if v.is_range() => {
-						return Err(Error::IdInvalid {
+						bail!(Error::IdInvalid {
 							value: v.to_string(),
 						})
 					}
@@ -251,7 +260,7 @@ impl Document {
 					v if v.is_none() => (),
 					// The id field does not match
 					v => {
-						return Err(Error::IdMismatch {
+						bail!(Error::IdMismatch {
 							value: v.to_string(),
 						})
 					}
@@ -265,7 +274,7 @@ impl Document {
 				{
 					// You cannot store a range id as the in field on a document
 					Value::Thing(v) if v.is_range() => {
-						return Err(Error::InInvalid {
+						bail!(Error::InInvalid {
 							value: v.to_string(),
 						})
 					}
@@ -275,7 +284,7 @@ impl Document {
 					v if l.id.is(&v) => (),
 					// The in field does not match
 					v => {
-						return Err(Error::InMismatch {
+						bail!(Error::InMismatch {
 							value: v.to_string(),
 						})
 					}
@@ -289,7 +298,7 @@ impl Document {
 				{
 					// You cannot store a range id as the out field on a document
 					Value::Thing(v) if v.is_range() => {
-						return Err(Error::OutInvalid {
+						bail!(Error::OutInvalid {
 							value: v.to_string(),
 						})
 					}
@@ -299,7 +308,7 @@ impl Document {
 					v if r.id.is(&v) => (),
 					// The out field does not match
 					v => {
-						return Err(Error::OutMismatch {
+						bail!(Error::OutMismatch {
 							value: v.to_string(),
 						})
 					}
@@ -433,15 +442,15 @@ impl Document {
 				if opt.auth.is_record() {
 					let ns = opt.ns()?;
 					if opt.auth.level().ns() != Some(ns) {
-						return Err(IgnoreError::from(Error::NsNotAllowed {
+						return Err(IgnoreError::from(anyhow::Error::new(Error::NsNotAllowed {
 							ns: ns.into(),
-						}));
+						})));
 					}
 					let db = opt.db()?;
 					if opt.auth.level().db() != Some(db) {
-						return Err(IgnoreError::from(Error::DbNotAllowed {
+						return Err(IgnoreError::from(anyhow::Error::new(Error::DbNotAllowed {
 							db: db.into(),
-						}));
+						})));
 					}
 				}
 				// Get the table

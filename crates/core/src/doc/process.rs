@@ -4,6 +4,7 @@ use crate::dbs::Statement;
 use crate::dbs::Workable;
 use crate::dbs::{Options, Processed};
 use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::value::Value;
 use reblessive::tree::Stk;
 use std::sync::Arc;
@@ -43,7 +44,11 @@ impl Document {
 			Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await?,
 			Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await?,
 			Statement::Insert(stm) => doc.insert(stk, ctx, opt, stm).await?,
-			stm => return Err(IgnoreError::from(fail!("Unexpected statement type: {stm:?}"))),
+			stm => {
+				return Err(IgnoreError::from(anyhow::Error::new(Error::unreachable(
+					format_args!("Unexpected statement type: {stm:?}"),
+				))))
+			}
 		};
 		Ok(res)
 	}

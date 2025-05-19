@@ -132,7 +132,6 @@ impl Surreal<Client> {
 	) -> Connect<Client, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
-			#[expect(deprecated)]
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,

@@ -6,6 +6,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
+use anyhow::{bail, Result};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -36,7 +37,7 @@ impl DefineFunctionStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
 		// Fetch the transaction
@@ -47,7 +48,7 @@ impl DefineFunctionStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::FcAlreadyExists {
+				bail!(Error::FcAlreadyExists {
 					name: self.name.to_string(),
 				});
 			}

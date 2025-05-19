@@ -31,12 +31,6 @@ pub enum ApiError {
 	Unreachable(String),
 }
 
-impl From<ApiError> for String {
-	fn from(e: ApiError) -> String {
-		e.to_string()
-	}
-}
-
 impl ApiError {
 	pub fn status_code(&self) -> StatusCode {
 		match self {

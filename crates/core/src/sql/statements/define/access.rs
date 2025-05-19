@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Strand, Value};
+use anyhow::{bail, Result};
 
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -64,7 +65,7 @@ impl DefineAccessStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
 		// Check the statement type
@@ -77,7 +78,7 @@ impl DefineAccessStatement {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite {
-						return Err(Error::AccessRootAlreadyExists {
+						bail!(Error::AccessRootAlreadyExists {
 							ac: self.name.to_string(),
 						});
 					}
@@ -108,7 +109,7 @@ impl DefineAccessStatement {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite {
-						return Err(Error::AccessNsAlreadyExists {
+						bail!(Error::AccessNsAlreadyExists {
 							ac: self.name.to_string(),
 							ns: opt.ns()?.into(),
 						});
@@ -142,7 +143,7 @@ impl DefineAccessStatement {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite {
-						return Err(Error::AccessDbAlreadyExists {
+						bail!(Error::AccessDbAlreadyExists {
 							ac: self.name.to_string(),
 							ns: ns.into(),
 							db: db.into(),
@@ -170,7 +171,7 @@ impl DefineAccessStatement {
 				Ok(Value::None)
 			}
 			// Other levels are not supported
-			_ => Err(Error::InvalidLevel(self.base.to_string())),
+			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
 		}
 	}
 }

@@ -107,7 +107,7 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			let value = self.recv(rx).await?;
-			from_core_value(value).map_err(Into::into)
+			from_core_value(value)
 		})
 	}
 
@@ -120,7 +120,7 @@ impl Router {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
 				CoreValue::None | CoreValue::Null => Ok(None),
-				value => from_core_value(value).map_err(Into::into),
+				value => from_core_value(value),
 			}
 		})
 	}
@@ -137,7 +137,7 @@ impl Router {
 				CoreValue::Array(array) => CoreValue::Array(array),
 				value => vec![value].into(),
 			};
-			from_core_value(value).map_err(Into::into)
+			from_core_value(value)
 		})
 	}
 
@@ -192,7 +192,7 @@ pub(crate) struct MlExportConfig {
 }
 
 /// Connection trait implemented by supported protocols
-pub trait Connection: Sized + Send + Sync + 'static {
+pub trait Sealed: Sized + Send + Sync + 'static {
 	/// Connect to the server
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>>
 	where

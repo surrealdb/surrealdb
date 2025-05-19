@@ -4,6 +4,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::Transaction;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::statements::info::InfoStructure;
@@ -11,10 +12,12 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Literal, Part};
 use crate::sql::{Relation, TableType};
+use anyhow::{bail, ensure, Result};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 6)]
@@ -52,7 +55,7 @@ impl DefineFieldStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Validate reference options
@@ -79,7 +82,7 @@ impl DefineFieldStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::FdAlreadyExists {
+				bail!(Error::FdAlreadyExists {
 					name: fd,
 				});
 			}
@@ -119,7 +122,90 @@ impl DefineFieldStatement {
 		}
 		// Clear the cache
 		txn.clear();
+		// Process possible recursive defitions
+		self.process_recursive_definitions(ns, db, txn.clone()).await?;
+		// If this is an `in` field then check relation definitions
+		if fd.as_str() == "in" {
+			// Get the table definition that this field belongs to
+			let tb = txn.get_tb(ns, db, &self.what).await?;
+			// The table is marked as TYPE RELATION
+			if let TableType::Relation(ref relation) = tb.kind {
+				// Check if a field TYPE has been specified
+				if let Some(kind) = self.kind.as_ref() {
+					// The `in` field must be a record type
+					ensure!(
+						kind.is_record(),
+						Error::Thrown("in field on a relation must be a record".into(),)
+					);
+					// Add the TYPE to the DEFINE TABLE statement
+					if relation.from.as_ref() != self.kind.as_ref() {
+						let key = crate::key::database::tb::new(ns, db, &self.what);
+						let val = DefineTableStatement {
+							cache_fields_ts: Uuid::now_v7(),
+							kind: TableType::Relation(Relation {
+								from: self.kind.clone(),
+								..relation.to_owned()
+							}),
+							..tb.as_ref().to_owned()
+						};
+						txn.set(key, revision::to_vec(&val)?, None).await?;
+						// Clear the cache
+						if let Some(cache) = ctx.get_cache() {
+							cache.clear_tb(ns, db, &self.what);
+						}
+						// Clear the cache
+						txn.clear();
+					}
+				}
+			}
+		}
+		// If this is an `out` field then check relation definitions
+		if fd.as_str() == "out" {
+			// Get the table definition that this field belongs to
+			let tb = txn.get_tb(ns, db, &self.what).await?;
+			// The table is marked as TYPE RELATION
+			if let TableType::Relation(ref relation) = tb.kind {
+				// Check if a field TYPE has been specified
+				if let Some(kind) = self.kind.as_ref() {
+					// The `out` field must be a record type
+					ensure!(
+						kind.is_record(),
+						Error::Thrown("out field on a relation must be a record".into(),)
+					);
+					// Add the TYPE to the DEFINE TABLE statement
+					if relation.from.as_ref() != self.kind.as_ref() {
+						let key = crate::key::database::tb::new(ns, db, &self.what);
+						let val = DefineTableStatement {
+							cache_fields_ts: Uuid::now_v7(),
+							kind: TableType::Relation(Relation {
+								to: self.kind.clone(),
+								..relation.to_owned()
+							}),
+							..tb.as_ref().to_owned()
+						};
+						txn.set(key, revision::to_vec(&val)?, None).await?;
+						// Clear the cache
+						if let Some(cache) = ctx.get_cache() {
+							cache.clear_tb(ns, db, &self.what);
+						}
+						// Clear the cache
+						txn.clear();
+					}
+				}
+			}
+		}
+		// Clear the cache
+		txn.clear();
+		// Ok all good
+		Ok(Value::None)
+	}
 
+	pub(crate) async fn process_recursive_definitions(
+		&self,
+		ns: &str,
+		db: &str,
+		txn: Arc<Transaction>,
+	) -> Result<()> {
 		// Find all existing field definitions
 		let fields = txn.all_tb_fields(ns, db, &self.what, None).await.ok();
 		// Process possible recursive_definitions
@@ -176,85 +262,11 @@ impl DefineFieldStatement {
 				}
 			}
 		}
-		// If this is an `in` field then check relation definitions
-		if fd.as_str() == "in" {
-			// Get the table definition that this field belongs to
-			let tb = txn.get_tb(ns, db, &self.what).await?;
-			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.kind {
-				// Check if a field TYPE has been specified
-				if let Some(kind) = self.kind.as_ref() {
-					// The `in` field must be a record type
-					if !kind.is_record() {
-						return Err(Error::Thrown(
-							"in field on a relation must be a record".into(),
-						));
-					}
-					// Add the TYPE to the DEFINE TABLE statement
-					if relation.from.as_ref() != self.kind.as_ref() {
-						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = DefineTableStatement {
-							cache_fields_ts: Uuid::now_v7(),
-							kind: TableType::Relation(Relation {
-								from: self.kind.clone(),
-								..relation.to_owned()
-							}),
-							..tb.as_ref().to_owned()
-						};
-						txn.set(key, revision::to_vec(&val)?, None).await?;
-						// Clear the cache
-						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &self.what);
-						}
-						// Clear the cache
-						txn.clear();
-					}
-				}
-			}
-		}
-		// If this is an `out` field then check relation definitions
-		if fd.as_str() == "out" {
-			// Get the table definition that this field belongs to
-			let tb = txn.get_tb(ns, db, &self.what).await?;
-			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.kind {
-				// Check if a field TYPE has been specified
-				if let Some(kind) = self.kind.as_ref() {
-					// The `out` field must be a record type
-					if !kind.is_record() {
-						return Err(Error::Thrown(
-							"out field on a relation must be a record".into(),
-						));
-					}
-					// Add the TYPE to the DEFINE TABLE statement
-					if relation.from.as_ref() != self.kind.as_ref() {
-						let key = crate::key::database::tb::new(ns, db, &self.what);
-						let val = DefineTableStatement {
-							cache_fields_ts: Uuid::now_v7(),
-							kind: TableType::Relation(Relation {
-								to: self.kind.clone(),
-								..relation.to_owned()
-							}),
-							..tb.as_ref().to_owned()
-						};
-						txn.set(key, revision::to_vec(&val)?, None).await?;
-						// Clear the cache
-						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &self.what);
-						}
-						// Clear the cache
-						txn.clear();
-					}
-				}
-			}
-		}
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
+
+		Ok(())
 	}
 
-	fn validate_reference_options(&self, ctx: &Context) -> Result<(), Error> {
+	pub(crate) fn validate_reference_options(&self, ctx: &Context) -> Result<()> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(());
 		}
@@ -268,37 +280,32 @@ impl DefineFieldStatement {
 			// Check if any of the kinds are references
 			if kinds.iter().any(|k| matches!(k, Kind::References(_, _))) {
 				// If any of the kinds are references, all of them must be
-				if !kinds.iter().all(|k| matches!(k, Kind::References(_, _))) {
-					return Err(Error::RefsMismatchingVariants);
-				}
+				ensure!(
+					kinds.iter().all(|k| matches!(k, Kind::References(_, _))),
+					Error::RefsMismatchingVariants
+				);
 
 				// As the refs and dynrefs type essentially take over a field
 				// they are not allowed to be mixed with most other clauses
 				let typename = kind.to_string();
 
-				if self.reference.is_some() {
-					return Err(Error::RefsTypeConflict("REFERENCE".into(), typename));
-				}
+				ensure!(
+					self.reference.is_none(),
+					Error::RefsTypeConflict("REFERENCE".into(), typename)
+				);
 
-				if self.default.is_some() {
-					return Err(Error::RefsTypeConflict("DEFAULT".into(), typename));
-				}
+				ensure!(
+					self.default.is_none(),
+					Error::RefsTypeConflict("DEFAULT".into(), typename)
+				);
 
-				if self.value.is_some() {
-					return Err(Error::RefsTypeConflict("VALUE".into(), typename));
-				}
+				ensure!(self.value.is_none(), Error::RefsTypeConflict("VALUE".into(), typename));
 
-				if self.assert.is_some() {
-					return Err(Error::RefsTypeConflict("ASSERT".into(), typename));
-				}
+				ensure!(self.assert.is_none(), Error::RefsTypeConflict("ASSERT".into(), typename));
 
-				if self.flex {
-					return Err(Error::RefsTypeConflict("FLEXIBLE".into(), typename));
-				}
+				ensure!(!self.flex, Error::RefsTypeConflict("FLEXIBLE".into(), typename));
 
-				if self.readonly {
-					return Err(Error::RefsTypeConflict("READONLY".into(), typename));
-				}
+				ensure!(!self.readonly, Error::RefsTypeConflict("READONLY".into(), typename));
 			}
 
 			// If a reference is defined, the field must be a record
@@ -316,9 +323,10 @@ impl DefineFieldStatement {
 					kind => &vec![kind.to_owned()],
 				};
 
-				if !kinds.iter().all(|k| matches!(k, Kind::Record(_))) {
-					return Err(Error::ReferenceTypeConflict(kind.to_string()));
-				}
+				ensure!(
+					kinds.iter().all(|k| matches!(k, Kind::Record(_))),
+					Error::ReferenceTypeConflict(kind.to_string())
+				);
 			}
 		}
 
@@ -326,11 +334,11 @@ impl DefineFieldStatement {
 	}
 
 	/// Get the correct reference type if needed.
-	async fn get_reference_kind(
+	pub(crate) async fn get_reference_kind(
 		&self,
 		ctx: &Context,
 		opt: &Options,
-	) -> Result<Option<Kind>, Error> {
+	) -> Result<Option<Kind>> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
 		}
@@ -341,10 +349,13 @@ impl DefineFieldStatement {
 			let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
 				Ok(fd) => fd,
 				// If the field does not exist, there is nothing to correct
-				Err(Error::FdNotFound {
-					..
-				}) => return Ok(None),
-				Err(e) => return Err(e),
+				Err(e) => {
+					if matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
+						return Ok(None);
+					} else {
+						return Err(e);
+					}
+				}
 			};
 
 			// Check if the field is an array-like value and thus "containing" references
@@ -364,12 +375,12 @@ impl DefineFieldStatement {
 		Ok(None)
 	}
 
-	async fn disallow_mismatched_types(
+	pub(crate) async fn disallow_mismatched_types(
 		&self,
 		ctx: &Context,
 		ns: &str,
 		db: &str,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
 
 		if let Some(self_kind) = &self.kind {
@@ -378,7 +389,7 @@ impl DefineFieldStatement {
 					if let Some(fd_kind) = &fd.kind {
 						let path = self.name[fd.name.len()..].to_vec();
 						if !fd_kind.allows_nested_kind(&path, self_kind) {
-							return Err(Error::MismatchedFieldTypes {
+							bail!(Error::MismatchedFieldTypes {
 								name: self.name.to_string(),
 								kind: self_kind.to_string(),
 								existing_name: fd.name.to_string(),

@@ -5,7 +5,6 @@ mod heuristic;
 pub mod index;
 mod layer;
 
-use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::docs::HnswDocs;
@@ -13,6 +12,7 @@ use crate::idx::trees::hnsw::docs::VecDocs;
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
+use anyhow::Result;
 
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
@@ -78,7 +78,7 @@ where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
-	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Result<Self, Error> {
+	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Result<Self> {
 		let m0 = p.m0 as usize;
 		let state_key = ikb.new_hs_key()?;
 		Ok(Self {
@@ -96,7 +96,7 @@ where
 		})
 	}
 
-	async fn check_state(&mut self, tx: &Transaction) -> Result<(), Error> {
+	async fn check_state(&mut self, tx: &Transaction) -> Result<()> {
 		// Read the state
 		let st: HnswState = if let Some(val) = tx.get(self.state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
@@ -135,7 +135,7 @@ where
 		tx: &Transaction,
 		q_pt: Vector,
 		q_level: usize,
-	) -> Result<ElementId, Error> {
+	) -> Result<ElementId> {
 		// Attributes an ID to the vector
 		let q_id = self.elements.next_element_id();
 		let top_up_layers = self.layers.len();
@@ -172,7 +172,7 @@ where
 		tx: &Transaction,
 		id: ElementId,
 		level: usize,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if level > 0 {
 			// Insert in up levels
 			for (layer, state) in
@@ -197,7 +197,7 @@ where
 		q_level: usize,
 		mut ep_id: ElementId,
 		top_up_layers: usize,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if let Some(mut ep_dist) = self.elements.get_distance(tx, q_pt, &ep_id).await? {
 			if q_level < top_up_layers {
 				for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
@@ -271,20 +271,20 @@ where
 		Ok(())
 	}
 
-	async fn save_state(&self, tx: &Transaction) -> Result<(), Error> {
+	async fn save_state(&self, tx: &Transaction) -> Result<()> {
 		let val: Val = VersionedStore::try_into(&self.state)?;
 		tx.set(self.state_key.clone(), val, None).await?;
 		Ok(())
 	}
 
-	async fn insert(&mut self, tx: &Transaction, q_pt: Vector) -> Result<ElementId, Error> {
+	async fn insert(&mut self, tx: &Transaction, q_pt: Vector) -> Result<ElementId> {
 		let q_level = self.get_random_level();
 		let res = self.insert_level(tx, q_pt, q_level).await?;
 		self.save_state(tx).await?;
 		Ok(res)
 	}
 
-	async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool, Error> {
+	async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool> {
 		let mut removed = false;
 
 		// Do we have the vector?
@@ -338,7 +338,7 @@ where
 		&self,
 		tx: &Transaction,
 		search: &HnswSearch,
-	) -> Result<Vec<(f64, ElementId)>, Error> {
+	) -> Result<Vec<(f64, ElementId)>> {
 		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await? {
 			let w = self
 				.layer0
@@ -358,7 +358,7 @@ where
 		hnsw_docs: &HnswDocs,
 		vec_docs: &VecDocs,
 		chk: &mut HnswConditionChecker<'_>,
-	) -> Result<Vec<(f64, ElementId)>, Error> {
+	) -> Result<Vec<(f64, ElementId)>> {
 		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await? {
 			if let Some(ep_pt) = self.elements.get_vector(tx, &ep_id).await? {
 				let search_ctx = HnswCheckedSearchContext::new(
@@ -382,7 +382,7 @@ where
 		&self,
 		tx: &Transaction,
 		pt: &SharedVector,
-	) -> Result<Option<(f64, ElementId)>, Error> {
+	) -> Result<Option<(f64, ElementId)>> {
 		if let Some(mut ep_id) = self.state.enter_point {
 			if let Some(mut ep_dist) = self.elements.get_distance(tx, pt, &ep_id).await? {
 				for layer in self.layers.iter().rev() {
@@ -406,11 +406,7 @@ where
 		Ok(None)
 	}
 
-	async fn get_vector(
-		&self,
-		tx: &Transaction,
-		e_id: &ElementId,
-	) -> Result<Option<SharedVector>, Error> {
+	async fn get_vector(&self, tx: &Transaction, e_id: &ElementId) -> Result<Option<SharedVector>> {
 		self.elements.get_vector(tx, e_id).await
 	}
 	#[cfg(test)]
@@ -434,7 +430,6 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::ctx::{Context, MutableContext};
-	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
@@ -449,6 +444,7 @@ mod tests {
 	use crate::sql::index::{Distance, HnswParams, VectorType};
 	use crate::sql::{Id, Value};
 	use ahash::{HashMap, HashSet};
+	use anyhow::Result;
 	use ndarray::Array1;
 	use reblessive::tree::Stk;
 	use roaring::RoaringTreemap;
@@ -585,7 +581,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn tests_hnsw() -> Result<(), Error> {
+	async fn tests_hnsw() -> Result<()> {
 		let mut futures = Vec::new();
 		for (dist, dim) in [
 			(Distance::Chebyshev, 5),
@@ -623,7 +619,7 @@ mod tests {
 		tx: &Transaction,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
-	) -> Result<HashMap<SharedVector, HashSet<DocId>>, Error> {
+	) -> Result<HashMap<SharedVector, HashSet<DocId>>> {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
@@ -685,7 +681,7 @@ mod tests {
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 		mut map: HashMap<SharedVector, HashSet<DocId>>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
 			h.remove_document(tx, Id::Number(*doc_id as i64), &content).await?;
@@ -757,7 +753,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn tests_hnsw_index() -> Result<(), Error> {
+	async fn tests_hnsw_index() -> Result<()> {
 		let mut futures = Vec::new();
 		for (dist, dim) in [
 			(Distance::Chebyshev, 5),
@@ -832,7 +828,7 @@ mod tests {
 		query_limit: usize,
 		p: HnswParams,
 		tests_ef_recall: &[(usize, f64)],
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		info!("Build data collection");
 
 		let ds = Arc::new(Datastore::new("memory").await?);
@@ -909,7 +905,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn test_recall_euclidean() -> Result<(), Error> {
+	async fn test_recall_euclidean() -> Result<()> {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
@@ -923,7 +919,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn test_recall_euclidean_keep_pruned_connections() -> Result<(), Error> {
+	async fn test_recall_euclidean_keep_pruned_connections() -> Result<()> {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, true);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
@@ -937,7 +933,7 @@ mod tests {
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn test_recall_euclidean_full() -> Result<(), Error> {
+	async fn test_recall_euclidean_full() -> Result<()> {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, true, true);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",

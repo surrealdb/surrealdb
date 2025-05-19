@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
 use crate::syn;
+use anyhow::Result;
 use chrono::{offset::LocalResult, DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -133,10 +134,11 @@ impl ops::Sub<Self> for Datetime {
 
 impl TrySub for Datetime {
 	type Output = Duration;
-	fn try_sub(self, other: Self) -> Result<Duration, Error> {
+	fn try_sub(self, other: Self) -> Result<Duration> {
 		(self.0 - other.0)
 			.to_std()
 			.map_err(|_| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
+			.map_err(anyhow::Error::new)
 			.map(Duration::from)
 	}
 }

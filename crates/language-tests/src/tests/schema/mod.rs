@@ -83,6 +83,9 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub auth: bool,
 
+	#[serde(default)]
+	pub strict: bool,
+
 	pub namespace: Option<BoolOr<String>>,
 	pub database: Option<BoolOr<String>>,
 
@@ -197,6 +200,10 @@ pub struct ValueTestResult {
 	pub skip_record_id_key: Option<bool>,
 	#[serde(default)]
 	pub skip_uuid: Option<bool>,
+	#[serde(default)]
+	pub float_roughly_eq: Option<bool>,
+	#[serde(default)]
+	pub decimal_roughly_eq: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

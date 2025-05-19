@@ -4,7 +4,7 @@ use crate::cli::abstraction::{
 };
 use crate::cnf::PKG_VERSION;
 use crate::dbs::DbsCapabilities;
-use crate::err::Error;
+use anyhow::{anyhow, Result};
 use clap::Args;
 use futures::StreamExt;
 use rustyline::error::ReadlineError;
@@ -13,7 +13,7 @@ use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
-use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::engine::any::{self, connect};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::sql::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
@@ -66,16 +66,14 @@ pub async fn init(
 		capabilities,
 		..
 	}: SqlCommandArguments,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Capabilities configuration for local engines
 	let capabilities = capabilities.into_cli_capabilities();
 	let config = Config::new().capabilities(capabilities.clone().into());
+	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
-	let client = if username.is_some()
-		&& password.is_some()
-		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()
-	{
+	let client = if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
 			.with_username(username.as_deref())
@@ -93,7 +91,7 @@ pub async fn init(
 		};
 
 		client
-	} else if token.is_some() && !endpoint.clone().into_endpoint()?.parse_kind()?.is_local() {
+	} else if token.is_some() && !is_local {
 		let client = connect(endpoint).await?;
 		client.authenticate(token.unwrap()).await?;
 
@@ -275,7 +273,7 @@ fn process(
 	pretty: bool,
 	json: bool,
 	res: surrealdb::Result<WithStats<Response>>,
-) -> Result<String, Error> {
+) -> Result<String> {
 	// Check query response for an error
 	let mut response = res?;
 	// Get the number of statements the query contained
@@ -283,12 +281,9 @@ fn process(
 	// Prepare a single value from the query response
 	let mut vec = Vec::<(Stats, Value)>::with_capacity(num_statements);
 	for index in 0..num_statements {
-		let (stats, result) = response
-			.take(index)
-			.ok_or_else(|| {
-				format!("Expected some result for a query with index {index}, but found none")
-			})
-			.map_err(Error::Other)?;
+		let (stats, result) = response.take(index).ok_or_else(|| {
+			anyhow!("Expected some result for a query with index {index}, but found none")
+		})?;
 		let output = result.unwrap_or_else(|e| Value::from_inner(CoreValue::from(e.to_string())));
 		vec.push((stats, output));
 	}
@@ -297,7 +292,7 @@ fn process(
 		let mut stream = match response.into_inner().stream::<Value>(()) {
 			Ok(stream) => stream,
 			Err(error) => {
-				print(Err(error.into()));
+				print(Err(error));
 				return;
 			}
 		};
@@ -392,7 +387,7 @@ fn process(
 	})
 }
 
-fn print(result: Result<String, Error>) {
+fn print(result: Result<String>) {
 	match result {
 		Ok(v) => {
 			println!("{v}\n");
