@@ -11,7 +11,6 @@ use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
-use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::Data;
 use crate::engine::IntervalStream;

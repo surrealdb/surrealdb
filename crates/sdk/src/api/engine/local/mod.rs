@@ -31,6 +31,7 @@ use crate::{
 	value::Notification,
 	Result,
 };
+#[cfg(not(target_family = "wasm"))]
 use anyhow::bail;
 use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
