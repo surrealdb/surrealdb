@@ -11,7 +11,6 @@ use crate::{
 
 use anyhow::{bail, Context, Result};
 use clap::ArgMatches;
-use futures::pin_mut;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
 use std::{io, mem, str, thread, time::Duration};
@@ -39,7 +38,6 @@ pub struct TestTaskContext {
 	pub result: Sender<(TestId, TestTaskResult)>,
 }
 
-/// Collects the reports into the reporst vector from the channel and updates the progress.
 fn try_collect_reports<W: io::Write>(
 	reports: &mut Vec<TestReport>,
 	channel: &mut UnboundedReceiver<TestReport>,
@@ -52,7 +50,6 @@ fn try_collect_reports<W: io::Write>(
 	}
 }
 
-/// Filters the test from arguments.
 fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> TestSet {
 	let subset = if let Some(x) = matches.get_one::<String>("filter") {
 		testset.filter_map(|name, _| name.contains(x))
@@ -183,19 +180,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		progress.start_item(id, subset[id].path.as_str()).unwrap();
 
 		let ds = if config.can_use_reusable_ds() {
-			let future = provisioner.obtain();
-			pin_mut!(future);
-			match tokio::time::timeout(Duration::from_secs(10), &mut future).await {
-				Ok(x) => x,
-				Err(_) => {
-					progress
-						.write_inbetween(format_args!(
-							"Test suite hasn't made progress for 60 seconds.\n"
-						))
-						.unwrap();
-					future.await
-				}
-			}
+			provisioner.obtain().await
 		} else {
 			provisioner.create()
 		};
@@ -208,23 +193,17 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		};
 		let future = async move {
 			let name = context.testset[context.id].path.as_str().to_owned();
-			let future = tokio::time::timeout(Duration::from_secs(30), test_task(context));
+			let future = test_task(context);
 
-			if let Err(e) = future.await.unwrap() {
+			if let Err(e) = future.await {
 				println!("Error: {:?}", e.context(format!("Failed to run test '{name}'")))
 			}
 		};
 
 		if config.should_run_sequentially() {
-			tokio::time::timeout(Duration::from_secs(30), schedular.acquire_sequential())
-				.await
-				.unwrap()
-				.spawn(future);
+			schedular.spawn_sequential(future).await;
 		} else {
-			tokio::time::timeout(Duration::from_secs(30), schedular.acquire())
-				.await
-				.unwrap()
-				.spawn(future);
+			schedular.spawn(future).await;
 		}
 
 		// Try to collect reports to give quick feedback on test completion.
@@ -321,10 +300,16 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
 
+	let strict = config.env.as_ref().map(|x| x.strict).unwrap_or(false);
+
 	let res = context
 		.ds
 		.with(
-			move |ds| ds.with_capabilities(capabilities).with_query_timeout(Some(timeout_duration)),
+			move |ds| {
+				ds.with_capabilities(capabilities)
+					.with_query_timeout(Some(timeout_duration))
+					.with_strict_mode(strict)
+			},
 			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
 		)
 		.await;
