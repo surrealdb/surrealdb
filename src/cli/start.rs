@@ -1,4 +1,4 @@
-use super::config::{Config, CF};
+use super::config::{CF, Config};
 use crate::cnf::LOGO;
 use crate::dbs;
 use crate::dbs::StartCommandDbsOptions;

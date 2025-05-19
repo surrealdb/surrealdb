@@ -6,8 +6,8 @@ use crate::{
 	err::Error,
 	exe::try_join_all_buffered,
 	sql::{
-		fmt::Fmt, strand::no_nul_bytes, FlowResultExt as _, Graph, Ident, Idiom, Number, Thing,
-		Value,
+		FlowResultExt as _, Graph, Ident, Idiom, Number, Thing, Value, fmt::Fmt,
+		strand::no_nul_bytes,
 	},
 };
 use anyhow::Result;
@@ -20,7 +20,7 @@ use std::str;
 
 use super::{
 	fmt::{is_pretty, pretty_indent},
-	value::idiom_recursion::{clean_iteration, compute_idiom_recursion, is_final, Recursion},
+	value::idiom_recursion::{Recursion, clean_iteration, compute_idiom_recursion, is_final},
 };
 
 #[revisioned(revision = 4)]

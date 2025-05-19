@@ -2,7 +2,7 @@ use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, 
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -1026,9 +1026,9 @@ impl ToFloat for Number {
 mod tests {
 	use std::cmp::Ordering;
 
+	use rand::Rng;
 	use rand::seq::SliceRandom;
 	use rand::thread_rng;
-	use rand::Rng;
 	use rust_decimal::Decimal;
 
 	use super::*;

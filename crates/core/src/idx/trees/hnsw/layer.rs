@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::graph::UndirectedGraph;
@@ -7,7 +8,6 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
-use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use ahash::HashSet;
 use anyhow::Result;

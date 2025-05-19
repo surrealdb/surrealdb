@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::range::TypedRange;
-use crate::sql::{block::Entry, Block, Param, Value};
+use crate::sql::{Block, Param, Value, block::Entry};
 use crate::sql::{ControlFlow, FlowResult};
 
 use reblessive::tree::Stk;
@@ -80,7 +80,7 @@ impl ForeachStatement {
 			v => {
 				return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidStatementTarget {
 					value: v.to_string(),
-				})))
+				})));
 			}
 		};
 

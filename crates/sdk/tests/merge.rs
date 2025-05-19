@@ -2,9 +2,9 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use surrealdb::Result;
 
 #[tokio::test]
 async fn merge_record() -> Result<()> {

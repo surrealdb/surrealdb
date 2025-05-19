@@ -1,6 +1,6 @@
+use crate::fnc::util::math::ToFloat;
 use crate::fnc::util::math::mean::Mean;
 use crate::fnc::util::math::variance::variance;
-use crate::fnc::util::math::ToFloat;
 use crate::sql::number::Number;
 
 pub trait Deviation {

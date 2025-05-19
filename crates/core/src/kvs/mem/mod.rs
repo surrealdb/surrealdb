@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
 use crate::kvs::{Key, Val, Version};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use std::ops::Range;
 use std::sync::OnceLock;
 use surrealkv::Options;

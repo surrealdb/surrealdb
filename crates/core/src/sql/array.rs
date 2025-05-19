@@ -3,10 +3,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
-	fmt::{pretty_indent, Fmt, Pretty},
 	Value,
+	fmt::{Fmt, Pretty, pretty_indent},
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

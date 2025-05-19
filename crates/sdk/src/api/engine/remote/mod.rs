@@ -8,16 +8,16 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use crate::api::{self, conn::DbResponse, err::Error, method::query::QueryResult, Result};
+use crate::api::{self, Result, conn::DbResponse, err::Error, method::query::QueryResult};
 use crate::dbs::{self, Status};
 use crate::method::Stats;
 use indexmap::IndexMap;
-use revision::revisioned;
 use revision::Revisioned;
-use rust_decimal::prelude::ToPrimitive;
+use revision::revisioned;
 use rust_decimal::Decimal;
-use serde::de::DeserializeOwned;
+use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use std::time::Duration;
 use surrealdb_core::sql::Value as CoreValue;
 

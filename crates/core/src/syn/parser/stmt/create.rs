@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{statements::CreateStatement, Values},
+	sql::{Values, statements::CreateStatement},
 	syn::{
 		parser::{ParseResult, Parser},
 		token::t,

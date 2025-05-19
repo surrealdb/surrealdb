@@ -3,16 +3,16 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{kind::Literal, Duration, Idiom, Kind, Strand, Table},
+	sql::{Duration, Idiom, Kind, Strand, Table, kind::Literal},
 	syn::{
 		error::bail,
 		lexer::compound,
 		parser::mac::expected,
-		token::{t, Glued, Keyword, Span, TokenKind},
+		token::{Glued, Keyword, Span, TokenKind, t},
 	},
 };
 
-use super::{mac::unexpected, ParseResult, Parser};
+use super::{ParseResult, Parser, mac::unexpected};
 
 impl Parser<'_> {
 	/// Parse a kind production.
@@ -281,7 +281,7 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
-	use crate::sql::{table::Table, Ident};
+	use crate::sql::{Ident, table::Table};
 
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());

@@ -12,21 +12,21 @@ use crate::sql::{Cond, Fields};
 use crate::sql::{Expression, Value as SqlValue};
 use crate::sql::{Idiom, Kind};
 use crate::sql::{Statement, Thing};
-use async_graphql::dynamic::indexmap::IndexMap;
+use async_graphql::Name;
+use async_graphql::Value as GqlValue;
 use async_graphql::dynamic::FieldFuture;
 use async_graphql::dynamic::InputValue;
 use async_graphql::dynamic::TypeRef;
+use async_graphql::dynamic::indexmap::IndexMap;
 use async_graphql::dynamic::{Enum, FieldValue, Type};
 use async_graphql::dynamic::{Field, ResolverContext};
 use async_graphql::dynamic::{InputObject, Object};
-use async_graphql::Name;
-use async_graphql::Value as GqlValue;
 
-use super::error::{resolver_error, GqlError};
+use super::error::{GqlError, resolver_error};
 use super::ext::IntoExt;
 use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
 use crate::gql::error::internal_error;
-use crate::gql::utils::{field_val_erase_owned, ErasedRecord, GQLTx, GqlValueUtils};
+use crate::gql::utils::{ErasedRecord, GQLTx, GqlValueUtils, field_val_erase_owned};
 
 macro_rules! order {
 	(asc, $field:expr_2021) => {{
@@ -249,52 +249,54 @@ pub async fn process_tbs(
 
 		let sess2 = session.to_owned();
 		let kvs2 = datastore.to_owned();
-		query =
-			query.field(
-				Field::new(
-					format!("_get_{}", tb.name),
-					TypeRef::named(tb.name.to_string()),
-					move |ctx| {
-						let tb_name = second_tb_name.clone();
-						let kvs2 = kvs2.clone();
-						FieldFuture::new({
-							let sess2 = sess2.clone();
-							async move {
-								let gtx = GQLTx::new(&kvs2, &sess2).await?;
+		query = query.field(
+			Field::new(
+				format!("_get_{}", tb.name),
+				TypeRef::named(tb.name.to_string()),
+				move |ctx| {
+					let tb_name = second_tb_name.clone();
+					let kvs2 = kvs2.clone();
+					FieldFuture::new({
+						let sess2 = sess2.clone();
+						async move {
+							let gtx = GQLTx::new(&kvs2, &sess2).await?;
 
-								let args = ctx.args.as_index_map();
-								let id = match args.get("id").and_then(GqlValueUtils::as_string) {
-									Some(i) => i,
-									None => {
-										return Err(internal_error(
-											"Schema validation failed: No id found in _get_",
-										)
-										.into());
-									}
-								};
-								let thing = match id.clone().try_into() {
-									Ok(t) => t,
-									Err(_) => Thing::from((tb_name, id)),
-								};
-
-								match gtx.get_record_field(thing, "id").await? {
-									SqlValue::Thing(t) => {
-										let erased: ErasedRecord = (gtx, t);
-										Ok(Some(field_val_erase_owned(erased)))
-									}
-									_ => Ok(None),
+							let args = ctx.args.as_index_map();
+							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
+								Some(i) => i,
+								None => {
+									return Err(internal_error(
+										"Schema validation failed: No id found in _get_",
+									)
+									.into());
 								}
+							};
+							let thing = match id.clone().try_into() {
+								Ok(t) => t,
+								Err(_) => Thing::from((tb_name, id)),
+							};
+
+							match gtx.get_record_field(thing, "id").await? {
+								SqlValue::Thing(t) => {
+									let erased: ErasedRecord = (gtx, t);
+									Ok(Some(field_val_erase_owned(erased)))
+								}
+								_ => Ok(None),
 							}
-						})
-					},
+						}
+					})
+				},
+			)
+			.description(if let Some(c) = &tb.comment {
+				format!("{c}")
+			} else {
+				format!(
+					"Generated from table `{}`\nallows querying a single record in a table by ID",
+					tb.name
 				)
-				.description(if let Some(c) = &tb.comment {
-					format!("{c}")
-				} else {
-					format!("Generated from table `{}`\nallows querying a single record in a table by ID", tb.name)
-				})
-				.argument(id_input!()),
-			);
+			})
+			.argument(id_input!()),
+		);
 
 		let mut table_ty_obj = Object::new(tb.name.to_string())
 			.field(Field::new(

@@ -8,7 +8,7 @@ use crate::{
 		Array, Constant, Expression, Geometry, Id, Ident, Idiom, Number, Object, Operator, Part,
 		Query, Statement, Statements, Strand, Thing, Value,
 	},
-	syn::parser::{mac::test_parse, Parser, ParserSettings},
+	syn::parser::{Parser, ParserSettings, mac::test_parse},
 };
 
 #[test]

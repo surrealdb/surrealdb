@@ -2,8 +2,8 @@ mod convert;
 
 pub use convert::Cbor;
 
-use crate::rpc::request::Request;
 use crate::rpc::RpcError;
+use crate::rpc::request::Request;
 use crate::sql::Value;
 use ciborium::Value as Data;
 

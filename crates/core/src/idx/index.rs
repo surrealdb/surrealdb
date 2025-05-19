@@ -3,9 +3,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::idx::IndexKeyBase;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::TransactionType;
 use crate::sql::index::{HnswParams, MTreeParams, SearchParams};

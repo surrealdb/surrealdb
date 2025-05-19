@@ -6,15 +6,15 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::iam::Action;
+use crate::sql::FlowResultExt as _;
 use crate::sql::paths::ID;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
-use crate::sql::FlowResultExt as _;
+use anyhow::Result;
 use anyhow::bail;
 use anyhow::ensure;
-use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;

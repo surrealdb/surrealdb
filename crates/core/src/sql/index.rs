@@ -265,7 +265,13 @@ impl Display for Index {
 				write!(
 					f,
 					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
-					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order, p.doc_ids_cache, p.mtree_cache
+					p.dimension,
+					p.distance,
+					p.vector_type,
+					p.capacity,
+					p.doc_ids_order,
+					p.doc_ids_cache,
+					p.mtree_cache
 				)
 			}
 			Self::Hnsw(p) => {

@@ -5,13 +5,13 @@
 use anyhow::Result;
 use bytes::Bytes;
 use futures::stream::BoxStream;
+use object_store::ObjectStore;
 #[cfg(not(target_family = "wasm"))]
 use object_store::local::LocalFileSystem;
 #[cfg(target_family = "wasm")]
 use object_store::memory::InMemory;
 use object_store::parse_url;
 use object_store::path::Path;
-use object_store::ObjectStore;
 use sha1::{Digest, Sha1};
 use std::env;
 use std::fs;

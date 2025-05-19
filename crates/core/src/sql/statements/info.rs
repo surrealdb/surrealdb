@@ -6,8 +6,8 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::{Base, Ident, Object, Value, Version};
 use crate::sys::INFORMATION;
-use anyhow::bail;
 use anyhow::Result;
+use anyhow::bail;
 
 use reblessive::tree::Stk;
 use revision::revisioned;

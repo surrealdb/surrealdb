@@ -2,7 +2,7 @@ mod helpers;
 mod parse;
 use std::time::{Duration, Instant};
 
-use helpers::{new_ds, Test};
+use helpers::{Test, new_ds};
 use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 

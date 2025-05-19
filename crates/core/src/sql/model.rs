@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::value::Value;
 use crate::sql::ControlFlow;
 use crate::sql::FlowResult;
+use crate::sql::value::Value;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -66,7 +66,7 @@ impl Model {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		use crate::sql::{value::CoerceError, FlowResultExt};
+		use crate::sql::{FlowResultExt, value::CoerceError};
 
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -85,9 +85,11 @@ impl Model {
 			match &val.permissions {
 				Permission::Full => (),
 				Permission::None => {
-					return Err(ControlFlow::from(anyhow::Error::new(Error::FunctionPermissions {
-						name: self.name.clone(),
-					})))
+					return Err(ControlFlow::from(anyhow::Error::new(
+						Error::FunctionPermissions {
+							name: self.name.clone(),
+						},
+					)));
 				}
 				Permission::Specific(e) => {
 					// Disable permissions

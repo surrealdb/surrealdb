@@ -5,7 +5,7 @@ use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use anyhow::Result;
-use revision::{revisioned, Revisioned};
+use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
@@ -206,7 +206,7 @@ mod tests {
 	use crate::idx::{IndexKeyBase, VersionedStore};
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
-	use rand::{thread_rng, Rng};
+	use rand::{Rng, thread_rng};
 	use std::collections::HashSet;
 	use test_log::test;
 

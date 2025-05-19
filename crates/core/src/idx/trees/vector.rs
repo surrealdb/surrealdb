@@ -5,7 +5,7 @@ use crate::sql::index::{Distance, VectorType};
 use crate::sql::{Number, Value};
 use ahash::AHasher;
 use ahash::HashSet;
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
@@ -555,7 +555,7 @@ impl Distance {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec, RandomItemGenerator};
+	use crate::idx::trees::knn::tests::{RandomItemGenerator, get_seed_rnd, new_random_vec};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::index::{Distance, VectorType};
 

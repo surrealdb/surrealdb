@@ -109,7 +109,9 @@ mod tests {
 	#[test]
 	fn each_array_field_embedded() {
 		let idi = Idiom::parse("test.something[*].tags");
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res =
 			vec![Idiom::parse("test.something[0].tags"), Idiom::parse("test.something[1].tags")];
 		assert_eq!(res, val.each(&idi));
@@ -120,7 +122,9 @@ mod tests {
 	#[test]
 	fn each_array_field_embedded_index() {
 		let idi = Idiom::parse("test.something[*].tags[1]");
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			Idiom::parse("test.something[0].tags[1]"),
 			Idiom::parse("test.something[1].tags[1]"),
@@ -133,7 +137,9 @@ mod tests {
 	#[test]
 	fn each_array_field_embedded_index_all() {
 		let idi = Idiom::parse("test.something[*].tags[*]");
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			Idiom::parse("test.something[0].tags[0]"),
 			Idiom::parse("test.something[0].tags[1]"),

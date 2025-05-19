@@ -4,9 +4,9 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::sql::{
-	array::Uniq as _, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, DecimalExt,
-	Duration, File, Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table,
-	Thing, Uuid, Value,
+	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Ident, Kind, Literal,
+	Number, Object, Range, Regex, Strand, Table, Thing, Uuid, Value, array::Uniq as _,
+	kind::HasKind, value::Null,
 };
 
 #[derive(Clone, Debug)]
@@ -59,7 +59,10 @@ impl fmt::Display for CastError {
 			CastError::RangeSizeLimit {
 				value,
 			} => {
-				write!(f, "Casting range `{value}` to an array would create an array larger then the max allocation limit.")
+				write!(
+					f,
+					"Casting range `{value}` to an array would create an array larger then the max allocation limit."
+				)
 			}
 		}
 	}

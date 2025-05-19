@@ -1,9 +1,9 @@
+use crate::sql::Operation;
 use crate::sql::array::Array;
 use crate::sql::object::Object;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::Operation;
 use crate::vs::VersionStamp;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

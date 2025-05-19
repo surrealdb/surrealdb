@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Args;
 use glob::glob;
 use surrealdb::sql::parse;

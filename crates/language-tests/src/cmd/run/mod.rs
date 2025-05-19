@@ -3,19 +3,19 @@ use crate::{
 	format::Progress,
 	runner::Schedular,
 	tests::{
+		TestSet,
 		report::{TestGrade, TestReport, TestTaskResult},
 		set::TestId,
-		TestSet,
 	},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
 use std::{io, mem, str, thread, time::Duration};
 use surrealdb_core::{
-	dbs::{capabilities::ExperimentalTarget, Session},
+	dbs::{Session, capabilities::ExperimentalTarget},
 	env::VERSION,
 	kvs::Datastore,
 	syn,

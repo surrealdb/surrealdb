@@ -1,9 +1,9 @@
 use regex::Regex;
 
 use crate::syn::{
-	error::{bail, syntax_error, SyntaxError},
+	error::{SyntaxError, bail, syntax_error},
 	lexer::Lexer,
-	token::{t, Token},
+	token::{Token, t},
 };
 
 pub fn regex(lexer: &mut Lexer, start: Token) -> Result<Regex, SyntaxError> {

@@ -9,8 +9,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::graph::GraphSubjects;
 use super::Value;
+use super::graph::GraphSubjects;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Edges";
 

@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 
 macro_rules! parser {
@@ -21,7 +21,12 @@ fn bench_parser(c: &mut Criterion) {
 		surrealdb::sql::parse,
 		"SELECT name, age, country FROM person WHERE hair = 'brown' AND is_vegetarian;"
 	);
-	parser!(c, transaction, surrealdb::sql::parse, "BEGIN TRANSACTION; UPDATE person:finn SET squirrels = 'yes'; SELECT * FROM person; COMMIT TRANSACTION;");
+	parser!(
+		c,
+		transaction,
+		surrealdb::sql::parse,
+		"BEGIN TRANSACTION; UPDATE person:finn SET squirrels = 'yes'; SELECT * FROM person; COMMIT TRANSACTION;"
+	);
 	parser!(c, datetime, surrealdb::sql::parse, "RETURN '2022-07-03T07:18:52.841147+02:00';");
 	parser!(c, duration, surrealdb::sql::parse, "RETURN [100w, 5d, 20m, 2s];");
 	parser!(

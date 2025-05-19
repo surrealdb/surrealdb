@@ -94,8 +94,8 @@ impl Postings {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::postings::Postings;
 	use crate::idx::IndexKeyBase;
+	use crate::idx::ft::postings::Postings;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType, TransactionType::*};
 	use test_log::test;
 

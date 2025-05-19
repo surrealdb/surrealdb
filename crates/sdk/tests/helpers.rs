@@ -7,13 +7,13 @@ use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
-use surrealdb::dbs::capabilities::Capabilities;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
+use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
-use surrealdb::Result;
 use surrealdb_core::dbs::Response;
-use surrealdb_core::sql::{value, Number, Value};
+use surrealdb_core::sql::{Number, Value, value};
 
 pub async fn new_ds() -> Result<Datastore> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())

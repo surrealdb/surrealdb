@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
 	cli::ColorMode,
-	format::{ansi, IndentFormatter},
+	format::{IndentFormatter, ansi},
 	tests::TestSet,
 };
 

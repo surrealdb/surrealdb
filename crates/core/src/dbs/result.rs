@@ -7,8 +7,8 @@ use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
 use crate::idx::planner::RecordStrategy;
-use crate::sql::order::Ordering;
 use crate::sql::Value;
+use crate::sql::order::Ordering;
 use anyhow::Result;
 use reblessive::tree::Stk;
 

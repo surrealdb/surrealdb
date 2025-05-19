@@ -5,14 +5,14 @@ use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
+use crate::sql::FlowResultExt;
 use crate::sql::data::Data;
 use crate::sql::operator::Operator;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::value::Value;
-use crate::sql::FlowResultExt;
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 

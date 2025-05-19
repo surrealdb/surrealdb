@@ -1,9 +1,9 @@
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
-use crate::sql::value::Value;
 use crate::sql::Regex;
-use anyhow::{ensure, Result};
+use crate::sql::value::Value;
+use anyhow::{Result, ensure};
 
 use super::args::{Any, Cast, Optional};
 
@@ -254,7 +254,7 @@ pub mod is {
 	use crate::fnc::args::Optional;
 	use crate::sql::value::Value;
 	use crate::sql::{Datetime, Thing};
-	use anyhow::{bail, Result};
+	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;
 	use regex::Regex;
 	use semver::Version;

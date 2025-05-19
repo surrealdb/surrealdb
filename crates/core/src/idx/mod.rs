@@ -32,8 +32,8 @@ use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Thing};
 use anyhow::Result;
 use revision::Revisioned;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]

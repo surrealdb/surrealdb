@@ -1,6 +1,6 @@
 use http::{
-	header::{ACCEPT, CONTENT_TYPE},
 	HeaderMap, StatusCode,
+	header::{ACCEPT, CONTENT_TYPE},
 };
 
 use crate::{

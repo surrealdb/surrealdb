@@ -1,3 +1,5 @@
+use axum::Extension;
+use axum::RequestPartsExt;
 use axum::async_trait;
 use axum::extract::ConnectInfo;
 use axum::extract::FromRef;
@@ -5,11 +7,9 @@ use axum::extract::FromRequestParts;
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::Extension;
-use axum::RequestPartsExt;
 use clap::ValueEnum;
-use http::request::Parts;
 use http::StatusCode;
+use http::request::Parts;
 use std::net::SocketAddr;
 
 use super::AppState;
@@ -86,12 +86,10 @@ where
 		let res = match app_state.client_ip {
 			ClientIp::None => ExtractClientIP(None),
 			ClientIp::Socket => {
-				match ConnectInfo::<SocketAddr>::from_request_parts(parts, state).await
-				{ Ok(ConnectInfo(addr)) => {
-					ExtractClientIP(Some(addr.ip().to_string()))
-				} _ => {
-					ExtractClientIP(None)
-				}}
+				match ConnectInfo::<SocketAddr>::from_request_parts(parts, state).await {
+					Ok(ConnectInfo(addr)) => ExtractClientIP(Some(addr.ip().to_string())),
+					_ => ExtractClientIP(None),
+				}
 			}
 			// Get the IP from the corresponding header
 			var if var.is_header() => {
@@ -122,13 +120,18 @@ pub(super) async fn client_ip_middleware(
 ) -> Result<Response, StatusCode> {
 	let (mut parts, body) = request.into_parts();
 
-	match parts.extract::<Extension<AppState>>().await { Ok(Extension(state)) => {
-		if let Ok(client_ip) = parts.extract_with_state::<ExtractClientIP, AppState>(&state).await {
-			parts.extensions.insert(client_ip);
+	match parts.extract::<Extension<AppState>>().await {
+		Ok(Extension(state)) => {
+			if let Ok(client_ip) =
+				parts.extract_with_state::<ExtractClientIP, AppState>(&state).await
+			{
+				parts.extensions.insert(client_ip);
+			}
 		}
-	} _ => {
-		trace!("No AppState found, skipping client_ip_middleware");
-	}}
+		_ => {
+			trace!("No AppState found, skipping client_ip_middleware");
+		}
+	}
 
 	Ok(next.run(Request::from_parts(parts, body)).await)
 }

@@ -1,6 +1,6 @@
 use crate::sql::thing;
 use crate::sql::value::Value;
-use js::{class::Trace, JsLifetime};
+use js::{JsLifetime, class::Trace};
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]

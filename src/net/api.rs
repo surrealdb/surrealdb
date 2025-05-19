@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use super::AppState;
 use super::error::ResponseError;
 use super::params::Params;
-use super::AppState;
 use crate::cnf::HTTP_MAX_API_BODY_SIZE;
 use crate::net::error::Error as NetError;
+use axum::Extension;
+use axum::Router;
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
@@ -13,20 +15,18 @@ use axum::http::HeaderMap;
 use axum::http::Method;
 use axum::response::IntoResponse;
 use axum::routing::any;
-use axum::Extension;
-use axum::Router;
 use http::header::CONTENT_TYPE;
+use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::dbs::Session;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
+use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::cbor;
 use surrealdb::rpc::format::json;
 use surrealdb::rpc::format::revision;
-use surrealdb::rpc::format::Format;
-use surrealdb::sql::statements::FindApi;
 use surrealdb::sql::Value;
+use surrealdb::sql::statements::FindApi;
 use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::{
 	body::ApiBody, invocation::ApiInvocation, method::Method as ApiMethod,
@@ -86,8 +86,8 @@ async fn handler(
 	let apis = tx.all_db_apis(&ns, &db).await.map_err(ResponseError)?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-	let (mut res, res_instruction) =
-		match apis.as_ref().find_api(segments, method) { Some((api, params)) => {
+	let (mut res, res_instruction) = match apis.as_ref().find_api(segments, method) {
+		Some((api, params)) => {
 			let invocation = ApiInvocation {
 				params,
 				method,
@@ -109,9 +109,11 @@ async fn handler(
 				Ok(None) => return Err(NetError::NotFound(url).into()),
 				Err(e) => return Err(ResponseError(e)),
 			}
-		} _ => {
+		}
+		_ => {
 			return Err(NetError::NotFound(url).into());
-		}};
+		}
+	};
 
 	// Commit the transaction
 	tx.commit().await.map_err(ResponseError)?;
@@ -139,7 +141,7 @@ async fn handler(
 							"Expected bytes or string, found {}",
 							v.kindof()
 						))
-						.into())
+						.into());
 					}
 				}
 			}
@@ -170,7 +172,7 @@ async fn handler(
 				return Err(ApiError::Unreachable(
 					"Found a native response instruction where this is not supported".into(),
 				)
-				.into())
+				.into());
 			}
 		}
 	} else {

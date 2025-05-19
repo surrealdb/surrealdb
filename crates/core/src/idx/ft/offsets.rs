@@ -1,7 +1,7 @@
 use crate::err::Error;
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::idx::IndexKeyBase;
 use crate::kvs::{Transaction, Val};
 use anyhow::Result;
 

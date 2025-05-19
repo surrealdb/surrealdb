@@ -5,7 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Idiom, Value};
 use crate::syn;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

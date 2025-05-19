@@ -1,16 +1,16 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::key::sequence::Prefix;
 use crate::key::sequence::ba::Ba;
 use crate::key::sequence::st::St;
-use crate::key::sequence::Prefix;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
 use crate::sql::statements::define::DefineSequenceStatement;
 use anyhow::Result;
-use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
-use rand::{thread_rng, Rng};
+use dashmap::mapref::entry::Entry;
+use rand::{Rng, thread_rng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -134,7 +134,7 @@ impl Sequence {
 			key,
 			to,
 			st,
-			timeout: seq.timeout.as_ref().map(|d| d.0 .0),
+			timeout: seq.timeout.as_ref().map(|d| d.0.0),
 		})
 	}
 

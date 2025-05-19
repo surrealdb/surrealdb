@@ -5,15 +5,15 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	escape::QuoteStr, fmt::Fmt, user::UserDuration, Base, Duration, Ident, Strand, Value,
+	Base, Duration, Ident, Strand, Value, escape::QuoteStr, fmt::Fmt, user::UserDuration,
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use argon2::{
-	password_hash::{PasswordHasher, SaltString},
 	Argon2,
+	password_hash::{PasswordHasher, SaltString},
 };
 
-use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
+use rand::{Rng, distributions::Alphanumeric, rngs::OsRng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};

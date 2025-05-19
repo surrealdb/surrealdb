@@ -1,19 +1,19 @@
+use crate::Surreal;
+use crate::Value;
+use crate::api::Connection;
+use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::opt::Resource;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::Surreal;
-use crate::Value;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{to_value as to_core_value, Object as CoreObject, Value as CoreValue};
+use surrealdb_core::sql::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
 
 use super::insert_relation::InsertRelation;
 use super::validate_data;
@@ -123,7 +123,10 @@ where
 	{
 		Content::from_closure(self.client, || {
 			let mut data = to_core_value(data)?;
-			validate_data(&data, "Tried to insert non-object-like data as content, only structs and objects are supported")?;
+			validate_data(
+				&data,
+				"Tried to insert non-object-like data as content, only structs and objects are supported",
+			)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::Insert {
 					what: Some(table),
@@ -172,7 +175,10 @@ where
 	{
 		InsertRelation::from_closure(self.client, || {
 			let mut data = to_core_value(data)?;
-			validate_data(&data, "Tried to insert non-object-like data as relation data, only structs and objects are supported")?;
+			validate_data(
+				&data,
+				"Tried to insert non-object-like data as relation data, only structs and objects are supported",
+			)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::InsertRelation {
 					what: Some(table),

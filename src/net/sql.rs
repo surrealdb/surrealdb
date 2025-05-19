@@ -1,27 +1,27 @@
+use super::AppState;
 use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
-use super::AppState;
 use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::params::Params;
 use anyhow::Context;
-use axum::extract::ws::Message;
-use axum::extract::ws::WebSocket;
+use axum::Extension;
+use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Query;
 use axum::extract::WebSocketUpgrade;
+use axum::extract::ws::Message;
+use axum::extract::ws::WebSocket;
 use axum::response::IntoResponse;
 use axum::routing::options;
-use axum::Extension;
-use axum::Router;
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::dbs::Session;
+use surrealdb::dbs::capabilities::RouteTarget;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>

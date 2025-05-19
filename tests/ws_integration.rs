@@ -23,7 +23,7 @@ mod ws_integration {
 }
 
 use assert_fs::TempDir;
-use common::{Format, Socket, StartServerArguments, DB, NS, PASS, USER};
+use common::{DB, Format, NS, PASS, Socket, StartServerArguments, USER};
 use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 use std::future::Future;

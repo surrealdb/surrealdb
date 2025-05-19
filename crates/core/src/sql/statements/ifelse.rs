@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
+use crate::sql::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use crate::sql::{FlowResult, Value};
 
 use reblessive::tree::Stk;

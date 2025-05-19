@@ -3,8 +3,8 @@ use quick_cache::sync::{Cache, GuardResult};
 use regex::RegexBuilder;
 use revision::revisioned;
 use serde::{
-	de::{self, Visitor},
 	Deserialize, Deserializer, Serialize, Serializer,
+	de::{self, Visitor},
 };
 use std::cmp::Ordering;
 use std::fmt::Debug;

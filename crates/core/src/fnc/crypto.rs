@@ -87,8 +87,8 @@ pub mod argon2 {
 	use crate::sql::value::Value;
 	use anyhow::Result;
 	use argon2::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Argon2,
+		password_hash::{PasswordHash, PasswordHasher, SaltString},
 	};
 	use rand::rngs::OsRng;
 
@@ -151,8 +151,8 @@ pub mod pbkdf2 {
 	use crate::sql::value::Value;
 	use anyhow::Result;
 	use pbkdf2::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Pbkdf2,
+		password_hash::{PasswordHash, PasswordHasher, SaltString},
 	};
 	use rand::rngs::OsRng;
 
@@ -186,8 +186,8 @@ pub mod scrypt {
 	use anyhow::Result;
 	use rand::rngs::OsRng;
 	use scrypt::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Scrypt,
+		password_hash::{PasswordHash, PasswordHasher, SaltString},
 	};
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {

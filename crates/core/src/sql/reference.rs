@@ -1,16 +1,16 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use crate::{
 	ctx::Context,
-	dbs::{capabilities::ExperimentalTarget, Options},
+	dbs::{Options, capabilities::ExperimentalTarget},
 	doc::CursorDoc,
 	err::Error,
 };
 
-use super::{array::Uniq, statements::info::InfoStructure, Array, Idiom, Table, Thing, Value};
+use super::{Array, Idiom, Table, Thing, Value, array::Uniq, statements::info::InfoStructure};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]

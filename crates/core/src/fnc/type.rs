@@ -12,7 +12,7 @@ use crate::sql::{
 	Strand, Uuid,
 };
 use crate::syn;
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use geo::Point;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -188,9 +188,9 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 
 pub mod is {
 	use crate::fnc::args::Optional;
+	use crate::sql::Geometry;
 	use crate::sql::table::Table;
 	use crate::sql::value::Value;
-	use crate::sql::Geometry;
 	use anyhow::Result;
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {

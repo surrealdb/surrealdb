@@ -6,7 +6,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Permission, Strand, Value};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

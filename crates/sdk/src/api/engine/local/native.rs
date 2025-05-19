@@ -1,25 +1,25 @@
 use crate::{
+	Action,
 	api::{
+		ExtraFeatures, Result, Surreal,
 		conn::{self, Route, Router},
 		engine::local::Db,
 		method::BoxFuture,
 		opt::{Endpoint, EndpointKind},
-		ExtraFeatures, Result, Surreal,
 	},
 	engine::tasks,
-	opt::{auth::Root, WaitFor},
+	opt::{WaitFor, auth::Root},
 	value::Notification,
-	Action,
 };
 use async_channel::{Receiver, Sender};
-use futures::{stream::poll_fn, StreamExt};
+use futures::{StreamExt, stream::poll_fn};
 use std::{
 	collections::{BTreeMap, HashMap, HashSet},
-	sync::{atomic::AtomicI64, Arc},
+	sync::{Arc, atomic::AtomicI64},
 	task::Poll,
 };
 use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
 impl crate::api::Connection for Db {}

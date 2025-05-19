@@ -6,7 +6,7 @@ use crate::doc::CursorDoc;
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode as _;
-use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
+use crate::sql::{Strand, Value, escape::EscapeRid, id::Id};
 use crate::syn;
 use anyhow::Result;
 use futures::StreamExt;

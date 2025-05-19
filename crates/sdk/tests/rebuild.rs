@@ -4,9 +4,9 @@ use parse::Parse;
 mod helpers;
 use helpers::*;
 
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use surrealdb::Result;
 
 #[tokio::test]
 async fn rebuild_index_statement() -> Result<()> {

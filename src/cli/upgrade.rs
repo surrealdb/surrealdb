@@ -1,7 +1,7 @@
 use crate::cli::version_client;
 use crate::cli::version_client::VersionClient;
 use crate::cnf::PKG_VERSION;
-use anyhow::{bail, ensure, Context as _, Result};
+use anyhow::{Context as _, Result, bail, ensure};
 use clap::Args;
 use semver::{Comparator, Op, Version};
 use std::borrow::Cow;

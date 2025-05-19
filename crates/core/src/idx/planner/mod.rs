@@ -15,7 +15,7 @@ use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
 use crate::sql::with::With;
-use crate::sql::{order::Ordering, Cond, Fields, Groups, Table};
+use crate::sql::{Cond, Fields, Groups, Table, order::Ordering};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use std::collections::HashMap;

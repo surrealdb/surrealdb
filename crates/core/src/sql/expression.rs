@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-use super::operator::BindingPower;
 use super::ControlFlow;
 use super::FlowResult;
+use super::operator::BindingPower;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
 
@@ -198,7 +198,7 @@ impl Expression {
 					o => {
 						return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
 							format_args!("Invalid operator '{o:?}' encountered"),
-						))))
+						))));
 					}
 				};
 				res.map_err(ControlFlow::from)

@@ -1,4 +1,4 @@
-use crate::syn::token::{t, TokenKind};
+use crate::syn::token::{TokenKind, t};
 
 macro_rules! test_case(
 	($source:expr_2021 => [$($token:expr_2021),*$(,)?]) => {

@@ -1,5 +1,5 @@
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables, Value};
+use crate::sql::{Value, cond::Cond, field::Fields, group::Groups, table::Tables};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

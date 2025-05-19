@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
 
-use super::statements::InfoStatement;
 use super::FlowResult;
+use super::statements::InfoStatement;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 

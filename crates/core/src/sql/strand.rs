@@ -115,8 +115,8 @@ impl TryAdd for Strand {
 // serde(with = no_nul_bytes) will (de)serialize with no NUL bytes.
 pub(crate) mod no_nul_bytes {
 	use serde::{
-		de::{self, Visitor},
 		Deserializer, Serializer,
+		de::{self, Visitor},
 	};
 	use std::fmt;
 

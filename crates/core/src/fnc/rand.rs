@@ -3,12 +3,12 @@ use crate::err::Error;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use crate::sql::{Datetime, Duration, Number};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use chrono::{TimeZone, Utc};
 use nanoid::nanoid;
+use rand::Rng;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
-use rand::Rng;
 use ulid::Ulid;
 
 use super::args::{Any, Args, Arity, FromArg, Optional};
@@ -98,19 +98,27 @@ pub fn guid((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) ->
 					.to_string(),
 			}
 		);
-		ensure!(upper <= LIMIT,
+		ensure!(
+			upper <= LIMIT,
 			Error::InvalidArguments {
 				name: String::from("rand::guid"),
-				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
-			});
+				message: format!(
+					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
+				),
+			}
+		);
 
 		rand::thread_rng().gen_range((lower as usize)..=(upper as usize))
 	} else {
-		ensure!(lower <= LIMIT,
+		ensure!(
+			lower <= LIMIT,
 			Error::InvalidArguments {
-			name: String::from("rand::guid"),
-			message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
-		});
+				name: String::from("rand::guid"),
+				message: format!(
+					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
+				),
+			}
+		);
 		lower as usize
 	};
 
@@ -145,19 +153,27 @@ pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) 
 					.to_string(),
 			}
 		);
-		ensure!(upper <= LIMIT,
+		ensure!(
+			upper <= LIMIT,
 			Error::InvalidArguments {
 				name: String::from("rand::guid"),
-				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
-			});
+				message: format!(
+					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
+				),
+			}
+		);
 
 		rand::thread_rng().gen_range((lower as usize)..=(upper as usize))
 	} else {
-		ensure!(lower <= LIMIT,
+		ensure!(
+			lower <= LIMIT,
 			Error::InvalidArguments {
-			name: String::from("rand::guid"),
-			message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
-		});
+				name: String::from("rand::guid"),
+				message: format!(
+					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
+				),
+			}
+		);
 		lower as usize
 	};
 	// Generate the random string
@@ -215,12 +231,16 @@ pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value> {
 				max if max >= MINIMUM && max <= min => (max, min),
 				_ => bail!(Error::InvalidArguments {
 					name: String::from("rand::time"),
-					message: format!("To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."),
+					message: format!(
+						"To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."
+					),
 				}),
 			},
 			_ => bail!(Error::InvalidArguments {
 				name: String::from("rand::time"),
-				message: format!("To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."),
+				message: format!(
+					"To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."
+				),
 			}),
 		}
 	} else {
@@ -284,9 +304,9 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 pub mod uuid {
 
 	use crate::fnc::args::Optional;
+	use crate::sql::Datetime;
 	use crate::sql::uuid::Uuid;
 	use crate::sql::value::Value;
-	use crate::sql::Datetime;
 	use anyhow::Result;
 
 	pub fn v4(_: ()) -> Result<Value> {

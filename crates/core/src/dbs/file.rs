@@ -1,12 +1,12 @@
 use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::dbs::plan::Explanation;
 use crate::err::Error;
-use crate::sql::order::Ordering;
 use crate::sql::Value;
+use crate::sql::order::Ordering;
 use anyhow::Result;
 use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
-use rand::seq::SliceRandom as _;
 use rand::Rng as _;
+use rand::seq::SliceRandom as _;
 use revision::Revisioned;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Take, Write};

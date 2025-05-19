@@ -1,10 +1,10 @@
+use crate::Surreal;
+use crate::api::Connection;
+use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::method::OnceLockExt;
 use crate::api::opt::auth::Jwt;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::Surreal;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 

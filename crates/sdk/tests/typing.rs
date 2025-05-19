@@ -3,9 +3,9 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use surrealdb::Result;
 
 #[tokio::test]
 async fn strict_typing_inline() -> Result<()> {

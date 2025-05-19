@@ -4,7 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{escape::EscapeRid, Array, Number, Object, Strand, Thing, Uuid, Value};
+use crate::sql::{Array, Number, Object, Strand, Thing, Uuid, Value, escape::EscapeRid};
 use anyhow::Result;
 use nanoid::nanoid;
 use range::IdRange;

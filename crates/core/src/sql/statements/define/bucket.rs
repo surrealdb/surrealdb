@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::{Base, FlowResultExt, Ident, Permission, Strand, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

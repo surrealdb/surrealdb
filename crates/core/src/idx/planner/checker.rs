@@ -10,8 +10,8 @@ use crate::sql::{Cond, FlowResultExt as _, Thing, Value};
 use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
-use std::collections::hash_map::Entry;
 use std::collections::VecDeque;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 pub enum HnswConditionChecker<'a> {

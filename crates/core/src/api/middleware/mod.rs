@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	err::Error,
-	sql::{statements::info::InfoStructure, Object, Value},
+	sql::{Object, Value, statements::info::InfoStructure},
 };
 
 #[revisioned(revision = 1)]
@@ -47,12 +47,12 @@ impl<'a> CollectMiddleware<'a> for Vec<&'a RequestMiddleware> {
 					Some(("fn", _)) => {
 						return Err(Error::Unreachable(
 							"Custom middleware are not yet supported".into(),
-						))
+						));
 					}
 					_ => {
 						return Err(Error::Unreachable(
 							"Found a middleware which is unparsable".into(),
-						))
+						));
 					}
 				}
 			}

@@ -1,12 +1,12 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 
 use crate::ctx::Context;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::value::Value;
 use crate::sql::Thing;
+use crate::sql::value::Value;
 use anyhow::Result;
 use reblessive::tree::Stk;
 pub mod api;
@@ -1518,15 +1518,15 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 		"number" => ("math", name),
 		"string" => match name {
 			"distance_damerau_levenshtein" => {
-				return "string::distance::damerau_levenshtein".to_string()
+				return "string::distance::damerau_levenshtein".to_string();
 			}
 			"distance_hamming" => return "string::distance::hamming".to_string(),
 			"distance_levenshtein" => return "string::distance::levenshtein".to_string(),
 			"distance_normalized_damerau_levenshtein" => {
-				return "string::distance::normalized_damerau_levenshtein".to_string()
+				return "string::distance::normalized_damerau_levenshtein".to_string();
 			}
 			"distance_normalized_levenshtein" => {
-				return "string::distance::normalized_levenshtein".to_string()
+				return "string::distance::normalized_levenshtein".to_string();
 			}
 			"html_encode" => return "string::html::encode".to_string(),
 			"html_sanitize" => return "string::html::sanitize".to_string(),
@@ -1582,7 +1582,7 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::{
 		dbs::capabilities::ExperimentalTarget,
-		sql::{statements::OutputStatement, Function, Query, Statement, Value},
+		sql::{Function, Query, Statement, Value, statements::OutputStatement},
 	};
 
 	#[tokio::test]
@@ -1671,7 +1671,9 @@ mod tests {
 			for problem in problems {
 				eprintln!(" - {problem}");
 			}
-			panic!("ensure functions can be parsed in core/src/sql/function.rs and are exported to JS in core/src/fnc/script/modules/surrealdb");
+			panic!(
+				"ensure functions can be parsed in core/src/sql/function.rs and are exported to JS in core/src/fnc/script/modules/surrealdb"
+			);
 		}
 	}
 }

@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::Value;
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 
 impl Value {
 	pub(crate) fn merge(&mut self, val: Value) -> Result<()> {

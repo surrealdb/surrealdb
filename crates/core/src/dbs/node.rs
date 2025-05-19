@@ -1,7 +1,7 @@
-use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
-use revision::revisioned;
+use crate::sql::statements::info::InfoStructure;
 use revision::Error;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::ops::{Add, Sub};
@@ -156,8 +156,8 @@ impl InfoStructure for Timestamp {
 #[cfg(test)]
 mod test {
 	use crate::dbs::node::Timestamp;
-	use chrono::prelude::Utc;
 	use chrono::TimeZone;
+	use chrono::prelude::Utc;
 	use std::time::Duration;
 
 	#[test]

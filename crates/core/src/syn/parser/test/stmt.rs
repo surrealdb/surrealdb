@@ -1,5 +1,10 @@
 use crate::{
 	sql::{
+		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
+		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
+		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
+		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
+		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 		access::AccessDuration,
 		access_type::{
 			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
@@ -13,13 +18,6 @@ use crate::{
 		language::Language,
 		order::{OrderList, Ordering},
 		statements::{
-			access::{
-				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-				AccessStatementShow,
-			},
-			analyze::AnalyzeStatement,
-			show::{ShowSince, ShowStatement},
-			sleep::SleepStatement,
 			AccessStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
 			ContinueStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
@@ -32,21 +30,23 @@ use crate::{
 			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
 			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
 			UpsertStatement, UseStatement,
+			access::{
+				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+				AccessStatementShow,
+			},
+			analyze::AnalyzeStatement,
+			show::{ShowSince, ShowStatement},
+			sleep::SleepStatement,
 		},
 		tokenizer::Tokenizer,
 		user::UserDuration,
-		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
-		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::parser::{
-		mac::{test_parse, test_parse_with_settings},
 		ParserSettings,
+		mac::{test_parse, test_parse_with_settings},
 	},
 };
-use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
+use chrono::{NaiveDate, Offset, Utc, offset::TimeZone};
 
 fn ident_field(name: &str) -> Value {
 	Value::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))

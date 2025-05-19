@@ -17,9 +17,9 @@ use tokio::sync::{
 };
 use tokio::time;
 use tokio_stream::StreamExt;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error};
 
 type Result<T> = StdResult<T, Box<dyn Error>>;

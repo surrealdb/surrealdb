@@ -2,19 +2,19 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Value,
 		graph::GraphSubjects,
 		part::{DestructurePart, Recurse, RecurseInstruction},
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Value,
 	},
 	syn::{
 		error::bail,
-		token::{t, Glued, Span, TokenKind},
+		token::{Glued, Span, TokenKind, t},
 	},
 };
 
 use super::{
-	mac::{expected, parse_option, unexpected},
 	ParseResult, Parser,
+	mac::{expected, parse_option, unexpected},
 };
 
 impl Parser<'_> {

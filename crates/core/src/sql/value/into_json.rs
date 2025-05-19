@@ -1,11 +1,11 @@
 use crate::sql;
-use crate::sql::constant::ConstantValue;
 use crate::sql::Number;
 use crate::sql::Value;
+use crate::sql::constant::ConstantValue;
 use serde::Serialize;
-use serde_json::json;
 use serde_json::Map;
 use serde_json::Value as JsonValue;
+use serde_json::json;
 
 impl From<Value> for serde_json::Value {
 	fn from(value: Value) -> Self {
@@ -140,11 +140,12 @@ impl From<sql::Geometry> for Geometry {
 			}),
 			sql::Geometry::Polygon(v) => json!(Coordinates {
 				typ: CoordinatesType::Polygon,
-				coordinates: vec![v
-					.exterior()
-					.points()
-					.map(|p| vec![json!(p.x()), json!(p.y())].into())
-					.collect::<Vec<JsonValue>>()]
+				coordinates: vec![
+					v.exterior()
+						.points()
+						.map(|p| vec![json!(p.x()), json!(p.y())].into())
+						.collect::<Vec<JsonValue>>()
+				]
 				.into_iter()
 				.chain(
 					v.interiors()
@@ -187,11 +188,12 @@ impl From<sql::Geometry> for Geometry {
 					.0
 					.iter()
 					.map(|v| {
-						vec![v
-							.exterior()
-							.points()
-							.map(|p| vec![json!(p.x()), json!(p.y())].into())
-							.collect::<Vec<JsonValue>>()]
+						vec![
+							v.exterior()
+								.points()
+								.map(|p| vec![json!(p.x()), json!(p.y())].into())
+								.collect::<Vec<JsonValue>>(),
+						]
 						.into_iter()
 						.chain(
 							v.interiors()
@@ -220,22 +222,22 @@ impl From<sql::Geometry> for Geometry {
 mod tests {
 	mod into_json {
 		use crate::sql;
-		use crate::sql::from_value;
 		use crate::sql::Value;
+		use crate::sql::from_value;
 		use chrono::DateTime;
 		use chrono::Utc;
-		use geo::line_string;
-		use geo::point;
-		use geo::polygon;
 		use geo::LineString;
 		use geo::MultiLineString;
 		use geo::MultiPoint;
 		use geo::MultiPolygon;
 		use geo::Point;
 		use geo::Polygon;
+		use geo::line_string;
+		use geo::point;
+		use geo::polygon;
 		use rust_decimal::Decimal;
-		use serde_json::json;
 		use serde_json::Value as Json;
+		use serde_json::json;
 		use std::collections::BTreeMap;
 		use std::time::Duration;
 		use uuid::Uuid;

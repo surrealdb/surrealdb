@@ -1,10 +1,12 @@
+use crate::Surreal;
+use crate::Value;
+use crate::api::Connection;
+use crate::api::ExtraFeatures;
+use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::Connection;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
 use crate::engine::any::Any;
 use crate::method::Live;
 use crate::method::OnceLockExt;
@@ -12,8 +14,6 @@ use crate::method::Query;
 use crate::method::Select;
 use crate::opt::Resource;
 use crate::value::Notification;
-use crate::Surreal;
-use crate::Value;
 use async_channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
@@ -23,8 +23,8 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::sql::{
-	statements::LiveStatement, Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part,
-	Statement, Table, Value as CoreValue,
+	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, Statement, Table,
+	Value as CoreValue, statements::LiveStatement,
 };
 use uuid::Uuid;
 

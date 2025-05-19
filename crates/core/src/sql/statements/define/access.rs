@@ -4,11 +4,11 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Strand, Value};
-use anyhow::{bail, Result};
+use crate::sql::{AccessType, Base, Ident, Strand, Value, access::AccessDuration};
+use anyhow::{Result, bail};
 
-use rand::distributions::Alphanumeric;
 use rand::Rng;
+use rand::distributions::Alphanumeric;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};

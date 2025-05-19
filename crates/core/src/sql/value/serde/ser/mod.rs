@@ -3,8 +3,8 @@ mod r#struct;
 
 use crate::err::Error;
 use crate::sql;
-use crate::sql::value::Value;
 use crate::sql::Bytes;
+use crate::sql::value::Value;
 use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
@@ -186,9 +186,9 @@ impl From<serde_content::Error> for Error {
 mod tests {
 	use super::*;
 	use crate::sql;
+	use crate::sql::Number;
 	use crate::sql::block::Entry;
 	use crate::sql::statements::CreateStatement;
-	use crate::sql::Number;
 	use crate::sql::*;
 	use ::serde::Serialize;
 	use graph::{GraphSubject, GraphSubjects};

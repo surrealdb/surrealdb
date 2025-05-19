@@ -27,12 +27,12 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::{statements::DefineUserStatement, Base, FlowResultExt as _, Query, Value};
+use crate::sql::{Base, FlowResultExt as _, Query, Value, statements::DefineUserStatement};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
@@ -43,7 +43,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
-use std::task::{ready, Poll};
+use std::task::{Poll, ready};
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -839,50 +839,54 @@ impl Datastore {
 		let mut complete = false;
 		let mut filling = true;
 
-		let stream = futures::stream::poll_fn(move |cx| loop {
-			// fill the buffer to at least parse_size when filling is required.
-			while filling {
-				let bytes = ready!(bytes_stream.as_mut().poll_next(cx));
-				let bytes = match bytes {
-					Some(Err(e)) => return Poll::Ready(Some(Err(e))),
-					Some(Ok(x)) => x,
-					None => {
-						complete = true;
-						filling = false;
-						break;
-					}
-				};
+		let stream = futures::stream::poll_fn(move |cx| {
+			loop {
+				// fill the buffer to at least parse_size when filling is required.
+				while filling {
+					let bytes = ready!(bytes_stream.as_mut().poll_next(cx));
+					let bytes = match bytes {
+						Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+						Some(Ok(x)) => x,
+						None => {
+							complete = true;
+							filling = false;
+							break;
+						}
+					};
 
-				buffer.extend_from_slice(&bytes);
-				filling = buffer.len() < parse_size
-			}
-
-			// if we finished streaming we can parse with complete so that the parser can be sure
-			// of it's results.
-			if complete {
-				return match statements_stream.parse_complete(&mut buffer) {
-					Err(e) => Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e))))),
-					Ok(None) => Poll::Ready(None),
-					Ok(Some(x)) => Poll::Ready(Some(Ok(x))),
-				};
-			}
-
-			// otherwise try to parse a single statement.
-			match statements_stream.parse_partial(&mut buffer) {
-				Err(e) => {
-					return Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e)))))
+					buffer.extend_from_slice(&bytes);
+					filling = buffer.len() < parse_size
 				}
-				Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
-				Ok(None) => {
-					// Couldn't parse a statement for sure.
-					if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
-						// the buffer already contained more or equal to parse_size bytes
-						// this means we are trying to parse a statement of more then buffer size.
-						// so we need to increase the buffer size.
-						parse_size = (parse_size + 1).next_power_of_two();
+
+				// if we finished streaming we can parse with complete so that the parser can be sure
+				// of it's results.
+				if complete {
+					return match statements_stream.parse_complete(&mut buffer) {
+						Err(e) => {
+							Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e)))))
+						}
+						Ok(None) => Poll::Ready(None),
+						Ok(Some(x)) => Poll::Ready(Some(Ok(x))),
+					};
+				}
+
+				// otherwise try to parse a single statement.
+				match statements_stream.parse_partial(&mut buffer) {
+					Err(e) => {
+						return Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e)))));
 					}
-					// start filling the buffer again.
-					filling = true;
+					Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
+					Ok(None) => {
+						// Couldn't parse a statement for sure.
+						if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
+							// the buffer already contained more or equal to parse_size bytes
+							// this means we are trying to parse a statement of more then buffer size.
+							// so we need to increase the buffer size.
+							parse_size = (parse_size + 1).next_power_of_two();
+						}
+						// start filling the buffer again.
+						filling = true;
+					}
 				}
 			}
 		});

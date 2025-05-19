@@ -9,7 +9,7 @@ use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Value};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use api::ApiConfig;
 use graphql::GraphQLConfig;
 use revision::revisioned;

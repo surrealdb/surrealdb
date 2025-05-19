@@ -1,3 +1,7 @@
+#[allow(unused_imports, reason = "Used by the DB engines.")]
+use crate::api::ExtraFeatures;
+use crate::api::Result;
+use crate::api::Surreal;
 use crate::api::conn;
 use crate::api::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
@@ -11,10 +15,6 @@ use crate::api::method::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
-#[allow(unused_imports, reason = "Used by the DB engines.")]
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
 use crate::opt::WaitFor;
 #[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
 use anyhow::bail;
@@ -26,10 +26,10 @@ use std::sync::atomic::AtomicI64;
 use surrealdb_core::err::Error as DbError;
 use tokio::sync::watch;
 #[cfg(feature = "protocol-ws")]
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-#[cfg(feature = "protocol-ws")]
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use tokio_tungstenite::Connector;
+#[cfg(feature = "protocol-ws")]
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 impl crate::api::Connection for Any {}
 impl conn::Sealed for Any {

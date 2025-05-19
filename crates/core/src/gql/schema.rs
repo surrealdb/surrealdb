@@ -6,23 +6,23 @@ use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
 use crate::kvs::Datastore;
 use crate::sql;
-use crate::sql::kind::Literal;
-use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::sql::Geometry;
 use crate::sql::Kind;
+use crate::sql::kind::Literal;
+use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
+use async_graphql::Name;
+use async_graphql::Value as GqlValue;
 use async_graphql::dynamic::Interface;
 use async_graphql::dynamic::InterfaceField;
 use async_graphql::dynamic::Object;
 use async_graphql::dynamic::Schema;
 use async_graphql::dynamic::{Enum, Type, Union};
 use async_graphql::dynamic::{Scalar, TypeRef};
-use async_graphql::Name;
-use async_graphql::Value as GqlValue;
-use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
 
-use super::error::{resolver_error, GqlError};
+use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
@@ -78,10 +78,10 @@ pub async fn generate_schema(
 	match (&tbs, &fns) {
 		(None, None) => return Err(GqlError::NotConfigured),
 		(None, Some(fs)) if fs.is_empty() => {
-			return Err(schema_error("no functions found in database"))
+			return Err(schema_error("no functions found in database"));
 		}
 		(Some(ts), None) if ts.is_empty() => {
-			return Err(schema_error("no tables found in database"))
+			return Err(schema_error("no tables found in database"));
 		}
 		(Some(ts), Some(fs)) if ts.is_empty() && fs.is_empty() => {
 			return Err(schema_error("no items found in database"));

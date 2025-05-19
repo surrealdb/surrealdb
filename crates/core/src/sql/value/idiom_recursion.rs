@@ -6,11 +6,11 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	sql::{
-		part::{RecurseInstruction, RecursionPlan},
 		Array, FlowResultExt as _, Part,
+		part::{RecurseInstruction, RecursionPlan},
 	},
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 #[derive(Clone, Copy, Debug)]

@@ -1,6 +1,6 @@
 use crate::cli::upgrade::ROOT;
-use anyhow::bail;
 use anyhow::Result;
+use anyhow::bail;
 use reqwest::Client;
 use std::borrow::Cow;
 #[cfg(test)]

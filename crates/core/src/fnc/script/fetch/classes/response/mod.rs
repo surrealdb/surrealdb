@@ -2,12 +2,13 @@
 
 use super::{Blob, Headers};
 use crate::fnc::script::fetch::{
+	RequestError,
 	body::{Body, BodyKind},
-	util, RequestError,
+	util,
 };
 use bytes::Bytes;
 use js::{
-	class::Trace, prelude::Opt, ArrayBuffer, Class, Ctx, Exception, JsLifetime, Result, Value,
+	ArrayBuffer, Class, Ctx, Exception, JsLifetime, Result, Value, class::Trace, prelude::Opt,
 };
 use reqwest::Url;
 
@@ -301,7 +302,7 @@ impl<'js> Response<'js> {
 #[cfg(test)]
 mod test {
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::{promise::Promise, CatchResultExt};
+	use js::{CatchResultExt, promise::Promise};
 
 	#[tokio::test]
 	async fn basic_response_use() {

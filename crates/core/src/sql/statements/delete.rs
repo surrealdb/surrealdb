@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{Cond, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

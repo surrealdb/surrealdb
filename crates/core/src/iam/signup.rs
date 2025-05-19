@@ -1,19 +1,19 @@
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Session;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
-use crate::iam::Auth;
 use crate::iam::{Actor, Level};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::AccessType;
 use crate::sql::Object;
 use crate::sql::Value;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::Utc;
-use jsonwebtoken::{encode, Header};
+use jsonwebtoken::{Header, encode};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -529,7 +529,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_record_signup_with_jwt_issuer() {
-		use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+		use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 		// Test with valid parameters
 		{
 			let public_key = r#"-----BEGIN PUBLIC KEY-----
@@ -1016,21 +1016,22 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			match (res1, res2) {
-				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
-				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
-				(Err(e1), Ok(_)) => {
-					match e1.downcast().expect("Unexpected error kind") {
-						Error::UnexpectedAuth => {}
-						e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-					}
-
-				}
-				(Ok(_), Err(e2)) =>{
-					match e2.downcast().expect("Unexpected error kind") {
-						Error::UnexpectedAuth => {}
-						e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-					}
-				}
+				(Ok(r1), Ok(r2)) => panic!(
+					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
+					r1, r2
+				),
+				(Err(e1), Err(e2)) => panic!(
+					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
+					e1, e2
+				),
+				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
+					Error::UnexpectedAuth => {}
+					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
+				},
+				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
+					Error::UnexpectedAuth => {}
+					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
+				},
 			}
 		}
 
@@ -1095,21 +1096,22 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			match (res1, res2) {
-				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
-				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
-				(Err(e1), Ok(_)) => {
-					match e1.downcast().expect("Unexpected error kind") {
-						Error::UnexpectedAuth => {}
-						e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-					}
-
-				}
-				(Ok(_), Err(e2)) =>{
-					match e2.downcast().expect("Unexpected error kind") {
-						Error::UnexpectedAuth => {}
-						e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
-					}
-				}
+				(Ok(r1), Ok(r2)) => panic!(
+					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
+					r1, r2
+				),
+				(Err(e1), Err(e2)) => panic!(
+					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
+					e1, e2
+				),
+				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
+					Error::UnexpectedAuth => {}
+					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
+				},
+				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
+					Error::UnexpectedAuth => {}
+					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
+				},
 			}
 		}
 	}

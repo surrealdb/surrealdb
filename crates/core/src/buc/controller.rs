@@ -4,9 +4,9 @@ use crate::{
 	doc::CursorDoc,
 	err,
 	iam::Action,
-	sql::{statements::define::BucketDefinition, Bytes, File, FlowResultExt, Permission, Value},
+	sql::{Bytes, File, FlowResultExt, Permission, Value, statements::define::BucketDefinition},
 };
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use core::fmt;
 use reblessive::tree::Stk;
 use std::sync::Arc;

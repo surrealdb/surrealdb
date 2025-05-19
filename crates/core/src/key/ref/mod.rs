@@ -1,8 +1,8 @@
 //! Stores a graph edge pointer
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
 use crate::kvs::KeyEncode;
+use crate::kvs::impl_key;
 use crate::sql::id::Id;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

@@ -10,15 +10,15 @@ use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	fmt::{Fmt, Pretty},
-	id::{Gen, Id},
-	model::Model,
 	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
 	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
 	Strand, Subquery, Table, Tables, Thing, Uuid,
+	fmt::{Fmt, Pretty},
+	id::{Gen, Id},
+	model::Model,
 };
 use crate::sql::{Closure, ControlFlow, FlowResult, Ident, Kind};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
 use geo::Point;

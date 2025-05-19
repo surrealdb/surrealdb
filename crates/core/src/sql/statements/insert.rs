@@ -6,7 +6,7 @@ use crate::idx::planner::RecordStrategy;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::{Data, FlowResultExt as _, Id, Output, Table, Thing, Timeout, Value, Version};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

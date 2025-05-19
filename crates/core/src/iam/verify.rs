@@ -3,15 +3,15 @@ use crate::err::Error;
 use crate::iam::access::{authenticate_generic, authenticate_record};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
-use crate::iam::{issue::expiration, token::Claims, Actor, Auth, Level, Role};
+use crate::iam::{Actor, Auth, Level, Role, issue::expiration, token::Claims};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::access_type::{AccessType, Jwt, JwtAccessVerify};
-use crate::sql::{statements::DefineUserStatement, Algorithm, Value};
+use crate::sql::{Algorithm, Value, statements::DefineUserStatement};
 use crate::syn;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use std::str::{self, FromStr};
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -700,7 +700,7 @@ mod tests {
 	use crate::iam::token::{Audience, HEADER};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
-	use jsonwebtoken::{encode, EncodingKey};
+	use jsonwebtoken::{EncodingKey, encode};
 
 	struct TestLevel {
 		level: &'static str,
@@ -851,9 +851,9 @@ mod tests {
 	async fn test_basic_nonexistent_role() {
 		use crate::iam::Error as IamError;
 		use crate::sql::{
-			statements::{define::DefineStatement, DefineUserStatement},
-			user::UserDuration,
 			Base, Statement,
+			statements::{DefineUserStatement, define::DefineStatement},
+			user::UserDuration,
 		};
 		let test_levels = vec![
 			TestLevel {
@@ -1345,9 +1345,9 @@ mod tests {
 	#[tokio::test]
 	async fn test_token_record_jwks() {
 		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
-		use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
+		use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
-		use rand::{distributions::Alphanumeric, Rng};
+		use rand::{Rng, distributions::Alphanumeric};
 		use wiremock::matchers::{method, path};
 		use wiremock::{Mock, MockServer, ResponseTemplate};
 

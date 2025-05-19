@@ -3,15 +3,15 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::idx::IndexKeyBase;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::IndexKeyBase;
 use crate::kvs::TransactionType;
+use crate::sql::Base;
 use crate::sql::ident::Ident;
 use crate::sql::index::Index;
 use crate::sql::value::Value;
-use crate::sql::Base;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

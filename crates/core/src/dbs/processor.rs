@@ -10,7 +10,7 @@ use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
 use crate::sql::dir::Dir;
 use crate::sql::id::range::IdRange;
 use crate::sql::{Edges, Table, Thing, Value};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use std::borrow::Cow;

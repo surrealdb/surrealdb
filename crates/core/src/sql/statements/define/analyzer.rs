@@ -4,8 +4,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{filter::Filter, tokenizer::Tokenizer, Array, Base, Ident, Strand, Value};
-use anyhow::{bail, Result};
+use crate::sql::{Array, Base, Ident, Strand, Value, filter::Filter, tokenizer::Tokenizer};
+use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

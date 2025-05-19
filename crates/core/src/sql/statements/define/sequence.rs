@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Timeout, Value};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;

@@ -1,5 +1,10 @@
 use crate::{
 	sql::{
+		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
+		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
+		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
+		Permission, Permissions, Regex, Scoring, Script, Split, Splits, Start, Statement, Strand,
+		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 		access::AccessDuration,
 		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
 		block::Entry,
@@ -10,9 +15,6 @@ use crate::{
 		language::Language,
 		order::{OrderList, Ordering},
 		statements::{
-			analyze::AnalyzeStatement,
-			show::{ShowSince, ShowStatement},
-			sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
 			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
@@ -22,18 +24,16 @@ use crate::{
 			OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
 			RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
 			UpsertStatement,
+			analyze::AnalyzeStatement,
+			show::{ShowSince, ShowStatement},
+			sleep::SleepStatement,
 		},
 		tokenizer::Tokenizer,
-		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
-		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Regex, Scoring, Script, Split, Splits, Start, Statement, Strand,
-		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::parser::StatementStream,
 };
 use bytes::BytesMut;
-use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
+use chrono::{NaiveDate, Offset, Utc, offset::TimeZone};
 
 fn ident_field(name: &str) -> Value {
 	Value::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))
