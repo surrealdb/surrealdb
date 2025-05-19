@@ -11,9 +11,10 @@ use crate::{
 
 use anyhow::{bail, Context, Result};
 use clap::ArgMatches;
+use futures::pin_mut;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
-use std::{io, mem, str, thread, time::Duration};
+use std::{io, mem, str, sync::Mutex, thread, time::Duration};
 use surrealdb_core::{
 	dbs::{capabilities::ExperimentalTarget, Session},
 	env::VERSION,
@@ -38,6 +39,7 @@ pub struct TestTaskContext {
 	pub result: Sender<(TestId, TestTaskResult)>,
 }
 
+/// Collects the reports into the reporst vector from the channel and updates the progress.
 fn try_collect_reports<W: io::Write>(
 	reports: &mut Vec<TestReport>,
 	channel: &mut UnboundedReceiver<TestReport>,
@@ -50,6 +52,7 @@ fn try_collect_reports<W: io::Write>(
 	}
 }
 
+/// Filters the test from arguments.
 fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> TestSet {
 	let subset = if let Some(x) = matches.get_one::<String>("filter") {
 		testset.filter_map(|name, _| name.contains(x))
@@ -173,17 +176,36 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let mut reports = Vec::new();
 	let mut progress = Progress::from_stderr(tasks.len(), color);
+	progress.set_ansi_mode(false);
 
 	// spawn all tests.
 	for id in tasks {
+		dbg!(1);
 		let config = subset[id].config.as_ref();
 		progress.start_item(id, subset[id].path.as_str()).unwrap();
 
+		dbg!(2);
 		let ds = if config.can_use_reusable_ds() {
-			provisioner.obtain().await
+			dbg!(3);
+			let future = provisioner.obtain();
+			pin_mut!(future);
+			dbg!(4);
+			match tokio::time::timeout(Duration::from_secs(10), &mut future).await {
+				Ok(x) => x,
+				Err(_) => {
+					dbg!(6);
+					progress
+						.write_inbetween(format_args!(
+							"Test suite hasn't made progress for 60 seconds.\n"
+						))
+						.unwrap();
+					future.await
+				}
+			}
 		} else {
 			provisioner.create()
 		};
+		dbg!(3);
 
 		let context = TestTaskContext {
 			id,
@@ -193,23 +215,28 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		};
 		let future = async move {
 			let name = context.testset[context.id].path.as_str().to_owned();
-			let future = test_task(context);
+			let future = tokio::time::timeout(Duration::from_secs(30), test_task(context));
 
-			if let Err(e) = future.await {
+			if let Err(e) = future.await.unwrap() {
 				println!("Error: {:?}", e.context(format!("Failed to run test '{name}'")))
 			}
 		};
+		dbg!(4);
 
-		if config.should_run_sequentially() {
-			schedular.spawn_sequential(future).await;
+		let permit = if config.should_run_sequentially() {
+			tokio::time::timeout(Duration::from_secs(30), schedular.acquire_sequential())
+				.await
+				.unwrap()
 		} else {
-			schedular.spawn(future).await;
-		}
+			tokio::time::timeout(Duration::from_secs(30), schedular.acquire()).await.unwrap()
+		};
+		dbg!(5);
+		permit.spawn(future);
+		dbg!(6);
 
 		// Try to collect reports to give quick feedback on test completion.
 		try_collect_reports(&mut reports, &mut report_recv, &mut progress);
 	}
-
 	// all test are running.
 	// drop the result sender so that tasks properly quit when the channel does.
 	mem::drop(res_send);
@@ -395,6 +422,10 @@ async fn run_test_with_dbs(
 
 	let mut process_future = Box::pin(dbs.process(query, &session, None));
 	let timeout_future = time::sleep(timeout_duration);
+
+	let lock = std::sync::Mutex::new(());
+	std::mem::forget(lock.lock());
+	lock.lock();
 
 	let mut did_timeout = false;
 	let result = select! {
