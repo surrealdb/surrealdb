@@ -10,6 +10,10 @@ pub fn blake3((arg,): (String,)) -> Result<Value, Error> {
 	Ok(blake3::hash(arg.as_bytes()).to_string().into())
 }
 
+pub fn joaat((arg,): (String,)) -> Result<Value, Error> {
+	Ok(joaat::hash_bytes(arg.as_bytes()).to_string().into())
+}
+
 pub fn md5((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Md5::new();
 	hasher.update(arg.as_str());

@@ -89,6 +89,7 @@ hex = "0.4.3"
 http = "1.1.0"
 indexmap = "2.1.0"
 jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
+joaat = "0.1.0"
 jsonwebtoken = "9.3.0"
 linfa-linalg = "=0.1.0"
 md-5 = "0.10.6"
