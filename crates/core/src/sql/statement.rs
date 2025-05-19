@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::err::Error;
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::AccessStatement;
 use crate::sql::{
@@ -192,7 +193,11 @@ impl Statement {
 				// Process the output value
 				return v.compute(stk, ctx, opt, doc).await;
 			}
-			_ => Err(fail!("Unexpected statement type encountered: {self:?}")),
+			_ => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(format_args!(
+					"Unexpected statement type encountered: {self:?}"
+				)))))
+			}
 		};
 
 		res.map_err(ControlFlow::from)

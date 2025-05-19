@@ -12,6 +12,7 @@ use crate::sql::paths::RD;
 use crate::sql::paths::TK;
 use crate::sql::permission::Permission;
 use crate::sql::{FlowResultExt as _, Value};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -29,7 +30,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check import
 		if opt.import {
 			return Ok(());
@@ -61,11 +62,15 @@ impl Document {
 				Value::from("UPDATE")
 			};
 			// Get the record if of this docunent
-			let rid = self.id.clone().ok_or_else(|| {
-				Error::Unreachable(
-					"Processing live query for record without a Record ID".to_owned(),
-				)
-			})?;
+			let rid = self
+				.id
+				.clone()
+				.ok_or_else(|| {
+					Error::Unreachable(
+						"Processing live query for record without a Record ID".to_owned(),
+					)
+				})
+				.map_err(anyhow::Error::new)?;
 			// Get the current and initial docs
 			let current = self.current.doc.as_arc();
 			let initial = self.initial.doc.as_arc();
@@ -118,7 +123,7 @@ impl Document {
 			let lqctx = lqctx.freeze();
 			match self.lq_check(stk, &lqctx, &lqopt, &lq, doc).await {
 				Err(IgnoreError::Ignore) => continue,
-				Err(IgnoreError::Error(e)) => return Err(*e),
+				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(_) => (),
 			}
 			// Secondly, let's check to see if any PERMISSIONS
@@ -127,7 +132,7 @@ impl Document {
 			// query. If it does, then we can continue.
 			match self.lq_allow(stk, &lqctx, &lqopt, &lq, doc).await {
 				Err(IgnoreError::Ignore) => continue,
-				Err(IgnoreError::Error(e)) => return Err(*e),
+				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(_) => (),
 			}
 			// Let's check what type of statement
@@ -160,7 +165,7 @@ impl Document {
 					// case.
 					let result = match self.pluck(stk, &lqctx, &lqopt, &lq).await {
 						Err(IgnoreError::Ignore) => continue,
-						Err(IgnoreError::Error(e)) => return Err(*e),
+						Err(IgnoreError::Error(e)) => return Err(e),
 						Ok(x) => x,
 					};
 					(Action::Create, result)
@@ -176,7 +181,7 @@ impl Document {
 					// case.
 					let result = match self.pluck(stk, &lqctx, &lqopt, &lq).await {
 						Err(IgnoreError::Ignore) => continue,
-						Err(IgnoreError::Error(e)) => return Err(*e),
+						Err(IgnoreError::Error(e)) => return Err(e),
 						Ok(x) => x,
 					};
 					(Action::Update, result)

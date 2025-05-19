@@ -4,7 +4,7 @@ use crate::cli::abstraction::{
 };
 use crate::cnf::PKG_VERSION;
 use crate::dbs::DbsCapabilities;
-use crate::err::Error;
+use anyhow::{anyhow, Result};
 use clap::Args;
 use futures::StreamExt;
 use rustyline::error::ReadlineError;
@@ -66,7 +66,7 @@ pub async fn init(
 		capabilities,
 		..
 	}: SqlCommandArguments,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Capabilities configuration for local engines
 	let capabilities = capabilities.into_cli_capabilities();
 	let config = Config::new().capabilities(capabilities.clone().into());
@@ -273,7 +273,7 @@ fn process(
 	pretty: bool,
 	json: bool,
 	res: surrealdb::Result<WithStats<Response>>,
-) -> Result<String, Error> {
+) -> Result<String> {
 	// Check query response for an error
 	let mut response = res?;
 	// Get the number of statements the query contained
@@ -281,12 +281,9 @@ fn process(
 	// Prepare a single value from the query response
 	let mut vec = Vec::<(Stats, Value)>::with_capacity(num_statements);
 	for index in 0..num_statements {
-		let (stats, result) = response
-			.take(index)
-			.ok_or_else(|| {
-				format!("Expected some result for a query with index {index}, but found none")
-			})
-			.map_err(Error::Other)?;
+		let (stats, result) = response.take(index).ok_or_else(|| {
+			anyhow!("Expected some result for a query with index {index}, but found none")
+		})?;
 		let output = result.unwrap_or_else(|e| Value::from_inner(CoreValue::from(e.to_string())));
 		vec.push((stats, output));
 	}
@@ -295,7 +292,7 @@ fn process(
 		let mut stream = match response.into_inner().stream::<Value>(()) {
 			Ok(stream) => stream,
 			Err(error) => {
-				print(Err(error.into()));
+				print(Err(error));
 				return;
 			}
 		};
@@ -390,7 +387,7 @@ fn process(
 	})
 }
 
-fn print(result: Result<String, Error>) {
+fn print(result: Result<String>) {
 	match result {
 		Ok(v) => {
 			println!("{v}\n");

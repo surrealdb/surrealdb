@@ -5,12 +5,12 @@ use crate::helpers::Test;
 use helpers::new_ds;
 use helpers::with_enough_stack;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn field_definition_value_reference() -> Result<(), Error> {
+async fn field_definition_value_reference() -> Result<()> {
 	let sql = "
 		DEFINE TABLE product;
 		DEFINE FIELD subproducts ON product VALUE ->contains->product;
@@ -111,7 +111,7 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn field_definition_value_reference_with_future() -> Result<(), Error> {
+async fn field_definition_value_reference_with_future() -> Result<()> {
 	with_enough_stack(async {
 		let sql = "
 		DEFINE TABLE product;
@@ -216,7 +216,7 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn field_definition_edge_permissions() -> Result<(), Error> {
+async fn field_definition_edge_permissions() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE TABLE business SCHEMAFULL;
@@ -298,7 +298,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn field_definition_readonly() -> Result<(), Error> {
+async fn field_definition_readonly() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD birthdate ON person TYPE datetime READONLY;
@@ -354,7 +354,7 @@ async fn field_definition_readonly() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn field_definition_flexible_array_any() -> Result<(), Error> {
+async fn field_definition_flexible_array_any() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE FIELD custom ON user TYPE option<array>;
@@ -403,7 +403,7 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn field_definition_array_any() -> Result<(), Error> {
+async fn field_definition_array_any() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE FIELD custom ON user TYPE array<any>;

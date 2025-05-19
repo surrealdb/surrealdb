@@ -7,6 +7,7 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Base, ChangeFeed, Ident, Permissions, Strand, Value};
 use crate::sql::{Kind, TableType};
+use anyhow::Result;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -45,20 +46,24 @@ impl AlterTableStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
 		let (ns, db) = opt.ns_db()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
+
 		// Get the table definition
 		let mut dt = match txn.get_tb(ns, db, &self.name).await {
 			Ok(tb) => tb.deref().clone(),
-			Err(Error::TbNotFound {
-				..
-			}) if self.if_exists => return Ok(Value::None),
-			Err(v) => return Err(v),
+			Err(e) => {
+				if self.if_exists && matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
+					return Ok(Value::None);
+				} else {
+					return Err(e);
+				}
+			}
 		};
 		// Process the statement
 		let key = crate::key::database::tb::new(ns, db, &self.name);

@@ -6,6 +6,7 @@ use crate::sql::{
 	fmt::{pretty_indent, Fmt, Pretty},
 	Value,
 };
+use anyhow::{ensure, Result};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -120,7 +121,7 @@ impl Array {
 	}
 
 	/// Validate that an Array contains only computed Values
-	pub fn validate_computed(&self) -> Result<(), Error> {
+	pub fn validate_computed(&self) -> Result<()> {
 		self.iter().try_for_each(|v| v.validate_computed())
 	}
 }
@@ -207,17 +208,18 @@ impl<T> Abolish<T> for Vec<T> {
 // ------------------------------
 
 pub(crate) trait Clump<T> {
-	fn clump(self, clump_size: usize) -> Result<T, Error>;
+	fn clump(self, clump_size: usize) -> Result<T>;
 }
 
 impl Clump<Array> for Array {
-	fn clump(self, clump_size: usize) -> Result<Array, Error> {
-		if clump_size < 1 {
-			return Err(Error::InvalidArguments {
+	fn clump(self, clump_size: usize) -> Result<Array> {
+		ensure!(
+			clump_size >= 1,
+			Error::InvalidArguments {
 				name: "array::clump".to_string(),
 				message: "The second argument must be an integer greater than 0".to_string(),
-			});
-		}
+			}
+		);
 
 		Ok(self
 			.0
@@ -454,17 +456,18 @@ impl Uniq<Array> for Array {
 // ------------------------------
 
 pub(crate) trait Windows<T> {
-	fn windows(self, window_size: usize) -> Result<T, Error>;
+	fn windows(self, window_size: usize) -> Result<T>;
 }
 
 impl Windows<Array> for Array {
-	fn windows(self, window_size: usize) -> Result<Array, Error> {
-		if window_size < 1 {
-			return Err(Error::InvalidArguments {
+	fn windows(self, window_size: usize) -> Result<Array> {
+		ensure!(
+			window_size >= 1,
+			Error::InvalidArguments {
 				name: "array::windows".to_string(),
 				message: "The second argument must be an integer greater than 0".to_string(),
-			});
-		}
+			}
+		);
 
 		Ok(self
 			.0

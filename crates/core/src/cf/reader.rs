@@ -6,6 +6,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::{KeyDecode, Transaction};
 use crate::sql::statements::show::ShowSince;
 use crate::vs::VersionStamp;
+use anyhow::{bail, Result};
 
 // Reads the change feed for a specific database or a table,
 // starting from a specific versionstamp.
@@ -22,7 +23,7 @@ pub async fn read(
 	tb: Option<&str>,
 	start: ShowSince,
 	limit: Option<u32>,
-) -> Result<Vec<ChangeSet>, Error> {
+) -> Result<Vec<ChangeSet>> {
 	// Calculate the start of the changefeed range
 	let beg = match start {
 		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, VersionStamp::from_u64(x))?,
@@ -32,7 +33,7 @@ pub async fn read(
 			match vs {
 				Some(vs) => change::prefix_ts(ns, db, vs)?,
 				None => {
-					return Err(Error::Internal(
+					bail!(Error::Internal(
 						"no versionstamp associated to this timestamp exists yet".to_string(),
 					))
 				}

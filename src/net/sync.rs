@@ -1,4 +1,4 @@
-use crate::err::Error;
+use crate::net::error::Error as NetError;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Extension, Router};
@@ -21,7 +21,7 @@ async fn load(
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Sync) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sync);
-		return Err(Error::ForbiddenRoute(RouteTarget::Sync.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Sync.to_string()));
 	}
 
 	Ok("Load")
@@ -35,7 +35,7 @@ async fn save(
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Sync) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Sync);
-		return Err(Error::ForbiddenRoute(RouteTarget::Sync.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Sync.to_string()));
 	}
 
 	Ok("Save")

@@ -7,6 +7,7 @@ use crate::key::sequence::Prefix;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
 use crate::sql::statements::define::DefineSequenceStatement;
+use anyhow::Result;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use rand::{thread_rng, Rng};
@@ -62,7 +63,7 @@ impl Sequences {
 			sequences: Arc::new(Default::default()),
 		}
 	}
-	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: &str) -> Result<(), Error> {
+	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: &str) -> Result<()> {
 		for db in tx.all_ns().await?.iter() {
 			self.database_removed(tx, ns, &db.name).await?;
 		}
@@ -73,7 +74,7 @@ impl Sequences {
 		tx: &Transaction,
 		ns: &str,
 		db: &str,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		for sqs in tx.all_db_sequences(ns, db).await?.iter() {
 			self.sequence_removed(ns, db, &sqs.name);
 		}
@@ -85,12 +86,7 @@ impl Sequences {
 		self.sequences.remove(&key);
 	}
 
-	pub(crate) async fn next_val(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		sq: &str,
-	) -> Result<i64, Error> {
+	pub(crate) async fn next_val(&self, ctx: &Context, opt: &Options, sq: &str) -> Result<i64> {
 		let (ns, db) = opt.ns_db()?;
 		let seq = ctx.tx().get_db_sequence(ns, db, sq).await?;
 		let key = SequenceKey::new(ns, db, sq);
@@ -119,7 +115,7 @@ impl Sequence {
 		opt: &Options,
 		sq: &str,
 		seq: &DefineSequenceStatement,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let (ns, db) = opt.ns_db()?;
 		let nid = opt.id()?;
 		let key = St::new(ns, db, sq, nid).encode()?;
@@ -148,7 +144,7 @@ impl Sequence {
 		opt: &Options,
 		seq: &str,
 		batch: u32,
-	) -> Result<i64, Error> {
+	) -> Result<i64> {
 		if self.st.next >= self.to {
 			(self.st.next, self.to) = Self::find_batch_allocation(
 				&self.tf,
@@ -178,7 +174,7 @@ impl Sequence {
 		next: i64,
 		batch: u32,
 		to: Option<Duration>,
-	) -> Result<(i64, i64), Error> {
+	) -> Result<(i64, i64)> {
 		let (ns, db) = opt.ns_db()?;
 		let nid = opt.id()?;
 		// Use for exponential backoff
@@ -209,7 +205,7 @@ impl Sequence {
 				tempo *= 2;
 			}
 		}
-		Err(Error::QueryTimedout)
+		Err(anyhow::Error::new(Error::QueryTimedout))
 	}
 
 	async fn check_batch_allocation(
@@ -220,7 +216,7 @@ impl Sequence {
 		nid: Uuid,
 		next: i64,
 		batch: u32,
-	) -> Result<(i64, i64), Error> {
+	) -> Result<(i64, i64)> {
 		let tx = tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
 		let (beg, end) = Prefix::new_ba_range(ns, db, seq)?;
 		let val = tx.getr(beg..end, None).await?;

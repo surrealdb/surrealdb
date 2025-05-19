@@ -1,6 +1,6 @@
-use crate::err::Error;
 use crate::sql;
 use crate::sql::Value;
+use anyhow::Result;
 use serde::de::DeserializeOwned;
 use serde_content::Deserializer;
 use serde_content::Number;
@@ -9,7 +9,7 @@ use serde_content::Value as Content;
 use std::borrow::Cow;
 
 impl Value {
-	fn into_content(self) -> Result<Content<'static>, Error> {
+	fn into_content(self) -> Result<Content<'static>> {
 		let serializer = Serializer::new();
 		match self {
 			Value::None => Ok(Content::Option(None)),
@@ -75,7 +75,7 @@ impl Value {
 }
 
 /// Deserializes a value `T` from `SurrealDB` [`Value`]
-pub fn from_value<T>(value: Value) -> Result<T, Error>
+pub fn from_value<T>(value: Value) -> Result<T>
 where
 	T: DeserializeOwned,
 {

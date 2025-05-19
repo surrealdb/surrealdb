@@ -8,6 +8,7 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::{Base, Ident, Permissions, Strand, Value};
 use crate::sql::{Idiom, Kind};
 
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -42,7 +43,7 @@ impl AlterFieldStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
@@ -53,10 +54,13 @@ impl AlterFieldStatement {
 		let name = self.name.to_string();
 		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await {
 			Ok(tb) => tb.deref().clone(),
-			Err(Error::FdNotFound {
-				..
-			}) if self.if_exists => return Ok(Value::None),
-			Err(v) => return Err(v),
+			Err(e) => {
+				if self.if_exists && matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
+					return Ok(Value::None);
+				} else {
+					return Err(e);
+				}
+			}
 		};
 		// Process the statement
 		if let Some(ref flex) = &self.flex {

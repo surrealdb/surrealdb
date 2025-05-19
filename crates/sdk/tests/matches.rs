@@ -4,11 +4,11 @@ mod helpers;
 use crate::helpers::{skip_ok, Test};
 use helpers::new_ds;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn select_where_matches_using_index() -> Result<(), Error> {
+async fn select_where_matches_using_index() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET title = 'Hello World!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
@@ -60,7 +60,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_matches_without_using_index_iterator() -> Result<(), Error> {
+async fn select_where_matches_without_using_index_iterator() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET title = 'Hello World!';
 		CREATE blog:2 SET title = 'Foo Bar!';
@@ -120,7 +120,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	Ok(())
 }
 
-async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(), Error> {
+async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<()> {
 	let p = if parallel {
 		"PARALLEL"
 	} else {
@@ -184,17 +184,17 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 }
 
 #[tokio::test]
-async fn select_where_matches_using_index_and_arrays_non_parallel() -> Result<(), Error> {
+async fn select_where_matches_using_index_and_arrays_non_parallel() -> Result<()> {
 	select_where_matches_using_index_and_arrays(false).await
 }
 
 #[tokio::test]
-async fn select_where_matches_using_index_and_arrays_with_parallel() -> Result<(), Error> {
+async fn select_where_matches_using_index_and_arrays_with_parallel() -> Result<()> {
 	select_where_matches_using_index_and_arrays(true).await
 }
 
 #[tokio::test]
-async fn select_where_matches_partial_highlight() -> Result<(), Error> {
+async fn select_where_matches_partial_highlight() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET content = 'Hello World!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase,edgengram(2,100);
@@ -278,7 +278,7 @@ async fn select_where_matches_partial_highlight() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_matches_partial_highlight_ngram() -> Result<(), Error> {
+async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET content = 'Hello World!';
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase,ngram(1,32);
@@ -362,7 +362,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<(), Error> {
 	Ok(())
 }
 
-async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<(), Error> {
+async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<()> {
 	let p = if parallel {
 		"PARALLEL"
 	} else {
@@ -427,17 +427,17 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 }
 
 #[tokio::test]
-async fn select_where_matches_using_index_and_objects_non_parallel() -> Result<(), Error> {
+async fn select_where_matches_using_index_and_objects_non_parallel() -> Result<()> {
 	select_where_matches_using_index_and_objects(false).await
 }
 
 #[tokio::test]
-async fn select_where_matches_using_index_and_objects_with_parallel() -> Result<(), Error> {
+async fn select_where_matches_using_index_and_objects_with_parallel() -> Result<()> {
 	select_where_matches_using_index_and_objects(true).await
 }
 
 #[tokio::test]
-async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
+async fn select_where_matches_using_index_offsets() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET title = 'Blog title!', content = ['Hello World!', 'Be Bop', 'Foo Bãr'];
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
@@ -472,7 +472,7 @@ async fn select_where_matches_using_index_offsets() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
+async fn select_where_matches_using_index_and_score() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET title = 'the quick brown fox jumped over the lazy dog';
 		CREATE blog:2 SET title = 'the fast fox jumped over the lazy dog';
@@ -503,7 +503,7 @@ async fn select_where_matches_using_index_and_score() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_matches_without_using_index_and_score() -> Result<(), Error> {
+async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 	let sql = r"
 		CREATE blog:1 SET title = 'the quick brown fox jumped over the lazy dog', label = 'test';
 		CREATE blog:2 SET title = 'the fast fox jumped over the lazy dog', label = 'test';
@@ -545,7 +545,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<(), Erro
 }
 
 #[tokio::test]
-async fn select_where_matches_without_complex_query() -> Result<(), Error> {
+async fn select_where_matches_without_complex_query() -> Result<()> {
 	let sql = r"
 		CREATE page:1 SET title = 'the quick brown', content = 'fox jumped over the lazy dog', host = 'test';
 		CREATE page:2 SET title = 'the fast fox', content = 'jumped over the lazy dog', host = 'test';
@@ -648,7 +648,7 @@ async fn select_where_matches_without_complex_query() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_matches_mixing_indexes() -> Result<(), Error> {
+async fn select_where_matches_mixing_indexes() -> Result<()> {
 	let sql = r"
 		DEFINE ANALYZER edgeNgram TOKENIZERS class FILTERS lowercase,ascii,edgeNgram(1,10);
 		DEFINE INDEX idxPersonName ON TABLE person COLUMNS name SEARCH ANALYZER edgeNgram BM25;
@@ -715,7 +715,7 @@ async fn select_where_matches_mixing_indexes() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_matches_analyser_without_tokenizer() -> Result<(), Error> {
+async fn select_where_matches_analyser_without_tokenizer() -> Result<()> {
 	let sql = r"
 		DEFINE ANALYZER az FILTERS lowercase,ngram(1,5);
 		CREATE t:1 SET text = 'ab';
@@ -729,7 +729,7 @@ async fn select_where_matches_analyser_without_tokenizer() -> Result<(), Error> 
 }
 
 #[tokio::test]
-async fn select_where_matches_analyser_with_mapper() -> Result<(), Error> {
+async fn select_where_matches_analyser_with_mapper() -> Result<()> {
 	let sql = r"
 		DEFINE ANALYZER mapper TOKENIZERS blank,class FILTERS lowercase,mapper('../../tests/data/lemmatization-en.txt');
 		CREATE t:1 SET text = 'He drives to work every day, taking the scenic route through town';

@@ -6,6 +6,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Permission, Strand, Value};
+use anyhow::{bail, Result};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -34,7 +35,7 @@ impl DefineModelStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
 		// Fetch the transaction
@@ -45,7 +46,7 @@ impl DefineModelStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::MlAlreadyExists {
+				bail!(Error::MlAlreadyExists {
 					name: self.name.to_string(),
 				});
 			}

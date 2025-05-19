@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
@@ -11,6 +10,7 @@ use crate::kvs::{Key, Val};
 use crate::kvs::{KeyEncode, Transaction};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Ident, Number, Thing, Value};
+use anyhow::Result;
 use radix_trie::Trie;
 use rust_decimal::Decimal;
 use std::borrow::Cow;
@@ -130,7 +130,7 @@ impl ThingIterator {
 		ctx: &Context,
 		txn: &Transaction,
 		size: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		match self {
 			Self::IndexEqual(i) => i.next_batch(txn, size).await,
 			Self::UniqueEqual(i) => i.next_batch(txn).await,
@@ -155,7 +155,7 @@ impl ThingIterator {
 		ctx: &Context,
 		txn: &Transaction,
 		size: u32,
-	) -> Result<usize, Error> {
+	) -> Result<usize> {
 		match self {
 			Self::IndexEqual(i) => i.next_count(txn, size).await,
 			Self::UniqueEqual(i) => i.next_count(txn).await,
@@ -223,7 +223,7 @@ impl IndexEqualThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		a: &Array,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let (beg, end) = Self::get_beg_end(ns, db, ix, a)?;
 		Ok(Self {
 			irf,
@@ -237,7 +237,7 @@ impl IndexEqualThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		a: &Array,
-	) -> Result<(Vec<u8>, Vec<u8>), Error> {
+	) -> Result<(Vec<u8>, Vec<u8>)> {
 		Ok(if ix.cols.len() == 1 {
 			(
 				Index::prefix_ids_beg(ns, db, &ix.what, &ix.name, a)?,
@@ -256,7 +256,7 @@ impl IndexEqualThingIterator {
 		beg: &mut Vec<u8>,
 		end: &[u8],
 		limit: u32,
-	) -> Result<Vec<(Key, Val)>, Error> {
+	) -> Result<Vec<(Key, Val)>> {
 		let min = beg.clone();
 		let max = end.to_owned();
 		let res = tx.scan(min..max, limit, None).await?;
@@ -274,25 +274,21 @@ impl IndexEqualThingIterator {
 		beg: &mut Vec<u8>,
 		end: &[u8],
 		limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		let res = Self::next_scan(tx, beg, end, limit).await?;
 		let mut records = B::with_capacity(res.len());
-		res.into_iter().try_for_each(|(_, val)| -> Result<(), Error> {
+		res.into_iter().try_for_each(|(_, val)| -> Result<()> {
 			records.add(IndexItemRecord::new_key(revision::from_slice(&val)?, irf.into()));
 			Ok(())
 		})?;
 		Ok(records)
 	}
 
-	async fn next_batch<B: IteratorBatch>(
-		&mut self,
-		tx: &Transaction,
-		limit: u32,
-	) -> Result<B, Error> {
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
 		Self::next_scan_batch(tx, self.irf, &mut self.beg, &self.end, limit).await
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize, Error> {
+	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
 		Ok(Self::next_scan(tx, &mut self.beg, &self.end, limit).await?.len())
 	}
 }
@@ -410,13 +406,7 @@ pub(super) enum ValueType {
 }
 
 impl ValueType {
-	fn prefix_beg(
-		&self,
-		ns: &str,
-		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
-	) -> Result<Vec<u8>, Error> {
+	fn prefix_beg(&self, ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident) -> Result<Vec<u8>> {
 		match self {
 			Self::None => Index::prefix_beg(ns, db, ix_what, ix_name),
 			Self::NumberInt => Index::prefix_ids_beg(
@@ -443,13 +433,7 @@ impl ValueType {
 		}
 	}
 
-	fn prefix_end(
-		&self,
-		ns: &str,
-		db: &str,
-		ix_what: &Ident,
-		ix_name: &Ident,
-	) -> Result<Vec<u8>, Error> {
+	fn prefix_end(&self, ns: &str, db: &str, ix_what: &Ident, ix_name: &Ident) -> Result<Vec<u8>> {
 		match self {
 			Self::None => Index::prefix_end(ns, db, ix_what, ix_name),
 			Self::NumberInt => Index::prefix_ids_end(
@@ -489,7 +473,7 @@ impl IndexRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		Ok(Self {
 			irf,
 			r: Self::range_scan(ns, db, ix, range)?,
@@ -501,7 +485,7 @@ impl IndexRangeThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let range = full_iterator_range();
 		Self::new(irf, ns, db, ix, &range)
 	}
@@ -511,7 +495,7 @@ impl IndexRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
-	) -> Result<RangeScan, Error> {
+	) -> Result<RangeScan> {
 		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from, range.value_type)?;
 		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to, range.value_type)?;
 		Ok(RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive))
@@ -524,7 +508,7 @@ impl IndexRangeThingIterator {
 		ix_name: &Ident,
 		from: &RangeValue,
 		value_type: ValueType,
-	) -> Result<Vec<u8>, Error> {
+	) -> Result<Vec<u8>> {
 		if from.value == Value::None {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
@@ -543,7 +527,7 @@ impl IndexRangeThingIterator {
 		ix_name: &Ident,
 		to: &RangeValue,
 		value_type: ValueType,
-	) -> Result<Vec<u8>, Error> {
+	) -> Result<Vec<u8>> {
 		if to.value == Value::None {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
@@ -555,7 +539,7 @@ impl IndexRangeThingIterator {
 		}
 	}
 
-	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
+	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>> {
 		let res = tx.scan(self.r.range(), limit, None).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg.clone_from(key);
@@ -564,7 +548,7 @@ impl IndexRangeThingIterator {
 		Ok(res)
 	}
 
-	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>, Error> {
+	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>> {
 		let res = tx.keys(self.r.range(), limit, None).await?;
 		if let Some(key) = res.last() {
 			self.r.beg.clone_from(key);
@@ -573,15 +557,11 @@ impl IndexRangeThingIterator {
 		Ok(res)
 	}
 
-	async fn next_batch<B: IteratorBatch>(
-		&mut self,
-		tx: &Transaction,
-		limit: u32,
-	) -> Result<B, Error> {
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
 		let res = self.next_scan(tx, limit).await?;
 		let mut records = B::with_capacity(res.len());
 		res.into_iter().filter(|(k, _)| self.r.matches(k)).try_for_each(
-			|(_, v)| -> Result<(), Error> {
+			|(_, v)| -> Result<()> {
 				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
 				Ok(())
 			},
@@ -589,7 +569,7 @@ impl IndexRangeThingIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize, Error> {
+	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
 		let res = self.next_keys(tx, limit).await?;
 		let count = res.into_iter().filter(|k| self.r.matches(k)).count();
 		Ok(count)
@@ -610,7 +590,7 @@ impl IndexRangeReverseThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		Ok(Self {
 			irf,
 			r: ReverseRangeScan::new(IndexRangeThingIterator::range_scan(ns, db, ix, range)?),
@@ -622,7 +602,7 @@ impl IndexRangeReverseThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let range = full_iterator_range();
 		Self::new(irf, ns, db, ix, &range)
 	}
@@ -630,7 +610,7 @@ impl IndexRangeReverseThingIterator {
 		&mut self,
 		tx: &Transaction,
 		limit: &mut u32,
-	) -> Result<Option<IndexItemRecord>, Error> {
+	) -> Result<Option<IndexItemRecord>> {
 		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
 			return Ok(None);
 		}
@@ -643,11 +623,7 @@ impl IndexRangeReverseThingIterator {
 		}
 	}
 
-	async fn check_keys_ending(
-		&mut self,
-		tx: &Transaction,
-		limit: &mut u32,
-	) -> Result<bool, Error> {
+	async fn check_keys_ending(&mut self, tx: &Transaction, limit: &mut u32) -> Result<bool> {
 		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
 			return Ok(false);
 		}
@@ -664,7 +640,7 @@ impl IndexRangeReverseThingIterator {
 		&mut self,
 		tx: &Transaction,
 		mut limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		// Check if we need to retrieve the key at end of the range (not returned by the scanr)
 		let ending = self.check_batch_ending(tx, &mut limit).await?;
 
@@ -688,7 +664,7 @@ impl IndexRangeReverseThingIterator {
 
 		// Feed the result
 		res.into_iter().filter(|(k, _)| self.r.r.matches(k)).try_for_each(
-			|(_, v)| -> Result<(), Error> {
+			|(_, v)| -> Result<()> {
 				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
 				Ok(())
 			},
@@ -706,7 +682,7 @@ impl IndexRangeReverseThingIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize, Error> {
+	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
 		// Check if we need to retrieve the key at end of the range (not returned by the keysr)
 		let mut count = self.check_keys_ending(tx, &mut limit).await? as usize;
 
@@ -746,7 +722,7 @@ impl IndexUnionThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		arrays: &[Array],
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value in the array.
 		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(arrays.len());
 
@@ -767,7 +743,7 @@ impl IndexUnionThingIterator {
 		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		while let Some(r) = &mut self.current {
 			if ctx.is_done(true).await? {
 				break;
@@ -783,12 +759,7 @@ impl IndexUnionThingIterator {
 		Ok(B::empty())
 	}
 
-	async fn next_count(
-		&mut self,
-		ctx: &Context,
-		tx: &Transaction,
-		limit: u32,
-	) -> Result<usize, Error> {
+	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
 		while let Some(r) = &mut self.current {
 			if ctx.is_done(true).await? {
 				break;
@@ -819,7 +790,7 @@ impl JoinThingIterator {
 		opt: &Options,
 		ix: IndexReference,
 		remote_iterators: VecDeque<ThingIterator>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let (ns, db) = opt.ns_db()?;
 		Ok(Self {
 			ns: ns.to_owned(),
@@ -840,7 +811,7 @@ impl JoinThingIterator {
 		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
-	) -> Result<bool, Error> {
+	) -> Result<bool> {
 		while !ctx.is_done(true).await? {
 			if let Some(it) = &mut self.current_remote {
 				self.current_remote_batch = it.next_batch(ctx, tx, limit).await?;
@@ -862,9 +833,9 @@ impl JoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
-	) -> Result<bool, Error>
+	) -> Result<bool>
 	where
-		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator, Error>,
+		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator>,
 	{
 		while !ctx.is_done(true).await? {
 			let mut count = 0;
@@ -894,9 +865,9 @@ impl JoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
-	) -> Result<B, Error>
+	) -> Result<B>
 	where
-		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator, Error> + Copy,
+		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator> + Copy,
 	{
 		while !ctx.is_done(true).await? {
 			if let Some(current_local) = &mut self.current_local {
@@ -918,9 +889,9 @@ impl JoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
-	) -> Result<usize, Error>
+	) -> Result<usize>
 	where
-		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator, Error> + Copy,
+		F: Fn(&str, &str, &DefineIndexStatement, Value) -> Result<ThingIterator> + Copy,
 	{
 		while !ctx.is_done(true).await? {
 			if let Some(current_local) = &mut self.current_local {
@@ -945,7 +916,7 @@ impl IndexJoinThingIterator {
 		opt: &Options,
 		ix: IndexReference,
 		remote_iterators: VecDeque<ThingIterator>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		Ok(Self(irf, JoinThingIterator::new(opt, ix, remote_iterators)?))
 	}
 
@@ -954,7 +925,7 @@ impl IndexJoinThingIterator {
 		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
 			let array = Array::from(value);
 			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array)?;
@@ -963,12 +934,7 @@ impl IndexJoinThingIterator {
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
 
-	async fn next_count(
-		&mut self,
-		ctx: &Context,
-		tx: &Transaction,
-		limit: u32,
-	) -> Result<usize, Error> {
+	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
 			let array = Array::from(value);
 			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array)?;
@@ -990,7 +956,7 @@ impl UniqueEqualThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		a: &Array,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode()?;
 		Ok(Self {
 			irf,
@@ -998,7 +964,7 @@ impl UniqueEqualThingIterator {
 		})
 	}
 
-	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B, Error> {
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = tx.get(key, None).await? {
 				let rid: Thing = revision::from_slice(&val)?;
@@ -1009,7 +975,7 @@ impl UniqueEqualThingIterator {
 		Ok(B::empty())
 	}
 
-	async fn next_count(&mut self, tx: &Transaction) -> Result<usize, Error> {
+	async fn next_count(&mut self, tx: &Transaction) -> Result<usize> {
 		if let Some(key) = self.key.take() {
 			if tx.exists(key, None).await? {
 				return Ok(1);
@@ -1043,7 +1009,7 @@ impl UniqueRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		range: &IteratorRange<'_>,
-	) -> Result<RangeScan, Error> {
+	) -> Result<RangeScan> {
 		let beg = Self::compute_beg(ns, db, &ix.what, &ix.name, &range.from, range.value_type)?;
 		let end = Self::compute_end(ns, db, &ix.what, &ix.name, &range.to, range.value_type)?;
 		Ok(RangeScan::new(beg, range.from.inclusive, end, range.to.inclusive))
@@ -1055,7 +1021,7 @@ impl UniqueRangeThingIterator {
 		db: &str,
 		ix: &DefineIndexStatement,
 		r: &IteratorRange<'_>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let r = Self::range_scan(ns, db, ix, r)?;
 		Ok(Self {
 			irf,
@@ -1069,7 +1035,7 @@ impl UniqueRangeThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let rng = full_iterator_range();
 		Self::new(irf, ns, db, ix, &rng)
 	}
@@ -1081,7 +1047,7 @@ impl UniqueRangeThingIterator {
 		ix_name: &Ident,
 		from: &RangeValue,
 		value_type: ValueType,
-	) -> Result<Vec<u8>, Error> {
+	) -> Result<Vec<u8>> {
 		if from.value == Value::None {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
@@ -1095,7 +1061,7 @@ impl UniqueRangeThingIterator {
 		ix_name: &Ident,
 		to: &RangeValue,
 		value_type: ValueType,
-	) -> Result<Vec<u8>, Error> {
+	) -> Result<Vec<u8>> {
 		if to.value == Value::None {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
@@ -1106,7 +1072,7 @@ impl UniqueRangeThingIterator {
 		&mut self,
 		tx: &Transaction,
 		mut limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		if self.done {
 			return Ok(B::empty());
 		}
@@ -1135,7 +1101,7 @@ impl UniqueRangeThingIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize, Error> {
+	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
 		if self.done {
 			return Ok(0);
 		}
@@ -1174,7 +1140,7 @@ impl UniqueRangeReverseThingIterator {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let r = full_iterator_range();
 		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, &r)?);
 		Ok(Self {
@@ -1188,7 +1154,7 @@ impl UniqueRangeReverseThingIterator {
 		&mut self,
 		tx: &Transaction,
 		mut limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		if self.done {
 			return Ok(B::empty());
 		}
@@ -1236,7 +1202,7 @@ impl UniqueRangeReverseThingIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize, Error> {
+	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
 		if self.done {
 			return Ok(0);
 		}
@@ -1283,7 +1249,7 @@ impl UniqueUnionThingIterator {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		vals: &[Array],
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		// We create a VecDeque to hold the key for each value in the array.
 		let mut keys = VecDeque::with_capacity(vals.len());
 		let (ns, db) = opt.ns_db()?;
@@ -1302,7 +1268,7 @@ impl UniqueUnionThingIterator {
 		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		let limit = limit as usize;
 		let mut results = B::with_capacity(limit.min(self.keys.len()));
 		let mut count = 0;
@@ -1322,12 +1288,7 @@ impl UniqueUnionThingIterator {
 		Ok(results)
 	}
 
-	async fn next_count(
-		&mut self,
-		ctx: &Context,
-		tx: &Transaction,
-		limit: u32,
-	) -> Result<usize, Error> {
+	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
 		let limit = limit as usize;
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
@@ -1353,7 +1314,7 @@ impl UniqueJoinThingIterator {
 		opt: &Options,
 		ix: IndexReference,
 		remote_iterators: VecDeque<ThingIterator>,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		Ok(Self(irf, JoinThingIterator::new(opt, ix, remote_iterators)?))
 	}
 
@@ -1362,7 +1323,7 @@ impl UniqueJoinThingIterator {
 		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
 			let array = Array::from(value.clone());
 			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
@@ -1371,12 +1332,7 @@ impl UniqueJoinThingIterator {
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
 
-	async fn next_count(
-		&mut self,
-		ctx: &Context,
-		tx: &Transaction,
-		limit: u32,
-	) -> Result<usize, Error> {
+	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
 		let new_iter = |ns: &str, db: &str, ix: &DefineIndexStatement, value: Value| {
 			let array = Array::from(value.clone());
 			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
@@ -1397,7 +1353,7 @@ impl MatchesThingIterator {
 		irf: IteratorRef,
 		fti: &FtIndex,
 		terms_docs: TermsDocs,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let hits = fti.new_hits_iterator(terms_docs)?;
 		let hits_left = if let Some(h) = &hits {
 			h.len()
@@ -1416,7 +1372,7 @@ impl MatchesThingIterator {
 		ctx: &Context,
 		tx: &Transaction,
 		limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		if let Some(hits) = &mut self.hits {
 			let limit = limit as usize;
 			let mut records = B::with_capacity(limit.min(self.hits_left));
@@ -1442,12 +1398,7 @@ impl MatchesThingIterator {
 		}
 	}
 
-	async fn next_count(
-		&mut self,
-		ctx: &Context,
-		tx: &Transaction,
-		limit: u32,
-	) -> Result<usize, Error> {
+	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
 		if let Some(hits) = &mut self.hits {
 			let limit = limit as usize;
 			let mut count = 0;
@@ -1483,11 +1434,7 @@ impl KnnIterator {
 			res,
 		}
 	}
-	async fn next_batch<B: IteratorBatch>(
-		&mut self,
-		ctx: &Context,
-		limit: u32,
-	) -> Result<B, Error> {
+	async fn next_batch<B: IteratorBatch>(&mut self, ctx: &Context, limit: u32) -> Result<B> {
 		let limit = limit as usize;
 		let mut records = B::with_capacity(limit.min(self.res.len()));
 		while limit > records.len() {
@@ -1508,7 +1455,7 @@ impl KnnIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, ctx: &Context, limit: u32) -> Result<usize, Error> {
+	async fn next_count(&mut self, ctx: &Context, limit: u32) -> Result<usize> {
 		let limit = limit as usize;
 		let mut count = 0;
 		while limit > count {
@@ -1543,7 +1490,7 @@ impl MultipleIterators {
 		ctx: &Context,
 		txn: &Transaction,
 		limit: u32,
-	) -> Result<B, Error> {
+	) -> Result<B> {
 		loop {
 			// Do we have an iterator
 			if let Some(i) = &mut self.current {
@@ -1563,12 +1510,7 @@ impl MultipleIterators {
 		}
 	}
 
-	async fn next_count(
-		&mut self,
-		ctx: &Context,
-		txn: &Transaction,
-		limit: u32,
-	) -> Result<usize, Error> {
+	async fn next_count(&mut self, ctx: &Context, txn: &Transaction, limit: u32) -> Result<usize> {
 		loop {
 			// Do we have an iterator
 			if let Some(i) = &mut self.current {

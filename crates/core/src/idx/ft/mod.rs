@@ -9,7 +9,6 @@ pub(crate) mod terms;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::doclength::DocLengths;
@@ -28,6 +27,7 @@ use crate::sql::index::SearchParams;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{Idiom, Object, Thing, Value};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::treemap::IntoIter;
@@ -104,7 +104,7 @@ impl FtIndex {
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let tx = ctx.tx();
 		let ixs = ctx.get_index_stores();
 		let (ns, db) = opt.ns_db()?;
@@ -119,7 +119,7 @@ impl FtIndex {
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let state_key: Key = index_key_base.new_bs_key()?;
 		let state: State = if let Some(val) = txn.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
@@ -188,11 +188,7 @@ impl FtIndex {
 		self.analyzer.clone()
 	}
 
-	pub(crate) async fn remove_document(
-		&mut self,
-		ctx: &Context,
-		rid: &Thing,
-	) -> Result<(), Error> {
+	pub(crate) async fn remove_document(&mut self, ctx: &Context, rid: &Thing) -> Result<()> {
 		let tx = ctx.tx();
 		// Extract and remove the doc_id (if any)
 		let mut doc_ids = self.doc_ids.write().await;
@@ -247,7 +243,7 @@ impl FtIndex {
 		opt: &Options,
 		rid: &Thing,
 		content: Vec<Value>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Resolve the doc_id
 		let tx = ctx.tx();
 		let mut doc_ids = self.doc_ids.write().await;
@@ -356,7 +352,7 @@ impl FtIndex {
 		ctx: &Context,
 		opt: &Options,
 		query_string: String,
-	) -> Result<(TermsList, TermsSet), Error> {
+	) -> Result<(TermsList, TermsSet)> {
 		let t = self.terms.read().await;
 		let res = self.analyzer.extract_querying_terms(stk, ctx, opt, &t, query_string).await?;
 		drop(t);
@@ -367,7 +363,7 @@ impl FtIndex {
 		&self,
 		tx: &Transaction,
 		terms: &TermsList,
-	) -> Result<Vec<Option<(TermId, RoaringTreemap)>>, Error> {
+	) -> Result<Vec<Option<(TermId, RoaringTreemap)>>> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
 		for opt_term in terms {
 			if let Some((term_id, _)) = opt_term {
@@ -384,10 +380,7 @@ impl FtIndex {
 		Ok(terms_docs)
 	}
 
-	pub(super) fn new_hits_iterator(
-		&self,
-		terms_docs: TermsDocs,
-	) -> Result<Option<HitsIterator>, Error> {
+	pub(super) fn new_hits_iterator(&self, terms_docs: TermsDocs) -> Result<Option<HitsIterator>> {
 		let mut hits: Option<RoaringTreemap> = None;
 		for opt_term_docs in terms_docs.iter() {
 			if let Some((_, term_docs)) = opt_term_docs {
@@ -408,7 +401,7 @@ impl FtIndex {
 		Ok(None)
 	}
 
-	pub(super) fn new_scorer(&self, terms_docs: TermsDocs) -> Result<Option<BM25Scorer>, Error> {
+	pub(super) fn new_scorer(&self, terms_docs: TermsDocs) -> Result<Option<BM25Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			return Ok(Some(BM25Scorer::new(
 				self.postings.clone(),
@@ -430,7 +423,7 @@ impl FtIndex {
 		hlp: HighlightParams,
 		idiom: &Idiom,
 		doc: &Value,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		let doc_key: Key = revision::to_vec(thg)?;
 		let di = self.doc_ids.read().await;
 		let doc_id = di.get_doc_id(tx, doc_key).await?;
@@ -454,7 +447,7 @@ impl FtIndex {
 		thg: &Thing,
 		terms: &[Option<(TermId, u32)>],
 		partial: bool,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		let doc_key: Key = revision::to_vec(thg)?;
 		let di = self.doc_ids.read().await;
 		let doc_id = di.get_doc_id(tx, doc_key).await?;
@@ -467,12 +460,12 @@ impl FtIndex {
 					or.highlight(*term_len, o.0);
 				}
 			}
-			return or.try_into();
+			return or.try_into().map_err(anyhow::Error::new);
 		}
 		Ok(Value::None)
 	}
 
-	pub(crate) async fn statistics(&self, ctx: &Context) -> Result<FtStatistics, Error> {
+	pub(crate) async fn statistics(&self, ctx: &Context) -> Result<FtStatistics> {
 		let txn = ctx.tx();
 		let res = FtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(&txn).await?,
@@ -483,7 +476,7 @@ impl FtIndex {
 		Ok(res)
 	}
 
-	pub(crate) async fn finish(&self, ctx: &Context) -> Result<(), Error> {
+	pub(crate) async fn finish(&self, ctx: &Context) -> Result<()> {
 		let txn = ctx.tx();
 		self.doc_ids.write().await.finish(&txn).await?;
 		self.doc_lengths.write().await.finish(&txn).await?;
@@ -515,7 +508,7 @@ impl HitsIterator {
 		self.iter.size_hint().0
 	}
 
-	pub(crate) async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>, Error> {
+	pub(crate) async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>> {
 		let di = self.doc_ids.read().await;
 		for doc_id in self.iter.by_ref() {
 			if let Some(doc_key) = di.get_doc_key(tx, doc_id).await? {

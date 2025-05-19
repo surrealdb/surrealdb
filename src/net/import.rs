@@ -1,8 +1,9 @@
+use super::error::ResponseError;
 use super::headers::Accept;
 use super::AppState;
 use crate::cnf::HTTP_MAX_IMPORT_BODY_SIZE;
-use crate::err::Error;
-use crate::net::output;
+use crate::net::error::Error as NetError;
+use crate::net::output::{self, Output};
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Request;
 use axum::response::IntoResponse;
@@ -32,38 +33,39 @@ async fn handler(
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
 	request: Request,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> Result<impl IntoResponse, ResponseError> {
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Import) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Import);
-		return Err(Error::ForbiddenRoute(RouteTarget::Import.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Import.to_string()).into());
 	}
 	// Check the permissions level
-	db.check(&session, Edit, Any.on_level(session.au.level().to_owned()))?;
+	db.check(&session, Edit, Any.on_level(session.au.level().to_owned())).map_err(ResponseError)?;
 
-	let body_stream = request
-		.into_body()
-		.into_data_stream()
-		.map_err(|e| surrealdb_core::err::Error::QueryStream(e.to_string()));
+	let body_stream = request.into_body().into_data_stream().map_err(anyhow::Error::new);
 
 	// Execute the sql query in the database
 	match db.import_stream(&session, body_stream).await {
 		Ok(res) => {
 			match accept.as_deref() {
 				// Simple serialization
-				Some(Accept::ApplicationJson) => Ok(output::json(&output::simplify(res)?)),
-				Some(Accept::ApplicationCbor) => Ok(output::cbor(&output::simplify(res)?)),
+				Some(Accept::ApplicationJson) => {
+					Ok(Output::json(&output::simplify(res).map_err(ResponseError)?))
+				}
+				Some(Accept::ApplicationCbor) => {
+					Ok(Output::cbor(&output::simplify(res).map_err(ResponseError)?))
+				}
 				// Return nothing
-				Some(Accept::ApplicationOctetStream) => Ok(output::none()),
+				Some(Accept::ApplicationOctetStream) => Ok(Output::None),
 				// Internal serialization
-				Some(Accept::Surrealdb) => Ok(output::full(&res)),
+				Some(Accept::Surrealdb) => Ok(Output::full(&res)),
 				// An incorrect content-type was requested
-				_ => Err(Error::InvalidType),
+				_ => Err(NetError::InvalidType.into()),
 			}
 		}
 		// There was an error when executing the query
-		Err(err) => Err(Error::from(err)),
+		Err(err) => Err(ResponseError(err)),
 	}
 }

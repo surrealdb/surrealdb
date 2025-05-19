@@ -3,11 +3,11 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
+use surrealdb::Result;
 
 #[tokio::test]
-async fn return_subquery_only() -> Result<(), Error> {
+async fn return_subquery_only() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie';
 		CREATE person:jaime SET name = 'Jaime';
@@ -161,7 +161,7 @@ async fn return_subquery_only() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn return_breaks_nested_execution() -> Result<(), Error> {
+async fn return_breaks_nested_execution() -> Result<()> {
 	let sql = "
 		DEFINE FUNCTION fn::test() {
 		    {

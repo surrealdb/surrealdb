@@ -1,10 +1,10 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{fmt::Fmt, Idiom, Part, Value};
 use crate::syn;
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -114,7 +114,7 @@ impl Fields {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		group: bool,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		if let Some(doc) = doc {
 			self.compute_value(stk, ctx, opt, doc, group).await
 		} else {
@@ -130,7 +130,7 @@ impl Fields {
 		opt: &Options,
 		doc: &CursorDoc,
 		group: bool,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
 		// Process the desired output

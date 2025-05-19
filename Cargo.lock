@@ -5810,6 +5810,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 name = "surreal"
 version = "3.0.0"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "argon2",
  "assert_fs",
@@ -5881,6 +5882,7 @@ dependencies = [
 name = "surrealdb"
 version = "3.0.0"
 dependencies = [
+ "anyhow",
  "arrayvec",
  "async-channel",
  "bincode",
@@ -5944,6 +5946,7 @@ dependencies = [
  "affinitypool",
  "ahash 0.8.11",
  "ammonia",
+ "anyhow",
  "arbitrary",
  "argon2",
  "async-channel",
