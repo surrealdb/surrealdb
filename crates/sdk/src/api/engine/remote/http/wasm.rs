@@ -1,5 +1,5 @@
 use super::Client;
-use crate::api::conn::Connection;
+use crate::api::conn;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
@@ -18,8 +18,7 @@ use url::Url;
 use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Client {}
-
-impl Connection for Client {
+impl conn::Sealed for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {

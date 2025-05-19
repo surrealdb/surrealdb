@@ -1,4 +1,4 @@
-use crate::api::conn::Connection;
+use crate::api::conn;
 use crate::api::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::engine;
@@ -30,8 +30,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::Connector;
 
 impl crate::api::Connection for Any {}
-
-impl Connection for Any {
+impl conn::Sealed for Any {
 	#[allow(
 		unused_variables,
 		unreachable_code,

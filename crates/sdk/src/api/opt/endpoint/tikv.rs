@@ -1,6 +1,7 @@
 use crate::api::engine::local::Db;
 use crate::api::engine::local::TiKv;
 use crate::api::err::Error;
+use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
@@ -11,7 +12,8 @@ use url::Url;
 macro_rules! endpoints {
 	($($name:ty),*) => {
 		$(
-			impl IntoEndpoint<TiKv> for $name {
+			impl IntoEndpoint<TiKv> for $name {}
+			impl into_endpoint::Sealed<TiKv> for $name {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
@@ -22,12 +24,12 @@ macro_rules! endpoints {
 				}
 			}
 
-			impl IntoEndpoint<TiKv> for ($name, Config) {
+			impl IntoEndpoint<TiKv> for ($name, Config) {}
+			impl into_endpoint::Sealed<TiKv> for ($name, Config) {
 				type Client = Db;
 
 				fn into_endpoint(self) -> Result<Endpoint> {
-		#[expect(deprecated)]
-					let mut endpoint = IntoEndpoint::<TiKv>::into_endpoint(self.0)?;
+					let mut endpoint = into_endpoint::Sealed::<TiKv>::into_endpoint(self.0)?;
 					endpoint.config = self.1;
 					Ok(endpoint)
 				}
