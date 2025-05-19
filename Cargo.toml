@@ -204,11 +204,11 @@ storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv"]
 storage-tikv = ["surrealdb/kv-tikv"]
 # FoundationDB features
+storage-fdb = ["surrealdb/kv-fdb"]
 storage-fdb-7_1 = ["surrealdb/kv-fdb-7_1"]
 storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 # Deprecated features
 # Doesn't do anything. Use a version specific `storage-fdb-*` feature instead.
-storage-fdb = ["surrealdb/kv-fdb"]
 enterprise = ["surrealdb-core/enterprise"]
 
 [dependencies]
@@ -373,6 +373,7 @@ systemd-units = { enable = true }
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(docker)',
+    'cfg(kv_fdb)',
     'cfg(storage)',
 ] }
 
