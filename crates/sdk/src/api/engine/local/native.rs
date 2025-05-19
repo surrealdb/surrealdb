@@ -1,5 +1,4 @@
 use crate::{
-	Action,
 	api::{
 		ExtraFeatures, Result, Surreal,
 		conn::{self, Route, Router},
@@ -9,7 +8,6 @@ use crate::{
 	},
 	engine::tasks,
 	opt::{WaitFor, auth::Root},
-	value::Notification,
 };
 use async_channel::{Receiver, Sender};
 use futures::{StreamExt, stream::poll_fn};
@@ -173,14 +171,8 @@ pub(crate) async fn run_router(
 					continue
 				};
 
-				let notification = Notification{
-					query_id: *notification.id,
-					action: Action::from_core(notification.action),
-					data: notification.result
-				};
-
 				tokio::spawn(async move {
-					let id = notification.query_id;
+					let id = notification.id.0;
 					if let Some(sender) = live_queries.read().await.get(&id) {
 
 						if sender.send(notification).await.is_err() {

@@ -476,17 +476,3 @@ pub struct Notification<R> {
 	pub action: Action,
 	pub data: R,
 }
-
-impl Notification<CoreValue> {
-	pub fn map_deserialize<R>(self) -> Result<Notification<R>>
-	where
-		R: DeserializeOwned,
-	{
-		let data = surrealdb_core::expr::from_value(self.data)?;
-		Ok(Notification {
-			query_id: self.query_id,
-			action: self.action,
-			data,
-		})
-	}
-}

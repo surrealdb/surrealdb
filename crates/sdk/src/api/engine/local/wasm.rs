@@ -14,7 +14,6 @@ use crate::kvs::Datastore;
 use crate::opt::WaitFor;
 use crate::opt::auth::Root;
 use crate::options::EngineOptions;
-use crate::{Action, Notification};
 use async_channel::{Receiver, Sender};
 use futures::FutureExt;
 use futures::StreamExt;
@@ -171,13 +170,6 @@ pub(crate) async fn run_router(
 
 				let id = notification.id;
 				if let Some(sender) = live_queries.read().await.get(&id) {
-
-					let notification = Notification {
-						query_id: notification.id.0,
-						action: Action::from_core(notification.action),
-						data: notification.result,
-					};
-
 					if sender.send(notification).await.is_err() {
 						live_queries.write().await.remove(&id);
 						if let Err(error) =
