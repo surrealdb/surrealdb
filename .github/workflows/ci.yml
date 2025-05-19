@@ -1007,12 +1007,14 @@ jobs:
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
+          SURREALDB_VERSION: ${{ matrix.version }}
 
       - name: Run Python tests (WebSocket)
         run: python -m unittest discover -s tests
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
+          SURREALDB_VERSION: ${{ matrix.version }}
 
   sdk-php:
     name: PHP SDK tests (${{ matrix.version }})
