@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use anyhow::ensure;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
@@ -8,13 +9,13 @@ use std::sync::Arc;
 use std::thread::Builder;
 use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
+use surrealdb::Result;
 use surrealdb_core::dbs::Response;
 use surrealdb_core::sql::{value, Number, Value};
 
-pub async fn new_ds() -> Result<Datastore, Error> {
+pub async fn new_ds() -> Result<Datastore> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
 }
 
@@ -27,7 +28,7 @@ pub async fn iam_run_case(
 	ds: &Datastore,
 	sess: &Session,
 	should_succeed: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
 	// Use the session as the test statement, but change the Auth to run the check with full permissions
 	let mut owner_sess = sess.clone();
 	owner_sess.au = Arc::new(Auth::for_root(Role::Owner));
@@ -38,9 +39,7 @@ pub async fn iam_run_case(
 			let resp = ds.execute(prepare, &owner_sess, None).await.unwrap();
 			for r in resp.into_iter() {
 				let tmp = r.output();
-				if tmp.is_err() {
-					return Err(format!("Prepare statement failed: {}", tmp.unwrap_err()).into());
-				}
+				ensure!(tmp.is_ok(), "Prepare statement failed: {}", tmp.unwrap_err());
 			}
 		}
 	}
@@ -51,52 +50,41 @@ pub async fn iam_run_case(
 	// Check datastore state first
 	{
 		let resp = ds.execute(check, &owner_sess, None).await.unwrap();
-		if resp.len() != check_expected_result.len() {
-			return Err(format!(
-				"Check statement failed for test: expected {} results, got {}",
-				check_expected_result.len(),
-				resp.len()
-			)
-			.into());
-		}
+		ensure!(
+			resp.len() == check_expected_result.len(),
+			"Check statement failed for test: expected {} results, got {}",
+			check_expected_result.len(),
+			resp.len()
+		);
 
 		for (i, r) in resp.into_iter().enumerate() {
 			let tmp = r.output();
-			if tmp.is_err() {
-				return Err(
-					format!("Check statement errored for test: {}", tmp.unwrap_err()).into()
-				);
-			}
+			ensure!(tmp.is_ok(), "Check statement errored for test: {}", tmp.unwrap_err());
 
 			let tmp = tmp.unwrap();
 			let expected = value(check_expected_result[i])?;
-			if tmp != expected {
-				return Err(format!(
-					"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",
-					expected, tmp
-				)
-				.into());
-			}
+			ensure!(
+				tmp == expected,
+				"Check statement failed for test: expected value '{:#}' doesn't match '{:#}'",
+				expected,
+				tmp
+			)
 		}
 	}
 
 	// Check statement result. If the statement should succeed, check that the result is Ok, otherwise check that the result is a 'Not Allowed' error
 	let res = resp.pop().unwrap().output();
 	if should_succeed {
-		if res.is_err() {
-			return Err(format!("Test statement failed: {}", res.unwrap_err()).into());
-		}
+		ensure!(res.is_ok(), "Test statement failed: {}", res.unwrap_err());
 	} else {
-		if res.is_ok() {
-			return Err(
-				format!("Test statement succeeded when it should have failed: {:?}", res).into()
-			);
-		}
+		ensure!(res.is_err(), "Test statement succeeded when it should have failed: {:?}", res);
 
 		let err = res.unwrap_err().to_string();
-		if !err.contains("Not enough permissions to perform this action") {
-			return Err(format!("Test statement failed with unexpected error: {}", err).into());
-		}
+		ensure!(
+			err.contains("Not enough permissions to perform this action"),
+			"Test statement failed with unexpected error: {}",
+			err
+		);
 	}
 	Ok(())
 }
@@ -108,7 +96,7 @@ pub async fn iam_check_cases(
 	cases: CaseIter<'_>,
 	scenario: &HashMap<&str, &str>,
 	check_results: [Vec<&str>; 2],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
 	let prepare = scenario.get("prepare").unwrap();
 	let test = scenario.get("test").unwrap();
 	let check = scenario.get("check").unwrap();
@@ -172,9 +160,7 @@ pub async fn iam_check_cases(
 }
 
 #[allow(dead_code)]
-pub fn with_enough_stack(
-	fut: impl Future<Output = Result<(), Error>> + Send + 'static,
-) -> Result<(), Error> {
+pub fn with_enough_stack(fut: impl Future<Output = Result<()>> + Send + 'static) -> Result<()> {
 	let mut builder = Builder::new();
 
 	// Roughly how much stack is allocated for surreal server workers in release mode
@@ -201,7 +187,7 @@ pub fn with_enough_stack(
 
 #[track_caller]
 #[allow(dead_code)]
-fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<(), Error> {
+fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<()> {
 	assert!(!res.is_empty(), "At position {pos} - No more result!");
 	let r = res.remove(0).result;
 	let _ = r.is_err_and(|e| {
@@ -214,7 +200,7 @@ fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<(), Error> {
 /// This function will panic if there are not enough results in the vector or if an error occurs.
 #[track_caller]
 #[allow(dead_code)]
-pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<(), Error> {
+pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<()> {
 	for i in 0..skip {
 		skip_ok_pos(res, i)?;
 	}
@@ -244,7 +230,7 @@ impl Debug for Test {
 
 impl Test {
 	#[allow(dead_code)]
-	pub async fn new_ds_session(ds: Datastore, session: Session, sql: &str) -> Result<Self, Error> {
+	pub async fn new_ds_session(ds: Datastore, session: Session, sql: &str) -> Result<Self> {
 		let responses = ds.execute(sql, &session, None).await?;
 		Ok(Self {
 			ds,
@@ -255,7 +241,7 @@ impl Test {
 	}
 
 	#[allow(dead_code)]
-	pub async fn new_ds(ds: Datastore, sql: &str) -> Result<Self, Error> {
+	pub async fn new_ds(ds: Datastore, sql: &str) -> Result<Self> {
 		Self::new_ds_session(ds, Session::owner().with_ns("test").with_db("test"), sql).await
 	}
 
@@ -263,7 +249,7 @@ impl Test {
 	/// Arguments `sql` - A string slice representing the SQL query.
 	/// Panics if an error occurs.#[expect(dead_code)]
 	#[allow(dead_code)]
-	pub async fn new(sql: &str) -> Result<Self, Error> {
+	pub async fn new(sql: &str) -> Result<Self> {
 		Self::new_ds(new_ds().await?, sql).await
 	}
 
@@ -271,7 +257,7 @@ impl Test {
 	/// - Data are persistent (including memory store)
 	/// - Flushing caches (jwks, IndexStore, ...)
 	#[allow(dead_code)]
-	pub async fn restart(self, sql: &str) -> Result<Self, Error> {
+	pub async fn restart(self, sql: &str) -> Result<Self> {
 		Self::new_ds(self.ds.restart(), sql).await
 	}
 
@@ -279,7 +265,7 @@ impl Test {
 	/// Panics if the number of responses does not match the expected size
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_size(&mut self, expected: usize) -> Result<&mut Self, Error> {
+	pub fn expect_size(&mut self, expected: usize) -> Result<&mut Self> {
 		assert_eq!(
 			self.responses.len(),
 			expected,
@@ -295,7 +281,7 @@ impl Test {
 	#[track_caller]
 	#[allow(dead_code)]
 	#[allow(clippy::should_implement_trait)]
-	pub fn next(&mut self) -> Result<Response, Error> {
+	pub fn next(&mut self) -> Result<Response> {
 		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
 		Ok(self.responses.remove(0))
@@ -305,7 +291,7 @@ impl Test {
 	/// This method will panic if the responses list is empty, indicating that there are no more responses to retrieve.
 	/// The panic message will include the last position in the responses list before it was emptied.
 	#[track_caller]
-	pub fn next_value(&mut self) -> Result<Value, Error> {
+	pub fn next_value(&mut self) -> Result<Value> {
 		self.next()?.result
 	}
 
@@ -313,7 +299,7 @@ impl Test {
 	/// and updates the position.
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn skip_ok(&mut self, skip: usize) -> Result<&mut Self, Error> {
+	pub fn skip_ok(&mut self, skip: usize) -> Result<&mut Self> {
 		for _ in 0..skip {
 			skip_ok_pos(&mut self.responses, self.pos)?;
 			self.pos += 1;
@@ -326,11 +312,7 @@ impl Test {
 	/// Compliant with NaN and Constants.
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_value_info<I: Display>(
-		&mut self,
-		val: Value,
-		info: I,
-	) -> Result<&mut Self, Error> {
+	pub fn expect_value_info<I: Display>(&mut self, val: Value, info: I) -> Result<&mut Self> {
 		let tmp = self.next_value()?;
 		// Then check they are indeed the same values
 		//
@@ -354,7 +336,7 @@ impl Test {
 
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_regex(&mut self, regex: &str) -> Result<&mut Self, Error> {
+	pub fn expect_regex(&mut self, regex: &str) -> Result<&mut Self> {
 		let tmp = self.next_value()?.to_string();
 		let regex = Regex::new(regex)?;
 		assert!(regex.is_match(&tmp), "Output '{tmp}' doesn't match regex '{regex}'",);
@@ -363,14 +345,14 @@ impl Test {
 
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_value(&mut self, val: Value) -> Result<&mut Self, Error> {
+	pub fn expect_value(&mut self, val: Value) -> Result<&mut Self> {
 		self.expect_value_info(val, "")
 	}
 
 	/// Expect values in the given slice to be present in the responses, following the same order.
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_values(&mut self, values: &[Value]) -> Result<&mut Self, Error> {
+	pub fn expect_values(&mut self, values: &[Value]) -> Result<&mut Self> {
 		for value in values {
 			self.expect_value(value.clone())?;
 		}
@@ -380,13 +362,13 @@ impl Test {
 	/// Expect the given value to be equals to the next response.
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_val(&mut self, val: &str) -> Result<&mut Self, Error> {
+	pub fn expect_val(&mut self, val: &str) -> Result<&mut Self> {
 		self.expect_val_info(val, "")
 	}
 
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self, Error> {
+	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self> {
 		self.expect_value_info(
 			value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
 			info,
@@ -396,7 +378,7 @@ impl Test {
 	#[track_caller]
 	#[allow(dead_code)]
 	/// Expect values in the given slice to be present in the responses, following the same order.
-	pub fn expect_vals(&mut self, vals: &[&str]) -> Result<&mut Self, Error> {
+	pub fn expect_vals(&mut self, vals: &[&str]) -> Result<&mut Self> {
 		for (i, val) in vals.iter().enumerate() {
 			self.expect_val_info(val, i)?;
 		}
@@ -408,10 +390,10 @@ impl Test {
 	/// message does not pass the check.
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_error_func<F: Fn(&Error) -> bool>(
+	pub fn expect_error_func<F: Fn(&anyhow::Error) -> bool>(
 		&mut self,
 		check: F,
-	) -> Result<&mut Self, Error> {
+	) -> Result<&mut Self> {
 		let tmp = self.next()?.result;
 		match &tmp {
 			Ok(val) => {
@@ -427,13 +409,13 @@ impl Test {
 	#[track_caller]
 	#[allow(dead_code)]
 	/// Expects the next result to be an error with the specified error message.
-	pub fn expect_error(&mut self, error: &str) -> Result<&mut Self, Error> {
+	pub fn expect_error(&mut self, error: &str) -> Result<&mut Self> {
 		self.expect_error_func(|e| e.to_string() == error)
 	}
 
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_errors(&mut self, errors: &[&str]) -> Result<&mut Self, Error> {
+	pub fn expect_errors(&mut self, errors: &[&str]) -> Result<&mut Self> {
 		for error in errors {
 			self.expect_error(error)?;
 		}
@@ -453,7 +435,7 @@ impl Test {
 	/// between the expected and actual value exceeds the precision.
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_float(&mut self, val: f64, precision: f64) -> Result<&mut Self, Error> {
+	pub fn expect_float(&mut self, val: f64, precision: f64) -> Result<&mut Self> {
 		let tmp = self.next_value()?;
 		if let Value::Number(Number::Float(n)) = tmp {
 			let diff = (n - val).abs();
@@ -469,7 +451,7 @@ impl Test {
 
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_floats(&mut self, vals: &[f64], precision: f64) -> Result<&mut Self, Error> {
+	pub fn expect_floats(&mut self, vals: &[f64], precision: f64) -> Result<&mut Self> {
 		for val in vals {
 			self.expect_float(*val, precision)?;
 		}
@@ -479,7 +461,7 @@ impl Test {
 	/// Expects the next value to be bytes
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_bytes(&mut self, val: impl Into<Vec<u8>>) -> Result<&mut Self, Error> {
+	pub fn expect_bytes(&mut self, val: impl Into<Vec<u8>>) -> Result<&mut Self> {
 		self.expect_bytes_info(val, "")
 	}
 
@@ -487,7 +469,7 @@ impl Test {
 		&mut self,
 		val: impl Into<Vec<u8>>,
 		info: I,
-	) -> Result<&mut Self, Error> {
+	) -> Result<&mut Self> {
 		let val: Vec<u8> = val.into();
 		let val = Value::Bytes(val.into());
 		self.expect_value_info(val, info)

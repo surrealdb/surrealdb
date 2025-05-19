@@ -4,9 +4,9 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::dbs::{Action, Notification, Session};
-use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::{Thing, Value};
+use surrealdb::Result;
 
 //
 // Permissions
@@ -340,7 +340,7 @@ async fn check_permissions_auth_disabled() {
 }
 
 #[tokio::test]
-async fn delete_filtered_live_notification() -> Result<(), Error> {
+async fn delete_filtered_live_notification() -> Result<()> {
 	let dbs = new_ds().await?.with_notifications();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;

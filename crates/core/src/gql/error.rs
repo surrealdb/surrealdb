@@ -8,7 +8,7 @@ use crate::sql::Kind;
 #[derive(Error, Debug)]
 pub enum GqlError {
 	#[error("Database error: {0}")]
-	DbError(crate::err::Error),
+	DbError(#[from] anyhow::Error),
 	#[error("Error generating schema: {0}")]
 	SchemaError(String),
 	#[error("Error resolving request: {0}")]
@@ -47,12 +47,6 @@ pub fn type_error(kind: Kind, val: &async_graphql::Value) -> GqlError {
 	GqlError::TypeError {
 		target: kind,
 		val: val.to_owned(),
-	}
-}
-
-impl From<crate::err::Error> for GqlError {
-	fn from(value: crate::err::Error) -> Self {
-		GqlError::DbError(value)
 	}
 }
 

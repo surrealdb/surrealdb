@@ -1,4 +1,3 @@
-use crate::err::Error;
 use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
 use crate::idx::trees::btree::{BTreeNode, BTreeStore};
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
@@ -8,6 +7,7 @@ use crate::idx::trees::store::{
 };
 use crate::kvs::{Key, Transaction, TransactionType};
 use ahash::{HashMap, HashSet};
+use anyhow::Result;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use std::cmp::Ordering;
@@ -28,7 +28,7 @@ impl IndexTreeCaches {
 		generation: StoreGeneration,
 		tt: TransactionType,
 		cache_size: usize,
-	) -> Result<BTreeStore<FstKeys>, Error> {
+	) -> Result<BTreeStore<FstKeys>> {
 		let cache = self.btree_fst_caches.get_cache(generation, &keys, cache_size).await?;
 		Ok(TreeStore::new(keys, cache, tt).await)
 	}
@@ -43,7 +43,7 @@ impl IndexTreeCaches {
 		generation: StoreGeneration,
 		tt: TransactionType,
 		cache_size: usize,
-	) -> Result<BTreeStore<TrieKeys>, Error> {
+	) -> Result<BTreeStore<TrieKeys>> {
 		let cache = self.btree_trie_caches.get_cache(generation, &keys, cache_size).await?;
 		Ok(TreeStore::new(keys, cache, tt).await)
 	}
@@ -58,7 +58,7 @@ impl IndexTreeCaches {
 		generation: StoreGeneration,
 		tt: TransactionType,
 		cache_size: usize,
-	) -> Result<MTreeStore, Error> {
+	) -> Result<MTreeStore> {
 		let cache = self.mtree_caches.get_cache(generation, &keys, cache_size).await?;
 		Ok(TreeStore::new(keys, cache, tt).await)
 	}
@@ -81,7 +81,7 @@ where
 		generation: StoreGeneration,
 		keys: &TreeNodeProvider,
 		cache_size: usize,
-	) -> Result<Arc<TreeCache<N>>, Error> {
+	) -> Result<Arc<TreeCache<N>>> {
 		#[cfg(debug_assertions)]
 		debug!("get_cache {generation}");
 		// We take the key from the node 0 as the key identifier for the cache
@@ -188,7 +188,7 @@ where
 		&self,
 		tx: &Transaction,
 		node_id: NodeId,
-	) -> Result<Arc<StoredNode<N>>, Error> {
+	) -> Result<Arc<StoredNode<N>>> {
 		match self {
 			Self::Lru(_, _, c) => c.get_node(tx, node_id).await,
 			Self::Full(_, _, c) => c.get_node(tx, node_id).await,
@@ -261,11 +261,7 @@ where
 		}
 	}
 
-	async fn get_node(
-		&self,
-		tx: &Transaction,
-		node_id: NodeId,
-	) -> Result<Arc<StoredNode<N>>, Error> {
+	async fn get_node(&self, tx: &Transaction, node_id: NodeId) -> Result<Arc<StoredNode<N>>> {
 		if let Some(n) = self.lru.get(node_id).await {
 			return Ok(n);
 		}
@@ -317,7 +313,7 @@ where
 		&self,
 		tx: &Transaction,
 		node_id: NodeId,
-	) -> Result<Arc<StoredNode<N>>, Error> {
+	) -> Result<Arc<StoredNode<N>>> {
 		match self.cache.entry(node_id) {
 			Entry::Occupied(e) => Ok(e.get().clone()),
 			Entry::Vacant(e) => {

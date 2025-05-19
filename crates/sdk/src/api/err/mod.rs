@@ -1,8 +1,7 @@
 use crate::{api::Response, Value};
 use serde::Serialize;
-use std::borrow::Cow;
+use std::io;
 use std::path::PathBuf;
-use std::{convert::Infallible, io};
 use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 use thiserror::Error;
 
@@ -248,10 +247,6 @@ pub enum Error {
 	/// The engine used does not support data versioning
 	#[error("The '{0}' engine does not support data versioning")]
 	VersionsNotSupported(String),
-
-	#[doc(hidden)] // A raw query being forwarded
-	#[error("{0}")]
-	RawQuery(Cow<'static, str>),
 }
 
 impl serde::ser::Error for Error {
@@ -269,73 +264,6 @@ impl serde::de::Error for Error {
 		T: std::fmt::Display,
 	{
 		Error::DeSerializeValue(msg.to_string())
-	}
-}
-
-impl From<Infallible> for crate::Error {
-	fn from(_: Infallible) -> Self {
-		unreachable!()
-	}
-}
-
-impl From<ParseNetTargetError> for crate::Error {
-	fn from(e: ParseNetTargetError) -> Self {
-		Self::Api(Error::from(e))
-	}
-}
-
-impl From<ParseFuncTargetError> for crate::Error {
-	fn from(e: ParseFuncTargetError) -> Self {
-		Self::Api(Error::from(e))
-	}
-}
-
-#[cfg(feature = "protocol-http")]
-impl From<reqwest::Error> for crate::Error {
-	fn from(e: reqwest::Error) -> Self {
-		Self::Api(Error::Http(e.to_string()))
-	}
-}
-
-#[cfg(all(feature = "protocol-ws", not(target_family = "wasm")))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", not(target_family = "wasm")))))]
-impl From<tokio_tungstenite::tungstenite::Error> for crate::Error {
-	fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
-		Self::Api(Error::Ws(error.to_string()))
-	}
-}
-
-impl<T> From<async_channel::SendError<T>> for crate::Error {
-	fn from(error: async_channel::SendError<T>) -> Self {
-		Self::Api(Error::InternalError(error.to_string()))
-	}
-}
-
-impl From<async_channel::RecvError> for crate::Error {
-	fn from(error: async_channel::RecvError) -> Self {
-		Self::Api(Error::InternalError(error.to_string()))
-	}
-}
-
-impl From<url::ParseError> for crate::Error {
-	fn from(error: url::ParseError) -> Self {
-		Self::Api(Error::InternalError(error.to_string()))
-	}
-}
-
-#[cfg(all(feature = "protocol-ws", target_family = "wasm"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", target_family = "wasm"))))]
-impl From<ws_stream_wasm::WsErr> for crate::Error {
-	fn from(error: ws_stream_wasm::WsErr) -> Self {
-		Self::Api(Error::Ws(error.to_string()))
-	}
-}
-
-#[cfg(all(feature = "protocol-ws", target_family = "wasm"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "protocol-ws", target_family = "wasm"))))]
-impl From<pharos::PharErr> for crate::Error {
-	fn from(error: pharos::PharErr) -> Self {
-		Self::Api(Error::Ws(error.to_string()))
 	}
 }
 

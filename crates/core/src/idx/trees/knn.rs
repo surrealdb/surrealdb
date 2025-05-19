@@ -616,7 +616,6 @@ pub struct KnnResult {
 
 #[cfg(test)]
 pub(super) mod tests {
-	use crate::err::Error;
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
@@ -626,6 +625,7 @@ pub(super) mod tests {
 	#[cfg(debug_assertions)]
 	use ahash::HashMap;
 	use ahash::HashSet;
+	use anyhow::Result;
 	use flate2::read::GzDecoder;
 	use rand::prelude::SmallRng;
 	use rand::{Rng, SeedableRng};
@@ -670,7 +670,7 @@ pub(super) mod tests {
 		t: VectorType,
 		path: &str,
 		limit: Option<usize>,
-	) -> Result<Vec<(DocId, V)>, Error> {
+	) -> Result<Vec<(DocId, V)>> {
 		// Open the gzip file
 		let file = File::open(path)?;
 

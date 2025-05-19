@@ -1,10 +1,11 @@
 use super::Raw;
 use crate::{
 	api::{err::Error, Response as QueryResponse, Result},
-	method::{self, Stats, Stream},
+	method::{self, query::ValidQuery, Stats, Stream},
 	value::Notification,
 	Value,
 };
+use anyhow::bail;
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::de::DeserializeOwned;
@@ -14,13 +15,14 @@ use surrealdb_core::sql::{
 	self, from_value as from_core_value, statements::*, Statement, Statements, Value as CoreValue,
 };
 
+pub struct Query(pub(crate) ValidQuery);
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery: into_query::Sealed {}
 
 pub(crate) mod into_query {
 	pub trait Sealed {
 		/// Converts an input into SQL statements
-		fn into_query(self) -> super::Result<Vec<super::Statement>>;
+		fn into_query(self) -> super::Query;
 
 		/// Not public API
 		#[doc(hidden)]
@@ -30,226 +32,278 @@ pub(crate) mod into_query {
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for sql::Query {}
 impl into_query::Sealed for sql::Query {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(self.0 .0)
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: self.0 .0,
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for Statements {}
 impl into_query::Sealed for Statements {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(self.0)
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: self.0,
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for Vec<Statement> {}
 impl into_query::Sealed for Vec<Statement> {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(self)
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: self,
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for Statement {}
 impl into_query::Sealed for Statement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![self])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![self],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for UseStatement {}
 impl into_query::Sealed for UseStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Use(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Use(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for SetStatement {}
 impl into_query::Sealed for SetStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Set(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Set(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for InfoStatement {}
 impl into_query::Sealed for InfoStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Info(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Info(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for LiveStatement {}
 impl into_query::Sealed for LiveStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Live(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Live(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for KillStatement {}
 impl into_query::Sealed for KillStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Kill(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Kill(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for BeginStatement {}
 impl into_query::Sealed for BeginStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Begin(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Begin(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for CancelStatement {}
 impl into_query::Sealed for CancelStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Cancel(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Cancel(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for CommitStatement {}
 impl into_query::Sealed for CommitStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Commit(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Commit(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for OutputStatement {}
 impl into_query::Sealed for OutputStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Output(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Output(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for IfelseStatement {}
 impl into_query::Sealed for IfelseStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Ifelse(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Ifelse(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for SelectStatement {}
 impl into_query::Sealed for SelectStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Select(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Select(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for CreateStatement {}
 impl into_query::Sealed for CreateStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Create(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Create(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for UpdateStatement {}
 impl into_query::Sealed for UpdateStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Update(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Update(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for RelateStatement {}
 impl into_query::Sealed for RelateStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Relate(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Relate(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for DeleteStatement {}
 impl into_query::Sealed for DeleteStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Delete(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Delete(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for InsertStatement {}
 impl into_query::Sealed for InsertStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Insert(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Insert(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for DefineStatement {}
 impl into_query::Sealed for DefineStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Define(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Define(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for AlterStatement {}
 impl into_query::Sealed for AlterStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Alter(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Alter(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for RemoveStatement {}
 impl into_query::Sealed for RemoveStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Remove(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Remove(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
-#[doc(hidden)]
-/// Internal API
 impl IntoQuery for OptionStatement {}
 impl into_query::Sealed for OptionStatement {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(vec![Statement::Option(self)])
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: vec![Statement::Option(self)],
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 }
 
 impl IntoQuery for &str {}
 impl into_query::Sealed for &str {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(Vec::new())
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: Vec::new(),
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 
 	fn as_str(&self) -> Option<&str> {
@@ -259,8 +313,12 @@ impl into_query::Sealed for &str {
 
 impl IntoQuery for &String {}
 impl into_query::Sealed for &String {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(Vec::new())
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: Vec::new(),
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 
 	fn as_str(&self) -> Option<&str> {
@@ -270,8 +328,12 @@ impl into_query::Sealed for &String {
 
 impl IntoQuery for String {}
 impl into_query::Sealed for String {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Ok(Vec::new())
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: Vec::new(),
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
 	}
 
 	fn as_str(&self) -> Option<&str> {
@@ -281,8 +343,11 @@ impl into_query::Sealed for String {
 
 impl IntoQuery for Raw {}
 impl into_query::Sealed for Raw {
-	fn into_query(self) -> Result<Vec<Statement>> {
-		Err(Error::RawQuery(self.0).into())
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Raw {
+			query: self.0,
+			bindings: Default::default(),
+		})
 	}
 }
 
@@ -346,7 +411,7 @@ where
 				[] => Ok(None),
 				[value] => {
 					let value = mem::take(value);
-					from_core_value(value).map_err(Into::into)
+					from_core_value(value)
 				}
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
@@ -356,7 +421,7 @@ where
 			},
 			_ => {
 				let value = mem::take(value);
-				from_core_value(value).map_err(Into::into)
+				from_core_value(value)
 			}
 		};
 		response.results.swap_remove(&self);
@@ -449,7 +514,7 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				from_core_value(value).map_err(Into::into)
+				from_core_value(value)
 			}
 			_ => Ok(None),
 		}
@@ -475,7 +540,7 @@ where
 				return Ok(vec![]);
 			}
 		};
-		from_core_value(vec.into()).map_err(Into::into)
+		from_core_value(vec.into())
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
@@ -502,12 +567,12 @@ where
 								}
 							}
 						}
-						from_core_value(responses.into()).map_err(Into::into)
+						from_core_value(responses.into())
 					}
 					val => {
 						if let CoreValue::Object(object) = val {
 							if let Some(value) = object.remove(key) {
-								return from_core_value(vec![value].into()).map_err(Into::into);
+								return from_core_value(vec![value].into());
 							}
 						}
 						Ok(vec![])
@@ -575,8 +640,12 @@ impl query_stream::Sealed<Value> for usize {
 			.live_queries
 			.swap_remove(&self)
 			.and_then(|result| match result {
-				Err(crate::Error::Api(Error::NotLiveQuery(..))) => {
-					response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
+				Err(e) => {
+					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+						response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
+					} else {
+						Some(Err(e))
+					}
 				}
 				result => Some(result),
 			})
@@ -595,15 +664,20 @@ impl query_stream::Sealed<Value> for () {
 		for (index, result) in mem::take(&mut response.live_queries) {
 			match result {
 				Ok(stream) => streams.push(stream),
-				Err(crate::Error::Api(Error::NotLiveQuery(..))) => match response.results.swap_remove(&index) {
-					Some((stats, Err(error))) => {
-						response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
-						return Err(error);
+				Err(e) => {
+					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+						match response.results.swap_remove(&index) {
+							Some((stats, Err(error))) => {
+								response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
+								return Err(error);
+							}
+							Some((_, Ok(..))) => unreachable!("the internal error variant indicates that an error occurred in the `LIVE SELECT` query"),
+							None => { bail!(Error::ResponseAlreadyTaken); }
+						}
+					} else {
+						return Err(e);
 					}
-					Some((_, Ok(..))) => unreachable!("the internal error variant indicates that an error occurred in the `LIVE SELECT` query"),
-					None => { return Err(Error::ResponseAlreadyTaken.into()); }
 				}
-				Err(error) => { return Err(error); }
 			}
 		}
 		Ok(method::QueryStream(Either::Right(select_all(streams))))
@@ -623,8 +697,12 @@ where
 			.live_queries
 			.swap_remove(&self)
 			.and_then(|result| match result {
-				Err(crate::Error::Api(Error::NotLiveQuery(..))) => {
-					response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
+				Err(e) => {
+					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+						response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
+					} else {
+						Some(Err(e))
+					}
 				}
 				result => Some(result),
 			})
@@ -654,15 +732,20 @@ where
 		for (index, result) in mem::take(&mut response.live_queries) {
 			let mut stream = match result {
 				Ok(stream) => stream,
-				Err(crate::Error::Api(Error::NotLiveQuery(..))) => match response.results.swap_remove(&index) {
-					Some((stats, Err(error))) => {
-						response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
-						return Err(error);
+				Err(e) => {
+					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+						match response.results.swap_remove(&index) {
+							Some((stats, Err(error))) => {
+								response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
+								return Err(error);
+							}
+							Some((_, Ok(..))) => unreachable!("the internal error variant indicates that an error occurred in the `LIVE SELECT` query"),
+							None => { bail!(Error::ResponseAlreadyTaken); }
+						}
+					} else {
+						return Err(e);
 					}
-					Some((_, Ok(..))) => unreachable!("the internal error variant indicates that an error occurred in the `LIVE SELECT` query"),
-					None => { return Err(Error::ResponseAlreadyTaken.into()); }
 				}
-				Err(error) => { return Err(error); }
 			};
 			streams.push(Stream {
 				client: stream.client.clone(),

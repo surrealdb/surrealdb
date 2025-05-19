@@ -30,9 +30,9 @@ impl ThrowStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		Err(ControlFlow::from(Error::Thrown(
+		Err(ControlFlow::from(anyhow::Error::new(Error::Thrown(
 			self.error.compute(stk, ctx, opt, doc).await?.to_raw_string(),
-		)))
+		))))
 	}
 }
 

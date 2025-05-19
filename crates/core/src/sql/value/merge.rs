@@ -1,14 +1,16 @@
 use crate::err::Error;
 use crate::sql::value::Value;
+use anyhow::{ensure, Result};
 
 impl Value {
-	pub(crate) fn merge(&mut self, val: Value) -> Result<(), Error> {
+	pub(crate) fn merge(&mut self, val: Value) -> Result<()> {
 		// If this value is not an object, then error
-		if !val.is_object() {
-			return Err(Error::InvalidMerge {
+		ensure!(
+			val.is_object(),
+			Error::InvalidMerge {
 				value: val,
-			});
-		}
+			}
+		);
 		// Otherwise loop through every object field
 		for k in val.every(None, true, false).iter() {
 			// Because we iterate every step, we need to this check
@@ -49,11 +51,12 @@ mod tests {
 			}",
 		);
 		let none = Value::None;
-		match res.merge(none.clone()).unwrap_err() {
-			Error::InvalidMerge {
+		match res.merge(none.clone()).unwrap_err().downcast() {
+			Ok(Error::InvalidMerge {
 				value,
-			} => assert_eq!(value, none),
-			error => panic!("unexpected error: {error:?}"),
+			}) => assert_eq!(value, none),
+			Ok(error) => panic!("unexpected error: {error:?}"),
+			Err(error) => panic!("unexpected error: {error:?}"),
 		}
 	}
 

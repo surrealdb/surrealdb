@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::idx::trees::btree::Payload;
 use crate::kvs::Key;
+use anyhow::Result;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
 use serde::ser;
@@ -10,7 +11,7 @@ use std::io;
 use std::io::Cursor;
 
 pub trait BKeys: Default + Debug + Display + Sized {
-	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
+	fn with_key_val(key: Key, payload: Payload) -> Result<Self>;
 	fn len(&self) -> u32;
 	fn is_empty(&self) -> bool;
 	fn get(&self, key: &Key) -> Option<Payload>;
@@ -18,17 +19,17 @@ pub trait BKeys: Default + Debug + Display + Sized {
 	// because BKeys are intended to be stored as Node in the BTree.
 	// The size of the Node should be small, therefore one instance of
 	// BKeys would never be store a large volume of keys.
-	fn collect_with_prefix(&self, prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error>;
+	fn collect_with_prefix(&self, prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>>;
 	fn insert(&mut self, key: Key, payload: Payload) -> Option<Payload>;
 	fn append(&mut self, keys: Self);
 	fn remove(&mut self, key: &Key) -> Option<Payload>;
-	fn split_keys(self) -> Result<SplitKeys<Self>, Error>;
+	fn split_keys(self) -> Result<SplitKeys<Self>>;
 	fn get_key(&self, idx: usize) -> Option<Key>;
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn get_first_key(&self) -> Option<(Key, Payload)>;
 	fn get_last_key(&self) -> Option<(Key, Payload)>;
-	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self, Error>;
-	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<(), Error>;
+	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self>;
+	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<()>;
 	fn compile(&mut self) {}
 }
 
@@ -74,7 +75,7 @@ impl Default for FstKeys {
 }
 
 impl BKeys for FstKeys {
-	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
+	fn with_key_val(key: Key, payload: Payload) -> Result<Self> {
 		let i = Inner::Trie(TrieKeys::with_key_val(key, payload)?);
 		Ok(Self {
 			i,
@@ -102,8 +103,8 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
-		Err(fail!("BKeys/FSTKeys::collect_with_prefix"))
+	fn collect_with_prefix(&self, _prefix_key: &Key) -> Result<VecDeque<(Key, Payload)>> {
+		fail!("BKeys/FSTKeys::collect_with_prefix")
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) -> Option<Payload> {
@@ -143,7 +144,7 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn split_keys(mut self) -> Result<SplitKeys<Self>, Error> {
+	fn split_keys(mut self) -> Result<SplitKeys<Self>> {
 		self.edit();
 		if let Inner::Trie(t) = self.i {
 			let s = t.split_keys()?;
@@ -159,7 +160,7 @@ impl BKeys for FstKeys {
 				median_payload: s.median_payload,
 			})
 		} else {
-			Err(fail!("BKeys/FSTKeys::split_keys"))
+			fail!("BKeys/FSTKeys::split_keys")
 		}
 	}
 
@@ -229,20 +230,20 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self, Error> {
+	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self> {
 		let bytes: Vec<u8> = bincode::deserialize_from(c)?;
 		Ok(Self::try_from(bytes)?)
 	}
 
-	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<(), Error> {
+	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<()> {
 		if let Inner::Map(m) = &self.i {
 			let b = m.as_fst().as_bytes();
 			bincode::serialize_into(c, b)?;
 			Ok(())
 		} else {
-			Err(Error::Bincode(ser::Error::custom(
+			Err(anyhow::Error::new(Error::Bincode(ser::Error::custom(
 				"bkeys.to_map() should be called prior serializing",
-			)))
+			))))
 		}
 	}
 }
@@ -320,7 +321,7 @@ impl From<&Map<Vec<u8>>> for TrieKeys {
 }
 
 impl BKeys for TrieKeys {
-	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
+	fn with_key_val(key: Key, payload: Payload) -> Result<Self> {
 		let mut trie_keys = Self {
 			keys: Trie::default(),
 		};
@@ -340,7 +341,7 @@ impl BKeys for TrieKeys {
 		self.keys.get(key).copied()
 	}
 
-	fn collect_with_prefix(&self, prefix: &Key) -> Result<VecDeque<(Key, Payload)>, Error> {
+	fn collect_with_prefix(&self, prefix: &Key) -> Result<VecDeque<(Key, Payload)>> {
 		let mut i = KeysIterator::new(prefix, &self.keys);
 		let mut r = VecDeque::new();
 		while let Some((k, p)) = i.next() {
@@ -363,7 +364,7 @@ impl BKeys for TrieKeys {
 		self.keys.remove(key)
 	}
 
-	fn split_keys(self) -> Result<SplitKeys<Self>, Error> {
+	fn split_keys(self) -> Result<SplitKeys<Self>> {
 		let median_idx = self.keys.len() / 2;
 		let mut s = self.keys.iter();
 		let mut left = Trie::default();
@@ -377,7 +378,7 @@ impl BKeys for TrieKeys {
 		let (median_key, median_payload) = if let Some((k, v)) = s.next() {
 			(k.clone(), *v)
 		} else {
-			return Err(fail!("BKeys/TrieKeys::split_keys"));
+			fail!("BKeys/TrieKeys::split_keys")
 		};
 		let mut right = Trie::default();
 		for (key, val) in s {
@@ -421,7 +422,7 @@ impl BKeys for TrieKeys {
 		self.keys.iter().last().map(|(k, p)| (k.clone(), *p))
 	}
 
-	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self, Error> {
+	fn read_from(c: &mut Cursor<Vec<u8>>) -> Result<Self> {
 		let compressed: Vec<u8> = bincode::deserialize_from(c)?;
 		let mut uncompressed: Vec<u8> = Vec::new();
 		{
@@ -434,7 +435,7 @@ impl BKeys for TrieKeys {
 		})
 	}
 
-	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<(), Error> {
+	fn write_to(&self, c: &mut Cursor<Vec<u8>>) -> Result<()> {
 		let mut uncompressed: Vec<u8> = Vec::new();
 		bincode::serialize_into(&mut uncompressed, &self.keys)?;
 		let mut compressed: Vec<u8> = Vec::new();
