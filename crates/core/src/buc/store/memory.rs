@@ -121,8 +121,8 @@ impl ObjectStore for MemoryStore {
 		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			if let Some(x) = self.store.get(key) {
-				let data = x.clone();
+			// as_deref().cloned() here is important to prevent a deadlock.
+			if let Some(data) = self.store.get(key).as_deref().cloned() {
 				self.store.insert(target.clone(), data);
 			}
 
@@ -137,8 +137,8 @@ impl ObjectStore for MemoryStore {
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
 			if !self.store.contains_key(target) {
-				if let Some(x) = self.store.get(key) {
-					let data = x.clone();
+				// as_deref().cloned() here is important to prevent a deadlock.
+				if let Some(data) = self.store.get(key).as_deref().cloned() {
 					self.store.insert(target.clone(), data);
 				}
 			}
