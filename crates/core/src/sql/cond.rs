@@ -18,8 +18,10 @@ impl Deref for Cond {
 	}
 }
 
-impl fmt::Display for Cond {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Cond);
+
+impl crate::sql::DisplaySql for Cond {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "WHERE {}", self.0)
 	}
 }

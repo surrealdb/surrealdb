@@ -26,8 +26,10 @@ impl IntoIterator for Splits {
 	}
 }
 
-impl fmt::Display for Splits {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Splits);
+
+impl crate::sql::DisplaySql for Splits {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SPLIT ON {}", Fmt::comma_separated(&self.0))
 	}
 }
@@ -45,8 +47,10 @@ impl Deref for Split {
 	}
 }
 
-impl Display for Split {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Split);
+
+impl crate::sql::DisplaySql for Split {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
 	}
 }

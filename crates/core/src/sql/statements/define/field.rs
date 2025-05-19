@@ -16,7 +16,7 @@ use anyhow::{bail, ensure, Result};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Write};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -405,8 +405,10 @@ impl DefineFieldStatement {
 	}
 }
 
-impl Display for DefineFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineFieldStatement);
+
+impl crate::sql::DisplaySql for DefineFieldStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FIELD")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

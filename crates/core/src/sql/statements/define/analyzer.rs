@@ -9,7 +9,7 @@ use anyhow::{bail, Result};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -69,8 +69,10 @@ impl DefineAnalyzerStatement {
 	}
 }
 
-impl Display for DefineAnalyzerStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineAnalyzerStatement);
+
+impl crate::sql::DisplaySql for DefineAnalyzerStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE ANALYZER")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

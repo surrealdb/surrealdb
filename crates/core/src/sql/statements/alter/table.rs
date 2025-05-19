@@ -12,7 +12,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Write};
 use std::ops::Deref;
 
 #[revisioned(revision = 2)]
@@ -100,8 +100,10 @@ impl AlterTableStatement {
 	}
 }
 
-impl Display for AlterTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(AlterTableStatement);
+
+impl crate::sql::DisplaySql for AlterTableStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "ALTER TABLE")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?

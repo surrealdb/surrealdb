@@ -58,8 +58,10 @@ impl Ident {
 	}
 }
 
-impl Display for Ident {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Ident);
+
+impl crate::sql::DisplaySql for Ident {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		EscapeIdent(&self.0).fmt(f)
 	}
 }

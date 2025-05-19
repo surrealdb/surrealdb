@@ -16,7 +16,7 @@ use crate::sql::{Statement, Statements};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::str;
 
@@ -140,8 +140,10 @@ impl IntoIterator for Query {
 	}
 }
 
-impl Display for Query {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Query);
+
+impl crate::sql::DisplaySql for Query {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(Pretty::from(f), "{}", &self.0)
 	}
 }

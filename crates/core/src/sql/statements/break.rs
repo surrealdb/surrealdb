@@ -31,8 +31,10 @@ impl BreakStatement {
 	}
 }
 
-impl fmt::Display for BreakStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(BreakStatement);
+
+impl crate::sql::DisplaySql for BreakStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("BREAK")
 	}
 }

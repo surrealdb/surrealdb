@@ -21,8 +21,10 @@ pub struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
 
-impl fmt::Display for Reference {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Reference);
+
+impl crate::sql::DisplaySql for Reference {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "ON DELETE {}", &self.on_delete)
 	}
 }
@@ -49,8 +51,10 @@ pub enum ReferenceDeleteStrategy {
 	Custom(Value),
 }
 
-impl fmt::Display for ReferenceDeleteStrategy {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ReferenceDeleteStrategy);
+
+impl crate::sql::DisplaySql for ReferenceDeleteStrategy {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			ReferenceDeleteStrategy::Reject => write!(f, "REJECT"),
 			ReferenceDeleteStrategy::Ignore => write!(f, "IGNORE"),
@@ -116,8 +120,10 @@ impl Refs {
 	}
 }
 
-impl fmt::Display for Refs {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Refs);
+
+impl crate::sql::DisplaySql for Refs {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "[]")
 	}
 }

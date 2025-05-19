@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -48,8 +48,10 @@ impl RemoveParamStatement {
 	}
 }
 
-impl Display for RemoveParamStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(RemoveParamStatement);
+
+impl crate::sql::DisplaySql for RemoveParamStatement {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE PARAM")?;
 		if self.if_exists {
 			write!(f, " IF EXISTS")?

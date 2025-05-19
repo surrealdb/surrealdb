@@ -16,7 +16,7 @@ use anyhow::{bail, Result};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::{Display, Formatter};
+use std::fmt::Formatter;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -68,8 +68,10 @@ impl AnalyzeStatement {
 	}
 }
 
-impl Display for AnalyzeStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(AnalyzeStatement);
+
+impl crate::sql::DisplaySql for AnalyzeStatement {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Idx(tb, idx) => write!(f, "ANALYZE INDEX {idx} ON {tb}"),
 		}

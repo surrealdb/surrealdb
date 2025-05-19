@@ -14,7 +14,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::{self, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
@@ -286,8 +286,10 @@ impl std::ops::Add for Object {
 	}
 }
 
-impl Display for Object {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Object);
+
+impl crate::sql::DisplaySql for Object {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		if is_pretty() {
 			f.write_char('{')?;

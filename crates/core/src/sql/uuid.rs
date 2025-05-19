@@ -1,7 +1,7 @@
 use crate::sql::{escape::QuoteStr, strand::Strand};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
@@ -97,8 +97,10 @@ impl Uuid {
 	}
 }
 
-impl Display for Uuid {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Uuid);
+
+impl crate::sql::DisplaySql for Uuid {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "u{}", QuoteStr(&self.0.to_string()))
 	}
 }

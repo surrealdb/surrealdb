@@ -13,7 +13,7 @@ use revision::revisioned;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::{self, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 2)]
@@ -428,8 +428,10 @@ impl From<&Kind> for Box<Kind> {
 	}
 }
 
-impl Display for Kind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Kind);
+
+impl crate::sql::DisplaySql for Kind {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Kind::Any => f.write_str("any"),
 			Kind::Null => f.write_str("null"),
@@ -677,8 +679,10 @@ impl Literal {
 	}
 }
 
-impl Display for Literal {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Literal);
+
+impl crate::sql::DisplaySql for Literal {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Literal::String(s) => write!(f, "{}", s),
 			Literal::Number(n) => write!(f, "{}", n),

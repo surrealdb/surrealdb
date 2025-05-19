@@ -57,8 +57,10 @@ impl Default for Algorithm {
 	}
 }
 
-impl fmt::Display for Algorithm {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Algorithm);
+
+impl crate::sql::DisplaySql for Algorithm {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str(match self {
 			Self::EdDSA => "EDDSA",
 			Self::Es256 => "ES256",

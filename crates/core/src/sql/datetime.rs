@@ -6,7 +6,7 @@ use anyhow::Result;
 use chrono::{offset::LocalResult, DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::str;
@@ -116,8 +116,10 @@ impl Datetime {
 	}
 }
 
-impl Display for Datetime {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Datetime);
+
+impl crate::sql::DisplaySql for Datetime {
+	fn fmt_sql(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "d{}", &QuoteStr(&self.to_raw()))
 	}
 }

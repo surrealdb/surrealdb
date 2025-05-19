@@ -10,7 +10,7 @@ use anyhow::{bail, Result};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 use uuid::Uuid;
 
 #[revisioned(revision = 3)]
@@ -92,8 +92,10 @@ impl DefineEventStatement {
 	}
 }
 
-impl Display for DefineEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineEventStatement);
+
+impl crate::sql::DisplaySql for DefineEventStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE EVENT",)?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?

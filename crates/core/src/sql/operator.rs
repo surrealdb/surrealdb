@@ -75,8 +75,10 @@ impl Default for Operator {
 	}
 }
 
-impl fmt::Display for Operator {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Operator);
+
+impl crate::sql::DisplaySql for Operator {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Neg => f.write_str("-"),
 			Self::Not => f.write_str("!"),

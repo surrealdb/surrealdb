@@ -123,8 +123,10 @@ impl InfoStructure for DefineConfigStatement {
 	}
 }
 
-impl Display for DefineConfigStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(DefineConfigStatement);
+
+impl crate::sql::DisplaySql for DefineConfigStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE CONFIG")?;
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
@@ -139,8 +141,10 @@ impl Display for DefineConfigStatement {
 	}
 }
 
-impl Display for ConfigInner {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+crate::sql::impl_display_from_sql!(ConfigInner);
+
+impl crate::sql::DisplaySql for ConfigInner {
+	fn fmt_sql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
 			ConfigInner::Api(v) => Display::fmt(v, f),

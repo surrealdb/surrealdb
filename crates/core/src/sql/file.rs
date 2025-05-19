@@ -40,8 +40,10 @@ impl File {
 	}
 }
 
-impl fmt::Display for File {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(File);
+
+impl crate::sql::DisplaySql for File {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "f\"{}\"", self.display_inner())
 	}
 }

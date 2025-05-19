@@ -57,8 +57,10 @@ impl Edges {
 	}
 }
 
-impl fmt::Display for Edges {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Edges);
+
+impl crate::sql::DisplaySql for Edges {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.what.len() {
 			0 => write!(f, "{}{}?", self.from, self.dir,),
 			1 => write!(f, "{}{}{}", self.from, self.dir, self.what),

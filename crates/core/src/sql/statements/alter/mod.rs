@@ -50,8 +50,10 @@ impl AlterStatement {
 	}
 }
 
-impl Display for AlterStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(AlterStatement);
+
+impl crate::sql::DisplaySql for AlterStatement {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Table(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),

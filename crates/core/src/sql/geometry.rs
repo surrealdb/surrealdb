@@ -565,8 +565,10 @@ impl Geometry {
 	}
 }
 
-impl fmt::Display for Geometry {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(Geometry);
+
+impl crate::sql::DisplaySql for Geometry {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Point(v) => {
 				write!(f, "({}, {})", v.x(), v.y())

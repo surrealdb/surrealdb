@@ -15,8 +15,10 @@ pub struct View {
 	pub group: Option<Groups>,
 }
 
-impl fmt::Display for View {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+crate::sql::impl_display_from_sql!(View);
+
+impl crate::sql::DisplaySql for View {
+	fn fmt_sql(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "AS SELECT {} FROM {}", self.expr, self.what)?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
