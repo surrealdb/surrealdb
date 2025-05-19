@@ -192,7 +192,7 @@ pub(crate) struct MlExportConfig {
 }
 
 /// Connection trait implemented by supported protocols
-pub trait Connection: Sized + Send + Sync + 'static {
+pub trait Sealed: Sized + Send + Sync + 'static {
 	/// Connect to the server
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>>
 	where

@@ -1,3 +1,4 @@
+use super::Raw;
 use crate::{
 	api::{err::Error, Response as QueryResponse, Result},
 	method::{self, query::ValidQuery, Stats, Stream},
@@ -14,270 +15,295 @@ use surrealdb_core::sql::{
 	self, from_value as from_core_value, statements::*, Statement, Statements, Value as CoreValue,
 };
 
-use super::Raw;
-
 pub struct Query(pub(crate) ValidQuery);
-
 /// A trait for converting inputs into SQL statements
-pub trait IntoQuery {
-	/// Converts an input into SQL statements
-	#[deprecated(since = "2.3.0")]
-	fn into_query(self) -> Result<Query>;
+pub trait IntoQuery: into_query::Sealed {}
 
-	/// Not public API
-	#[doc(hidden)]
-	fn as_str(&self) -> Option<&str> {
-		None
+pub(crate) mod into_query {
+	pub trait Sealed {
+		/// Converts an input into SQL statements
+		fn into_query(self) -> super::Query;
+
+		/// Not public API
+		#[doc(hidden)]
+		fn as_str(&self) -> Option<&str> {
+			None
+		}
 	}
 }
 
-impl IntoQuery for sql::Query {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for sql::Query {}
+impl into_query::Sealed for sql::Query {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: self.0 .0,
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for Statements {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for Statements {}
+impl into_query::Sealed for Statements {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: self.0,
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for Vec<Statement> {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for Vec<Statement> {}
+impl into_query::Sealed for Vec<Statement> {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: self,
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for Statement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for Statement {}
+impl into_query::Sealed for Statement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![self],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for UseStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for UseStatement {}
+impl into_query::Sealed for UseStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Use(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for SetStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for SetStatement {}
+impl into_query::Sealed for SetStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Set(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for InfoStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for InfoStatement {}
+impl into_query::Sealed for InfoStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Info(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for LiveStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for LiveStatement {}
+impl into_query::Sealed for LiveStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Live(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for KillStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for KillStatement {}
+impl into_query::Sealed for KillStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Kill(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for BeginStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for BeginStatement {}
+impl into_query::Sealed for BeginStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Begin(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for CancelStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for CancelStatement {}
+impl into_query::Sealed for CancelStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Cancel(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for CommitStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for CommitStatement {}
+impl into_query::Sealed for CommitStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Commit(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for OutputStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for OutputStatement {}
+impl into_query::Sealed for OutputStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Output(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for IfelseStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for IfelseStatement {}
+impl into_query::Sealed for IfelseStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Ifelse(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for SelectStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for SelectStatement {}
+impl into_query::Sealed for SelectStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Select(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for CreateStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for CreateStatement {}
+impl into_query::Sealed for CreateStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Create(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for UpdateStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for UpdateStatement {}
+impl into_query::Sealed for UpdateStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Update(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for RelateStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for RelateStatement {}
+impl into_query::Sealed for RelateStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Relate(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for DeleteStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for DeleteStatement {}
+impl into_query::Sealed for DeleteStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Delete(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for InsertStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for InsertStatement {}
+impl into_query::Sealed for InsertStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Insert(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for DefineStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for DefineStatement {}
+impl into_query::Sealed for DefineStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Define(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for AlterStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for AlterStatement {}
+impl into_query::Sealed for AlterStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Alter(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for RemoveStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for RemoveStatement {}
+impl into_query::Sealed for RemoveStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Remove(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for OptionStatement {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for OptionStatement {}
+impl into_query::Sealed for OptionStatement {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: vec![Statement::Option(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
-impl IntoQuery for &str {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for &str {}
+impl into_query::Sealed for &str {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: Vec::new(),
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 
 	fn as_str(&self) -> Option<&str> {
@@ -285,13 +311,14 @@ impl IntoQuery for &str {
 	}
 }
 
-impl IntoQuery for &String {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for &String {}
+impl into_query::Sealed for &String {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: Vec::new(),
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 
 	fn as_str(&self) -> Option<&str> {
@@ -299,13 +326,14 @@ impl IntoQuery for &String {
 	}
 }
 
-impl IntoQuery for String {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Normal {
+impl IntoQuery for String {}
+impl into_query::Sealed for String {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
 			query: Vec::new(),
 			register_live_queries: true,
 			bindings: Default::default(),
-		}))
+		})
 	}
 
 	fn as_str(&self) -> Option<&str> {
@@ -313,32 +341,40 @@ impl IntoQuery for String {
 	}
 }
 
-impl IntoQuery for Raw {
-	fn into_query(self) -> Result<Query> {
-		Ok(Query(ValidQuery::Raw {
+impl IntoQuery for Raw {}
+impl into_query::Sealed for Raw {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Raw {
 			query: self.0,
 			bindings: Default::default(),
-		}))
+		})
 	}
 }
 
 /// Represents a way to take a single query result from a list of responses
-pub trait QueryResult<Response>
+pub trait QueryResult<Response>: query_result::Sealed<Response>
 where
 	Response: DeserializeOwned,
 {
-	/// Extracts and deserializes a query result from a query response
-	#[deprecated(since = "2.3.0")]
-	fn query_result(self, response: &mut QueryResponse) -> Result<Response>;
+}
 
-	/// Extracts the statistics from a query response
-	#[deprecated(since = "2.3.0")]
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
-		response.results.get(&0).map(|x| x.0)
+mod query_result {
+	pub trait Sealed<Response>
+	where
+		Response: super::DeserializeOwned,
+	{
+		/// Extracts and deserializes a query result from a query response
+		fn query_result(self, response: &mut super::QueryResponse) -> super::Result<Response>;
+
+		/// Extracts the statistics from a query response
+		fn stats(&self, response: &super::QueryResponse) -> Option<super::Stats> {
+			response.results.get(&0).map(|x| x.0)
+		}
 	}
 }
 
-impl QueryResult<Value> for usize {
+impl QueryResult<Value> for usize {}
+impl query_result::Sealed<Value> for usize {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		match response.results.swap_remove(&self) {
 			Some((_, result)) => Ok(Value::from_inner(result?)),
@@ -351,7 +387,8 @@ impl QueryResult<Value> for usize {
 	}
 }
 
-impl<T> QueryResult<Option<T>> for usize
+impl<T> QueryResult<Option<T>> for usize where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Option<T>> for usize
 where
 	T: DeserializeOwned,
 {
@@ -396,7 +433,8 @@ where
 	}
 }
 
-impl QueryResult<Value> for (usize, &str) {
+impl QueryResult<Value> for (usize, &str) {}
+impl query_result::Sealed<Value> for (usize, &str) {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		let (index, key) = self;
 		let value = match response.results.get_mut(&index) {
@@ -426,7 +464,8 @@ impl QueryResult<Value> for (usize, &str) {
 	}
 }
 
-impl<T> QueryResult<Option<T>> for (usize, &str)
+impl<T> QueryResult<Option<T>> for (usize, &str) where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Option<T>> for (usize, &str)
 where
 	T: DeserializeOwned,
 {
@@ -486,7 +525,8 @@ where
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for usize
+impl<T> QueryResult<Vec<T>> for usize where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Vec<T>> for usize
 where
 	T: DeserializeOwned,
 {
@@ -508,7 +548,8 @@ where
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for (usize, &str)
+impl<T> QueryResult<Vec<T>> for (usize, &str) where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Vec<T>> for (usize, &str)
 where
 	T: DeserializeOwned,
 {
@@ -552,41 +593,48 @@ where
 	}
 }
 
-impl QueryResult<Value> for &str {
+impl QueryResult<Value> for &str {}
+impl query_result::Sealed<Value> for &str {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
-		#[expect(deprecated)]
 		(0, self).query_result(response)
 	}
 }
 
-impl<T> QueryResult<Option<T>> for &str
+impl<T> QueryResult<Option<T>> for &str where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Option<T>> for &str
 where
 	T: DeserializeOwned,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
-		#[expect(deprecated)]
 		(0, self).query_result(response)
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for &str
+impl<T> QueryResult<Vec<T>> for &str where T: DeserializeOwned {}
+impl<T> query_result::Sealed<Vec<T>> for &str
 where
 	T: DeserializeOwned,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
-		#[expect(deprecated)]
 		(0, self).query_result(response)
 	}
 }
 
 /// A way to take a query stream future from a query response
-pub trait QueryStream<R> {
-	/// Retrieves the query stream future
-	#[deprecated(since = "2.3.0")]
-	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<R>>;
+pub trait QueryStream<R>: query_stream::Sealed<R> {}
+
+mod query_stream {
+	pub trait Sealed<R> {
+		/// Retrieves the query stream future
+		fn query_stream(
+			self,
+			response: &mut super::QueryResponse,
+		) -> super::Result<super::method::QueryStream<R>>;
+	}
 }
 
-impl QueryStream<Value> for usize {
+impl QueryStream<Value> for usize {}
+impl query_stream::Sealed<Value> for usize {
 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
 		let stream = response
 			.live_queries
@@ -609,7 +657,8 @@ impl QueryStream<Value> for usize {
 	}
 }
 
-impl QueryStream<Value> for () {
+impl QueryStream<Value> for () {}
+impl query_stream::Sealed<Value> for () {
 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
 		for (index, result) in mem::take(&mut response.live_queries) {
@@ -635,7 +684,8 @@ impl QueryStream<Value> for () {
 	}
 }
 
-impl<R> QueryStream<Notification<R>> for usize
+impl<R> QueryStream<Notification<R>> for usize where R: DeserializeOwned + Unpin {}
+impl<R> query_stream::Sealed<Notification<R>> for usize
 where
 	R: DeserializeOwned + Unpin,
 {
@@ -669,7 +719,8 @@ where
 	}
 }
 
-impl<R> QueryStream<Notification<R>> for ()
+impl<R> QueryStream<Notification<R>> for () where R: DeserializeOwned + Unpin {}
+impl<R> query_stream::Sealed<Notification<R>> for ()
 where
 	R: DeserializeOwned + Unpin,
 {
