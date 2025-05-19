@@ -1,3 +1,4 @@
+use anyhow::{bail, Result};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -79,7 +80,7 @@ impl Refs {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(Value::Array(Default::default()));
 		}
@@ -93,7 +94,7 @@ impl Refs {
 					Some(id) => id.as_ref().to_owned(),
 					None => match &doc.doc.rid() {
 						Value::Thing(id) => id.to_owned(),
-						_ => return Err(Error::InvalidRefsContext),
+						_ => bail!(Error::InvalidRefsContext),
 					},
 				};
 
@@ -108,7 +109,7 @@ impl Refs {
 				// Convert the references into values
 				ids.into_iter().map(Value::Thing).collect()
 			}
-			None => return Err(Error::InvalidRefsContext),
+			None => bail!(Error::InvalidRefsContext),
 		};
 
 		Ok(Value::Array(arr.uniq()))

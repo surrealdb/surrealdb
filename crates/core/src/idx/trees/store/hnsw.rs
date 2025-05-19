@@ -1,9 +1,9 @@
 use crate::ctx::Context;
-use crate::err::Error;
 use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Key;
 use crate::sql::index::HnswParams;
+use anyhow::Result;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ impl HnswIndexes {
 		tb: &str,
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
-	) -> Result<SharedHnswIndex, Error> {
+	) -> Result<SharedHnswIndex> {
 		let key = ikb.new_vm_key(None)?;
 		let h = self.0.read().await.get(&key).cloned();
 		if let Some(h) = h {
@@ -46,7 +46,7 @@ impl HnswIndexes {
 		Ok(ix)
 	}
 
-	pub(super) async fn remove(&self, ikb: &IndexKeyBase) -> Result<(), Error> {
+	pub(super) async fn remove(&self, ikb: &IndexKeyBase) -> Result<()> {
 		let key = ikb.new_vm_key(None)?;
 		self.0.write().await.remove(&key);
 		Ok(())

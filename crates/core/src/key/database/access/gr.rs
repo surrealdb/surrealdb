@@ -1,8 +1,8 @@
 //! Stores a grant associated with an access method
-use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::{impl_key, KeyEncode};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -26,13 +26,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ns, db, ac, gr)
 }
 
-pub fn prefix(ns: &str, db: &str, ac: &str) -> Result<Vec<u8>, Error> {
+pub fn prefix(ns: &str, db: &str, ac: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, ac).encode()?;
 	k.extend_from_slice(b"!gr\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, ac: &str) -> Result<Vec<u8>, Error> {
+pub fn suffix(ns: &str, db: &str, ac: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, ac).encode()?;
 	k.extend_from_slice(b"!gr\xff");
 	Ok(k)

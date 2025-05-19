@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{filter::Filter, tokenizer::Tokenizer, Array, Base, Ident, Strand, Value};
+use anyhow::{bail, Result};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -33,7 +34,7 @@ impl DefineAnalyzerStatement {
 		ctx: &Context,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
 		// Fetch the transaction
@@ -44,7 +45,7 @@ impl DefineAnalyzerStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::AzAlreadyExists {
+				bail!(Error::AzAlreadyExists {
 					name: self.name.to_string(),
 				});
 			}

@@ -1,9 +1,9 @@
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::table::Tables;
 use crate::sql::thing::Thing;
 use crate::{ctx::Context, sql::dir::Dir};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,7 @@ impl Edges {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		Ok(Value::Edges(Box::new(Self {
 			dir: self.dir.clone(),
 			from: self.from.clone(),

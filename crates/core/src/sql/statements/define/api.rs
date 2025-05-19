@@ -6,6 +6,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{pretty_indent, Fmt};
 use crate::sql::{Base, FlowResultExt as _, Object, Strand, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
+use anyhow::{bail, Result};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -36,7 +37,7 @@ impl DefineApiStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
 		// Fetch the transaction
@@ -47,7 +48,7 @@ impl DefineApiStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::ApAlreadyExists {
+				bail!(Error::ApAlreadyExists {
 					value: self.path.to_string(),
 				});
 			}

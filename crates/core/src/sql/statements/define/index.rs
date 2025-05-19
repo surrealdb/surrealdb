@@ -12,6 +12,7 @@ use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::sql::{Base, Ident, Idioms, Index, Part, Strand, Value};
 #[cfg(target_family = "wasm")]
 use crate::sql::{Output, Values};
+use anyhow::{bail, Result};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -46,7 +47,7 @@ impl DefineIndexStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
@@ -58,7 +59,7 @@ impl DefineIndexStatement {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite {
-				return Err(Error::IxAlreadyExists {
+				bail!(Error::IxAlreadyExists {
 					name: self.name.to_string(),
 				});
 			}
@@ -84,12 +85,11 @@ impl DefineIndexStatement {
 					}
 				}
 			}
-			// If the TB was not found, we're fine
-			Err(Error::TbNotFound {
-				..
-			}) => {}
-			// Any other error should be returned
-			Err(e) => return Err(e),
+			Err(e) => {
+				if !matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
+					return Err(e);
+				}
+			}
 		}
 		// Process the statement
 		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
@@ -142,7 +142,7 @@ impl DefineIndexStatement {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
@@ -175,13 +175,11 @@ impl DefineIndexStatement {
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 		blocking: bool,
-	) -> Result<(), Error> {
-		let rcv = ctx.get_index_builder().ok_or_else(|| fail!("No Index Builder"))?.build(
-			ctx,
-			opt.clone(),
-			self.clone().into(),
-			blocking,
-		)?;
+	) -> Result<()> {
+		let rcv = ctx
+			.get_index_builder()
+			.ok_or_else(|| Error::unreachable("No Index Builder"))?
+			.build(ctx, opt.clone(), self.clone().into(), blocking)?;
 		if let Some(rcv) = rcv {
 			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
 		} else {

@@ -17,7 +17,7 @@ use surrealdb::sql::statements::CommitStatement;
 use surrealdb::RecordId;
 use surrealdb::Response;
 use surrealdb::Value;
-use surrealdb::{error::Api as ApiError, error::Db as DbError, Error};
+use surrealdb::{error::Api as ApiError, error::Db as DbError};
 use surrealdb_core::sql::{Id, Value as CoreValue};
 use ulid::Ulid;
 
@@ -37,20 +37,14 @@ pub async fn connect(new_db: impl CreateDb) {
 pub async fn yuse(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	let item = Ulid::new().to_string();
-	match db.create(Resource::from(item.as_str())).await.unwrap_err() {
-		// Local engines return this error
-		Error::Db(DbError::NsEmpty) => {}
-		// Remote engines return this error
-		Error::Api(ApiError::Query(error)) if error.contains("Specify a namespace to use") => {}
-		error => panic!("{:?}", error),
+	let err = db.create(Resource::from(item.as_str())).await.unwrap_err();
+	if !err.to_string().contains("Specify a namespace to use") {
+		panic!("{:?}", err)
 	}
 	db.use_ns(NS).await.unwrap();
-	match db.create(Resource::from(item.as_str())).await.unwrap_err() {
-		// Local engines return this error
-		Error::Db(DbError::DbEmpty) => {}
-		// Remote engines return this error
-		Error::Api(ApiError::Query(error)) if error.contains("Specify a database to use") => {}
-		error => panic!("{:?}", error),
+	let err = db.create(Resource::from(item.as_str())).await.unwrap_err();
+	if !err.to_string().contains("Specify a database to use") {
+		panic!("{:?}", err)
 	}
 	db.use_db(item.as_str()).await.unwrap();
 	db.create(Resource::from(item)).await.unwrap();
@@ -198,7 +192,7 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 
-	match db
+	let err = db
 		.signup(RecordAccess {
 			namespace: NS,
 			database: &database,
@@ -209,17 +203,27 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 			},
 		})
 		.await
-	{
-		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signup_thrown_error"),
-		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert!(e.contains("signup")),
-		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
-			e,
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
-		),
-		v => panic!("Unexpected response or error: {v:?}"),
-	};
+		.unwrap_err();
 
-	match db
+	if let Some(e) = err.downcast_ref() {
+		match e {
+			surrealdb::err::Error::Thrown(e) => assert_eq!(e, "signup_thrown_error"),
+			x => panic!("unexpected error: {x:?}"),
+		}
+	} else if let Some(e) = err.downcast_ref() {
+		match e {
+			surrealdb::error::Api::Query(e) => assert!(e.contains("signup")),
+			surrealdb::error::Api::Http(e) => assert_eq!(
+				e,
+				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			),
+			x => panic!("unexpected error: {x:?}"),
+		}
+	} else {
+		panic!("unexpected error: {err:?}")
+	}
+
+	let err = db
 		.signin(RecordAccess {
 			namespace: NS,
 			database: &database,
@@ -230,15 +234,25 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 			},
 		})
 		.await
-	{
-		Err(Error::Db(surrealdb::err::Error::Thrown(e))) => assert_eq!(e, "signin_thrown_error"),
-		Err(Error::Api(surrealdb::error::Api::Query(e))) => assert!(e.contains("signin")),
-		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
-			e,
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
-		),
-		v => panic!("Unexpected response or error: {v:?}"),
-	};
+		.unwrap_err();
+
+	if let Some(e) = err.downcast_ref() {
+		match e {
+			surrealdb::err::Error::Thrown(e) => assert_eq!(e, "signin_thrown_error"),
+			x => panic!("unexpected error: {x:?}"),
+		}
+	} else if let Some(e) = err.downcast_ref() {
+		match e {
+			surrealdb::error::Api::Query(e) => assert!(e.contains("signin")),
+			surrealdb::error::Api::Http(e) => assert_eq!(
+				e,
+				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			),
+			x => panic!("unexpected error: {x:?}"),
+		}
+	} else {
+		panic!("unexpected error: {err:?}")
+	}
 }
 
 pub async fn record_access_invalid_query(new_db: impl CreateDb) {
@@ -260,7 +274,7 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 
-	match db
+	let err = db
 		.signup(RecordAccess {
 			namespace: NS,
 			database: &database,
@@ -271,22 +285,30 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 			},
 		})
 		.await
-	{
-		Err(Error::Db(surrealdb::err::Error::AccessRecordSignupQueryFailed)) => (),
-		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
-			assert_eq!(
+		.unwrap_err();
+
+	if let Some(e) = err.downcast_ref() {
+		match e {
+			surrealdb::err::Error::AccessRecordSignupQueryFailed => {}
+			x => panic!("unexpected error: {x:?}"),
+		}
+	} else if let Some(e) = err.downcast_ref() {
+		match e {
+			surrealdb::error::Api::Query(e) => assert_eq!(
 				e,
 				"There was a problem with the database: The record access signup query failed"
-			)
+			),
+			surrealdb::error::Api::Http(e) => assert_eq!(
+				e,
+				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			),
+			x => panic!("unexpected error: {x:?}"),
 		}
-		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
-			e,
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
-		),
-		v => panic!("Unexpected response or error: {v:?}"),
+	} else {
+		panic!("unexpected error: {err:?}")
 	};
 
-	match db
+	let err = db
 		.signin(RecordAccess {
 			namespace: NS,
 			database: &database,
@@ -297,19 +319,27 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 			},
 		})
 		.await
-	{
-		Err(Error::Db(surrealdb::err::Error::AccessRecordSigninQueryFailed)) => (),
-		Err(Error::Api(surrealdb::error::Api::Query(e))) => {
-			assert_eq!(
+		.unwrap_err();
+
+	if let Some(e) = err.downcast_ref() {
+		match e {
+			surrealdb::err::Error::AccessRecordSigninQueryFailed => {}
+			x => panic!("unexpected error: {x:?}"),
+		}
+	} else if let Some(e) = err.downcast_ref() {
+		match e {
+			surrealdb::error::Api::Query(e) => assert_eq!(
 				e,
 				"There was a problem with the database: The record access signin query failed"
-			)
+			),
+			surrealdb::error::Api::Http(e) => assert_eq!(
+				e,
+				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
+			),
+			x => panic!("unexpected error: {x:?}"),
 		}
-		Err(Error::Api(surrealdb::error::Api::Http(e))) => assert_eq!(
-			e,
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
-		),
-		v => panic!("Unexpected response or error: {v:?}"),
+	} else {
+		panic!("unexpected error: {err:?}")
 	};
 }
 
@@ -561,15 +591,18 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap_err();
-	match error {
-		surrealdb::Error::Db(DbError::IdMismatch {
-			..
-		}) => {}
-		surrealdb::Error::Api(ApiError::Query {
-			..
-		}) => {}
-		error => panic!("unexpected error; {error:?}"),
-	}
+
+	if let Some(DbError::IdMismatch {
+		..
+	}) = error.downcast_ref()
+	{
+	} else if let Some(ApiError::Query {
+		..
+	}) = error.downcast_ref()
+	{
+	} else {
+		panic!("unexpected error; {error:?}")
+	};
 
 	let _: Option<Record> = db
 		.create("person")

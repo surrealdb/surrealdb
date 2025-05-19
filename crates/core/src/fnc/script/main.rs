@@ -16,6 +16,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
+use anyhow::Result;
 use js::async_with;
 use js::prelude::*;
 use js::CatchResultExt;
@@ -51,7 +52,7 @@ pub async fn run(
 	doc: Option<&CursorDoc>,
 	src: &str,
 	arg: Vec<Value>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	// Check the context
 	if context.is_done(true).await? {
 		return Ok(Value::None);
@@ -118,5 +119,5 @@ pub async fn run(
 		// Catch and convert any errors
 		res.catch(&ctx).map_err(Error::from)
 	})
-	.await
+	.await.map_err(anyhow::Error::new)
 }

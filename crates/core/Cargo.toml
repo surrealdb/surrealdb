@@ -109,6 +109,7 @@ tikv = { workspace = true, optional = true }
 addr.workspace = true
 ahash.workspace = true
 ammonia.workspace = true
+anyhow.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
 async-executor.workspace = true

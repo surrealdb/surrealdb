@@ -20,7 +20,6 @@ mod cli;
 mod cnf;
 mod dbs;
 mod env;
-mod err;
 mod gql;
 mod net;
 mod rpc;

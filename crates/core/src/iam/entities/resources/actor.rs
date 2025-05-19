@@ -137,7 +137,7 @@ impl std::convert::From<&Actor> for Entity {
 impl std::convert::TryFrom<(&DefineUserStatement, Level)> for Actor {
 	type Error = Error;
 	fn try_from(val: (&DefineUserStatement, Level)) -> Result<Self, Self::Error> {
-		let roles = val.0.roles.iter().map(Role::try_from).collect::<Result<_, _>>()?;
+		let roles = val.0.roles.iter().map(|e| Role::from_str(e)).collect::<Result<_, _>>()?;
 		Ok(Self::new(val.0.name.to_string(), roles, val.1))
 	}
 }

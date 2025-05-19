@@ -1,7 +1,6 @@
-use crate::err::Error;
+use anyhow::{bail, Result};
 use clap::Args;
 use glob::glob;
-use std::io::{Error as IoError, ErrorKind};
 use surrealdb::sql::parse;
 
 #[derive(Args, Debug)]
@@ -11,7 +10,7 @@ pub struct ValidateCommandArguments {
 	patterns: Vec<String>,
 }
 
-pub async fn init(args: ValidateCommandArguments) -> Result<(), Error> {
+pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 	let ValidateCommandArguments {
 		patterns,
 	} = args;
@@ -24,10 +23,8 @@ pub async fn init(args: ValidateCommandArguments) -> Result<(), Error> {
 			Err(error) => {
 				eprintln!("Error parsing glob pattern {pattern}: {error}");
 
-				return Err(Error::Io(IoError::new(
-					ErrorKind::Other,
-					format!("Error parsing glob pattern {pattern}: {error}"),
-				)));
+				return Err(anyhow::Error::new(error)
+					.context(format!("Error parsing glob pattern '{pattern}'")));
 			}
 		};
 
@@ -48,7 +45,7 @@ pub async fn init(args: ValidateCommandArguments) -> Result<(), Error> {
 				println!("{}: KO", entry.display());
 				eprintln!("{error}");
 
-				return Err(crate::err::Error::from(error));
+				bail!(error)
 			}
 		}
 
@@ -57,7 +54,7 @@ pub async fn init(args: ValidateCommandArguments) -> Result<(), Error> {
 
 	if !has_entries {
 		eprintln!("No files found");
-		return Err(Error::Io(IoError::new(ErrorKind::NotFound, "No files found".to_string())));
+		bail!("No filed found");
 	}
 
 	Ok(())
