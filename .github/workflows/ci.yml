@@ -253,7 +253,7 @@ jobs:
     needs: [format, check, check-wasm]
     uses: ./.github/workflows/build.yml
     with:
-      name: surrealdb-ci
+      name: ci
       release-branch: ${{ github.head_ref || github.ref_name }}
     secrets: inherit
 
