@@ -2,11 +2,10 @@
 
 pub mod any;
 #[cfg(any(
+	kv_fdb,
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
-	feature = "kv-fdb-7_1",
-	feature = "kv-fdb-7_3",
 	feature = "kv-indxdb",
 	feature = "kv-surrealkv",
 ))]

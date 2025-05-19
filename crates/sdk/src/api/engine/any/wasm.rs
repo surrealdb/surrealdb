@@ -37,14 +37,14 @@ impl conn::Sealed for Any {
 
 			match EndpointKind::from(address.url.scheme()) {
 				EndpointKind::FoundationDb => {
-					#[cfg(any(feature = "kv-fdb-7_1", feature = "kv-fdb-7_3"))]
+					#[cfg(kv_fdb)]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.recv().await??;
 					}
 
-					#[cfg(not(any(feature = "kv-fdb-7_1", feature = "kv-fdb-7_3")))]
+					#[cfg(not(kv_fdb))]
 					return Err(
 						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
 					);
