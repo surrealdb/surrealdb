@@ -163,7 +163,7 @@ where
 	}
 
 	fn get_random_level(&mut self) -> usize {
-		let unif: f64 = self.rng.gen(); // generate a uniform random number between 0 and 1
+		let unif: f64 = self.rng.r#gen(); // generate a uniform random number between 0 and 1
 		(-unif.ln() * self.ml).floor() as usize // calculate the layer
 	}
 
@@ -430,15 +430,15 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::ctx::{Context, MutableContext};
+	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
 	use crate::idx::trees::hnsw::index::HnswIndex;
 	use crate::idx::trees::hnsw::{ElementId, HnswSearch};
-	use crate::idx::trees::knn::tests::{new_vectors_from_file, TestCollection};
+	use crate::idx::trees::knn::tests::{TestCollection, new_vectors_from_file};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::idx::IndexKeyBase;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::index::{Distance, HnswParams, VectorType};

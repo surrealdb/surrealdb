@@ -6,7 +6,7 @@ use crate::{
 	err::Error,
 	sql::{Range, Value},
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

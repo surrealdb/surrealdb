@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
+use crate::sql::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use crate::sql::{FlowResult, Value};
 
 use reblessive::tree::Stk;
@@ -44,7 +44,7 @@ impl IfelseStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		for (ref cond, ref then) in &self.exprs {
+		for (cond, then) in &self.exprs {
 			let v = cond.compute(stk, ctx, opt, doc).await?;
 			if v.is_truthy() {
 				return then.compute(stk, ctx, opt, doc).await;

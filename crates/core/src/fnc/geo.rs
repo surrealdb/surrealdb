@@ -56,7 +56,7 @@ pub mod hash {
 	use crate::fnc::util::geo;
 	use crate::sql::geometry::Geometry;
 	use crate::sql::value::Value;
-	use anyhow::{bail, Result};
+	use anyhow::{Result, bail};
 
 	pub fn encode((arg, Optional(len)): (Geometry, Optional<i64>)) -> Result<Value> {
 		let len = match len {
@@ -64,8 +64,10 @@ pub mod hash {
 			None => 12usize,
 			_ => bail!(Error::InvalidArguments {
 				name: String::from("geo::encode"),
-				message: String::from("The second argument must be an integer greater than 0 and less than or equal to 12."),
-			})
+				message: String::from(
+					"The second argument must be an integer greater than 0 and less than or equal to 12."
+				),
+			}),
 		};
 
 		Ok(match arg {

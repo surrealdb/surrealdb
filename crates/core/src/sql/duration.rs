@@ -1,8 +1,8 @@
 use crate::err::Error;
+use crate::sql::Value;
 use crate::sql::datetime::Datetime;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::strand::Strand;
-use crate::sql::Value;
 use crate::syn;
 use anyhow::Result;
 use revision::revisioned;

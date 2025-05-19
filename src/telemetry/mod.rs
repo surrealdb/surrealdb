@@ -4,20 +4,20 @@ pub mod traces;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use anyhow::Result;
-use opentelemetry::global;
 use opentelemetry::KeyValue;
+use opentelemetry::global;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
-use opentelemetry_sdk::Resource;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::NonBlockingBuilder;
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::ParseError;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::EnvFilter;
 
 pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 	// Set the default otel metadata if available
@@ -154,7 +154,7 @@ mod tests {
 	use std::{ffi::OsString, sync::Mutex};
 
 	use opentelemetry::global::shutdown_tracer_provider;
-	use tracing::{span, Level};
+	use tracing::{Level, span};
 	use tracing_subscriber::util::SubscriberInitExt;
 
 	use crate::telemetry;
@@ -174,9 +174,11 @@ mod tests {
 		for (k, v) in vars {
 			restore.push((k.as_ref().to_string(), std::env::var_os(k.as_ref())));
 			if let Some(x) = v {
-				std::env::set_var(k.as_ref(), x.as_ref());
+				// TODO: Audit that the environment access only happens in single-threaded code.
+				unsafe { std::env::set_var(k.as_ref(), x.as_ref()) };
 			} else {
-				std::env::remove_var(k.as_ref());
+				// TODO: Audit that the environment access only happens in single-threaded code.
+				unsafe { std::env::remove_var(k.as_ref()) };
 			}
 		}
 
@@ -185,9 +187,11 @@ mod tests {
 			fn drop(&mut self) {
 				for (k, v) in self.0.drain(..) {
 					if let Some(v) = v {
-						std::env::set_var(k, v);
+						// TODO: Audit that the environment access only happens in single-threaded code.
+						unsafe { std::env::set_var(k, v) };
 					} else {
-						std::env::remove_var(k);
+						// TODO: Audit that the environment access only happens in single-threaded code.
+						unsafe { std::env::remove_var(k) };
 					}
 				}
 			}

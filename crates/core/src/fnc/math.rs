@@ -14,7 +14,7 @@ use crate::fnc::util::math::trimean::Trimean;
 use crate::fnc::util::math::variance::Variance;
 use crate::sql::number::{Number, Sort};
 use crate::sql::value::{TryPow, Value};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 
 pub fn abs((arg,): (Number,)) -> Result<Value> {
 	let Some(x) = arg.checked_abs() else {

@@ -3,7 +3,7 @@ use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any::{self, connect};
-use surrealdb::opt::{capabilities::Capabilities, Config};
+use surrealdb::opt::{Config, capabilities::Capabilities};
 
 #[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {
@@ -82,7 +82,9 @@ pub async fn init(
 	client.use_ns(namespace).use_db(database).await?;
 	// Import the data into the database
 	client.import(file).await.inspect_err(|_| {
-		error!("Surreal import failed, import might only be partially completed or have failed entirely.")
+		error!(
+			"Surreal import failed, import might only be partially completed or have failed entirely."
+		)
 	})?;
 	info!("The SurrealQL file was imported successfully");
 	// All ok

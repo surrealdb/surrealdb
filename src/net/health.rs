@@ -1,8 +1,8 @@
 use super::AppState;
 use crate::net::error::Error as NetError;
-use axum::routing::get;
 use axum::Extension;
 use axum::Router;
+use axum::routing::get;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::kvs::{LockType::*, TransactionType::*};
 

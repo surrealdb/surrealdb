@@ -1,12 +1,12 @@
 use crate::{
 	sql::{
-		language::Language, Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table,
-		Uuid,
+		Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid,
+		language::Language,
 	},
 	syn::{
 		lexer::compound,
-		parser::{mac::unexpected, ParseResult, Parser},
-		token::{self, t, TokenKind},
+		parser::{ParseResult, Parser, mac::unexpected},
+		token::{self, TokenKind, t},
 	},
 };
 

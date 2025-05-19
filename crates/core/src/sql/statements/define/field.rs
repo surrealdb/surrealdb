@@ -1,18 +1,18 @@
 use crate::ctx::Context;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
-use crate::sql::statements::info::InfoStructure;
 use crate::sql::statements::DefineTableStatement;
+use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Literal, Part};
 use crate::sql::{Relation, TableType};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

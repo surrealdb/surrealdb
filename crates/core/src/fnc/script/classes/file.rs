@@ -1,4 +1,4 @@
-use js::{class::Trace, JsLifetime};
+use js::{JsLifetime, class::Trace};
 
 use crate::sql::file;
 

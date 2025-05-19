@@ -1,19 +1,19 @@
+use crate::Value;
 use crate::api;
-use crate::api::err::Error;
-use crate::api::method::query::Response;
-use crate::api::method::BoxFuture;
-use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::Value;
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::method::query::Response;
+use crate::api::opt::Endpoint;
 use async_channel::Receiver;
 use async_channel::Sender;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use surrealdb_core::sql::{from_value as from_core_value, Value as CoreValue};
+use surrealdb_core::sql::{Value as CoreValue, from_value as from_core_value};
 
 mod cmd;
 pub(crate) use cmd::Command;

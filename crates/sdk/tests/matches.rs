@@ -1,11 +1,11 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use crate::helpers::{skip_ok, Test};
+use crate::helpers::{Test, skip_ok};
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use surrealdb::Result;
 
 #[tokio::test]
 async fn select_where_matches_using_index() -> Result<()> {

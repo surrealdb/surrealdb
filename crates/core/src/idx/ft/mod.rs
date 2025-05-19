@@ -30,8 +30,8 @@ use crate::sql::{Idiom, Object, Thing, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
+use roaring::treemap::IntoIter;
 use serde::{Deserialize, Serialize};
 use std::ops::BitAnd;
 use std::sync::Arc;
@@ -525,9 +525,9 @@ impl HitsIterator {
 mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
+	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
-	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::index::SearchParams;
 	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
@@ -624,7 +624,7 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
 		let az = Arc::new(az);
@@ -763,7 +763,7 @@ mod tests {
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-			let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 				panic!()
 			};
 			let az = Arc::new(az);
@@ -897,7 +897,33 @@ mod tests {
 	async fn concurrent_task(ds: Arc<Datastore>, az: Arc<DefineAnalyzerStatement>) {
 		let btree_order = 5;
 		let doc1: Thing = ("t", "doc1").into();
-		let content1 = Value::from(Array::from(vec!["Enter a search term", "Welcome", "Docusaurus blogging features are powered by the blog plugin.", "Simply add Markdown files (or folders) to the blog directory.", "blog", "Regular blog authors can be added to authors.yml.", "authors.yml", "The blog post date can be extracted from filenames, such as:", "2019-05-30-welcome.md", "2019-05-30-welcome/index.md", "A blog post folder can be convenient to co-locate blog post images:", "The blog supports tags as well!", "And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.", "blog: false", "MDX Blog Post", "Blog posts support Docusaurus Markdown features, such as MDX.", "Use the power of React to create interactive blog posts.", "Long Blog Post", "This is the summary of a very long blog post,", "Use a <!-- truncate --> comment to limit blog post size in the list view.", "<!--", "truncate", "-->", "First Blog Post", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+		let content1 = Value::from(Array::from(vec![
+			"Enter a search term",
+			"Welcome",
+			"Docusaurus blogging features are powered by the blog plugin.",
+			"Simply add Markdown files (or folders) to the blog directory.",
+			"blog",
+			"Regular blog authors can be added to authors.yml.",
+			"authors.yml",
+			"The blog post date can be extracted from filenames, such as:",
+			"2019-05-30-welcome.md",
+			"2019-05-30-welcome/index.md",
+			"A blog post folder can be convenient to co-locate blog post images:",
+			"The blog supports tags as well!",
+			"And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.",
+			"blog: false",
+			"MDX Blog Post",
+			"Blog posts support Docusaurus Markdown features, such as MDX.",
+			"Use the power of React to create interactive blog posts.",
+			"Long Blog Post",
+			"This is the summary of a very long blog post,",
+			"Use a <!-- truncate --> comment to limit blog post size in the list view.",
+			"<!--",
+			"truncate",
+			"-->",
+			"First Blog Post",
+			"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
+		]));
 		let mut stack = reblessive::TreeStack::new();
 
 		let start = std::time::Instant::now();
@@ -917,7 +943,7 @@ mod tests {
 	async fn concurrent_test() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
 		let az = Arc::new(az);
@@ -946,12 +972,38 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
 		let az = Arc::new(az);
 		let doc: Thing = ("t", "doc1").into();
-		let content = Value::from(Array::from(vec!["Enter a search term","Welcome","Docusaurus blogging features are powered by the blog plugin.","Simply add Markdown files (or folders) to the blog directory.","blog","Regular blog authors can be added to authors.yml.","authors.yml","The blog post date can be extracted from filenames, such as:","2019-05-30-welcome.md","2019-05-30-welcome/index.md","A blog post folder can be convenient to co-locate blog post images:","The blog supports tags as well!","And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.","blog: false","MDX Blog Post","Blog posts support Docusaurus Markdown features, such as MDX.","Use the power of React to create interactive blog posts.","Long Blog Post","This is the summary of a very long blog post,","Use a <!-- truncate --> comment to limit blog post size in the list view.","<!--","truncate","-->","First Blog Post","Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+		let content = Value::from(Array::from(vec![
+			"Enter a search term",
+			"Welcome",
+			"Docusaurus blogging features are powered by the blog plugin.",
+			"Simply add Markdown files (or folders) to the blog directory.",
+			"blog",
+			"Regular blog authors can be added to authors.yml.",
+			"authors.yml",
+			"The blog post date can be extracted from filenames, such as:",
+			"2019-05-30-welcome.md",
+			"2019-05-30-welcome/index.md",
+			"A blog post folder can be convenient to co-locate blog post images:",
+			"The blog supports tags as well!",
+			"And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.",
+			"blog: false",
+			"MDX Blog Post",
+			"Blog posts support Docusaurus Markdown features, such as MDX.",
+			"Use the power of React to create interactive blog posts.",
+			"Long Blog Post",
+			"This is the summary of a very long blog post,",
+			"Use a <!-- truncate --> comment to limit blog post size in the list view.",
+			"<!--",
+			"truncate",
+			"-->",
+			"First Blog Post",
+			"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
+		]));
 
 		for i in 0..5 {
 			debug!("Attempt {i}");

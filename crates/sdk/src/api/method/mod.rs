@@ -1,13 +1,13 @@
 //! Methods to use when interacting with a SurrealDB instance
-use crate::api::opt;
-use crate::api::opt::auth;
-use crate::api::opt::auth::Credentials;
-use crate::api::opt::auth::Jwt;
-use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::OnceLockExt;
 use crate::api::Surreal;
+use crate::api::opt;
+use crate::api::opt::IntoEndpoint;
+use crate::api::opt::auth;
+use crate::api::opt::auth::Credentials;
+use crate::api::opt::auth::Jwt;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use serde::Serialize;
@@ -18,8 +18,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use surrealdb_core::sql::to_value as to_core_value;
 use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::sql::to_value as to_core_value;
 use surrealdb_core::syn;
 
 pub(crate) mod live;
@@ -1276,13 +1276,13 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// // Specify no args by not calling `.args()`
-	/// let foo = db.run("fn::foo").await?; // fn::foo()
+	/// let foo: usize = db.run("fn::foo").await?; // fn::foo()
 	/// // A single value will be turned into one argument
-	/// let bar = db.run("fn::bar").args(42).await?; // fn::bar(42)
+	/// let bar: usize = db.run("fn::bar").args(42).await?; // fn::bar(42)
 	/// // Arrays are treated as single arguments
-	/// let count = db.run("count").args(vec![1,2,3]).await?;
+	/// let count: usize = db.run("count").args(vec![1,2,3]).await?;
 	/// // Specify multiple args using a tuple
-	/// let two = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
+	/// let two: usize = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
 	///
 	/// # Ok(())
 	/// # }

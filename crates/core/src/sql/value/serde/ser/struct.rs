@@ -2,8 +2,8 @@ use super::Content;
 use crate::sql;
 use crate::sql::Value;
 use anyhow::Result;
-use serde::de::IntoDeserializer;
 use serde::Deserialize;
+use serde::de::IntoDeserializer;
 use serde_content::{Data, Expected, Unexpected};
 
 pub(super) fn to_value(content: Content) -> Result<Value> {

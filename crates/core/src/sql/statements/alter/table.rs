@@ -67,19 +67,19 @@ impl AlterTableStatement {
 		};
 		// Process the statement
 		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if let Some(ref full) = &self.full {
+		if let Some(full) = &self.full {
 			dt.full = *full;
 		}
-		if let Some(ref permissions) = &self.permissions {
+		if let Some(permissions) = &self.permissions {
 			dt.permissions = permissions.clone();
 		}
-		if let Some(ref changefeed) = &self.changefeed {
+		if let Some(changefeed) = &self.changefeed {
 			dt.changefeed = *changefeed;
 		}
-		if let Some(ref comment) = &self.comment {
+		if let Some(comment) = &self.comment {
 			dt.comment.clone_from(comment);
 		}
-		if let Some(ref kind) = &self.kind {
+		if let Some(kind) = &self.kind {
 			dt.kind = kind.clone();
 		}
 
@@ -143,14 +143,14 @@ impl Display for AlterTableStatement {
 			})?;
 		}
 		if let Some(comment) = &self.comment {
-			if let Some(ref comment) = comment {
+			if let Some(comment) = comment {
 				write!(f, " COMMENT {}", comment.clone())?;
 			} else {
 				write!(f, " DROP COMMENT")?;
 			}
 		}
 		if let Some(changefeed) = &self.changefeed {
-			if let Some(ref changefeed) = changefeed {
+			if let Some(changefeed) = changefeed {
 				write!(f, " CHANGEFEED {}", changefeed.clone())?;
 			} else {
 				write!(f, " DROP CHANGEFEED")?;

@@ -1,11 +1,11 @@
 use crate::ctx::Context;
-use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::idx::IndexKeyBase;
+use crate::idx::trees::hnsw::index::HnswIndex;
 use crate::kvs::Key;
 use crate::sql::index::HnswParams;
 use anyhow::Result;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

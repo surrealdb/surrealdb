@@ -130,14 +130,18 @@ mod tests {
 
 	#[test]
 	fn every_without_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![Idiom::parse("test.something")];
 		assert_eq!(res, val.every(None, false, false));
 	}
 
 	#[test]
 	fn every_recursive_without_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			Idiom::parse("test.something"),
 			Idiom::parse("test.something[1].age"),
@@ -150,7 +154,9 @@ mod tests {
 
 	#[test]
 	fn every_including_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			Idiom::parse("test.something"),
 			Idiom::parse("test.something[1].age"),
@@ -167,14 +173,18 @@ mod tests {
 
 	#[test]
 	fn every_including_intermediary_nodes_without_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![Idiom::parse("test"), Idiom::parse("test.something")];
 		assert_eq!(res, val.every(None, true, false));
 	}
 
 	#[test]
 	fn every_including_intermediary_nodes_including_array_indexes() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			Idiom::parse("test"),
 			Idiom::parse("test.something"),
@@ -194,7 +204,9 @@ mod tests {
 
 	#[test]
 	fn every_given_one_path_part() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			Idiom::parse("test"),
 			Idiom::parse("test.something"),
@@ -214,7 +226,9 @@ mod tests {
 
 	#[test]
 	fn every_given_two_path_parts() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			Idiom::parse("test.something"),
 			Idiom::parse("test.something[1]"),
@@ -233,7 +247,9 @@ mod tests {
 
 	#[test]
 	fn every_including_intermediary_nodes_including_array_indexes_ending_all() {
-		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let val = Value::parse(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
+		);
 		let res = vec![
 			Idiom::parse("test.something"),
 			Idiom::parse("test.something[1]"),

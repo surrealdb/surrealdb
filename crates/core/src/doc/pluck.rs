@@ -4,12 +4,12 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::iam::Action;
+use crate::sql::FlowResultExt as _;
 use crate::sql::idiom::Idiom;
 use crate::sql::output::Output;
 use crate::sql::paths::META;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
-use crate::sql::FlowResultExt as _;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 

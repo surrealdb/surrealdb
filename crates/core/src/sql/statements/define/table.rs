@@ -9,15 +9,15 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	changefeed::ChangeFeed, statements::UpdateStatement, Base, Ident, Output, Permissions, Strand,
-	Value, Values, View,
+	Base, Ident, Output, Permissions, Strand, Value, Values, View, changefeed::ChangeFeed,
+	statements::UpdateStatement,
 };
 use crate::sql::{Idiom, Kind, TableType};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
-use revision::revisioned;
 use revision::Error as RevisionError;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;

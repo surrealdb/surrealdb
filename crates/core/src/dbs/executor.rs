@@ -1,9 +1,9 @@
-use crate::ctx::reason::Reason;
 use crate::ctx::Context;
-use crate::dbs::response::Response;
+use crate::ctx::reason::Reason;
 use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
+use crate::dbs::response::Response;
 use crate::err;
 use crate::err::Error;
 use crate::iam::Action;
@@ -11,19 +11,19 @@ use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
+use crate::sql::Base;
+use crate::sql::ControlFlow;
+use crate::sql::FlowResult;
 use crate::sql::paths::DB;
 use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::statements::{OptionStatement, UseStatement};
 use crate::sql::value::Value;
-use crate::sql::Base;
-use crate::sql::ControlFlow;
-use crate::sql::FlowResult;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
-use std::pin::{pin, Pin};
+use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
@@ -617,27 +617,93 @@ mod tests {
 	#[tokio::test]
 	async fn check_execute_option_permissions() {
 		let tests = vec![
-            // Root level
-            (Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at root level should be able to set options"),
-            (Session::for_level(().into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at root level should be able to set options"),
-            (Session::for_level(().into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at root level should not be able to set options"),
-
-            // Namespace level
-            (Session::for_level(("NS", ).into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at namespace level should be able to set options on its namespace"),
-            (Session::for_level(("NS", ).into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at namespace level should not be able to set options on another namespace"),
-            (Session::for_level(("NS", ).into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at namespace level should be able to set options on its namespace"),
-            (Session::for_level(("NS", ).into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at namespace level should not be able to set options on another namespace"),
-            (Session::for_level(("NS", ).into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at namespace level should not be able to set options on its namespace"),
-
-            // Database level
-            (Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at database level should be able to set options on its database"),
-            (Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("OTHER_DB"), false, "owner at database level should not be able to set options on another database"),
-            (Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at database level should not be able to set options on another namespace even if the database name matches"),
-            (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at database level should be able to set options on its database"),
-            (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("OTHER_DB"), false, "editor at database level should not be able to set options on another database"),
-            (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at database level should not be able to set options on another namespace even if the database name matches"),
-            (Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at database level should not be able to set options on its database"),
-        ];
+			// Root level
+			(
+				Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB"),
+				true,
+				"owner at root level should be able to set options",
+			),
+			(
+				Session::for_level(().into(), Role::Editor).with_ns("NS").with_db("DB"),
+				true,
+				"editor at root level should be able to set options",
+			),
+			(
+				Session::for_level(().into(), Role::Viewer).with_ns("NS").with_db("DB"),
+				false,
+				"viewer at root level should not be able to set options",
+			),
+			// Namespace level
+			(
+				Session::for_level(("NS",).into(), Role::Owner).with_ns("NS").with_db("DB"),
+				true,
+				"owner at namespace level should be able to set options on its namespace",
+			),
+			(
+				Session::for_level(("NS",).into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"),
+				false,
+				"owner at namespace level should not be able to set options on another namespace",
+			),
+			(
+				Session::for_level(("NS",).into(), Role::Editor).with_ns("NS").with_db("DB"),
+				true,
+				"editor at namespace level should be able to set options on its namespace",
+			),
+			(
+				Session::for_level(("NS",).into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"),
+				false,
+				"editor at namespace level should not be able to set options on another namespace",
+			),
+			(
+				Session::for_level(("NS",).into(), Role::Viewer).with_ns("NS").with_db("DB"),
+				false,
+				"viewer at namespace level should not be able to set options on its namespace",
+			),
+			// Database level
+			(
+				Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB"),
+				true,
+				"owner at database level should be able to set options on its database",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Owner)
+					.with_ns("NS")
+					.with_db("OTHER_DB"),
+				false,
+				"owner at database level should not be able to set options on another database",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Owner)
+					.with_ns("OTHER_NS")
+					.with_db("DB"),
+				false,
+				"owner at database level should not be able to set options on another namespace even if the database name matches",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("DB"),
+				true,
+				"editor at database level should be able to set options on its database",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Editor)
+					.with_ns("NS")
+					.with_db("OTHER_DB"),
+				false,
+				"editor at database level should not be able to set options on another database",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Editor)
+					.with_ns("OTHER_NS")
+					.with_db("DB"),
+				false,
+				"editor at database level should not be able to set options on another namespace even if the database name matches",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"),
+				false,
+				"viewer at database level should not be able to set options on its database",
+			),
+		];
 		let statement = "OPTION IMPORT = false";
 
 		for test in tests.iter() {

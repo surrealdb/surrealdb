@@ -1,4 +1,4 @@
-use crate::sql::{id::Gen, id::Id as NewId, Array, IdRange, Object};
+use crate::sql::{Array, IdRange, Object, id::Gen, id::Id as NewId};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -57,7 +57,7 @@ pub mod key {
 
 	use crate::{
 		kvs::impl_key,
-		sql::{id::Id as NewId, Dir},
+		sql::{Dir, id::Id as NewId},
 	};
 
 	use super::Id;

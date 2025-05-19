@@ -6,7 +6,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::{KeyDecode, Transaction};
 use crate::sql::statements::show::ShowSince;
 use crate::vs::VersionStamp;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 // Reads the change feed for a specific database or a table,
 // starting from a specific versionstamp.

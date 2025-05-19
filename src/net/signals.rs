@@ -20,11 +20,14 @@ pub fn graceful_shutdown(
 	// Spawn a new background asynchronous task
 	tokio::spawn(async move {
 		// Listen to the primary OS task signal
-		if let Ok(signal) = listen().await {
-			warn!(target: super::LOG, "{signal} received. Waiting for a graceful shutdown. A second signal will force an immediate shutdown.");
-		} else {
-			error!(target: super::LOG, "Failed to listen to shutdown signal. Terminating immediately.");
-			canceller.cancel();
+		match listen().await {
+			Ok(signal) => {
+				warn!(target: super::LOG, "{signal} received. Waiting for a graceful shutdown. A second signal will force an immediate shutdown.");
+			}
+			_ => {
+				error!(target: super::LOG, "Failed to listen to shutdown signal. Terminating immediately.");
+				canceller.cancel();
+			}
 		}
 		// Spawn a task to gracefully shutdown
 		let shutdown = {
@@ -91,7 +94,7 @@ pub async fn listen() -> Result<String> {
 	// Log informational message
 	info!(target: super::LOG, "Listening for a system shutdown signal.");
 	// Import the OS signals
-	use tokio::signal::unix::{signal, SignalKind};
+	use tokio::signal::unix::{SignalKind, signal};
 	// Get the operating system signal types
 	let mut sighup = signal(SignalKind::hangup())?;
 	let mut sigint = signal(SignalKind::interrupt())?;

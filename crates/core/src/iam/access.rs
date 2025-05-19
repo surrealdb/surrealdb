@@ -36,7 +36,9 @@ pub async fn authenticate_record(
 				}
 				// Otherwise, return a generic error unless it should be forwarded
 				_ => {
-					debug!("Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}");
+					debug!(
+						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
+					);
 					if *INSECURE_FORWARD_ACCESS_ERRORS {
 						Err(e)
 					} else {
@@ -78,7 +80,9 @@ pub async fn authenticate_generic(
 				}
 				// Otherwise, return a generic error unless it should be forwarded
 				_ => {
-					debug!("Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}");
+					debug!(
+						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
+					);
 					if *INSECURE_FORWARD_ACCESS_ERRORS {
 						Err(e)
 					} else {

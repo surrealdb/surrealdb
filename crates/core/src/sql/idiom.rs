@@ -3,10 +3,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	fmt::{fmt_separated_by, Fmt},
+	Part, Value,
+	fmt::{Fmt, fmt_separated_by},
 	part::{Next, NextMethod},
 	paths::{ID, IN, META, OUT},
-	Part, Value,
 };
 use md5::{Digest, Md5};
 use reblessive::tree::Stk;

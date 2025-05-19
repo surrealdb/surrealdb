@@ -1,7 +1,7 @@
 use crate::syn::{
-	error::{bail, SyntaxError},
+	error::{SyntaxError, bail},
 	lexer::Lexer,
-	token::{t, Token},
+	token::{Token, t},
 };
 use uuid::Uuid;
 

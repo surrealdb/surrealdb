@@ -19,7 +19,7 @@ use crate::sql::subquery::Subquery;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use crate::sql::{Cond, FlowResultExt as _, Function, Groups, View};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;

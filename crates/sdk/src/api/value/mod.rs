@@ -1,7 +1,7 @@
-use crate::{error::Api as ApiError, Result};
+use crate::{Result, error::Api as ApiError};
 use chrono::{DateTime, Utc};
 use revision::revisioned;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
 	cmp::{Ordering, PartialEq, PartialOrd},
 	fmt,
@@ -233,7 +233,10 @@ pub struct RecordIdKeyFromValueError(());
 
 impl fmt::Display for RecordIdKeyFromValueError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		writeln!(f,"tried to convert a value to a record id key with a value type that is not allowed in a record id key")
+		writeln!(
+			f,
+			"tried to convert a value to a record id key with a value type that is not allowed in a record id key"
+		)
 	}
 }
 

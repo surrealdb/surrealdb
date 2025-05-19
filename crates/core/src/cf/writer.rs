@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::kvs::{Key, KeyEncode};
+use crate::sql::Idiom;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::thing::Thing;
-use crate::sql::Idiom;
 use anyhow::Result;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
@@ -152,6 +152,7 @@ mod tests {
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
+	use crate::sql::Datetime;
 	use crate::sql::changefeed::ChangeFeed;
 	use crate::sql::id::Id;
 	use crate::sql::statements::show::ShowSince;
@@ -160,7 +161,6 @@ mod tests {
 	};
 	use crate::sql::thing::Thing;
 	use crate::sql::value::Value;
-	use crate::sql::Datetime;
 	use crate::vs::VersionStamp;
 
 	const DONT_STORE_PREVIOUS: bool = false;

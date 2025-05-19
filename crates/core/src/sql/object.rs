@@ -3,11 +3,11 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
-	escape::EscapeKey,
-	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Operation, Thing, Value,
+	escape::EscapeKey,
+	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use http::{HeaderMap, HeaderName, HeaderValue};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -320,9 +320,9 @@ impl Display for Object {
 
 mod no_nul_bytes_in_keys {
 	use serde::{
+		Deserializer, Serializer,
 		de::{self, Visitor},
 		ser::SerializeMap,
-		Deserializer, Serializer,
 	};
 	use std::{collections::BTreeMap, fmt};
 

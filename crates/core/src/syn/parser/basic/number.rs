@@ -8,8 +8,8 @@ use crate::{
 	syn::{
 		error::{bail, syntax_error},
 		lexer::compound::{self, NumberKind},
-		parser::{mac::unexpected, GluedValue, ParseResult, Parser},
-		token::{self, t, TokenKind},
+		parser::{GluedValue, ParseResult, Parser, mac::unexpected},
+		token::{self, TokenKind, t},
 	},
 };
 

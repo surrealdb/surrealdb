@@ -42,7 +42,7 @@ impl AlterSequenceStatement {
 			}
 		};
 		// Process the statement
-		if let Some(ref timeout) = &self.timeout {
+		if let Some(timeout) = &self.timeout {
 			if timeout.is_zero() {
 				sq.timeout = None;
 			} else {

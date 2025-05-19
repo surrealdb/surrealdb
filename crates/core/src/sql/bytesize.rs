@@ -1,7 +1,7 @@
 use crate::err::Error;
-use crate::sql::statements::info::InfoStructure;
 use crate::sql::Value;
-use anyhow::{bail, ensure, Result};
+use crate::sql::statements::info::InfoStructure;
+use anyhow::{Result, bail, ensure};
 use num_traits::CheckedAdd;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -10,8 +10,8 @@ use std::iter::{Peekable, Sum};
 use std::ops;
 use std::str::{Chars, FromStr};
 
-use super::value::{TryAdd, TrySub};
 use super::Strand;
+use super::value::{TryAdd, TrySub};
 
 #[revisioned(revision = 1)]
 #[derive(

@@ -1,36 +1,36 @@
-use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
+use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
+use crate::api::ExtraFeatures;
+use crate::api::Surreal;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::conn::{self, Command, RequestData};
+use crate::api::engine::remote::Response;
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::PING_INTERVAL;
-use crate::api::engine::remote::Response;
 use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
-use crate::api::ExtraFeatures;
-use crate::api::Surreal;
-use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
+use crate::engine::remote::Data;
 use crate::opt::WaitFor;
 use crate::{Action, Notification};
 use anyhow::Result;
 use async_channel::{Receiver, Sender};
-use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
 use futures::SinkExt;
 use futures::StreamExt;
+use futures::stream::{SplitSink, SplitStream};
 use pharos::Channel;
 use pharos::Events;
 use pharos::Observable;
 use pharos::ObserveConfig;
 use revision::revisioned;
 use serde::Deserialize;
-use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 use surrealdb_core::sql::Value as CoreValue;
@@ -268,7 +268,9 @@ async fn router_handle_response(
 									.send(DbResponse::from_server_result(response.result))
 									.await;
 							} else {
-								warn!("got response for request with id '{id}', which was not in pending requests")
+								warn!(
+									"got response for request with id '{id}', which was not in pending requests"
+								)
 							}
 						}
 					}
@@ -328,7 +330,9 @@ async fn router_handle_response(
 						if let Some(req) = state.pending_requests.remove(&id) {
 							let _res = req.response_channel.send(Err(error)).await;
 						} else {
-							warn!("got response for request with id '{id}', which was not in pending requests")
+							warn!(
+								"got response for request with id '{id}', which was not in pending requests"
+							)
 						}
 					}
 				} else {

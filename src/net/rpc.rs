@@ -1,39 +1,39 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use super::AppState;
 use super::error::ResponseError;
 use super::headers::Accept;
 use super::headers::ContentType;
 use super::headers::SurrealId;
-use super::AppState;
 use crate::cnf;
 use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
 use crate::net::error::Error as NetError;
+use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::http::Http;
 use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::websocket::Websocket;
-use crate::rpc::RpcState;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::routing::options;
 use axum::{
+	Extension, Router,
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
-	Extension, Router,
 };
-use axum_extra::headers::Header;
 use axum_extra::TypedHeader;
+use axum_extra::headers::Header;
 use bytes::Bytes;
-use http::header::SEC_WEBSOCKET_PROTOCOL;
 use http::HeaderMap;
-use surrealdb::dbs::capabilities::RouteTarget;
+use http::header::SEC_WEBSOCKET_PROTOCOL;
 use surrealdb::dbs::Session;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
+use surrealdb::rpc::RpcContext;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
-use surrealdb::rpc::RpcContext;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -63,7 +63,9 @@ async fn get_handler(
 	// Check that a valid header has been specified
 	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
 		warn!("A connection was made without a specified protocol.");
-		warn!("Automatic inference of the protocol format is deprecated in SurrealDB 2.0 and will be removed in SurrealDB 3.0.");
+		warn!(
+			"Automatic inference of the protocol format is deprecated in SurrealDB 2.0 and will be removed in SurrealDB 3.0."
+		);
 		warn!("Please upgrade any client to ensure that the connection format is specified.");
 	}
 	// Check if there is a connection id header specified

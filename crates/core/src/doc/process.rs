@@ -47,7 +47,7 @@ impl Document {
 			stm => {
 				return Err(IgnoreError::from(anyhow::Error::new(Error::unreachable(
 					format_args!("Unexpected statement type: {stm:?}"),
-				))))
+				))));
 			}
 		};
 		Ok(res)

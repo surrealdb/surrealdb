@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
 
-use super::statements::InfoStatement;
 use super::FlowResult;
+use super::statements::InfoStatement;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
@@ -92,21 +92,21 @@ impl Subquery {
 		let ctx = ctx.freeze();
 		// Process the subquery
 		let res = match self {
-			Self::Value(ref v) => return v.compute(stk, &ctx, opt, doc).await,
-			Self::Ifelse(ref v) => return v.compute(stk, &ctx, opt, doc).await,
-			Self::Output(ref v) => return v.compute(stk, &ctx, opt, doc).await,
-			Self::Define(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Rebuild(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Remove(ref v) => v.compute(&ctx, opt, doc).await?,
-			Self::Select(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Create(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Upsert(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Update(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Delete(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Relate(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Insert(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Alter(ref v) => v.compute(stk, &ctx, opt, doc).await?,
-			Self::Info(ref v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Value(v) => return v.compute(stk, &ctx, opt, doc).await,
+			Self::Ifelse(v) => return v.compute(stk, &ctx, opt, doc).await,
+			Self::Output(v) => return v.compute(stk, &ctx, opt, doc).await,
+			Self::Define(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Rebuild(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Remove(v) => v.compute(&ctx, opt, doc).await?,
+			Self::Select(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Create(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Upsert(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Update(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Delete(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Relate(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Insert(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Alter(v) => v.compute(stk, &ctx, opt, doc).await?,
+			Self::Info(v) => v.compute(stk, &ctx, opt, doc).await?,
 		};
 
 		Ok(res)

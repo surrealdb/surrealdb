@@ -1,6 +1,6 @@
+use crate::sql::Value;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
-use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;

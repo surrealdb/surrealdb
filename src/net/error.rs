@@ -1,6 +1,6 @@
 use axum::{
-	response::{IntoResponse, Response},
 	Json,
+	response::{IntoResponse, Response},
 };
 use http::{HeaderName, StatusCode};
 use opentelemetry::global::Error as OpentelemetryError;

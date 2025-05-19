@@ -1,9 +1,9 @@
 use super::MlExportConfig;
-use crate::{opt::Resource, value::Notification, Result};
+use crate::{Result, opt::Resource, value::Notification};
 use async_channel::Sender;
 use bincode::Options;
 use revision::Revisioned;
-use serde::{ser::SerializeMap as _, Serialize};
+use serde::{Serialize, ser::SerializeMap as _};
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
@@ -126,8 +126,8 @@ impl Command {
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		use crate::api::engine::resource_to_values;
 		use surrealdb_core::sql::{
-			statements::{UpdateStatement, UpsertStatement},
 			Data, Output,
+			statements::{UpdateStatement, UpsertStatement},
 		};
 
 		let res = match self {

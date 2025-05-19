@@ -22,22 +22,23 @@ pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
 			if d.is_zero() {
 				return Ok(Value::Datetime(val));
 			}
-			let result = val
-				.duration_trunc(d)
-				.ok()
-				.and_then(floor_to_ceil);
+			let result = val.duration_trunc(d).ok().and_then(floor_to_ceil);
 
 			match result {
 				Some(v) => Ok(v.into()),
 				_ => Err(anyhow::Error::new(Error::InvalidArguments {
 					name: String::from("time::ceil"),
-					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+					message: String::from(
+						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+					),
 				})),
 			}
-		},
+		}
 		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: String::from("time::ceil"),
-			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+			message: String::from(
+				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+			),
 		})),
 	}
 }
@@ -56,17 +57,21 @@ pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value> {
 			if d.is_zero() {
 				return Ok(Value::Datetime(val));
 			}
-			match val.duration_trunc(d){
+			match val.duration_trunc(d) {
 				Ok(v) => Ok(v.into()),
 				_ => Err(anyhow::Error::new(Error::InvalidArguments {
 					name: String::from("time::floor"),
-					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+					message: String::from(
+						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+					),
 				})),
 			}
-		},
+		}
 		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: String::from("time::floor"),
-			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+			message: String::from(
+				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+			),
 		})),
 	}
 }
@@ -77,39 +82,42 @@ pub fn format((val, format): (Datetime, String)) -> Result<Value> {
 
 pub fn group((val, group): (Datetime, String)) -> Result<Value> {
 	match group.as_str() {
-		"year" => Ok(Utc
-			.with_ymd_and_hms(val.year(), 1, 1, 0,0,0)
-			.earliest()
-			.unwrap()
-			.into()),
-		"month" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), 1, 0,0,0)
-			.earliest()
-			.unwrap()
-			.into()),
+		"year" => Ok(Utc.with_ymd_and_hms(val.year(), 1, 1, 0, 0, 0).earliest().unwrap().into()),
+		"month" => {
+			Ok(Utc.with_ymd_and_hms(val.year(), val.month(), 1, 0, 0, 0).earliest().unwrap().into())
+		}
 		"day" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), val.day(), 0,0,0)
+			.with_ymd_and_hms(val.year(), val.month(), val.day(), 0, 0, 0)
 			.earliest()
 			.unwrap()
 			.into()),
 		"hour" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(),0,0)
+			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), 0, 0)
 			.earliest()
 			.unwrap()
 			.into()),
 		"minute" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), val.minute(),0)
+			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), val.minute(), 0)
 			.earliest()
 			.unwrap()
 			.into()),
 		"second" => Ok(Utc
-			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), val.minute(), val.second())
+			.with_ymd_and_hms(
+				val.year(),
+				val.month(),
+				val.day(),
+				val.hour(),
+				val.minute(),
+				val.second(),
+			)
 			.earliest()
 			.unwrap()
 			.into()),
 		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: String::from("time::group"),
-			message: String::from("The second argument must be a string, and can be one of 'year', 'month', 'day', 'hour', 'minute', or 'second'."),
+			message: String::from(
+				"The second argument must be a string, and can be one of 'year', 'month', 'day', 'hour', 'minute', or 'second'.",
+			),
 		})),
 	}
 }
@@ -185,13 +193,17 @@ pub fn round((val, duration): (Datetime, Duration)) -> Result<Value> {
 				Ok(v) => Ok(v.into()),
 				_ => Err(anyhow::Error::new(Error::InvalidArguments {
 					name: String::from("time::round"),
-					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+					message: String::from(
+						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+					),
 				})),
 			}
-		},
+		}
 		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: String::from("time::round"),
-			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+			message: String::from(
+				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+			),
 		})),
 	}
 }
@@ -259,7 +271,7 @@ pub mod from {
 
 	use crate::err::Error;
 	use crate::sql::datetime::Datetime;
-	use crate::sql::{value::Value, Uuid};
+	use crate::sql::{Uuid, value::Value};
 	use anyhow::Result;
 	use chrono::DateTime;
 	use ulid::Ulid;
@@ -274,7 +286,9 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::nanos"),
-				message: String::from("The argument must be a number of nanoseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
+				message: String::from(
+					"The argument must be a number of nanoseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
 			})),
 		}
 	}
@@ -284,7 +298,9 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::micros"),
-				message: String::from("The argument must be a number of microseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
+				message: String::from(
+					"The argument must be a number of microseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
 			})),
 		}
 	}
@@ -294,7 +310,9 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::millis"),
-				message: String::from("The argument must be a number of milliseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
+				message: String::from(
+					"The argument must be a number of milliseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
 			})),
 		}
 	}
@@ -304,7 +322,9 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::secs"),
-				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
+				message: String::from(
+					"The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
 			})),
 		}
 	}
@@ -314,7 +334,9 @@ pub mod from {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
 				name: String::from("time::from::unix"),
-				message: String::from("The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z."),
+				message: String::from(
+					"The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
+				),
 			})),
 		}
 	}

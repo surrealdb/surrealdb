@@ -8,9 +8,9 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::sql::{
-	array::Uniq, kind::HasKind, value::Null, Array, Bytes, Closure, Datetime, Duration, File,
-	Geometry, Ident, Kind, Literal, Number, Object, Range, Regex, Strand, Table, Thing, Uuid,
-	Value,
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Kind, Literal, Number,
+	Object, Range, Regex, Strand, Table, Thing, Uuid, Value, array::Uniq, kind::HasKind,
+	value::Null,
 };
 
 #[derive(Clone, Debug)]

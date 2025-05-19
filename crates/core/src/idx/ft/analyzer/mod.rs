@@ -11,7 +11,7 @@ use crate::idx::trees::store::IndexStores;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{FlowResultExt as _, Value};
 use crate::sql::{Function, Strand};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use filter::Filter;
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
@@ -314,7 +314,7 @@ mod tests {
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::{
-		sql::{statements::DefineStatement, Statement},
+		sql::{Statement, statements::DefineStatement},
 		syn,
 	};
 	use std::sync::Arc;
@@ -327,7 +327,7 @@ mod tests {
 		let ctx = ctx.freeze();
 
 		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
-		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
+		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0.0.pop() else {
 			panic!()
 		};
 		let a = Analyzer::new(ctx.get_index_stores(), Arc::new(az)).unwrap();

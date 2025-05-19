@@ -15,29 +15,29 @@
 #[macro_export]
 macro_rules! lazy_env_parse {
 	// With no default specified
-	($key:expr, Option<String>) => {
+	($key:expr_2021, Option<String>) => {
 		std::sync::LazyLock::new(|| std::env::var($key).ok())
 	};
 	// With no default specified
-	($key:expr, $t:ty) => {
+	($key:expr_2021, $t:ty) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or_default()
 		})
 	};
 	// With a closure for the default value
-	($key:expr, $t:ty, || $default:expr) => {
+	($key:expr_2021, $t:ty, || $default:expr_2021) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or_else(|| $default)
 		})
 	};
 	// With a static expression for the default value
-	($key:expr, $t:ty, $default:expr) => {
+	($key:expr_2021, $t:ty, $default:expr_2021) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or($default)
 		})
 	};
 	// With a closure for the default value, allowing for byte suffixes
-	(bytes, $key:expr, $t:ty, || $default:expr) => {
+	(bytes, $key:expr_2021, $t:ty, || $default:expr_2021) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key)
 				.ok()
@@ -49,7 +49,7 @@ macro_rules! lazy_env_parse {
 		})
 	};
 	// With a static expression for the default value, allowing for byte suffixes
-	(bytes, $key:expr, $t:ty, $default:expr) => {
+	(bytes, $key:expr_2021, $t:ty, $default:expr_2021) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key)
 				.ok()
@@ -69,7 +69,7 @@ macro_rules! lazy_env_parse {
 /// items to the new map.
 #[macro_export]
 macro_rules! map {
-    ($($k:expr $(, if let $grant:pat = $check:expr)? $(, if $guard:expr)? => $v:expr),* $(,)? $( => $x:expr )?) => {{
+    ($($k:expr_2021 $(, if let $grant:pat = $check:expr_2021)? $(, if $guard:expr_2021)? => $v:expr_2021),* $(,)? $( => $x:expr_2021 )?) => {{
         let mut m = ::std::collections::BTreeMap::new();
     	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
 		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
@@ -83,7 +83,7 @@ macro_rules! map {
 /// the items from the secondary map into it.
 #[macro_export]
 macro_rules! mrg {
-	($($m:expr, $x:expr)+) => {{
+	($($m:expr_2021, $x:expr_2021)+) => {{
 		$($m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)+
 		$($m)+
 	}};
@@ -98,7 +98,7 @@ macro_rules! fail {
 
 /// Converts some text into a new line byte string
 macro_rules! bytes {
-	($expression:expr) => {
+	($expression:expr_2021) => {
 		format!("{}\n", $expression).into_bytes()
 	};
 }
@@ -114,7 +114,7 @@ macro_rules! yield_now {
 
 /// Matches on a specific config environment
 macro_rules! get_cfg {
-	($i:ident : $($s:expr),+) => (
+	($i:ident : $($s:expr_2021),+) => (
 		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};
 	)
 }
@@ -125,7 +125,7 @@ macro_rules! get_cfg {
 /// fail fast and return an error from a function does not leave
 /// a transaction in an uncommitted state without rolling back.
 macro_rules! catch {
-	($txn:ident, $default:expr) => {
+	($txn:ident, $default:expr_2021) => {
 		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;
@@ -143,7 +143,7 @@ macro_rules! catch {
 /// fast and return an error from a function does not leave a
 /// transaction in an uncommitted state without rolling back.
 macro_rules! run {
-	($txn:ident, $default:expr) => {
+	($txn:ident, $default:expr_2021) => {
 		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;

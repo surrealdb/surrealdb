@@ -6,23 +6,23 @@ use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
 use crate::kvs::Datastore;
 use crate::sql;
-use crate::sql::kind::Literal;
-use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::sql::Geometry;
 use crate::sql::Kind;
+use crate::sql::kind::Literal;
+use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
+use async_graphql::Name;
+use async_graphql::Value as GqlValue;
 use async_graphql::dynamic::Interface;
 use async_graphql::dynamic::InterfaceField;
 use async_graphql::dynamic::Object;
 use async_graphql::dynamic::Schema;
 use async_graphql::dynamic::{Enum, Type, Union};
 use async_graphql::dynamic::{Scalar, TypeRef};
-use async_graphql::Name;
-use async_graphql::Value as GqlValue;
-use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
 
-use super::error::{resolver_error, GqlError};
+use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
 use crate::gql::error::{internal_error, schema_error, type_error};
@@ -78,10 +78,10 @@ pub async fn generate_schema(
 	match (&tbs, &fns) {
 		(None, None) => return Err(GqlError::NotConfigured),
 		(None, Some(fs)) if fs.is_empty() => {
-			return Err(schema_error("no functions found in database"))
+			return Err(schema_error("no functions found in database"));
 		}
 		(Some(ts), None) if ts.is_empty() => {
-			return Err(schema_error("no tables found in database"))
+			return Err(schema_error("no tables found in database"));
 		}
 		(Some(ts), Some(fs)) if ts.is_empty() && fs.is_empty() => {
 			return Err(schema_error("no items found in database"));
@@ -114,7 +114,7 @@ pub async fn generate_schema(
 	}
 
 	macro_rules! scalar_debug_validated {
-		($schema:ident, $name:expr, $kind:expr) => {
+		($schema:ident, $name:expr_2021, $kind:expr_2021) => {
 			scalar_debug_validated!(
 				$schema,
 				$name,
@@ -123,10 +123,10 @@ pub async fn generate_schema(
 				::std::option::Option::<&str>::None
 			)
 		};
-		($schema:ident, $name:expr, $kind:expr, $desc:literal) => {
+		($schema:ident, $name:expr_2021, $kind:expr_2021, $desc:literal) => {
 			scalar_debug_validated!($schema, $name, $kind, std::option::Option::Some($desc), None)
 		};
-		($schema:ident, $name:expr, $kind:expr, $desc:literal, $url:literal) => {
+		($schema:ident, $name:expr_2021, $kind:expr_2021, $desc:literal, $url:literal) => {
 			scalar_debug_validated!(
 				$schema,
 				$name,
@@ -135,7 +135,7 @@ pub async fn generate_schema(
 				Some($url)
 			)
 		};
-		($schema:ident, $name:expr, $kind:expr, $desc:expr, $url:expr) => {{
+		($schema:ident, $name:expr_2021, $kind:expr_2021, $desc:expr_2021, $url:expr_2021) => {{
 			let new_type = Type::Scalar({
 				let mut tmp = Scalar::new($name);
 				if let Some(desc) = $desc {
@@ -345,28 +345,28 @@ pub fn unwrap_type(ty: TypeRef) -> TypeRef {
 }
 
 macro_rules! either_try_kind {
-	($ks:ident, $val:expr, Kind::Array) => {
+	($ks:ident, $val:expr_2021, Kind::Array) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
 			either_try_kind!($ks, $val, arr_kind);
 		}
 	};
-	($ks:ident, $val:expr, Array) => {
+	($ks:ident, $val:expr_2021, Array) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
 			either_try_kind!($ks, $val, arr_kind);
 		}
 	};
-	($ks:ident, $val:expr, Record) => {
+	($ks:ident, $val:expr_2021, Record) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
 			either_try_kind!($ks, $val, arr_kind);
 		}
 	};
-	($ks:ident, $val:expr, AllNumbers) => {
+	($ks:ident, $val:expr_2021, AllNumbers) => {
 		either_try_kind!($ks, $val, Kind::Int);
 		either_try_kind!($ks, $val, Kind::Float);
 		either_try_kind!($ks, $val, Kind::Decimal);
 		either_try_kind!($ks, $val, Kind::Number);
 	};
-	($ks:ident, $val:expr, $kind:expr) => {
+	($ks:ident, $val:expr_2021, $kind:expr_2021) => {
 		if $ks.contains(&$kind) {
 			if let Ok(out) = gql_to_sql_kind($val, $kind) {
 				return Ok(out);
@@ -376,20 +376,20 @@ macro_rules! either_try_kind {
 }
 
 macro_rules! either_try_kinds {
-	($ks:ident, $val:expr, $($kind:tt),+) => {
+	($ks:ident, $val:expr_2021, $($kind:tt),+) => {
 		$(either_try_kind!($ks, $val, $kind));+
 	};
 }
 
 macro_rules! any_try_kind {
-	($val:expr, $kind:expr) => {
+	($val:expr_2021, $kind:expr_2021) => {
 		if let Ok(out) = gql_to_sql_kind($val, $kind) {
 			return Ok(out);
 		}
 	};
 }
 macro_rules! any_try_kinds {
-	($val:expr, $($kind:tt),+) => {
+	($val:expr_2021, $($kind:tt),+) => {
 		$(any_try_kind!($val, $kind));+
 	};
 }

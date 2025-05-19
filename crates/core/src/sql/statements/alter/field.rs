@@ -63,31 +63,31 @@ impl AlterFieldStatement {
 			}
 		};
 		// Process the statement
-		if let Some(ref flex) = &self.flex {
+		if let Some(flex) = &self.flex {
 			df.flex = *flex;
 		}
-		if let Some(ref kind) = &self.kind {
+		if let Some(kind) = &self.kind {
 			df.kind.clone_from(kind);
 		}
-		if let Some(ref readonly) = &self.readonly {
+		if let Some(readonly) = &self.readonly {
 			df.readonly = *readonly;
 		}
-		if let Some(ref value) = &self.value {
+		if let Some(value) = &self.value {
 			df.value.clone_from(value);
 		}
-		if let Some(ref assert) = &self.assert {
+		if let Some(assert) = &self.assert {
 			df.assert.clone_from(assert);
 		}
-		if let Some(ref default) = &self.default {
+		if let Some(default) = &self.default {
 			df.default.clone_from(default);
 		}
-		if let Some(ref permissions) = &self.permissions {
+		if let Some(permissions) = &self.permissions {
 			df.permissions = permissions.clone();
 		}
-		if let Some(ref comment) = &self.comment {
+		if let Some(comment) = &self.comment {
 			df.comment.clone_from(comment);
 		}
-		if let Some(ref reference) = &self.reference {
+		if let Some(reference) = &self.reference {
 			df.reference.clone_from(reference);
 
 			// Validate reference options
@@ -95,7 +95,7 @@ impl AlterFieldStatement {
 				df.validate_reference_options(ctx)?;
 			}
 		}
-		if let Some(ref default_always) = &self.default_always {
+		if let Some(default_always) = &self.default_always {
 			df.default_always = *default_always;
 		}
 
@@ -143,43 +143,43 @@ impl Display for AlterFieldStatement {
 			write!(f, " IF EXISTS")?
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
-		if let Some(ref flex) = self.flex {
-			if *flex {
+		if let Some(flex) = self.flex {
+			if flex {
 				write!(f, " FLEXIBLE")?;
 			} else {
 				write!(f, " DROP FLEXIBLE")?;
 			}
 		}
-		if let Some(ref kind) = self.kind {
-			if let Some(ref kind) = kind {
+		if let Some(kind) = &self.kind {
+			if let Some(kind) = kind {
 				write!(f, " TYPE {kind}")?;
 			} else {
 				write!(f, " DROP TYPE")?;
 			}
 		}
-		if let Some(ref readonly) = self.readonly {
-			if *readonly {
+		if let Some(readonly) = self.readonly {
+			if readonly {
 				write!(f, " READONLY")?;
 			} else {
 				write!(f, " DROP READONLY")?;
 			}
 		}
-		if let Some(ref value) = self.value {
-			if let Some(ref value) = value {
+		if let Some(value) = &self.value {
+			if let Some(value) = value {
 				write!(f, " VALUE {value}")?;
 			} else {
 				write!(f, " DROP VALUE")?;
 			}
 		}
-		if let Some(ref assert) = self.assert {
-			if let Some(ref assert) = assert {
+		if let Some(assert) = &self.assert {
+			if let Some(assert) = assert {
 				write!(f, " ASSERT {assert}")?;
 			} else {
 				write!(f, " DROP ASSERT")?;
 			}
 		}
-		if let Some(ref default) = self.default {
-			if let Some(ref default) = default {
+		if let Some(default) = &self.default {
+			if let Some(default) = default {
 				write!(f, " DEFAULT")?;
 				if self.default_always.is_some_and(|x| x) {
 					write!(f, " ALWAYS")?;
@@ -194,14 +194,14 @@ impl Display for AlterFieldStatement {
 			write!(f, "{permissions}")?;
 		}
 		if let Some(comment) = &self.comment {
-			if let Some(ref comment) = comment {
+			if let Some(comment) = comment {
 				write!(f, " COMMENT {comment}")?;
 			} else {
 				write!(f, " DROP COMMENT")?;
 			}
 		}
 		if let Some(reference) = &self.reference {
-			if let Some(ref reference) = reference {
+			if let Some(reference) = reference {
 				write!(f, " REFERENCE {reference}")?;
 			} else {
 				write!(f, " DROP REFERENCE")?;

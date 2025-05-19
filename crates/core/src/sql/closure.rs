@@ -1,7 +1,7 @@
 use super::{FlowResultExt, Ident, Kind};
 use crate::ctx::MutableContext;
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::value::Value};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

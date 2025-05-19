@@ -1,7 +1,7 @@
 use crate::sql::{Expression, Number, Thing};
 use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

@@ -499,7 +499,9 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something.other['inner']");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = Value::parse("{ test: { something: [{ age: 34, other: { inner: true } }, { age: 36, other: { inner: true } }] } }");
+		let res = Value::parse(
+			"{ test: { something: [{ age: 34, other: { inner: true } }, { age: 36, other: { inner: true } }] } }",
+		);
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true)))
@@ -514,7 +516,9 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let idi = Idiom::parse("test.something.other[city:london]");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = Value::parse("{ test: { something: [{ age: 34, other: { 'city:london': true } }, { age: 36, other: { 'city:london': true } }] } }");
+		let res = Value::parse(
+			"{ test: { something: [{ age: 34, other: { 'city:london': true } }, { age: 36, other: { 'city:london': true } }] } }",
+		);
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.set(stk, &ctx, &opt, &idi, Value::from(true)))

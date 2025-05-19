@@ -6,7 +6,7 @@ use crate::iam::Auth;
 use crate::kvs::Live;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

@@ -1,8 +1,8 @@
+use crate::rpc::RpcError;
 use crate::rpc::format::ResTrait;
 use crate::rpc::request::Request;
-use crate::rpc::RpcError;
-use crate::sql::serde::{deserialize, serialize};
 use crate::sql::Value;
+use crate::sql::serde::{deserialize, serialize};
 
 pub fn parse_value(val: &[u8]) -> Result<Value, RpcError> {
 	deserialize::<Value>(val).map_err(|_| RpcError::ParseError)

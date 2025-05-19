@@ -1,12 +1,12 @@
 //! Request class implementation
 
-use crate::fnc::script::fetch::{body::Body, RequestError};
+use crate::fnc::script::fetch::{RequestError, body::Body};
 use bytes::Bytes;
 use js::{
-	class::Trace, function::Opt, prelude::Coerced, Class, Ctx, Exception, FromJs, JsLifetime,
-	Object, Result, Value,
+	Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value, class::Trace, function::Opt,
+	prelude::Coerced,
 };
-use reqwest::{header::HeaderName, Method, Url};
+use reqwest::{Method, Url, header::HeaderName};
 
 use super::{Blob, Headers};
 
@@ -38,7 +38,7 @@ impl<'js> FromJs<'js> for RequestMode {
 							or `cors`",
 							x
 						),
-					))
+					));
 				}
 			}
 		} else {
@@ -73,7 +73,7 @@ impl<'js> FromJs<'js> for RequestCredentials {
 								, or `include`",
 							x
 						),
-					))
+					));
 				}
 			}
 		} else {
@@ -117,7 +117,7 @@ impl<'js> FromJs<'js> for RequestCache {
 								, or `only-if-cached`",
 							x
 						),
-					))
+					));
 				}
 			}
 		} else {
@@ -152,7 +152,7 @@ impl<'js> FromJs<'js> for RequestRedirect {
 							or `manual`",
 							x
 						),
-					))
+					));
 				}
 			}
 		} else {
@@ -204,7 +204,7 @@ impl<'js> FromJs<'js> for ReferrerPolicy {
 							, or `unsafe-url1`",
 							x
 						),
-					))
+					));
 				}
 			}
 		} else {
@@ -544,7 +544,7 @@ impl<'js> Request<'js> {
 #[cfg(test)]
 mod test {
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::{promise::Promise, CatchResultExt};
+	use js::{CatchResultExt, promise::Promise};
 
 	#[tokio::test]
 	async fn basic_request_use() {

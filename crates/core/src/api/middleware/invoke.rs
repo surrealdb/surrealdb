@@ -8,7 +8,7 @@ pub trait InvokeMiddleware<'a> {
 }
 
 macro_rules! dispatch {
-	($name: ident, $args: expr, $context: expr, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+,)+) => {
+	($name: ident, $args: expr_2021, $context: expr_2021, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+,)+) => {
 		{
 			match $name {
 				$($function_name => {

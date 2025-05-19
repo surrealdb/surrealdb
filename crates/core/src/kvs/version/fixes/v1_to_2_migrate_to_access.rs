@@ -3,12 +3,12 @@ use std::sync::Arc;
 use crate::{
 	kvs::{KeyEncode as _, Transaction},
 	sql::{
+		AccessType, Ident,
 		access_type::{JwtAccessVerify, JwtAccessVerifyKey},
 		statements::{
-			define::{DefineScopeStatement, DefineTokenStatement},
 			DefineAccessStatement,
+			define::{DefineScopeStatement, DefineTokenStatement},
 		},
-		AccessType, Ident,
 	},
 };
 use anyhow::Result;
@@ -215,9 +215,15 @@ async fn migrate_sc_tokens(
 
 	println!("\n==================");
 	println!("NS: `{ns}`, DB: `{db}`, SC: `{}`", ac.name);
-	println!("Can not automatically merge scope tokens scope into the new scope-converted access method.");
-	println!("Logging the merged access definitions individually, with their names joined together like `scope_token`.");
-	println!("The old tokens will be removed from the datastore, but no fixes will be applied. They need manual resolution.");
+	println!(
+		"Can not automatically merge scope tokens scope into the new scope-converted access method."
+	);
+	println!(
+		"Logging the merged access definitions individually, with their names joined together like `scope_token`."
+	);
+	println!(
+		"The old tokens will be removed from the datastore, but no fixes will be applied. They need manual resolution."
+	);
 	println!("==================\n");
 
 	// Log example merged accesses

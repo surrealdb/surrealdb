@@ -48,8 +48,8 @@ where
 pub mod tests {
 	use futures::StreamExt;
 	use opentelemetry_proto::tonic::collector::trace::v1::{
-		trace_service_server::{TraceService, TraceServiceServer},
 		ExportTraceServiceRequest, ExportTraceServiceResponse,
+		trace_service_server::{TraceService, TraceServiceServer},
 	};
 	use std::{net::SocketAddr, sync::Mutex};
 	use tokio::sync::mpsc;

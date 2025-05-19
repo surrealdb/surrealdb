@@ -3,10 +3,10 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::{self, Number, Value};
-use surrealdb::Result;
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<()> {
 	Test::new(sql).await?.expect_vals(desired_responses)?;
@@ -39,7 +39,7 @@ macro_rules! assert_delta {
 async fn error_on_invalid_function() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut query = sql::Query::default();
-	query.0 .0 = vec![sql::Statement::Value(Value::Function(Box::new(sql::Function::Normal(
+	query.0.0 = vec![sql::Statement::Value(Value::Function(Box::new(sql::Function::Normal(
 		"this is an invalid function name".to_string(),
 		Vec::new(),
 	))))];
@@ -1020,8 +1020,10 @@ async fn function_string_distance_hamming() -> Result<()> {
 	check_test_is_error(
 		r#"RETURN string::distance::hamming("ham", "hamming");"#,
 		&[
-			"Incorrect arguments for function string::distance::hamming(). Strings must be of equal length."
-		]).await?;
+			"Incorrect arguments for function string::distance::hamming(). Strings must be of equal length.",
+		],
+	)
+	.await?;
 
 	Ok(())
 }
@@ -3271,7 +3273,7 @@ async fn function_vector_add() -> Result<()> {
 	"#,
 		&[
 			"Incorrect arguments for function vector::add(). The two vectors must be of the same dimension.",
-			"Incorrect arguments for function vector::add(). The two vectors must be of the same dimension."
+			"Incorrect arguments for function vector::add(). The two vectors must be of the same dimension.",
 		],
 	)
 	.await?;
@@ -3323,10 +3325,10 @@ async fn function_vector_cross() -> Result<()> {
 	"#,
 		&[
 			"Incorrect arguments for function vector::cross(). Both vectors must have a dimension of 3.",
-			"Incorrect arguments for function vector::cross(). Both vectors must have a dimension of 3."
+			"Incorrect arguments for function vector::cross(). Both vectors must have a dimension of 3.",
 		],
 	)
-		.await?;
+	.await?;
 	Ok(())
 }
 
@@ -3348,9 +3350,10 @@ async fn function_vector_dot() -> Result<()> {
 	"#,
 		&[
 			"Incorrect arguments for function vector::dot(). The two vectors must be of the same dimension.",
-			"Incorrect arguments for function vector::dot(). The two vectors must be of the same dimension."
+			"Incorrect arguments for function vector::dot(). The two vectors must be of the same dimension.",
 		],
-	).await?;
+	)
+	.await?;
 	Ok(())
 }
 
@@ -3676,8 +3679,8 @@ async fn function_vector_distance_chebyshev() -> Result<()> {
 #[tokio::test]
 pub async fn function_http_head() -> Result<()> {
 	use wiremock::{
-		matchers::{header, method, path},
 		Mock, ResponseTemplate,
+		matchers::{header, method, path},
 	};
 
 	let server = wiremock::MockServer::start().await;
@@ -3700,8 +3703,8 @@ pub async fn function_http_head() -> Result<()> {
 #[tokio::test]
 pub async fn function_http_get() -> Result<()> {
 	use wiremock::{
-		matchers::{header, method, path},
 		Mock, ResponseTemplate,
+		matchers::{header, method, path},
 	};
 
 	let server = wiremock::MockServer::start().await;
@@ -3729,8 +3732,8 @@ pub async fn function_http_get() -> Result<()> {
 #[tokio::test]
 pub async fn function_http_put() -> Result<()> {
 	use wiremock::{
-		matchers::{header, method, path},
 		Mock, ResponseTemplate,
+		matchers::{header, method, path},
 	};
 
 	let server = wiremock::MockServer::start().await;
@@ -3757,8 +3760,8 @@ pub async fn function_http_put() -> Result<()> {
 #[tokio::test]
 pub async fn function_http_post() -> Result<()> {
 	use wiremock::{
-		matchers::{header, method, path},
 		Mock, ResponseTemplate,
+		matchers::{header, method, path},
 	};
 
 	let server = wiremock::MockServer::start().await;
@@ -3787,8 +3790,8 @@ pub async fn function_http_post() -> Result<()> {
 #[tokio::test]
 pub async fn function_http_patch() -> Result<()> {
 	use wiremock::{
-		matchers::{header, method, path},
 		Mock, ResponseTemplate,
+		matchers::{header, method, path},
 	};
 
 	let server = wiremock::MockServer::start().await;
@@ -3817,8 +3820,8 @@ pub async fn function_http_patch() -> Result<()> {
 #[tokio::test]
 pub async fn function_http_delete() -> Result<()> {
 	use wiremock::{
-		matchers::{header, method, path},
 		Mock, ResponseTemplate,
+		matchers::{header, method, path},
 	};
 
 	let server = wiremock::MockServer::start().await;
@@ -3846,8 +3849,8 @@ pub async fn function_http_delete() -> Result<()> {
 #[tokio::test]
 pub async fn function_http_error() -> Result<()> {
 	use wiremock::{
-		matchers::{header, method, path},
 		Mock, ResponseTemplate,
+		matchers::{header, method, path},
 	};
 
 	let server = wiremock::MockServer::start().await;
@@ -3878,8 +3881,8 @@ pub async fn function_http_error() -> Result<()> {
 #[tokio::test]
 pub async fn function_http_get_from_script() -> Result<()> {
 	use wiremock::{
-		matchers::{header, method, path},
 		Mock, ResponseTemplate,
+		matchers::{header, method, path},
 	};
 
 	let server = wiremock::MockServer::start().await;

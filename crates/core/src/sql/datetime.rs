@@ -3,7 +3,7 @@ use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
 use crate::syn;
 use anyhow::Result;
-use chrono::{offset::LocalResult, DateTime, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, SecondsFormat, TimeZone, Utc, offset::LocalResult};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

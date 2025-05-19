@@ -3,11 +3,11 @@ pub mod base64 {
 	use crate::fnc::args::Optional;
 	use crate::sql::{Bytes, Value};
 	use anyhow::Result;
+	use base64::engine::DecodePaddingMode;
 	use base64::engine::general_purpose::{
 		GeneralPurpose, GeneralPurposeConfig, STANDARD, STANDARD_NO_PAD,
 	};
-	use base64::engine::DecodePaddingMode;
-	use base64::{alphabet, Engine};
+	use base64::{Engine, alphabet};
 
 	/// Base64 configuration which supports decoding with or without padding.
 	const STANDARD_GENERIC_DECODER: GeneralPurpose = GeneralPurpose::new(

@@ -20,7 +20,7 @@ use crate::sql::{ControlFlow, FlowResult, FlowResultExt as _, Function};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
-use super::idiom_recursion::{compute_idiom_recursion, Recursion};
+use super::idiom_recursion::{Recursion, compute_idiom_recursion};
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -64,7 +64,7 @@ impl Value {
 								Some(_) => {
 									return Err(ControlFlow::Err(anyhow::Error::new(
 										Error::RecursionInstructionPlanConflict,
-									)))
+									)));
 								}
 								_ => (path, None, after),
 							}

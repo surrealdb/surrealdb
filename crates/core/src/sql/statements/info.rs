@@ -6,8 +6,8 @@ use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sql::{Base, Ident, Object, Value, Version};
 use crate::sys::INFORMATION;
-use anyhow::bail;
 use anyhow::Result;
+use anyhow::bail;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -367,33 +367,33 @@ impl fmt::Display for InfoStatement {
 			Self::Root(true) => f.write_str("INFO FOR ROOT STRUCTURE"),
 			Self::Ns(false) => f.write_str("INFO FOR NAMESPACE"),
 			Self::Ns(true) => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
-			Self::Db(false, ref v) => match v {
-				Some(ref v) => write!(f, "INFO FOR DATABASE VERSION {v}"),
+			Self::Db(false, v) => match v {
+				Some(v) => write!(f, "INFO FOR DATABASE VERSION {v}"),
 				None => f.write_str("INFO FOR DATABASE"),
 			},
-			Self::Db(true, ref v) => match v {
-				Some(ref v) => write!(f, "INFO FOR DATABASE VERSION {v} STRUCTURE"),
+			Self::Db(true, v) => match v {
+				Some(v) => write!(f, "INFO FOR DATABASE VERSION {v} STRUCTURE"),
 				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
 			},
-			Self::Tb(ref t, false, ref v) => match v {
-				Some(ref v) => write!(f, "INFO FOR TABLE {t} VERSION {v}"),
+			Self::Tb(t, false, v) => match v {
+				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v}"),
 				None => write!(f, "INFO FOR TABLE {t}"),
 			},
 
-			Self::Tb(ref t, true, ref v) => match v {
-				Some(ref v) => write!(f, "INFO FOR TABLE {t} VERSION {v} STRUCTURE"),
+			Self::Tb(t, true, v) => match v {
+				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v} STRUCTURE"),
 				None => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
 			},
-			Self::User(ref u, ref b, false) => match b {
-				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b}"),
+			Self::User(u, b, false) => match b {
+				Some(b) => write!(f, "INFO FOR USER {u} ON {b}"),
 				None => write!(f, "INFO FOR USER {u}"),
 			},
-			Self::User(ref u, ref b, true) => match b {
-				Some(ref b) => write!(f, "INFO FOR USER {u} ON {b} STRUCTURE"),
+			Self::User(u, b, true) => match b {
+				Some(b) => write!(f, "INFO FOR USER {u} ON {b} STRUCTURE"),
 				None => write!(f, "INFO FOR USER {u} STRUCTURE"),
 			},
-			Self::Index(ref i, ref t, false) => write!(f, "INFO FOR INDEX {i} ON {t}"),
-			Self::Index(ref i, ref t, true) => write!(f, "INFO FOR INDEX {i} ON {t} STRUCTURE"),
+			Self::Index(i, t, false) => write!(f, "INFO FOR INDEX {i} ON {t}"),
+			Self::Index(i, t, true) => write!(f, "INFO FOR INDEX {i} ON {t} STRUCTURE"),
 		}
 	}
 }

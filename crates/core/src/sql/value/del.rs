@@ -2,14 +2,14 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
+use crate::sql::FlowResultExt as _;
 use crate::sql::array::Abolish;
 use crate::sql::part::DestructurePart;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
-use crate::sql::FlowResultExt as _;
-use anyhow::ensure;
 use anyhow::Result;
+use anyhow::ensure;
 use reblessive::tree::Stk;
 use std::collections::HashSet;
 

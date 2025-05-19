@@ -3,15 +3,15 @@ use super::Transaction;
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::key::thing;
+use crate::sql::Value;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::Value;
 use anyhow::Result;
 use async_channel::Sender;
-use chrono::prelude::Utc;
 use chrono::TimeZone;
+use chrono::prelude::Utc;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -59,7 +59,7 @@ impl Config {
 								return Err(anyhow::Error::new(Error::InvalidExportConfig(
 									v.to_owned(),
 									"a bool".into(),
-								)))
+								)));
 							}
 							_ => (),
 						}

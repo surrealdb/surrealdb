@@ -3,10 +3,10 @@ use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 use anyhow::Result;
 use clap::Args;
 use futures_util::StreamExt;
+use surrealdb::Connection;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::kvs::export::TableConfig;
 use surrealdb::method::{Export, ExportConfig};
-use surrealdb::Connection;
 use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Args, Debug)]

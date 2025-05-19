@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::surrealkv::cnf::commit_pool;
 use crate::kvs::{Check, Key, Val, Version};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use std::ops::Range;
 use surrealkv::Options;
 use surrealkv::Store;

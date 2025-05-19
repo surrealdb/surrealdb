@@ -1,9 +1,9 @@
-use crate::api::method::BoxFuture;
-use crate::api::method::Cancel;
-use crate::api::method::Commit;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::api::method::BoxFuture;
+use crate::api::method::Cancel;
+use crate::api::method::Commit;
 use std::future::IntoFuture;
 use std::ops::Deref;
 use surrealdb_core::sql::statements::BeginStatement;

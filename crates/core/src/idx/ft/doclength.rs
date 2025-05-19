@@ -94,8 +94,8 @@ impl DocLengths {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::doclength::DocLengths;
 	use crate::idx::IndexKeyBase;
+	use crate::idx::ft::doclength::DocLengths;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 
 	async fn doc_length(

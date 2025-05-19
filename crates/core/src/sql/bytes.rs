@@ -2,8 +2,8 @@ use hex;
 use revision::revisioned;
 use serde::de::SeqAccess;
 use serde::{
-	de::{self, Visitor},
 	Deserialize, Serialize,
+	de::{self, Visitor},
 };
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;

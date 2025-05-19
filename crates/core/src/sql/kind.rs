@@ -5,8 +5,8 @@ use super::{
 };
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
 	Table, Value,
+	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
@@ -268,7 +268,7 @@ impl Kind {
 			match self {
 				Kind::Object => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
 				Kind::Either(kinds) => {
-					return kinds.iter().all(|k| k.allows_nested_kind(path, kind))
+					return kinds.iter().all(|k| k.allows_nested_kind(path, kind));
 				}
 				Kind::Array(inner, len) | Kind::Set(inner, len) => {
 					return match path.first() {
@@ -283,7 +283,7 @@ impl Kind {
 							inner.allows_nested_kind(&path[1..], kind)
 						}
 						_ => false,
-					}
+					};
 				}
 				_ => (),
 			}

@@ -48,7 +48,7 @@ const COST_ALLOWANCE: u32 = 4;
 /// Like verify_password, but takes a closure to determine whether the cost of performing the
 /// operation is not too high.
 macro_rules! bounded_verify_password {
-	($algo: ident, $instance: expr, $password: expr, $hash: expr, $bound: expr) => {
+	($algo: ident, $instance: expr_2021, $password: expr_2021, $hash: expr_2021, $bound: expr_2021) => {
 		if let (Some(salt), Some(expected_output)) = (&$hash.salt, &$hash.hash) {
 			if let Some(params) =
 				<$algo as PasswordHasher>::Params::try_from($hash).ok().filter($bound)
@@ -76,7 +76,7 @@ macro_rules! bounded_verify_password {
 		}
 	};
 
-	($algo: ident, $password: expr, $hash: expr, $bound: expr) => {
+	($algo: ident, $password: expr_2021, $hash: expr_2021, $bound: expr_2021) => {
 		bounded_verify_password!($algo, $algo::default(), $password, $hash, $bound)
 	};
 }
@@ -87,8 +87,8 @@ pub mod argon2 {
 	use crate::sql::value::Value;
 	use anyhow::Result;
 	use argon2::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Argon2,
+		password_hash::{PasswordHash, PasswordHasher, SaltString},
 	};
 	use rand::rngs::OsRng;
 
@@ -107,7 +107,7 @@ pub mod argon2 {
 			.into())
 	}
 
-	pub fn gen((pass,): (String,)) -> Result<Value> {
+	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let algo = Argon2::default();
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = algo.hash_password(pass.as_ref(), &salt).unwrap().to_string();
@@ -139,7 +139,7 @@ pub mod bcrypt {
 		})
 	}
 
-	pub fn gen((pass,): (String,)) -> Result<Value> {
+	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap();
 		Ok(hash.into())
 	}
@@ -151,8 +151,8 @@ pub mod pbkdf2 {
 	use crate::sql::value::Value;
 	use anyhow::Result;
 	use pbkdf2::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Pbkdf2,
+		password_hash::{PasswordHash, PasswordHasher, SaltString},
 	};
 	use rand::rngs::OsRng;
 
@@ -173,7 +173,7 @@ pub mod pbkdf2 {
 			.into())
 	}
 
-	pub fn gen((pass,): (String,)) -> Result<Value> {
+	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = Pbkdf2.hash_password(pass.as_ref(), &salt).unwrap().to_string();
 		Ok(hash.into())
@@ -186,8 +186,8 @@ pub mod scrypt {
 	use anyhow::Result;
 	use rand::rngs::OsRng;
 	use scrypt::{
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
 		Scrypt,
+		password_hash::{PasswordHash, PasswordHasher, SaltString},
 	};
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
@@ -208,7 +208,7 @@ pub mod scrypt {
 			.into())
 	}
 
-	pub fn gen((pass,): (String,)) -> Result<Value> {
+	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = Scrypt.hash_password(pass.as_ref(), &salt).unwrap().to_string();
 		Ok(hash.into())

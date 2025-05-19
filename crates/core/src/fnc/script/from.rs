@@ -1,20 +1,20 @@
 use super::classes;
-use crate::sql::array::Array;
-use crate::sql::datetime::Datetime;
-use crate::sql::object::Object;
-use crate::sql::value::Value;
 use crate::sql::Bytes;
 use crate::sql::Geometry;
 use crate::sql::Id;
 use crate::sql::Strand;
+use crate::sql::array::Array;
+use crate::sql::datetime::Datetime;
+use crate::sql::object::Object;
+use crate::sql::value::Value;
 use chrono::{TimeZone, Utc};
-use js::prelude::This;
 use js::Coerced;
 use js::Ctx;
 use js::Error;
 use js::Exception;
 use js::FromAtom;
 use js::FromJs;
+use js::prelude::This;
 use rust_decimal::Decimal;
 
 fn check_nul(s: &str) -> Result<(), Error> {

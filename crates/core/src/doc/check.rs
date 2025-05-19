@@ -6,15 +6,15 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::iam::Action;
+use crate::sql::FlowResultExt as _;
 use crate::sql::paths::ID;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
-use crate::sql::FlowResultExt as _;
+use anyhow::Result;
 use anyhow::bail;
 use anyhow::ensure;
-use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
@@ -130,7 +130,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Don't bother checking if we generated the document id
-		if self.gen.is_some() {
+		if self.r#gen.is_some() {
 			return Ok(());
 		}
 		// You cannot store a range id as the id field on a document

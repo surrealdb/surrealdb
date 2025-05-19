@@ -5,7 +5,7 @@ mod cnf;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::{Check, Key, Val};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use rocksdb::{
 	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
 	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
@@ -217,14 +217,16 @@ impl Datastore {
 				// Clone the database reference
 				let dbc = db.clone();
 				// Create a new background thread
-				thread::spawn(move || loop {
-					// Get the specified flush interval
-					let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
-					// Wait for the specified interval
-					thread::sleep(Duration::from_millis(wait));
-					// Flush the WAL to disk periodically
-					if let Err(err) = dbc.flush_wal(*cnf::SYNC_DATA) {
-						error!("Failed to flush WAL: {err}");
+				thread::spawn(move || {
+					loop {
+						// Get the specified flush interval
+						let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
+						// Wait for the specified interval
+						thread::sleep(Duration::from_millis(wait));
+						// Flush the WAL to disk periodically
+						if let Err(err) = dbc.flush_wal(*cnf::SYNC_DATA) {
+							error!("Failed to flush WAL: {err}");
+						}
 					}
 				});
 				// Return the datastore

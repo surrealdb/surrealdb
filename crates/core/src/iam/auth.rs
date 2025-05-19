@@ -3,7 +3,7 @@ use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use super::{is_allowed, Action, Actor, Error, Level, Resource, Role};
+use super::{Action, Actor, Error, Level, Resource, Role, is_allowed};
 
 /// Specifies the current authentication for the datastore execution context.
 #[revisioned(revision = 1)]

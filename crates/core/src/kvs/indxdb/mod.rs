@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
 use crate::kvs::{Check, Key, Val};
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use std::ops::Range;
 
 pub struct Datastore {

@@ -1,7 +1,7 @@
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::iam::Action;
@@ -16,7 +16,7 @@ use crate::sql::thing::Thing;
 use crate::sql::value::every::ArrayBehaviour;
 use crate::sql::value::{CoerceError, Value};
 use crate::sql::{FlowResultExt as _, Part};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 

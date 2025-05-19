@@ -8,8 +8,8 @@ use crate::idx::trees::store::{
 use crate::kvs::{Key, Transaction, TransactionType};
 use ahash::{HashMap, HashSet};
 use anyhow::Result;
-use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
@@ -218,7 +218,7 @@ where
 
 	fn generation(&self) -> StoreGeneration {
 		match self {
-			Self::Lru(_, gen, _) | TreeCache::Full(_, gen, _) => *gen,
+			Self::Lru(_, r#gen, _) | TreeCache::Full(_, r#gen, _) => *r#gen,
 		}
 	}
 

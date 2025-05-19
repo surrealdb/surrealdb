@@ -1,7 +1,7 @@
 use geo::Point;
 use reblessive::Stk;
 
-use super::{mac::pop_glued, ParseResult, Parser};
+use super::{ParseResult, Parser, mac::pop_glued};
 use crate::{
 	sql::{
 		Array, Closure, Dir, Duration, Function, Geometry, Ident, Idiom, Kind, Mock, Number, Param,
@@ -14,7 +14,7 @@ use crate::{
 			enter_object_recursion, enter_query_recursion,
 			mac::{expected, unexpected},
 		},
-		token::{t, Glued, Span, TokenKind},
+		token::{Glued, Span, TokenKind, t},
 	},
 };
 

@@ -1,8 +1,8 @@
+use crate::sql::Value;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
 use crate::sql::fmt::pretty_sequence_item;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
@@ -188,7 +188,7 @@ impl Display for Permission {
 		match self {
 			Self::None => f.write_str("NONE"),
 			Self::Full => f.write_str("FULL"),
-			Self::Specific(ref v) => write!(f, "WHERE {v}"),
+			Self::Specific(v) => write!(f, "WHERE {v}"),
 		}
 	}
 }

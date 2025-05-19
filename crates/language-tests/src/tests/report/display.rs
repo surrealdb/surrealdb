@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
 	cli::ColorMode,
-	format::{ansi, IndentFormatter},
+	format::{IndentFormatter, ansi},
 	tests::TestSet,
 };
 
@@ -345,7 +345,7 @@ impl TestReport {
 					}
 					MatcherMismatch::Failed {
 						matcher,
-						ref value,
+						value,
 					} => {
 						writeln!(f, "> Value failed to match matching expression")?;
 						f.indent(|f| {

@@ -1,5 +1,5 @@
-use anyhow::ensure;
 use anyhow::Result;
+use anyhow::ensure;
 #[cfg(not(target_family = "wasm"))]
 use async_graphql::BatchRequest;
 use std::collections::BTreeMap;
@@ -13,14 +13,14 @@ use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
 use crate::{
-	dbs::{capabilities::MethodTarget, QueryType, Response},
+	dbs::{QueryType, Response, capabilities::MethodTarget},
 	rpc::args::Take,
 	sql::{
+		Array, Fields, Function, Model, Output, Query, Strand, Value,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
-		Array, Fields, Function, Model, Output, Query, Strand, Value,
 	},
 };
 

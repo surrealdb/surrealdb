@@ -3,9 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::Base;
 use crate::sql::ident::Ident;
 use crate::sql::value::Value;
-use crate::sql::Base;
 use anyhow::Result;
 
 use reblessive::tree::Stk;

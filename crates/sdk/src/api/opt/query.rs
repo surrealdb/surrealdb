@@ -1,9 +1,9 @@
 use super::Raw;
 use crate::{
-	api::{err::Error, Response as QueryResponse, Result},
-	method::{self, query::ValidQuery, Stats, Stream},
-	value::Notification,
 	Value,
+	api::{Response as QueryResponse, Result, err::Error},
+	method::{self, Stats, Stream, query::ValidQuery},
+	value::Notification,
 };
 use anyhow::bail;
 use futures::future::Either;
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
 use surrealdb_core::sql::{
-	self, from_value as from_core_value, statements::*, Statement, Statements, Value as CoreValue,
+	self, Statement, Statements, Value as CoreValue, from_value as from_core_value, statements::*,
 };
 
 pub struct Query(pub(crate) ValidQuery);
@@ -36,7 +36,7 @@ impl IntoQuery for sql::Query {}
 impl into_query::Sealed for sql::Query {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: self.0 .0,
+			query: self.0.0,
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -668,11 +668,18 @@ impl query_stream::Sealed<Value> for () {
 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
 						match response.results.swap_remove(&index) {
 							Some((stats, Err(error))) => {
-								response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
+								response.results.insert(
+									index,
+									(stats, Err(Error::ResponseAlreadyTaken.into())),
+								);
 								return Err(error);
 							}
-							Some((_, Ok(..))) => unreachable!("the internal error variant indicates that an error occurred in the `LIVE SELECT` query"),
-							None => { bail!(Error::ResponseAlreadyTaken); }
+							Some((_, Ok(..))) => unreachable!(
+								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
+							),
+							None => {
+								bail!(Error::ResponseAlreadyTaken);
+							}
 						}
 					} else {
 						return Err(e);
@@ -736,11 +743,18 @@ where
 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
 						match response.results.swap_remove(&index) {
 							Some((stats, Err(error))) => {
-								response.results.insert(index, (stats, Err(Error::ResponseAlreadyTaken.into())));
+								response.results.insert(
+									index,
+									(stats, Err(Error::ResponseAlreadyTaken.into())),
+								);
 								return Err(error);
 							}
-							Some((_, Ok(..))) => unreachable!("the internal error variant indicates that an error occurred in the `LIVE SELECT` query"),
-							None => { bail!(Error::ResponseAlreadyTaken); }
+							Some((_, Ok(..))) => unreachable!(
+								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
+							),
+							None => {
+								bail!(Error::ResponseAlreadyTaken);
+							}
 						}
 					} else {
 						return Err(e);

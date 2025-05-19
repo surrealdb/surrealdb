@@ -7,13 +7,13 @@ use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
-use surrealdb::dbs::capabilities::Capabilities;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
+use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
-use surrealdb::Result;
 use surrealdb_core::dbs::Response;
-use surrealdb_core::sql::{value, Number, Value};
+use surrealdb_core::sql::{Number, Value, value};
 
 pub async fn new_ds() -> Result<Datastore> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -479,7 +479,7 @@ impl Test {
 /// Creates a new b-tree map of key-value pairs
 #[macro_export]
 macro_rules! map {
-    ($($k:expr $(, if let $grant:pat = $check:expr)? $(, if $guard:expr)? => $v:expr),* $(,)? $( => $x:expr )?) => {{
+    ($($k:expr_2021 $(, if let $grant:pat = $check:expr_2021)? $(, if $guard:expr_2021)? => $v:expr_2021),* $(,)? $( => $x:expr_2021 )?) => {{
         let mut m = ::std::collections::BTreeMap::new();
     	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
 		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+

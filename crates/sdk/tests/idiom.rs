@@ -1029,12 +1029,14 @@ async fn idiom_object_dot_star() -> Result<()> {
 		.expect_val("[1, 2]")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
-		.expect_error("Couldn't coerce value for field `obj[*]` of `test:1`: Expected `number` but found `'a'`")?
+		.expect_error(
+			"Couldn't coerce value for field `obj[*]` of `test:1`: Expected `number` but found `'a'`",
+		)?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
 		.expect_error(
-			"Couldn't coerce value for field `emails.address` of `user:1`: Expected `string` but found `9`"
+			"Couldn't coerce value for field `emails.address` of `user:1`: Expected `string` but found `9`",
 		)?
 		.expect_val(
 			"[

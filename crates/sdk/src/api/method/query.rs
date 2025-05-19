@@ -1,23 +1,23 @@
-use super::{live, Stream};
+use super::{Stream, live};
+use crate::api::Connection;
+use crate::api::ExtraFeatures;
+use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt;
-use crate::api::Connection;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
 use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
 use crate::value::Notification;
 use crate::{Surreal, Value};
 use anyhow::bail;
+use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::SelectAll;
-use futures::StreamExt;
 use indexmap::IndexMap;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
@@ -25,7 +25,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::sql::{
-	self, to_value as to_core_value, Object as CoreObject, Statement, Value as CoreValue,
+	self, Object as CoreObject, Statement, Value as CoreValue, to_value as to_core_value,
 };
 
 /// A query future
@@ -153,7 +153,7 @@ where
 					}
 
 					let mut query = sql::Query::default();
-					query.0 .0 = query_statements;
+					query.0.0 = query_statements;
 
 					let mut response = router
 						.execute_query(Command::Query {

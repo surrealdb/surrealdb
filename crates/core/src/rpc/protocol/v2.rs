@@ -6,21 +6,21 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
-use crate::rpc::statement_options::StatementOptions;
 use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
+use crate::rpc::statement_options::StatementOptions;
 use crate::sql::Uuid;
 use crate::{
-	dbs::{capabilities::MethodTarget, QueryType, Response},
+	dbs::{QueryType, Response, capabilities::MethodTarget},
 	rpc::args::Take,
 	sql::{
+		Array, Fields, Function, Model, Output, Query, Strand, Value,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
-		Array, Fields, Function, Model, Output, Query, Strand, Value,
 	},
 };
 use anyhow::Result;
@@ -963,7 +963,7 @@ pub trait RpcProtocolV2: RpcContext {
 			_ => {
 				return Err(RpcError::from(anyhow::Error::new(Error::unreachable(
 					"Unexpected query type: {query:?}",
-				))))
+				))));
 			}
 		};
 

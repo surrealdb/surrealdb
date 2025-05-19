@@ -3,11 +3,11 @@ members = [".", "crates/core", "crates/sdk"]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
-edition = "2021"
+edition = "2024"
 license-file = "LICENSE"
 publish = false
 version = "3.0.0"
-rust-version = "1.84.0"
+rust-version = "1.85.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"

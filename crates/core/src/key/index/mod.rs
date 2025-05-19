@@ -23,7 +23,7 @@ pub mod vm;
 
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
+use crate::kvs::{KeyEncode, impl_key};
 use crate::sql::array::Array;
 use crate::sql::id::Id;
 use anyhow::Result;

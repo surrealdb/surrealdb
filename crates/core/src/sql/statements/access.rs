@@ -8,7 +8,7 @@ use crate::sql::{
 	AccessType, Array, Base, Cond, Datetime, Duration, FlowResultExt as _, Ident, Object, Strand,
 	Thing, Uuid, Value,
 };
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;
@@ -390,7 +390,9 @@ pub async fn create_grant(
 				Ok(_) => {}
 				Err(e) => {
 					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
-						error!("A collision was found when attempting to create a new grant. Purging inactive grants is advised")
+						error!(
+							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
+						)
 					}
 					return Err(e);
 				}
@@ -494,7 +496,9 @@ pub async fn create_grant(
 				Ok(_) => {}
 				Err(e) => {
 					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
-						error!("A collision was found when attempting to create a new grant. Purging inactive grants is advised")
+						error!(
+							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
+						)
 					}
 					return Err(e);
 				}

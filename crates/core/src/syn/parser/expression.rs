@@ -6,13 +6,13 @@ use reblessive::Stk;
 
 use super::mac::{expected_whitespace, unexpected};
 use crate::sql::operator::BindingPower;
-use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
+use crate::sql::{Cast, Expression, Number, Operator, Value, value::TryNeg};
 use crate::sql::{Function, Range};
 use crate::syn::error::bail;
 use crate::syn::token::{self, Token};
 use crate::syn::{
-	parser::{mac::expected, ParseResult, Parser},
-	token::{t, TokenKind},
+	parser::{ParseResult, Parser, mac::expected},
+	token::{TokenKind, t},
 };
 
 impl Parser<'_> {

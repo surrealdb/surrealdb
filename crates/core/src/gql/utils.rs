@@ -9,15 +9,15 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
 use crate::sql;
-use crate::sql::part::Part;
 use crate::sql::FlowResultExt;
 use crate::sql::Function;
 use crate::sql::Statement;
+use crate::sql::part::Part;
 use crate::sql::{Thing, Value as SqlValue};
 use anyhow::Result;
 
 use async_graphql::dynamic::FieldValue;
-use async_graphql::{dynamic::indexmap::IndexMap, Name, Value as GqlValue};
+use async_graphql::{Name, Value as GqlValue, dynamic::indexmap::IndexMap};
 use reblessive::TreeStack;
 
 use super::error::GqlError;

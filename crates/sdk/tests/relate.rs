@@ -6,10 +6,10 @@ mod helpers;
 use crate::helpers::Test;
 
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
-use surrealdb::Result;
 
 #[tokio::test]
 async fn relate_with_parameters() -> Result<()> {

@@ -4,9 +4,9 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	iam::Action,
-	sql::{ident::Ident, value::Value, Permission},
+	sql::{Permission, ident::Ident, value::Value},
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -120,6 +120,6 @@ impl Param {
 
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", &self.0 .0)
+		write!(f, "${}", &self.0.0)
 	}
 }

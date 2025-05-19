@@ -5,12 +5,12 @@ use chrono::DateTime;
 use anyhow::anyhow;
 use helpers::new_ds;
 use parse::Parse;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
 use surrealdb::sql::Value;
-use surrealdb::Result;
 use surrealdb_core::vs::VersionStamp;
 
 mod helpers;

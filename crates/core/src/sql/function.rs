@@ -4,12 +4,12 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::iam::Action;
+use crate::sql::Permission;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::operator::BindingPower;
 use crate::sql::script::Script;
 use crate::sql::value::Value;
-use crate::sql::Permission;
 use anyhow::Result;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
@@ -294,7 +294,7 @@ impl Function {
 								Error::FunctionPermissions {
 									name: s.to_owned(),
 								},
-							)))
+							)));
 						}
 						Permission::Specific(e) => {
 							// Disable permissions

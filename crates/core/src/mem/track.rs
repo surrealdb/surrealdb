@@ -340,7 +340,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
 		// Allocate using the wrapped allocator and then record the allocated size.
-		let ret = self.alloc.alloc(layout);
+		let ret = unsafe { self.alloc.alloc(layout) };
 		if !ret.is_null() {
 			self.add(layout.size());
 		}
@@ -348,12 +348,12 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 	}
 
 	unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-		self.alloc.dealloc(ptr, layout);
+		unsafe { self.alloc.dealloc(ptr, layout) };
 		self.sub(layout.size());
 	}
 
 	unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-		let ret = self.alloc.alloc_zeroed(layout);
+		let ret = unsafe { self.alloc.alloc_zeroed(layout) };
 		if !ret.is_null() {
 			self.add(layout.size());
 		}
@@ -361,7 +361,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for TrackAlloc<A> {
 	}
 
 	unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-		let ret = self.alloc.realloc(ptr, layout, new_size);
+		let ret = unsafe { self.alloc.realloc(ptr, layout, new_size) };
 		if !ret.is_null() {
 			// Update counters: remove old size, add new size.
 			self.sub(layout.size());

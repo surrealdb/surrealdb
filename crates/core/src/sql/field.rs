@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{fmt::Fmt, Idiom, Part, Value};
+use crate::sql::{Idiom, Part, Value, fmt::Fmt};
 use crate::syn;
 use anyhow::Result;
 use reblessive::tree::Stk;

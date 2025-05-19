@@ -17,9 +17,9 @@ use tokio::sync::{
 };
 use tokio::time;
 use tokio_stream::StreamExt;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error};
 
 type Result<T> = StdResult<T, Box<dyn Error>>;
@@ -266,11 +266,11 @@ impl Socket {
 					};
 
 					// does the response have an id.
-					if let Some(sender) = res.get("id").and_then(|x| x.as_u64()).and_then(|x| awaiting.remove(&x)){
+					match res.get("id").and_then(|x| x.as_u64()).and_then(|x| awaiting.remove(&x)){ Some(sender) => {
 						let _ = sender.send(res);
-					}else if (other.send(res).await).is_err(){
+					} _ => if (other.send(res).await).is_err(){
 						 return Err("main thread quit unexpectedly".to_string().into())
-					 }
+					 }}
 				}
 			}
 		}
