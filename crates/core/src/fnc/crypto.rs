@@ -11,7 +11,7 @@ pub fn blake3((arg,): (String,)) -> Result<Value, Error> {
 }
 
 pub fn joaat((arg,): (String,)) -> Result<Value, Error> {
-	Ok(joaat::hash_bytes(arg.as_bytes()).to_string().into())
+	Ok(joaat::hash_ascii_lowercase(arg.as_bytes()).to_string().into())
 }
 
 pub fn md5((arg,): (String,)) -> Result<Value, Error> {
