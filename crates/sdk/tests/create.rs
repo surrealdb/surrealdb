@@ -1,6 +1,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::skip_ok;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
@@ -21,17 +22,7 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
+	skip_ok(res, 4)?;
 	//
 	let sql = "
 		CREATE demo SET id = demo:one;
