@@ -1880,12 +1880,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
-name = "joaat"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d9a6717b2ab76dc25f45a183801e28c079e95369416303a87977f119a12c29b"
-
-[[package]]
 name = "jobserver"
 version = "0.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3604,7 +3598,6 @@ dependencies = [
  "hex",
  "http",
  "ipnet",
- "joaat",
  "jsonwebtoken",
  "lexicmp",
  "linfa-linalg",

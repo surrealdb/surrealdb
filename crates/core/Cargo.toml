@@ -136,7 +136,6 @@ geo-types = { workspace = true }
 http.workspace = true
 hex.workspace = true
 ipnet.workspace = true
-joaat.workspace = true
 jsonwebtoken.workspace = true
 linfa-linalg.workspace = true
 md-5.workspace = true
