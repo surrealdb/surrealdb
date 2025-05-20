@@ -1,10 +1,10 @@
 //! Implements token gluing logic.
 
 use crate::{
-	sql::{Datetime, Duration, Strand, Uuid},
+	expr::{Datetime, Duration, Strand, Uuid},
 	syn::{
 		lexer::compound,
-		token::{t, Glued, Token, TokenKind},
+		token::{Glued, Token, TokenKind, t},
 	},
 };
 

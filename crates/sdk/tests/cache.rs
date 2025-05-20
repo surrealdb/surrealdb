@@ -2,12 +2,12 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn clear_transaction_cache_table() -> Result<(), Error> {
+async fn clear_transaction_cache_table() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:one CONTENT { x: 0 };
@@ -61,7 +61,7 @@ async fn clear_transaction_cache_table() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn clear_transaction_cache_field() -> Result<(), Error> {
+async fn clear_transaction_cache_field() -> Result<()> {
 	let sql = "
 		DEFINE FIELD test ON person TYPE option<string> VALUE 'test';
 		BEGIN;

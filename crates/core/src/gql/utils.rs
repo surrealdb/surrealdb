@@ -4,20 +4,21 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::expr;
+use crate::expr::FlowResultExt;
+use crate::expr::Function;
+use crate::expr::Statement;
+use crate::expr::function::CustomFunctionName;
+use crate::expr::part::Part;
+use crate::expr::{Thing, Value as SqlValue};
 use crate::iam::Error as IamError;
 use crate::kvs::Datastore;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
-use crate::sql;
-use crate::sql::function::CustomFunctionName;
-use crate::sql::part::Part;
-use crate::sql::FlowResultExt;
-use crate::sql::Function;
-use crate::sql::Statement;
-use crate::sql::{Thing, Value as SqlValue};
+use anyhow::Result;
 
 use async_graphql::dynamic::FieldValue;
-use async_graphql::{dynamic::indexmap::IndexMap, Name, Value as GqlValue};
+use async_graphql::{Name, Value as GqlValue, dynamic::indexmap::IndexMap};
 use reblessive::TreeStack;
 
 use super::error::GqlError;
@@ -69,13 +70,15 @@ pub struct GQLTx {
 
 impl GQLTx {
 	pub async fn new(kvs: &Arc<Datastore>, sess: &Session) -> Result<Self, GqlError> {
-		kvs.check_anon(sess).map_err(|_| {
-			Error::IamError(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "process".to_string(),
-				resource: "graphql".to_string(),
+		kvs.check_anon(sess)
+			.map_err(|_| {
+				Error::IamError(IamError::NotAllowed {
+					actor: "anonymous".to_string(),
+					action: "process".to_string(),
+					resource: "graphql".to_string(),
+				})
 			})
-		})?;
+			.map_err(anyhow::Error::new)?;
 
 		let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 		let tx = Arc::new(tx);
@@ -120,7 +123,7 @@ impl GQLTx {
 
 	pub async fn run_fn(&self, name: &str, args: Vec<SqlValue>) -> Result<SqlValue, GqlError> {
 		let mut stack = TreeStack::new();
-		let fun = sql::Value::Function(Box::new(Function::Custom(
+		let fun = expr::Value::Function(Box::new(Function::Custom(
 			CustomFunctionName {
 				name: name.into(),
 				// TODO(kearfy): support version and submodule specification here

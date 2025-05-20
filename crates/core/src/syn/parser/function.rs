@@ -1,14 +1,14 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{
-		function::{CustomFunctionName, FunctionVersion},
+	expr::{
 		Function, Ident, Model, Value,
+		function::{CustomFunctionName, FunctionVersion},
 	},
 	syn::{
 		error::{bail, syntax_error},
 		parser::mac::{expected, unexpected},
-		token::{t, TokenKind},
+		token::{TokenKind, t},
 	},
 };
 
@@ -221,7 +221,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod test {
 	use crate::{
-		sql::{Script, Value},
+		expr::{Script, Value},
 		syn::{self, Parse},
 	};
 
@@ -304,7 +304,10 @@ mod test {
 		})
 		"#;
 		let out = Value::parse(sql);
-		assert_eq!("ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",out.to_string());
+		assert_eq!(
+			"ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",
+			out.to_string()
+		);
 	}
 
 	#[test]

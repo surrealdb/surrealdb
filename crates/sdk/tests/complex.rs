@@ -5,12 +5,13 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use helpers::with_enough_stack;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
 
 #[test]
-fn self_referential_field() -> Result<(), Error> {
+fn self_referential_field() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		let mut res = run_queries(
@@ -23,14 +24,19 @@ fn self_referential_field() -> Result<(), Error> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
+		let err = tmp.unwrap_err();
+		assert!(
+			matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+			"found {:?}",
+			err
+		);
 		//
 		Ok(())
 	})
 }
 
 #[test]
-fn cyclic_fields() -> Result<(), Error> {
+fn cyclic_fields() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		let mut res = run_queries(
@@ -43,14 +49,19 @@ fn cyclic_fields() -> Result<(), Error> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
+		let err = tmp.unwrap_err();
+		assert!(
+			matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+			"found {:?}",
+			err
+		);
 		//
 		Ok(())
 	})
 }
 
 #[test]
-fn cyclic_records() -> Result<(), Error> {
+fn cyclic_records() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		let mut res = run_queries(
@@ -67,14 +78,19 @@ fn cyclic_records() -> Result<(), Error> {
 		tmp.unwrap();
 		//
 		let tmp = res.next().unwrap();
-		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)), "found {:?}", tmp);
+		let err = tmp.unwrap_err();
+		assert!(
+			matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+			"found {:?}",
+			err
+		);
 		//
 		Ok(())
 	})
 }
 
 #[test]
-fn ok_future_graph_subquery_recursion_depth() -> Result<(), Error> {
+fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		let mut res = run_queries(
@@ -110,7 +126,7 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<(), Error> {
 }
 
 #[test]
-fn ok_graph_traversal_depth() -> Result<(), Error> {
+fn ok_graph_traversal_depth() -> Result<()> {
 	// Build the SQL traversal query
 	fn graph_traversal(n: usize) -> String {
 		let mut ret = String::from("DELETE node;\n");
@@ -152,7 +168,11 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 					assert_eq!(res, val);
 				}
 				Err(res) => {
-					assert!(matches!(res, Error::ComputationDepthExceeded));
+					assert!(
+						matches!(res.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+						"found {:?}",
+						res
+					);
 					assert!(n > 10, "Max traversals: {}", n - 1);
 				}
 			}
@@ -166,7 +186,7 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 }
 
 #[test]
-fn ok_cast_chain_depth() -> Result<(), Error> {
+fn ok_cast_chain_depth() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which succeeds
@@ -183,7 +203,7 @@ fn ok_cast_chain_depth() -> Result<(), Error> {
 }
 
 #[test]
-fn excessive_cast_chain_depth() -> Result<(), Error> {
+fn excessive_cast_chain_depth() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which will fail (either while parsing or executing)
@@ -192,17 +212,20 @@ fn excessive_cast_chain_depth() -> Result<(), Error> {
 				assert_eq!(res.len(), 1);
 				//
 				let tmp = res.next().unwrap();
+				let err = tmp.unwrap_err();
 				assert!(
-					matches!(tmp, Err(Error::ComputationDepthExceeded)),
-					"didn't return a computation depth exceeded: {:?}",
-					tmp
+					matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+					"found {:?}",
+					err
 				);
 			}
-			Err(e) => assert!(
-				matches!(e, Error::InvalidQuery(_)),
-				"didn't return a computation depth exceeded: {:?}",
-				e
-			),
+			Err(e) => {
+				assert!(
+					matches!(e.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+					"found {:?}",
+					e
+				);
+			}
 		}
 		//
 		Ok(())
@@ -211,10 +234,7 @@ fn excessive_cast_chain_depth() -> Result<(), Error> {
 
 async fn run_queries(
 	sql: &str,
-) -> Result<
-	impl ExactSizeIterator<Item = Result<Value, Error>> + DoubleEndedIterator + 'static,
-	Error,
-> {
+) -> Result<impl ExactSizeIterator<Item = Result<Value>> + DoubleEndedIterator + 'static> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))

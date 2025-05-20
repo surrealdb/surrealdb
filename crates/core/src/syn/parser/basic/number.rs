@@ -2,14 +2,14 @@ use std::{mem, num::ParseIntError, str::FromStr};
 
 use rust_decimal::Decimal;
 
-use crate::sql::number::decimal::DecimalExt;
+use crate::expr::number::decimal::DecimalExt;
 use crate::{
-	sql::Number,
+	expr::Number,
 	syn::{
 		error::{bail, syntax_error},
 		lexer::compound::{self, NumberKind},
-		parser::{mac::unexpected, GluedValue, ParseResult, Parser},
-		token::{self, t, TokenKind},
+		parser::{GluedValue, ParseResult, Parser, mac::unexpected},
+		token::{self, TokenKind, t},
 	},
 };
 

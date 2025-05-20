@@ -1,7 +1,7 @@
 use super::classes;
-use crate::sql::geometry::Geometry;
-use crate::sql::number::Number;
-use crate::sql::value::Value;
+use crate::expr::geometry::Geometry;
+use crate::expr::number::Number;
+use crate::expr::value::Value;
 use js::Array;
 use js::BigInt;
 use js::Class;

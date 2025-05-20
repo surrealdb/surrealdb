@@ -5,10 +5,10 @@ use axum::extract::ws::Message;
 use axum::response::IntoResponse;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
-use http::header::{HeaderValue, CONTENT_TYPE};
+use http::header::{CONTENT_TYPE, HeaderValue};
+use surrealdb::rpc::RpcError;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::request::Request;
-use surrealdb::rpc::RpcError;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {

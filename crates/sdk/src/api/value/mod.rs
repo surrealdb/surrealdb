@@ -1,7 +1,7 @@
-use crate::Error;
+use crate::{Result, error::Api as ApiError};
 use chrono::{DateTime, Utc};
 use revision::revisioned;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
 	cmp::{Ordering, PartialEq, PartialOrd},
 	fmt,
@@ -10,7 +10,7 @@ use std::{
 };
 use surrealdb_core::{
 	dbs::Action as CoreAction,
-	sql::{
+	expr::{
 		Array as CoreArray, Datetime as CoreDatetime, Id as CoreId, Number as CoreNumber,
 		Thing as CoreThing, Value as CoreValue,
 	},
@@ -21,12 +21,12 @@ use uuid::Uuid;
 mod obj;
 pub use obj::{IntoIter, Iter, IterMut, Object};
 
-pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, Error> {
-	Ok(surrealdb_core::sql::from_value(value.0)?)
+pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
+	surrealdb_core::expr::from_value(value.0)
 }
 
-pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value, Error> {
-	Ok(Value(surrealdb_core::sql::to_value(value)?))
+pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value> {
+	Ok(Value(surrealdb_core::expr::to_value(value)?))
 }
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
@@ -102,16 +102,16 @@ impl From<Object> for RecordIdKey {
 }
 
 impl TryFrom<RecordIdKey> for Object {
-	type Error = crate::error::Api;
+	type Error = anyhow::Error;
 
-	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
+	fn try_from(value: RecordIdKey) -> Result<Self> {
 		if let CoreId::Object(x) = value.0 {
 			Ok(Object::from_inner(x))
 		} else {
-			Err(Self::Error::FromValue {
+			Err(anyhow::Error::new(ApiError::FromValue {
 				value: value.into(),
 				error: String::from("inner value is not an object"),
-			})
+			}))
 		}
 	}
 }
@@ -123,16 +123,16 @@ impl From<String> for RecordIdKey {
 }
 
 impl TryFrom<RecordIdKey> for String {
-	type Error = crate::error::Api;
+	type Error = anyhow::Error;
 
-	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
+	fn try_from(value: RecordIdKey) -> Result<Self> {
 		if let CoreId::String(x) = value.0 {
 			Ok(x)
 		} else {
-			Err(Self::Error::FromValue {
+			Err(anyhow::Error::new(ApiError::FromValue {
 				value: value.into(),
 				error: String::from("inner value is not a string"),
-			})
+			}))
 		}
 	}
 }
@@ -156,16 +156,16 @@ impl From<i64> for RecordIdKey {
 }
 
 impl TryFrom<RecordIdKey> for i64 {
-	type Error = crate::error::Api;
+	type Error = anyhow::Error;
 
-	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
+	fn try_from(value: RecordIdKey) -> Result<Self> {
 		if let CoreId::Number(x) = value.0 {
 			Ok(x)
 		} else {
-			Err(Self::Error::FromValue {
+			Err(anyhow::Error::new(ApiError::FromValue {
 				value: value.into(),
 				error: String::from("inner value is not a number"),
-			})
+			}))
 		}
 	}
 }
@@ -177,16 +177,16 @@ impl From<Uuid> for RecordIdKey {
 }
 
 impl TryFrom<RecordIdKey> for Uuid {
-	type Error = crate::error::Api;
+	type Error = anyhow::Error;
 
-	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
+	fn try_from(value: RecordIdKey) -> Result<Self> {
 		if let CoreId::Uuid(x) = value.0 {
 			Ok(*x)
 		} else {
-			Err(Self::Error::FromValue {
+			Err(anyhow::Error::new(ApiError::FromValue {
 				value: value.into(),
 				error: String::from("inner value is not a UUID"),
-			})
+			}))
 		}
 	}
 }
@@ -221,9 +221,9 @@ impl From<RecordId> for Value {
 }
 
 impl FromStr for Value {
-	type Err = Error;
+	type Err = anyhow::Error;
 
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
+	fn from_str(s: &str) -> Result<Self> {
 		Ok(Value::from_inner(surrealdb_core::syn::value(s)?))
 	}
 }
@@ -233,14 +233,17 @@ pub struct RecordIdKeyFromValueError(());
 
 impl fmt::Display for RecordIdKeyFromValueError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		writeln!(f,"tried to convert a value to a record id key with a value type that is not allowed in a record id key")
+		writeln!(
+			f,
+			"tried to convert a value to a record id key with a value type that is not allowed in a record id key"
+		)
 	}
 }
 
 impl TryFrom<Value> for RecordIdKey {
 	type Error = RecordIdKeyFromValueError;
 
-	fn try_from(key: Value) -> Result<Self, Self::Error> {
+	fn try_from(key: Value) -> std::result::Result<Self, Self::Error> {
 		match key.0 {
 			CoreValue::Strand(x) => Ok(RecordIdKey::from_inner(CoreId::String(x.0))),
 			CoreValue::Number(CoreNumber::Int(x)) => Ok(RecordIdKey::from_inner(CoreId::Number(x))),
@@ -282,10 +285,10 @@ impl RecordId {
 }
 
 impl FromStr for RecordId {
-	type Err = Error;
+	type Err = anyhow::Error;
 
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		syn::thing(s).map_err(crate::Error::Db).map(RecordId::from_inner)
+	fn from_str(s: &str) -> Result<Self> {
+		syn::thing(s).map(RecordId::from_inner)
 	}
 }
 
@@ -447,7 +450,6 @@ pub enum Action {
 	Create,
 	Update,
 	Delete,
-	Killed,
 }
 
 impl Action {
@@ -457,7 +459,6 @@ impl Action {
 			CoreAction::Create => Self::Create,
 			CoreAction::Update => Self::Update,
 			CoreAction::Delete => Self::Delete,
-			CoreAction::Killed => Self::Killed,
 			_ => panic!("unimplemented variant of action"),
 		}
 	}
@@ -474,18 +475,4 @@ pub struct Notification<R> {
 	pub query_id: Uuid,
 	pub action: Action,
 	pub data: R,
-}
-
-impl Notification<CoreValue> {
-	pub fn map_deserialize<R>(self) -> Result<Notification<R>, crate::error::Db>
-	where
-		R: DeserializeOwned,
-	{
-		let data = surrealdb_core::sql::from_value(self.data)?;
-		Ok(Notification {
-			query_id: self.query_id,
-			action: self.action,
-			data,
-		})
-	}
 }

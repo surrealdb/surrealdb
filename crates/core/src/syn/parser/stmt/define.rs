@@ -2,41 +2,41 @@ use reblessive::Stk;
 
 use crate::api::method::Method;
 use crate::api::middleware::RequestMiddleware;
-use crate::sql::access_type::JwtAccessVerify;
-use crate::sql::index::HnswParams;
-use crate::sql::statements::define::config::api::ApiConfig;
-use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
-use crate::sql::statements::define::config::ConfigInner;
-use crate::sql::statements::define::{
+use crate::expr::Value;
+use crate::expr::access_type::JwtAccessVerify;
+use crate::expr::index::HnswParams;
+use crate::expr::statements::DefineApiStatement;
+use crate::expr::statements::define::config::ConfigInner;
+use crate::expr::statements::define::config::api::ApiConfig;
+use crate::expr::statements::define::config::graphql::{GraphQLConfig, TableConfig};
+use crate::expr::statements::define::{
 	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement, Executable,
 };
-use crate::sql::statements::DefineApiStatement;
-use crate::sql::Value;
 use crate::syn::error::bail;
 use crate::syn::token::Token;
 use crate::{
-	sql::{
-		access_type,
+	expr::{
+		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType,
+		Values, access_type,
 		base::Base,
 		filter::Filter,
 		index::{Distance, VectorType},
 		statements::{
-			define::config::graphql, DefineAccessStatement, DefineAnalyzerStatement,
-			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
+			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
+			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+			DefineTableStatement, DefineUserStatement, define::config::graphql,
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		user, AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand,
-		TableType, Values,
+		user,
 	},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
 			ParseResult, Parser,
+			mac::{expected, unexpected},
 		},
-		token::{t, Keyword, TokenKind},
+		token::{Keyword, TokenKind, t},
 	},
 };
 
@@ -893,7 +893,9 @@ impl Parser<'_> {
 							t!("PUT") => Method::Put,
 							t!("TRACE") => Method::Trace,
 							found => {
-								bail!("Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}");
+								bail!(
+									"Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}"
+								);
 							}
 						};
 
@@ -1178,7 +1180,7 @@ impl Parser<'_> {
 						}
 					}
 
-					res.index = Index::Search(crate::sql::index::SearchParams {
+					res.index = Index::Search(crate::expr::index::SearchParams {
 						az: analyzer.unwrap_or_else(|| Ident::from("like")),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
@@ -1231,7 +1233,7 @@ impl Parser<'_> {
 							_ => break,
 						}
 					}
-					res.index = Index::MTree(crate::sql::index::MTreeParams::new(
+					res.index = Index::MTree(crate::expr::index::MTreeParams::new(
 						dimension,
 						distance,
 						vector_type,

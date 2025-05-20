@@ -1,16 +1,16 @@
 use reblessive::Stk;
 
-use crate::sql::statements::alter::{AlterFieldStatement, AlterSequenceStatement};
+use crate::expr::statements::alter::{AlterFieldStatement, AlterSequenceStatement};
 use crate::syn::error::bail;
 use crate::{
-	sql::{
-		statements::{AlterStatement, AlterTableStatement},
+	expr::{
 		TableType,
+		statements::{AlterStatement, AlterTableStatement},
 	},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
 			ParseResult, Parser,
+			mac::{expected, unexpected},
 		},
 		token::t,
 	},
@@ -177,7 +177,11 @@ impl Parser<'_> {
 							res.reference = Some(None);
 						}
 						_ => {
-							unexpected!(self, peek, "`FLEXIBLE`, `TYPE`, `READONLY`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`")
+							unexpected!(
+								self,
+								peek,
+								"`FLEXIBLE`, `TYPE`, `READONLY`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`"
+							)
 						}
 					}
 				}

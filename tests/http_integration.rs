@@ -5,7 +5,7 @@ mod http_integration {
 	use std::time::Duration;
 
 	use http::header::HeaderValue;
-	use http::{header, Method};
+	use http::{Method, header};
 	use reqwest::Client;
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
@@ -13,7 +13,7 @@ mod http_integration {
 	use test_log::test;
 	use ulid::Ulid;
 
-	use super::common::{self, StartServerArguments, PASS, USER};
+	use super::common::{self, PASS, StartServerArguments, USER};
 
 	#[test(tokio::test)]
 	async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {

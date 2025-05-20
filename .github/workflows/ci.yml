@@ -152,7 +152,7 @@ jobs:
     name: Check workspace MSRV
     runs-on: ubuntu-latest
     env:
-      msrv: "1.84" # This should be updated if the MSRV is updated.
+      msrv: "1.85" # This should be updated if the MSRV is updated.
 
     steps:
       - name: Install MSRV toolchain
@@ -247,6 +247,15 @@ jobs:
 
       - name: Check revision.lock
         run: revision-lock --check
+
+  check-binaries:
+    name: Release binaries
+    needs: [format, check, check-wasm]
+    uses: ./.github/workflows/build.yml
+    with:
+      name: ci
+      release-branch: ${{ github.head_ref || github.ref_name }}
+    secrets: inherit
 
   # ----------------------------------------
   # Integration tests
@@ -998,12 +1007,14 @@ jobs:
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
+          SURREALDB_VERSION: ${{ matrix.version }}
 
       - name: Run Python tests (WebSocket)
         run: python -m unittest discover -s tests
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
+          SURREALDB_VERSION: ${{ matrix.version }}
 
   sdk-php:
     name: PHP SDK tests (${{ matrix.version }})

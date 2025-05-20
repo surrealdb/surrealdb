@@ -1,5 +1,5 @@
 use crate::{
-	sql::{Object, Strand, Value},
+	expr::{Object, Strand, Value},
 	syn::parser::mac::test_parse,
 };
 

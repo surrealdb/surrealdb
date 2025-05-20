@@ -1,7 +1,8 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::MutableContext;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
+use anyhow::Result;
 use std::collections::BTreeMap;
 
 pub(crate) type Variables = Option<BTreeMap<String, Value>>;

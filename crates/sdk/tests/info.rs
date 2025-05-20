@@ -235,9 +235,13 @@ async fn permissions_checks_info_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -312,16 +316,23 @@ async fn permissions_checks_info_table() {
 #[tokio::test]
 async fn permissions_checks_info_user_root() {
 	let scenario = HashMap::from([
-        ("prepare", "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
-        ("test", "INFO FOR USER user ON ROOT"),
-        ("check", "INFO FOR USER user ON ROOT"),
-    ]);
+		(
+			"prepare",
+			"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h",
+		),
+		("test", "INFO FOR USER user ON ROOT"),
+		("check", "INFO FOR USER user ON ROOT"),
+	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-        vec!["\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-    ];
+		vec![
+			"\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+		vec![
+			"\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -354,16 +365,23 @@ async fn permissions_checks_info_user_root() {
 #[tokio::test]
 async fn permissions_checks_info_user_ns() {
 	let scenario = HashMap::from([
-        ("prepare", "DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
-        ("test", "INFO FOR USER user ON NS"),
-        ("check", "INFO FOR USER user ON NS"),
-    ]);
+		(
+			"prepare",
+			"DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h",
+		),
+		("test", "INFO FOR USER user ON NS"),
+		("check", "INFO FOR USER user ON NS"),
+	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-        vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-    ];
+		vec![
+			"\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+		vec![
+			"\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -396,16 +414,23 @@ async fn permissions_checks_info_user_ns() {
 #[tokio::test]
 async fn permissions_checks_info_user_db() {
 	let scenario = HashMap::from([
-        ("prepare", "DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
-        ("test", "INFO FOR USER user ON DB"),
-        ("check", "INFO FOR USER user ON DB"),
-    ]);
+		(
+			"prepare",
+			"DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h",
+		),
+		("test", "INFO FOR USER user ON DB"),
+		("check", "INFO FOR USER user ON DB"),
+	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-        vec!["\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-    ];
+		vec![
+			"\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+		vec![
+			"\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+	];
 
 	let test_cases = [
 		// Root level

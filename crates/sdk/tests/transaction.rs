@@ -2,12 +2,12 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn transaction_basic() -> Result<(), Error> {
+async fn transaction_basic() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -43,7 +43,7 @@ async fn transaction_basic() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn transaction_with_return() -> Result<(), Error> {
+async fn transaction_with_return() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -69,7 +69,7 @@ async fn transaction_with_return() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn transaction_with_failure() -> Result<(), Error> {
+async fn transaction_with_failure() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -104,7 +104,7 @@ async fn transaction_with_failure() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn transaction_with_failure_and_return() -> Result<(), Error> {
+async fn transaction_with_failure_and_return() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -143,7 +143,7 @@ async fn transaction_with_failure_and_return() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn transaction_with_throw() -> Result<(), Error> {
+async fn transaction_with_throw() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -178,7 +178,7 @@ async fn transaction_with_throw() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn transaction_with_throw_and_return() -> Result<(), Error> {
+async fn transaction_with_throw_and_return() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;

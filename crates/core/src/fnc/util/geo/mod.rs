@@ -1,5 +1,5 @@
-use crate::sql::geometry::Geometry;
-use crate::sql::strand::Strand;
+use crate::expr::geometry::Geometry;
+use crate::expr::strand::Strand;
 use geo::Point;
 
 static BASE32: &[char] = &[

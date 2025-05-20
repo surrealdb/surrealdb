@@ -1,10 +1,10 @@
 //! FormData class implementation
 
 use js::{
+	Ctx, Exception, FromJs, JsLifetime, Result, String, Value,
 	class::{Class, Trace},
 	function::{Opt, Rest},
 	prelude::Coerced,
-	Ctx, Exception, FromJs, JsLifetime, Result, String, Value,
 };
 use reqwest::multipart::{Form, Part};
 use std::{collections::HashMap, string::String as StdString};

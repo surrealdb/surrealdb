@@ -1,6 +1,6 @@
 use std::{io::Write, path::Path, process::Stdio};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use semver::Version;
 use serde_json::Value;
 use tokio::process::Command;
@@ -66,7 +66,9 @@ pub async fn prepare_version(version: Version, download_permission: bool) -> any
 		return prepare_wget(version.clone(), download_permission).await;
 	}
 
-	bail!("Could not run wget or curl, please install either curl or wget to facilitate downloading surrealdb binaries")
+	bail!(
+		"Could not run wget or curl, please install either curl or wget to facilitate downloading surrealdb binaries"
+	)
 }
 
 cfg_if::cfg_if! {

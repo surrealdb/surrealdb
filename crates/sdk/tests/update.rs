@@ -3,13 +3,13 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn update_merge_and_content() -> Result<(), Error> {
+async fn update_merge_and_content() -> Result<()> {
 	let sql = "
 		CREATE person:test CONTENT { name: 'Tobie' };
 		UPDATE person:test CONTENT { name: 'Jaime' };
@@ -79,7 +79,7 @@ async fn update_merge_and_content() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn update_simple_with_input() -> Result<(), Error> {
+async fn update_simple_with_input() -> Result<()> {
 	let sql = "
 		DEFINE FIELD name ON TABLE person
 			ASSERT
@@ -181,7 +181,7 @@ async fn update_simple_with_input() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn update_complex_with_input() -> Result<(), Error> {
+async fn update_complex_with_input() -> Result<()> {
 	let sql = "
 		DEFINE FIELD images ON product
 			TYPE array
@@ -207,7 +207,7 @@ async fn update_complex_with_input() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn update_with_return_clause() -> Result<(), Error> {
+async fn update_with_return_clause() -> Result<()> {
 	let sql = "
 		CREATE person:test SET age = 18, name = 'John';
 		UPDATE person:test SET age = 25 RETURN VALUE $before;
@@ -282,7 +282,7 @@ async fn update_with_return_clause() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn update_with_object_array_string_field_names() -> Result<(), Error> {
+async fn update_with_object_array_string_field_names() -> Result<()> {
 	let sql = "
 		UPSERT person:one SET field.key = 'value';
 		UPSERT person:two SET field['key'] = 'value';
@@ -322,7 +322,7 @@ async fn update_with_object_array_string_field_names() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn update_records_and_arrays_with_json_patch() -> Result<(), Error> {
+async fn update_records_and_arrays_with_json_patch() -> Result<()> {
 	let sql = "
 		UPSERT person:test CONTENT {
 			username: 'parsley',
@@ -445,28 +445,116 @@ async fn update_records_and_arrays_with_json_patch() -> Result<(), Error> {
 async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true, "owner at root level should be able to update a record"),
-		((().into(), Role::Editor), ("NS", "DB"), true, "editor at root level should be able to update a record"),
-		((().into(), Role::Viewer), ("NS", "DB"), false, "viewer at root level should not be able to update a record"),
-
+		(
+			(().into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at root level should be able to update a record",
+		),
+		(
+			(().into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at root level should be able to update a record",
+		),
+		(
+			(().into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at root level should not be able to update a record",
+		),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true, "owner at namespace level should be able to update a record on its namespace"),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at namespace level should not be able to update a record on another namespace"),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true, "editor at namespace level should be able to update a record on its namespace"),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at namespace level should not be able to update a record on another namespace"),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false, "viewer at namespace level should not be able to update a record on its namespace"),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at namespace level should not be able to update a record on another namespace"),
-
+		(
+			(("NS",).into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at namespace level should be able to update a record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at namespace level should not be able to update a record on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at namespace level should be able to update a record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at namespace level should not be able to update a record on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to update a record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to update a record on another namespace",
+		),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true, "owner at database level should be able to update a record on its database"),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false, "owner at database level should not be able to update a record on another database"),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at database level should not be able to update a record on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true, "editor at database level should be able to update a record on its database"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false, "editor at database level should not be able to update a record on another database"),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at database level should not be able to update a record on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false, "viewer at database level should not be able to update a record on its database"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false, "viewer at database level should not be able to update a record on another database"),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at database level should not be able to update a record on another namespace even if the database name matches"),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at database level should be able to update a record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "OTHER_DB"),
+			false,
+			"owner at database level should not be able to update a record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at database level should not be able to update a record on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at database level should be able to update a record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "OTHER_DB"),
+			false,
+			"editor at database level should not be able to update a record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at database level should not be able to update a record on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at database level should not be able to update a record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "OTHER_DB"),
+			false,
+			"viewer at database level should not be able to update a record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at database level should not be able to update a record on another namespace even if the database name matches",
+		),
 	];
 	let statement = "UPDATE person:test CONTENT { name: 'Name' };";
 
@@ -780,7 +868,7 @@ async fn check_permissions_auth_disabled() {
 }
 
 #[tokio::test]
-async fn update_field_permissions() -> Result<(), Error> {
+async fn update_field_permissions() -> Result<()> {
 	let dbs = new_ds().await?;
 
 	let sql = r#"

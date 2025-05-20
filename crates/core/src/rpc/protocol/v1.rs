@@ -1,3 +1,5 @@
+use anyhow::Result;
+use anyhow::ensure;
 #[cfg(not(target_family = "wasm"))]
 use async_graphql::BatchRequest;
 use std::collections::BTreeMap;
@@ -6,21 +8,21 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::expr::function::CustomFunctionName;
 use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
-use crate::sql::function::CustomFunctionName;
 use crate::{
-	dbs::{capabilities::MethodTarget, QueryType, Response},
-	rpc::args::Take,
-	sql::{
+	dbs::{QueryType, Response, capabilities::MethodTarget},
+	expr::{
+		Array, Fields, Function, Model, Output, Query, Strand, Value,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
-		Array, Fields, Function, Model, Output, Query, Strand, Value,
 	},
+	rpc::args::Take,
 };
 
 #[expect(async_fn_in_trait)]
@@ -133,7 +135,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
-		let out: Result<Value, Error> =
+		let out: Result<Value> =
 			crate::iam::signup::signup(self.kvs(), &mut session, v).await.map(|v| v.token.into());
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -157,7 +159,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
-		let out: Result<Value, Error> = crate::iam::signin::signin(self.kvs(), &mut session, v)
+		let out: Result<Value> = crate::iam::signin::signin(self.kvs(), &mut session, v)
 			.await
 			// The default `signin` method just returns the token
 			.map(|v| v.token.into());
@@ -181,10 +183,9 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Attempt authentication, mutating the session
-		let out: Result<Value, Error> =
-			crate::iam::verify::token(self.kvs(), &mut session, &token.0)
-				.await
-				.map(|_| Value::None);
+		let out: Result<Value> = crate::iam::verify::token(self.kvs(), &mut session, &token.0)
+			.await
+			.map(|_| Value::None);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -218,7 +219,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Reset the current session
-		crate::iam::reset::reset(&mut session)?;
+		crate::iam::reset::reset(&mut session);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -403,9 +404,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -429,7 +430,7 @@ pub trait RpcProtocolV1: RpcContext {
 				false => Some(what.could_be_table()),
 				true => None,
 			},
-			data: crate::sql::Data::SingleExpression(data),
+			data: crate::expr::Data::SingleExpression(data),
 			output: Some(Output::After),
 			..Default::default()
 		}
@@ -442,9 +443,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -461,11 +462,12 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let sql = InsertStatement {
 			relation: true,
-			into: match what.is_none_or_null() {
-				false => Some(what.could_be_table()),
-				true => None,
+			into: if what.is_none_or_null() {
+				None
+			} else {
+				Some(what.could_be_table())
 			},
-			data: crate::sql::Data::SingleExpression(data),
+			data: crate::expr::Data::SingleExpression(data),
 			output: Some(Output::After),
 			..Default::default()
 		}
@@ -478,9 +480,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -503,9 +505,10 @@ pub trait RpcProtocolV1: RpcContext {
 		let sql = CreateStatement {
 			only: what.is_thing_single() || what.is_table(),
 			what: vec![what.could_be_table()].into(),
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::ContentExpression(data)),
-				true => None,
+			data: if data.is_none_or_null() {
+				None
+			} else {
+				Some(crate::expr::Data::ContentExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()
@@ -517,9 +520,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -541,9 +544,10 @@ pub trait RpcProtocolV1: RpcContext {
 		let sql = UpsertStatement {
 			only: what.is_thing_single(),
 			what: vec![what.could_be_table()].into(),
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::ContentExpression(data)),
-				true => None,
+			data: if data.is_none_or_null() {
+				None
+			} else {
+				Some(crate::expr::Data::ContentExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()
@@ -557,9 +561,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -581,9 +585,10 @@ pub trait RpcProtocolV1: RpcContext {
 		let sql = UpdateStatement {
 			only: what.is_thing_single(),
 			what: vec![what.could_be_table()].into(),
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::ContentExpression(data)),
-				true => None,
+			data: if data.is_none_or_null() {
+				None
+			} else {
+				Some(crate::expr::Data::ContentExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()
@@ -597,9 +602,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -621,9 +626,10 @@ pub trait RpcProtocolV1: RpcContext {
 		let sql = UpdateStatement {
 			only: what.is_thing_single(),
 			what: vec![what.could_be_table()].into(),
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::MergeExpression(data)),
-				true => None,
+			data: if data.is_none_or_null() {
+				None
+			} else {
+				Some(crate::expr::Data::MergeExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()
@@ -637,9 +643,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -661,10 +667,11 @@ pub trait RpcProtocolV1: RpcContext {
 		let sql = UpdateStatement {
 			only: what.is_thing_single(),
 			what: vec![what.could_be_table()].into(),
-			data: Some(crate::sql::Data::PatchExpression(data)),
-			output: match diff.is_true() {
-				true => Some(Output::Diff),
-				false => Some(Output::After),
+			data: Some(crate::expr::Data::PatchExpression(data)),
+			output: if diff.is_true() {
+				Some(Output::Diff)
+			} else {
+				Some(Output::After)
 			},
 			..Default::default()
 		}
@@ -677,9 +684,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -703,9 +710,10 @@ pub trait RpcProtocolV1: RpcContext {
 			from,
 			kind: kind.could_be_table(),
 			with,
-			data: match data.is_none_or_null() {
-				false => Some(crate::sql::Data::ContentExpression(data)),
-				true => None,
+			data: if data.is_none_or_null() {
+				None
+			} else {
+				Some(crate::expr::Data::ContentExpression(data))
 			},
 			output: Some(Output::After),
 			..Default::default()
@@ -719,9 +727,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -755,9 +763,9 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(res
 			.remove(0)
 			.result
-			.or_else(|e| match e {
-				Error::SingleOnlyOutput => Ok(Value::None),
-				e => Err(e),
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(e),
 			})?
 			.into())
 	}
@@ -797,7 +805,7 @@ pub trait RpcProtocolV1: RpcContext {
 			_ => return Err(RpcError::InvalidParams),
 		};
 		// Execute the specified query
-		self.query_inner(query, vars).await.map(Into::into)
+		self.query_inner(query, vars).await.map(Into::into).map_err(RpcError::from)
 	}
 
 	// ------------------------------
@@ -966,14 +974,13 @@ pub trait RpcProtocolV1: RpcContext {
 		// Execute the request against the schema
 		let res = schema.execute(req).await;
 		// Serialize the graphql response
-		let out = match pretty {
-			true => {
-				let mut buf = Vec::new();
-				let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
-				let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
-				res.serialize(&mut ser).ok().and_then(|_| String::from_utf8(buf).ok())
-			}
-			false => serde_json::to_string(&res).ok(),
+		let out = if pretty {
+			let mut buf = Vec::new();
+			let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+			let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+			res.serialize(&mut ser).ok().and_then(|_| String::from_utf8(buf).ok())
+		} else {
+			serde_json::to_string(&res).ok()
 		}
 		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
 		// Output the graphql response
@@ -988,16 +995,14 @@ pub trait RpcProtocolV1: RpcContext {
 		&self,
 		query: Value,
 		vars: Option<BTreeMap<String, Value>>,
-	) -> Result<Vec<Response>, RpcError> {
+	) -> Result<Vec<Response>> {
 		// If no live query handler force realtime off
-		if !Self::LQ_SUPPORT && self.session().rt {
-			return Err(RpcError::BadLQConfig);
-		}
+		ensure!(Self::LQ_SUPPORT || !self.session().rt, RpcError::BadLQConfig);
 		// Execute the query on the database
 		let res = match query {
 			Value::Query(sql) => self.kvs().process(sql, &self.session(), vars).await?,
 			Value::Strand(sql) => self.kvs().execute(&sql, &self.session(), vars).await?,
-			_ => return Err(fail!("Unexpected query type: {query:?}").into()),
+			_ => fail!("Unexpected query type: {query:?}"),
 		};
 
 		// Post-process hooks for web layer

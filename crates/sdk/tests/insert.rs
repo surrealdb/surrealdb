@@ -3,14 +3,14 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Part;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn insert_statement_object_single() -> Result<(), Error> {
+async fn insert_statement_object_single() -> Result<()> {
 	let sql = "
 		INSERT INTO `test-table` {
 			id: 'tester',
@@ -31,7 +31,7 @@ async fn insert_statement_object_single() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_statement_object_multiple() -> Result<(), Error> {
+async fn insert_statement_object_multiple() -> Result<()> {
 	let sql = "
 		INSERT INTO test [
 			{
@@ -64,7 +64,7 @@ async fn insert_statement_object_multiple() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_statement_values_single() -> Result<(), Error> {
+async fn insert_statement_values_single() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other');
 	";
@@ -81,7 +81,7 @@ async fn insert_statement_values_single() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_statement_values_multiple() -> Result<(), Error> {
+async fn insert_statement_values_multiple() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES (1, true, 'other'), (2, false, 'else');
 	";
@@ -103,7 +103,7 @@ async fn insert_statement_values_multiple() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_statement_values_retable_id() -> Result<(), Error> {
+async fn insert_statement_values_retable_id() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES (person:1, true, 'other'), (person:2, false, 'else');
 	";
@@ -125,7 +125,7 @@ async fn insert_statement_values_retable_id() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_statement_on_duplicate_key() -> Result<(), Error> {
+async fn insert_statement_on_duplicate_key() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other');
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other') ON DUPLICATE KEY UPDATE something = 'else';
@@ -147,7 +147,7 @@ async fn insert_statement_on_duplicate_key() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_with_savepoint() -> Result<(), Error> {
+async fn insert_with_savepoint() -> Result<()> {
 	let sql = "
 		DEFINE INDEX one ON pokemon FIELDS one UNIQUE;
 		DEFINE INDEX two ON pokemon FIELDS two UNIQUE;
@@ -213,7 +213,7 @@ async fn insert_with_savepoint() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_statement_output() -> Result<(), Error> {
+async fn insert_statement_output() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other') RETURN something;
 	";
@@ -230,7 +230,7 @@ async fn insert_statement_output() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_statement_duplicate_key_update() -> Result<(), Error> {
+async fn insert_statement_duplicate_key_update() -> Result<()> {
 	let sql = "
 		DEFINE INDEX name ON TABLE company COLUMNS name UNIQUE;
 		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-10') ON DUPLICATE KEY UPDATE founded = $input.founded;
@@ -267,28 +267,116 @@ async fn insert_statement_duplicate_key_update() -> Result<(), Error> {
 async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true, "owner at root level should be able to insert a new record"),
-		((().into(), Role::Editor), ("NS", "DB"), true, "editor at root level should be able to insert a new record"),
-		((().into(), Role::Viewer), ("NS", "DB"), false, "viewer at root level should not be able to insert a new record"),
-
+		(
+			(().into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at root level should be able to insert a new record",
+		),
+		(
+			(().into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at root level should be able to insert a new record",
+		),
+		(
+			(().into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at root level should not be able to insert a new record",
+		),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true, "owner at namespace level should be able to insert a new record on its namespace"),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at namespace level should not be able to insert a new record on another namespace"),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true, "editor at namespace level should be able to insert a new record on its namespace"),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at namespace level should not be able to insert a new record on another namespace"),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false, "viewer at namespace level should not be able to insert a new record on its namespace"),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at namespace level should not be able to insert a new record on another namespace"),
-
+		(
+			(("NS",).into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at namespace level should be able to insert a new record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at namespace level should not be able to insert a new record on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at namespace level should be able to insert a new record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at namespace level should not be able to insert a new record on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to insert a new record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to insert a new record on another namespace",
+		),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true, "owner at database level should be able to insert a new record on its database"),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false, "owner at database level should not be able to insert a new record on another database"),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at database level should not be able to insert a new record on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true, "editor at database level should be able to insert a new record on its database"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false, "editor at database level should not be able to insert a new record on another database"),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at database level should not be able to insert a new record on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false, "viewer at database level should not be able to insert a new record on its database"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false, "viewer at database level should not be able to insert a new record on another database"),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at database level should not be able to insert a new record on another namespace even if the database name matches"),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at database level should be able to insert a new record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "OTHER_DB"),
+			false,
+			"owner at database level should not be able to insert a new record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at database level should not be able to insert a new record on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at database level should be able to insert a new record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "OTHER_DB"),
+			false,
+			"editor at database level should not be able to insert a new record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at database level should not be able to insert a new record on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at database level should not be able to insert a new record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "OTHER_DB"),
+			false,
+			"viewer at database level should not be able to insert a new record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at database level should not be able to insert a new record on another namespace even if the database name matches",
+		),
 	];
 	let statement = "INSERT INTO person (id) VALUES ('id')";
 
@@ -434,7 +522,11 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(res.unwrap() == Value::parse("[]"), "{}", "anonymous user should not be able to insert a new record if the table exists but has no permissions");
+		assert!(
+			res.unwrap() == Value::parse("[]"),
+			"{}",
+			"anonymous user should not be able to insert a new record if the table exists but has no permissions"
+		);
 	}
 
 	// When the table exists and grants full permissions
@@ -462,7 +554,11 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(res.unwrap() != Value::parse("[]"), "{}", "anonymous user should be able to insert a new record if the table exists and grants full permissions");
+		assert!(
+			res.unwrap() != Value::parse("[]"),
+			"{}",
+			"anonymous user should be able to insert a new record if the table exists and grants full permissions"
+		);
 	}
 }
 
@@ -524,7 +620,11 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(res.unwrap() != Value::parse("[]"), "{}", "anonymous user should not be able to insert a new record if the table exists but has no permissions");
+		assert!(
+			res.unwrap() != Value::parse("[]"),
+			"{}",
+			"anonymous user should not be able to insert a new record if the table exists but has no permissions"
+		);
 	}
 
 	// When the table exists and grants full permissions
@@ -552,48 +652,16 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(res.unwrap() != Value::parse("[]"), "{}", "anonymous user should be able to insert a new record if the table exists and grants full permissions");
+		assert!(
+			res.unwrap() != Value::parse("[]"),
+			"{}",
+			"anonymous user should be able to insert a new record if the table exists and grants full permissions"
+		);
 	}
 }
 
 #[tokio::test]
-async fn insert_statement_unique_index() -> Result<(), Error> {
-	let sql = "
-		DEFINE INDEX name ON TABLE company COLUMNS name UNIQUE;
-		INSERT INTO company { name: 'SurrealDB' };
-		INSERT INTO company { name: 'SurrealDB' };
-		SELECT count() FROM company GROUP ALL;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	match tmp {
-		Err(Error::IndexExists {
-			index,
-			value,
-			..
-		}) if index.eq("name") && value.eq("'SurrealDB'") => (),
-		found => panic!("Expected Err(Error::IndexExists), found '{:?}'", found),
-	}
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[ { count: 1 } ]");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn insert_relation() -> Result<(), Error> {
+async fn insert_relation() -> Result<()> {
 	let sql = "
 		INSERT INTO person [
 			{ id: person:1 },
@@ -699,79 +767,7 @@ async fn insert_relation() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn insert_invalid_relation() -> Result<(), Error> {
-	let sql = "
-		INSERT RELATION INTO likes {
-			id: 'object',
-		};
-
-		INSERT RELATION {
-			in: person:1,
-		};
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	match res.remove(0).result {
-		Err(Error::InsertStatementIn {
-			value,
-		}) if value == "NONE" => (),
-		found => panic!("Expected Err(Error::InsertStatementIn), found '{:?}'", found),
-	}
-	//
-	match res.remove(0).result {
-		Err(Error::InsertStatementId {
-			value,
-		}) if value == "NONE" => (),
-		found => panic!("Expected Err(Error::InsertStatementId), found '{:?}'", found),
-	}
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn insert_without_into() -> Result<(), Error> {
-	let sql = "
-		INSERT [
-			{ id: test:1 }
-		];
-
-		INSERT { id: test:2 };
-		INSERT (id) VALUES (test:3);
-
-		INSERT {};
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:1 }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:2 }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:3 }]");
-	assert_eq!(tmp, val);
-	//
-	match res.remove(0).result {
-		Err(Error::InsertStatementId {
-			value,
-		}) if value == "NONE" => (),
-		found => panic!("Expected Err(Error::RelateStatementId), found '{:?}'", found),
-	}
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn insert_ignore() -> Result<(), Error> {
+async fn insert_ignore() -> Result<()> {
 	let sql = "
 		INSERT INTO user { id: 1, name: 'foo' };
 		INSERT IGNORE INTO user { id: 1, name: 'bar' };

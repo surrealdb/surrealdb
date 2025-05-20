@@ -55,11 +55,11 @@
 
 use self::token_buffer::TokenBuffer;
 use crate::{
-	sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid},
+	expr::{self, Bytes, Datetime, Duration, File, Strand, Uuid},
 	syn::{
-		error::{bail, SyntaxError},
-		lexer::{compound::NumberKind, Lexer},
-		token::{t, Span, Token, TokenKind},
+		error::{SyntaxError, bail},
+		lexer::{Lexer, compound::NumberKind},
+		token::{Span, Token, TokenKind, t},
 	},
 };
 use bytes::BytesMut;
@@ -83,7 +83,7 @@ mod token_buffer;
 
 pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
 
-use super::error::{syntax_error, RenderedError};
+use super::error::{RenderedError, syntax_error};
 
 #[cfg(test)]
 pub mod test;
@@ -382,13 +382,13 @@ impl<'a> Parser<'a> {
 	/// Parse a full query.
 	///
 	/// This is the primary entry point of the parser.
-	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<sql::Query> {
+	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<expr::Query> {
 		let statements = self.parse_stmt_list(ctx).await?;
-		Ok(sql::Query(statements))
+		Ok(expr::Query(statements))
 	}
 
 	/// Parse a single statement.
-	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::Statement> {
+	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<expr::Statement> {
 		self.parse_stmt(ctx).await
 	}
 }
@@ -442,7 +442,7 @@ impl StatementStream {
 	pub fn parse_partial(
 		&mut self,
 		buffer: &mut BytesMut,
-	) -> Result<Option<sql::Statement>, RenderedError> {
+	) -> Result<Option<expr::Statement>, RenderedError> {
 		let mut slice = &**buffer;
 		if slice.len() > u32::MAX as usize {
 			// limit slice length.
@@ -523,7 +523,7 @@ impl StatementStream {
 	pub fn parse_complete(
 		&mut self,
 		buffer: &mut BytesMut,
-	) -> Result<Option<sql::Statement>, RenderedError> {
+	) -> Result<Option<expr::Statement>, RenderedError> {
 		let mut slice = &**buffer;
 		if slice.len() > u32::MAX as usize {
 			// limit slice length.

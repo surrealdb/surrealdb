@@ -12,7 +12,7 @@ mod test;
 pub use reader::{BytesReader, CharError};
 
 use crate::syn::{
-	error::{bail, SyntaxError},
+	error::{SyntaxError, bail},
 	token::{Span, Token, TokenKind},
 };
 

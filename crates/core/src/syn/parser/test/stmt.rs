@@ -1,5 +1,10 @@
 use crate::{
-	sql::{
+	expr::{
+		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
+		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
+		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
+		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
+		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 		access::AccessDuration,
 		access_type::{
 			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
@@ -14,14 +19,6 @@ use crate::{
 		language::Language,
 		order::{OrderList, Ordering},
 		statements::{
-			access::{
-				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-				AccessStatementShow,
-			},
-			analyze::AnalyzeStatement,
-			define::Executable,
-			show::{ShowSince, ShowStatement},
-			sleep::SleepStatement,
 			AccessStatement, BeginStatement, BreakStatement, CancelStatement, CommitStatement,
 			ContinueStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
@@ -34,21 +31,24 @@ use crate::{
 			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
 			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
 			UpsertStatement, UseStatement,
+			access::{
+				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+				AccessStatementShow,
+			},
+			analyze::AnalyzeStatement,
+			define::Executable,
+			show::{ShowSince, ShowStatement},
+			sleep::SleepStatement,
 		},
 		tokenizer::Tokenizer,
 		user::UserDuration,
-		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
-		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::parser::{
-		mac::{test_parse, test_parse_with_settings},
 		ParserSettings,
+		mac::{test_parse, test_parse_with_settings},
 	},
 };
-use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
+use chrono::{NaiveDate, Offset, Utc, offset::TimeZone};
 
 fn ident_field(name: &str) -> Value {
 	Value::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))
@@ -1831,7 +1831,7 @@ fn parse_define_table() {
 			name: Ident("name".to_string()),
 			drop: true,
 			full: true,
-			view: Some(crate::sql::View {
+			view: Some(crate::expr::View {
 				expr: Fields(
 					vec![Field::Single {
 						expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
@@ -1845,7 +1845,7 @@ fn parse_define_table() {
 			}),
 			permissions: Permissions {
 				select: Permission::Specific(Value::Expression(Box::new(
-					crate::sql::Expression::Binary {
+					crate::expr::Expression::Binary {
 						l: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_owned()))])),
 						o: Operator::Equal,
 						r: Value::Number(Number::Int(1))
@@ -2136,7 +2136,7 @@ fn parse_delete() {
 		res,
 		Statement::Delete(DeleteStatement {
 			only: true,
-			what: Values(vec![Value::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
+			what: Values(vec![Value::Mock(crate::expr::Mock::Range("foo".to_string(), 32, 64))]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Value::Number(Number::Int(2)))),
 			output: Some(Output::After),

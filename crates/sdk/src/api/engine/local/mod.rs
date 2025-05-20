@@ -22,14 +22,16 @@
 //! during development while allowing you to test your code fully.
 use crate::api::err::Error;
 use crate::{
+	Result,
 	api::{
+		Connect, Response as QueryResponse, Surreal,
 		conn::{Command, DbResponse, RequestData},
-		Connect, Response as QueryResponse, Result, Surreal,
 	},
 	method::Stats,
 	opt::{IntoEndpoint, Table},
-	value::Notification,
 };
+#[cfg(not(target_family = "wasm"))]
+use anyhow::bail;
 use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
@@ -37,28 +39,28 @@ use indexmap::IndexMap;
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
 #[cfg(not(target_family = "wasm"))]
-use std::task::{ready, Poll};
+use std::task::{Poll, ready};
 use std::{
 	collections::{BTreeMap, HashMap},
 	marker::PhantomData,
 	mem,
 	sync::Arc,
 };
+use surrealdb_core::expr::CustomFunctionName;
+use surrealdb_core::expr::Function;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::sql::CustomFunctionName;
-use surrealdb_core::sql::Function;
 use surrealdb_core::{
-	dbs::{Response, Session},
-	iam,
-	kvs::Datastore,
-	sql::{
+	dbs::{Notification, Response, Session},
+	expr::{
+		Data, Field, Output, Query, Statement, Value as CoreValue,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
 			UpdateStatement, UpsertStatement,
 		},
-		Data, Field, Output, Query, Statement, Value as CoreValue,
 	},
+	iam,
+	kvs::Datastore,
 };
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
@@ -76,7 +78,7 @@ use tokio::{
 };
 
 #[cfg(feature = "ml")]
-use surrealdb_core::sql::Model;
+use surrealdb_core::expr::Model;
 
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::api::conn::MlExportConfig;
@@ -84,10 +86,10 @@ use crate::api::conn::MlExportConfig;
 use futures::StreamExt;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
-	iam::{check::check_ns_db, Action, ResourceKind},
+	expr::statements::{DefineModelStatement, DefineStatement},
+	iam::{Action, ResourceKind, check::check_ns_db},
 	kvs::{LockType, TransactionType},
 	ml::storage::surml_file::SurMlFile,
-	sql::statements::{DefineModelStatement, DefineStatement},
 };
 
 use super::resource_to_values;
@@ -97,7 +99,7 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-type LiveQueryMap = HashMap<Uuid, Sender<Notification<CoreValue>>>;
+type LiveQueryMap = HashMap<Uuid, Sender<Notification>>;
 
 /// In-memory database
 ///
@@ -292,7 +294,7 @@ pub struct TiKv;
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(feature = "kv-fdb")]
+#[cfg(kv_fdb)]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb-7_3")))]
 #[derive(Debug)]
 pub struct FDb;
@@ -361,7 +363,7 @@ fn process(responses: Vec<Response>) -> QueryResponse {
 				map.insert(index, (stats, Ok(value)));
 			}
 			Err(error) => {
-				map.insert(index, (stats, Err(error.into())));
+				map.insert(index, (stats, Err(error)));
 			}
 		};
 	}
@@ -406,12 +408,13 @@ async fn export_file(
 	};
 
 	if let Err(error) = res {
-		if let crate::error::Db::Channel(message) = error {
+		if let Some(surrealdb_core::err::Error::Channel(message)) = error.downcast_ref() {
 			// This is not really an error. Just logging it for improved visibility.
 			trace!("{message}");
 			return Ok(());
 		}
-		return Err(error.into());
+
+		return Err(error);
 	}
 	Ok(())
 }
@@ -446,21 +449,19 @@ async fn export_ml(
 }
 
 #[cfg(not(target_family = "wasm"))]
-async fn copy<'a, R, W>(
-	path: PathBuf,
-	reader: &'a mut R,
-	writer: &'a mut W,
-) -> std::result::Result<(), crate::Error>
+async fn copy<'a, R, W>(path: PathBuf, reader: &'a mut R, writer: &'a mut W) -> Result<()>
 where
 	R: tokio::io::AsyncRead + Unpin + ?Sized,
 	W: tokio::io::AsyncWrite + Unpin + ?Sized,
 {
-	io::copy(reader, writer).await.map(|_| ()).map_err(|error| {
-		crate::Error::Api(crate::error::Api::FileRead {
+	io::copy(reader, writer)
+		.await
+		.map(|_| ())
+		.map_err(|error| crate::error::Api::FileRead {
 			path,
 			error,
 		})
-	})
+		.map_err(anyhow::Error::new)
 }
 
 async fn kill_live_query(
@@ -472,7 +473,7 @@ async fn kill_live_query(
 	let mut query = Query::default();
 	let mut kill = KillStatement::default();
 	kill.id = id.into();
-	query.0 .0 = vec![Statement::Kill(kill)];
+	query.0.0 = vec![Statement::Kill(kill)];
 	let response = kvs.process(query, session, Some(vars)).await?;
 	take(true, response).await
 }
@@ -536,7 +537,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0 .0 = vec![Statement::Create(statement)];
+			query.0.0 = vec![Statement::Create(statement)];
 			let response =
 				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
 			let value = take(true, response).await?;
@@ -555,7 +556,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0 .0 = vec![Statement::Upsert(statement)];
+			query.0.0 = vec![Statement::Upsert(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -574,7 +575,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0 .0 = vec![Statement::Update(statement)];
+			query.0.0 = vec![Statement::Update(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -593,7 +594,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0 .0 = vec![Statement::Insert(statement)];
+			query.0.0 = vec![Statement::Insert(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -613,7 +614,7 @@ async fn router(
 				stmt.relation = true;
 				stmt
 			};
-			query.0 .0 = vec![Statement::Insert(statement)];
+			query.0.0 = vec![Statement::Insert(statement)];
 			let response =
 				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
 			let value = take(one, response).await?;
@@ -638,7 +639,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				Statement::Update(stmt)
 			};
-			query.0 .0 = vec![statement];
+			query.0.0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let response = process(response);
@@ -663,7 +664,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				Statement::Update(stmt)
 			};
-			query.0 .0 = vec![statement];
+			query.0.0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let response = process(response);
@@ -680,7 +681,7 @@ async fn router(
 				stmt.expr.0 = vec![Field::All];
 				stmt
 			};
-			query.0 .0 = vec![Statement::Select(statement)];
+			query.0.0 = vec![Statement::Select(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -697,7 +698,7 @@ async fn router(
 				stmt.output = Some(Output::Before);
 				stmt
 			};
-			query.0 .0 = vec![Statement::Delete(statement)];
+			query.0.0 = vec![Statement::Delete(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -907,11 +908,10 @@ async fn router(
 			let mut file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
-					return Err(Error::FileOpen {
+					bail!(Error::FileOpen {
 						path,
 						error,
-					}
-					.into());
+					});
 				}
 			};
 
@@ -933,7 +933,7 @@ async fn router(
 					Ok(0) => Poll::Ready(None),
 					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
 					Err(e) => {
-						let error = CoreError::QueryStream(e.to_string());
+						let error = anyhow::Error::new(CoreError::QueryStream(e.to_string()));
 						Poll::Ready(Some(Err(error)))
 					}
 				}
@@ -1081,7 +1081,10 @@ async fn router(
 					}
 					#[cfg(not(feature = "ml"))]
 					Some(_) => {
-						return Err(Error::Query(format!("tried to call an ML function `{name}` but the `ml` feature is not enabled")).into());
+						return Err(Error::Query(format!(
+							"tried to call an ML function `{name}` but the `ml` feature is not enabled"
+						))
+						.into());
 					}
 					None => Function::Normal(name, args.0).into(),
 				},

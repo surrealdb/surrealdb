@@ -1,13 +1,13 @@
 use crate::dbs::plan::Explanation;
 #[cfg(not(target_family = "wasm"))]
 use crate::err::Error;
-use crate::sql::order::OrderList;
-use crate::sql::value::Value;
+use crate::expr::order::OrderList;
+use crate::expr::value::Value;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 
 use rand::prelude::SliceRandom;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 #[cfg(not(target_family = "wasm"))]
 use rayon::prelude::ParallelSliceMut;
 use std::mem;

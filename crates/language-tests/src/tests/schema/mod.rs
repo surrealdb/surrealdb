@@ -5,13 +5,13 @@ mod bytes_hack;
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use semver::VersionReq;
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 use surrealdb_core::{
 	dbs::capabilities::{
 		Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 		RouteTarget, Targets,
 	},
-	sql::{Thing, Value as CoreValue},
+	expr::{Thing, Value as CoreValue},
 	syn,
 };
 
@@ -82,6 +82,9 @@ pub struct TestEnv {
 
 	#[serde(default)]
 	pub auth: bool,
+
+	#[serde(default)]
+	pub strict: bool,
 
 	pub namespace: Option<BoolOr<String>>,
 	pub database: Option<BoolOr<String>>,
@@ -173,7 +176,9 @@ impl<'de> Deserialize<'de> for TestExpectation {
 			} else if x.contains_key("error") {
 				ErrorTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Error)
 			} else {
-				Err(to_deser_error("Table does not match any the options, expected table to contain altleast one `match`, `value` or `error` field"))
+				Err(to_deser_error(
+					"Table does not match any the options, expected table to contain altleast one `match`, `value` or `error` field",
+				))
 			}
 		} else {
 			Err(to_deser_error("Expected a string or a table"))
@@ -467,7 +472,9 @@ impl<'de> Deserialize<'de> for TestLogin {
 			} else if x.contains_key("rid") {
 				TestRecordLogin::deserialize(v).map_err(to_deser_error).map(TestLogin::Record)
 			} else {
-				Err(to_deser_error("Table does not match any the options, expected table to contain altleast one `level` or `rid` field"))
+				Err(to_deser_error(
+					"Table does not match any the options, expected table to contain altleast one `level` or `rid` field",
+				))
 			}
 		} else {
 			Err(to_deser_error("Expected a table"))

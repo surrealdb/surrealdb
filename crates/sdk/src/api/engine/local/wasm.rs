@@ -1,32 +1,31 @@
+use crate::api::ExtraFeatures;
+use crate::api::Result;
+use crate::api::Surreal;
 use crate::api::conn;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
 use crate::dbs::Session;
 use crate::engine::tasks;
 use crate::iam::Level;
 use crate::kvs::Datastore;
-use crate::opt::auth::Root;
 use crate::opt::WaitFor;
+use crate::opt::auth::Root;
 use crate::options::EngineOptions;
-use crate::{Action, Notification};
 use async_channel::{Receiver, Sender};
-use futures::stream::poll_fn;
 use futures::FutureExt;
 use futures::StreamExt;
+use futures::stream::poll_fn;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use std::task::Poll;
-use tokio::sync::watch;
 use tokio::sync::RwLock;
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
 
@@ -171,13 +170,6 @@ pub(crate) async fn run_router(
 
 				let id = notification.id;
 				if let Some(sender) = live_queries.read().await.get(&id) {
-
-					let notification = Notification {
-						query_id: notification.id.0,
-						action: Action::from_core(notification.action),
-						data: notification.result,
-					};
-
 					if sender.send(notification).await.is_err() {
 						live_queries.write().await.remove(&id);
 						if let Err(error) =

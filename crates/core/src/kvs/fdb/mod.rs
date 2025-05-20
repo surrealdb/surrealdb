@@ -7,11 +7,12 @@ use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::kvs::{Check, Key, Val};
 use crate::vs::VersionStamp;
-use foundationdb::options::DatabaseOption;
-use foundationdb::options::MutationType;
+use anyhow::{Result, bail, ensure};
 use foundationdb::Database;
 use foundationdb::RangeOption;
 use foundationdb::Transaction as Tx;
+use foundationdb::options::DatabaseOption;
+use foundationdb::options::MutationType;
 use futures::StreamExt;
 use std::ops::Range;
 use std::sync::Arc;
@@ -77,7 +78,7 @@ impl Datastore {
 	/// dependent location (defined by FoundationDB) will be used.
 	/// See https://apple.github.io/foundationdb/administration.html
 	/// for more information on cluster connection files.
-	pub(crate) async fn new(path: &str) -> Result<Datastore, Error> {
+	pub(crate) async fn new(path: &str) -> Result<Datastore> {
 		// Initialize the FoundationDB Client API
 		static NETWORK: LazyLock<Arc<foundationdb::api::NetworkAutoStop>> =
 			LazyLock::new(|| Arc::new(unsafe { foundationdb::boot() }));
@@ -111,12 +112,12 @@ impl Datastore {
 					_fdbnet,
 				})
 			}
-			Err(e) => Err(Error::Ds(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
 		}
 	}
 
 	/// Shutdown the database
-	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+	pub(crate) async fn shutdown(&self) -> Result<()> {
 		// Nothing to do here
 		Ok(())
 	}
@@ -126,7 +127,7 @@ impl Datastore {
 		&self,
 		write: bool,
 		lock: bool,
-	) -> Result<Box<dyn crate::kvs::api::Transaction>, Error> {
+	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
@@ -142,7 +143,7 @@ impl Datastore {
 				inner: Some(inner),
 				save_points: Default::default(),
 			})),
-			Err(e) => Err(Error::Tx(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Tx(e.to_string()))),
 		}
 	}
 }
@@ -187,17 +188,15 @@ impl super::api::Transaction for Transaction {
 
 	/// Cancel a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Mark this transaction as done
 		self.done = true;
 		// Cancel this transaction
 		match self.inner.take() {
 			Some(inner) => inner.cancel().reset(),
-			None => return Err(fail!("Unable to cancel an already taken transaction")),
+			None => fail!("Unable to cancel an already taken transaction"),
 		};
 		// Continue
 		Ok(())
@@ -205,21 +204,17 @@ impl super::api::Transaction for Transaction {
 
 	/// Commit a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Mark this transaction as done
 		self.done = true;
 		// Commit this transaction
 		match self.inner.take() {
-			Some(inner) => inner.commit().await?,
-			None => return Err(fail!("Unable to commit an already taken transaction")),
+			Some(inner) => inner.commit().await.map_err(Error::from)?,
+			None => fail!("Unable to commit an already taken transaction"),
 		};
 		// Continue
 		Ok(())
@@ -227,15 +222,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool, Error> {
+	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
 		// FoundationDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check the key
 		let res = self.inner.as_ref().unwrap().get(&key, self.snapshot()).await?.is_some();
 		// Return result
@@ -244,15 +235,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>, Error> {
+	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
 		// FoundationDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Get the key
 		let res =
 			self.inner.as_ref().unwrap().get(&key, self.snapshot()).await?.map(|v| v.to_vec());
@@ -262,19 +249,13 @@ impl super::api::Transaction for Transaction {
 
 	/// Inserts or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<(), Error> {
+	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// FoundationDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Prepare the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, version, SaveOperation::Set).await?
@@ -293,19 +274,13 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<(), Error> {
+	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// FoundationDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
@@ -322,9 +297,7 @@ impl super::api::Transaction for Transaction {
 			inner.get(&key, self.snapshot()).await?.is_some()
 		};
 		// If the key exists we return an error
-		if key_exists {
-			return Err(Error::TxKeyAlreadyExists);
-		}
+		ensure!(!key_exists, Error::TxKeyAlreadyExists);
 		// Set the key if empty
 		inner.set(&key, &val);
 		// Confirm the save point
@@ -337,15 +310,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<(), Error> {
+	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, None, SaveOperation::Put).await?
@@ -364,7 +333,7 @@ impl super::api::Transaction for Transaction {
 		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => inner.set(&key, &val),
 			(None, None) => inner.set(&key, &val),
-			_ => return Err(Error::TxConditionNotMet),
+			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Confirm the save point
 		if let Some(prep) = prep {
@@ -376,15 +345,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn del(&mut self, key: Key) -> Result<(), Error> {
+	async fn del(&mut self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, None, SaveOperation::Del).await?
@@ -403,15 +368,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<(), Error> {
+	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Hydrate the savepoint if any
 		let prep = if self.save_points.is_some() {
 			self.save_point_prepare(&key, None, SaveOperation::Del).await?
@@ -430,7 +391,7 @@ impl super::api::Transaction for Transaction {
 		match (current_val, chk) {
 			(Some(v), Some(w)) if v == w => inner.clear(&key),
 			(None, None) => inner.clear(&key),
-			_ => return Err(Error::TxConditionNotMet),
+			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Confirm the save point
 		if let Some(prep) = prep {
@@ -442,15 +403,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a range of keys from the databases
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn delr(&mut self, rng: Range<Key>) -> Result<(), Error> {
+	async fn delr(&mut self, rng: Range<Key>) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// TODO: Check if we need savepoint with ranges
 
 		// Delete the key range
@@ -466,15 +423,11 @@ impl super::api::Transaction for Transaction {
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<Key>, Error> {
+	) -> Result<Vec<Key>> {
 		// FoundationDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
 
@@ -504,15 +457,11 @@ impl super::api::Transaction for Transaction {
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error> {
+	) -> Result<Vec<(Key, Val)>> {
 		// FoundationDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
 		// Create result set
@@ -536,11 +485,9 @@ impl super::api::Transaction for Transaction {
 
 	/// Obtain a new change timestamp for a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = _key.sprint()))]
-	async fn get_timestamp(&mut self, _key: Key) -> Result<VersionStamp, Error> {
+	async fn get_timestamp(&mut self, _key: Key) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Get the current read version
 		let res = self.inner.as_ref().unwrap().get_read_version().await?;
 		// Convert to a version stamp
@@ -557,15 +504,11 @@ impl super::api::Transaction for Transaction {
 		prefix: Key,
 		suffix: Key,
 		val: Val,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Build the key starting with the prefix
 		let mut key: Key = prefix.clone();
 		// Get the position of the timestamp

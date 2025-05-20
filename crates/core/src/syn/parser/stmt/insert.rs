@@ -1,10 +1,10 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{statements::InsertStatement, Data, Idiom, Subquery, Value},
+	expr::{Data, Idiom, Subquery, Value, statements::InsertStatement},
 	syn::{
 		error::bail,
-		parser::{mac::expected, ParseResult, Parser},
+		parser::{ParseResult, Parser, mac::expected},
 		token::t,
 	},
 };

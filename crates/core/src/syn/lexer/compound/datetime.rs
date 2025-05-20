@@ -3,9 +3,9 @@ use std::ops::RangeInclusive;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 
 use crate::syn::{
-	error::{bail, syntax_error, SyntaxError},
+	error::{SyntaxError, bail, syntax_error},
 	lexer::Lexer,
-	token::{t, Token},
+	token::{Token, t},
 };
 
 pub fn datetime(lexer: &mut Lexer, start: Token) -> Result<DateTime<Utc>, SyntaxError> {
