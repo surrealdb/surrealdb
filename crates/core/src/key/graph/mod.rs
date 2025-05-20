@@ -221,12 +221,16 @@ impl<'a> Graph<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::kvs::KeyDecode;
+	
+	use crate::sql::Thing as SqlThing;
+
 	#[test]
 	fn key() {
-		use super::*;
 		use crate::syn::Parse;
-		let fk = Thing::parse("other:test");
+
+		let fk: Thing = SqlThing::parse("other:test").into();
 		#[rustfmt::skip]
 		let val = Graph::new(
 			"testns",

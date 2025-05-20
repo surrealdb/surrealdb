@@ -233,8 +233,6 @@ impl Object {
 }
 
 impl Object {
-	/// Process this type returning a computed simple Value
-
 	/// Checks whether all object values are static values
 	pub(crate) fn is_static(&self) -> bool {
 		self.values().all(SqlValue::is_static)

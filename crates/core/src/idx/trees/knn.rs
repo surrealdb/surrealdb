@@ -617,7 +617,8 @@ pub struct KnnResult {
 #[cfg(test)]
 pub(super) mod tests {
 	use crate::expr::index::{Distance, VectorType};
-	use crate::expr::{Array, Number, Value};
+	use crate::expr::{Number, Value};
+	use crate::sql::Array as SqlArray;
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
@@ -689,8 +690,8 @@ pub(super) mod tests {
 				}
 			}
 			let line = line_result?;
-			let array = Array::parse(&line);
-			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array))?.into();
+			let array = SqlArray::parse(&line);
+			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array.into()))?.into();
 			res.push((i as DocId, vec));
 		}
 		Ok(res)

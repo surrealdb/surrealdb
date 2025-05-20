@@ -36,11 +36,12 @@ impl Value {
 mod tests {
 
 	use super::*;
+	use crate::sql::SqlValue;
 	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn merge_none() {
-		let mut res = Value::parse(
+		let mut res: Value = SqlValue::parse(
 			"{
 				test: true,
 				name: {
@@ -49,7 +50,7 @@ mod tests {
 					initials: 'TMH',
 				},
 			}",
-		);
+		).into();
 		let none = Value::None;
 		match res.merge(none.clone()).unwrap_err().downcast() {
 			Ok(Error::InvalidMerge {
@@ -62,7 +63,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn merge_empty() {
-		let mut res = Value::parse(
+		let mut res: Value = SqlValue::parse(
 			"{
 				test: true,
 				name: {
@@ -71,8 +72,8 @@ mod tests {
 					initials: 'TMH',
 				},
 			}",
-		);
-		let val = Value::parse(
+		).into();
+		let val: Value = SqlValue::parse(
 			"{
 				test: true,
 				name: {
@@ -81,7 +82,7 @@ mod tests {
 					initials: 'TMH',
 				},
 			}",
-		);
+		).into();
 		let mrg = Value::Object(Default::default());
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
@@ -89,7 +90,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn merge_basic() {
-		let mut res = Value::parse(
+		let mut res: Value = SqlValue::parse(
 			"{
 				test: true,
 				name: {
@@ -98,8 +99,8 @@ mod tests {
 					initials: 'TMH',
 				},
 			}",
-		);
-		let mrg = Value::parse(
+		).into();
+		let mrg: Value = SqlValue::parse(
 			"{
 				name: {
 					title: 'Mr',
@@ -107,8 +108,8 @@ mod tests {
 				},
 				tags: ['Rust', 'Golang', 'JavaScript'],
 			}",
-		);
-		let val = Value::parse(
+		).into();
+		let val: Value = SqlValue::parse(
 			"{
 				test: true,
 				name: {
@@ -118,14 +119,14 @@ mod tests {
 				},
 				tags: ['Rust', 'Golang', 'JavaScript'],
 			}",
-		);
+		).into();
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn merge_new_object() {
-		let mut res = Value::parse(
+		let mut res: Value = SqlValue::parse(
 			"{
 				test: true,
 				name: 'Tobie',
@@ -134,8 +135,8 @@ mod tests {
 					b: 2,
 				}
 			}",
-		);
-		let mrg = Value::parse(
+		).into();
+		let mrg: Value = SqlValue::parse(
 			"{
 				name: {
 					title: 'Mr',
@@ -146,8 +147,8 @@ mod tests {
 					b: NONE,
 				}
 			}",
-		);
-		let val = Value::parse(
+		).into();
+		let val: Value = SqlValue::parse(
 			"{
 				test: true,
 				name: {
@@ -157,7 +158,7 @@ mod tests {
 					a: 2,
 				},
 			}",
-		);
+		).into();
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}

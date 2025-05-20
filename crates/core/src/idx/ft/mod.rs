@@ -526,8 +526,9 @@ mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::SearchParams;
-	use crate::expr::statements::{DefineAnalyzerStatement, DefineStatement};
-	use crate::expr::{Array, LogicalPlan, Thing, Value};
+	use crate::expr::statements::{DefineAnalyzerStatement};
+	use crate::sql::{Statement, statements::DefineStatement};
+	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
@@ -624,10 +625,10 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let LogicalPlan::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
-		let az = Arc::new(az);
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		let mut stack = reblessive::TreeStack::new();
 
 		let btree_order = 5;
@@ -763,10 +764,10 @@ mod tests {
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-			let LogicalPlan::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 				panic!()
 			};
-			let az = Arc::new(az);
+			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 			let mut stack = reblessive::TreeStack::new();
 
 			let doc1: Thing = ("t", "doc1").into();
@@ -943,10 +944,10 @@ mod tests {
 	async fn concurrent_test() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let LogicalPlan::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
-		let az = Arc::new(az);
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		concurrent_task(ds.clone(), az.clone()).await;
 		let task1 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
 		let task2 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
@@ -972,10 +973,10 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let LogicalPlan::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
-		let az = Arc::new(az);
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		let doc: Thing = ("t", "doc1").into();
 		let content = Value::from(Array::from(vec![
 			"Enter a search term",

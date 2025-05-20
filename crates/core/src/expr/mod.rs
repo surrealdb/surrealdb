@@ -166,13 +166,6 @@ pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;
 
-// module reexporting parsing function to prevent a breaking change.
-mod parser {
-	pub use crate::syn::*;
-}
-
-pub use self::parser::{idiom, json, parse, subquery, thing, value};
-
 /// Result of functions which can impact the controlflow of query execution.
 pub type FlowResult<T> = Result<T, ControlFlow>;
 
@@ -213,4 +206,33 @@ impl FlowResultExt for FlowResult<Value> {
 			Ok(x) => Ok(x),
 		}
 	}
+}
+
+pub fn idiom(input: &str) -> Result<Idiom> {
+	let idiom = crate::sql::idiom(input)?;
+	Ok(idiom.into())
+}
+
+pub fn json(input: &str) -> Result<Value> {
+	let value = crate::sql::json(input)?;
+	Ok(value.into())
+}
+
+pub fn parse(input: &str) -> Result<Query> {
+	let query = crate::sql::parse(input)?;
+	Ok(query.into())
+}
+
+pub fn subquery(input: &str) -> Result<Subquery> {
+	let query = crate::sql::subquery(input)?;
+	Ok(query.into())
+}
+
+pub fn thing(input: &str) -> Result<Thing> {
+	let thing = crate::sql::thing(input)?;
+	Ok(thing.into())
+}
+pub fn value(input: &str) -> Result<Value> {
+	let value = crate::sql::value(input)?;
+	Ok(value.into())
 }

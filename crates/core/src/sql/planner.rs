@@ -9,6 +9,6 @@ impl SqlToLogical {
 	}
 
 	pub(crate) fn statement_to_logical(&self, stmt: Statement) -> Result<crate::expr::LogicalPlan> {
-		todo!("Convert SQL statement to logical statement");
+		Ok(stmt.into())
 	}
 }

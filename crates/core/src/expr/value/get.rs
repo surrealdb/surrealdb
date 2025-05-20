@@ -599,14 +599,16 @@ mod tests {
 
 	use super::*;
 	use crate::dbs::test::mock;
+	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::expr::idiom::Idiom;
+	use crate::sql::SqlValue;
 	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn get_none() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::default();
-		let val = Value::parse("{ test: { other: null, something: 123 } }");
+		let idi: Idiom = SqlIdiom::default().into();
+		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -615,8 +617,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_basic() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something");
-		let val = Value::parse("{ test: { other: null, something: 123 } }");
+		let idi: Idiom = SqlIdiom::parse("test.something").into();
+		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
@@ -626,12 +628,12 @@ mod tests {
 	async fn get_basic_deep_ok() {
 		let (ctx, opt) = mock().await;
 		let depth = 20;
-		let idi = Idiom::parse(&format!("{}something", "test.".repeat(depth)));
-		let val = Value::parse(&format!(
+		let idi: Idiom = SqlIdiom::parse(&format!("{}something", "test.".repeat(depth))).into();
+		let val: Value = SqlValue::parse(&format!(
 			"{} {{ other: null, something: 123 {} }}",
 			"{ test: ".repeat(depth),
 			"}".repeat(depth)
-		));
+		)).into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
@@ -641,8 +643,8 @@ mod tests {
 	async fn get_basic_deep_ko() {
 		let (ctx, opt) = mock().await;
 		let depth = 2000;
-		let idi = Idiom::parse(&format!("{}something", "test.".repeat(depth)));
-		let val = Value::parse("{}"); // A deep enough object cannot be parsed.
+		let idi: Idiom = SqlIdiom::parse(&format!("{}something", "test.".repeat(depth))).into();
+		let val: Value = SqlValue::parse("{}").into(); // A deep enough object cannot be parsed.
 		let mut stack = reblessive::tree::TreeStack::new();
 		let err = stack
 			.enter(|stk| val.get(stk, &ctx, &opt, None, &idi))
@@ -661,8 +663,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_thing() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.other");
-		let val = Value::parse("{ test: { other: test:tobie, something: 123 } }");
+		let idi: Idiom = SqlIdiom::parse("test.other").into();
+		let val: Value = SqlValue::parse("{ test: { other: test:tobie, something: 123 } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -677,8 +679,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_array() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something[1]");
-		let val = Value::parse("{ test: { something: [123, 456, 789] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something[1]").into();
+		let val: Value = SqlValue::parse("{ test: { something: [123, 456, 789] } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(456));
@@ -687,8 +689,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_array_thing() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something[1]");
-		let val = Value::parse("{ test: { something: [test:tobie, test:jaime] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something[1]").into();
+		let val: Value = SqlValue::parse("{ test: { something: [test:tobie, test:jaime] } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -703,8 +705,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_array_field() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something[1].age");
-		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something[1].age").into();
+		let val: Value = SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(36));
@@ -713,8 +715,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_array_fields() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something[*].age");
-		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something[*].age").into();
+		let val: Value = SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
@@ -723,8 +725,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_array_fields_flat() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something.age");
-		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something.age").into();
+		let val: Value = SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
@@ -733,8 +735,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_array_where_field() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something[WHERE age > 35].age");
-		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something[WHERE age > 35].age").into();
+		let val: Value = SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(vec![36]));
@@ -743,8 +745,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_array_where_fields() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something[WHERE age > 35]");
-		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something[WHERE age > 35]").into();
+		let val: Value = SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -758,8 +760,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_array_where_fields_array_index() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something[WHERE age > 30][0]");
-		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something[WHERE age > 30][0]").into();
+		let val: Value = SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -773,8 +775,8 @@ mod tests {
 	#[tokio::test]
 	async fn get_future_embedded_field() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test.something[WHERE age > 35]");
-		let val = Value::parse("{ test: <future> { { something: [{ age: 34 }, { age: 36 }] } } }");
+		let idi: Idiom = SqlIdiom::parse("test.something[WHERE age > 35]").into();
+		let val: Value = SqlValue::parse("{ test: <future> { { something: [{ age: 34 }, { age: 36 }] } } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -788,9 +790,9 @@ mod tests {
 	#[tokio::test]
 	async fn get_future_embedded_field_with_reference() {
 		let (ctx, opt) = mock().await;
-		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
-		let idi = Idiom::parse("test.something[WHERE age > 35]");
-		let val = Value::parse("{ test: <future> { { something: something } } }");
+		let doc: Value = SqlValue::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }").into();
+		let idi: Idiom = SqlIdiom::parse("test.something[WHERE age > 35]").into();
+		let val: Value = SqlValue::parse("{ test: <future> { { something: something } } }").into();
 		let cur = doc.into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res =
@@ -806,9 +808,9 @@ mod tests {
 	#[tokio::test]
 	async fn get_object_with_thing_based_key() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test[city:london]");
-		let val =
-			Value::parse("{ test: { 'city:london': true, other: test:tobie, something: 123 } }");
+		let idi: Idiom = SqlIdiom::parse("test[city:london]").into();
+		let val: Value =
+			SqlValue::parse("{ test: { 'city:london': true, other: test:tobie, something: 123 } }").into();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(true));

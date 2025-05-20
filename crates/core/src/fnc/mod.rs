@@ -1582,7 +1582,7 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::{
 		dbs::capabilities::ExperimentalTarget,
-		expr::{Function, LogicalPlan, Query, Value, statements::OutputStatement},
+		sql::{Function, Statement, Query, SqlValue, statements::OutputStatement},
 	};
 
 	#[tokio::test]
@@ -1622,8 +1622,8 @@ mod tests {
 
 			if let Ok(Query(mut x)) = res {
 				match x.0.pop() {
-					Some(LogicalPlan::Output(OutputStatement {
-						what: Value::Function(x),
+					Some(Statement::Output(OutputStatement {
+						what: SqlValue::Function(x),
 						..
 					})) => match *x {
 						Function::Normal(parsed_name, _) => {

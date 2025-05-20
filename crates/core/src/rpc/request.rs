@@ -5,10 +5,10 @@ use crate::sql::Array;
 use crate::sql::Number;
 use crate::sql::SqlValue;
 
-pub static ID: &'static str = "id";
-pub static METHOD: &'static str = "method";
-pub static PARAMS: &'static str = "params";
-pub static VERSION: &'static str = "version";
+pub static ID: &str = "id";
+pub static METHOD: &str = "method";
+pub static PARAMS: &str = "params";
+pub static VERSION: &str = "version";
 
 #[derive(Debug)]
 pub struct Request {

@@ -901,7 +901,7 @@ impl Datastore {
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
 	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::expr::parse;
+	/// use surrealdb_core::sql::parse;
 	/// use anyhow::Error;
 	///
 	/// #[tokio::main]

@@ -222,8 +222,10 @@ impl From<expr::Geometry> for Geometry {
 mod tests {
 	mod into_json {
 		use crate::expr;
-		use crate::expr::Value;
+		use crate::expr::Thing;
+use crate::expr::Value;
 		use crate::expr::from_value;
+use crate::sql;
 		use chrono::DateTime;
 		use chrono::Utc;
 		use geo::LineString;
@@ -542,7 +544,7 @@ mod tests {
 		#[test]
 		fn thing() {
 			let record_id = "foo:bar";
-			let thing = expr::thing(record_id).unwrap();
+			let thing: Thing = sql::thing(record_id).unwrap().into();
 			let value = Value::Thing(thing.clone());
 
 			let simple_json = Json::from(value.clone());

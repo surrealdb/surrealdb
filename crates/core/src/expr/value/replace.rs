@@ -22,12 +22,13 @@ mod tests {
 
 	use super::*;
 	use crate::syn::Parse;
+	use crate::sql::SqlValue;
 
 	#[tokio::test]
 	async fn replace() {
-		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("{ other: true }");
-		let obj = Value::parse("{ other: true }");
+		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let res: Value = SqlValue::parse("{ other: true }").into();
+		let obj: Value = SqlValue::parse("{ other: true }").into();
 		val.replace(obj).unwrap();
 		assert_eq!(res, val);
 	}

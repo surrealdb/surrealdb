@@ -2610,7 +2610,7 @@ async fn select_memory_ordered_collector() -> Result<()> {
 	// Extract the array from a value
 	let mut get_array = || -> Result<_> {
 		let v = t.next_value()?;
-		if let SqlValue::Array(a) = &v {
+		if let Value::Array(a) = &v {
 			assert_eq!(a.len(), 1500);
 			Ok(a.to_vec())
 		} else {
@@ -2685,7 +2685,7 @@ async fn select_limit_start() -> Result<()> {
 				]",
 		)?;
 		let r = t.next()?.result?;
-		if let SqlValue::Array(a) = r {
+		if let Value::Array(a) = r {
 			assert_eq!(a.len(), 10);
 		} else {
 			panic!("Unexpected value: {r:#}");
@@ -2725,7 +2725,7 @@ async fn select_limit_start_order() -> Result<()> {
 				]",
 		)?;
 		let r = t.next()?.result?;
-		if let SqlValue::Array(a) = r {
+		if let Value::Array(a) = r {
 			assert_eq!(a.len(), 10);
 		} else {
 			panic!("Unexpected value: {r:#}");

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::expr::{self, Value as SurValue};
-
+use crate::expr::{Value as SurValue};
+use crate::sql;
 use js::{
 	Array, Ctx, Exception, FromJs, JsLifetime, Result, Value,
 	class::Trace,
@@ -96,7 +96,7 @@ impl<'js> FromJs<'js> for QueryVariables {
 impl Query {
 	#[qjs(constructor)]
 	pub fn new(ctx: Ctx<'_>, text: String, variables: Opt<QueryVariables>) -> Result<Self> {
-		let query = expr::value(&text)
+		let query = sql::value(&text)
 			.map_err(|e| {
 				let error_text = format!("{}", e);
 				Exception::throw_type(&ctx, &error_text)

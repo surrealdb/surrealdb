@@ -286,8 +286,6 @@ impl Range {
 		}
 	}
 
-	/// Process this type returning a computed simple Value
-
 	/// Validate that a Range contains only computed Values
 	pub fn validate_computed(&self) -> Result<()> {
 		match &self.beg {
