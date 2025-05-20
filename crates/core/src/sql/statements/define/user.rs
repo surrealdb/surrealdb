@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{
-	Base, Duration, Ident, Strand, Value, escape::QuoteStr, fmt::Fmt, user::UserDuration,
+
+use crate::sql::{
+	Base, Duration, Ident, Strand, SqlValue, escape::QuoteStr, fmt::Fmt, user::UserDuration,
 };
 use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail};
@@ -101,122 +101,7 @@ impl DefineUserStatement {
 		self.duration.session = duration;
 	}
 
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
-		// Check the statement type
-		match self.base {
-			Base::Root => {
-				// Fetch the transaction
-				let txn = ctx.tx();
-				// Check if the definition exists
-				if txn.get_root_user(&self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite {
-						bail!(Error::UserRootAlreadyExists {
-							name: self.name.to_string(),
-						});
-					}
-				}
-				// Process the statement
-				let key = crate::key::root::us::new(&self.name);
-				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
-						..self.clone()
-					})?,
-					None,
-				)
-				.await?;
-				// Clear the cache
-				txn.clear();
-				// Ok all good
-				Ok(Value::None)
-			}
-			Base::Ns => {
-				// Fetch the transaction
-				let txn = ctx.tx();
-				// Check if the definition exists
-				if txn.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite {
-						bail!(Error::UserNsAlreadyExists {
-							name: self.name.to_string(),
-							ns: opt.ns()?.into(),
-						});
-					}
-				}
-				// Process the statement
-				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
-				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
-						..self.clone()
-					})?,
-					None,
-				)
-				.await?;
-				// Clear the cache
-				txn.clear();
-				// Ok all good
-				Ok(Value::None)
-			}
-			Base::Db => {
-				// Fetch the transaction
-				let txn = ctx.tx();
-				// Check if the definition exists
-				let (ns, db) = opt.ns_db()?;
-				if txn.get_db_user(ns, db, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite {
-						bail!(Error::UserDbAlreadyExists {
-							name: self.name.to_string(),
-							ns: ns.into(),
-							db: db.into(),
-						});
-					}
-				}
-				// Process the statement
-				let key = crate::key::database::us::new(ns, db, &self.name);
-				txn.get_or_add_ns(ns, opt.strict).await?;
-				txn.get_or_add_db(ns, db, opt.strict).await?;
-				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
-						..self.clone()
-					})?,
-					None,
-				)
-				.await?;
-				// Clear the cache
-				txn.clear();
-				// Ok all good
-				Ok(Value::None)
-			}
-			// Other levels are not supported
-			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
-		}
 	}
-}
 
 impl Display for DefineUserStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -264,18 +149,35 @@ impl Display for DefineUserStatement {
 	}
 }
 
-impl InfoStructure for DefineUserStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"base".to_string() => self.base.structure(),
-			"hash".to_string() => self.hash.into(),
-			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
-			"duration".to_string() => Value::from(map! {
-				"token".to_string() => self.duration.token.into(),
-				"session".to_string() => self.duration.session.into(),
-			}),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+
+impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement {
+	fn from(v: DefineUserStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			base: v.base.into(),
+			hash: v.hash,
+			code: v.code,
+			roles: v.roles.into_iter().map(Into::into).collect(),
+			duration: v.duration.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineUserStatement> for DefineUserStatement {
+	fn from(v: crate::expr::statements::DefineUserStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			base: v.base.into(),
+			hash: v.hash,
+			code: v.code,
+			roles: v.roles.into_iter().map(Into::into).collect(),
+			duration: v.duration.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
 	}
 }

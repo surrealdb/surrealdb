@@ -16,7 +16,7 @@ use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::iam::signin::signin;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 use tower_http::limit::RequestBodyLimitLayer;
 
 #[derive(Serialize)]
@@ -66,7 +66,7 @@ async fn handler(
 	// Parse the provided data as JSON
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
-		Ok(Value::Object(vars)) => {
+		Ok(SqlValue::Object(vars)) => {
 			match signin(kvs, &mut session, vars).await {
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {

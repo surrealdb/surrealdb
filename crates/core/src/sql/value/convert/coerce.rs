@@ -7,9 +7,9 @@ use std::{
 use geo::Point;
 use rust_decimal::Decimal;
 
-use crate::expr::{
+use crate::sql::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Kind, Literal, Number,
-	Object, Range, Regex, Strand, Table, Thing, Uuid, Value, array::Uniq, kind::HasKind,
+	Object, Range, Regex, Strand, Table, Thing, Uuid, SqlValue, array::Uniq, kind::HasKind,
 	value::Null,
 };
 
@@ -17,7 +17,7 @@ use crate::expr::{
 pub enum CoerceError {
 	// Coercion error at the end.
 	InvalidKind {
-		from: Value,
+		from: SqlValue,
 		into: String,
 	},
 	InvalidLength {
@@ -90,31 +90,31 @@ pub trait Coerce: Sized {
 	/// Returns if calling coerce on the value will succeed or not.
 	///
 	/// If `T::can_coerce(&v)` returns `false` then `T::coerce(v) should not
-	fn can_coerce(v: &Value) -> bool;
+	fn can_coerce(v: &SqlValue) -> bool;
 
 	/// Coerce a value.
-	fn coerce(v: Value) -> Result<Self, CoerceError>;
+	fn coerce(v: SqlValue) -> Result<Self, CoerceError>;
 }
 
-impl Coerce for Value {
-	fn can_coerce(_: &Value) -> bool {
+impl Coerce for SqlValue {
+	fn can_coerce(_: &SqlValue) -> bool {
 		true
 	}
 
-	fn coerce(v: Value) -> Result<Self, CoerceError> {
+	fn coerce(v: SqlValue) -> Result<Self, CoerceError> {
 		Ok(v)
 	}
 }
 
 impl Coerce for Null {
-	fn can_coerce(v: &Value) -> bool {
-		matches!(v, Value::Null)
+	fn can_coerce(v: &SqlValue) -> bool {
+		matches!(v, SqlValue::Null)
 	}
 
-	fn coerce(v: Value) -> Result<Null, CoerceError> {
+	fn coerce(v: SqlValue) -> Result<Null, CoerceError> {
 		match v {
 			// Allow any null value
-			Value::Null => Ok(Null),
+			SqlValue::Null => Ok(Null),
 			// Anything else raises an error
 			_ => Err(CoerceError::InvalidKind {
 				from: v,
@@ -125,8 +125,8 @@ impl Coerce for Null {
 }
 
 impl Coerce for i64 {
-	fn can_coerce(v: &Value) -> bool {
-		let Value::Number(n) = v else {
+	fn can_coerce(v: &SqlValue) -> bool {
+		let SqlValue::Number(n) = v else {
 			return false;
 		};
 		match n {
@@ -136,14 +136,14 @@ impl Coerce for i64 {
 		}
 	}
 
-	fn coerce(val: Value) -> Result<Self, CoerceError> {
+	fn coerce(val: SqlValue) -> Result<Self, CoerceError> {
 		match val {
 			// Allow any int number
-			Value::Number(Number::Int(v)) => Ok(v),
+			SqlValue::Number(Number::Int(v)) => Ok(v),
 			// Attempt to convert an float number
-			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as i64),
+			SqlValue::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as i64),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
+			SqlValue::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
 				// The Decimal can be represented as an i64
 				Ok(v) => Ok(v),
 				// The Decimal is out of bounds
@@ -162,8 +162,8 @@ impl Coerce for i64 {
 }
 
 impl Coerce for f64 {
-	fn can_coerce(v: &Value) -> bool {
-		let Value::Number(n) = v else {
+	fn can_coerce(v: &SqlValue) -> bool {
+		let SqlValue::Number(n) = v else {
 			return false;
 		};
 		match n {
@@ -173,14 +173,14 @@ impl Coerce for f64 {
 	}
 
 	/// Try to coerce this value to an `f64`
-	fn coerce(val: Value) -> Result<f64, CoerceError> {
+	fn coerce(val: SqlValue) -> Result<f64, CoerceError> {
 		match val {
 			// Allow any float number
-			Value::Number(Number::Float(v)) => Ok(v),
+			SqlValue::Number(Number::Float(v)) => Ok(v),
 			// Attempt to convert an int number
-			Value::Number(Number::Int(v)) => Ok(v as f64),
+			SqlValue::Number(Number::Int(v)) => Ok(v as f64),
 			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) => match v.try_into() {
+			SqlValue::Number(Number::Decimal(v)) => match v.try_into() {
 				// The Decimal can be represented as a f64
 				Ok(v) => Ok(v),
 				// This Decimal loses precision
@@ -199,8 +199,8 @@ impl Coerce for f64 {
 }
 
 impl Coerce for Decimal {
-	fn can_coerce(v: &Value) -> bool {
-		let Value::Number(n) = v else {
+	fn can_coerce(v: &SqlValue) -> bool {
+		let SqlValue::Number(n) = v else {
 			return false;
 		};
 		match n {
@@ -209,14 +209,14 @@ impl Coerce for Decimal {
 		}
 	}
 
-	fn coerce(val: Value) -> Result<Self, CoerceError> {
+	fn coerce(val: SqlValue) -> Result<Self, CoerceError> {
 		match val {
 			// Allow any decimal number
-			Value::Number(Number::Decimal(x)) => Ok(x),
+			SqlValue::Number(Number::Decimal(x)) => Ok(x),
 			// Attempt to convert an int number
-			Value::Number(Number::Int(v)) => Ok(Decimal::from(v)),
+			SqlValue::Number(Number::Int(v)) => Ok(Decimal::from(v)),
 			// Attempt to convert an float number
-			Value::Number(Number::Float(v)) => match Decimal::try_from(v).ok() {
+			SqlValue::Number(Number::Float(v)) => match Decimal::try_from(v).ok() {
 				// The Float can be represented as a Decimal
 				Some(v) => Ok(v),
 				// This Float does not convert to a Decimal
@@ -235,22 +235,22 @@ impl Coerce for Decimal {
 }
 
 impl Coerce for String {
-	fn can_coerce(v: &Value) -> bool {
+	fn can_coerce(v: &SqlValue) -> bool {
 		Strand::can_coerce(v)
 	}
 
-	fn coerce(v: Value) -> Result<Self, CoerceError> {
+	fn coerce(v: SqlValue) -> Result<Self, CoerceError> {
 		Strand::coerce(v).map(|x| x.0)
 	}
 }
 
 impl Coerce for File {
-	fn can_coerce(v: &Value) -> bool {
-		matches!(v, Value::File(_))
+	fn can_coerce(v: &SqlValue) -> bool {
+		matches!(v, SqlValue::File(_))
 	}
 
-	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		if let Value::File(x) = v {
+	fn coerce(v: SqlValue) -> Result<Self, CoerceError> {
+		if let SqlValue::File(x) = v {
 			Ok(x)
 		} else {
 			Err(CoerceError::InvalidKind {
@@ -262,12 +262,12 @@ impl Coerce for File {
 }
 
 impl Coerce for Point<f64> {
-	fn can_coerce(v: &Value) -> bool {
-		matches!(v, Value::Geometry(Geometry::Point(_)))
+	fn can_coerce(v: &SqlValue) -> bool {
+		matches!(v, SqlValue::Geometry(Geometry::Point(_)))
 	}
 
-	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		if let Value::Geometry(Geometry::Point(x)) = v {
+	fn coerce(v: SqlValue) -> Result<Self, CoerceError> {
+		if let SqlValue::Geometry(Geometry::Point(x)) = v {
 			Ok(x)
 		} else {
 			Err(CoerceError::InvalidKind {
@@ -279,14 +279,14 @@ impl Coerce for Point<f64> {
 }
 
 impl<T: Coerce + HasKind> Coerce for Vec<T> {
-	fn can_coerce(v: &Value) -> bool {
-		let Value::Array(a) = v else {
+	fn can_coerce(v: &SqlValue) -> bool {
+		let SqlValue::Array(a) = v else {
 			return false;
 		};
 		a.iter().all(T::can_coerce)
 	}
 
-	fn coerce(v: Value) -> Result<Self, CoerceError> {
+	fn coerce(v: SqlValue) -> Result<Self, CoerceError> {
 		if !v.is_array() {
 			return Err(CoerceError::InvalidKind {
 				from: v,
@@ -306,14 +306,14 @@ impl<T: Coerce + HasKind> Coerce for Vec<T> {
 }
 
 impl<T: Coerce + HasKind> Coerce for BTreeMap<String, T> {
-	fn can_coerce(v: &Value) -> bool {
-		let Value::Object(a) = v else {
+	fn can_coerce(v: &SqlValue) -> bool {
+		let SqlValue::Object(a) = v else {
 			return false;
 		};
 		a.values().all(T::can_coerce)
 	}
 
-	fn coerce(v: Value) -> Result<Self, CoerceError> {
+	fn coerce(v: SqlValue) -> Result<Self, CoerceError> {
 		if !v.is_object() {
 			return Err(CoerceError::InvalidKind {
 				from: v,
@@ -338,14 +338,14 @@ impl<T: Coerce + HasKind> Coerce for BTreeMap<String, T> {
 }
 
 impl<T: Coerce + HasKind, S: BuildHasher + Default> Coerce for HashMap<String, T, S> {
-	fn can_coerce(v: &Value) -> bool {
-		let Value::Object(a) = v else {
+	fn can_coerce(v: &SqlValue) -> bool {
+		let SqlValue::Object(a) = v else {
 			return false;
 		};
 		a.values().all(T::can_coerce)
 	}
 
-	fn coerce(v: Value) -> Result<Self, CoerceError> {
+	fn coerce(v: SqlValue) -> Result<Self, CoerceError> {
 		if !v.is_object() {
 			return Err(CoerceError::InvalidKind {
 				from: v,
@@ -373,12 +373,12 @@ macro_rules! impl_direct {
 	($($name:ident => $inner:ty $(= $kind:ident)?),*$(,)?) => {
 		$(
 		impl Coerce for $inner {
-			fn can_coerce(v: &Value) -> bool{
-				matches!(v, Value::$name(_))
+			fn can_coerce(v: &SqlValue) -> bool{
+				matches!(v, SqlValue::$name(_))
 			}
 
-			fn coerce(v: Value) -> Result<Self, CoerceError> {
-				if let Value::$name(x) = v {
+			fn coerce(v: SqlValue) -> Result<Self, CoerceError> {
+				if let SqlValue::$name(x) = v {
 					return Ok(x);
 				} else {
 					return Err(CoerceError::InvalidKind{
@@ -419,7 +419,7 @@ impl_direct! {
 }
 
 // Coerce to runtime value implementations
-impl Value {
+impl SqlValue {
 	pub fn can_coerce_to<T: Coerce>(&self) -> bool {
 		T::can_coerce(self)
 	}
@@ -484,7 +484,7 @@ impl Value {
 
 	fn can_coerce_to_array_len(&self, kind: &Kind, len: u64) -> bool {
 		match self {
-			Value::Array(a) => {
+			SqlValue::Array(a) => {
 				a.len() as u64 == len && a.iter().all(|x| x.can_coerce_to_kind(kind))
 			}
 			_ => false,
@@ -493,14 +493,14 @@ impl Value {
 
 	fn can_coerce_to_array(&self, kind: &Kind) -> bool {
 		match self {
-			Value::Array(a) => a.iter().all(|x| x.can_coerce_to_kind(kind)),
+			SqlValue::Array(a) => a.iter().all(|x| x.can_coerce_to_kind(kind)),
 			_ => false,
 		}
 	}
 
 	fn can_coerce_to_record(&self, val: &[Table]) -> bool {
 		match self {
-			Value::Thing(t) => t.is_record_type(val),
+			SqlValue::Thing(t) => t.is_record_type(val),
 			_ => false,
 		}
 	}
@@ -514,7 +514,7 @@ impl Value {
 	}
 
 	fn can_coerce_to_file_buckets(&self, buckets: &[Ident]) -> bool {
-		matches!(self, Value::File(f) if f.is_bucket_type(buckets))
+		matches!(self, SqlValue::File(f) if f.is_bucket_type(buckets))
 	}
 
 	/// Convert the value using coercion rules.
@@ -528,41 +528,41 @@ impl Value {
 	}
 
 	/// Try to coerce this value to the specified `Kind`
-	pub(crate) fn coerce_to_kind(self, kind: &Kind) -> Result<Value, CoerceError> {
+	pub(crate) fn coerce_to_kind(self, kind: &Kind) -> Result<SqlValue, CoerceError> {
 		// Attempt to convert to the desired type
 		match kind {
 			Kind::Any => Ok(self),
-			Kind::Null => self.coerce_to::<Null>().map(Value::from),
-			Kind::Bool => self.coerce_to::<bool>().map(Value::from),
-			Kind::Int => self.coerce_to::<i64>().map(Value::from),
-			Kind::Float => self.coerce_to::<f64>().map(Value::from),
-			Kind::Decimal => self.coerce_to::<Decimal>().map(Value::from),
-			Kind::Number => self.coerce_to::<Number>().map(Value::from),
-			Kind::String => self.coerce_to::<Strand>().map(Value::from),
-			Kind::Datetime => self.coerce_to::<Datetime>().map(Value::from),
-			Kind::Duration => self.coerce_to::<Duration>().map(Value::from),
-			Kind::Object => self.coerce_to::<Object>().map(Value::from),
-			Kind::Point => self.coerce_to::<Point<f64>>().map(Value::from),
-			Kind::Bytes => self.coerce_to::<Bytes>().map(Value::from),
-			Kind::Uuid => self.coerce_to::<Uuid>().map(Value::from),
-			Kind::Regex => self.coerce_to::<Regex>().map(Value::from),
-			Kind::Range => self.coerce_to::<Box<Range>>().map(Value::from),
-			Kind::Function(_, _) => self.coerce_to::<Box<Closure>>().map(Value::from),
+			Kind::Null => self.coerce_to::<Null>().map(SqlValue::from),
+			Kind::Bool => self.coerce_to::<bool>().map(SqlValue::from),
+			Kind::Int => self.coerce_to::<i64>().map(SqlValue::from),
+			Kind::Float => self.coerce_to::<f64>().map(SqlValue::from),
+			Kind::Decimal => self.coerce_to::<Decimal>().map(SqlValue::from),
+			Kind::Number => self.coerce_to::<Number>().map(SqlValue::from),
+			Kind::String => self.coerce_to::<Strand>().map(SqlValue::from),
+			Kind::Datetime => self.coerce_to::<Datetime>().map(SqlValue::from),
+			Kind::Duration => self.coerce_to::<Duration>().map(SqlValue::from),
+			Kind::Object => self.coerce_to::<Object>().map(SqlValue::from),
+			Kind::Point => self.coerce_to::<Point<f64>>().map(SqlValue::from),
+			Kind::Bytes => self.coerce_to::<Bytes>().map(SqlValue::from),
+			Kind::Uuid => self.coerce_to::<Uuid>().map(SqlValue::from),
+			Kind::Regex => self.coerce_to::<Regex>().map(SqlValue::from),
+			Kind::Range => self.coerce_to::<Box<Range>>().map(SqlValue::from),
+			Kind::Function(_, _) => self.coerce_to::<Box<Closure>>().map(SqlValue::from),
 			Kind::Set(t, l) => match l {
-				Some(l) => self.coerce_to_set_kind_len(t, *l).map(Value::from),
-				None => self.coerce_to_set_kind(t).map(Value::from),
+				Some(l) => self.coerce_to_set_kind_len(t, *l).map(SqlValue::from),
+				None => self.coerce_to_set_kind(t).map(SqlValue::from),
 			},
 			Kind::Array(t, l) => match l {
-				Some(l) => self.coerce_to_array_type_len(t, *l).map(Value::from),
-				None => self.coerce_to_array_type(t).map(Value::from),
+				Some(l) => self.coerce_to_array_type_len(t, *l).map(SqlValue::from),
+				None => self.coerce_to_array_type(t).map(SqlValue::from),
 			},
 			Kind::Record(t) => match t.is_empty() {
-				true => self.coerce_to::<Thing>().map(Value::from),
-				false => self.coerce_to_record_kind(t).map(Value::from),
+				true => self.coerce_to::<Thing>().map(SqlValue::from),
+				false => self.coerce_to_record_kind(t).map(SqlValue::from),
 			},
 			Kind::Geometry(t) => match t.is_empty() {
-				true => self.coerce_to::<Geometry>().map(Value::from),
-				false => self.coerce_to_geometry_kind(t).map(Value::from),
+				true => self.coerce_to::<Geometry>().map(SqlValue::from),
+				false => self.coerce_to_geometry_kind(t).map(SqlValue::from),
 			},
 			Kind::Option(k) => match self {
 				Self::None => Ok(Self::None),
@@ -588,16 +588,16 @@ impl Value {
 			}),
 			Kind::File(buckets) => {
 				if buckets.is_empty() {
-					self.coerce_to::<File>().map(Value::from)
+					self.coerce_to::<File>().map(SqlValue::from)
 				} else {
-					self.coerce_to_file_buckets(buckets).map(Value::from)
+					self.coerce_to_file_buckets(buckets).map(SqlValue::from)
 				}
 			}
 		}
 	}
 
 	/// Try to coerce this value to a Literal, returns a `Value` with the coerced value
-	pub(crate) fn coerce_to_literal(self, literal: &Literal) -> Result<Value, CoerceError> {
+	pub(crate) fn coerce_to_literal(self, literal: &Literal) -> Result<SqlValue, CoerceError> {
 		if literal.validate_value(&self) {
 			Ok(self)
 		} else {
@@ -612,7 +612,7 @@ impl Value {
 	pub(crate) fn coerce_to_record_kind(self, val: &[Table]) -> Result<Thing, CoerceError> {
 		match self {
 			// Records are allowed if correct type
-			Value::Thing(v) if v.is_record_type(val) => Ok(v),
+			SqlValue::Thing(v) if v.is_record_type(val) => Ok(v),
 			// Anything else raises an error
 			this => {
 				let mut kind = "record<".to_string();
@@ -635,7 +635,7 @@ impl Value {
 	/// Try to coerce this value to a `Geometry` of a certain type
 	pub(crate) fn coerce_to_geometry_kind(self, val: &[String]) -> Result<Geometry, CoerceError> {
 		if self.is_geometry_type(val) {
-			let Value::Geometry(x) = self else {
+			let SqlValue::Geometry(x) = self else {
 				// Checked above in is_geometry_type
 				unreachable!()
 			};

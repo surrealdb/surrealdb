@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Data, FlowResultExt as _, Output, Timeout, Value, Values, Version};
+use crate::sql::{Data, FlowResultExt as _, Output, Timeout, SqlValue, Values, Version};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use anyhow::{Result, ensure};
 
@@ -34,78 +34,6 @@ pub struct CreateStatement {
 	pub version: Option<Version>,
 }
 
-impl CreateStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Valid options?
-		opt.valid_for_db()?;
-		// Create a new iterator
-		let mut i = Iterator::new();
-		// Assign the statement
-		let stm = Statement::from(self);
-		// Propagate the version to the underlying datastore
-		let version = match &self.version {
-			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
-			_ => None,
-		};
-		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_version(version);
-		// Check if there is a timeout
-		let ctx = stm.setup_timeout(ctx)?;
-		// Get a query planner
-		let mut planner = QueryPlanner::new();
-		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
-		// Loop over the create targets
-		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| {
-				// double match to avoid allocation
-				if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
-					let Ok(Error::InvalidStatementTarget {
-						value,
-					}) = e.downcast()
-					else {
-						unreachable!()
-					};
-					anyhow::Error::new(Error::CreateStatement {
-						value,
-					})
-				} else {
-					e
-				}
-			})?;
-		}
-		// Attach the query planner to the context
-		let ctx = stm.setup_query_planner(planner, ctx);
-		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
-	}
-}
-
 impl fmt::Display for CreateStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "CREATE")?;
@@ -129,5 +57,34 @@ impl fmt::Display for CreateStatement {
 			f.write_str(" PARALLEL")?
 		}
 		Ok(())
+	}
+}
+
+
+impl From<CreateStatement> for crate::expr::statements::CreateStatement {
+	fn from(v: CreateStatement) -> Self {
+		crate::expr::statements::CreateStatement {
+			only: v.only,
+			what: v.what.into(),
+			data: v.data.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			version: v.version.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::CreateStatement> for CreateStatement {
+	fn from(v: crate::expr::statements::CreateStatement) -> Self {
+		CreateStatement {
+			only: v.only,
+			what: v.what.into(),
+			data: v.data.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			version: v.version.map(Into::into),
+		}
 	}
 }

@@ -1,21 +1,20 @@
 use reblessive::Stk;
 
 use crate::api::method::Method;
-use crate::api::middleware::RequestMiddleware;
-use crate::expr::Value;
-use crate::expr::access_type::JwtAccessVerify;
-use crate::expr::index::HnswParams;
-use crate::expr::statements::DefineApiStatement;
-use crate::expr::statements::define::config::ConfigInner;
-use crate::expr::statements::define::config::api::ApiConfig;
-use crate::expr::statements::define::config::graphql::{GraphQLConfig, TableConfig};
-use crate::expr::statements::define::{
+use crate::sql::SqlValue;
+use crate::sql::access_type::JwtAccessVerify;
+use crate::sql::index::HnswParams;
+use crate::sql::statements::DefineApiStatement;
+use crate::sql::statements::define::config::ConfigInner;
+use crate::sql::statements::define::config::api::{ApiConfig, RequestMiddleware};
+use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
+use crate::sql::statements::define::{
 	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement,
 };
 use crate::syn::error::bail;
 use crate::syn::token::Token;
 use crate::{
-	expr::{
+	sql::{
 		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType,
 		Values, access_type,
 		base::Base,
@@ -916,7 +915,7 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			name,
 			what,
-			when: Value::Bool(true),
+			when: SqlValue::Bool(true),
 			if_not_exists,
 			overwrite,
 			..Default::default()
@@ -1143,7 +1142,7 @@ impl Parser<'_> {
 						}
 					}
 
-					res.index = Index::Search(crate::expr::index::SearchParams {
+					res.index = Index::Search(crate::sql::index::SearchParams {
 						az: analyzer.unwrap_or_else(|| Ident::from("like")),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
@@ -1196,7 +1195,7 @@ impl Parser<'_> {
 							_ => break,
 						}
 					}
-					res.index = Index::MTree(crate::expr::index::MTreeParams::new(
+					res.index = Index::MTree(crate::sql::index::MTreeParams::new(
 						dimension,
 						distance,
 						vector_type,
@@ -1532,7 +1531,7 @@ impl Parser<'_> {
 				t!("MIDDLEWARE") => {
 					self.pop_peek();
 
-					let mut middleware: Vec<(String, Vec<Value>)> = Vec::new();
+					let mut middleware: Vec<(String, Vec<SqlValue>)> = Vec::new();
 					// let mut parsed_custom = false;
 
 					loop {

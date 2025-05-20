@@ -314,7 +314,7 @@ mod tests {
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::{
-		expr::{Statement, statements::DefineStatement},
+		expr::{LogicalPlan, statements::DefineStatement},
 		syn,
 	};
 	use std::sync::Arc;
@@ -327,7 +327,7 @@ mod tests {
 		let ctx = ctx.freeze();
 
 		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
-		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0.0.pop() else {
+		let Some(LogicalPlan::Define(DefineStatement::Analyzer(az))) = stmt.0.0.pop() else {
 			panic!()
 		};
 		let a = Analyzer::new(ctx.get_index_stores(), Arc::new(az)).unwrap();

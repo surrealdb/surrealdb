@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::str::FromStr;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 use super::error::ResponseError;
 
@@ -29,10 +29,10 @@ impl FromStr for Param {
 	}
 }
 
-impl From<Param> for Value {
+impl From<Param> for SqlValue {
 	#[inline]
 	fn from(v: Param) -> Self {
-		Value::from(v.0)
+		SqlValue::from(v.0)
 	}
 }
 
@@ -43,18 +43,18 @@ pub struct Params {
 }
 
 impl Params {
-	pub fn parse(self) -> BTreeMap<String, Value> {
+	pub fn parse(self) -> BTreeMap<String, SqlValue> {
 		self.into()
 	}
 }
 
-impl From<Params> for BTreeMap<String, Value> {
-	fn from(v: Params) -> BTreeMap<String, Value> {
+impl From<Params> for BTreeMap<String, SqlValue> {
+	fn from(v: Params) -> BTreeMap<String, SqlValue> {
 		v.inner
 			.into_iter()
 			.map(|(k, v)| {
 				let value = surrealdb::syn::json_legacy_strand(&v);
-				(k, value.unwrap_or_else(|_| Value::from(v)))
+				(k, value.unwrap_or_else(|_| SqlValue::from(v)))
 			})
 			.collect::<BTreeMap<_, _>>()
 	}

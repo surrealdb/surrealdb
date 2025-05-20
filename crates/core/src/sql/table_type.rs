@@ -1,5 +1,5 @@
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Kind, Value};
+
+use crate::sql::{Kind, SqlValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -43,26 +43,26 @@ impl Display for TableType {
 	}
 }
 
-impl InfoStructure for TableType {
-	fn structure(self) -> Value {
-		match self {
-			TableType::Any => Value::from(map! {
-				"kind".to_string() => "ANY".into(),
-			}),
-			TableType::Normal => Value::from(map! {
-				"kind".to_string() => "NORMAL".into(),
-			}),
-			TableType::Relation(rel) => Value::from(map! {
-				"kind".to_string() => "RELATION".into(),
-				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
-					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
-				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
-					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
-				"enforced".to_string() => rel.enforced.into()
-			}),
+impl From<TableType> for crate::expr::TableType {
+	fn from(v: TableType) -> Self {
+		match v {
+			TableType::Any => crate::expr::TableType::Any,
+			TableType::Normal => crate::expr::TableType::Normal,
+			TableType::Relation(rel) => crate::expr::TableType::Relation(rel.into()),
 		}
 	}
 }
+
+impl From<crate::expr::TableType> for TableType {
+	fn from(v: crate::expr::TableType) -> Self {
+		match v {
+			crate::expr::TableType::Any => TableType::Any,
+			crate::expr::TableType::Normal => TableType::Normal,
+			crate::expr::TableType::Relation(rel) => TableType::Relation(rel.into()),
+		}
+	}
+}
+
 
 #[revisioned(revision = 2)]
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
@@ -73,4 +73,24 @@ pub struct Relation {
 	pub to: Option<Kind>,
 	#[revision(start = 2)]
 	pub enforced: bool,
+}
+
+impl From<Relation> for crate::expr::Relation {
+	fn from(v: Relation) -> Self {
+		crate::expr::Relation {
+			from: v.from.map(Into::into),
+			to: v.to.map(Into::into),
+			enforced: v.enforced,
+		}
+	}
+}
+
+impl From<crate::expr::Relation> for Relation {
+	fn from(v: crate::expr::Relation) -> Self {
+		Relation {
+			from: v.from.map(Into::into),
+			to: v.to.map(Into::into),
+			enforced: v.enforced,
+		}
+	}
 }

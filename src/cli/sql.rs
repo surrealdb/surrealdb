@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{self, connect};
-use surrealdb::expr::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
+use surrealdb::expr::{Param, LogicalPlan, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::{Notification, Response, Value};
@@ -199,7 +199,7 @@ pub async fn init(
 				// Capture `use` and `set/let` statements from the query
 				for statement in query.iter() {
 					match statement {
-						Statement::Use(stmt) => {
+						LogicalPlan::Use(stmt) => {
 							if let Some(ns) = &stmt.ns {
 								namespace = Some(ns.clone());
 							}
@@ -207,13 +207,13 @@ pub async fn init(
 								database = Some(db.clone());
 							}
 						}
-						Statement::Set(stmt) => vars.push(stmt.name.clone()),
+						LogicalPlan::Set(stmt) => vars.push(stmt.name.clone()),
 						_ => {}
 					}
 				}
 
 				for var in &vars {
-					query.push(Statement::Value(CoreValue::Param(Param::from(var.as_str()))))
+					query.push(LogicalPlan::Value(CoreValue::Param(Param::from(var.as_str()))))
 				}
 
 				// Extract the namespace and database from the current prompt

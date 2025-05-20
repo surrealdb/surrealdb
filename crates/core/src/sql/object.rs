@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{
-	Operation, Thing, Value,
+use crate::sql::{
+	Operation, Thing, SqlValue,
 	escape::EscapeKey,
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
@@ -28,40 +28,40 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 #[serde(rename = "$surrealdb::private::sql::Object")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>);
+pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, SqlValue>);
 
-impl From<BTreeMap<&str, Value>> for Object {
-	fn from(v: BTreeMap<&str, Value>) -> Self {
+impl From<BTreeMap<&str, SqlValue>> for Object {
+	fn from(v: BTreeMap<&str, SqlValue>) -> Self {
 		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())
 	}
 }
 
-impl From<BTreeMap<String, Value>> for Object {
-	fn from(v: BTreeMap<String, Value>) -> Self {
+impl From<BTreeMap<String, SqlValue>> for Object {
+	fn from(v: BTreeMap<String, SqlValue>) -> Self {
 		Self(v)
 	}
 }
 
-impl FromIterator<(String, Value)> for Object {
-	fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
+impl FromIterator<(String, SqlValue)> for Object {
+	fn from_iter<T: IntoIterator<Item = (String, SqlValue)>>(iter: T) -> Self {
 		Self(BTreeMap::from_iter(iter))
 	}
 }
 
 impl From<BTreeMap<String, String>> for Object {
 	fn from(v: BTreeMap<String, String>) -> Self {
-		Self(v.into_iter().map(|(k, v)| (k, Value::from(v))).collect())
+		Self(v.into_iter().map(|(k, v)| (k, SqlValue::from(v))).collect())
 	}
 }
 
-impl From<HashMap<&str, Value>> for Object {
-	fn from(v: HashMap<&str, Value>) -> Self {
+impl From<HashMap<&str, SqlValue>> for Object {
+	fn from(v: HashMap<&str, SqlValue>) -> Self {
 		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())
 	}
 }
 
-impl From<HashMap<String, Value>> for Object {
-	fn from(v: HashMap<String, Value>) -> Self {
+impl From<HashMap<String, SqlValue>> for Object {
+	fn from(v: HashMap<String, SqlValue>) -> Self {
 		Self(v.into_iter().collect())
 	}
 }
@@ -79,21 +79,21 @@ impl From<Operation> for Object {
 				path,
 				value,
 			} => map! {
-				String::from("op") => Value::from("add"),
+				String::from("op") => SqlValue::from("add"),
 				String::from("path") => path.to_path().into(),
 				String::from("value") => value
 			},
 			Operation::Remove {
 				path,
 			} => map! {
-				String::from("op") => Value::from("remove"),
+				String::from("op") => SqlValue::from("remove"),
 				String::from("path") => path.to_path().into()
 			},
 			Operation::Replace {
 				path,
 				value,
 			} => map! {
-				String::from("op") => Value::from("replace"),
+				String::from("op") => SqlValue::from("replace"),
 				String::from("path") => path.to_path().into(),
 				String::from("value") => value
 			},
@@ -101,7 +101,7 @@ impl From<Operation> for Object {
 				path,
 				value,
 			} => map! {
-				String::from("op") => Value::from("change"),
+				String::from("op") => SqlValue::from("change"),
 				String::from("path") => path.to_path().into(),
 				String::from("value") => value
 			},
@@ -109,7 +109,7 @@ impl From<Operation> for Object {
 				path,
 				from,
 			} => map! {
-				String::from("op") => Value::from("copy"),
+				String::from("op") => SqlValue::from("copy"),
 				String::from("path") => path.to_path().into(),
 				String::from("from") => from.to_path().into()
 			},
@@ -117,7 +117,7 @@ impl From<Operation> for Object {
 				path,
 				from,
 			} => map! {
-				String::from("op") => Value::from("move"),
+				String::from("op") => SqlValue::from("move"),
 				String::from("path") => path.to_path().into(),
 				String::from("from") => from.to_path().into()
 			},
@@ -125,7 +125,7 @@ impl From<Operation> for Object {
 				path,
 				value,
 			} => map! {
-				String::from("op") => Value::from("test"),
+				String::from("op") => SqlValue::from("test"),
 				String::from("path") => path.to_path().into(),
 				String::from("value") => value
 			},
@@ -133,8 +133,20 @@ impl From<Operation> for Object {
 	}
 }
 
+impl From<Object> for crate::expr::Object {
+	fn from(v: Object) -> Self {
+		crate::expr::Object(v.0.into_iter().map(|(k, v)| (k, v.into())).collect())
+	}
+}
+
+impl From<crate::expr::Object> for Object {
+	fn from(v: crate::expr::Object) -> Self {
+		Object(v.0.into_iter().map(|(k, v)| (k, v.into())).collect())
+	}
+}
+
 impl Deref for Object {
-	type Target = BTreeMap<String, Value>;
+	type Target = BTreeMap<String, SqlValue>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -147,31 +159,10 @@ impl DerefMut for Object {
 }
 
 impl IntoIterator for Object {
-	type Item = (String, Value);
-	type IntoIter = std::collections::btree_map::IntoIter<String, Value>;
+	type Item = (String, SqlValue);
+	type IntoIter = std::collections::btree_map::IntoIter<String, SqlValue>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
-	}
-}
-
-impl TryInto<BTreeMap<String, String>> for Object {
-	type Error = Error;
-	fn try_into(self) -> Result<BTreeMap<String, String>, Self::Error> {
-		self.into_iter().map(|(k, v)| Ok((k, v.coerce_to()?))).collect()
-	}
-}
-
-impl TryInto<HeaderMap> for Object {
-	type Error = Error;
-	fn try_into(self) -> Result<HeaderMap, Self::Error> {
-		let mut headermap = HeaderMap::new();
-		for (k, v) in self.into_iter() {
-			let k: HeaderName = k.parse()?;
-			let v: HeaderValue = v.coerce_to::<String>()?.parse()?;
-			headermap.insert(k, v);
-		}
-
-		Ok(headermap)
 	}
 }
 
@@ -179,7 +170,7 @@ impl Object {
 	/// Fetch the record id if there is one
 	pub fn rid(&self) -> Option<Thing> {
 		match self.get("id") {
-			Some(Value::Thing(v)) => Some(v.clone()),
+			Some(SqlValue::Thing(v)) => Some(v.clone()),
 			_ => None,
 		}
 	}
@@ -250,24 +241,11 @@ impl Object {
 
 impl Object {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		let mut x = BTreeMap::new();
-		for (k, v) in self.iter() {
-			let v = v.compute(stk, ctx, opt, doc).await?;
-			x.insert(k.clone(), v);
-		}
-		Ok(Value::Object(Object(x)))
-	}
+
 
 	/// Checks whether all object values are static values
 	pub(crate) fn is_static(&self) -> bool {
-		self.values().all(Value::is_static)
+		self.values().all(SqlValue::is_static)
 	}
 
 	/// Validate that a Object contains only computed Values
@@ -326,10 +304,10 @@ mod no_nul_bytes_in_keys {
 	};
 	use std::{collections::BTreeMap, fmt};
 
-	use crate::expr::Value;
+	use crate::sql::SqlValue;
 
 	pub(crate) fn serialize<S>(
-		m: &BTreeMap<String, Value>,
+		m: &BTreeMap<String, SqlValue>,
 		serializer: S,
 	) -> Result<S::Ok, S::Error>
 	where
@@ -343,14 +321,14 @@ mod no_nul_bytes_in_keys {
 		s.end()
 	}
 
-	pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<String, Value>, D::Error>
+	pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<String, SqlValue>, D::Error>
 	where
 		D: Deserializer<'de>,
 	{
 		struct NoNulBytesInKeysVisitor;
 
 		impl<'de> Visitor<'de> for NoNulBytesInKeysVisitor {
-			type Value = BTreeMap<String, Value>;
+			type Value = BTreeMap<String, SqlValue>;
 
 			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
 				formatter.write_str("a map without any NUL bytes in its keys")

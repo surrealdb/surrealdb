@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::sql::{Base, Ident, SqlValue};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
@@ -19,35 +19,6 @@ pub struct RemoveParamStatement {
 	pub if_exists: bool,
 }
 
-impl RemoveParamStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
-		// Get the transaction
-		let txn = ctx.tx();
-		// Get the definition
-		let (ns, db) = opt.ns_db()?;
-		let pa = match txn.get_db_param(ns, db, &self.name).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::PaNotFound { .. })) {
-					return Ok(Value::None);
-				} else {
-					return Err(e);
-				}
-			}
-		};
-		// Delete the definition
-		let key = crate::key::database::pa::new(ns, db, &pa.name);
-		txn.del(key).await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 impl Display for RemoveParamStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE PARAM")?;
@@ -56,5 +27,23 @@ impl Display for RemoveParamStatement {
 		}
 		write!(f, " ${}", self.name)?;
 		Ok(())
+	}
+}
+
+impl From<RemoveParamStatement> for crate::expr::statements::RemoveParamStatement {
+	fn from(v: RemoveParamStatement) -> Self {
+		crate::expr::statements::RemoveParamStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+		}
+	}
+}
+
+impl From<crate::expr::statements::RemoveParamStatement> for RemoveParamStatement {
+	fn from(v: crate::expr::statements::RemoveParamStatement) -> Self {
+		RemoveParamStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+		}
 	}
 }

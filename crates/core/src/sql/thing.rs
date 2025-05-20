@@ -3,7 +3,7 @@ use super::{Cond, Expression, Ident, Idiom, Operator, Part, Table};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Strand, Value, escape::EscapeRid, id::Id};
+use crate::sql::{Strand, SqlValue, escape::EscapeRid, id::Id};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode as _;
@@ -29,159 +29,6 @@ pub struct Thing {
 	/// Table name
 	pub tb: String,
 	pub id: Id,
-}
-
-impl Thing {
-	/// Convert `Thing` to `Cond`
-	pub fn to_cond(self) -> Option<Cond> {
-		match &self.id {
-			Id::Range(r) => match (&r.beg, &r.end) {
-				(Bound::Unbounded, Bound::Unbounded) => None,
-				(Bound::Unbounded, Bound::Excluded(id)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-						Operator::LessThan,
-						Thing::from((self.tb, id.to_owned())).into(),
-					)))))
-				}
-				(Bound::Unbounded, Bound::Included(id)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-						Operator::LessThanOrEqual,
-						Thing::from((self.tb, id.to_owned())).into(),
-					)))))
-				}
-				(Bound::Excluded(id), Bound::Unbounded) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-						Operator::MoreThan,
-						Thing::from((self.tb, id.to_owned())).into(),
-					)))))
-				}
-				(Bound::Included(id), Bound::Unbounded) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-						Operator::MoreThanOrEqual,
-						Thing::from((self.tb, id.to_owned())).into(),
-					)))))
-				}
-				(Bound::Included(lid), Bound::Included(rid)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Value::Expression(Box::new(Expression::new(
-							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-							Operator::MoreThanOrEqual,
-							Thing::from((self.tb.clone(), lid.to_owned())).into(),
-						))),
-						Operator::And,
-						Value::Expression(Box::new(Expression::new(
-							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-							Operator::LessThanOrEqual,
-							Thing::from((self.tb, rid.to_owned())).into(),
-						))),
-					)))))
-				}
-				(Bound::Included(lid), Bound::Excluded(rid)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Value::Expression(Box::new(Expression::new(
-							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-							Operator::MoreThanOrEqual,
-							Thing::from((self.tb.clone(), lid.to_owned())).into(),
-						))),
-						Operator::And,
-						Value::Expression(Box::new(Expression::new(
-							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-							Operator::LessThan,
-							Thing::from((self.tb, rid.to_owned())).into(),
-						))),
-					)))))
-				}
-				(Bound::Excluded(lid), Bound::Included(rid)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Value::Expression(Box::new(Expression::new(
-							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-							Operator::MoreThan,
-							Thing::from((self.tb.clone(), lid.to_owned())).into(),
-						))),
-						Operator::And,
-						Value::Expression(Box::new(Expression::new(
-							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-							Operator::LessThanOrEqual,
-							Thing::from((self.tb, rid.to_owned())).into(),
-						))),
-					)))))
-				}
-				(Bound::Excluded(lid), Bound::Excluded(rid)) => {
-					Some(Cond(Value::Expression(Box::new(Expression::new(
-						Value::Expression(Box::new(Expression::new(
-							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-							Operator::MoreThan,
-							Thing::from((self.tb.clone(), lid.to_owned())).into(),
-						))),
-						Operator::And,
-						Value::Expression(Box::new(Expression::new(
-							Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-							Operator::LessThan,
-							Thing::from((self.tb, rid.to_owned())).into(),
-						))),
-					)))))
-				}
-			},
-			_ => Some(Cond(Value::Expression(Box::new(Expression::new(
-				Idiom(vec![Part::from(Ident(ID.to_owned()))]).into(),
-				Operator::Equal,
-				Thing::from((self.tb, self.id)).into(),
-			))))),
-		}
-	}
-
-	pub(crate) async fn refs(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		ft: Option<&Table>,
-		ff: Option<&Idiom>,
-	) -> Result<Vec<Thing>> {
-		let (ns, db) = opt.ns_db()?;
-
-		let (prefix, suffix) = match (ft, ff) {
-			(Some(ft), Some(ff)) => {
-				let ff = ff.to_string();
-
-				(
-					crate::key::r#ref::ffprefix(ns, db, &self.tb, &self.id, ft, &ff),
-					crate::key::r#ref::ffsuffix(ns, db, &self.tb, &self.id, ft, &ff),
-				)
-			}
-			(Some(ft), None) => (
-				crate::key::r#ref::ftprefix(ns, db, &self.tb, &self.id, ft),
-				crate::key::r#ref::ftsuffix(ns, db, &self.tb, &self.id, ft),
-			),
-			(None, None) => (
-				crate::key::r#ref::prefix(ns, db, &self.tb, &self.id),
-				crate::key::r#ref::suffix(ns, db, &self.tb, &self.id),
-			),
-			(None, Some(_)) => {
-				fail!("A foreign field was passed without a foreign table")
-			}
-		};
-
-		let range = prefix?..suffix?;
-		let txn = ctx.tx();
-		let mut stream = txn.stream_keys(range, None, ScanDirection::Forward);
-
-		let mut ids = Vec::new();
-		while let Some(res) = stream.next().await {
-			yield_now!();
-			let x = res?;
-			let key = Ref::decode(&x)?;
-			ids.push(Thing {
-				tb: key.ft.to_string(),
-				id: key.fk,
-			})
-		}
-
-		Ok(ids)
-	}
 }
 
 impl From<(&str, Id)> for Thing {
@@ -263,6 +110,24 @@ impl TryFrom<&str> for Thing {
 	}
 }
 
+impl From<Thing> for crate::expr::Thing {
+	fn from(v: Thing) -> Self {
+		crate::expr::Thing {
+			tb: v.tb,
+			id: v.id.into(),
+		}
+	}
+}
+
+impl From<crate::expr::Thing> for Thing {
+	fn from(v: crate::expr::Thing) -> Self {
+		Thing {
+			tb: v.tb,
+			id: v.id.into(),
+		}
+	}
+}
+
 impl Thing {
 	/// Convert the Thing to a raw String
 	pub fn to_raw(&self) -> String {
@@ -285,26 +150,13 @@ impl fmt::Display for Thing {
 }
 
 impl Thing {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		Ok(Value::Thing(Thing {
-			tb: self.tb.clone(),
-			id: self.id.compute(stk, ctx, opt, doc).await?,
-		}))
 	}
-}
 
 #[cfg(test)]
 mod test {
 	use std::{ops::Bound, str::FromStr};
 
-	use crate::expr::{Array, Id, IdRange, Object, Value};
+	use crate::sql::{Array, Id, IdRange, Object, SqlValue};
 
 	use super::Thing;
 
@@ -338,7 +190,7 @@ mod test {
 			let string = "foo:{bar: 1}";
 			let thing = Thing {
 				tb: "foo".into(),
-				id: Id::Object(Object([("bar".to_string(), Value::from(1))].into_iter().collect())),
+				id: Id::Object(Object([("bar".to_string(), SqlValue::from(1))].into_iter().collect())),
 			};
 			assert_eq!(thing, Thing::from_str(string).unwrap());
 		}

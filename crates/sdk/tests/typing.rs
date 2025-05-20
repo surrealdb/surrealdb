@@ -5,7 +5,7 @@ use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn strict_typing_inline() -> Result<()> {
@@ -29,7 +29,7 @@ async fn strict_typing_inline() -> Result<()> {
 	assert_eq!(tmp.unwrap_err().to_string(), "Expected `int` but found a `NONE`");
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -43,7 +43,7 @@ async fn strict_typing_inline() -> Result<()> {
 	assert_eq!(tmp.unwrap_err().to_string(), "Expected `bool | int` but found a `NONE`");
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -55,7 +55,7 @@ async fn strict_typing_inline() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -68,7 +68,7 @@ async fn strict_typing_inline() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -82,7 +82,7 @@ async fn strict_typing_inline() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -96,7 +96,7 @@ async fn strict_typing_inline() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -167,7 +167,7 @@ async fn strict_typing_defined() -> Result<()> {
 	);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,

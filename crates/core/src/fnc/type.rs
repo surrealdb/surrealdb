@@ -8,8 +8,7 @@ use crate::expr::table::Table;
 use crate::expr::thing::Thing;
 use crate::expr::value::Value;
 use crate::expr::{
-	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Kind, Number, Range,
-	Strand, Uuid,
+	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Idiom, Kind, Number, Range, Strand, Uuid
 };
 use crate::syn;
 use anyhow::{Result, bail, ensure};
@@ -54,7 +53,7 @@ pub async fn field(
 	match opt {
 		Some(opt) => {
 			// Parse the string as an Idiom
-			let idi = syn::idiom(&val)?;
+			let idi: Idiom = syn::idiom(&val)?.into();
 			// Return the Idiom or fetch the field
 			idi.compute(stk, ctx, opt, doc).await.catch_return()
 		}
@@ -71,7 +70,7 @@ pub async fn fields(
 			let mut args: Vec<Value> = Vec::with_capacity(val.len());
 			for v in val {
 				// Parse the string as an Idiom
-				let idi = syn::idiom(&v)?;
+				let idi: Idiom = syn::idiom(&v)?.into();
 				// Return the Idiom or fetch the field
 				args.push(idi.compute(stk, ctx, opt, doc).await.catch_return()?);
 			}

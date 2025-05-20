@@ -7,7 +7,7 @@ use helpers::with_enough_stack;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Thing;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn field_definition_value_reference() -> Result<()> {
@@ -32,7 +32,7 @@ async fn field_definition_value_reference() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: product:one,
@@ -47,7 +47,7 @@ async fn field_definition_value_reference() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: contains:test,
@@ -59,7 +59,7 @@ async fn field_definition_value_reference() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: product:one,
@@ -74,7 +74,7 @@ async fn field_definition_value_reference() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: product:one,
@@ -91,7 +91,7 @@ async fn field_definition_value_reference() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: product:one,
@@ -134,7 +134,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: product:one,
@@ -149,7 +149,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: contains:test,
@@ -161,7 +161,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: product:one,
@@ -178,7 +178,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: product:one,
@@ -195,7 +195,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: product:one,
@@ -243,7 +243,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: user:one,
@@ -256,7 +256,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: business:one,
@@ -279,7 +279,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: contact:one,
@@ -291,7 +291,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -318,7 +318,7 @@ async fn field_definition_readonly() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				birthdate: d'2023-12-13T21:27:55.632Z',
@@ -329,7 +329,7 @@ async fn field_definition_readonly() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				birthdate: d'2023-12-13T21:27:55.632Z',

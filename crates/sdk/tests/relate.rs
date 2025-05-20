@@ -9,7 +9,7 @@ use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn relate_with_parameters() -> Result<()> {
@@ -24,15 +24,15 @@ async fn relate_with_parameters() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::None;
+	let val = SqlValue::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::None;
+	let val = SqlValue::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:test,
@@ -62,15 +62,15 @@ async fn relate_and_overwrite() -> Result<()> {
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::None;
+	let val = SqlValue::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::None;
+	let val = SqlValue::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:test,
@@ -83,7 +83,7 @@ async fn relate_and_overwrite() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:test,
@@ -96,7 +96,7 @@ async fn relate_and_overwrite() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:test,
@@ -130,36 +130,36 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	//
 	for _ in 0..3 {
 		let tmp = res.remove(0).result?;
-		let val = Value::None;
+		let val = SqlValue::None;
 		assert_eq!(tmp, val);
 	}
 	//
 	for _ in 0..2 {
 		let tmp = res.remove(0).result?;
-		let Value::Array(v) = tmp else {
+		let SqlValue::Array(v) = tmp else {
 			panic!("response should be array:{tmp:?}")
 		};
 		assert_eq!(v.len(), 1);
 		let tmp = v.into_iter().next().unwrap();
-		let Value::Object(o) = tmp else {
+		let SqlValue::Object(o) = tmp else {
 			panic!("should be object {tmp:?}")
 		};
-		assert_eq!(o.get("in").unwrap(), &Value::parse("person:tobie"));
-		assert_eq!(o.get("out").unwrap(), &Value::parse("person:jaime"));
+		assert_eq!(o.get("in").unwrap(), &SqlValue::parse("person:tobie"));
+		assert_eq!(o.get("out").unwrap(), &SqlValue::parse("person:jaime"));
 		let id = o.get("id").unwrap();
 
-		let Value::Thing(t) = id else {
+		let SqlValue::Thing(t) = id else {
 			panic!("should be thing {id:?}")
 		};
 		assert_eq!(t.tb, "knows");
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::None;
+	let val = SqlValue::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:foo,
@@ -171,7 +171,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:bar,
@@ -198,15 +198,15 @@ async fn relate_with_complex_table() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: a:1 }, { id: a:2 }]");
+	let val = SqlValue::parse("[{ id: a:1 }, { id: a:2 }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: `-`:`-`, in: a:1, out: a:2 }]");
+	let val = SqlValue::parse("[{ id: `-`:`-`, in: a:1, out: a:2 }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ rel: [`-`:`-`] }]");
+	let val = SqlValue::parse("[{ rel: [`-`:`-`] }]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -279,7 +279,7 @@ async fn relate_enforced() -> Result<()> {
 	//
 	t.expect_val("[{ id: edge:1, in: a:1, out: a:2 }]")?;
 	//
-	let info = Value::parse(
+	let info = SqlValue::parse(
 		"{
 	accesses: {},
 	analyzers: {},

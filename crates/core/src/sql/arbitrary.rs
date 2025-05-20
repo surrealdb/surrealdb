@@ -1,5 +1,5 @@
-use crate::expr::regex::regex_new;
-use crate::expr::{
+use crate::sql::regex::regex_new;
+use crate::sql::{
 	changefeed::ChangeFeed, datetime::Datetime, duration::Duration, regex::Regex,
 	statements::SleepStatement,
 };

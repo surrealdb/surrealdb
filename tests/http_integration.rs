@@ -1777,14 +1777,14 @@ mod http_integration {
 			};
 
 			let mut obj = sql::Object::default();
-			obj.insert("email".to_string(), sql::Value::Query(stmt.into()));
+			obj.insert("email".to_string(), sql::SqlValue::Query(stmt.into()));
 			obj.insert("pass".to_string(), "foo".into());
 			request.insert(
 				"params".to_string(),
-				sql::Value::Array(vec![sql::Value::Object(obj)].into()),
+				sql::SqlValue::Array(vec![sql::SqlValue::Object(obj)].into()),
 			);
 
-			let req: sql::Value = sql::Value::Object(request);
+			let req: sql::SqlValue = sql::SqlValue::Object(request);
 
 			let req = sql::serde::serialize(&req).unwrap();
 

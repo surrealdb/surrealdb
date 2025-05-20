@@ -4086,7 +4086,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_nonexistent_role() {
 		use crate::expr::{
-			Base, Statement,
+			Base, LogicalPlan,
 			statements::{DefineUserStatement, define::DefineStatement},
 			user::UserDuration,
 		};
@@ -4135,7 +4135,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			};
 
 			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
+			ds.process(LogicalPlan::Define(DefineStatement::User(user)).into(), &sess, None)
 				.await
 				.unwrap();
 

@@ -32,6 +32,19 @@ impl From<Bytes> for Vec<u8> {
 	}
 }
 
+
+impl From<Bytes> for crate::expr::Bytes {
+	fn from(v: Bytes) -> Self {
+		crate::expr::Bytes(v.0)
+	}
+}
+
+impl From<crate::expr::Bytes> for Bytes {
+	fn from(v: crate::expr::Bytes) -> Self {
+		Bytes(v.0)
+	}
+}
+
 impl Deref for Bytes {
 	type Target = Vec<u8>;
 
@@ -102,11 +115,11 @@ impl<'de> Deserialize<'de> for Bytes {
 
 #[cfg(test)]
 mod tests {
-	use crate::expr::{Bytes, Value};
+	use crate::sql::{Bytes, SqlValue};
 
 	#[test]
 	fn serialize() {
-		let val = Value::Bytes(Bytes(vec![1, 2, 3, 5]));
+		let val = SqlValue::Bytes(Bytes(vec![1, 2, 3, 5]));
 		let serialized: Vec<u8> = revision::to_vec(&val).unwrap();
 		println!("{serialized:?}");
 		let deserialized = revision::from_slice(&serialized).unwrap();

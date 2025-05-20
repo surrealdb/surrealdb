@@ -1,6 +1,6 @@
 use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
-use crate::expr::strand::Strand;
+use crate::sql::strand::Strand;
 use crate::fnc::util::math::ToFloat;
 use anyhow::{Result, bail};
 use revision::revisioned;
@@ -36,6 +36,27 @@ pub enum Number {
 impl Default for Number {
 	fn default() -> Self {
 		Self::Int(0)
+	}
+}
+
+
+impl From<Number> for crate::expr::Number {
+	fn from(v: Number) -> Self {
+		match v {
+			Number::Int(v) => Self::Int(v.into()),
+			Number::Float(v) => Self::Float(v.into()),
+			Number::Decimal(v) => Self::Decimal(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Number> for Number {
+	fn from(v: crate::expr::Number) -> Self {
+		match v {
+			crate::expr::Number::Int(v) => Self::Int(v.into()),
+			crate::expr::Number::Float(v) => Self::Float(v.into()),
+			crate::expr::Number::Decimal(v) => Self::Decimal(v.into()),
+		}
 	}
 }
 

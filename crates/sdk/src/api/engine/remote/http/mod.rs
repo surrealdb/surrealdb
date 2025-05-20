@@ -26,7 +26,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
-	Object as CoreObject, Param, Query, Statement, Value as CoreValue,
+	Object as CoreObject, Param, Query, LogicalPlan, Value as CoreValue,
 	from_value as from_core_value, statements::OutputStatement,
 };
 use url::Url;
@@ -404,7 +404,7 @@ async fn router(
 		} => {
 			let mut output_stmt = OutputStatement::default();
 			output_stmt.what = CoreValue::Param(Param::from(key.clone()));
-			let query = Query::from(Statement::Output(output_stmt));
+			let query = Query::from(LogicalPlan::Output(output_stmt));
 			let mut variables = CoreObject::default();
 			variables.insert(key.clone(), value);
 			let req = Command::Query {

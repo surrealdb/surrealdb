@@ -1,17 +1,17 @@
-use crate::expr::idiom::Idiom;
-use crate::expr::value::Value;
+use crate::sql::idiom::Idiom;
+use crate::sql::value::SqlValue;
 
-impl Value {
-	pub(crate) fn changed(&self, val: &Value) -> Value {
+impl SqlValue {
+	pub(crate) fn changed(&self, val: &SqlValue) -> SqlValue {
 		match (self, val) {
-			(Value::Object(a), Value::Object(b)) => {
+			(SqlValue::Object(a), SqlValue::Object(b)) => {
 				// Create an object
-				let mut chg = Value::base();
+				let mut chg = SqlValue::base();
 				// Loop over old keys
 				for (key, _) in a.iter() {
 					if !b.contains_key(key) {
 						let path = Idiom::from(key.clone());
-						chg.put(&path, Value::None);
+						chg.put(&path, SqlValue::None);
 					}
 				}
 				// Loop over new keys
@@ -46,49 +46,49 @@ mod tests {
 
 	#[test]
 	fn changed_none() {
-		let old = Value::parse("{ test: true, text: 'text', other: { something: true } }");
-		let now = Value::parse("{ test: true, text: 'text', other: { something: true } }");
-		let res = Value::parse("{}");
+		let old = SqlValue::parse("{ test: true, text: 'text', other: { something: true } }");
+		let now = SqlValue::parse("{ test: true, text: 'text', other: { something: true } }");
+		let res = SqlValue::parse("{}");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_add() {
-		let old = Value::parse("{ test: true }");
-		let now = Value::parse("{ test: true, other: 'test' }");
-		let res = Value::parse("{ other: 'test' }");
+		let old = SqlValue::parse("{ test: true }");
+		let now = SqlValue::parse("{ test: true, other: 'test' }");
+		let res = SqlValue::parse("{ other: 'test' }");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_remove() {
-		let old = Value::parse("{ test: true, other: 'test' }");
-		let now = Value::parse("{ test: true }");
-		let res = Value::parse("{ other: NONE }");
+		let old = SqlValue::parse("{ test: true, other: 'test' }");
+		let now = SqlValue::parse("{ test: true }");
+		let res = SqlValue::parse("{ other: NONE }");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_add_array() {
-		let old = Value::parse("{ test: [1,2,3] }");
-		let now = Value::parse("{ test: [1,2,3,4] }");
-		let res = Value::parse("{ test: [1,2,3,4] }");
+		let old = SqlValue::parse("{ test: [1,2,3] }");
+		let now = SqlValue::parse("{ test: [1,2,3,4] }");
+		let res = SqlValue::parse("{ test: [1,2,3,4] }");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_replace_embedded() {
-		let old = Value::parse("{ test: { other: 'test' } }");
-		let now = Value::parse("{ test: { other: false } }");
-		let res = Value::parse("{ test: { other: false } }");
+		let old = SqlValue::parse("{ test: { other: 'test' } }");
+		let now = SqlValue::parse("{ test: { other: false } }");
+		let res = SqlValue::parse("{ test: { other: false } }");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_change_text() {
-		let old = Value::parse("{ test: { other: 'test' } }");
-		let now = Value::parse("{ test: { other: 'text' } }");
-		let res = Value::parse("{ test: { other: 'text' } }");
+		let old = SqlValue::parse("{ test: { other: 'test' } }");
+		let now = SqlValue::parse("{ test: { other: 'text' } }");
+		let res = SqlValue::parse("{ test: { other: 'text' } }");
 		assert_eq!(res, old.changed(&now));
 	}
 }

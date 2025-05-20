@@ -1,4 +1,4 @@
-use crate::expr::{escape::QuoteStr, strand::Strand};
+use crate::sql::{escape::QuoteStr, strand::Strand};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -59,6 +59,19 @@ impl TryFrom<&str> for Uuid {
 			Ok(v) => Ok(Self(v)),
 			Err(_) => Err(()),
 		}
+	}
+}
+
+
+impl From<Uuid> for crate::expr::Uuid {
+	fn from(v: Uuid) -> Self {
+		crate::expr::Uuid(v.0)
+	}
+}
+
+impl From<crate::expr::Uuid> for Uuid {
+	fn from(v: crate::expr::Uuid) -> Self {
+		Self(v.0)
 	}
 }
 

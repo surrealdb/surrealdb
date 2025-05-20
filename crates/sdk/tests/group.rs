@@ -6,7 +6,7 @@ use helpers::new_ds;
 use helpers::skip_ok;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 use surrealdb_core::expr::Thing;
 
 #[tokio::test]
@@ -31,7 +31,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(res.len(), 12);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'GBP',
@@ -43,7 +43,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'GBP',
@@ -55,7 +55,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'GBP',
@@ -67,7 +67,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'GBP',
@@ -79,7 +79,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'GBP',
@@ -91,7 +91,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'EUR',
@@ -103,7 +103,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'USD',
@@ -115,7 +115,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'AUD',
@@ -127,7 +127,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'CHF',
@@ -139,7 +139,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				country: 'GBP',
@@ -200,7 +200,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					count: 1,
@@ -249,7 +249,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -305,7 +305,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:1,
@@ -318,7 +318,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:2,
@@ -331,7 +331,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:3,
@@ -344,7 +344,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:4,
@@ -357,7 +357,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					group: 1,
@@ -376,7 +376,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					group: 1,
@@ -397,7 +397,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -453,7 +453,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:1,
@@ -466,7 +466,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:2,
@@ -479,7 +479,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:3,
@@ -492,7 +492,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:4,
@@ -505,7 +505,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				group: 1,
@@ -522,7 +522,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				group: 1,
@@ -539,7 +539,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				group: 1,
@@ -556,7 +556,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -606,7 +606,7 @@ async fn select_array_group_group_by() -> Result<()> {
 	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
                 {
                         "array::group": [
@@ -644,7 +644,7 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 				{
 					detail: {
@@ -669,7 +669,7 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 					{
 						count: 2
@@ -695,7 +695,7 @@ async fn select_aggregate_mean_update() -> Result<()> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:a,
@@ -706,11 +706,11 @@ async fn select_aggregate_mean_update() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("None");
+	let val = SqlValue::parse("None");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:a,
@@ -721,7 +721,7 @@ async fn select_aggregate_mean_update() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				avg: 2

@@ -71,7 +71,7 @@ impl TryFrom<&str> for Datetime {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match syn::datetime(v) {
-			Ok(v) => Ok(v),
+			Ok(v) => Ok(v.into()),
 			_ => Err(()),
 		}
 	}

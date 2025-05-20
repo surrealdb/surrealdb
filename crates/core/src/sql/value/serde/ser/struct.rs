@@ -1,88 +1,88 @@
 use super::Content;
-use crate::expr;
-use crate::expr::Value;
+use crate::sql;
+use crate::sql::SqlValue;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::de::IntoDeserializer;
 use serde_content::{Data, Expected, Unexpected};
 
-pub(super) fn to_value(content: Content) -> Result<Value> {
+pub(super) fn to_value(content: Content) -> Result<SqlValue> {
 	match content {
 		Content::Struct(v) => match v.name.as_ref() {
-			expr::strand::TOKEN => {
-				expr::Strand::deserialize(Content::Struct(v).into_deserializer())
+			sql::strand::TOKEN => {
+				sql::Strand::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::model::TOKEN => expr::Model::deserialize(Content::Struct(v).into_deserializer())
+			sql::model::TOKEN => sql::Model::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::query::TOKEN => expr::Query::deserialize(Content::Struct(v).into_deserializer())
+			sql::query::TOKEN => sql::Query::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::future::TOKEN => {
-				expr::Future::deserialize(Content::Struct(v).into_deserializer())
+			sql::future::TOKEN => {
+				sql::Future::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::edges::TOKEN => expr::Edges::deserialize(Content::Struct(v).into_deserializer())
+			sql::edges::TOKEN => sql::Edges::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::range::TOKEN => expr::Range::deserialize(Content::Struct(v).into_deserializer())
+			sql::range::TOKEN => sql::Range::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::block::TOKEN => expr::Block::deserialize(Content::Struct(v).into_deserializer())
+			sql::block::TOKEN => sql::Block::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::cast::TOKEN => expr::Cast::deserialize(Content::Struct(v).into_deserializer())
+			sql::cast::TOKEN => sql::Cast::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::regex::TOKEN => expr::Regex::deserialize(Content::Struct(v).into_deserializer())
+			sql::regex::TOKEN => sql::Regex::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::table::TOKEN => expr::Table::deserialize(Content::Struct(v).into_deserializer())
+			sql::table::TOKEN => sql::Table::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::idiom::TOKEN => expr::Idiom::deserialize(Content::Struct(v).into_deserializer())
+			sql::idiom::TOKEN => sql::Idiom::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::param::TOKEN => expr::Param::deserialize(Content::Struct(v).into_deserializer())
+			sql::param::TOKEN => sql::Param::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::thing::TOKEN => expr::Thing::deserialize(Content::Struct(v).into_deserializer())
+			sql::thing::TOKEN => sql::Thing::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::object::TOKEN => {
-				expr::Object::deserialize(Content::Struct(v).into_deserializer())
+			sql::object::TOKEN => {
+				sql::Object::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::array::TOKEN => expr::Array::deserialize(Content::Struct(v).into_deserializer())
+			sql::array::TOKEN => sql::Array::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::uuid::TOKEN => expr::Uuid::deserialize(Content::Struct(v).into_deserializer())
+			sql::uuid::TOKEN => sql::Uuid::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::datetime::TOKEN => {
-				expr::Datetime::deserialize(Content::Struct(v).into_deserializer())
+			sql::datetime::TOKEN => {
+				sql::Datetime::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::duration::TOKEN => {
-				expr::Duration::deserialize(Content::Struct(v).into_deserializer())
+			sql::duration::TOKEN => {
+				sql::Duration::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::closure::TOKEN => {
-				expr::Closure::deserialize(Content::Struct(v).into_deserializer())
+			sql::closure::TOKEN => {
+				sql::Closure::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::file::TOKEN => expr::File::deserialize(Content::Struct(v).into_deserializer())
+			sql::file::TOKEN => sql::File::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
 			_ => match v.data {
-				Data::Unit => Ok(Value::None),
+				Data::Unit => Ok(SqlValue::None),
 				Data::NewType {
 					value,
 				} => value.try_into(),

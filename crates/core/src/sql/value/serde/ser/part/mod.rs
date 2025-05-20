@@ -1,10 +1,10 @@
 pub(super) mod vec;
 
 use crate::err::Error;
-use crate::expr::value::serde::ser;
-use crate::expr::Ident;
-use crate::expr::Part;
-use crate::expr::Value;
+use crate::sql::value::serde::ser;
+use crate::sql::Ident;
+use crate::sql::Part;
+use crate::sql::Value;
 use ser::Serializer as _;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
@@ -130,7 +130,7 @@ impl serde::ser::SerializeTupleVariant for SerializePart {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::expr;
+	use crate::sql;
 	use serde::Serialize;
 
 	#[test]
@@ -184,14 +184,14 @@ mod tests {
 
 	#[test]
 	fn start() {
-		let part = Part::Start(expr::thing("foo:bar").unwrap().into());
+		let part = Part::Start(sql::thing("foo:bar").unwrap().into());
 		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
 	fn value() {
-		let part = Part::Value(expr::thing("foo:bar").unwrap().into());
+		let part = Part::Value(sql::thing("foo:bar").unwrap().into());
 		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}

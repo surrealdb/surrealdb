@@ -23,7 +23,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::expr::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, Statement, Table,
+	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, LogicalPlan, Table,
 	Value as CoreValue, statements::LiveStatement,
 };
 use uuid::Uuid;
@@ -88,7 +88,7 @@ where
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
 		let query =
-			Query::normal(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
+			Query::normal(client.clone(), vec![LogicalPlan::Live(stmt)], Default::default(), false);
 		let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
 			return Err(Error::InternalError(
 				"successufull live query didn't return a uuid".to_string(),

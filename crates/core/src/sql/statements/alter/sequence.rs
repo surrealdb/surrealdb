@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Ident, Timeout, Value};
+use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::sql::{Base, Ident, Timeout, SqlValue};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
@@ -22,43 +22,6 @@ pub struct AlterSequenceStatement {
 	pub timeout: Option<Timeout>,
 }
 
-impl AlterSequenceStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Get the sequence definition
-		let mut sq = match txn.get_db_sequence(ns, db, &self.name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::SeqNotFound { .. })) {
-					return Ok(Value::None);
-				} else {
-					return Err(e);
-				}
-			}
-		};
-		// Process the statement
-		if let Some(timeout) = &self.timeout {
-			if timeout.is_zero() {
-				sq.timeout = None;
-			} else {
-				sq.timeout = Some(timeout.clone());
-			}
-		}
-		// Set the table definition
-		let key = Sq::new(ns, db, &self.name);
-		txn.set(key, revision::to_vec(&sq)?, None).await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 impl Display for AlterSequenceStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "ALTER SEQUENCE")?;
@@ -76,5 +39,25 @@ impl Display for AlterSequenceStatement {
 			None
 		};
 		Ok(())
+	}
+}
+
+
+impl From<AlterSequenceStatement> for crate::expr::statements::alter::AlterSequenceStatement {
+	fn from(v: AlterSequenceStatement) -> Self {
+		crate::expr::statements::alter::AlterSequenceStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			timeout: v.timeout.map(Into::into),
+		}
+	}
+}
+impl From<crate::expr::statements::alter::AlterSequenceStatement> for AlterSequenceStatement {
+	fn from(v: crate::expr::statements::alter::AlterSequenceStatement) -> Self {
+		AlterSequenceStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			timeout: v.timeout.map(Into::into),
+		}
 	}
 }

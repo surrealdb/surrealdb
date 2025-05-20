@@ -98,6 +98,18 @@ impl Display for Regex {
 	}
 }
 
+impl From<Regex> for crate::expr::Regex {
+	fn from(v: Regex) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Regex> for Regex {
+	fn from(v: crate::expr::Regex) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Serialize for Regex {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where

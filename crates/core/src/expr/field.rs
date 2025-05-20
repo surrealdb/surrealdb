@@ -232,7 +232,7 @@ impl Fields {
 									// This value is always an array, so we can convert it
 									for (name, expr) in args.into_iter().zip(expr) {
 										// This value is always a string, so we can convert it
-										let name = syn::idiom(&name.to_raw_string())?;
+										let name: Idiom = syn::idiom(&name.to_raw_string())?.into();
 										// Check if this is a single VALUE field expression
 										out.set(stk, ctx, opt, name.as_ref(), expr).await?
 									}
@@ -260,7 +260,7 @@ impl Fields {
 									let name = if let Some(x) = alias.as_ref().map(Cow::Borrowed) {
 										x
 									} else {
-										Cow::Owned(syn::idiom(&name.to_raw_string())?)
+										Cow::Owned(syn::idiom(&name.to_raw_string())?.into())
 									};
 									// Add the projected field to the output document
 									out.set(stk, ctx, opt, name.as_ref(), expr).await?

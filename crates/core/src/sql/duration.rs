@@ -1,8 +1,8 @@
 use crate::err::Error;
-use crate::expr::Value;
-use crate::expr::datetime::Datetime;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::strand::Strand;
+use crate::sql::SqlValue;
+use crate::sql::datetime::Datetime;
+
+use crate::sql::strand::Strand;
 use crate::syn;
 use anyhow::Result;
 use revision::revisioned;
@@ -50,7 +50,7 @@ impl From<Duration> for time::Duration {
 	}
 }
 
-impl From<time::Duration> for Value {
+impl From<time::Duration> for SqlValue {
 	fn from(value: time::Duration) -> Self {
 		Self::Duration(value.into())
 	}
@@ -84,6 +84,18 @@ impl TryFrom<&str> for Duration {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
+	}
+}
+
+impl From<Duration> for crate::expr::Duration {
+	fn from(v: Duration) -> Self {
+		crate::expr::Duration(v.0)
+	}
+}
+
+impl From<crate::expr::Duration> for Duration {
+	fn from(v: crate::expr::Duration) -> Self {
+		Self(v.0)
 	}
 }
 
@@ -397,8 +409,4 @@ impl<'a> Sum<&'a Self> for Duration {
 	}
 }
 
-impl InfoStructure for Duration {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+

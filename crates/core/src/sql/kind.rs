@@ -3,9 +3,9 @@ use super::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Part,
 	Range, Regex, Strand, Thing, Uuid,
 };
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{
-	Table, Value,
+
+use crate::sql::{
+	Table, SqlValue,
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
@@ -298,6 +298,101 @@ impl Kind {
 	}
 }
 
+
+impl From<Kind> for crate::expr::Kind {
+	fn from(v: Kind) -> Self {
+		match v {
+			Kind::Any => crate::expr::Kind::Any,
+			Kind::Null => crate::expr::Kind::Null,
+			Kind::Bool => crate::expr::Kind::Bool,
+			Kind::Bytes => crate::expr::Kind::Bytes,
+			Kind::Datetime => crate::expr::Kind::Datetime,
+			Kind::Decimal => crate::expr::Kind::Decimal,
+			Kind::Duration => crate::expr::Kind::Duration,
+			Kind::Float => crate::expr::Kind::Float,
+			Kind::Int => crate::expr::Kind::Int,
+			Kind::Number => crate::expr::Kind::Number,
+			Kind::Object => crate::expr::Kind::Object,
+			Kind::Point => crate::expr::Kind::Point,
+			Kind::String => crate::expr::Kind::String,
+			Kind::Uuid => crate::expr::Kind::Uuid,
+			Kind::Regex => crate::expr::Kind::Regex,
+			Kind::Record(tables) => {
+				crate::expr::Kind::Record(tables.into_iter().map(Into::into).collect())
+			}
+			Kind::Geometry(geometries) => {
+				crate::expr::Kind::Geometry(geometries.into_iter().collect())
+			}
+			Kind::Option(k) => crate::expr::Kind::Option(Box::new(k.as_ref().clone().into())),
+			Kind::Either(kinds) => {
+				crate::expr::Kind::Either(kinds.into_iter().map(Into::into).collect())
+			}
+			Kind::Set(k, l) => crate::expr::Kind::Set(Box::new(k.as_ref().clone().into()), l),
+			Kind::Array(k, l) => crate::expr::Kind::Array(Box::new(k.as_ref().clone().into()), l),
+			Kind::Function(args, ret) => crate::expr::Kind::Function(
+				args.map(|args| args.into_iter().map(Into::into).collect()),
+				ret.map(|ret| Box::new((*ret).into())),
+			),
+			Kind::Range => crate::expr::Kind::Range,
+			Kind::Literal(l) => crate::expr::Kind::Literal(l.into()),
+			Kind::References(t, i) => {
+				crate::expr::Kind::References(t.map(Into::into), i.map(Into::into))
+			}
+			Kind::File(k) => crate::expr::Kind::File(k.into_iter().map(Into::into).collect()),
+		}
+	}
+}
+
+impl From<crate::expr::Kind> for Kind {
+	fn from(v: crate::expr::Kind) -> Self {
+		match v {
+			crate::expr::Kind::Any => Kind::Any,
+			crate::expr::Kind::Null => Kind::Null,
+			crate::expr::Kind::Bool => Kind::Bool,
+			crate::expr::Kind::Bytes => Kind::Bytes,
+			crate::expr::Kind::Datetime => Kind::Datetime,
+			crate::expr::Kind::Decimal => Kind::Decimal,
+			crate::expr::Kind::Duration => Kind::Duration,
+			crate::expr::Kind::Float => Kind::Float,
+			crate::expr::Kind::Int => Kind::Int,
+			crate::expr::Kind::Number => Kind::Number,
+			crate::expr::Kind::Object => Kind::Object,
+			crate::expr::Kind::Point => Kind::Point,
+			crate::expr::Kind::String => Kind::String,
+			crate::expr::Kind::Uuid => Kind::Uuid,
+			crate::expr::Kind::Regex => Kind::Regex,
+			crate::expr::Kind::Record(tables) => {
+				Kind::Record(tables.into_iter().map(Into::<Table>::into).collect())
+			}
+			crate::expr::Kind::Geometry(geometries) => {
+				Kind::Geometry(geometries.into_iter().collect())
+			}
+			crate::expr::Kind::Option(k) => Kind::Option(Box::new((*k).into())),
+			crate::expr::Kind::Either(kinds) => {
+				let kinds: Vec<Kind> = kinds.into_iter().map(Into::into).collect();
+				if kinds.is_empty() {
+					return Self::Either(vec![Self::Any]);
+				}
+				Self::Either(kinds)
+			}
+			crate::expr::Kind::Set(k, l) => Self::Set(Box::new((*k).into()), l),
+			crate::expr::Kind::Array(k, l) => Self::Array(Box::new((*k).into()), l),
+			crate::expr::Kind::Function(args, ret) => Self::Function(
+				args.map(|args| args.into_iter().map(Into::into).collect()),
+				ret.map(|ret| Box::new((*ret).into())),
+			),
+			crate::expr::Kind::Range => Self::Range,
+			crate::expr::Kind::Literal(l) => Self::Literal(l.into()),
+			crate::expr::Kind::References(t, i) => {
+				Self::References(t.map(Into::into), i.map(Into::into))
+			}
+			crate::expr::Kind::File(k) => {
+				Kind::File(k.into_iter().map(Into::<Ident>::into).collect())
+			}
+		}
+	}
+}
+
 /// Trait for retrieving the `kind` equivalent of a rust type.
 ///
 /// Returns the most general kind for a type.
@@ -491,11 +586,7 @@ impl Display for Kind {
 	}
 }
 
-impl InfoStructure for Kind {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -532,26 +623,26 @@ impl Literal {
 		}
 	}
 
-	pub fn validate_value(&self, value: &Value) -> bool {
+	pub fn validate_value(&self, value: &SqlValue) -> bool {
 		match self {
 			Self::String(v) => match value {
-				Value::Strand(s) => s == v,
+				SqlValue::Strand(s) => s == v,
 				_ => false,
 			},
 			Self::Number(v) => match value {
-				Value::Number(n) => n == v,
+				SqlValue::Number(n) => n == v,
 				_ => false,
 			},
 			Self::Duration(v) => match value {
-				Value::Duration(n) => n == v,
+				SqlValue::Duration(n) => n == v,
 				_ => false,
 			},
 			Self::Bool(v) => match value {
-				Value::Bool(b) => b == v,
+				SqlValue::Bool(b) => b == v,
 				_ => false,
 			},
 			Self::Array(a) => match value {
-				Value::Array(x) => {
+				SqlValue::Array(x) => {
 					if a.len() != x.len() {
 						return false;
 					}
@@ -571,7 +662,7 @@ impl Literal {
 				_ => false,
 			},
 			Self::Object(o) => match value {
-				Value::Object(x) => {
+				SqlValue::Object(x) => {
 					if o.len() < x.len() {
 						return false;
 					}
@@ -591,8 +682,8 @@ impl Literal {
 				_ => false,
 			},
 			Self::DiscriminatedObject(key, discriminants) => match value {
-				Value::Object(x) => {
-					let value = x.get(key).unwrap_or(&Value::None);
+				SqlValue::Object(x) => {
+					let value = x.get(key).unwrap_or(&SqlValue::None);
 					if let Some(o) = discriminants
 						.iter()
 						.find(|o| value.to_owned().coerce_to_kind(&o[key]).is_ok())
@@ -753,6 +844,47 @@ impl Display for Literal {
 
 				Ok(())
 			}
+		}
+	}
+}
+
+
+impl From<Literal> for crate::expr::Literal {
+	fn from(v: Literal) -> Self {
+		match v {
+			Literal::String(s) => Self::String(s.into()),
+			Literal::Number(n) => Self::Number(n.into()),
+			Literal::Duration(d) => Self::Duration(d.into()),
+			Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
+			Literal::Object(o) => Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect()),
+			Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
+				k,
+				o.into_iter()
+					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
+					.collect(),
+			),
+			Literal::Bool(b) => Self::Bool(b),
+		}
+	}
+}
+
+impl From<crate::expr::Literal> for Literal {
+	fn from(v: crate::expr::Literal) -> Self {
+		match v {
+			crate::expr::Literal::String(s) => Self::String(s.into()),
+			crate::expr::Literal::Number(n) => Self::Number(n.into()),
+			crate::expr::Literal::Duration(d) => Self::Duration(d.into()),
+			crate::expr::Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
+			crate::expr::Literal::Object(o) => {
+				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
+			}
+			crate::expr::Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
+				k,
+				o.into_iter()
+					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
+					.collect(),
+			),
+			crate::expr::Literal::Bool(b) => Self::Bool(b),
 		}
 	}
 }

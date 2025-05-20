@@ -11,15 +11,17 @@ use crate::expr::ControlFlow;
 use crate::expr::FlowResult;
 use crate::expr::paths::DB;
 use crate::expr::paths::NS;
-use crate::expr::query::Query;
-use crate::expr::statement::Statement;
-use crate::expr::statements::{OptionStatement, UseStatement};
+use crate::sql::query::Query;
+use crate::expr::statement::LogicalPlan;
+use crate::sql::statements::{OptionStatement, UseStatement};
 use crate::expr::value::Value;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
+use crate::sql::planner::SqlToLogical;
+use crate::sql::statement::Statement;
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
@@ -110,10 +112,11 @@ impl Executor {
 	async fn execute_transaction_statement(
 		&mut self,
 		txn: Arc<Transaction>,
-		stmt: Statement,
+		plan: LogicalPlan,
 	) -> FlowResult<Value> {
-		let res = match stmt {
-			Statement::Set(stm) => {
+
+		let res = match plan {
+			LogicalPlan::Set(stm) => {
 				// Avoid moving in and out of the context via Arc::get_mut
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
@@ -147,7 +150,7 @@ impl Executor {
 				}
 			}
 			// Process all other normal statements
-			stmt => {
+			plan => {
 				// The transaction began successfully
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
@@ -158,7 +161,7 @@ impl Executor {
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Process the statement
-				self.stack.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None)).finish().await
+				self.stack.enter(|stk| plan.compute(stk, &self.ctx, &self.opt, None)).finish().await
 			}
 		};
 
@@ -193,7 +196,10 @@ impl Executor {
 			// These statements don't need a transaction.
 			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 			stmt => {
-				let writeable = stmt.writeable();
+				let planner = SqlToLogical::new();
+				let plan = planner.statement_to_logical(stmt)?;
+
+				let writeable = plan.writeable();
 				let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
 				let receiver = self.ctx.has_notifications().then(|| {
 					let (send, recv) = async_channel::unbounded();
@@ -201,7 +207,7 @@ impl Executor {
 					recv
 				});
 
-				match self.execute_transaction_statement(txn.clone(), stmt).await {
+				match self.execute_transaction_statement(txn.clone(), plan).await {
 					Ok(value) | Err(ControlFlow::Return(value)) => {
 						let mut lock = txn.lock().await;
 
@@ -461,7 +467,10 @@ impl Executor {
 				stmt => {
 					skip_remaining = matches!(stmt, Statement::Output(_));
 
-					let r = match self.execute_transaction_statement(txn.clone(), stmt).await {
+					let planner = SqlToLogical::new();
+					let plan = planner.statement_to_logical(stmt)?;
+
+					let r = match self.execute_transaction_statement(txn.clone(), plan).await {
 						Ok(x) => Ok(x),
 						Err(ControlFlow::Return(value)) => {
 							skip_remaining = true;

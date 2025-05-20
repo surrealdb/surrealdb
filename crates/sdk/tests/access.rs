@@ -8,7 +8,7 @@ use regex::Regex;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::{Capabilities, Session};
 use surrealdb::iam::Role;
-use surrealdb::sql::{Base, Value};
+use surrealdb::sql::{Base, SqlValue};
 use tokio::time::Duration;
 
 struct TestLevel {
@@ -973,7 +973,7 @@ async fn permissions_access_grant() {
 
 				if should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
-					assert_ne!(res.unwrap(), Value::parse("[]"), "{}", msg);
+					assert_ne!(res.unwrap(), SqlValue::parse("[]"), "{}", msg);
 				} else {
 					let err = res.unwrap_err().to_string();
 					assert!(

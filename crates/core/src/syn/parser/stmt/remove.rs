@@ -1,8 +1,8 @@
 use reblessive::Stk;
 
-use crate::expr::statements::remove::RemoveSequenceStatement;
+use crate::sql::statements::remove::RemoveSequenceStatement;
 use crate::{
-	expr::{
+	sql::{
 		Param,
 		statements::{
 			RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
@@ -136,7 +136,7 @@ impl Parser<'_> {
 
 				let name = self.next_token_value()?;
 
-				RemoveStatement::Table(crate::expr::statements::RemoveTableStatement {
+				RemoveStatement::Table(crate::sql::statements::RemoveTableStatement {
 					name,
 					if_exists,
 					expunge,

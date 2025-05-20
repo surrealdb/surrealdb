@@ -2,7 +2,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::expr::escape::EscapeIdent;
+use crate::sql::escape::EscapeIdent;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -25,5 +25,23 @@ impl fmt::Display for UseStatement {
 			write!(f, " DB {db}")?;
 		}
 		Ok(())
+	}
+}
+
+impl From<UseStatement> for crate::expr::statements::UseStatement {
+	fn from(v: UseStatement) -> Self {
+		crate::expr::statements::UseStatement {
+			ns: v.ns.map(Into::into),
+			db: v.db.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::UseStatement> for UseStatement {
+	fn from(v: crate::expr::statements::UseStatement) -> Self {
+		UseStatement {
+			ns: v.ns.map(Into::into),
+			db: v.db.map(Into::into),
+		}
 	}
 }

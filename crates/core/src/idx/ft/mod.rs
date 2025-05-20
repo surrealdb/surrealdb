@@ -527,7 +527,7 @@ mod tests {
 	use crate::dbs::Options;
 	use crate::expr::index::SearchParams;
 	use crate::expr::statements::{DefineAnalyzerStatement, DefineStatement};
-	use crate::expr::{Array, Statement, Thing, Value};
+	use crate::expr::{Array, LogicalPlan, Thing, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
@@ -624,7 +624,7 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+		let LogicalPlan::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
 		let az = Arc::new(az);
@@ -763,7 +763,7 @@ mod tests {
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+			let LogicalPlan::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 				panic!()
 			};
 			let az = Arc::new(az);
@@ -943,7 +943,7 @@ mod tests {
 	async fn concurrent_test() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+		let LogicalPlan::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
 		let az = Arc::new(az);
@@ -972,7 +972,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+		let LogicalPlan::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
 		let az = Arc::new(az);

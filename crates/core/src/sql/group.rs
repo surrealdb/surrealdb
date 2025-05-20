@@ -1,5 +1,5 @@
-use crate::expr::fmt::Fmt;
-use crate::expr::idiom::Idiom;
+use crate::sql::fmt::Fmt;
+use crate::sql::idiom::Idiom;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -36,6 +36,18 @@ impl Display for Groups {
 	}
 }
 
+impl From<Groups> for crate::expr::Groups {
+	fn from(v: Groups) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Groups> for Groups {
+	fn from(v: crate::expr::Groups) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -52,5 +64,17 @@ impl Deref for Group {
 impl Display for Group {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
+	}
+}
+
+impl From<Group> for crate::expr::Group {
+	fn from(v: Group) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Group> for Group {
+	fn from(v: crate::expr::Group) -> Self {
+		Self(v.0.into())
 	}
 }

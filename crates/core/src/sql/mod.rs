@@ -52,6 +52,7 @@ pub(crate) mod param;
 pub(crate) mod part;
 pub(crate) mod paths;
 pub(crate) mod permission;
+pub(crate) mod planner;
 pub(crate) mod query;
 pub(crate) mod range;
 pub(crate) mod reference;
@@ -158,7 +159,7 @@ pub use self::thing::Thing;
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::uuid::Uuid;
-pub use self::value::Value;
+pub use self::value::SqlValue;
 pub use self::value::Values;
 pub use self::value::serde::from_value;
 pub use self::value::serde::to_value;
@@ -183,7 +184,7 @@ pub type FlowResult<T> = Result<T, ControlFlow>;
 pub enum ControlFlow {
 	Break,
 	Continue,
-	Return(Value),
+	Return(SqlValue),
 	Err(anyhow::Error),
 }
 
@@ -199,11 +200,11 @@ pub trait FlowResultExt {
 	///
 	/// If the error value is either `ControlFlow::Break` or `ControlFlow::Continue` it will
 	/// instead create an error that break/continue was used within an invalid location.
-	fn catch_return(self) -> Result<Value, anyhow::Error>;
+	fn catch_return(self) -> Result<SqlValue, anyhow::Error>;
 }
 
-impl FlowResultExt for FlowResult<Value> {
-	fn catch_return(self) -> Result<Value, anyhow::Error> {
+impl FlowResultExt for FlowResult<SqlValue> {
+	fn catch_return(self) -> Result<SqlValue, anyhow::Error> {
 		match self {
 			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
 				Err(anyhow::Error::new(Error::InvalidControlFlow))

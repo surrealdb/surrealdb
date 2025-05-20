@@ -2,16 +2,16 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::try_join_all_buffered;
-use crate::expr::cond::Cond;
-use crate::expr::dir::Dir;
-use crate::expr::field::Fields;
-use crate::expr::group::Groups;
-use crate::expr::idiom::Idiom;
-use crate::expr::limit::Limit;
-use crate::expr::order::{OldOrders, Order, OrderList, Ordering};
-use crate::expr::split::Splits;
-use crate::expr::start::Start;
-use crate::expr::table::Tables;
+use crate::sql::cond::Cond;
+use crate::sql::dir::Dir;
+use crate::sql::field::Fields;
+use crate::sql::group::Groups;
+use crate::sql::idiom::Idiom;
+use crate::sql::limit::Limit;
+use crate::sql::order::{OldOrders, Order, OrderList, Ordering};
+use crate::sql::split::Splits;
+use crate::sql::start::Start;
+use crate::sql::table::Tables;
 use crate::kvs::KeyEncode;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -144,6 +144,41 @@ impl Display for Graph {
 		}
 	}
 }
+
+impl From<Graph> for crate::expr::Graph {
+	fn from(v: Graph) -> Self {
+		Self {
+			dir: v.dir.into(),
+			expr: v.expr.map(Into::into),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			alias: v.alias.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::Graph> for Graph {
+	fn from(v: crate::expr::Graph) -> Self {
+		Graph {
+			dir: v.dir.into(),
+			expr: v.expr.map(Into::into),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			alias: v.alias.map(Into::into),
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -162,27 +197,22 @@ impl From<Table> for GraphSubjects {
 	}
 }
 
+
+impl From<GraphSubjects> for crate::expr::graph::GraphSubjects {
+	fn from(v: GraphSubjects) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+impl From<crate::expr::graph::GraphSubjects> for GraphSubjects {
+	fn from(v: crate::expr::graph::GraphSubjects) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 impl Deref for GraphSubjects {
 	type Target = Vec<GraphSubject>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
-	}
-}
-
-impl GraphSubjects {
-	pub(crate) async fn compute(
-		self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Self> {
-		stk.scope(|scope| {
-			let futs = self.0.into_iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc)));
-			try_join_all_buffered(futs)
-		})
-		.await
-		.map(GraphSubjects)
 	}
 }
 
@@ -201,106 +231,6 @@ pub enum GraphSubject {
 	Range(Table, IdRange),
 }
 
-impl GraphSubject {
-	pub(crate) async fn compute(
-		self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Self> {
-		if let Self::Range(tb, rng) = self {
-			let rng = rng.compute(stk, ctx, opt, doc).await?;
-			Ok(Self::Range(tb, rng))
-		} else {
-			Ok(self)
-		}
-	}
-
-	pub(crate) fn presuf(
-		&self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		id: &Id,
-		dir: &Dir,
-	) -> (Result<Vec<u8>>, Result<Vec<u8>>) {
-		match self {
-			Self::Table(t) => (
-				crate::key::graph::ftprefix(ns, db, tb, id, dir, &t.0),
-				crate::key::graph::ftsuffix(ns, db, tb, id, dir, &t.0),
-			),
-			Self::Range(t, r) => {
-				let beg = match &r.beg {
-					Bound::Unbounded => crate::key::graph::ftprefix(ns, db, tb, id, dir, &t.0),
-					Bound::Included(v) => crate::key::graph::new(
-						ns,
-						db,
-						tb,
-						id,
-						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
-						},
-					)
-					.encode(),
-					Bound::Excluded(v) => crate::key::graph::new(
-						ns,
-						db,
-						tb,
-						id,
-						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
-						},
-					)
-					.encode()
-					.map(|mut v| {
-						v.push(0x00);
-						v
-					}),
-				};
-				// Prepare the range end key
-				let end = match &r.end {
-					Bound::Unbounded => crate::key::graph::ftsuffix(ns, db, tb, id, dir, &t.0),
-					Bound::Excluded(v) => crate::key::graph::new(
-						ns,
-						db,
-						tb,
-						id,
-						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
-						},
-					)
-					.encode(),
-					Bound::Included(v) => crate::key::graph::new(
-						ns,
-						db,
-						tb,
-						id,
-						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
-						},
-					)
-					.encode()
-					.map(|mut v| {
-						v.push(0x00);
-						v
-					}),
-				};
-
-				(beg, end)
-			}
-		}
-	}
-}
-
 impl From<Table> for GraphSubject {
 	fn from(x: Table) -> Self {
 		GraphSubject::Table(x)
@@ -312,6 +242,25 @@ impl Display for GraphSubject {
 		match self {
 			Self::Table(tb) => Display::fmt(&tb, f),
 			Self::Range(tb, rng) => write!(f, "{tb}:{rng}"),
+		}
+	}
+}
+
+
+impl From<GraphSubject> for crate::expr::graph::GraphSubject {
+	fn from(v: GraphSubject) -> Self {
+		match v {
+			GraphSubject::Table(tb) => Self::Table(tb.into()),
+			GraphSubject::Range(tb, rng) => Self::Range(tb.into(), rng.into()),
+		}
+	}
+}
+
+impl From<crate::expr::graph::GraphSubject> for GraphSubject {
+	fn from(v: crate::expr::graph::GraphSubject) -> Self {
+		match v {
+			crate::expr::graph::GraphSubject::Table(tb) => Self::Table(tb.into()),
+			crate::expr::graph::GraphSubject::Range(tb, rng) => Self::Range(tb.into(), rng.into()),
 		}
 	}
 }

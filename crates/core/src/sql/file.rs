@@ -60,3 +60,20 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 		})
 		.collect::<String>()
 }
+
+impl From<File> for crate::expr::File {
+	fn from(v: File) -> Self {
+		Self {
+			bucket: v.bucket,
+			key: v.key,
+		}
+	}
+}
+impl From<crate::expr::File> for File {
+	fn from(v: crate::expr::File) -> Self {
+		Self {
+			bucket: v.bucket,
+			key: v.key,
+		}
+	}
+}

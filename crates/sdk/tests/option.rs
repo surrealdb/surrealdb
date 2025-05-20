@@ -4,7 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn option_import_indexes_should_be_populated() -> Result<()> {
@@ -26,7 +26,7 @@ async fn option_import_indexes_should_be_populated() -> Result<()> {
 	assert!(tmp.is_ok(), "{:?}", tmp.err());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			id: test:1,
 			num: 123
@@ -35,7 +35,7 @@ async fn option_import_indexes_should_be_populated() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:1,
@@ -46,7 +46,7 @@ async fn option_import_indexes_should_be_populated() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				detail: {

@@ -6,7 +6,7 @@ use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::iam::Role;
-use surrealdb::sql::{Thing, Value};
+use surrealdb::sql::{Thing, SqlValue};
 
 //
 // Permissions
@@ -141,7 +141,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]"),
 				"unexpected error creating person record"
 			);
 
@@ -155,7 +155,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]"),
 				"unexpected error creating person record"
 			);
 
@@ -169,7 +169,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]"),
 				"unexpected error creating person record"
 			);
 
@@ -189,7 +189,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() == Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() == SqlValue::parse("[]"), "{}", msg);
 			} else {
 				// Verify the record has not been deleted in any DB
 				let mut resp = ds
@@ -201,7 +201,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", msg);
 
 				let mut resp = ds
 					.execute(
@@ -212,7 +212,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", msg);
 
 				let mut resp = ds
 					.execute(
@@ -223,7 +223,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", msg);
 			}
 		}
 	}
@@ -258,7 +258,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -279,7 +279,7 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() != Value::parse("[]"),
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]"),
 			"{}",
 			"anonymous user should not be able to delete a record if the table has no permissions"
 		);
@@ -300,7 +300,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -321,7 +321,7 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() == Value::parse("[]"),
+			res.is_ok() && res.unwrap() == SqlValue::parse("[]"),
 			"{}",
 			"anonymous user should be able to delete a record if the table has full permissions"
 		);
@@ -357,7 +357,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -378,7 +378,7 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() == Value::parse("[]"),
+			res.is_ok() && res.unwrap() == SqlValue::parse("[]"),
 			"{}",
 			"anonymous user should be able to delete a record if the table has no permissions"
 		);
@@ -399,7 +399,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", "failed to create record");
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -420,7 +420,7 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() == Value::parse("[]"),
+			res.is_ok() && res.unwrap() == SqlValue::parse("[]"),
 			"{}",
 			"anonymous user should be able to delete a record if the table has full permissions"
 		);
@@ -435,7 +435,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	// validate create response
 	let tmp = res.remove(0).result?;
-	let expected_record = Value::parse(
+	let expected_record = SqlValue::parse(
 		"[
 			{
 				id: person:test_true,
@@ -451,7 +451,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	let live_id = res.remove(0).result?;
 	let live_id = match live_id {
-		Value::Uuid(id) => id,
+		SqlValue::Uuid(id) => id,
 		_ => panic!("expected uuid"),
 	};
 
@@ -459,7 +459,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 	let res = &mut dbs.execute("DELETE person:test_true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]");
 	assert_eq!(tmp, val);
 
 	// Validate notification
@@ -470,8 +470,8 @@ async fn delete_filtered_live_notification() -> Result<()> {
 		Notification::new(
 			live_id,
 			Action::Delete,
-			Value::Thing(Thing::from(("person", "test_true"))),
-			Value::parse(
+			SqlValue::Thing(Thing::from(("person", "test_true"))),
+			SqlValue::parse(
 				"{
 					id: person:test_true,
 					condition: true,

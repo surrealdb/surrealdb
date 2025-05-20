@@ -25,7 +25,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::expr::{
-	self, Object as CoreObject, Statement, Value as CoreValue, to_value as to_core_value,
+	self, Object as CoreObject, LogicalPlan, Value as CoreValue, to_value as to_core_value,
 };
 
 /// A query future
@@ -43,7 +43,7 @@ pub(crate) enum ValidQuery {
 		bindings: CoreObject,
 	},
 	Normal {
-		query: Vec<Statement>,
+		query: Vec<LogicalPlan>,
 		register_live_queries: bool,
 		bindings: CoreObject,
 	},
@@ -55,7 +55,7 @@ where
 {
 	pub(crate) fn normal(
 		client: Cow<'r, Surreal<C>>,
-		query: Vec<Statement>,
+		query: Vec<LogicalPlan>,
 		bindings: CoreObject,
 		register_live_queries: bool,
 	) -> Self {
@@ -133,12 +133,12 @@ where
 							.filter(|x| {
 								!matches!(
 									x,
-									Statement::Begin(_)
-										| Statement::Commit(_) | Statement::Cancel(_)
+									LogicalPlan::Begin(_)
+										| LogicalPlan::Commit(_) | LogicalPlan::Cancel(_)
 								)
 							})
 							.enumerate()
-							.filter(|(_, x)| matches!(x, Statement::Live(_)))
+							.filter(|(_, x)| matches!(x, LogicalPlan::Live(_)))
 							.map(|(i, _)| i)
 							.collect()
 					} else {

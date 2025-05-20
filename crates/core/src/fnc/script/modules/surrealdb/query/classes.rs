@@ -99,7 +99,7 @@ impl Query {
 		let query = expr::value(&text).map_err(|e| {
 			let error_text = format!("{}", e);
 			Exception::throw_type(&ctx, &error_text)
-		})?;
+		})?.into();
 		let vars = variables.into_inner().map(|x| x.0);
 		Ok(Query {
 			query,

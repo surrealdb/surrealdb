@@ -38,14 +38,13 @@ pub use deprecated::token::DefineTokenStatement;
 
 pub use api::ApiAction;
 pub use api::ApiDefinition;
-pub use api::FindApi;
 
 pub use bucket::BucketDefinition;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::value::Value;
+use crate::sql::value::SqlValue;
 use anyhow::Result;
 
 use reblessive::tree::Stk;
@@ -109,40 +108,6 @@ impl DefineStatement {
 	}
 }
 
-impl DefineStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		match self {
-			Self::Namespace(v) => v.compute(ctx, opt, doc).await,
-			Self::Database(v) => v.compute(ctx, opt, doc).await,
-			Self::Function(v) => v.compute(ctx, opt, doc).await,
-			Self::Param(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Event(v) => v.compute(ctx, opt, doc).await,
-			Self::Field(v) => v.compute(ctx, opt, doc).await,
-			Self::Index(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Analyzer(v) => v.compute(ctx, opt, doc).await,
-			Self::User(v) => v.compute(ctx, opt, doc).await,
-			Self::Model(v) => v.compute(ctx, opt, doc).await,
-			Self::Access(v) => v.compute(ctx, opt, doc).await,
-			Self::Config(v) => v.compute(ctx, opt, doc).await,
-			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Sequence(v) => v.compute(ctx, opt).await,
-		}
-	}
-}
-
 impl Display for DefineStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -166,11 +131,58 @@ impl Display for DefineStatement {
 	}
 }
 
+
+impl From<DefineStatement> for crate::expr::statements::DefineStatement {
+	fn from(v: DefineStatement) -> Self {
+		match v {
+			DefineStatement::Namespace(v) => Self::Namespace(v.into()),
+			DefineStatement::Database(v) => Self::Database(v.into()),
+			DefineStatement::Function(v) => Self::Function(v.into()),
+			DefineStatement::Analyzer(v) => Self::Analyzer(v.into()),
+			DefineStatement::Param(v) => Self::Param(v.into()),
+			DefineStatement::Table(v) => Self::Table(v.into()),
+			DefineStatement::Event(v) => Self::Event(v.into()),
+			DefineStatement::Field(v) => Self::Field(v.into()),
+			DefineStatement::Index(v) => Self::Index(v.into()),
+			DefineStatement::User(v) => Self::User(v.into()),
+			DefineStatement::Model(v) => Self::Model(v.into()),
+			DefineStatement::Access(v) => Self::Access(v.into()),
+			DefineStatement::Config(v) => Self::Config(v.into()),
+			DefineStatement::Api(v) => Self::Api(v.into()),
+			DefineStatement::Bucket(v) => Self::Bucket(v.into()),
+			DefineStatement::Sequence(v) => Self::Sequence(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineStatement> for DefineStatement {
+	fn from(v: crate::expr::statements::DefineStatement) -> Self {
+		match v {
+			crate::expr::statements::DefineStatement::Namespace(v) => Self::Namespace(v.into()),
+			crate::expr::statements::DefineStatement::Database(v) => Self::Database(v.into()),
+			crate::expr::statements::DefineStatement::Function(v) => Self::Function(v.into()),
+			crate::expr::statements::DefineStatement::Analyzer(v) => Self::Analyzer(v.into()),
+			crate::expr::statements::DefineStatement::Param(v) => Self::Param(v.into()),
+			crate::expr::statements::DefineStatement::Table(v) => Self::Table(v.into()),
+			crate::expr::statements::DefineStatement::Event(v) => Self::Event(v.into()),
+			crate::expr::statements::DefineStatement::Field(v) => Self::Field(v.into()),
+			crate::expr::statements::DefineStatement::Index(v) => Self::Index(v.into()),
+			crate::expr::statements::DefineStatement::User(v) => Self::User(v.into()),
+			crate::expr::statements::DefineStatement::Model(v) => Self::Model(v.into()),
+			crate::expr::statements::DefineStatement::Access(v) => Self::Access(v.into()),
+			crate::expr::statements::DefineStatement::Config(v) => Self::Config(v.into()),
+			crate::expr::statements::DefineStatement::Api(v) => Self::Api(v.into()),
+			crate::expr::statements::DefineStatement::Bucket(v) => Self::Bucket(v.into()),
+			crate::expr::statements::DefineStatement::Sequence(v) => Self::Sequence(v.into()),
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 
 	use super::*;
-	use crate::expr::Ident;
+	use crate::sql::Ident;
 
 	#[test]
 	fn check_define_serialize() {

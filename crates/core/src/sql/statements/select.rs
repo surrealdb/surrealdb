@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::FlowResultExt as _;
-use crate::expr::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
+use crate::sql::FlowResultExt as _;
+use crate::sql::{
+	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, SqlValue,
 	Values, Version, With,
 	order::{OldOrders, Order, OrderList, Ordering},
 };
@@ -79,81 +79,6 @@ impl SelectStatement {
 		Ok(())
 	}
 
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		if self.expr.iter().any(|v| match v {
-			Field::All => false,
-			Field::Single {
-				expr,
-				..
-			} => expr.writeable(),
-		}) {
-			return true;
-		}
-		if self.what.iter().any(|v| v.writeable()) {
-			return true;
-		}
-		self.cond.as_deref().is_some_and(Value::writeable)
-	}
-
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Valid options?
-		opt.valid_for_db()?;
-		// Assign the statement
-		let stm = Statement::from(self);
-		// Create a new iterator
-		let mut i = Iterator::new();
-		// Ensure futures are stored and the version is set if specified
-		let version = match &self.version {
-			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
-			_ => None,
-		};
-		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
-		// Extract the limits
-		i.setup_limit(stk, ctx, &opt, &stm).await?;
-		// Fail for multiple targets without a limit
-		ensure!(
-			!self.only || i.is_limit_one_or_zero() || self.what.0.len() <= 1,
-			Error::SingleOnlyOutput
-		);
-		// Check if there is a timeout
-		let ctx = stm.setup_timeout(ctx)?;
-		// Get a query planner
-		let mut planner = QueryPlanner::new();
-		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
-		// Loop over the select targets
-		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, &opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await?;
-		}
-		// Attach the query planner to the context
-		let ctx = stm.setup_query_planner(planner, ctx);
-		// Process the statement
-		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There were no results
-				0 => Ok(Value::None),
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
-	}
 }
 
 impl fmt::Display for SelectStatement {
@@ -204,5 +129,54 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+
+impl From<SelectStatement> for crate::expr::statements::SelectStatement {
+	fn from(v: SelectStatement) -> Self {
+		Self {
+			expr: v.expr.into(),
+			omit: v.omit.map(Into::into),
+			only: v.only,
+			what: v.what.into(),
+			with: v.with.map(Into::into),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			version: v.version.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			explain: v.explain.map(Into::into),
+			tempfiles: v.tempfiles,
+		}
+	}
+}
+
+impl From<crate::expr::statements::SelectStatement> for SelectStatement {
+	fn from(v: crate::expr::statements::SelectStatement) -> Self {
+		Self {
+			expr: v.expr.into(),
+			omit: v.omit.map(Into::into),
+			only: v.only,
+			what: v.what.into(),
+			with: v.with.map(Into::into),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			version: v.version.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			explain: v.explain.map(Into::into),
+			tempfiles: v.tempfiles,
+		}
 	}
 }

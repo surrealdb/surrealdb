@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Permission, Strand, Value};
+use crate::sql::fmt::{is_pretty, pretty_indent};
+
+use crate::sql::{Base, Ident, Permission, Strand, SqlValue};
 use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail};
 
@@ -26,51 +26,6 @@ pub struct DefineModelStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
-}
-
-impl DefineModelStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
-		if txn.get_db_model(ns, db, &self.name, &self.version).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				bail!(Error::MlAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineModelStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
 }
 
 impl fmt::Display for DefineModelStatement {
@@ -97,13 +52,31 @@ impl fmt::Display for DefineModelStatement {
 	}
 }
 
-impl InfoStructure for DefineModelStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"version".to_string() => self.version.into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+
+impl From<DefineModelStatement> for crate::expr::statements::DefineModelStatement {
+	fn from(v: DefineModelStatement) -> Self {
+		Self {
+			hash: v.hash,
+			name: v.name.into(),
+			version: v.version,
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineModelStatement> for DefineModelStatement {
+	fn from(v: crate::expr::statements::DefineModelStatement) -> Self {
+		Self {
+			hash: v.hash,
+			name: v.name.into(),
+			version: v.version,
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
 	}
 }

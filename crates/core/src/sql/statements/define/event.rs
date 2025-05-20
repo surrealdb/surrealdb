@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, Values};
+use crate::sql::statements::define::DefineTableStatement;
+
+use crate::sql::{Base, Ident, Strand, SqlValue, Values};
 use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail};
 
@@ -20,76 +20,13 @@ use uuid::Uuid;
 pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
-	pub when: Value,
+	pub when: SqlValue,
 	pub then: Values,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
-}
-
-impl DefineEventStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Check if the definition exists
-		if txn.get_tb_event(ns, db, &self.what, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				bail!(Error::EvAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::table::ev::new(ns, db, &self.what, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineEventStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Refresh the table cache
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
-				cache_events_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
-		}
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
 }
 
 impl Display for DefineEventStatement {
@@ -109,14 +46,31 @@ impl Display for DefineEventStatement {
 	}
 }
 
-impl InfoStructure for DefineEventStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.what.structure(),
-			"when".to_string() => self.when.structure(),
-			"then".to_string() => self.then.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+
+impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatement {
+	fn from(v: DefineEventStatement) -> Self {
+		crate::expr::statements::DefineEventStatement {
+			name: v.name.into(),
+			what: v.what.into(),
+			when: v.when.into(),
+			then: v.then.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatement {
+	fn from(v: crate::expr::statements::DefineEventStatement) -> Self {
+		DefineEventStatement {
+			name: v.name.into(),
+			what: v.what.into(),
+			when: v.when.into(),
+			then: v.then.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
 	}
 }

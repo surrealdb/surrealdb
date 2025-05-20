@@ -114,7 +114,7 @@ impl ApiBody {
 					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
 				};
 
-				parsed.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
+				parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
 			}
 		}
 	}

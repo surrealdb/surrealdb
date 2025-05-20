@@ -53,7 +53,7 @@ use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::{
 	dbs::{Response, Session},
 	expr::{
-		Data, Field, Output, Query, Statement, Value as CoreValue,
+		Data, Field, Output, Query, LogicalPlan, Value as CoreValue,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
 			UpdateStatement, UpsertStatement,
@@ -473,7 +473,7 @@ async fn kill_live_query(
 	let mut query = Query::default();
 	let mut kill = KillStatement::default();
 	kill.id = id.into();
-	query.0.0 = vec![Statement::Kill(kill)];
+	query.0.0 = vec![LogicalPlan::Kill(kill)];
 	let response = kvs.process(query, session, Some(vars)).await?;
 	take(true, response).await
 }
@@ -537,7 +537,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0.0 = vec![Statement::Create(statement)];
+			query.0.0 = vec![LogicalPlan::Create(statement)];
 			let response =
 				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
 			let value = take(true, response).await?;
@@ -556,7 +556,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0.0 = vec![Statement::Upsert(statement)];
+			query.0.0 = vec![LogicalPlan::Upsert(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -575,7 +575,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0.0 = vec![Statement::Update(statement)];
+			query.0.0 = vec![LogicalPlan::Update(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -594,7 +594,7 @@ async fn router(
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0.0 = vec![Statement::Insert(statement)];
+			query.0.0 = vec![LogicalPlan::Insert(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -614,7 +614,7 @@ async fn router(
 				stmt.relation = true;
 				stmt
 			};
-			query.0.0 = vec![Statement::Insert(statement)];
+			query.0.0 = vec![LogicalPlan::Insert(statement)];
 			let response =
 				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
 			let value = take(one, response).await?;
@@ -631,13 +631,13 @@ async fn router(
 				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
-				Statement::Upsert(stmt)
+				LogicalPlan::Upsert(stmt)
 			} else {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
-				Statement::Update(stmt)
+				LogicalPlan::Update(stmt)
 			};
 			query.0.0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -656,13 +656,13 @@ async fn router(
 				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
-				Statement::Upsert(stmt)
+				LogicalPlan::Upsert(stmt)
 			} else {
 				let mut stmt = UpdateStatement::default();
 				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
-				Statement::Update(stmt)
+				LogicalPlan::Update(stmt)
 			};
 			query.0.0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -681,7 +681,7 @@ async fn router(
 				stmt.expr.0 = vec![Field::All];
 				stmt
 			};
-			query.0.0 = vec![Statement::Select(statement)];
+			query.0.0 = vec![LogicalPlan::Select(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -698,7 +698,7 @@ async fn router(
 				stmt.output = Some(Output::Before);
 				stmt
 			};
-			query.0.0 = vec![Statement::Delete(statement)];
+			query.0.0 = vec![LogicalPlan::Delete(statement)];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -1085,7 +1085,7 @@ async fn router(
 				},
 			};
 
-			let stmt = Statement::Value(func);
+			let stmt = LogicalPlan::Value(func);
 
 			let response = kvs
 				.process(stmt.into(), &*session.read().await, Some(vars.read().await.clone()))

@@ -5,8 +5,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Value};
+
+use crate::sql::{Base, SqlValue};
 use crate::iam::{Action, ConfigKind, ResourceKind};
 
 use anyhow::{Result, bail};
@@ -26,6 +26,27 @@ pub struct DefineConfigStatement {
 	pub overwrite: bool,
 }
 
+
+impl From<DefineConfigStatement> for crate::expr::statements::define::DefineConfigStatement {
+	fn from(v: DefineConfigStatement) -> Self {
+		crate::expr::statements::define::DefineConfigStatement {
+			inner: v.inner.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::DefineConfigStatement> for DefineConfigStatement {
+	fn from(v: crate::expr::statements::define::DefineConfigStatement) -> Self {
+		DefineConfigStatement {
+			inner: v.inner.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -36,44 +57,7 @@ pub enum ConfigInner {
 }
 
 impl DefineConfigStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Config(ConfigKind::GraphQL), &Base::Db)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Get the config kind
-		let cg = match &self.inner {
-			ConfigInner::GraphQL(_) => "graphql",
-			ConfigInner::Api(_) => "api",
-		};
-		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
-		if txn.get_db_config(ns, db, cg).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				bail!(Error::CgAlreadyExists {
-					name: cg.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::database::cg::new(ns, db, cg);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.replace(key, revision::to_vec(self)?).await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
 	}
-}
 
 impl ConfigInner {
 	pub fn name(&self) -> String {
@@ -110,18 +94,7 @@ impl From<&ConfigInner> for ConfigKind {
 	}
 }
 
-impl InfoStructure for DefineConfigStatement {
-	fn structure(self) -> Value {
-		match self.inner {
-			ConfigInner::GraphQL(v) => Value::from(map!(
-				"graphql" => v.structure()
-			)),
-			ConfigInner::Api(v) => Value::from(map!(
-				"api" => v.structure()
-			)),
-		}
-	}
-}
+
 
 impl Display for DefineConfigStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -144,6 +117,33 @@ impl Display for ConfigInner {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
 			ConfigInner::Api(v) => Display::fmt(v, f),
+		}
+	}
+}
+
+
+impl From<ConfigInner> for crate::expr::statements::define::config::ConfigInner {
+	fn from(v: ConfigInner) -> Self {
+		match v {
+			ConfigInner::GraphQL(v) => {
+				crate::expr::statements::define::config::ConfigInner::GraphQL(v.into())
+			}
+			ConfigInner::Api(v) => {
+				crate::expr::statements::define::config::ConfigInner::Api(v.into())
+			}
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::config::ConfigInner> for ConfigInner {
+	fn from(v: crate::expr::statements::define::config::ConfigInner) -> Self {
+		match v {
+			crate::expr::statements::define::config::ConfigInner::GraphQL(v) => {
+				ConfigInner::GraphQL(v.into())
+			}
+			crate::expr::statements::define::config::ConfigInner::Api(v) => {
+				ConfigInner::Api(v.into())
+			}
 		}
 	}
 }

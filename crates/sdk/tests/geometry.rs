@@ -4,7 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn geometry_point() -> Result<()> {
@@ -18,7 +18,7 @@ async fn geometry_point() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"centre": {
@@ -32,7 +32,7 @@ async fn geometry_point() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"centre": {
@@ -75,7 +75,7 @@ async fn geometry_polygon() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -97,7 +97,7 @@ async fn geometry_polygon() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -119,7 +119,7 @@ async fn geometry_polygon() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -168,7 +168,7 @@ async fn geometry_multipoint() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"points": {
@@ -185,7 +185,7 @@ async fn geometry_multipoint() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"points": {
@@ -202,7 +202,7 @@ async fn geometry_multipoint() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"points": {
@@ -246,7 +246,7 @@ async fn geometry_multipolygon() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -267,7 +267,7 @@ async fn geometry_multipolygon() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -288,7 +288,7 @@ async fn geometry_multipolygon() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -351,7 +351,7 @@ async fn geometry_inner_access() -> Result<()> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				lat: 51.509865,
@@ -363,7 +363,7 @@ async fn geometry_inner_access() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				lat: 51.509865,
@@ -375,7 +375,7 @@ async fn geometry_inner_access() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				coordinates: [
@@ -408,7 +408,7 @@ async fn geometry_inner_access() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				coordinates: [

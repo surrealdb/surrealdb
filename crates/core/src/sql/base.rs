@@ -1,5 +1,5 @@
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Ident, Value};
+
+use crate::sql::{Ident, SqlValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -34,8 +34,25 @@ impl fmt::Display for Base {
 	}
 }
 
-impl InfoStructure for Base {
-	fn structure(self) -> Value {
-		self.to_string().into()
+
+impl From<Base> for crate::expr::Base {
+	fn from(v: Base) -> Self {
+		match v {
+			Base::Root => Self::Root,
+			Base::Ns => Self::Ns,
+			Base::Db => Self::Db,
+			Base::Sc(sc) => Self::Sc(sc.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Base> for Base {
+	fn from(v: crate::expr::Base) -> Self {
+		match v {
+			crate::expr::Base::Root => Self::Root,
+			crate::expr::Base::Ns => Self::Ns,
+			crate::expr::Base::Db => Self::Db,
+			crate::expr::Base::Sc(sc) => Self::Sc(sc.into()),
+		}
 	}
 }

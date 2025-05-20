@@ -3,9 +3,10 @@ use crate::expr::serde::{deserialize, serialize};
 use crate::rpc::RpcError;
 use crate::rpc::format::ResTrait;
 use crate::rpc::request::Request;
+use crate::sql::SqlValue;
 
-pub fn parse_value(val: &[u8]) -> Result<Value, RpcError> {
-	deserialize::<Value>(val).map_err(|_| RpcError::ParseError)
+pub fn parse_value(val: &[u8]) -> Result<SqlValue, RpcError> {
+	deserialize::<SqlValue>(val).map_err(|_| RpcError::ParseError)
 }
 
 pub fn req(val: &[u8]) -> Result<Request, RpcError> {

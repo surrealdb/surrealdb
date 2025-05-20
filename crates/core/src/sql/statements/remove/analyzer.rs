@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::sql::{Base, Ident, SqlValue};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
@@ -19,39 +19,6 @@ pub struct RemoveAnalyzerStatement {
 	pub if_exists: bool,
 }
 
-impl RemoveAnalyzerStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
-		let (ns, db) = opt.ns_db()?;
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
-		// Get the transaction
-		let txn = ctx.tx();
-		// Get the definition
-		let az = txn.get_db_analyzer(ns, db, &self.name).await;
-		let az = match az {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::AzNotFound { .. })) {
-					return Ok(Value::None);
-				} else {
-					return Err(e);
-				}
-			}
-		};
-		// Delete the definition
-		let key = crate::key::database::az::new(ns, db, &az.name);
-		txn.del(key).await?;
-		// Clear the cache
-		txn.clear();
-		// Cleanup in-memory mappers if not used anymore
-		let azs = txn.all_db_analyzers(ns, db).await?;
-		ctx.get_index_stores().mappers().cleanup(&azs);
-		// TODO Check that the analyzer is not used in any schema
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 impl Display for RemoveAnalyzerStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE ANALYZER")?;
@@ -60,5 +27,24 @@ impl Display for RemoveAnalyzerStatement {
 		}
 		write!(f, " {}", self.name)?;
 		Ok(())
+	}
+}
+
+
+impl From<RemoveAnalyzerStatement> for crate::expr::statements::RemoveAnalyzerStatement {
+	fn from(v: RemoveAnalyzerStatement) -> Self {
+		crate::expr::statements::RemoveAnalyzerStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+		}
+	}
+}
+
+impl From<crate::expr::statements::RemoveAnalyzerStatement> for RemoveAnalyzerStatement {
+	fn from(v: crate::expr::statements::RemoveAnalyzerStatement) -> Self {
+		RemoveAnalyzerStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+		}
 	}
 }

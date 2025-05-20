@@ -1,4 +1,4 @@
-use crate::expr::Duration;
+use crate::sql::Duration;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::str;
@@ -22,6 +22,23 @@ impl Default for UserDuration {
 			token: Some(Duration::from_hours(1).expect("1 hour should fit in a duration")),
 			// By default, sessions do not expire
 			session: None,
+		}
+	}
+}
+
+impl From<UserDuration> for crate::expr::user::UserDuration {
+	fn from(v: UserDuration) -> Self {
+		crate::expr::user::UserDuration {
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
+		}
+	}
+}
+impl From<crate::expr::user::UserDuration> for UserDuration {
+	fn from(v: crate::expr::user::UserDuration) -> Self {
+		UserDuration {
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
 		}
 	}
 }

@@ -1,17 +1,17 @@
-use crate::expr::fmt::Pretty;
-use crate::expr::function::Function;
-use crate::expr::model::Model;
-use crate::expr::statements::CreateStatement;
-use crate::expr::statements::DeleteStatement;
-use crate::expr::statements::InsertStatement;
-use crate::expr::statements::KillStatement;
-use crate::expr::statements::LiveStatement;
-use crate::expr::statements::RelateStatement;
-use crate::expr::statements::SelectStatement;
-use crate::expr::statements::UpdateStatement;
-use crate::expr::statements::UpsertStatement;
-use crate::expr::statements::{DefineStatement, RemoveStatement};
-use crate::expr::{Statement, Statements};
+use crate::sql::fmt::Pretty;
+use crate::sql::function::Function;
+use crate::sql::model::Model;
+use crate::sql::statements::CreateStatement;
+use crate::sql::statements::DeleteStatement;
+use crate::sql::statements::InsertStatement;
+use crate::sql::statements::KillStatement;
+use crate::sql::statements::LiveStatement;
+use crate::sql::statements::RelateStatement;
+use crate::sql::statements::SelectStatement;
+use crate::sql::statements::UpdateStatement;
+use crate::sql::statements::UpsertStatement;
+use crate::sql::statements::{DefineStatement, RemoveStatement};
+use crate::sql::{Statement, Statements};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -143,5 +143,17 @@ impl IntoIterator for Query {
 impl Display for Query {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(Pretty::from(f), "{}", &self.0)
+	}
+}
+
+impl From<Query> for crate::expr::Query {
+	fn from(v: Query) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Query> for Query {
+	fn from(v: crate::expr::Query) -> Self {
+		Self(v.0.into())
 	}
 }

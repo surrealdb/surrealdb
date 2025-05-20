@@ -12,6 +12,7 @@ use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use core::fmt;
+use std::fmt::Display;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -1379,6 +1380,17 @@ impl Error {
 		let message = format!("{}:{}: {}", location.file(), location.line(), message);
 		Error::Unreachable(message)
 	}
+
+	/// Check if this error is related to schema checks
+	pub fn is_schema_related(&self) -> bool {
+		matches!(
+			self,
+			Error::FieldCoerce { .. }
+				| Error::FieldValue { .. }
+				| Error::FieldReadonly { .. }
+				| Error::FieldUndefined { .. }
+		)
+	}
 }
 
 impl From<Error> for String {
@@ -1540,15 +1552,18 @@ impl Serialize for Error {
 		serializer.serialize_str(self.to_string().as_str())
 	}
 }
-impl Error {
-	/// Check if this error is related to schema checks
-	pub fn is_schema_related(&self) -> bool {
-		matches!(
-			self,
-			Error::FieldCoerce { .. }
-				| Error::FieldValue { .. }
-				| Error::FieldReadonly { .. }
-				| Error::FieldUndefined { .. }
-		)
+
+impl serde::ser::Error for Error {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: Display,
+	{
+		Self::Serialization(msg.to_string())
+	}
+}
+
+impl From<serde_content::Error> for Error {
+	fn from(error: serde_content::Error) -> Self {
+		Self::Serialization(error.to_string())
 	}
 }

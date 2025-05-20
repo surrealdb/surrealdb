@@ -1,15 +1,15 @@
-use crate::expr::part::Next;
-use crate::expr::part::Part;
-use crate::expr::value::Value;
+use crate::sql::part::Next;
+use crate::sql::part::Part;
+use crate::sql::value::SqlValue;
 
-impl Value {
+impl SqlValue {
 	/// Synchronous method for deleting a field from a `Value`
 	pub(crate) fn cut(&mut self, path: &[Part]) {
 		if let Some(p) = path.first() {
 			// Get the current value at path
 			match self {
 				// Current value at path is an object
-				Value::Object(v) => match p {
+				SqlValue::Object(v) => match p {
 					Part::Field(f) => match path.len() {
 						1 => {
 							v.remove(f.as_str());
@@ -42,7 +42,7 @@ impl Value {
 					_ => {}
 				},
 				// Current value at path is an array
-				Value::Array(v) => match p {
+				SqlValue::Array(v) => match p {
 					Part::All => match path.len() {
 						1 => {
 							v.clear();
@@ -105,14 +105,14 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::expr::idiom::Idiom;
+	use crate::sql::idiom::Idiom;
 	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn cut_none() {
 		let idi = Idiom::default();
-		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("{ test: { other: null, something: 123 } }");
+		let mut val = SqlValue::parse("{ test: { other: null, something: 123 } }");
+		let res = SqlValue::parse("{ test: { other: null, something: 123 } }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -120,8 +120,8 @@ mod tests {
 	#[tokio::test]
 	async fn cut_reset() {
 		let idi = Idiom::parse("test");
-		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("{ }");
+		let mut val = SqlValue::parse("{ test: { other: null, something: 123 } }");
+		let res = SqlValue::parse("{ }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -129,8 +129,8 @@ mod tests {
 	#[tokio::test]
 	async fn cut_basic() {
 		let idi = Idiom::parse("test.something");
-		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("{ test: { other: null } }");
+		let mut val = SqlValue::parse("{ test: { other: null, something: 123 } }");
+		let res = SqlValue::parse("{ test: { other: null } }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -138,8 +138,8 @@ mod tests {
 	#[tokio::test]
 	async fn cut_wrong() {
 		let idi = Idiom::parse("test.something.wrong");
-		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("{ test: { other: null, something: 123 } }");
+		let mut val = SqlValue::parse("{ test: { other: null, something: 123 } }");
+		let res = SqlValue::parse("{ test: { other: null, something: 123 } }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -147,8 +147,8 @@ mod tests {
 	#[tokio::test]
 	async fn cut_other() {
 		let idi = Idiom::parse("test.other.something");
-		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("{ test: { other: null, something: 123 } }");
+		let mut val = SqlValue::parse("{ test: { other: null, something: 123 } }");
+		let res = SqlValue::parse("{ test: { other: null, something: 123 } }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -156,8 +156,8 @@ mod tests {
 	#[tokio::test]
 	async fn cut_array() {
 		let idi = Idiom::parse("test.something[1]");
-		let mut val = Value::parse("{ test: { something: [123, 456, 789] } }");
-		let res = Value::parse("{ test: { something: [123, 789] } }");
+		let mut val = SqlValue::parse("{ test: { something: [123, 456, 789] } }");
+		let res = SqlValue::parse("{ test: { something: [123, 789] } }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -165,10 +165,10 @@ mod tests {
 	#[tokio::test]
 	async fn cut_array_field() {
 		let idi = Idiom::parse("test.something[1].age");
-		let mut val = Value::parse(
+		let mut val = SqlValue::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		);
-		let res = Value::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }");
+		let res = SqlValue::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -176,10 +176,10 @@ mod tests {
 	#[tokio::test]
 	async fn cut_array_fields() {
 		let idi = Idiom::parse("test.something[*].age");
-		let mut val = Value::parse(
+		let mut val = SqlValue::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		);
-		let res = Value::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
+		let res = SqlValue::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -187,10 +187,10 @@ mod tests {
 	#[tokio::test]
 	async fn cut_array_fields_flat() {
 		let idi = Idiom::parse("test.something.age");
-		let mut val = Value::parse(
+		let mut val = SqlValue::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		);
-		let res = Value::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
+		let res = SqlValue::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}

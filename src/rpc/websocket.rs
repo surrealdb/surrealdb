@@ -29,7 +29,7 @@ use surrealdb::rpc::Method;
 use surrealdb::rpc::RpcContext;
 use surrealdb::rpc::format::Format;
 use surrealdb::sql::Array;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 use surrealdb_core::rpc::RpcProtocolV1;
 use surrealdb_core::rpc::RpcProtocolV2;
 use tokio::sync::Semaphore;
@@ -353,7 +353,7 @@ impl Websocket {
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
 					span.record(
 						"rpc.request_id",
-						req.id.clone().map(Value::as_string).unwrap_or_default(),
+						req.id.clone().map(SqlValue::as_string).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(req.method.to_str()).with_size(len),

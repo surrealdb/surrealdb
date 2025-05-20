@@ -4,9 +4,9 @@ use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
 	dbs::{Capabilities, capabilities::ExperimentalTarget},
 	err::Error,
-	expr::{
+	sql::{
 		Block, Datetime, Duration, Fetchs, Fields, Idiom, Kind, Output, Query, Range, Subquery,
-		Thing, Value,
+		Thing, SqlValue,
 	},
 };
 
@@ -93,14 +93,14 @@ pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value(input: &str) -> Result<Value> {
+pub fn value(input: &str) -> Result<SqlValue> {
 	let capabilities = Capabilities::all();
 	value_with_capabilities(input, &capabilities)
 }
 
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Value> {
+pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<SqlValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
@@ -130,7 +130,7 @@ pub fn value_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json(input: &str) -> Result<Value> {
+pub fn json(input: &str) -> Result<SqlValue> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
@@ -434,7 +434,7 @@ pub(crate) fn output_with_capabilities(input: &str, capabilities: &Capabilities)
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str) -> Result<Value> {
+pub fn value_legacy_strand(input: &str) -> Result<SqlValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
@@ -460,7 +460,7 @@ pub fn value_legacy_strand(input: &str) -> Result<Value> {
 
 /// Parses JSON into an inert SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json_legacy_strand(input: &str) -> Result<Value> {
+pub fn json_legacy_strand(input: &str) -> Result<SqlValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);

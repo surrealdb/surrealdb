@@ -2,7 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Data, FlowResultExt as _, Output, Timeout, Value};
+use crate::sql::{Data, FlowResultExt as _, Output, Timeout, SqlValue};
 use crate::idx::planner::RecordStrategy;
 use anyhow::{Result, bail, ensure};
 
@@ -18,176 +18,14 @@ use std::fmt;
 pub struct RelateStatement {
 	#[revision(start = 2)]
 	pub only: bool,
-	pub kind: Value,
-	pub from: Value,
-	pub with: Value,
+	pub kind: SqlValue,
+	pub from: SqlValue,
+	pub with: SqlValue,
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-}
-
-impl RelateStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Valid options?
-		opt.valid_for_db()?;
-		// Create a new iterator
-		let mut i = Iterator::new();
-		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false);
-		// Check if there is a timeout
-		let ctx = match self.timeout.as_ref() {
-			Some(timeout) => {
-				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(*timeout.0)?;
-				ctx.freeze()
-			}
-			None => ctx.clone(),
-		};
-		// Loop over the from targets
-		let from = {
-			let mut out = Vec::new();
-			match self.from.compute(stk, &ctx, opt, doc).await.catch_return()? {
-				Value::Thing(v) => out.push(v),
-				Value::Array(v) => {
-					for v in v {
-						match v {
-							Value::Thing(v) => out.push(v),
-							Value::Object(v) => match v.rid() {
-								Some(v) => out.push(v),
-								_ => {
-									bail!(Error::RelateStatementIn {
-										value: v.to_string(),
-									})
-								}
-							},
-							v => {
-								bail!(Error::RelateStatementIn {
-									value: v.to_string(),
-								})
-							}
-						}
-					}
-				}
-				Value::Object(v) => match v.rid() {
-					Some(v) => out.push(v),
-					None => {
-						bail!(Error::RelateStatementIn {
-							value: v.to_string(),
-						})
-					}
-				},
-				v => {
-					bail!(Error::RelateStatementIn {
-						value: v.to_string(),
-					})
-				}
-			};
-			// }
-			out
-		};
-		// Loop over the with targets
-		let with = {
-			let mut out = Vec::new();
-			match self.with.compute(stk, &ctx, opt, doc).await.catch_return()? {
-				Value::Thing(v) => out.push(v),
-				Value::Array(v) => {
-					for v in v {
-						match v {
-							Value::Thing(v) => out.push(v),
-							Value::Object(v) => match v.rid() {
-								Some(v) => out.push(v),
-								None => {
-									bail!(Error::RelateStatementId {
-										value: v.to_string(),
-									})
-								}
-							},
-							v => {
-								bail!(Error::RelateStatementId {
-									value: v.to_string(),
-								})
-							}
-						}
-					}
-				}
-				Value::Object(v) => match v.rid() {
-					Some(v) => out.push(v),
-					None => {
-						bail!(Error::RelateStatementId {
-							value: v.to_string(),
-						})
-					}
-				},
-				v => {
-					bail!(Error::RelateStatementId {
-						value: v.to_string(),
-					})
-				}
-			};
-			out
-		};
-		//
-		for f in from.iter() {
-			for w in with.iter() {
-				let f = f.clone();
-				let w = w.clone();
-				match &self.kind.compute(stk, &ctx, opt, doc).await.catch_return()? {
-					// The relation has a specific record id
-					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w, None)),
-					// The relation does not have a specific record id
-					Value::Table(tb) => match &self.data {
-						// There is a data clause so check for a record id
-						Some(data) => {
-							let id = match data.rid(stk, &ctx, opt).await? {
-								Some(id) => id.generate(tb, false)?,
-								None => tb.generate(),
-							};
-							i.ingest(Iterable::Relatable(f, id, w, None))
-						}
-						// There is no data clause so create a record id
-						None => i.ingest(Iterable::Relatable(f, tb.generate(), w, None)),
-					},
-					// The relation can not be any other type
-					v => {
-						bail!(Error::RelateStatementOut {
-							value: v.to_string(),
-						})
-					}
-				};
-			}
-		}
-		// Assign the statement
-		let stm = Statement::from(self);
-		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
-	}
 }
 
 impl fmt::Display for RelateStatement {
@@ -213,5 +51,38 @@ impl fmt::Display for RelateStatement {
 			f.write_str(" PARALLEL")?
 		}
 		Ok(())
+	}
+}
+
+
+impl From<RelateStatement> for crate::expr::statements::RelateStatement {
+	fn from(v: RelateStatement) -> Self {
+		crate::expr::statements::RelateStatement {
+			only: v.only,
+			kind: v.kind.into(),
+			from: v.from.into(),
+			with: v.with.into(),
+			uniq: v.uniq,
+			data: v.data.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+		}
+	}
+}
+
+impl From<crate::expr::statements::RelateStatement> for RelateStatement {
+	fn from(v: crate::expr::statements::RelateStatement) -> Self {
+		RelateStatement {
+			only: v.only,
+			kind: v.kind.into(),
+			from: v.from.into(),
+			with: v.with.into(),
+			uniq: v.uniq,
+			data: v.data.map(Into::into),
+			output: v.output.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+		}
 	}
 }

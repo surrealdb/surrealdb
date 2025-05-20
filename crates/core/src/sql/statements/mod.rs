@@ -71,5 +71,3 @@ pub use self::remove::{
 	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
 	RemoveUserStatement,
 };
-
-pub use self::define::FindApi;

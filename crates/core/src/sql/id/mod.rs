@@ -4,7 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Array, Number, Object, Strand, Thing, Uuid, Value, escape::EscapeRid};
+use crate::sql::{Array, Number, Object, Strand, Thing, Uuid, SqlValue, escape::EscapeRid};
 use anyhow::Result;
 use nanoid::nanoid;
 use range::IdRange;
@@ -115,14 +115,14 @@ impl From<Vec<String>> for Id {
 	}
 }
 
-impl From<Vec<Value>> for Id {
-	fn from(v: Vec<Value>) -> Self {
+impl From<Vec<SqlValue>> for Id {
+	fn from(v: Vec<SqlValue>) -> Self {
 		Self::Array(v.into())
 	}
 }
 
-impl From<BTreeMap<String, Value>> for Id {
-	fn from(v: BTreeMap<String, Value>) -> Self {
+impl From<BTreeMap<String, SqlValue>> for Id {
+	fn from(v: BTreeMap<String, SqlValue>) -> Self {
 		Self::Object(v.into())
 	}
 }
@@ -157,15 +157,15 @@ impl TryFrom<Range> for Id {
 	}
 }
 
-impl TryFrom<Value> for Id {
+impl TryFrom<SqlValue> for Id {
 	type Error = anyhow::Error;
-	fn try_from(v: Value) -> Result<Self, Self::Error> {
+	fn try_from(v: SqlValue) -> Result<Self, Self::Error> {
 		match v {
-			Value::Number(Number::Int(v)) => Ok(v.into()),
-			Value::Strand(v) => Ok(v.into()),
-			Value::Array(v) => Ok(v.into()),
-			Value::Object(v) => Ok(v.into()),
-			Value::Range(v) => v.deref().to_owned().try_into(),
+			SqlValue::Number(Number::Int(v)) => Ok(v.into()),
+			SqlValue::Strand(v) => Ok(v.into()),
+			SqlValue::Array(v) => Ok(v.into()),
+			SqlValue::Object(v) => Ok(v.into()),
+			SqlValue::Range(v) => v.deref().to_owned().try_into(),
 			v => Err(anyhow::Error::new(Error::IdInvalid {
 				value: v.kindof().to_string(),
 			})),
@@ -176,6 +176,42 @@ impl TryFrom<Value> for Id {
 impl From<Thing> for Id {
 	fn from(v: Thing) -> Self {
 		v.id
+	}
+}
+
+impl From<Id> for crate::expr::Id {
+	fn from(v: Id) -> Self {
+		match v {
+			Id::Number(v) => crate::expr::Id::Number(v),
+			Id::String(v) => crate::expr::Id::String(v),
+			Id::Uuid(v) => crate::expr::Id::Uuid(v.into()),
+			Id::Array(v) => crate::expr::Id::Array(v.into()),
+			Id::Object(v) => crate::expr::Id::Object(v.into()),
+			Id::Generate(v) => match v {
+				Gen::Rand => crate::expr::Id::Generate(crate::expr::id::Gen::Rand),
+				Gen::Ulid => crate::expr::Id::Generate(crate::expr::id::Gen::Ulid),
+				Gen::Uuid => crate::expr::Id::Generate(crate::expr::id::Gen::Uuid),
+			},
+			Id::Range(v) => crate::expr::Id::Range(Box::new((*v).into())),
+		}
+	}
+}
+
+impl From<crate::expr::Id> for Id {
+	fn from(v: crate::expr::Id) -> Self {
+		match v {
+			crate::expr::Id::Number(v) => Id::Number(v),
+			crate::expr::Id::String(v) => Id::String(v),
+			crate::expr::Id::Uuid(v) => Id::Uuid(v.into()),
+			crate::expr::Id::Array(v) => Id::Array(v.into()),
+			crate::expr::Id::Object(v) => Id::Object(v.into()),
+			crate::expr::Id::Generate(v) => match v {
+				crate::expr::id::Gen::Rand => Id::Generate(Gen::Rand),
+				crate::expr::id::Gen::Ulid => Id::Generate(Gen::Ulid),
+				crate::expr::id::Gen::Uuid => Id::Generate(Gen::Uuid),
+			},
+			crate::expr::Id::Range(v) => Id::Range(Box::new((*v).into())),
+		}
 	}
 }
 
@@ -193,14 +229,14 @@ impl Id {
 		Self::Uuid(Uuid::new_v7())
 	}
 	/// Check if this Id matches a value
-	pub fn is(&self, val: &Value) -> bool {
+	pub fn is(&self, val: &SqlValue) -> bool {
 		match (self, val) {
-			(Self::Number(i), Value::Number(Number::Int(j))) if *i == *j => true,
-			(Self::String(i), Value::Strand(j)) if *i == j.0 => true,
-			(Self::Uuid(i), Value::Uuid(j)) if i == j => true,
-			(Self::Array(i), Value::Array(j)) if i == j => true,
-			(Self::Object(i), Value::Object(j)) if i == j => true,
-			(i, Value::Thing(t)) if i == &t.id => true,
+			(Self::Number(i), SqlValue::Number(Number::Int(j))) if *i == *j => true,
+			(Self::String(i), SqlValue::Strand(j)) if *i == j.0 => true,
+			(Self::Uuid(i), SqlValue::Uuid(j)) if i == j => true,
+			(Self::Array(i), SqlValue::Array(j)) if i == j => true,
+			(Self::Object(i), SqlValue::Object(j)) if i == j => true,
+			(i, SqlValue::Thing(t)) if i == &t.id => true,
 			_ => false,
 		}
 	}
@@ -241,32 +277,4 @@ impl Display for Id {
 }
 
 impl Id {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Id> {
-		match self {
-			Id::Number(v) => Ok(Id::Number(*v)),
-			Id::String(v) => Ok(Id::String(v.clone())),
-			Id::Uuid(v) => Ok(Id::Uuid(*v)),
-			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-				Value::Array(v) => Ok(Id::Array(v)),
-				v => fail!("Expected a Value::Array but found {v:?}"),
-			},
-			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-				Value::Object(v) => Ok(Id::Object(v)),
-				v => fail!("Expected a Value::Object but found {v:?}"),
-			},
-			Id::Generate(v) => match v {
-				Gen::Rand => Ok(Self::rand()),
-				Gen::Ulid => Ok(Self::ulid()),
-				Gen::Uuid => Ok(Self::uuid()),
-			},
-			Id::Range(v) => Ok(Id::Range(Box::new(v.compute(stk, ctx, opt, doc).await?))),
-		}
 	}
-}

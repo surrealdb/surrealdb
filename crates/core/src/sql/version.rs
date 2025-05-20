@@ -1,12 +1,12 @@
 use super::FlowResultExt;
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, expr::datetime::Datetime};
+use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::datetime::Datetime};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::Value;
+use super::SqlValue;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -14,7 +14,7 @@ use super::Value;
 #[non_exhaustive]
 pub struct Version(
 	#[revision(end = 2, convert_fn = "convert_version_datetime")] pub Datetime,
-	#[revision(start = 2)] pub Value,
+	#[revision(start = 2)] pub SqlValue,
 );
 
 impl Version {
@@ -23,33 +23,25 @@ impl Version {
 		_revision: u16,
 		old: Datetime,
 	) -> Result<(), revision::Error> {
-		self.0 = Value::Datetime(old);
+		self.0 = SqlValue::Datetime(old);
 		Ok(())
-	}
-
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<u64> {
-		match self.0.compute(stk, ctx, opt, doc).await.catch_return()? {
-			Value::Datetime(v) => match v.to_u64() {
-				Some(ts) => Ok(ts),
-				_ => Err(anyhow::Error::new(Error::unreachable(
-					"Failed to convert datetime to timestamp",
-				))),
-			},
-			found => Err(anyhow::Error::new(Error::InvalidVersion {
-				found,
-			})),
-		}
 	}
 }
 
 impl fmt::Display for Version {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "VERSION {}", self.0)
+	}
+}
+
+impl From<Version> for crate::expr::Version {
+	fn from(v: Version) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Version> for Version {
+	fn from(v: crate::expr::Version) -> Self {
+		Self(v.0.into())
 	}
 }

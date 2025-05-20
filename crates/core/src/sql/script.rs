@@ -1,4 +1,4 @@
-use crate::expr::strand::no_nul_bytes;
+use crate::sql::strand::no_nul_bytes;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -33,5 +33,17 @@ impl Deref for Script {
 impl Display for Script {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
+	}
+}
+
+impl From<Script> for crate::expr::Script {
+	fn from(v: Script) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Script> for Script {
+	fn from(v: crate::expr::Script) -> Self {
+		Self(v.0)
 	}
 }

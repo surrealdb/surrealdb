@@ -1,5 +1,5 @@
-use crate::expr::{
-	AccessType, Algorithm, Base, Duration, Ident, JwtAccess, RecordAccess, Strand, Value,
+use crate::sql::{
+	AccessType, Algorithm, Base, Duration, Ident, JwtAccess, RecordAccess, Strand, SqlValue,
 	access::AccessDuration,
 	access_type::{JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyKey},
 	statements::DefineAccessStatement,
@@ -16,8 +16,8 @@ pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
 	pub session: Option<Duration>,
-	pub signup: Option<Value>,
-	pub signin: Option<Value>,
+	pub signup: Option<SqlValue>,
+	pub signin: Option<SqlValue>,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,

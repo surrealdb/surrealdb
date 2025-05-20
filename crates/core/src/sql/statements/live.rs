@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
+
+use crate::sql::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, SqlValue};
 use crate::iam::Auth;
 use crate::kvs::Live;
 use anyhow::{Result, bail};
@@ -21,7 +21,7 @@ pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub expr: Fields,
-	pub what: Value,
+	pub what: SqlValue,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
 	// When a live query is created, we must also store the
@@ -35,7 +35,7 @@ pub struct LiveStatement {
 	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
-	pub(crate) session: Option<Value>,
+	pub(crate) session: Option<SqlValue>,
 }
 
 impl LiveStatement {
@@ -48,7 +48,7 @@ impl LiveStatement {
 		}
 	}
 
-	pub fn new_from_what_expr(expr: Fields, what: Value) -> Self {
+	pub fn new_from_what_expr(expr: Fields, what: SqlValue) -> Self {
 		LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
@@ -61,7 +61,7 @@ impl LiveStatement {
 	/// Creates a live statement from parts that can be set during a query.
 	pub(crate) fn from_source_parts(
 		expr: Fields,
-		what: Value,
+		what: SqlValue,
 		cond: Option<Cond>,
 		fetch: Option<Fetchs>,
 	) -> Self {
@@ -76,74 +76,7 @@ impl LiveStatement {
 		}
 	}
 
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Is realtime enabled?
-		opt.realtime()?;
-		// Valid options?
-		opt.valid_for_db()?;
-		// Get the Node ID
-		let nid = opt.id()?;
-		// Check that auth has been set
-		let mut stm = LiveStatement {
-			// Use the current session authentication
-			// for when we store the LIVE Statement
-			auth: Some(opt.auth.as_ref().clone()),
-			// Use the current session authentication
-			// for when we store the LIVE Statement
-			session: ctx.value("session").cloned(),
-			// Clone the rest of the original fields
-			// from the LIVE statement to the new one
-			..self.clone()
-		};
-		// Get the id
-		let id = stm.id.0;
-		// Process the live query table
-		match stm.what.compute(stk, ctx, opt, doc).await.catch_return()? {
-			Value::Table(tb) => {
-				// Store the current Node ID
-				stm.node = nid.into();
-				// Get the NS and DB
-				let (ns, db) = opt.ns_db()?;
-				// Store the live info
-				let lq = Live {
-					ns: ns.to_string(),
-					db: db.to_string(),
-					tb: tb.to_string(),
-				};
-				// Get the transaction
-				let txn = ctx.tx();
-				// Ensure that the table definition exists
-				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
-				// Insert the node live query
-				let key = crate::key::node::lq::new(nid, id);
-				txn.replace(key, revision::to_vec(&lq)?).await?;
-				// Insert the table live query
-				let key = crate::key::table::lq::new(ns, db, &tb, id);
-				txn.replace(key, revision::to_vec(&stm)?).await?;
-				// Refresh the table cache for lives
-				if let Some(cache) = ctx.get_cache() {
-					cache.new_live_queries_version(ns, db, &tb);
-				}
-				// Clear the cache
-				txn.clear();
-			}
-			v => {
-				bail!(Error::LiveStatement {
-					value: v.to_string(),
-				});
-			}
-		};
-		// Return the query id
-		Ok(id.into())
 	}
-}
 
 impl fmt::Display for LiveStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -158,22 +91,41 @@ impl fmt::Display for LiveStatement {
 	}
 }
 
-impl InfoStructure for LiveStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"expr".to_string() => self.expr.structure(),
-			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
-			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
-		})
+
+impl From<LiveStatement> for crate::expr::statements::LiveStatement {
+	fn from(v: LiveStatement) -> Self {
+		crate::expr::statements::LiveStatement {
+			id: v.id.into(),
+			node: v.node.into(),
+			expr: v.expr.into(),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			auth: v.auth,
+			session: v.session.map(Into::into),
+		}
+	}
+}
+impl From<crate::expr::statements::LiveStatement> for LiveStatement {
+	fn from(v: crate::expr::statements::LiveStatement) -> Self {
+		LiveStatement {
+			id: v.id.into(),
+			node: v.node.into(),
+			expr: v.expr.into(),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			auth: v.auth,
+			session: v.session.map(Into::into),
+		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use crate::dbs::{Action, Capabilities, Notification, Session};
-	use crate::expr::Thing;
-	use crate::expr::Value;
+	use crate::sql::Thing;
+	use crate::sql::SqlValue;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
@@ -205,7 +157,7 @@ mod tests {
 
 		let live_id = live_query_response.remove(0).result.unwrap();
 		let live_id = match live_id {
-			Value::Uuid(id) => id,
+			SqlValue::Uuid(id) => id,
 			_ => panic!("expected uuid"),
 		};
 
@@ -220,7 +172,7 @@ mod tests {
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record = Value::parse(&format!(
+		let expected_record = SqlValue::parse(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
@@ -245,8 +197,8 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
-				Value::Thing(Thing::from((tb, "test_true"))),
-				Value::parse(&format!(
+				SqlValue::Thing(Thing::from((tb, "test_true"))),
+				SqlValue::parse(&format!(
 					"{{
 						id: {tb}:test_true,
 						condition: true,

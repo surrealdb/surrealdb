@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
-use crate::expr::{Base, Ident, Value};
+use crate::sql::statements::define::DefineTableStatement;
+use crate::sql::{Base, Ident, SqlValue};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
@@ -22,60 +22,6 @@ pub struct RemoveIndexStatement {
 	pub if_exists: bool,
 }
 
-impl RemoveIndexStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
-		// Get the transaction
-		let txn = ctx.tx();
-		// Clear the index store cache
-		#[cfg(not(target_family = "wasm"))]
-		let err = ctx
-			.get_index_stores()
-			.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
-			.await;
-		#[cfg(target_family = "wasm")]
-		let err = ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await;
-
-		if let Err(e) = err {
-			if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
-				return Ok(Value::None);
-			}
-			return Err(e);
-		}
-
-		// Delete the definition
-		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.del(key).await?;
-		// Remove the index data
-		let key = crate::key::index::all::new(ns, db, &self.what, &self.name);
-		txn.delp(key).await?;
-		// Refresh the table cache for indexes
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
-				cache_indexes_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
-		}
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 impl Display for RemoveIndexStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE INDEX")?;
@@ -84,5 +30,25 @@ impl Display for RemoveIndexStatement {
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
 		Ok(())
+	}
+}
+
+impl From<RemoveIndexStatement> for crate::expr::statements::RemoveIndexStatement {
+	fn from(v: RemoveIndexStatement) -> Self {
+		crate::expr::statements::RemoveIndexStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			what: v.what.into(),
+		}
+	}
+}
+
+impl From<crate::expr::statements::RemoveIndexStatement> for RemoveIndexStatement {
+	fn from(v: crate::expr::statements::RemoveIndexStatement) -> Self {
+		RemoveIndexStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			what: v.what.into(),
+		}
 	}
 }

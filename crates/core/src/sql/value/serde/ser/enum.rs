@@ -1,7 +1,7 @@
 use super::Content;
-use crate::expr;
-use crate::expr::Object;
-use crate::expr::Value;
+use crate::sql;
+use crate::sql::Object;
+use crate::sql::SqlValue;
 use anyhow::Result;
 use serde::Deserialize;
 use serde::de::IntoDeserializer;
@@ -10,42 +10,42 @@ use serde_content::Expected;
 use serde_content::Unexpected;
 use std::collections::BTreeMap;
 
-pub(super) fn to_value(content: Content) -> Result<Value> {
+pub(super) fn to_value(content: Content) -> Result<SqlValue> {
 	match content {
 		Content::Enum(v) => match v.name.as_ref() {
-			expr::expression::TOKEN => {
-				expr::Expression::deserialize(Content::Enum(v).into_deserializer())
+			sql::expression::TOKEN => {
+				sql::Expression::deserialize(Content::Enum(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::subquery::TOKEN => {
-				expr::Subquery::deserialize(Content::Enum(v).into_deserializer())
+			sql::subquery::TOKEN => {
+				sql::Subquery::deserialize(Content::Enum(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::function::TOKEN => {
-				expr::Function::deserialize(Content::Enum(v).into_deserializer())
+			sql::function::TOKEN => {
+				sql::Function::deserialize(Content::Enum(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::constant::TOKEN => {
-				expr::Constant::deserialize(Content::Enum(v).into_deserializer())
+			sql::constant::TOKEN => {
+				sql::Constant::deserialize(Content::Enum(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::mock::TOKEN => expr::Mock::deserialize(Content::Enum(v).into_deserializer())
+			sql::mock::TOKEN => sql::Mock::deserialize(Content::Enum(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::number::TOKEN => expr::Number::deserialize(Content::Enum(v).into_deserializer())
+			sql::number::TOKEN => sql::Number::deserialize(Content::Enum(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::geometry::TOKEN => {
-				expr::Geometry::deserialize(Content::Enum(v).into_deserializer())
+			sql::geometry::TOKEN => {
+				sql::Geometry::deserialize(Content::Enum(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::value::TOKEN => {
-				expr::Value::deserialize(Content::Enum(v).into_deserializer()).map_err(Into::into)
+			sql::value::TOKEN => {
+				sql::SqlValue::deserialize(Content::Enum(v).into_deserializer()).map_err(Into::into)
 			}
 			_ => match v.data {
 				Data::Unit => Ok(v.variant.into_owned().into()),
@@ -61,7 +61,7 @@ pub(super) fn to_value(content: Content) -> Result<Value> {
 					let mut map = BTreeMap::new();
 					let value = fields.try_into()?;
 					map.insert(v.variant.into_owned(), value);
-					Ok(Value::Object(Object(map)))
+					Ok(SqlValue::Object(Object(map)))
 				}
 			},
 		},

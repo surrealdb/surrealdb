@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::expr::duration::Duration;
-use crate::expr::strand::Strand;
+use crate::sql::duration::Duration;
+use crate::sql::strand::Strand;
 use crate::syn;
 use anyhow::Result;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc, offset::LocalResult};
@@ -84,6 +84,18 @@ impl TryFrom<(i64, u32)> for Datetime {
 			LocalResult::Single(v) => Ok(Self(v)),
 			_ => Err(()),
 		}
+	}
+}
+
+impl From<Datetime> for crate::expr::Datetime {
+	fn from(v: Datetime) -> Self {
+		crate::expr::Datetime(v.0)
+	}
+}
+
+impl From<crate::expr::Datetime> for Datetime {
+	fn from(v: crate::expr::Datetime) -> Self {
+		Self(v.0)
 	}
 }
 

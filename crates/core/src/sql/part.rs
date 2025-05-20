@@ -5,8 +5,8 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	exe::try_join_all_buffered,
-	expr::{
-		FlowResultExt as _, Graph, Ident, Idiom, Number, Thing, Value, fmt::Fmt,
+	sql::{
+		FlowResultExt as _, Graph, Ident, Idiom, Number, Thing, SqlValue, fmt::Fmt,
 		strand::no_nul_bytes,
 	},
 };
@@ -20,7 +20,7 @@ use std::str;
 
 use super::{
 	fmt::{is_pretty, pretty_indent},
-	value::idiom_recursion::{Recursion, clean_iteration, compute_idiom_recursion, is_final},
+	value::idiom_recursion::{Recursion, clean_iteration, is_final},
 };
 
 #[revisioned(revision = 4)]
@@ -34,11 +34,11 @@ pub enum Part {
 	First,
 	Field(Ident),
 	Index(Number),
-	Where(Value),
+	Where(SqlValue),
 	Graph(Graph),
-	Value(Value),
-	Start(Value),
-	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
+	Value(SqlValue),
+	Start(SqlValue),
+	Method(#[serde(with = "no_nul_bytes")] String, Vec<SqlValue>),
 	#[revision(start = 2)]
 	Destructure(Vec<DestructurePart>),
 	Optional,
@@ -117,21 +117,74 @@ impl From<&str> for Part {
 	}
 }
 
+
+impl From<Part> for crate::expr::Part {
+	fn from(v: Part) -> Self {
+		match v {
+			Part::All => Self::All,
+			Part::Flatten => Self::Flatten,
+			Part::Last => Self::Last,
+			Part::First => Self::First,
+			Part::Field(ident) => Self::Field(ident.into()),
+			Part::Index(number) => Self::Index(number.into()),
+			Part::Where(value) => Self::Where(value.into()),
+			Part::Graph(graph) => Self::Graph(graph.into()),
+			Part::Value(value) => Self::Value(value.into()),
+			Part::Start(value) => Self::Start(value.into()),
+			Part::Method(method, values) => {
+				Self::Method(method, values.into_iter().map(Into::into).collect())
+			}
+			Part::Destructure(parts) => {
+				Self::Destructure(parts.into_iter().map(Into::into).collect())
+			}
+			Part::Optional => Self::Optional,
+			Part::Recurse(recurse, idiom, instructions) => {
+				let idiom = idiom.map(|idiom| idiom.into());
+				let instructions = instructions.map(Into::into);
+				crate::expr::Part::Recurse(recurse.into(), idiom, instructions)
+			}
+			Part::Doc => crate::expr::Part::Doc,
+			Part::RepeatRecurse => crate::expr::Part::RepeatRecurse,
+		}
+	}
+}
+
+impl From<crate::expr::Part> for Part {
+	fn from(v: crate::expr::Part) -> Self {
+		match v {
+			crate::expr::Part::All => Self::All,
+			crate::expr::Part::Flatten => Self::Flatten,
+			crate::expr::Part::Last => Self::Last,
+			crate::expr::Part::First => Self::First,
+			crate::expr::Part::Field(ident) => Self::Field(ident.into()),
+			crate::expr::Part::Index(number) => Self::Index(number.into()),
+			crate::expr::Part::Where(value) => Self::Where(value.into()),
+			crate::expr::Part::Graph(graph) => Self::Graph(graph.into()),
+			crate::expr::Part::Value(value) => Self::Value(value.into()),
+			crate::expr::Part::Start(value) => Self::Start(value.into()),
+			crate::expr::Part::Method(method, values) => {
+				Self::Method(method, values.into_iter().map(Into::<SqlValue>::into).collect())
+			}
+			crate::expr::Part::Destructure(parts) => {
+				Self::Destructure(parts.into_iter().map(Into::<DestructurePart>::into).collect())
+			}
+			crate::expr::Part::Optional => Self::Optional,
+			crate::expr::Part::Recurse(recurse, idiom, instructions) => Self::Recurse(
+				recurse.into(),
+				idiom.map(|idiom| idiom.into()),
+				instructions.map(Into::into),
+			),
+			crate::expr::Part::Doc => Self::Doc,
+			crate::expr::Part::RepeatRecurse => Self::RepeatRecurse,
+		}
+	}
+}
+
 impl Part {
 	pub(crate) fn is_index(&self) -> bool {
 		matches!(self, Part::Index(_) | Part::First | Part::Last)
 	}
 
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		match self {
-			Part::Start(v) => v.writeable(),
-			Part::Where(v) => v.writeable(),
-			Part::Value(v) => v.writeable(),
-			Part::Method(_, v) => v.iter().any(Value::writeable),
-			_ => false,
-		}
-	}
 	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {
@@ -254,86 +307,6 @@ pub enum RecursionPlan {
 		// Path after the repeat symbol
 		after: Vec<Part>,
 	},
-}
-
-impl<'a> RecursionPlan {
-	pub async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		rec: Recursion<'a>,
-	) -> Result<Value> {
-		match rec.current {
-			Value::Array(value) => stk
-				.scope(|scope| {
-					let futs = value.iter().map(|value| {
-						scope.run(|stk| {
-							let rec = rec.with_current(value);
-							self.compute_inner(stk, ctx, opt, doc, rec)
-						})
-					});
-					try_join_all_buffered(futs)
-				})
-				.await
-				.map(Into::into),
-			_ => stk.run(|stk| self.compute_inner(stk, ctx, opt, doc, rec)).await,
-		}
-	}
-
-	pub async fn compute_inner(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		rec: Recursion<'a>,
-	) -> Result<Value> {
-		match self {
-			Self::Repeat => compute_idiom_recursion(stk, ctx, opt, doc, rec).await,
-			Self::Destructure {
-				parts,
-				field,
-				before,
-				plan,
-				after,
-			} => {
-				let v = stk
-					.run(|stk| rec.current.get(stk, ctx, opt, doc, before))
-					.await
-					.catch_return()?;
-				let v = plan.compute(stk, ctx, opt, doc, rec.with_current(&v)).await?;
-				let v = stk.run(|stk| v.get(stk, ctx, opt, doc, after)).await.catch_return()?;
-				let v = clean_iteration(v);
-
-				if rec.iterated < rec.min && is_final(&v) {
-					// We do not use get_final here, because it's not a result
-					// the user will see, it's rather about path elimination
-					// By returning NONE, an array to be eliminated will be
-					// filled with NONE, and thus eliminated
-					return Ok(Value::None);
-				}
-
-				let path = &[Part::Destructure(parts.to_owned())];
-				match stk
-					.run(|stk| rec.current.get(stk, ctx, opt, doc, path))
-					.await
-					.catch_return()?
-				{
-					Value::Object(mut obj) => {
-						obj.insert(field.to_raw(), v);
-						Ok(Value::Object(obj))
-					}
-					Value::None => Ok(Value::None),
-					v => Err(anyhow::Error::new(Error::unreachable(format_args!(
-						"Expected an object or none, found {}.",
-						v.kindof()
-					)))),
-				}
-			}
-		}
-	}
 }
 
 pub trait FindRecursionPlan<'a> {
@@ -498,6 +471,37 @@ impl fmt::Display for DestructurePart {
 	}
 }
 
+
+impl From<DestructurePart> for crate::expr::part::DestructurePart {
+	fn from(v: DestructurePart) -> Self {
+		match v {
+			DestructurePart::All(v) => Self::All(v.into()),
+			DestructurePart::Field(v) => Self::Field(v.into()),
+			DestructurePart::Aliased(v, idiom) => Self::Aliased(v.into(), idiom.into()),
+			DestructurePart::Destructure(v, d) => {
+				Self::Destructure(v.into(), d.into_iter().map(Into::into).collect())
+			}
+		}
+	}
+}
+
+impl From<crate::expr::part::DestructurePart> for DestructurePart {
+	fn from(v: crate::expr::part::DestructurePart) -> Self {
+		match v {
+			crate::expr::part::DestructurePart::All(v) => Self::All(v.into()),
+			crate::expr::part::DestructurePart::Field(v) => Self::Field(v.into()),
+			crate::expr::part::DestructurePart::Aliased(v, idiom) => {
+				Self::Aliased(v.into(), idiom.into())
+			}
+			crate::expr::part::DestructurePart::Destructure(v, d) => Self::Destructure(
+				v.into(),
+				d.into_iter().map(Into::<DestructurePart>::into).collect(),
+			),
+		}
+	}
+}
+
+
 // ------------------------------
 
 #[revisioned(revision = 1)]
@@ -551,6 +555,23 @@ impl fmt::Display for Recurse {
 	}
 }
 
+impl From<Recurse> for crate::expr::part::Recurse {
+	fn from(v: Recurse) -> Self {
+		match v {
+			Recurse::Fixed(v) => Self::Fixed(v),
+			Recurse::Range(min, max) => Self::Range(min, max),
+		}
+	}
+}
+
+impl From<crate::expr::part::Recurse> for Recurse {
+	fn from(v: crate::expr::part::Recurse) -> Self {
+		match v {
+			crate::expr::part::Recurse::Fixed(v) => Self::Fixed(v),
+			crate::expr::part::Recurse::Range(min, max) => Self::Range(min, max),
+		}
+	}
+}
 // ------------------------------
 
 #[revisioned(revision = 1)]
@@ -568,7 +589,7 @@ pub enum RecurseInstruction {
 	},
 	Shortest {
 		// What ending node are we looking for?
-		expects: Value,
+		expects: SqlValue,
 		// Do we include the starting point in the collection?
 		inclusive: bool,
 	},
@@ -619,7 +640,7 @@ macro_rules! walk_paths {
 			};
 
 			// Apply the recursed path to the last value
-			let res = $crate::expr::FlowResultExt::catch_return(
+			let res = $crate::sql::FlowResultExt::catch_return(
 				$stk.run(|stk| last.get(stk, $ctx, $opt, $doc, $rec.path)).await,
 			)?;
 
@@ -689,81 +710,6 @@ macro_rules! walk_paths {
 	}};
 }
 
-impl RecurseInstruction {
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		rec: Recursion<'_>,
-		finished: &mut Vec<Value>,
-	) -> Result<Value> {
-		match self {
-			Self::Path {
-				inclusive,
-			} => {
-				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Option::<&Value>::None)
-			}
-			Self::Shortest {
-				expects,
-				inclusive,
-			} => {
-				let expects = expects
-					.compute(stk, ctx, opt, doc)
-					.await
-					.catch_return()?
-					.coerce_to::<Thing>()?
-					.into();
-				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(&expects))
-			}
-			Self::Collect {
-				inclusive,
-			} => {
-				macro_rules! persist {
-					($finished:ident, $subject:expr_2021) => {
-						match $subject {
-							Value::Array(v) => {
-								for v in v.iter() {
-									// Add a unique value to the finished collection
-									if !$finished.contains(v) {
-										$finished.push(v.to_owned());
-									}
-								}
-							}
-							v => {
-								if !$finished.contains(v) {
-									// Add a unique value to the finished collection
-									$finished.push(v.to_owned());
-								}
-							}
-						}
-					};
-				}
-
-				// If we are inclusive, we add the starting point to the collection
-				if rec.iterated == 1 && *inclusive {
-					persist!(finished, rec.current);
-				}
-
-				// Apply the recursed path to the current values
-				let res = stk
-					.run(|stk| rec.current.get(stk, ctx, opt, doc, rec.path))
-					.await
-					.catch_return()?;
-				// Clean the iteration
-				let res = clean_iteration(res);
-
-				// Persist any new values from the result
-				persist!(finished, &res);
-
-				// Continue
-				Ok(res)
-			}
-		}
-	}
-}
-
 impl fmt::Display for RecurseInstruction {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -801,6 +747,54 @@ impl fmt::Display for RecurseInstruction {
 
 				Ok(())
 			}
+		}
+	}
+}
+
+impl From<RecurseInstruction> for crate::expr::part::RecurseInstruction {
+	fn from(v: RecurseInstruction) -> Self {
+		match v {
+			RecurseInstruction::Path {
+				inclusive,
+			} => Self::Path {
+				inclusive,
+			},
+			RecurseInstruction::Collect {
+				inclusive,
+			} => Self::Collect {
+				inclusive,
+			},
+			RecurseInstruction::Shortest {
+				expects,
+				inclusive,
+			} => Self::Shortest {
+				expects: expects.into(),
+				inclusive,
+			},
+		}
+	}
+}
+
+impl From<crate::expr::part::RecurseInstruction> for RecurseInstruction {
+	fn from(v: crate::expr::part::RecurseInstruction) -> Self {
+		match v {
+			crate::expr::part::RecurseInstruction::Path {
+				inclusive,
+			} => Self::Path {
+				inclusive,
+			},
+			crate::expr::part::RecurseInstruction::Collect {
+				inclusive,
+			} => Self::Collect {
+				inclusive,
+			},
+			crate::expr::part::RecurseInstruction::Shortest {
+				expects,
+				inclusive,
+			} => Self::Shortest {
+				expects: expects.into(),
+				inclusive,
+			},
 		}
 	}
 }

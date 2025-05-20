@@ -2,13 +2,13 @@
 
 use reblessive::Stk;
 
-use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
-use crate::expr::{Explain, Fetch, With};
+use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
+use crate::sql::{Explain, Fetch, With};
 use crate::syn::error::bail;
 use crate::{
-	expr::{
+	sql::{
 		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, Tables, Timeout, Value, View,
+		Permission, Permissions, Tables, Timeout, SqlValue, View,
 		changefeed::ChangeFeed,
 		index::{Distance, VectorType},
 	},
@@ -137,7 +137,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 	) -> ParseResult<Vec<Fetch>> {
 		match self.peek().kind {
-			t!("$param") => Ok(vec![Value::Param(self.next_token_value()?).into()]),
+			t!("$param") => Ok(vec![SqlValue::Param(self.next_token_value()?).into()]),
 			t!("TYPE") => {
 				let fields = self.parse_fields(ctx).await?;
 				let fetches = fields
@@ -157,7 +157,7 @@ impl Parser<'_> {
 					.collect();
 				Ok(fetches)
 			}
-			_ => Ok(vec![Value::Idiom(self.parse_plain_idiom(ctx).await?).into()]),
+			_ => Ok(vec![SqlValue::Idiom(self.parse_plain_idiom(ctx).await?).into()]),
 		}
 	}
 
@@ -194,7 +194,7 @@ impl Parser<'_> {
 			}
 
 			match expr {
-				Value::Idiom(x) => {
+				SqlValue::Idiom(x) => {
 					if idiom == x {
 						found = Some(field);
 						break;

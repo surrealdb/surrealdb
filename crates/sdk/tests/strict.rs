@@ -5,7 +5,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 /*
 #[tokio::test]
@@ -196,11 +196,11 @@ async fn strict_mode_all_ok() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -226,15 +226,15 @@ async fn loose_mode_all_ok() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: { },
 			namespaces: { test: 'DEFINE NAMESPACE test' },
@@ -246,7 +246,7 @@ async fn loose_mode_all_ok() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
@@ -256,7 +256,7 @@ async fn loose_mode_all_ok() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -274,7 +274,7 @@ async fn loose_mode_all_ok() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			events: {},
 			fields: { extra: 'DEFINE FIELD extra ON test VALUE true PERMISSIONS FULL' },

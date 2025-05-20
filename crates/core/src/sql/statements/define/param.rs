@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, FlowResultExt as _, Ident, Permission, Strand, Value};
+use crate::sql::fmt::{is_pretty, pretty_indent};
+
+use crate::sql::{Base, FlowResultExt as _, Ident, Permission, Strand, SqlValue};
 use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail};
 
@@ -19,64 +19,13 @@ use std::fmt::{self, Display, Write};
 #[non_exhaustive]
 pub struct DefineParamStatement {
 	pub name: Ident,
-	pub value: Value,
+	pub value: SqlValue,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
-}
-
-impl DefineParamStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
-
-		let value = self.value.compute(stk, ctx, opt, doc).await.catch_return()?;
-
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
-		if txn.get_db_param(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				bail!(Error::PaAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::database::pa::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineParamStatement {
-				// Compute the param
-				value,
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
 }
 
 impl Display for DefineParamStatement {
@@ -103,13 +52,29 @@ impl Display for DefineParamStatement {
 	}
 }
 
-impl InfoStructure for DefineParamStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"value".to_string() => self.value.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+
+impl From<DefineParamStatement> for crate::expr::statements::DefineParamStatement {
+	fn from(v: DefineParamStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			value: v.value.into(),
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineParamStatement> for DefineParamStatement {
+	fn from(v: crate::expr::statements::DefineParamStatement) -> Self {
+		DefineParamStatement {
+			name: v.name.into(),
+			value: v.value.into(),
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
 	}
 }

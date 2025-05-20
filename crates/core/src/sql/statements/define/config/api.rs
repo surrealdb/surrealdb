@@ -1,11 +1,33 @@
 use std::fmt::{self, Display};
 
-use crate::api::middleware::RequestMiddleware;
-use crate::expr::fmt::Fmt;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Permission, Value};
+use crate::sql::fmt::Fmt;
+
+use crate::sql::{Permission, SqlValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct RequestMiddleware(pub Vec<(String, Vec<SqlValue>)>);
+
+impl From<RequestMiddleware> for crate::api::middleware::RequestMiddleware {
+	fn from(v: RequestMiddleware) -> Self {
+		crate::api::middleware::RequestMiddleware(
+			v.0.into_iter().map(|(k, v)| (k, v.into_iter().map(Into::into).collect())).collect(),
+		)
+	}
+}
+
+impl From<crate::api::middleware::RequestMiddleware> for RequestMiddleware {
+	fn from(v: crate::api::middleware::RequestMiddleware) -> Self {
+		RequestMiddleware(
+			v.0.into_iter().map(|(k, v)| (k, v.into_iter().map(Into::into).collect())).collect(),
+		)
+	}
+}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -32,7 +54,7 @@ impl Display for ApiConfig {
 				f,
 				"{}",
 				Fmt::pretty_comma_separated(
-					mw.iter().map(|(k, v)| format!("{k}({})", Fmt::pretty_comma_separated(v)))
+					mw.0.iter().map(|(k, v)| format!("{k}({})", Fmt::pretty_comma_separated(v)))
 				)
 			)?
 		}
@@ -44,11 +66,20 @@ impl Display for ApiConfig {
 	}
 }
 
-impl InfoStructure for ApiConfig {
-	fn structure(self) -> Value {
-		Value::from(map!(
-			"permissions", if let Some(v) = self.permissions => v.structure(),
-			"middleware", if let Some(v) = self.middleware => v.structure(),
-		))
+
+impl From<ApiConfig> for crate::expr::statements::define::config::api::ApiConfig {
+	fn from(v: ApiConfig) -> Self {
+		crate::expr::statements::define::config::api::ApiConfig {
+			middleware: v.middleware.map(Into::into),
+			permissions: v.permissions.map(Into::into),
+		}
+	}
+}
+impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig {
+	fn from(v: crate::expr::statements::define::config::api::ApiConfig) -> Self {
+		ApiConfig {
+			middleware: v.middleware.map(Into::into),
+			permissions: v.permissions.map(Into::into),
+		}
 	}
 }

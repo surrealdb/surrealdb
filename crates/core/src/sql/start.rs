@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::number::Number;
-use crate::expr::value::Value;
+use crate::sql::number::Number;
+use crate::sql::value::SqlValue;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -16,39 +16,22 @@ use super::FlowResultExt as _;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Start(pub Value);
-
-impl Start {
-	pub(crate) async fn process(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<u32> {
-		match self.0.compute(stk, ctx, opt, doc).await.catch_return() {
-			// This is a valid starting number
-			Ok(Value::Number(Number::Int(v))) if v >= 0 => {
-				if v > u32::MAX as i64 {
-					Err(anyhow::Error::new(Error::InvalidStart {
-						value: v.to_string(),
-					}))
-				} else {
-					Ok(v as u32)
-				}
-			}
-			// An invalid value was specified
-			Ok(v) => Err(anyhow::Error::new(Error::InvalidStart {
-				value: v.as_string(),
-			})),
-			// A different error occurred
-			Err(e) => Err(e),
-		}
-	}
-}
+pub struct Start(pub SqlValue);
 
 impl fmt::Display for Start {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "START {}", self.0)
+	}
+}
+
+impl From<Start> for crate::expr::Start {
+	fn from(value: Start) -> Self {
+		crate::expr::Start(value.0.into())
+	}
+}
+
+impl From<crate::expr::Start> for Start {
+	fn from(value: crate::expr::Start) -> Self {
+		Start(value.0.into())
 	}
 }

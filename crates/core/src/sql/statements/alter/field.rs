@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::reference::Reference;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, Ident, Permissions, Strand, Value};
-use crate::expr::{Idiom, Kind};
+use crate::sql::reference::Reference;
+use crate::sql::statements::DefineTableStatement;
+use crate::sql::{Base, Ident, Permissions, Strand, SqlValue};
+use crate::sql::{Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
 
 use anyhow::Result;
@@ -27,113 +27,13 @@ pub struct AlterFieldStatement {
 	pub flex: Option<bool>,
 	pub kind: Option<Option<Kind>>,
 	pub readonly: Option<bool>,
-	pub value: Option<Option<Value>>,
-	pub assert: Option<Option<Value>>,
-	pub default: Option<Option<Value>>,
+	pub value: Option<Option<SqlValue>>,
+	pub assert: Option<Option<SqlValue>>,
+	pub default: Option<Option<SqlValue>>,
 	pub permissions: Option<Permissions>,
 	pub comment: Option<Option<Strand>>,
 	pub reference: Option<Option<Reference>>,
 	pub default_always: Option<bool>,
-}
-
-impl AlterFieldStatement {
-	pub(crate) async fn compute(
-		&self,
-		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Get the table definition
-		let name = self.name.to_string();
-		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
-					return Ok(Value::None);
-				} else {
-					return Err(e);
-				}
-			}
-		};
-		// Process the statement
-		if let Some(flex) = &self.flex {
-			df.flex = *flex;
-		}
-		if let Some(kind) = &self.kind {
-			df.kind.clone_from(kind);
-		}
-		if let Some(readonly) = &self.readonly {
-			df.readonly = *readonly;
-		}
-		if let Some(value) = &self.value {
-			df.value.clone_from(value);
-		}
-		if let Some(assert) = &self.assert {
-			df.assert.clone_from(assert);
-		}
-		if let Some(default) = &self.default {
-			df.default.clone_from(default);
-		}
-		if let Some(permissions) = &self.permissions {
-			df.permissions = permissions.clone();
-		}
-		if let Some(comment) = &self.comment {
-			df.comment.clone_from(comment);
-		}
-		if let Some(reference) = &self.reference {
-			df.reference.clone_from(reference);
-
-			// Validate reference options
-			if df.reference.is_some() {
-				df.validate_reference_options(ctx)?;
-			}
-		}
-		if let Some(default_always) = &self.default_always {
-			df.default_always = *default_always;
-		}
-
-		// Validate reference options
-		df.validate_reference_options(ctx)?;
-
-		// Correct reference type
-		if let Some(kind) = df.get_reference_kind(ctx, opt).await? {
-			df.kind = Some(kind);
-		}
-
-		// Disallow mismatched types
-		df.disallow_mismatched_types(ctx, ns, db).await?;
-
-		// Set the table definition
-		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
-		txn.set(key, revision::to_vec(&df)?, None).await?;
-		// Refresh the table cache
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
-				cache_fields_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		txn.clear();
-		// Process possible recursive defitions
-		df.process_recursive_definitions(ns, db, txn.clone()).await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
 }
 
 impl Display for AlterFieldStatement {
@@ -208,5 +108,46 @@ impl Display for AlterFieldStatement {
 			}
 		}
 		Ok(())
+	}
+}
+
+
+impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldStatement {
+	fn from(v: AlterFieldStatement) -> Self {
+		crate::expr::statements::alter::AlterFieldStatement {
+			name: v.name.into(),
+			what: v.what.into(),
+			if_exists: v.if_exists,
+			flex: v.flex.map(Into::into),
+			kind: v.kind.map(|opt| opt.map(Into::into)),
+			readonly: v.readonly,
+			value: v.value.map(|opt| opt.map(Into::into)),
+			assert: v.assert.map(|opt| opt.map(Into::into)),
+			default: v.default.map(|opt| opt.map(Into::into)),
+			permissions: v.permissions.map(Into::into),
+			comment: v.comment.map(|opt| opt.map(Into::into)),
+			reference: v.reference.map(|opt| opt.map(Into::into)),
+			default_always: v.default_always,
+		}
+	}
+}
+
+impl From<crate::expr::statements::alter::AlterFieldStatement> for AlterFieldStatement {
+	fn from(v: crate::expr::statements::alter::AlterFieldStatement) -> Self {
+		AlterFieldStatement {
+			name: v.name.into(),
+			what: v.what.into(),
+			if_exists: v.if_exists,
+			flex: v.flex.map(Into::into),
+			kind: v.kind.map(|opt| opt.map(Into::into)),
+			readonly: v.readonly,
+			value: v.value.map(|opt| opt.map(Into::into)),
+			assert: v.assert.map(|opt| opt.map(Into::into)),
+			default: v.default.map(|opt| opt.map(Into::into)),
+			permissions: v.permissions.map(Into::into),
+			comment: v.comment.map(|opt| opt.map(Into::into)),
+			reference: v.reference.map(|opt| opt.map(Into::into)),
+			default_always: v.default_always,
+		}
 	}
 }

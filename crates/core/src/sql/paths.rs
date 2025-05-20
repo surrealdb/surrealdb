@@ -1,4 +1,4 @@
-use crate::expr::part::Part;
+use crate::sql::part::Part;
 use std::sync::LazyLock;
 
 pub const OBJ_PATH_ACCESS: &str = "ac";

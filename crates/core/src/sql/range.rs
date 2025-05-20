@@ -5,8 +5,8 @@ use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::Value;
-use crate::expr::operator::BindingPower;
+use crate::sql::SqlValue;
+use crate::sql::operator::BindingPower;
 use crate::syn;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -25,8 +25,8 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Range {
-	pub beg: Bound<Value>,
-	pub end: Bound<Value>,
+	pub beg: Bound<SqlValue>,
+	pub end: Bound<SqlValue>,
 }
 
 impl Range {
@@ -137,6 +137,41 @@ impl Range {
 	}
 }
 
+
+impl From<Range> for crate::expr::Range {
+	fn from(value: Range) -> Self {
+		crate::expr::Range {
+			beg: match value.beg {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match value.end {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		}
+	}
+}
+
+impl From<crate::expr::Range> for Range {
+	fn from(value: crate::expr::Range) -> Self {
+		Range {
+			beg: match value.beg {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match value.end {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		}
+	}
+}
+
 /// A range but with specific value types.
 #[derive(Clone, Debug)]
 pub struct TypedRange<T> {
@@ -154,7 +189,7 @@ impl TypedRange<i64> {
 			_ => {}
 		}
 
-		Some(Array(self.map(Value::from).collect()))
+		Some(Array(self.map(SqlValue::from).collect()))
 	}
 }
 
@@ -227,12 +262,12 @@ impl Iterator for TypedRange<i64> {
 
 impl<T> From<TypedRange<T>> for Range
 where
-	Value: From<T>,
+	SqlValue: From<T>,
 {
 	fn from(value: TypedRange<T>) -> Self {
 		Range {
-			beg: value.beg.map(Value::from),
-			end: value.end.map(Value::from),
+			beg: value.beg.map(SqlValue::from),
+			end: value.end.map(SqlValue::from),
 		}
 	}
 }
@@ -249,7 +284,7 @@ impl FromStr for Range {
 
 impl Range {
 	/// Construct a new range
-	pub fn new(beg: Bound<Value>, end: Bound<Value>) -> Self {
+	pub fn new(beg: Bound<SqlValue>, end: Bound<SqlValue>) -> Self {
 		Self {
 			beg,
 			end,
@@ -257,26 +292,7 @@ impl Range {
 	}
 
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		Ok(Value::Range(Box::new(Range {
-			beg: match &self.beg {
-				Bound::Included(v) => Bound::Included(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Excluded(v) => Bound::Excluded(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Unbounded => Bound::Unbounded,
-			},
-			end: match &self.end {
-				Bound::Included(v) => Bound::Included(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Excluded(v) => Bound::Excluded(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Unbounded => Bound::Unbounded,
-			},
-		})))
-	}
+
 
 	/// Validate that a Range contains only computed Values
 	pub fn validate_computed(&self) -> Result<()> {

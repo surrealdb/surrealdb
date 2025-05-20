@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	expr::{Data, Idiom, Subquery, Value, statements::InsertStatement},
+	sql::{Data, Idiom, Subquery, SqlValue, statements::InsertStatement},
 	syn::{
 		error::bail,
 		parser::{ParseResult, Parser, mac::expected},
@@ -20,11 +20,11 @@ impl Parser<'_> {
 			let r = match self.peek().kind {
 				t!("$param") => {
 					let param = self.next_token_value()?;
-					Value::Param(param)
+					SqlValue::Param(param)
 				}
 				_ => {
 					let table = self.next_token_value()?;
-					Value::Table(table)
+					SqlValue::Table(table)
 				}
 			};
 			Some(r)
@@ -57,7 +57,7 @@ impl Parser<'_> {
 	}
 
 	fn extract_idiom(subquery: Subquery) -> Option<Idiom> {
-		let Subquery::Value(Value::Idiom(idiom)) = subquery else {
+		let Subquery::Value(SqlValue::Idiom(idiom)) = subquery else {
 			return None;
 		};
 
@@ -89,7 +89,7 @@ impl Parser<'_> {
 
 			if !self.eat(t!("VALUES")) {
 				// found a subquery
-				return Ok(Data::SingleExpression(Value::Subquery(Box::new(subquery))));
+				return Ok(Data::SingleExpression(SqlValue::Subquery(Box::new(subquery))));
 			}
 
 			// found an values expression, so subquery must be an idiom

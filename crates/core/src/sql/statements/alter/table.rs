@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Ident, Permissions, Strand, Value};
-use crate::expr::{Kind, TableType};
+use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::sql::statements::DefineTableStatement;
+use crate::sql::{Base, ChangeFeed, Ident, Permissions, Strand, SqlValue};
+use crate::sql::{Kind, TableType};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
@@ -38,65 +38,6 @@ impl AlterTableStatement {
 		_value: Option<bool>,
 	) -> Result<(), revision::Error> {
 		Ok(())
-	}
-
-	pub(crate) async fn compute(
-		&self,
-		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-
-		// Get the table definition
-		let mut dt = match txn.get_tb(ns, db, &self.name).await {
-			Ok(tb) => tb.deref().clone(),
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					return Ok(Value::None);
-				} else {
-					return Err(e);
-				}
-			}
-		};
-		// Process the statement
-		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if let Some(full) = &self.full {
-			dt.full = *full;
-		}
-		if let Some(permissions) = &self.permissions {
-			dt.permissions = permissions.clone();
-		}
-		if let Some(changefeed) = &self.changefeed {
-			dt.changefeed = *changefeed;
-		}
-		if let Some(comment) = &self.comment {
-			dt.comment.clone_from(comment);
-		}
-		if let Some(kind) = &self.kind {
-			dt.kind = kind.clone();
-		}
-
-		// Add table relational fields
-		if matches!(self.kind, Some(TableType::Relation(_))) {
-			DefineTableStatement::add_in_out_fields(&txn, ns, db, &mut dt).await?;
-		}
-		// Set the table definition
-		txn.set(key, revision::to_vec(&dt)?, None).await?;
-		// Record definition change
-		if self.changefeed.is_some() && dt.changefeed.is_some() {
-			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
-		}
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
 	}
 }
 
@@ -166,5 +107,33 @@ impl Display for AlterTableStatement {
 			write!(f, "{permissions}")?;
 		}
 		Ok(())
+	}
+}
+
+impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableStatement {
+	fn from(v: AlterTableStatement) -> Self {
+		crate::expr::statements::alter::AlterTableStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			full: v.full,
+			permissions: v.permissions.map(Into::into),
+			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
+			comment: v.comment.map(|opt| opt.map(Into::into)),
+			kind: v.kind.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableStatement {
+	fn from(v: crate::expr::statements::alter::AlterTableStatement) -> Self {
+		AlterTableStatement {
+			name: v.name.into(),
+			if_exists: v.if_exists,
+			full: v.full,
+			permissions: v.permissions.map(Into::into),
+			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
+			comment: v.comment.map(|opt| opt.map(Into::into)),
+			kind: v.kind.map(Into::into),
+		}
 	}
 }

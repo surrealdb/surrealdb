@@ -1,5 +1,5 @@
 use crate::{
-	expr::{Object, Strand, Value},
+	sql::{Object, Strand, SqlValue},
 	syn::parser::mac::test_parse,
 };
 
@@ -21,7 +21,7 @@ fn array_with_negative() {
 #[test]
 fn not_record_id() {
 	let res = test_parse!(parse_json, r#" 'foo:bar-baz'  "#).unwrap();
-	assert_eq!(res, Value::Strand(Strand("foo:bar-baz".to_owned())))
+	assert_eq!(res, SqlValue::Strand(Strand("foo:bar-baz".to_owned())))
 }
 
 #[test]
@@ -29,5 +29,5 @@ fn not_a_record_id_in_object() {
 	let res = test_parse!(parse_json, r#"{ "data":"focus:outline-none", }"#).unwrap();
 	let object = res.coerce_to::<Object>().unwrap();
 	let data = object.get("data").unwrap();
-	assert_eq!(*data, Value::Strand(Strand("focus:outline-none".to_owned())))
+	assert_eq!(*data, SqlValue::Strand(Strand("focus:outline-none".to_owned())))
 }

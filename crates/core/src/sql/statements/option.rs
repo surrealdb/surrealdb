@@ -1,4 +1,4 @@
-use crate::expr::ident::Ident;
+use crate::sql::ident::Ident;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,24 @@ impl fmt::Display for OptionStatement {
 			write!(f, "OPTION {}", self.name)
 		} else {
 			write!(f, "OPTION {} = FALSE", self.name)
+		}
+	}
+}
+
+impl From<OptionStatement> for crate::expr::statements::OptionStatement {
+	fn from(v: OptionStatement) -> Self {
+		crate::expr::statements::OptionStatement {
+			name: v.name.into(),
+			what: v.what,
+		}
+	}
+}
+
+impl From<crate::expr::statements::OptionStatement> for OptionStatement {
+	fn from(v: crate::expr::statements::OptionStatement) -> Self {
+		OptionStatement {
+			name: v.name.into(),
+			what: v.what,
 		}
 	}
 }

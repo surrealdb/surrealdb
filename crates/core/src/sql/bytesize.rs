@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::expr::Value;
-use crate::expr::statements::info::InfoStructure;
+use crate::sql::SqlValue;
+
 use anyhow::{Result, bail, ensure};
 use num_traits::CheckedAdd;
 use revision::revisioned;
@@ -288,11 +288,7 @@ impl<'a> Sum<&'a Self> for Bytesize {
 	}
 }
 
-impl InfoStructure for Bytesize {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
+
 
 #[cfg(test)]
 mod tests {

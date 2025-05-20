@@ -1,8 +1,8 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
-use crate::expr::array::Array;
-use crate::expr::fmt::Fmt;
-use crate::expr::value::Value;
+use crate::sql::array::Array;
+use crate::sql::fmt::Fmt;
+use crate::sql::value::SqlValue;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, LinesIter, Point, Polygon};
@@ -122,33 +122,33 @@ impl Geometry {
 		}
 	}
 	/// Get the raw coordinates of this Geometry as an Array
-	pub fn as_coordinates(&self) -> Value {
-		fn point(v: &Point) -> Value {
+	pub fn as_coordinates(&self) -> SqlValue {
+		fn point(v: &Point) -> SqlValue {
 			Array::from(vec![v.x(), v.y()]).into()
 		}
 
-		fn line(v: &LineString) -> Value {
-			v.points().map(|v| point(&v)).collect::<Vec<Value>>().into()
+		fn line(v: &LineString) -> SqlValue {
+			v.points().map(|v| point(&v)).collect::<Vec<SqlValue>>().into()
 		}
 
-		fn polygon(v: &Polygon) -> Value {
-			once(v.exterior()).chain(v.interiors()).map(line).collect::<Vec<Value>>().into()
+		fn polygon(v: &Polygon) -> SqlValue {
+			once(v.exterior()).chain(v.interiors()).map(line).collect::<Vec<SqlValue>>().into()
 		}
 
-		fn multipoint(v: &MultiPoint) -> Value {
-			v.iter().map(point).collect::<Vec<Value>>().into()
+		fn multipoint(v: &MultiPoint) -> SqlValue {
+			v.iter().map(point).collect::<Vec<SqlValue>>().into()
 		}
 
-		fn multiline(v: &MultiLineString) -> Value {
-			v.iter().map(line).collect::<Vec<Value>>().into()
+		fn multiline(v: &MultiLineString) -> SqlValue {
+			v.iter().map(line).collect::<Vec<SqlValue>>().into()
 		}
 
-		fn multipolygon(v: &MultiPolygon) -> Value {
-			v.iter().map(polygon).collect::<Vec<Value>>().into()
+		fn multipolygon(v: &MultiPolygon) -> SqlValue {
+			v.iter().map(polygon).collect::<Vec<SqlValue>>().into()
 		}
 
-		fn collection(v: &[Geometry]) -> Value {
-			v.iter().map(Geometry::as_coordinates).collect::<Vec<Value>>().into()
+		fn collection(v: &[Geometry]) -> SqlValue {
+			v.iter().map(Geometry::as_coordinates).collect::<Vec<SqlValue>>().into()
 		}
 
 		match self {
@@ -164,7 +164,7 @@ impl Geometry {
 
 	/// Get the GeoJSON object representation for this geometry
 	pub fn as_object(&self) -> Object {
-		let mut obj = BTreeMap::<String, Value>::new();
+		let mut obj = BTreeMap::<String, SqlValue>::new();
 		obj.insert("type".into(), self.as_type().into());
 		obj.insert(
 			match self {
@@ -179,9 +179,9 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a MultiPolygon if the array matches to a MultiPolygon.
-	pub(crate) fn array_to_multipolygon(v: &Value) -> Option<MultiPolygon<f64>> {
+	pub(crate) fn array_to_multipolygon(v: &SqlValue) -> Option<MultiPolygon<f64>> {
 		let mut res = Vec::new();
-		let Value::Array(v) = v else {
+		let SqlValue::Array(v) = v else {
 			return None;
 		};
 		for x in v.iter() {
@@ -191,9 +191,9 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a MultiLine if the array matches to a MultiLine.
-	pub(crate) fn array_to_multiline(v: &Value) -> Option<MultiLineString<f64>> {
+	pub(crate) fn array_to_multiline(v: &SqlValue) -> Option<MultiLineString<f64>> {
 		let mut res = Vec::new();
-		let Value::Array(v) = v else {
+		let SqlValue::Array(v) = v else {
 			return None;
 		};
 		for x in v.iter() {
@@ -203,9 +203,9 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a MultiPoint if the array matches to a MultiPoint.
-	pub(crate) fn array_to_multipoint(v: &Value) -> Option<MultiPoint<f64>> {
+	pub(crate) fn array_to_multipoint(v: &SqlValue) -> Option<MultiPoint<f64>> {
 		let mut res = Vec::new();
-		let Value::Array(v) = v else {
+		let SqlValue::Array(v) = v else {
 			return None;
 		};
 		for x in v.iter() {
@@ -215,9 +215,9 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a Polygon if the array matches to a Polygon.
-	pub(crate) fn array_to_polygon(v: &Value) -> Option<Polygon<f64>> {
+	pub(crate) fn array_to_polygon(v: &SqlValue) -> Option<Polygon<f64>> {
 		let mut res = Vec::new();
-		let Value::Array(v) = v else {
+		let SqlValue::Array(v) = v else {
 			return None;
 		};
 		if v.is_empty() {
@@ -231,9 +231,9 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a LineString if the array matches to a LineString.
-	pub(crate) fn array_to_line(v: &Value) -> Option<LineString<f64>> {
+	pub(crate) fn array_to_line(v: &SqlValue) -> Option<LineString<f64>> {
 		let mut res = Vec::new();
-		let Value::Array(v) = v else {
+		let SqlValue::Array(v) = v else {
 			return None;
 		};
 		for x in v.iter() {
@@ -243,18 +243,18 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a Point if the array matches to a point.
-	pub(crate) fn array_to_point(v: &Value) -> Option<Point<f64>> {
-		let Value::Array(v) = v else {
+	pub(crate) fn array_to_point(v: &SqlValue) -> Option<Point<f64>> {
+		let SqlValue::Array(v) = v else {
 			return None;
 		};
 		if v.len() != 2 {
 			return None;
 		}
 		// FIXME: This truncates decimals and large integers into a f64.
-		let Value::Number(ref a) = v.0[0] else {
+		let SqlValue::Number(ref a) = v.0[0] else {
 			return None;
 		};
-		let Value::Number(ref b) = v.0[1] else {
+		let SqlValue::Number(ref b) = v.0[1] else {
 			return None;
 		};
 		Some(Point::from(((*a).try_into().ok()?, (*b).try_into().ok()?)))
@@ -449,6 +449,38 @@ impl FromIterator<Geometry> for geo::Geometry<f64> {
 		geo::Geometry::GeometryCollection(geo::GeometryCollection(c))
 	}
 }
+
+
+impl From<Geometry> for crate::expr::Geometry {
+	fn from(v: Geometry) -> Self {
+		match v {
+			Geometry::Point(v) => Self::Point(v),
+			Geometry::Line(v) => Self::Line(v),
+			Geometry::Polygon(v) => Self::Polygon(v),
+			Geometry::MultiPoint(v) => Self::MultiPoint(v),
+			Geometry::MultiLine(v) => Self::MultiLine(v),
+			Geometry::MultiPolygon(v) => Self::MultiPolygon(v),
+			Geometry::Collection(v) => Self::Collection(v.into_iter().map(Into::into).collect()),
+		}
+	}
+}
+
+impl From<crate::expr::Geometry> for Geometry {
+	fn from(v: crate::expr::Geometry) -> Self {
+		match v {
+			crate::expr::Geometry::Point(v) => Self::Point(v),
+			crate::expr::Geometry::Line(v) => Self::Line(v),
+			crate::expr::Geometry::Polygon(v) => Self::Polygon(v),
+			crate::expr::Geometry::MultiPoint(v) => Self::MultiPoint(v),
+			crate::expr::Geometry::MultiLine(v) => Self::MultiLine(v),
+			crate::expr::Geometry::MultiPolygon(v) => Self::MultiPolygon(v),
+			crate::expr::Geometry::Collection(v) => {
+				Self::Collection(v.into_iter().map(Into::into).collect())
+			}
+		}
+	}
+}
+
 
 impl Geometry {
 	// -----------------------------------

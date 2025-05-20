@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Role;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn remove_statement_table() -> Result<()> {
@@ -32,7 +32,7 @@ async fn remove_statement_table() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -166,7 +166,7 @@ async fn remove_statement_analyzer() -> Result<()> {
 	tmp.unwrap();
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -208,7 +208,7 @@ async fn remove_statement_index() -> Result<()> {
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			events: {},
 			fields: {},
@@ -232,7 +232,7 @@ async fn should_not_error_when_remove_table_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -248,7 +248,7 @@ async fn should_not_error_when_remove_analyzer_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -264,7 +264,7 @@ async fn should_not_error_when_remove_database_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -280,7 +280,7 @@ async fn should_not_error_when_remove_event_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -296,7 +296,7 @@ async fn should_not_error_when_remove_field_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -312,7 +312,7 @@ async fn should_not_error_when_remove_function_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -328,7 +328,7 @@ async fn should_not_error_when_remove_index_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -344,7 +344,7 @@ async fn should_not_error_when_remove_namespace_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -360,7 +360,7 @@ async fn should_not_error_when_remove_param_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -376,7 +376,7 @@ async fn should_not_error_when_remove_access_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }
@@ -392,7 +392,7 @@ async fn should_not_error_when_remove_user_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, SqlValue::None);
 
 	Ok(())
 }

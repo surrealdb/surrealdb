@@ -1,5 +1,5 @@
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Value, escape::EscapeIdent, strand::no_nul_bytes};
+
+use crate::sql::{SqlValue, escape::EscapeIdent, strand::no_nul_bytes};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -21,6 +21,19 @@ impl From<String> for Ident {
 impl From<&str> for Ident {
 	fn from(v: &str) -> Self {
 		Self::from(String::from(v))
+	}
+}
+
+
+impl From<Ident> for crate::expr::Ident {
+	fn from(v: Ident) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Ident> for Ident {
+	fn from(v: crate::expr::Ident) -> Self {
+		Self(v.0)
 	}
 }
 
@@ -64,8 +77,4 @@ impl Display for Ident {
 	}
 }
 
-impl InfoStructure for Ident {
-	fn structure(self) -> Value {
-		self.to_raw().into()
-	}
-}
+
