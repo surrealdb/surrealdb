@@ -253,18 +253,64 @@ jobs:
       - name: Check revision.lock
         run: revision-lock --check
 
+  # We need to ensure there is a local snapshot of the PR branch in case
+  # we are running against a fork, in which case the `check-binaries` job
+  # would run into this error:
+  # > Error: Credentials could not be loaded, please check your action inputs:
+  # > Could not load credentials from any providers
+  # This error is triggered by the `aws-actions/configure-aws-credentials` action.
+  create-snapshot:
+    name: Prepare local CI branch
+    runs-on: ubuntu-latest
+    outputs:
+      snapshot-branch: ${{ steps.snapshot.outputs.branch }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          repository: surrealdb/surrealdb
+
+      - name: Checkout PR branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          path: pr-branch
+
+      - name: Push snapshot
+        id: snapshot
+        run: |
+          set -x
+          snapshot_branch=ci/$(uuidgen)
+          echo "branch=${snapshot_branch}" >> $GITHUB_OUTPUT
+          git switch --orphan $snapshot_branch
+          git pull pr-branch/
+          git push --set-upstream origin $snapshot_branch
+
   check-binaries:
     name: Cross-compile binaries
-    needs: [ format, check, check-wasm ]
+    needs: [format, create-snapshot]
     uses: ./.github/workflows/build.yml
     with:
       name: ci
-      release-branch: ${{ github.head_ref || github.ref_name }}
+      release-branch: ${{ needs.create-snapshot.outputs.snapshot-branch }}
       # Only upload if not a pull request.
       upload: ${{ github.event_name != 'pull_request' }}
       # Only compile with --release when not a pull request.
       release: ${{ github.event_name != 'pull_request' }}
     secrets: inherit
+
+  delete-snapshot:
+    name: Delete local CI branch
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [create-snapshot, check-binaries]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        with:
+          repository: surrealdb/surrealdb
+
+      - name: Delete snapshot
+        run: git push origin --delete ${{ needs.create-snapshot.outputs.snapshot-branch }} || true
 
   # ----------------------------------------
   # Integration tests
