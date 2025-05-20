@@ -28,11 +28,6 @@ pub use sequence::RemoveSequenceStatement;
 pub use table::RemoveTableStatement;
 pub use user::RemoveUserStatement;
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::sql::SqlValue;
-use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

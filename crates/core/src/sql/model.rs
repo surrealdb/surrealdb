@@ -1,12 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::ControlFlow;
-use crate::sql::FlowResult;
 use crate::sql::value::SqlValue;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

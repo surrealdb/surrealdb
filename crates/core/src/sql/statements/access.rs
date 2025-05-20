@@ -1,17 +1,9 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::access_type::BearerAccessSubject;
 use crate::sql::{
-	AccessType, Array, Base, Cond, Datetime, Duration, FlowResultExt as _, Ident, Object, SqlValue,
+	Base, Cond, Datetime, Duration, Ident, Object, SqlValue,
 	Strand, Thing, Uuid,
 };
-use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;

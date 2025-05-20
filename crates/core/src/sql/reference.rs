@@ -1,16 +1,9 @@
-use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{
-	ctx::Context,
-	dbs::{Options, capabilities::ExperimentalTarget},
-	doc::CursorDoc,
-	err::Error,
-};
 
-use super::{Array, Idiom, SqlValue, Table, Thing, array::Uniq};
+use super::{Idiom, SqlValue, Table};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]

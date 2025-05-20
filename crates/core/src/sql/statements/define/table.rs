@@ -1,26 +1,18 @@
 use super::DefineFieldStatement;
-use crate::ctx::Context;
-use crate::dbs::{Force, Options};
-use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
 
-use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::sql::{
-	Base, Ident, Output, Permissions, SqlValue, SqlValues, Strand, View, changefeed::ChangeFeed,
-	statements::UpdateStatement,
+	Ident, Permissions, Strand, View, changefeed::ChangeFeed,
 };
 use crate::sql::{Idiom, Kind, TableType};
-use anyhow::{Result, bail};
+use anyhow::Result;
 
-use reblessive::tree::Stk;
 use revision::Error as RevisionError;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 6)]

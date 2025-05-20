@@ -1,17 +1,8 @@
 use super::SqlValue;
-use crate::{
-	cnf::IDIOM_RECURSION_LIMIT,
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	sql::{
-		Array, FlowResultExt as _, Part,
+use crate::sql::{
+		Array, Part,
 		part::{RecurseInstruction, RecursionPlan},
-	},
-};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
+	};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Recursion<'a> {

@@ -1,4 +1,3 @@
-use crate::sql::SqlValue;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

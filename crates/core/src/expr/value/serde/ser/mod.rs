@@ -13,7 +13,6 @@ use serde_content::Serializer;
 use serde_content::Unexpected;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::fmt::Display;
 
 type Content = serde_content::Value<'static>;
 

@@ -1,12 +1,9 @@
-use crate::expr::Part;
-use crate::expr::Value;
 use crate::rpc::Method;
 use crate::rpc::RpcError;
 use crate::rpc::format::cbor::Cbor;
 use crate::sql::Array;
 use crate::sql::Number;
 use crate::sql::SqlValue;
-use std::sync::LazyLock;
 
 pub static ID: &'static str = "id";
 pub static METHOD: &'static str = "method";

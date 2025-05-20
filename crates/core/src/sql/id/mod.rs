@@ -1,14 +1,10 @@
-use super::{FlowResultExt as _, Range};
+use super::Range;
 use crate::cnf::ID_CHARS;
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{Array, Number, Object, SqlValue, Strand, Thing, Uuid, escape::EscapeRid};
 use anyhow::Result;
 use nanoid::nanoid;
 use range::IdRange;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

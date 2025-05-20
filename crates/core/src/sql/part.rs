@@ -1,27 +1,19 @@
 use crate::{
 	cnf::IDIOM_RECURSION_LIMIT,
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
 	err::Error,
-	exe::try_join_all_buffered,
 	sql::{
-		FlowResultExt as _, Graph, Ident, Idiom, Number, SqlValue, Thing, fmt::Fmt,
+		Graph, Ident, Idiom, Number, SqlValue, fmt::Fmt,
 		strand::no_nul_bytes,
 	},
 };
 use anyhow::Result;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 use std::str;
 
-use super::{
-	fmt::{is_pretty, pretty_indent},
-	value::idiom_recursion::{Recursion, clean_iteration, is_final},
-};
+use super::fmt::{is_pretty, pretty_indent};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

@@ -6,13 +6,7 @@ pub use field::AlterFieldStatement;
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::sql::value::SqlValue;
-use anyhow::Result;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};

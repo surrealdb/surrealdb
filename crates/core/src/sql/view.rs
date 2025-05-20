@@ -1,4 +1,4 @@
-use crate::sql::{SqlValue, cond::Cond, field::Fields, group::Groups, table::Tables};
+use crate::sql::{cond::Cond, field::Fields, group::Groups, table::Tables};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

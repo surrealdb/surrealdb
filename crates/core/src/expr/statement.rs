@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Options, QueryType};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::AccessStatement;

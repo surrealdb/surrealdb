@@ -1,4 +1,4 @@
-use crate::sql::{Kind, SqlValue};
+use crate::sql::Kind;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

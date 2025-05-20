@@ -1,4 +1,3 @@
-use crate::expr::LogicalPlan;
 use crate::expr::Value as CoreValue;
 use crate::sql::statement::Statement;
 use anyhow::Result;

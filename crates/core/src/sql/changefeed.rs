@@ -1,4 +1,3 @@
-use crate::sql::SqlValue;
 use crate::sql::duration::Duration;
 
 use revision::revisioned;

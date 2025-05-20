@@ -1,14 +1,7 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, FlowResultExt as _, Ident, Permission, SqlValue, Strand};
-use anyhow::{Result, bail};
+use crate::sql::{Ident, Permission, SqlValue, Strand};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};

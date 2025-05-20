@@ -1,18 +1,12 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
 use crate::sql::fmt::Fmt;
 
 use crate::sql::{Idiom, SqlValue};
-use crate::syn;
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use super::Array;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

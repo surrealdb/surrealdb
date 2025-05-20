@@ -1,15 +1,10 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 
 use crate::sql::{
-	Part, SqlValue,
+	Part,
 	fmt::{Fmt, fmt_separated_by},
-	part::{Next, NextMethod},
 	paths::{ID, IN, META, OUT},
 };
 use md5::{Digest, Md5};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,7 +12,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 

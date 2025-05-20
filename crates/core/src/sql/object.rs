@@ -1,6 +1,3 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
 	Operation, SqlValue, Thing,
@@ -8,8 +5,6 @@ use crate::sql::{
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
 use anyhow::{Result, bail};
-use http::{HeaderMap, HeaderName, HeaderValue};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -18,7 +13,6 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 

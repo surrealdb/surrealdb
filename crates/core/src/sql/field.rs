@@ -1,19 +1,11 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 
-use crate::sql::{Idiom, Part, SqlValue, fmt::Fmt};
-use crate::syn;
-use anyhow::Result;
-use reblessive::tree::Stk;
+use crate::sql::{Idiom, SqlValue, fmt::Fmt};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use super::paths::ID;
-use super::{Array, FlowResultExt as _};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

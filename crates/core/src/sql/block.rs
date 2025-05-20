@@ -1,6 +1,3 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 
 use crate::sql::statements::rebuild::RebuildStatement;
@@ -11,14 +8,12 @@ use crate::sql::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::sql::value::SqlValue;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
-use super::FlowResult;
 use super::statements::InfoStatement;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";

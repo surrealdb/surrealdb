@@ -1,8 +1,3 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::exe::try_join_all_buffered;
-use crate::kvs::KeyEncode;
 use crate::sql::cond::Cond;
 use crate::sql::dir::Dir;
 use crate::sql::field::Fields;
@@ -14,14 +9,13 @@ use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::table::Tables;
 use anyhow::Result;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 
 use super::fmt::Fmt;
-use super::{Id, IdRange, Table, Thing};
+use super::{IdRange, Table};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

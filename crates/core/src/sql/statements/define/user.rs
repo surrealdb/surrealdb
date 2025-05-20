@@ -1,13 +1,7 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
 
-use crate::iam::{Action, ResourceKind};
 use crate::sql::{
-	Base, Duration, Ident, SqlValue, Strand, escape::QuoteStr, fmt::Fmt, user::UserDuration,
+	Base, Duration, Ident, Strand, escape::QuoteStr, fmt::Fmt, user::UserDuration,
 };
-use anyhow::{Result, bail};
 use argon2::{
 	Argon2,
 	password_hash::{PasswordHasher, SaltString},

@@ -1,15 +1,9 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::{Idiom, Kind, SqlValue};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
-use super::{ControlFlow, FlowResult};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
 

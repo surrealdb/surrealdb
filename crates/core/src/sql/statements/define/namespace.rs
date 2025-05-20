@@ -1,11 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
 
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, SqlValue, Strand};
-use anyhow::{Result, bail};
+use crate::sql::{Ident, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

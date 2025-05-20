@@ -1,8 +1,5 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::id::range::IdRange;
 use crate::sql::range::OldRange;
@@ -17,12 +14,11 @@ use crate::sql::{
 	id::{Gen, Id},
 	model::Model,
 };
-use crate::sql::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::sql::{Closure, Ident, Kind};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};

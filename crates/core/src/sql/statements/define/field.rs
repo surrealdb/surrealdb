@@ -1,24 +1,17 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
-use crate::sql::statements::DefineTableStatement;
 
-use crate::iam::{Action, ResourceKind};
-use crate::kvs::Transaction;
-use crate::sql::{Base, Ident, Idiom, Kind, Permissions, SqlValue, Strand};
-use crate::sql::{Literal, Part};
-use crate::sql::{Relation, TableType};
-use anyhow::{Result, bail, ensure};
+use crate::sql::{Ident, Idiom, Kind, Permissions, SqlValue, Strand};
+use crate::sql::Part;
+use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
-use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 6)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

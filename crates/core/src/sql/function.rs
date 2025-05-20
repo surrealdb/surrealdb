@@ -1,24 +1,14 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::fnc;
-use crate::iam::Action;
-use crate::sql::Permission;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::operator::BindingPower;
 use crate::sql::script::Script;
 use crate::sql::value::SqlValue;
 use anyhow::Result;
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
-use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 

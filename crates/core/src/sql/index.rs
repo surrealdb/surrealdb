@@ -1,11 +1,7 @@
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
 
-use crate::fnc::util::math::vector::{
-	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
-	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
-};
-use crate::sql::{Number, SqlValue};
+use crate::sql::Number;
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

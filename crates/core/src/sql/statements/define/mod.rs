@@ -37,17 +37,11 @@ pub use deprecated::scope::DefineScopeStatement;
 pub use deprecated::token::DefineTokenStatement;
 
 pub use api::ApiAction;
-pub use api::ApiDefinition;
 
-pub use bucket::BucketDefinition;
 
-use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::sql::value::SqlValue;
 use anyhow::Result;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};

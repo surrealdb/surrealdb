@@ -1,17 +1,9 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::statements::define::DefineTableStatement;
 
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, SqlValue, SqlValues, Strand};
-use anyhow::{Result, bail};
+use crate::sql::{Ident, SqlValue, SqlValues, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-use uuid::Uuid;
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

@@ -1,14 +1,7 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
 
 use crate::iam::Auth;
-use crate::kvs::Live;
-use crate::sql::{Cond, Fetchs, Fields, FlowResultExt as _, SqlValue, Uuid};
-use anyhow::{Result, bail};
+use crate::sql::{Cond, Fetchs, Fields, SqlValue, Uuid};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

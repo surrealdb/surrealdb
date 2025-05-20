@@ -1,18 +1,11 @@
 use crate::api::method::Method;
 use crate::api::path::Path;
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{Fmt, pretty_indent};
-use crate::sql::{Base, FlowResultExt as _, Object, SqlValue, Strand};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
+use crate::sql::{SqlValue, Strand};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-use super::CursorDoc;
 use super::config::api::ApiConfig;
 
 #[revisioned(revision = 2)]

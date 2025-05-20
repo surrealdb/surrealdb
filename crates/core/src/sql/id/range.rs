@@ -1,13 +1,9 @@
 use super::Id;
 use crate::{
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
 	err::Error,
 	sql::{Range, SqlValue},
 };
 use anyhow::{Result, bail};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt, ops::Bound};

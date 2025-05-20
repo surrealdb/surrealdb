@@ -1,21 +1,13 @@
-use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::FlowResultExt as _;
 use crate::sql::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, SqlValue, SqlValues,
+	Cond, Explain, Fetchs, Fields, Groups, Idioms, Limit, Splits, SqlValues,
 	Start, Timeout, Version, With,
 	order::{OldOrders, Order, OrderList, Ordering},
 };
-use anyhow::{Result, ensure};
+use anyhow::Result;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

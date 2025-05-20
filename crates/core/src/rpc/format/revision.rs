@@ -1,4 +1,3 @@
-use crate::expr::Value;
 use crate::rpc::RpcError;
 use crate::rpc::format::ResTrait;
 use crate::rpc::request::Request;

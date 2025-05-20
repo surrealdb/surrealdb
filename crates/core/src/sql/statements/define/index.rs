@@ -1,25 +1,16 @@
-use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
 use crate::dbs::Force;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::statements::DefineTableStatement;
 
-use crate::iam::{Action, ResourceKind};
 #[cfg(target_family = "wasm")]
 use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::sql::{Base, Ident, Idioms, Index, Part, SqlValue, Strand};
+use crate::sql::{Ident, Idioms, Index, Strand};
 #[cfg(target_family = "wasm")]
 use crate::sql::{Output, SqlValues};
-use anyhow::{Result, bail};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 #[cfg(target_family = "wasm")]
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

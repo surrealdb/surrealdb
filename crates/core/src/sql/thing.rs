@@ -1,20 +1,12 @@
 use super::id::range::IdRange;
-use super::{Cond, Expression, Ident, Idiom, Operator, Part, Table};
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::idx::planner::ScanDirection;
-use crate::key::r#ref::Ref;
-use crate::kvs::KeyDecode as _;
-use crate::sql::{SqlValue, Strand, escape::EscapeRid, id::Id};
+use super::Table;
+use crate::sql::{Strand, escape::EscapeRid, id::Id};
 use crate::syn;
 use anyhow::Result;
 use futures::StreamExt;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::Bound;
 use std::str::FromStr;
 
 const ID: &str = "id";

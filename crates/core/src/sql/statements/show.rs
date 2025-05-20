@@ -1,10 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Datetime, SqlValue, Table};
+use crate::sql::{Datetime, Table};
 use crate::vs::VersionStamp;
-use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
