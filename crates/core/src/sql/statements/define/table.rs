@@ -9,7 +9,7 @@ use crate::sql::paths::{IN, OUT};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::sql::{
-	Base, Ident, Output, Permissions, SqlValue, Strand, SqlValues, View, changefeed::ChangeFeed,
+	Base, Ident, Output, Permissions, SqlValue, SqlValues, Strand, View, changefeed::ChangeFeed,
 	statements::UpdateStatement,
 };
 use crate::sql::{Idiom, Kind, TableType};

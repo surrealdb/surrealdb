@@ -67,7 +67,7 @@ async fn handler(
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
 		Ok(SqlValue::Object(vars)) => {
-			match signin(kvs, &mut session, vars).await {
+			match signin(kvs, &mut session, vars.into()).await {
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization

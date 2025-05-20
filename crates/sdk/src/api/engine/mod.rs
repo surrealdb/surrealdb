@@ -20,8 +20,11 @@ use futures::Stream;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+use surrealdb_core::expr::Values as CoreValues;
 use surrealdb_core::sql::SqlValues as CoreSqlValues;
-use surrealdb_core::sql::{Thing as CoreSqlThing, Edges as CoreSqlEdges, Object as CoreSqlObject, SqlValue as CoreSqlValue};
+use surrealdb_core::sql::{
+	Edges as CoreSqlEdges, Object as CoreSqlObject, SqlValue as CoreSqlValue, Thing as CoreSqlThing,
+};
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
@@ -48,6 +51,23 @@ pub(crate) fn resource_to_sql_values(r: Resource) -> CoreSqlValues {
 		Resource::Array(x) => res.0 = Value::array_to_core(x).into_iter().map(Into::into).collect(),
 		Resource::Edge(x) => res.0 = vec![CoreSqlEdges::from(x.into_inner()).into()],
 		Resource::Range(x) => res.0 = vec![CoreSqlThing::from(x.into_inner()).into()],
+		Resource::Unspecified => {}
+	}
+	res
+}
+
+// used in http and all local engines.
+pub(crate) fn resource_to_values(r: Resource) -> CoreValues {
+	let mut res = CoreValues::default();
+	match r {
+		Resource::Table(x) => {
+			res.0 = vec![Table(x).into_core().into()];
+		}
+		Resource::RecordId(x) => res.0 = vec![x.into_inner().into()],
+		Resource::Object(x) => res.0 = vec![x.into_inner().into()],
+		Resource::Array(x) => res.0 = Value::array_to_core(x),
+		Resource::Edge(x) => res.0 = vec![x.into_inner().into()],
+		Resource::Range(x) => res.0 = vec![x.into_inner().into()],
 		Resource::Unspecified => {}
 	}
 	res

@@ -17,17 +17,17 @@ use crate::value::Notification;
 use async_channel::Receiver;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
-use surrealdb_core::sql::Statement;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::sql::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, Table,
-	SqlValue as CoreSqlValue, statements::LiveStatement,
-};
 use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::sql::Statement;
+use surrealdb_core::sql::{
+	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, SqlValue as CoreSqlValue, Table,
+	Thing as SqlThing, statements::LiveStatement,
+};
 use uuid::Uuid;
 
 #[cfg(not(target_family = "wasm"))]
@@ -63,7 +63,7 @@ where
 				stmt.what = core_table.into()
 			}
 			Resource::RecordId(record) => {
-				let record = record.into_inner();
+				let record: SqlThing = record.into_inner().into();
 				table.0.clone_from(&record.tb);
 				stmt.what = table.into();
 				let mut ident = Ident::default();
@@ -71,7 +71,7 @@ where
 				let mut idiom = Idiom::default();
 				idiom.0 = vec![Part::from(ident)];
 				let mut cond = Cond::default();
-				cond.0 = surrealdb_core::sql::SqlValue::Expression(Box::new(Expression::new(
+				cond.0 = CoreSqlValue::Expression(Box::new(Expression::new(
 					idiom.into(),
 					Operator::Equal,
 					record.into(),
@@ -85,13 +85,13 @@ where
 				let range = range.into_inner();
 				table.0.clone_from(&range.tb);
 				stmt.what = table.into();
-				stmt.cond = range.to_cond();
+				stmt.cond = range.to_cond().map(Into::into);
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
 		let query =
 			Query::normal(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
-		let CoreSqlValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
+		let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
 			return Err(Error::InternalError(
 				"successufull live query didn't return a uuid".to_string(),
 			)

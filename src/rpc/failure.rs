@@ -4,6 +4,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use surrealdb::rpc::RpcError;
 use surrealdb::sql::SqlValue;
+use surrealdb_core::expr::Value;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Failure {
@@ -59,11 +60,11 @@ impl From<RpcError> for Failure {
 	}
 }
 
-impl From<Failure> for SqlValue {
+impl From<Failure> for Value {
 	fn from(err: Failure) -> Self {
 		map! {
-			String::from("code") => SqlValue::from(err.code),
-			String::from("message") => SqlValue::from(err.message.to_string()),
+			String::from("code") => Value::from(err.code),
+			String::from("message") => Value::from(err.message.to_string()),
 		}
 		.into()
 	}

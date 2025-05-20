@@ -225,7 +225,7 @@ impl FromStr for Value {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		Ok(Value::from_inner(surrealdb_core::syn::value(s)?))
+		Ok(Value::from_inner(surrealdb_core::syn::value(s)?.into()))
 	}
 }
 
@@ -289,7 +289,7 @@ impl FromStr for RecordId {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		syn::thing(s).map(RecordId::from_inner)
+		syn::thing(s).map(|thing| RecordId::from_inner(CoreThing::from(thing)))
 	}
 }
 
@@ -426,7 +426,6 @@ impl Value {
 		matches!(&self, Value(CoreValue::None))
 	}
 }
-
 
 transparent_wrapper!(
 	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]

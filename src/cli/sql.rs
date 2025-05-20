@@ -14,10 +14,11 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{self, connect};
-use surrealdb::expr::{LogicalPlan, Param, Uuid as CoreUuid, Value as CoreValue};
+use surrealdb::expr::{LogicalPlan, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::{Notification, Response, Value};
+use surrealdb_core::sql::{Param, SqlValue as CoreSqlValue, Statement};
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -199,7 +200,7 @@ pub async fn init(
 				// Capture `use` and `set/let` statements from the query
 				for statement in query.iter() {
 					match statement {
-						LogicalPlan::Use(stmt) => {
+						Statement::Use(stmt) => {
 							if let Some(ns) = &stmt.ns {
 								namespace = Some(ns.clone());
 							}
@@ -207,13 +208,13 @@ pub async fn init(
 								database = Some(db.clone());
 							}
 						}
-						LogicalPlan::Set(stmt) => vars.push(stmt.name.clone()),
+						Statement::Set(stmt) => vars.push(stmt.name.clone()),
 						_ => {}
 					}
 				}
 
 				for var in &vars {
-					query.push(LogicalPlan::Value(CoreValue::Param(Param::from(var.as_str()))))
+					query.push(Statement::Value(CoreSqlValue::Param(Param::from(var.as_str()))))
 				}
 
 				// Extract the namespace and database from the current prompt

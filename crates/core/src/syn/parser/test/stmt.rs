@@ -3,8 +3,8 @@ use crate::{
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Scoring, Split, Splits, SqlValue, Start, Statement, Strand,
-		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, SqlValues, Version, With,
+		Permission, Permissions, Scoring, Split, Splits, SqlValue, SqlValues, Start, Statement,
+		Strand, Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Version, With,
 		access::AccessDuration,
 		access_type::{
 			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
@@ -2128,7 +2128,11 @@ fn parse_delete() {
 		res,
 		Statement::Delete(DeleteStatement {
 			only: true,
-			what: SqlValues(vec![SqlValue::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
+			what: SqlValues(vec![SqlValue::Mock(crate::sql::Mock::Range(
+				"foo".to_string(),
+				32,
+				64
+			))]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(SqlValue::Number(Number::Int(2)))),
 			output: Some(Output::After),

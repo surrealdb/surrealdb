@@ -11,10 +11,9 @@ use futures::stream::select_all;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
-use surrealdb_core::expr::{
-	self, LogicalPlan, LogicalPlans, Value as CoreValue, from_value as from_core_value,
-	statements::*,
-};
+use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::from_value as from_core_value;
+use surrealdb_core::sql::{self, SqlValue as CoreSqlValue, Statement, Statements, statements::*};
 
 pub struct Query(pub(crate) ValidQuery);
 /// A trait for converting inputs into SQL statements
@@ -33,8 +32,8 @@ pub(crate) mod into_query {
 	}
 }
 
-impl IntoQuery for expr::Query {}
-impl into_query::Sealed for expr::Query {
+impl IntoQuery for sql::Query {}
+impl into_query::Sealed for sql::Query {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
 			query: self.0.0,
@@ -44,8 +43,8 @@ impl into_query::Sealed for expr::Query {
 	}
 }
 
-impl IntoQuery for LogicalPlans {}
-impl into_query::Sealed for LogicalPlans {
+impl IntoQuery for Statements {}
+impl into_query::Sealed for Statements {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
 			query: self.0,
@@ -55,8 +54,8 @@ impl into_query::Sealed for LogicalPlans {
 	}
 }
 
-impl IntoQuery for Vec<LogicalPlan> {}
-impl into_query::Sealed for Vec<LogicalPlan> {
+impl IntoQuery for Vec<Statement> {}
+impl into_query::Sealed for Vec<Statement> {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
 			query: self,
@@ -66,8 +65,8 @@ impl into_query::Sealed for Vec<LogicalPlan> {
 	}
 }
 
-impl IntoQuery for LogicalPlan {}
-impl into_query::Sealed for LogicalPlan {
+impl IntoQuery for Statement {}
+impl into_query::Sealed for Statement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
 			query: vec![self],
@@ -81,7 +80,7 @@ impl IntoQuery for UseStatement {}
 impl into_query::Sealed for UseStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Use(self)],
+			query: vec![Statement::Use(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -92,7 +91,7 @@ impl IntoQuery for SetStatement {}
 impl into_query::Sealed for SetStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Set(self)],
+			query: vec![Statement::Set(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -103,7 +102,7 @@ impl IntoQuery for InfoStatement {}
 impl into_query::Sealed for InfoStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Info(self)],
+			query: vec![Statement::Info(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -114,7 +113,7 @@ impl IntoQuery for LiveStatement {}
 impl into_query::Sealed for LiveStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Live(self)],
+			query: vec![Statement::Live(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -125,7 +124,7 @@ impl IntoQuery for KillStatement {}
 impl into_query::Sealed for KillStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Kill(self)],
+			query: vec![Statement::Kill(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -136,7 +135,7 @@ impl IntoQuery for BeginStatement {}
 impl into_query::Sealed for BeginStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Begin(self)],
+			query: vec![Statement::Begin(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -147,7 +146,7 @@ impl IntoQuery for CancelStatement {}
 impl into_query::Sealed for CancelStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Cancel(self)],
+			query: vec![Statement::Cancel(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -158,7 +157,7 @@ impl IntoQuery for CommitStatement {}
 impl into_query::Sealed for CommitStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Commit(self)],
+			query: vec![Statement::Commit(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -169,7 +168,7 @@ impl IntoQuery for OutputStatement {}
 impl into_query::Sealed for OutputStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Output(self)],
+			query: vec![Statement::Output(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -180,7 +179,7 @@ impl IntoQuery for IfelseStatement {}
 impl into_query::Sealed for IfelseStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Ifelse(self)],
+			query: vec![Statement::Ifelse(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -191,7 +190,7 @@ impl IntoQuery for SelectStatement {}
 impl into_query::Sealed for SelectStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Select(self)],
+			query: vec![Statement::Select(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -202,7 +201,7 @@ impl IntoQuery for CreateStatement {}
 impl into_query::Sealed for CreateStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Create(self)],
+			query: vec![Statement::Create(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -213,7 +212,7 @@ impl IntoQuery for UpdateStatement {}
 impl into_query::Sealed for UpdateStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Update(self)],
+			query: vec![Statement::Update(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -224,7 +223,7 @@ impl IntoQuery for RelateStatement {}
 impl into_query::Sealed for RelateStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Relate(self)],
+			query: vec![Statement::Relate(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -235,7 +234,7 @@ impl IntoQuery for DeleteStatement {}
 impl into_query::Sealed for DeleteStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Delete(self)],
+			query: vec![Statement::Delete(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -246,7 +245,7 @@ impl IntoQuery for InsertStatement {}
 impl into_query::Sealed for InsertStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Insert(self)],
+			query: vec![Statement::Insert(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -257,7 +256,7 @@ impl IntoQuery for DefineStatement {}
 impl into_query::Sealed for DefineStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Define(self)],
+			query: vec![Statement::Define(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -268,7 +267,7 @@ impl IntoQuery for AlterStatement {}
 impl into_query::Sealed for AlterStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Alter(self)],
+			query: vec![Statement::Alter(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -279,7 +278,7 @@ impl IntoQuery for RemoveStatement {}
 impl into_query::Sealed for RemoveStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Remove(self)],
+			query: vec![Statement::Remove(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})
@@ -290,7 +289,7 @@ impl IntoQuery for OptionStatement {}
 impl into_query::Sealed for OptionStatement {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
-			query: vec![LogicalPlan::Option(self)],
+			query: vec![Statement::Option(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
 		})

@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::statements::define::DefineTableStatement;
 
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, SqlValue, Strand, SqlValues};
+use crate::sql::{Base, Ident, SqlValue, SqlValues, Strand};
 use anyhow::{Result, bail};
 
 use revision::revisioned;

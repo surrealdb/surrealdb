@@ -7,9 +7,13 @@ use serde::{Serialize, ser::SerializeMap as _};
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
-use surrealdb_core::sql::{Array as CoreSqlArray, Object as CoreSqlObject, Query, SqlValue as CoreSqlValue};
-use surrealdb_core::expr::{Value as CoreValue, Object as CoreObject};
+use surrealdb_core::expr::{
+	Array as CoreArray, Object as CoreObject, Query as CoreQuery, Value as CoreValue,
+};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
+use surrealdb_core::sql::{
+	Array as CoreSqlArray, Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
+};
 use uuid::Uuid;
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
@@ -23,10 +27,10 @@ pub(crate) enum Command {
 		database: Option<String>,
 	},
 	Signup {
-		credentials: CoreSqlObject,
+		credentials: CoreObject,
 	},
 	Signin {
-		credentials: CoreSqlObject,
+		credentials: CoreObject,
 	},
 	Authenticate {
 		token: String,
@@ -34,33 +38,33 @@ pub(crate) enum Command {
 	Invalidate,
 	Create {
 		what: Resource,
-		data: Option<CoreSqlValue>,
+		data: Option<CoreValue>,
 	},
 	Upsert {
 		what: Resource,
-		data: Option<CoreSqlValue>,
+		data: Option<CoreValue>,
 	},
 	Update {
 		what: Resource,
-		data: Option<CoreSqlValue>,
+		data: Option<CoreValue>,
 	},
 	Insert {
 		// inserts can only be on a table.
 		what: Option<String>,
-		data: CoreSqlValue,
+		data: CoreValue,
 	},
 	InsertRelation {
 		what: Option<String>,
-		data: CoreSqlValue,
+		data: CoreValue,
 	},
 	Patch {
 		what: Resource,
-		data: Option<CoreSqlValue>,
+		data: Option<CoreValue>,
 		upsert: bool,
 	},
 	Merge {
 		what: Resource,
-		data: Option<CoreSqlValue>,
+		data: Option<CoreValue>,
 		upsert: bool,
 	},
 	Select {
@@ -70,7 +74,7 @@ pub(crate) enum Command {
 		what: Resource,
 	},
 	Query {
-		query: Query,
+		query: CoreSqlQuery,
 		variables: CoreObject,
 	},
 	RawQuery {
@@ -103,7 +107,7 @@ pub(crate) enum Command {
 	Version,
 	Set {
 		key: String,
-		value: CoreSqlValue,
+		value: CoreValue,
 	},
 	Unset {
 		key: String,
@@ -118,7 +122,7 @@ pub(crate) enum Command {
 	Run {
 		name: String,
 		version: Option<String>,
-		args: CoreSqlArray,
+		args: CoreArray,
 	},
 }
 
@@ -126,7 +130,7 @@ impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		use crate::api::engine::resource_to_sql_values;
-		use surrealdb_core::expr::{
+		use surrealdb_core::sql::{
 			Data, Output,
 			statements::{UpdateStatement, UpsertStatement},
 		};
@@ -138,28 +142,28 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "use",
-				params: Some(vec![CoreSqlValue::from(namespace), CoreSqlValue::from(database)].into()),
+				params: Some(vec![CoreValue::from(namespace), CoreValue::from(database)].into()),
 			},
 			Command::Signup {
 				credentials,
 			} => RouterRequest {
 				id,
 				method: "signup",
-				params: Some(vec![CoreSqlValue::from(credentials)].into()),
+				params: Some(vec![CoreValue::from(credentials)].into()),
 			},
 			Command::Signin {
 				credentials,
 			} => RouterRequest {
 				id,
 				method: "signin",
-				params: Some(vec![CoreSqlValue::from(credentials)].into()),
+				params: Some(vec![CoreValue::from(credentials)].into()),
 			},
 			Command::Authenticate {
 				token,
 			} => RouterRequest {
 				id,
 				method: "authenticate",
-				params: Some(vec![CoreSqlValue::from(token)].into()),
+				params: Some(vec![CoreValue::from(token)].into()),
 			},
 			Command::Invalidate => RouterRequest {
 				id,
@@ -222,9 +226,9 @@ impl Command {
 					Some(w) => {
 						let mut table = CoreTable::default();
 						table.0.clone_from(&w);
-						CoreSqlValue::from(table)
+						CoreValue::from(table)
 					}
-					None => CoreSqlValue::None,
+					None => CoreValue::None,
 				};
 
 				let params = vec![table, data];
@@ -243,9 +247,9 @@ impl Command {
 					Some(w) => {
 						let mut tmp = CoreTable::default();
 						tmp.0.clone_from(&w);
-						CoreSqlValue::from(tmp)
+						CoreValue::from(tmp)
 					}
-					None => CoreSqlValue::None,
+					None => CoreValue::None,
 				};
 				let params = vec![table, data];
 
@@ -264,19 +268,20 @@ impl Command {
 				let query = if upsert {
 					let mut stmt = UpsertStatement::default();
 					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(Data::PatchExpression);
+					stmt.data = data.map(|d| Data::PatchExpression(d.into()));
 					stmt.output = Some(Output::After);
-					Query::from(stmt)
+					CoreSqlQuery::from(stmt)
 				} else {
 					let mut stmt = UpdateStatement::default();
 					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(Data::PatchExpression);
+					stmt.data = data.map(|d| Data::PatchExpression(d.into()));
 					stmt.output = Some(Output::After);
-					Query::from(stmt)
+					CoreSqlQuery::from(stmt)
 				};
 
 				let variables = CoreSqlObject::default();
-				let params: Vec<CoreSqlValue> = vec![query.into(), variables.into()];
+				let params: Vec<CoreValue> =
+					vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
 
 				RouterRequest {
 					id,
@@ -293,19 +298,20 @@ impl Command {
 				let query = if upsert {
 					let mut stmt = UpsertStatement::default();
 					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(Data::MergeExpression);
+					stmt.data = data.map(|d| Data::MergeExpression(d.into()));
 					stmt.output = Some(Output::After);
-					Query::from(stmt)
+					CoreSqlQuery::from(stmt)
 				} else {
 					let mut stmt = UpdateStatement::default();
 					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(Data::MergeExpression);
+					stmt.data = data.map(|d| Data::MergeExpression(d.into()));
 					stmt.output = Some(Output::After);
-					Query::from(stmt)
+					CoreSqlQuery::from(stmt)
 				};
 
 				let variables = CoreSqlObject::default();
-				let params: Vec<CoreSqlValue> = vec![query.into(), variables.into()];
+				let params: Vec<CoreValue> =
+					vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
 
 				RouterRequest {
 					id,
@@ -319,7 +325,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "select",
-				params: Some(CoreSqlValue::Array(vec![what.into_core_value()].into())),
+				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
 			},
 			Command::Delete {
 				what,
@@ -327,13 +333,13 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "delete",
-				params: Some(CoreSqlValue::Array(vec![what.into_core_value()].into())),
+				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
 			},
 			Command::Query {
 				query,
 				variables,
 			} => {
-				let params: Vec<CoreSqlValue> = vec![query.into(), variables.into()];
+				let params: Vec<CoreValue> = vec![CoreQuery::from(query).into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",
@@ -344,7 +350,7 @@ impl Command {
 				query,
 				variables,
 			} => {
-				let params: Vec<CoreSqlValue> = vec![query.into_owned().into(), variables.into()];
+				let params: Vec<CoreValue> = vec![query.into_owned().into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",
@@ -385,14 +391,14 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "let",
-				params: Some(CoreSqlValue::from(vec![CoreSqlValue::from(key), value])),
+				params: Some(CoreValue::from(vec![CoreValue::from(key), value])),
 			},
 			Command::Unset {
 				key,
 			} => RouterRequest {
 				id,
 				method: "unset",
-				params: Some(CoreSqlValue::from(vec![CoreSqlValue::from(key)])),
+				params: Some(CoreValue::from(vec![CoreValue::from(key)])),
 			},
 			Command::SubscribeLive {
 				..
@@ -402,7 +408,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "kill",
-				params: Some(CoreSqlValue::from(vec![CoreSqlValue::from(uuid)])),
+				params: Some(CoreValue::from(vec![CoreValue::from(uuid)])),
 			},
 			Command::Run {
 				name,
@@ -412,7 +418,7 @@ impl Command {
 				id,
 				method: "run",
 				params: Some(
-					vec![CoreSqlValue::from(name), CoreSqlValue::from(version), CoreSqlValue::Array(args)]
+					vec![CoreValue::from(name), CoreValue::from(version), CoreValue::Array(args)]
 						.into(),
 				),
 			},
@@ -461,14 +467,14 @@ impl Command {
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
 	method: &'static str,
-	params: Option<CoreSqlValue>,
+	params: Option<CoreValue>,
 }
 
 #[cfg(feature = "protocol-ws")]
-fn stringify_queries(value: CoreSqlValue) -> CoreSqlValue {
+fn stringify_queries(value: CoreValue) -> CoreValue {
 	match value {
-		CoreSqlValue::Query(query) => CoreSqlValue::Strand(query.to_string().into()),
-		CoreSqlValue::Array(array) => CoreSqlValue::Array(CoreSqlArray::from(
+		CoreValue::Query(query) => CoreValue::Strand(query.to_string().into()),
+		CoreValue::Array(array) => CoreValue::Array(CoreArray::from(
 			array.0.into_iter().map(stringify_queries).collect::<Vec<_>>(),
 		)),
 		_ => value,

@@ -52,7 +52,6 @@ impl Function {
 	}
 }
 
-
 impl From<Function> for crate::expr::Function {
 	fn from(v: Function) -> Self {
 		match v {

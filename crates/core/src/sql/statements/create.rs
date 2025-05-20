@@ -3,7 +3,7 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::{Data, FlowResultExt as _, Output, SqlValue, Timeout, SqlValues, Version};
+use crate::sql::{Data, FlowResultExt as _, Output, SqlValue, SqlValues, Timeout, Version};
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;

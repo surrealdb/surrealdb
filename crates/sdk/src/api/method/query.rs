@@ -18,17 +18,15 @@ use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use surrealdb_core::sql::Statement;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::expr::{
-	Object as CoreObject, Value as CoreValue, to_value as to_core_value,
-};
+use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
 use surrealdb_core::sql;
+use surrealdb_core::sql::Statement;
 
 /// A query future
 #[derive(Debug)]

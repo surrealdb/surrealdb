@@ -5,8 +5,8 @@ use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::FlowResultExt as _;
 use crate::sql::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, SqlValue, Start, Timeout,
-	SqlValues, Version, With,
+	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, SqlValue, SqlValues,
+	Start, Timeout, Version, With,
 	order::{OldOrders, Order, OrderList, Ordering},
 };
 use anyhow::{Result, ensure};

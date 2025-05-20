@@ -15,8 +15,8 @@ use crate::syn::error::bail;
 use crate::syn::token::Token;
 use crate::{
 	sql::{
-		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType,
-		SqlValues, access_type,
+		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, SqlValues, Strand,
+		TableType, access_type,
 		base::Base,
 		filter::Filter,
 		index::{Distance, VectorType},

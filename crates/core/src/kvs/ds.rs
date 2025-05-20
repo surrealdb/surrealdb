@@ -15,6 +15,7 @@ use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
 };
 use crate::err::Error;
+use crate::expr::LogicalPlan;
 use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
@@ -942,6 +943,38 @@ impl Datastore {
 		vars.attach(&mut ctx)?;
 		// Process all statements
 		Executor::execute(self, ctx.freeze(), opt, ast).await
+	}
+
+	pub async fn process_plan(
+		&self,
+		plan: LogicalPlan,
+		sess: &Session,
+		vars: Variables,
+	) -> Result<Vec<Response>> {
+		// Check if the session has expired
+		ensure!(!sess.expired(), Error::ExpiredSession);
+		// Check if anonymous actors can execute queries when auth is enabled
+		// TODO(sgirones): Check this as part of the authorisation layer
+		self.check_anon(sess).map_err(|_| {
+			Error::from(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "query".to_string(),
+			})
+		})?;
+
+		// Create a new query options
+		let opt = self.setup_options(sess);
+
+		// Create a default context
+		let mut ctx = self.setup_ctx()?;
+		// Start an execution context
+		sess.context(&mut ctx);
+		// Store the query variables
+		vars.attach(&mut ctx)?;
+
+		// Process all statements
+		Executor::execute_plan(self, ctx.freeze(), opt, plan).await
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed

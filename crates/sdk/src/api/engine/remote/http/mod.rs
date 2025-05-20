@@ -24,13 +24,13 @@ use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb_core::sql::Statement;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
-	Object as CoreObject, Value as CoreValue,
+	Object as CoreObject, Value as CoreValue, from_value as from_core_value,
 };
-use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue, from_value as from_core_value};
+use surrealdb_core::sql::Statement;
 use surrealdb_core::sql::statements::OutputStatement;
+use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue};
 use url::Url;
 
 #[cfg(not(target_family = "wasm"))]

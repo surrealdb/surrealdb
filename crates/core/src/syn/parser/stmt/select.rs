@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		Field, Fields, Idioms, Limit, Order, Split, Splits, Start, SqlValues, Version,
+		Field, Fields, Idioms, Limit, Order, Split, Splits, SqlValues, Start, Version,
 		order::{OrderList, Ordering},
 		statements::SelectStatement,
 	},

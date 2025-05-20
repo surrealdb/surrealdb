@@ -9,26 +9,27 @@ use std::sync::Arc;
 use surrealdb::rpc::Data;
 use surrealdb::rpc::format::Format;
 use surrealdb::sql::SqlValue;
+use surrealdb_core::expr::Value;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize)]
 pub struct Response {
-	id: Option<SqlValue>,
+	id: Option<Value>,
 	result: Result<Data, Failure>,
 }
 
 impl Response {
 	#[inline]
-	pub fn into_value(self) -> SqlValue {
+	pub fn into_value(self) -> Value {
 		let mut value = match self.result {
-			Ok(val) => match SqlValue::try_from(val) {
+			Ok(val) => match Value::try_from(val) {
 				Ok(v) => map! {"result" => v},
-				Err(e) => map!("error" => SqlValue::from(e.to_string())),
+				Err(e) => map!("error" => Value::from(e.to_string())),
 			},
 			Err(err) => map! {
-				"error" => SqlValue::from(err),
+				"error" => Value::from(err),
 			},
 		};
 		if let Some(id) = self.id {
@@ -67,14 +68,14 @@ impl Response {
 	}
 }
 
-impl From<Response> for SqlValue {
+impl From<Response> for Value {
 	fn from(value: Response) -> Self {
 		value.into_value()
 	}
 }
 
 /// Create a JSON RPC result response
-pub fn success<T: Into<Data>>(id: Option<SqlValue>, data: T) -> Response {
+pub fn success<T: Into<Data>>(id: Option<Value>, data: T) -> Response {
 	Response {
 		id,
 		result: Ok(data.into()),
@@ -82,7 +83,7 @@ pub fn success<T: Into<Data>>(id: Option<SqlValue>, data: T) -> Response {
 }
 
 /// Create a JSON RPC failure response
-pub fn failure(id: Option<SqlValue>, err: Failure) -> Response {
+pub fn failure(id: Option<Value>, err: Failure) -> Response {
 	Response {
 		id,
 		result: Err(err),
@@ -90,7 +91,7 @@ pub fn failure(id: Option<SqlValue>, err: Failure) -> Response {
 }
 
 pub trait IntoRpcResponse {
-	fn into_response(self, id: Option<SqlValue>) -> Response;
+	fn into_response(self, id: Option<Value>) -> Response;
 }
 
 impl<T, E> IntoRpcResponse for Result<T, E>
@@ -98,7 +99,7 @@ where
 	T: Into<Data>,
 	E: Into<Failure>,
 {
-	fn into_response(self, id: Option<SqlValue>) -> Response {
+	fn into_response(self, id: Option<Value>) -> Response {
 		match self {
 			Ok(v) => success(id, v.into()),
 			Err(err) => failure(id, err.into()),

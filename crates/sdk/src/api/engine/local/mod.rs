@@ -37,8 +37,6 @@ use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
-use surrealdb_core::dbs::sql_variables_to_expr_variables;
-use surrealdb_core::sql::Statement;
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
 #[cfg(not(target_family = "wasm"))]
@@ -49,21 +47,22 @@ use std::{
 	mem,
 	sync::Arc,
 };
-use surrealdb_core::sql::Function;
+use surrealdb_core::dbs::sql_variables_to_expr_variables;
+use surrealdb_core::expr::Function;
+use surrealdb_core::expr::LogicalPlan;
+use surrealdb_core::expr::statements::{
+	CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
+	UpdateStatement, UpsertStatement,
+};
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
+use surrealdb_core::sql::Statement;
 use surrealdb_core::{
 	dbs::{Response, Session},
-	sql::{
-		Data, Field, Output, Query, SqlValue as CoreSqlValue,
-		statements::{
-			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
-			UpdateStatement, UpsertStatement,
-		},
-	},
-	expr::{Value as CoreValue},
+	expr::{Data, Field, Output, Value as CoreValue},
 	iam,
 	kvs::Datastore,
+	sql::{Query, SqlValue as CoreSqlValue},
 };
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
@@ -81,7 +80,7 @@ use tokio::{
 };
 
 #[cfg(feature = "ml")]
-use surrealdb_core::sql::Model;
+use surrealdb_core::expr::Model;
 
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::api::conn::MlExportConfig;
@@ -89,13 +88,13 @@ use crate::api::conn::MlExportConfig;
 use futures::StreamExt;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
-	sql::statements::{DefineModelStatement, DefineStatement},
 	iam::{Action, ResourceKind, check::check_ns_db},
 	kvs::{LockType, TransactionType},
 	ml::storage::surml_file::SurMlFile,
+	sql::statements::{DefineModelStatement, DefineStatement},
 };
 
-use super::resource_to_sql_values;
+use super::{resource_to_sql_values, resource_to_values};
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -473,11 +472,10 @@ async fn kill_live_query(
 	session: &Session,
 	vars: BTreeMap<String, CoreValue>,
 ) -> Result<CoreValue> {
-	let mut query = Query::default();
-	let mut kill = KillStatement::default();
-	kill.id = id.into();
-	query.0.0 = vec![Statement::Kill(kill)];
-	let response = kvs.process(query, session, Some(vars)).await?;
+	let mut kill_plan = KillStatement::default();
+	kill_plan.id = id.into();
+	let plan = LogicalPlan::Kill(kill_plan);
+	let response = kvs.process_plan(plan, session, Some(vars)).await?;
 	take(true, response).await
 }
 
@@ -508,14 +506,18 @@ async fn router(
 			credentials,
 		} => {
 			let response =
-				iam::signup::signup(kvs, &mut *session.write().await, credentials.into()).await?.token;
+				iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
+					.await?
+					.token;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Signin {
 			credentials,
 		} => {
 			let response =
-				iam::signin::signin(kvs, &mut *session.write().await, credentials.into()).await?.token;
+				iam::signin::signin(kvs, &mut *session.write().await, credentials.into())
+					.await?
+					.token;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Authenticate {
@@ -532,17 +534,15 @@ async fn router(
 			what,
 			data,
 		} => {
-			let mut query = Query::default();
-			let statement = {
-				let mut stmt = CreateStatement::default();
-				stmt.what = resource_to_sql_values(what);
-				stmt.data = data.map(Data::ContentExpression);
-				stmt.output = Some(Output::After);
-				stmt
-			};
-			query.0.0 = vec![Statement::Create(statement)];
-			let response =
-				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
+			let mut create_plan = CreateStatement::default();
+			create_plan.what = resource_to_values(what);
+			create_plan.data = data.map(Data::ContentExpression);
+			create_plan.output = Some(Output::After);
+			let plan = LogicalPlan::Create(create_plan);
+
+			let response = kvs
+				.process_plan(plan, &*session.read().await, Some(vars.read().await.clone()))
+				.await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -550,18 +550,17 @@ async fn router(
 			what,
 			data,
 		} => {
-			let mut query = Query::default();
 			let one = what.is_single_recordid();
-			let statement = {
+			let upsert_plan = {
 				let mut stmt = UpsertStatement::default();
-				stmt.what = resource_to_sql_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0.0 = vec![Statement::Upsert(statement)];
+			let plan = LogicalPlan::Upsert(upsert_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -569,18 +568,17 @@ async fn router(
 			what,
 			data,
 		} => {
-			let mut query = Query::default();
 			let one = what.is_single_recordid();
-			let statement = {
+			let update_plan = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = resource_to_sql_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::ContentExpression);
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0.0 = vec![Statement::Update(statement)];
+			let plan = LogicalPlan::Update(update_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -590,16 +588,16 @@ async fn router(
 		} => {
 			let mut query = Query::default();
 			let one = !data.is_array();
-			let statement = {
+			let insert_plan = {
 				let mut stmt = InsertStatement::default();
-				stmt.into = what.map(|w| Table(w).into_core_sql().into());
+				stmt.into = what.map(|w| Table(w).into_core().into());
 				stmt.data = Data::SingleExpression(data);
 				stmt.output = Some(Output::After);
 				stmt
 			};
-			query.0.0 = vec![Statement::Insert(statement)];
+			let plan = LogicalPlan::Insert(insert_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -609,17 +607,18 @@ async fn router(
 		} => {
 			let mut query = Query::default();
 			let one = !data.is_array();
-			let statement = {
+			let insert_plan = {
 				let mut stmt = InsertStatement::default();
-				stmt.into = what.map(|w| Table(w).into_core_sql().into());
+				stmt.into = what.map(|w| Table(w).into_core().into());
 				stmt.data = Data::SingleExpression(data);
 				stmt.output = Some(Output::After);
 				stmt.relation = true;
 				stmt
 			};
-			query.0.0 = vec![Statement::Insert(statement)];
-			let response =
-				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
+			let plan = LogicalPlan::Insert(insert_plan);
+			let response = kvs
+				.process_plan(plan, &*session.read().await, Some(vars.read().await.clone()))
+				.await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -629,22 +628,21 @@ async fn router(
 			upsert,
 		} => {
 			let mut query = Query::default();
-			let statement = if upsert {
+			let plan = if upsert {
 				let mut stmt = UpsertStatement::default();
-				stmt.what = resource_to_sql_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
-				Statement::Upsert(stmt)
+				LogicalPlan::Upsert(stmt)
 			} else {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = resource_to_sql_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::PatchExpression);
 				stmt.output = Some(Output::After);
-				Statement::Update(stmt)
+				LogicalPlan::Update(stmt)
 			};
-			query.0.0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
@@ -654,22 +652,21 @@ async fn router(
 			upsert,
 		} => {
 			let mut query = Query::default();
-			let statement = if upsert {
+			let plan = if upsert {
 				let mut stmt = UpsertStatement::default();
-				stmt.what = resource_to_sql_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
-				Statement::Upsert(stmt)
+				LogicalPlan::Upsert(stmt)
 			} else {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = resource_to_sql_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.data = data.map(Data::MergeExpression);
 				stmt.output = Some(Output::After);
-				Statement::Update(stmt)
+				LogicalPlan::Update(stmt)
 			};
-			query.0.0 = vec![statement];
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
 		}
@@ -678,15 +675,15 @@ async fn router(
 		} => {
 			let mut query = Query::default();
 			let one = what.is_single_recordid();
-			let statement = {
+			let select_plan = {
 				let mut stmt = SelectStatement::default();
-				stmt.what = resource_to_sql_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.expr.0 = vec![Field::All];
 				stmt
 			};
-			query.0.0 = vec![Statement::Select(statement)];
+			let plan = LogicalPlan::Select(select_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -695,13 +692,13 @@ async fn router(
 		} => {
 			let mut query = Query::default();
 			let one = what.is_single_recordid();
-			let statement = {
+			let delete_plan = {
 				let mut stmt = DeleteStatement::default();
-				stmt.what = resource_to_sql_values(what);
+				stmt.what = resource_to_values(what);
 				stmt.output = Some(Output::Before);
 				stmt
 			};
-			query.0.0 = vec![Statement::Delete(statement)];
+			let plan = LogicalPlan::Delete(delete_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
@@ -1066,7 +1063,7 @@ async fn router(
 			version: _version,
 			args,
 		} => {
-			let func: CoreSqlValue = match name.strip_prefix("fn::") {
+			let func: CoreValue = match name.strip_prefix("fn::") {
 				Some(name) => Function::Custom(name.to_owned(), args.0).into(),
 				None => match name.strip_prefix("ml::") {
 					#[cfg(feature = "ml")]
@@ -1089,10 +1086,10 @@ async fn router(
 				},
 			};
 
-			let stmt = Statement::Value(func);
+			let plan = LogicalPlan::Value(func);
 
 			let response = kvs
-				.process(stmt.into(), &*session.read().await, Some(vars.read().await.clone()))
+				.process_plan(plan, &*session.read().await, Some(vars.read().await.clone()))
 				.await?;
 			let value = take(true, response).await?;
 
