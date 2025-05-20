@@ -2,7 +2,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self};
 
-use super::{statements::info::InfoStructure, Ident, Value};
+use super::{Ident, Value, statements::info::InfoStructure};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::File";
 
