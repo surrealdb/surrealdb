@@ -467,6 +467,10 @@ criteria = "safe-to-deploy"
 version = "0.4.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.flate2]]
+version = "1.1.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.float_next_after]]
 version = "1.0.0"
 criteria = "safe-to-deploy"
