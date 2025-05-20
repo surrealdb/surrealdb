@@ -2,10 +2,10 @@ use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
 };
-use crate::err::Error;
+use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any::{self, connect};
-use surrealdb::opt::{capabilities::Capabilities, Config};
+use surrealdb::opt::{Config, capabilities::Capabilities};
 
 #[derive(Args, Debug)]
 pub struct ImportCommandArguments {
@@ -37,7 +37,7 @@ pub async fn init(
 			database,
 		},
 	}: ImportCommandArguments,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
 	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();

@@ -15,10 +15,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
+use anyhow::Result;
+use js::CatchResultExt;
 use js::async_with;
 use js::prelude::*;
-use js::CatchResultExt;
 use js::{Ctx, Function, Module, Promise};
 
 /// Insert query data into the context,
@@ -31,18 +32,20 @@ pub unsafe fn create_query_data<'a>(
 	doc: Option<&'a CursorDoc>,
 	ctx: &Ctx<'_>,
 ) -> Result<(), js::Error> {
-	// remove the restricting lifetime.
-	let ctx = Ctx::from_raw(ctx.as_raw());
+	unsafe {
+		// remove the restricting lifetime.
+		let ctx = Ctx::from_raw(ctx.as_raw());
 
-	ctx.store_userdata(QueryContext {
-		context,
-		opt,
-		doc,
-		pending: RefCell::new(None),
-	})
-	.expect("userdata shouldn't be in use");
+		ctx.store_userdata(QueryContext {
+			context,
+			opt,
+			doc,
+			pending: RefCell::new(None),
+		})
+		.expect("userdata shouldn't be in use");
 
-	Ok(())
+		Ok(())
+	}
 }
 
 pub async fn run(
@@ -51,7 +54,7 @@ pub async fn run(
 	doc: Option<&CursorDoc>,
 	src: &str,
 	arg: Vec<Value>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	// Check the context
 	if context.is_done(true).await? {
 		return Ok(Value::None);
@@ -118,5 +121,5 @@ pub async fn run(
 		// Catch and convert any errors
 		res.catch(&ctx).map_err(Error::from)
 	})
-	.await
+	.await.map_err(anyhow::Error::new)
 }

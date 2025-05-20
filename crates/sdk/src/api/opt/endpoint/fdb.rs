@@ -1,10 +1,10 @@
+use crate::api::Result;
 use crate::api::engine::local::Db;
 use crate::api::engine::local::FDb;
-use crate::api::opt::endpoint::into_endpoint;
 use crate::api::opt::Config;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
-use crate::api::Result;
+use crate::api::opt::endpoint::into_endpoint;
 use std::path::Path;
 use std::path::PathBuf;
 use url::Url;

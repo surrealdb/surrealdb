@@ -2,7 +2,7 @@ use criterion::{Criterion, Throughput};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 use std::time::Duration;
-use surrealdb::{engine::any::Any, sql::Id, Surreal};
+use surrealdb::{Surreal, engine::any::Any, sql::Id};
 
 mod routines;
 

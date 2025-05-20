@@ -2,34 +2,34 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::dbs::Session;
+use crate::expr;
+use crate::expr::Geometry;
+use crate::expr::Kind;
+use crate::expr::kind::Literal;
+use crate::expr::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
 use crate::kvs::Datastore;
-use crate::sql;
-use crate::sql::kind::Literal;
-use crate::sql::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
-use crate::sql::Geometry;
-use crate::sql::Kind;
+use async_graphql::Name;
+use async_graphql::Value as GqlValue;
 use async_graphql::dynamic::Interface;
 use async_graphql::dynamic::InterfaceField;
 use async_graphql::dynamic::Object;
 use async_graphql::dynamic::Schema;
 use async_graphql::dynamic::{Enum, Type, Union};
 use async_graphql::dynamic::{Scalar, TypeRef};
-use async_graphql::Name;
-use async_graphql::Value as GqlValue;
-use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
 
-use super::error::{resolver_error, GqlError};
+use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
+use crate::expr::Value as SqlValue;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::NamedContainer;
 use crate::kvs::LockType;
 use crate::kvs::TransactionType;
-use crate::sql::Value as SqlValue;
 
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
@@ -40,11 +40,12 @@ pub async fn generate_schema(
 	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
-	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| match e {
-		crate::err::Error::CgNotFound {
-			..
-		} => GqlError::NotConfigured,
-		e => e.into(),
+	let cg = tx.get_db_config(ns, db, "graphql").await.map_err(|e| {
+		if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
+			GqlError::NotConfigured
+		} else {
+			GqlError::DbError(e)
+		}
 	})?;
 	let config = cg.inner.clone().try_into_graphql()?;
 
@@ -77,10 +78,10 @@ pub async fn generate_schema(
 	match (&tbs, &fns) {
 		(None, None) => return Err(GqlError::NotConfigured),
 		(None, Some(fs)) if fs.is_empty() => {
-			return Err(schema_error("no functions found in database"))
+			return Err(schema_error("no functions found in database"));
 		}
 		(Some(ts), None) if ts.is_empty() => {
-			return Err(schema_error("no tables found in database"))
+			return Err(schema_error("no tables found in database"));
 		}
 		(Some(ts), Some(fs)) if ts.is_empty() && fs.is_empty() => {
 			return Err(schema_error("no items found in database"));
@@ -113,7 +114,7 @@ pub async fn generate_schema(
 	}
 
 	macro_rules! scalar_debug_validated {
-		($schema:ident, $name:expr, $kind:expr) => {
+		($schema:ident, $name:expr_2021, $kind:expr_2021) => {
 			scalar_debug_validated!(
 				$schema,
 				$name,
@@ -122,10 +123,10 @@ pub async fn generate_schema(
 				::std::option::Option::<&str>::None
 			)
 		};
-		($schema:ident, $name:expr, $kind:expr, $desc:literal) => {
+		($schema:ident, $name:expr_2021, $kind:expr_2021, $desc:literal) => {
 			scalar_debug_validated!($schema, $name, $kind, std::option::Option::Some($desc), None)
 		};
-		($schema:ident, $name:expr, $kind:expr, $desc:literal, $url:literal) => {
+		($schema:ident, $name:expr_2021, $kind:expr_2021, $desc:literal, $url:literal) => {
 			scalar_debug_validated!(
 				$schema,
 				$name,
@@ -134,7 +135,7 @@ pub async fn generate_schema(
 				Some($url)
 			)
 		};
-		($schema:ident, $name:expr, $kind:expr, $desc:expr, $url:expr) => {{
+		($schema:ident, $name:expr_2021, $kind:expr_2021, $desc:expr_2021, $url:expr_2021) => {{
 			let new_type = Type::Scalar({
 				let mut tmp = Scalar::new($name);
 				if let Some(desc) = $desc {
@@ -190,12 +191,12 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 		SqlValue::Null => GqlValue::Null,
 		SqlValue::Bool(b) => GqlValue::Boolean(b),
 		SqlValue::Number(n) => match n {
-			crate::sql::Number::Int(i) => GqlValue::Number(i.into()),
-			crate::sql::Number::Float(f) => GqlValue::Number(
+			crate::expr::Number::Int(i) => GqlValue::Number(i.into()),
+			crate::expr::Number::Float(f) => GqlValue::Number(
 				Number::from_f64(f)
 					.ok_or(resolver_error("unimplemented: graceful NaN and Inf handling"))?,
 			),
-			num @ crate::sql::Number::Decimal(_) => GqlValue::String(num.to_string()),
+			num @ crate::expr::Number::Decimal(_) => GqlValue::String(num.to_string()),
 		},
 		SqlValue::Strand(s) => GqlValue::String(s.0),
 		d @ SqlValue::Duration(_) => GqlValue::String(d.to_string()),
@@ -344,28 +345,28 @@ pub fn unwrap_type(ty: TypeRef) -> TypeRef {
 }
 
 macro_rules! either_try_kind {
-	($ks:ident, $val:expr, Kind::Array) => {
+	($ks:ident, $val:expr_2021, Kind::Array) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
 			either_try_kind!($ks, $val, arr_kind);
 		}
 	};
-	($ks:ident, $val:expr, Array) => {
+	($ks:ident, $val:expr_2021, Array) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
 			either_try_kind!($ks, $val, arr_kind);
 		}
 	};
-	($ks:ident, $val:expr, Record) => {
+	($ks:ident, $val:expr_2021, Record) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
 			either_try_kind!($ks, $val, arr_kind);
 		}
 	};
-	($ks:ident, $val:expr, AllNumbers) => {
+	($ks:ident, $val:expr_2021, AllNumbers) => {
 		either_try_kind!($ks, $val, Kind::Int);
 		either_try_kind!($ks, $val, Kind::Float);
 		either_try_kind!($ks, $val, Kind::Decimal);
 		either_try_kind!($ks, $val, Kind::Number);
 	};
-	($ks:ident, $val:expr, $kind:expr) => {
+	($ks:ident, $val:expr_2021, $kind:expr_2021) => {
 		if $ks.contains(&$kind) {
 			if let Ok(out) = gql_to_sql_kind($val, $kind) {
 				return Ok(out);
@@ -375,20 +376,20 @@ macro_rules! either_try_kind {
 }
 
 macro_rules! either_try_kinds {
-	($ks:ident, $val:expr, $($kind:tt),+) => {
+	($ks:ident, $val:expr_2021, $($kind:tt),+) => {
 		$(either_try_kind!($ks, $val, $kind));+
 	};
 }
 
 macro_rules! any_try_kind {
-	($val:expr, $kind:expr) => {
+	($val:expr_2021, $kind:expr_2021) => {
 		if let Ok(out) = gql_to_sql_kind($val, $kind) {
 			return Ok(out);
 		}
 	};
 }
 macro_rules! any_try_kinds {
-	($val:expr, $($kind:tt),+) => {
+	($val:expr_2021, $($kind:tt),+) => {
 		$(any_try_kind!($val, $kind));+
 	};
 }
@@ -432,23 +433,23 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Decimal => match val {
 			GqlValue::Number(n) => {
 				if let Some(int) = n.as_i64() {
-					Ok(SqlValue::Number(sql::Number::Decimal(int.into())))
+					Ok(SqlValue::Number(expr::Number::Decimal(int.into())))
 				} else if let Some(d) = n.as_f64().and_then(Decimal::from_f64) {
-					Ok(SqlValue::Number(sql::Number::Decimal(d)))
+					Ok(SqlValue::Number(expr::Number::Decimal(d)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
+					Ok(SqlValue::Number(expr::Number::Decimal(uint.into())))
 				} else {
 					Err(type_error(kind, val))
 				}
 			}
 			GqlValue::String(s) => match syn::value(s) {
 				Ok(SqlValue::Number(n)) => match n {
-					sql::Number::Int(i) => Ok(SqlValue::Number(sql::Number::Decimal(i.into()))),
-					sql::Number::Float(f) => match Decimal::from_f64(f) {
-						Some(d) => Ok(SqlValue::Number(sql::Number::Decimal(d))),
+					expr::Number::Int(i) => Ok(SqlValue::Number(expr::Number::Decimal(i.into()))),
+					expr::Number::Float(f) => match Decimal::from_f64(f) {
+						Some(d) => Ok(SqlValue::Number(expr::Number::Decimal(d))),
 						None => Err(type_error(kind, val)),
 					},
-					sql::Number::Decimal(d) => Ok(SqlValue::Number(sql::Number::Decimal(d))),
+					expr::Number::Decimal(d) => Ok(SqlValue::Number(expr::Number::Decimal(d))),
 				},
 				_ => Err(type_error(kind, val)),
 			},
@@ -464,21 +465,21 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Float => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
-					Ok(SqlValue::Number(sql::Number::Float(i as f64)))
+					Ok(SqlValue::Number(expr::Number::Float(i as f64)))
 				} else if let Some(f) = n.as_f64() {
-					Ok(SqlValue::Number(sql::Number::Float(f)))
+					Ok(SqlValue::Number(expr::Number::Float(f)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SqlValue::Number(sql::Number::Float(uint as f64)))
+					Ok(SqlValue::Number(expr::Number::Float(uint as f64)))
 				} else {
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
 			GqlValue::String(s) => match syn::value(s) {
 				Ok(SqlValue::Number(n)) => match n {
-					sql::Number::Int(int) => Ok(SqlValue::Number(sql::Number::Float(int as f64))),
-					sql::Number::Float(float) => Ok(SqlValue::Number(sql::Number::Float(float))),
-					sql::Number::Decimal(d) => match d.try_into() {
-						Ok(f) => Ok(SqlValue::Number(sql::Number::Float(f))),
+					expr::Number::Int(int) => Ok(SqlValue::Number(expr::Number::Float(int as f64))),
+					expr::Number::Float(float) => Ok(SqlValue::Number(expr::Number::Float(float))),
+					expr::Number::Decimal(d) => match d.try_into() {
+						Ok(f) => Ok(SqlValue::Number(expr::Number::Float(f))),
 						_ => Err(type_error(kind, val)),
 					},
 				},
@@ -489,23 +490,23 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Int => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
-					Ok(SqlValue::Number(sql::Number::Int(i)))
+					Ok(SqlValue::Number(expr::Number::Int(i)))
 				} else {
 					Err(type_error(kind, val))
 				}
 			}
 			GqlValue::String(s) => match syn::value(s) {
 				Ok(SqlValue::Number(n)) => match n {
-					sql::Number::Int(int) => Ok(SqlValue::Number(sql::Number::Int(int))),
-					sql::Number::Float(float) => {
+					expr::Number::Int(int) => Ok(SqlValue::Number(expr::Number::Int(int))),
+					expr::Number::Float(float) => {
 						if float.fract() == 0.0 {
-							Ok(SqlValue::Number(sql::Number::Int(float as i64)))
+							Ok(SqlValue::Number(expr::Number::Int(float as i64)))
 						} else {
 							Err(type_error(kind, val))
 						}
 					}
-					sql::Number::Decimal(d) => match d.try_into() {
-						Ok(i) => Ok(SqlValue::Number(sql::Number::Int(i))),
+					expr::Number::Decimal(d) => match d.try_into() {
+						Ok(i) => Ok(SqlValue::Number(expr::Number::Int(i))),
 						_ => Err(type_error(kind, val)),
 					},
 				},
@@ -516,11 +517,11 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError>
 		Kind::Number => match val {
 			GqlValue::Number(n) => {
 				if let Some(i) = n.as_i64() {
-					Ok(SqlValue::Number(sql::Number::Int(i)))
+					Ok(SqlValue::Number(expr::Number::Int(i)))
 				} else if let Some(f) = n.as_f64() {
-					Ok(SqlValue::Number(sql::Number::Float(f)))
+					Ok(SqlValue::Number(expr::Number::Float(f)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SqlValue::Number(sql::Number::Decimal(uint.into())))
+					Ok(SqlValue::Number(expr::Number::Decimal(uint.into())))
 				} else {
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}

@@ -4,7 +4,8 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
-use crate::err::Error;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{Id, Thing};
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
@@ -29,11 +30,10 @@ use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
 use crate::kvs::{Key, KeyEncode as _, Val};
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Id, Thing};
+use anyhow::Result;
 use revision::Revisioned;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
@@ -51,7 +51,7 @@ struct Inner {
 }
 
 impl IndexKeyBase {
-	pub(crate) fn new(ns: &str, db: &str, ix: &DefineIndexStatement) -> Result<Self, Error> {
+	pub(crate) fn new(ns: &str, db: &str, ix: &DefineIndexStatement) -> Result<Self> {
 		Ok(Self {
 			inner: Arc::new(Inner {
 				ns: ns.to_string(),
@@ -62,7 +62,7 @@ impl IndexKeyBase {
 		})
 	}
 
-	fn new_bc_key(&self, term_id: TermId) -> Result<Key, Error> {
+	fn new_bc_key(&self, term_id: TermId) -> Result<Key> {
 		Bc::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -73,7 +73,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bd_key(&self, node_id: Option<NodeId>) -> Result<Key, Error> {
+	fn new_bd_key(&self, node_id: Option<NodeId>) -> Result<Key> {
 		Bd::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -84,7 +84,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bi_key(&self, doc_id: DocId) -> Result<Key, Error> {
+	fn new_bi_key(&self, doc_id: DocId) -> Result<Key> {
 		Bi::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -95,7 +95,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bk_key(&self, doc_id: DocId) -> Result<Key, Error> {
+	fn new_bk_key(&self, doc_id: DocId) -> Result<Key> {
 		Bk::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -106,7 +106,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bl_key(&self, node_id: Option<NodeId>) -> Result<Key, Error> {
+	fn new_bl_key(&self, node_id: Option<NodeId>) -> Result<Key> {
 		Bl::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -117,7 +117,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Result<Key, Error> {
+	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Result<Key> {
 		Bo::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -129,7 +129,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bp_key(&self, node_id: Option<NodeId>) -> Result<Key, Error> {
+	fn new_bp_key(&self, node_id: Option<NodeId>) -> Result<Key> {
 		Bp::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -140,7 +140,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Result<Key, Error> {
+	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Result<Key> {
 		Bf::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -152,7 +152,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bt_key(&self, node_id: Option<NodeId>) -> Result<Key, Error> {
+	fn new_bt_key(&self, node_id: Option<NodeId>) -> Result<Key> {
 		Bt::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -163,7 +163,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bs_key(&self) -> Result<Key, Error> {
+	fn new_bs_key(&self) -> Result<Key> {
 		Bs::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -173,7 +173,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_bu_key(&self, term_id: TermId) -> Result<Key, Error> {
+	fn new_bu_key(&self, term_id: TermId) -> Result<Key> {
 		Bu::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -184,7 +184,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_hd_key(&self, doc_id: Option<DocId>) -> Result<Key, Error> {
+	fn new_hd_key(&self, doc_id: Option<DocId>) -> Result<Key> {
 		Hd::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -195,7 +195,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_he_key(&self, element_id: ElementId) -> Result<Key, Error> {
+	fn new_he_key(&self, element_id: ElementId) -> Result<Key> {
 		He::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -206,7 +206,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_hi_key(&self, id: Id) -> Result<Key, Error> {
+	fn new_hi_key(&self, id: Id) -> Result<Key> {
 		Hi::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -217,7 +217,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_hl_key(&self, layer: u16, chunk: u32) -> Result<Key, Error> {
+	fn new_hl_key(&self, layer: u16, chunk: u32) -> Result<Key> {
 		Hl::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -229,7 +229,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_hv_key(&self, vec: Arc<SerializedVector>) -> Result<Key, Error> {
+	fn new_hv_key(&self, vec: Arc<SerializedVector>) -> Result<Key> {
 		Hv::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -240,7 +240,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_hs_key(&self) -> Result<Key, Error> {
+	fn new_hs_key(&self) -> Result<Key> {
 		Hs::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -250,7 +250,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_vm_key(&self, node_id: Option<NodeId>) -> Result<Key, Error> {
+	fn new_vm_key(&self, node_id: Option<NodeId>) -> Result<Key> {
 		Vm::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -267,13 +267,13 @@ trait VersionedStore
 where
 	Self: Sized + Serialize + DeserializeOwned + Revisioned,
 {
-	fn try_into(&self) -> Result<Val, Error> {
+	fn try_into(&self) -> Result<Val> {
 		let mut val = Vec::new();
 		self.serialize_revisioned(&mut val)?;
 		Ok(val)
 	}
 
-	fn try_from(val: Val) -> Result<Self, Error> {
+	fn try_from(val: Val) -> Result<Self> {
 		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }

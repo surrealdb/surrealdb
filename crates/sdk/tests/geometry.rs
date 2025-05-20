@@ -2,12 +2,12 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn geometry_point() -> Result<(), Error> {
+async fn geometry_point() -> Result<()> {
 	let sql = "
 		UPSERT city:london SET centre = (-0.118092, 51.509865);
 		SELECT * FROM city:london;
@@ -49,7 +49,7 @@ async fn geometry_point() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn geometry_polygon() -> Result<(), Error> {
+async fn geometry_polygon() -> Result<()> {
 	let sql = "
 		UPSERT city:london SET area = {
 			type: 'Polygon',
@@ -144,7 +144,7 @@ async fn geometry_polygon() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn geometry_multipoint() -> Result<(), Error> {
+async fn geometry_multipoint() -> Result<()> {
 	let sql = "
 		UPSERT city:london SET points = {
 			type: 'MultiPoint',
@@ -222,7 +222,7 @@ async fn geometry_multipoint() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn geometry_multipolygon() -> Result<(), Error> {
+async fn geometry_multipolygon() -> Result<()> {
 	let sql = "
 		UPSERT university:oxford SET area = {
 			type: 'MultiPolygon',
@@ -312,7 +312,7 @@ async fn geometry_multipolygon() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn geometry_inner_access() -> Result<(), Error> {
+async fn geometry_inner_access() -> Result<()> {
 	let sql = "
 		SELECT type, coordinates[0] as lng, coordinates[1] AS lat FROM type::point([-0.118092, 51.509865]);
 		SELECT type, coordinates[0] as lng, coordinates[1] AS lat FROM (-0.118092, 51.509865);

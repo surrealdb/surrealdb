@@ -4,8 +4,8 @@ use std::{
 	panic::AssertUnwindSafe,
 	path::Path,
 	sync::{
-		atomic::{AtomicUsize, Ordering},
 		Arc,
+		atomic::{AtomicUsize, Ordering},
 	},
 	time::SystemTime,
 };

@@ -1,4 +1,4 @@
-use crate::syn::token::{t, Glued, TokenKind};
+use crate::syn::token::{Glued, TokenKind, t};
 
 use super::Parser;
 

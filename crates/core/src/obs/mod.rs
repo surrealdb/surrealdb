@@ -2,16 +2,16 @@
 
 //! This module defines the operations for object storage using the [object_store](https://docs.rs/object_store/latest/object_store/)
 //! crate. This will enable the user to store objects using local file storage, memory, or cloud storage such as S3 or GCS.
-use crate::err::Error;
+use anyhow::Result;
 use bytes::Bytes;
 use futures::stream::BoxStream;
+use object_store::ObjectStore;
 #[cfg(not(target_family = "wasm"))]
 use object_store::local::LocalFileSystem;
 #[cfg(target_family = "wasm")]
 use object_store::memory::InMemory;
 use object_store::parse_url;
 use object_store::path::Path;
-use object_store::ObjectStore;
 use sha1::{Digest, Sha1};
 use std::env;
 use std::fs;
@@ -73,7 +73,7 @@ static CACHE: LazyLock<Arc<dyn ObjectStore>> =
 /// Streams the file from the local system or memory object storage.
 pub async fn stream(
 	file: String,
-) -> Result<BoxStream<'static, Result<Bytes, object_store::Error>>, Error> {
+) -> Result<BoxStream<'static, Result<Bytes, object_store::Error>>> {
 	match CACHE.get(&Path::from(file.as_str())).await {
 		Ok(data) => Ok(data.into_stream()),
 		_ => Ok(STORE.get(&Path::from(file.as_str())).await?.into_stream()),
@@ -81,7 +81,7 @@ pub async fn stream(
 }
 
 /// Gets the file from the local file system or memory object storage.
-pub async fn get(file: &str) -> Result<Vec<u8>, Error> {
+pub async fn get(file: &str) -> Result<Vec<u8>> {
 	match CACHE.get(&Path::from(file)).await {
 		Ok(data) => Ok(data.bytes().await?.to_vec()),
 		_ => {
@@ -93,13 +93,13 @@ pub async fn get(file: &str) -> Result<Vec<u8>, Error> {
 }
 
 /// Puts the file into the local file system or memory object storage.
-pub async fn put(file: &str, data: Vec<u8>) -> Result<(), Error> {
+pub async fn put(file: &str, data: Vec<u8>) -> Result<()> {
 	let _ = STORE.put(&Path::from(file), Bytes::from(data).into()).await?;
 	Ok(())
 }
 
 /// Deletes the file from the local file system or memory object storage.
-pub async fn del(file: &str) -> Result<(), Error> {
+pub async fn del(file: &str) -> Result<()> {
 	Ok(STORE.delete(&Path::from(file)).await?)
 }
 
@@ -120,12 +120,12 @@ mod tests {
 	#[test]
 	fn test_initialize_store_env_var() {
 		let url = "file:///tmp/test_store";
-		env::set_var("SURREAL_OBJECT_STORE", url);
+		unsafe { env::set_var("SURREAL_OBJECT_STORE", url) };
 		let store = initialize_store("SURREAL_OBJECT_STORE", "store");
 		// Assert the store is initialized with the correct URL
 		assert!(store.to_string().contains("store"));
 
-		env::remove_var("SURREAL_OBJECT_STORE");
+		unsafe { env::remove_var("SURREAL_OBJECT_STORE") };
 		assert!(env::var("SURREAL_OBJECT_STORE").is_err());
 		let store = initialize_store("SURREAL_OBJECT_STORE", "store");
 		debug!("{store:?}");

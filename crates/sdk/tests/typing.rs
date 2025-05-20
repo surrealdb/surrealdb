@@ -3,12 +3,12 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn strict_typing_inline() -> Result<(), Error> {
+async fn strict_typing_inline() -> Result<()> {
 	let sql = "
 		UPSERT person:test SET age = <int> NONE;
 		UPSERT person:test SET age = <int> '18';
@@ -119,7 +119,7 @@ async fn strict_typing_inline() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn strict_typing_defined() -> Result<(), Error> {
+async fn strict_typing_defined() -> Result<()> {
 	let sql = "
 		DEFINE FIELD age ON person TYPE int;
 		DEFINE FIELD enabled ON person TYPE bool | int;
@@ -184,7 +184,7 @@ async fn strict_typing_defined() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn strict_typing_none_null() -> Result<(), Error> {
+async fn strict_typing_none_null() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD name ON TABLE person TYPE option<string>;
@@ -278,7 +278,7 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn literal_typing() -> Result<(), Error> {
+async fn literal_typing() -> Result<()> {
 	let sql = "
 		DEFINE TABLE test SCHEMAFULL;
 		DEFINE FIELD obj ON test TYPE {
@@ -313,7 +313,7 @@ async fn literal_typing() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn strict_typing_optional_object() -> Result<(), Error> {
+async fn strict_typing_optional_object() -> Result<()> {
 	let sql = "
         DEFINE TABLE test SCHEMAFULL;
         DEFINE FIELD obj ON test TYPE option<object>;

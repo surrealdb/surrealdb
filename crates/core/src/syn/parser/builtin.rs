@@ -1,10 +1,10 @@
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{Constant, Function, Value},
+	expr::{Constant, Function, Value},
 	syn::{
-		error::{bail, MessageKind},
-		parser::{mac::expected, unexpected, SyntaxError},
-		token::{t, Span},
+		error::{MessageKind, bail},
+		parser::{SyntaxError, mac::expected, unexpected},
+		token::{Span, t},
 	},
 };
 use phf::phf_map;

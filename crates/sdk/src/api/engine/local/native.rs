@@ -1,25 +1,25 @@
 use crate::{
+	Action,
 	api::{
+		ExtraFeatures, Result, Surreal,
 		conn::{self, Route, Router},
 		engine::local::Db,
 		method::BoxFuture,
 		opt::{Endpoint, EndpointKind},
-		ExtraFeatures, Result, Surreal,
 	},
 	engine::tasks,
-	opt::{auth::Root, WaitFor},
+	opt::{WaitFor, auth::Root},
 	value::Notification,
-	Action,
 };
 use async_channel::{Receiver, Sender};
-use futures::{stream::poll_fn, StreamExt};
+use futures::{StreamExt, stream::poll_fn};
 use std::{
 	collections::{BTreeMap, HashMap, HashSet},
-	sync::{atomic::AtomicI64, Arc},
+	sync::{Arc, atomic::AtomicI64},
 	task::Poll,
 };
 use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
 impl crate::api::Connection for Db {}
@@ -76,17 +76,17 @@ pub(crate) async fn run_router(
 	let kvs = match Datastore::new(endpoint).await {
 		Ok(kvs) => {
 			if let Err(error) = kvs.check_version().await {
-				conn_tx.send(Err(error.into())).await.ok();
+				conn_tx.send(Err(error)).await.ok();
 				return;
 			};
 			if let Err(error) = kvs.bootstrap().await {
-				conn_tx.send(Err(error.into())).await.ok();
+				conn_tx.send(Err(error)).await.ok();
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
 			if let Some(root) = configured_root {
 				if let Err(error) = kvs.initialise_credentials(root.username, root.password).await {
-					conn_tx.send(Err(error.into())).await.ok();
+					conn_tx.send(Err(error)).await.ok();
 					return;
 				}
 			}
@@ -94,7 +94,7 @@ pub(crate) async fn run_router(
 			kvs.with_auth_enabled(configured_root.is_some())
 		}
 		Err(error) => {
-			conn_tx.send(Err(error.into())).await.ok();
+			conn_tx.send(Err(error)).await.ok();
 			return;
 		}
 	};

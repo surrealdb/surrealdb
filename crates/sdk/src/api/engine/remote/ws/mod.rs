@@ -5,11 +5,11 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-use crate::api::conn::Command;
-use crate::api::conn::DbResponse;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::api::conn::Command;
+use crate::api::conn::DbResponse;
 use crate::opt::IntoEndpoint;
 use crate::value::Notification;
 use async_channel::Sender;
@@ -17,7 +17,7 @@ use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Duration;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 use trice::Instant;
 use uuid::Uuid;
 

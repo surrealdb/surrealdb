@@ -3,7 +3,7 @@ mod http;
 #[cfg(feature = "protocol-ws")]
 mod ws;
 
-#[cfg(feature = "kv-fdb")]
+#[cfg(kv_fdb)]
 mod fdb;
 #[cfg(feature = "kv-indxdb")]
 mod indxdb;
@@ -16,9 +16,9 @@ mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
-use crate::api::err::Error;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::api::err::Error;
 use url::Url;
 
 use super::Config;

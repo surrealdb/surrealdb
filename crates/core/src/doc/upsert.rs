@@ -3,7 +3,8 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
+use anyhow::anyhow;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
@@ -33,21 +34,21 @@ impl Document {
 		// This is done this way to make the create path fast and take priority over the update
 		// path.
 		let retry = match self.upsert_create(stk, ctx, opt, stm).await {
-			Err(IgnoreError::Error(e)) => match *e {
+			Err(IgnoreError::Error(e)) => match e.downcast() {
 				// We received an index exists error, so we
 				// ignore the error, and attempt to update the
 				// record using the ON DUPLICATE KEY UPDATE
 				// clause with the ID received in the error
-				Error::IndexExists {
+				Ok(Error::IndexExists {
 					thing,
 					..
-				} if !self.is_specific_record_id() => thing,
+				}) if !self.is_specific_record_id() => thing,
 				// We attempted to INSERT a document with an ID,
 				// and this ID already exists in the database,
 				// so we need to UPDATE the record instead.
-				Error::RecordExists {
+				Ok(Error::RecordExists {
 					thing,
-				} => thing,
+				}) => thing,
 
 				// If an error was received, but this statement
 				// is potentially retryable because it might
@@ -57,8 +58,14 @@ impl Document {
 				// need to presume that we might need to retry
 				// after fetching the initial record value
 				// from storage before processing schema again.
-				e if e.is_schema_related() && stm.is_repeatable() => self.inner_id()?,
-				_ => {
+				Ok(e) => {
+					if e.is_schema_related() && stm.is_repeatable() {
+						self.inner_id()?
+					} else {
+						return Err(IgnoreError::Error(anyhow!(e)));
+					}
+				}
+				Err(e) => {
 					ctx.tx().lock().await.rollback_to_save_point().await?;
 					return Err(IgnoreError::Error(e));
 				}

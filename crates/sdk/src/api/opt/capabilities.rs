@@ -61,8 +61,8 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// # fn cap() -> surrealdb::Result<Capabilities>{
 /// # let cap =
 /// Capabilities::none()
-///     .with_allow_function("http::*")?
-///     .with_deny_function("http::post")?
+///     .with_function_allowed("http::*")?
+///     .with_function_denied("http::post")?
 ///
 ///  # ;
 ///  # Ok(cap)
@@ -84,12 +84,12 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
-/// # use surrealdb::engine::local::File;
+/// # use surrealdb::engine::local::RocksDb;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// let capabilities = Capabilities::all();
 /// let config = Config::default().capabilities(capabilities);
-/// let db = Surreal::new::<File>(("temp.db", config)).await?;
+/// let db = Surreal::new::<RocksDb>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -97,16 +97,16 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 #[cfg_attr(feature = "kv-rocksdb", doc = "```no_run")]
 #[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
 /// # use std::str::FromStr;
-/// # use surrealdb::engine::local::File;
+/// # use surrealdb::engine::local::RocksDb;
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// let capabilities = Capabilities::default()
-///     .with_deny_function("http::*")?;
+///     .with_function_denied("http::*")?;
 /// let config = Config::default().capabilities(capabilities);
-/// let db = Surreal::new::<File>(("temp.db", config)).await?;
+/// let db = Surreal::new::<RocksDb>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -259,7 +259,7 @@ impl Capabilities {
 				set.insert(target);
 				self.cap = mem::take(&mut self.cap).with_functions(Targets::Some(set));
 			}
-			Targets::Some(ref mut x) => {
+			Targets::Some(x) => {
 				x.insert(target);
 			}
 			_ => unreachable!(),
@@ -298,7 +298,7 @@ impl Capabilities {
 				set.insert(target);
 				*self.cap.denied_functions_mut() = Targets::Some(set);
 			}
-			Targets::Some(ref mut x) => {
+			Targets::Some(x) => {
 				x.insert(target);
 			}
 			_ => unreachable!(),
@@ -385,7 +385,7 @@ impl Capabilities {
 				set.insert(target);
 				*self.cap.allowed_network_targets_mut() = Targets::Some(set);
 			}
-			Targets::Some(ref mut x) => {
+			Targets::Some(x) => {
 				x.insert(target);
 			}
 			_ => unreachable!(),
@@ -424,7 +424,7 @@ impl Capabilities {
 				set.insert(target);
 				*self.cap.denied_network_targets_mut() = Targets::Some(set);
 			}
-			Targets::Some(ref mut x) => {
+			Targets::Some(x) => {
 				x.insert(target);
 			}
 			_ => unreachable!(),

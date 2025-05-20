@@ -8,14 +8,14 @@ use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use rust_decimal::Decimal;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Geometry;
 use surrealdb::sql::Number;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn script_function_error() -> Result<(), Error> {
+async fn script_function_error() -> Result<()> {
 	let sql = "
 		SELECT * FROM function() {
 			throw 'error';
@@ -45,7 +45,7 @@ async fn script_function_error() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_function_simple() -> Result<(), Error> {
+async fn script_function_simple() -> Result<()> {
 	let sql = r#"
 		CREATE person:test SET scores = function() {
 			return [6.6, 8.4, 7.3].map(v => v * 10);
@@ -66,7 +66,7 @@ async fn script_function_simple() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_function_context() -> Result<(), Error> {
+async fn script_function_context() -> Result<()> {
 	let sql = "
 		CREATE film:test SET
 			ratings = [
@@ -108,7 +108,7 @@ async fn script_function_context() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_function_arguments() -> Result<(), Error> {
+async fn script_function_arguments() -> Result<()> {
 	let sql = "
 		LET $value = 'SurrealDB';
 		LET $words = ['awesome', 'advanced', 'cool'];
@@ -142,7 +142,7 @@ async fn script_function_arguments() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_function_types() -> Result<(), Error> {
+async fn script_function_types() -> Result<()> {
 	let sql = "
 		CREATE article:test SET
 			created_at = function() {
@@ -189,7 +189,7 @@ async fn script_function_types() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_function_module_os() -> Result<(), Error> {
+async fn script_function_module_os() -> Result<()> {
 	let sql = "
 		CREATE platform:test SET version = function() {
 			const { platform } = await import('os');
@@ -208,7 +208,7 @@ async fn script_function_module_os() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_query_from_script_select() -> Result<(), Error> {
+async fn script_query_from_script_select() -> Result<()> {
 	let sql = r#"
 		CREATE test SET name = "a", number = 0;
 		CREATE test SET name = "b", number = 1;
@@ -262,7 +262,7 @@ async fn script_query_from_script_select() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_query_from_script() -> Result<(), Error> {
+async fn script_query_from_script() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			return await surrealdb.query(`CREATE ONLY article:test SET name = "The daily news", issue_number = 3`)
@@ -300,7 +300,7 @@ async fn script_query_from_script() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_value_function_params() -> Result<(), Error> {
+async fn script_value_function_params() -> Result<()> {
 	let sql = r#"
 		LET $test = CREATE ONLY article:test SET name = "The daily news", issue_number = 3;
 		RETURN function() {
@@ -318,7 +318,7 @@ async fn script_value_function_params() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_value_function_inline_values() -> Result<(), Error> {
+async fn script_value_function_inline_values() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			if(await surrealdb.value(`3`) !== 3){
@@ -341,7 +341,7 @@ async fn script_value_function_inline_values() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_function_number_conversion_test() -> Result<(), Error> {
+async fn script_function_number_conversion_test() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			if(await surrealdb.value(`2147483647`) !== 2147483647){
@@ -387,7 +387,7 @@ async fn script_function_number_conversion_test() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_bytes() -> Result<(), Error> {
+async fn script_bytes() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			return new Uint8Array([0,1,2,3,4,5,6,7])
@@ -410,7 +410,7 @@ async fn script_bytes() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_geometry_point() -> Result<(), Error> {
+async fn script_geometry_point() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			return {
@@ -435,7 +435,7 @@ async fn script_geometry_point() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_geometry_line() -> Result<(), Error> {
+async fn script_geometry_line() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			return {
@@ -465,7 +465,7 @@ async fn script_geometry_line() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_geometry_polygon() -> Result<(), Error> {
+async fn script_geometry_polygon() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			return {
@@ -506,7 +506,7 @@ async fn script_geometry_polygon() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_geometry_multi_point() -> Result<(), Error> {
+async fn script_geometry_multi_point() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			return {
@@ -536,7 +536,7 @@ async fn script_geometry_multi_point() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_geometry_multi_line() -> Result<(), Error> {
+async fn script_geometry_multi_line() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			return {
@@ -577,7 +577,7 @@ async fn script_geometry_multi_line() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_geometry_multi_polygon() -> Result<(), Error> {
+async fn script_geometry_multi_polygon() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			return {
@@ -621,7 +621,7 @@ async fn script_geometry_multi_polygon() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_geometry_collection() -> Result<(), Error> {
+async fn script_geometry_collection() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			return {
@@ -668,7 +668,7 @@ async fn script_geometry_collection() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_bytes_into() -> Result<(), Error> {
+async fn script_bytes_into() -> Result<()> {
 	let sql = r#"
 		RETURN function(<bytes> "hello world") {
 			let arg = arguments[0];
@@ -690,7 +690,7 @@ async fn script_bytes_into() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_geometry_into() -> Result<(), Error> {
+async fn script_geometry_into() -> Result<()> {
 	let sql = r#"
 		let $param = {
 			type: "Point",
@@ -720,7 +720,7 @@ async fn script_geometry_into() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_parallel_query() -> Result<(), Error> {
+async fn script_parallel_query() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			await Promise.all([
@@ -736,7 +736,7 @@ async fn script_parallel_query() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_run_too_long() -> Result<(), Error> {
+async fn script_run_too_long() -> Result<()> {
 	let sql = r#"
 		RETURN function() {
 			for(let i = 0;i < 10000000;i++){
@@ -770,7 +770,7 @@ async fn script_run_too_long() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn script_limit_massive_parallel() -> Result<(), Error> {
+async fn script_limit_massive_parallel() -> Result<()> {
 	let sql = r#"
 		define function fn::crashcat() {
 			return function() {

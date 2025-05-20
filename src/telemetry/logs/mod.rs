@@ -1,17 +1,17 @@
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::err::Error;
+use anyhow::Result;
 use tracing::Level;
 use tracing::Subscriber;
 use tracing_appender::non_blocking::NonBlocking;
+use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
-use tracing_subscriber::Layer;
 
 pub fn new<S>(
 	filter: CustomEnvFilter,
 	stdout: NonBlocking,
 	stderr: NonBlocking,
-) -> Result<Box<dyn Layer<S> + Send + Sync>, Error>
+) -> Result<Box<dyn Layer<S> + Send + Sync>>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {

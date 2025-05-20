@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
-use crate::err::Error;
+use crate::expr::Idiom;
+use crate::expr::statements::DefineTableStatement;
+use crate::expr::thing::Thing;
 use crate::kvs::{Key, KeyEncode};
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::thing::Thing;
-use crate::sql::Idiom;
+use anyhow::Result;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
 // The versionstamp key is the key that contains the current versionstamp and might be used by the
@@ -123,7 +123,7 @@ impl Writer {
 
 	// get returns all the mutations buffered for this transaction,
 	// that are to be written onto the key composed of the specified prefix + the current timestamp + the specified suffix.
-	pub(crate) fn get(&self) -> Result<Vec<PreparedWrite>, Error> {
+	pub(crate) fn get(&self) -> Result<Vec<PreparedWrite>> {
 		let mut r = Vec::<(Vec<u8>, Vec<u8>, Vec<u8>, crate::kvs::Val)>::new();
 		// Get the current timestamp
 		for (
@@ -151,16 +151,16 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
-	use crate::sql::changefeed::ChangeFeed;
-	use crate::sql::id::Id;
-	use crate::sql::statements::show::ShowSince;
-	use crate::sql::statements::{
+	use crate::expr::Datetime;
+	use crate::expr::changefeed::ChangeFeed;
+	use crate::expr::id::Id;
+	use crate::expr::statements::show::ShowSince;
+	use crate::expr::statements::{
 		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
 	};
-	use crate::sql::thing::Thing;
-	use crate::sql::value::Value;
-	use crate::sql::Datetime;
+	use crate::expr::thing::Thing;
+	use crate::expr::value::Value;
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
 	use crate::vs::VersionStamp;
 
 	const DONT_STORE_PREVIOUS: bool = false;
@@ -417,11 +417,11 @@ mod tests {
 
 	async fn init(store_diff: bool) -> Datastore {
 		let dns = DefineNamespaceStatement {
-			name: crate::sql::Ident(NS.to_string()),
+			name: crate::expr::Ident(NS.to_string()),
 			..Default::default()
 		};
 		let ddb = DefineDatabaseStatement {
-			name: crate::sql::Ident(DB.to_string()),
+			name: crate::expr::Ident(DB.to_string()),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_diff,

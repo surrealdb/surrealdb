@@ -2,9 +2,9 @@ mod convert;
 
 pub use convert::Cbor;
 
-use crate::rpc::request::Request;
+use crate::expr::Value;
 use crate::rpc::RpcError;
-use crate::sql::Value;
+use crate::rpc::request::Request;
 use ciborium::Value as Data;
 
 use super::ResTrait;
