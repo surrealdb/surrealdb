@@ -119,7 +119,7 @@ impl DefineUserStatement {
 				if txn.get_root_user(&self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else if !self.overwrite {
+					} else if !self.overwrite && !opt.import {
 						bail!(Error::UserRootAlreadyExists {
 							name: self.name.to_string(),
 						});
@@ -150,7 +150,7 @@ impl DefineUserStatement {
 				if txn.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else if !self.overwrite {
+					} else if !self.overwrite && !opt.import {
 						bail!(Error::UserNsAlreadyExists {
 							name: self.name.to_string(),
 							ns: opt.ns()?.into(),
@@ -184,7 +184,7 @@ impl DefineUserStatement {
 				if txn.get_db_user(ns, db, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else if !self.overwrite {
+					} else if !self.overwrite && !opt.import {
 						bail!(Error::UserDbAlreadyExists {
 							name: self.name.to_string(),
 							ns: ns.into(),
