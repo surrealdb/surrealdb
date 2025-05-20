@@ -202,6 +202,8 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("not") => PathKind::Function,
 		//
+		UniCase::ascii("number::format") => PathKind::Function,
+		//
 		UniCase::ascii("object::entries") => PathKind::Function,
 		UniCase::ascii("object::extend") => PathKind::Function,
 		UniCase::ascii("object::from_entries") => PathKind::Function,

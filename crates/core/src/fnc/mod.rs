@@ -34,6 +34,7 @@ pub mod session;
 pub mod sleep;
 pub mod string;
 pub mod time;
+pub mod number;
 pub mod r#type;
 pub mod util;
 pub mod value;
@@ -285,6 +286,8 @@ pub fn synchronous(
 		"meta::tb" => record::tb,
 		//
 		"not" => not::not,
+		//
+		"number::format" => number::format,
 		//
 		"object::entries" => object::entries,
 		"object::extend" => object::extend,
@@ -1084,6 +1087,7 @@ pub async fn idiom(
 				"cot" => math::cot,
 				"deg2rad" => math::deg2rad,
 				"floor" => math::floor,
+				"format" => number::format,
 				"ln" => math::ln,
 				"log" => math::log,
 				"log10" => math::log10,

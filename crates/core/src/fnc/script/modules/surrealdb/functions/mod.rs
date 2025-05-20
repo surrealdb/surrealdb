@@ -13,6 +13,7 @@ mod bytes;
 mod crypto;
 mod duration;
 mod encoding;
+mod number;
 mod file;
 mod geo;
 mod http;
@@ -50,6 +51,7 @@ impl_module_def!(
 	"math" => (math::Package),
 	"meta" => (meta::Package),
 	"not" => run,
+	"number" => (number::Package),
 	"object" => (object::Package),
 	"parse" => (parse::Package),
 	"rand" => (rand::Package),
