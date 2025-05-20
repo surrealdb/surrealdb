@@ -16,21 +16,24 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 		CREATE user:test;
 		DEFINE TABLE demo SCHEMAFULL PERMISSIONS FOR select, create WHERE user = $auth.id;
 		DEFINE FIELD user ON TABLE demo VALUE $auth.id;
+		DEFINE TABLE OVERWRITE foo SCHEMAFULL PERMISSIONS FOR select,create WHERE TRUE;
+		DEFINE FUNCTION OVERWRITE fn::client::foo() { RETURN CREATE ONLY foo:bar CONTENT {};};
 	";
 	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 6);
 	//
 	skip_ok(res, 4)?;
 	//
 	let sql = "
 		CREATE demo SET id = demo:one;
 		INSERT INTO demo (id) VALUES (demo:two);
+		fn::client::foo();
 	";
 	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "test")).into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -52,6 +55,10 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 			},
 		]",
 	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("{ id: foo:bar}");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
