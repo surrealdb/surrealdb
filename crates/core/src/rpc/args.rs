@@ -10,7 +10,9 @@ pub trait Take {
 	fn needs_two_or_three(self) -> Result<(SqlValue, SqlValue, SqlValue), RpcError>;
 	fn needs_one_two_or_three(self) -> Result<(SqlValue, SqlValue, SqlValue), RpcError>;
 	fn needs_three_or_four(self) -> Result<(SqlValue, SqlValue, SqlValue, SqlValue), RpcError>;
-	fn needs_three_four_or_five(self) -> Result<(SqlValue, SqlValue, SqlValue, SqlValue, SqlValue), RpcError>;
+	fn needs_three_four_or_five(
+		self,
+	) -> Result<(SqlValue, SqlValue, SqlValue, SqlValue, SqlValue), RpcError>;
 }
 
 impl Take for Array {
@@ -87,7 +89,9 @@ impl Take for Array {
 		}
 	}
 	/// Convert the array to four arguments
-	fn needs_three_four_or_five(self) -> Result<(SqlValue, SqlValue, SqlValue, SqlValue, SqlValue), RpcError> {
+	fn needs_three_four_or_five(
+		self,
+	) -> Result<(SqlValue, SqlValue, SqlValue, SqlValue, SqlValue), RpcError> {
 		if self.len() < 3 || self.len() > 5 {
 			return Err(RpcError::InvalidParams);
 		}
@@ -95,7 +99,9 @@ impl Take for Array {
 		match (x.next(), x.next(), x.next(), x.next(), x.next()) {
 			(Some(a), Some(b), Some(c), Some(d), Some(e)) => Ok((a, b, c, d, e)),
 			(Some(a), Some(b), Some(c), Some(d), None) => Ok((a, b, c, d, SqlValue::None)),
-			(Some(a), Some(b), Some(c), None, None) => Ok((a, b, c, SqlValue::None, SqlValue::None)),
+			(Some(a), Some(b), Some(c), None, None) => {
+				Ok((a, b, c, SqlValue::None, SqlValue::None))
+			}
 			(_, _, _, _, _) => {
 				Ok((SqlValue::None, SqlValue::None, SqlValue::None, SqlValue::None, SqlValue::None))
 			}

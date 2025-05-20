@@ -6,7 +6,7 @@ use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::{Action, Notification, Session};
 use surrealdb::iam::Role;
-use surrealdb::sql::{Thing, SqlValue};
+use surrealdb::sql::{SqlValue, Thing};
 
 //
 // Permissions
@@ -258,7 +258,11 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]"),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -300,7 +304,11 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]"),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -357,7 +365,11 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]"),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -399,7 +411,11 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]"),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)

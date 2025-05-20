@@ -408,5 +408,3 @@ impl<'a> Sum<&'a Self> for Duration {
 		iter.fold(Duration::default(), |a, b| &a + b)
 	}
 }
-
-

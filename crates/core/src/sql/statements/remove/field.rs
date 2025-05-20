@@ -1,9 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::{Base, Ident, Idiom, SqlValue};
-use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
 use revision::revisioned;
@@ -32,7 +32,6 @@ impl Display for RemoveFieldStatement {
 		Ok(())
 	}
 }
-
 
 impl From<RemoveFieldStatement> for crate::expr::statements::RemoveFieldStatement {
 	fn from(v: RemoveFieldStatement) -> Self {

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Array, Duration, Ident, Object, Strand, SqlValue},
+	sql::{Array, Duration, Ident, Object, SqlValue, Strand},
 	syn::{
 		lexer::compound::{self, Numeric},
 		parser::mac::{expected, pop_glued},

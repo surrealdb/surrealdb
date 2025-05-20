@@ -52,7 +52,6 @@ impl From<crate::expr::Fetchs> for Fetchs {
 	}
 }
 
-
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -71,8 +70,6 @@ impl Fetch {
 		};
 		Ok(())
 	}
-
-
 }
 
 impl From<SqlValue> for Fetch {

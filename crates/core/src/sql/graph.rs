@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::try_join_all_buffered;
+use crate::kvs::KeyEncode;
 use crate::sql::cond::Cond;
 use crate::sql::dir::Dir;
 use crate::sql::field::Fields;
@@ -12,7 +13,6 @@ use crate::sql::order::{OldOrders, Order, OrderList, Ordering};
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::table::Tables;
-use crate::kvs::KeyEncode;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -197,7 +197,6 @@ impl From<Table> for GraphSubjects {
 	}
 }
 
-
 impl From<GraphSubjects> for crate::expr::graph::GraphSubjects {
 	fn from(v: GraphSubjects) -> Self {
 		Self(v.0.into_iter().map(Into::into).collect())
@@ -245,7 +244,6 @@ impl Display for GraphSubject {
 		}
 	}
 }
-
 
 impl From<GraphSubject> for crate::expr::graph::GraphSubject {
 	fn from(v: GraphSubject) -> Self {

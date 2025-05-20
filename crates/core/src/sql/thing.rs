@@ -3,10 +3,10 @@ use super::{Cond, Expression, Ident, Idiom, Operator, Part, Table};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::sql::{Strand, SqlValue, escape::EscapeRid, id::Id};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode as _;
+use crate::sql::{SqlValue, Strand, escape::EscapeRid, id::Id};
 use crate::syn;
 use anyhow::Result;
 use futures::StreamExt;
@@ -149,8 +149,7 @@ impl fmt::Display for Thing {
 	}
 }
 
-impl Thing {
-	}
+impl Thing {}
 
 #[cfg(test)]
 mod test {
@@ -190,7 +189,9 @@ mod test {
 			let string = "foo:{bar: 1}";
 			let thing = Thing {
 				tb: "foo".into(),
-				id: Id::Object(Object([("bar".to_string(), SqlValue::from(1))].into_iter().collect())),
+				id: Id::Object(Object(
+					[("bar".to_string(), SqlValue::from(1))].into_iter().collect(),
+				)),
 			};
 			assert_eq!(thing, Thing::from_str(string).unwrap());
 		}

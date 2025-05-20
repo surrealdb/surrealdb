@@ -32,7 +32,6 @@ impl From<Bytes> for Vec<u8> {
 	}
 }
 
-
 impl From<Bytes> for crate::expr::Bytes {
 	fn from(v: Bytes) -> Self {
 		crate::expr::Bytes(v.0)

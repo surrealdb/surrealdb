@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, SqlValue,
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, SqlValue, Table,
 		graph::GraphSubjects,
 		part::{DestructurePart, Recurse, RecurseInstruction},
 	},
@@ -1063,7 +1063,10 @@ mod tests {
 		assert_eq!("{  }…", format!("{}", out));
 		assert_eq!(
 			out,
-			SqlValue::from(Idiom(vec![Part::Start(SqlValue::from(Object::default())), Part::Flatten]))
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::from(Object::default())),
+				Part::Flatten
+			]))
 		);
 	}
 
@@ -1074,7 +1077,10 @@ mod tests {
 		assert_eq!("{  }…", format!("{}", out));
 		assert_eq!(
 			out,
-			SqlValue::from(Idiom(vec![Part::Start(SqlValue::from(Object::default())), Part::Flatten]))
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::from(Object::default())),
+				Part::Flatten
+			]))
 		);
 	}
 

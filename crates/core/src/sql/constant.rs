@@ -84,7 +84,7 @@ impl Constant {
 			Self::DurationMax => ConstantValue::Duration(Duration::MAX),
 		}
 	}
-	}
+}
 
 impl fmt::Display for Constant {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

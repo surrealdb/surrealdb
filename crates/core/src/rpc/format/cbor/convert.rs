@@ -160,9 +160,11 @@ impl TryFrom<Cbor> for sql::SqlValue {
 							let tb = match sql::SqlValue::try_from(Cbor(v.remove(0))) {
 								Ok(sql::SqlValue::Strand(tb)) => tb.0,
 								Ok(sql::SqlValue::Table(tb)) => tb.0,
-								_ => return Err(
-									"Expected the tb of a Record Id to be a String or Table value",
-								),
+								_ => {
+									return Err(
+										"Expected the tb of a Record Id to be a String or Table value",
+									);
+								}
 							};
 
 							let id = sql::Id::try_from(v.remove(0))?;
@@ -233,9 +235,11 @@ impl TryFrom<Cbor> for sql::SqlValue {
 
 							let exterior = match lines.first() {
 								Some(v) => v,
-								_ => return Err(
-									"Expected a CBOR array with at least one Geometry Line values",
-								),
+								_ => {
+									return Err(
+										"Expected a CBOR array with at least one Geometry Line values",
+									);
+								}
 							};
 							let interiors = Vec::from(&lines[1..]);
 
@@ -410,7 +414,7 @@ impl TryFrom<sql::SqlValue> for Cbor {
 						sql::Id::Array(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
 						sql::Id::Object(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
 						sql::Id::Generate(_) => {
-							return Err("Cannot encode an ungenerated Record ID into CBOR")
+							return Err("Cannot encode an ungenerated Record ID into CBOR");
 						}
 						sql::Id::Range(v) => {
 							CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?))
@@ -781,9 +785,11 @@ pub mod convert_expr {
 								let tb = match expr::Value::try_from(Cbor(v.remove(0))) {
 									Ok(expr::Value::Strand(tb)) => tb.0,
 									Ok(expr::Value::Table(tb)) => tb.0,
-									_ => return Err(
-										"Expected the tb of a Record Id to be a String or Table value",
-									),
+									_ => {
+										return Err(
+											"Expected the tb of a Record Id to be a String or Table value",
+										);
+									}
 								};
 
 								let id = expr::Id::try_from(v.remove(0))?;
@@ -858,9 +864,11 @@ pub mod convert_expr {
 
 								let exterior = match lines.first() {
 									Some(v) => v,
-									_ => return Err(
-										"Expected a CBOR array with at least one Geometry Line values",
-									),
+									_ => {
+										return Err(
+											"Expected a CBOR array with at least one Geometry Line values",
+										);
+									}
 								};
 								let interiors = Vec::from(&lines[1..]);
 
@@ -1043,7 +1051,7 @@ pub mod convert_expr {
 							expr::Id::Array(v) => Cbor::try_from(expr::Value::from(v))?.0,
 							expr::Id::Object(v) => Cbor::try_from(expr::Value::from(v))?.0,
 							expr::Id::Generate(_) => {
-								return Err("Cannot encode an ungenerated Record ID into CBOR")
+								return Err("Cannot encode an ungenerated Record ID into CBOR");
 							}
 							expr::Id::Range(v) => {
 								CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?))

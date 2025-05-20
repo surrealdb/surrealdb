@@ -2,13 +2,13 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::FlowResultExt as _;
 use crate::sql::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, SqlValue,
+	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, SqlValue, Start, Timeout,
 	Values, Version, With,
 	order::{OldOrders, Order, OrderList, Ordering},
 };
-use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -78,7 +78,6 @@ impl SelectStatement {
 
 		Ok(())
 	}
-
 }
 
 impl fmt::Display for SelectStatement {
@@ -131,7 +130,6 @@ impl fmt::Display for SelectStatement {
 		Ok(())
 	}
 }
-
 
 impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 	fn from(v: SelectStatement) -> Self {

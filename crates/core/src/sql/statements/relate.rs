@@ -2,8 +2,8 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Data, FlowResultExt as _, Output, Timeout, SqlValue};
 use crate::idx::planner::RecordStrategy;
+use crate::sql::{Data, FlowResultExt as _, Output, SqlValue, Timeout};
 use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
@@ -53,7 +53,6 @@ impl fmt::Display for RelateStatement {
 		Ok(())
 	}
 }
-
 
 impl From<RelateStatement> for crate::expr::statements::RelateStatement {
 	fn from(v: RelateStatement) -> Self {

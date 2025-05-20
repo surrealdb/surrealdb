@@ -9,7 +9,7 @@ use rust_decimal::Decimal;
 
 use crate::sql::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Kind, Literal, Number,
-	Object, Range, Regex, Strand, Table, Thing, Uuid, SqlValue, array::Uniq, kind::HasKind,
+	Object, Range, Regex, SqlValue, Strand, Table, Thing, Uuid, array::Uniq, kind::HasKind,
 	value::Null,
 };
 

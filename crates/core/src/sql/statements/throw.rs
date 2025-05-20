@@ -23,7 +23,6 @@ impl fmt::Display for ThrowStatement {
 	}
 }
 
-
 impl From<ThrowStatement> for crate::expr::statements::ThrowStatement {
 	fn from(v: ThrowStatement) -> Self {
 		Self {

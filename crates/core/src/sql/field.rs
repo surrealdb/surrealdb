@@ -75,7 +75,6 @@ impl Fields {
 	}
 }
 
-
 impl From<Fields> for crate::expr::field::Fields {
 	fn from(v: Fields) -> Self {
 		Self(v.0.into_iter().map(Into::into).collect(), v.1)
@@ -111,8 +110,6 @@ impl Display for Fields {
 		}
 	}
 }
-
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

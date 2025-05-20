@@ -1,5 +1,5 @@
 use crate::sql::{
-	AccessType, Algorithm, Base, Duration, Ident, JwtAccess, RecordAccess, Strand, SqlValue,
+	AccessType, Algorithm, Base, Duration, Ident, JwtAccess, RecordAccess, SqlValue, Strand,
 	access::AccessDuration,
 	access_type::{JwtAccessIssue, JwtAccessVerify, JwtAccessVerifyKey},
 	statements::DefineAccessStatement,

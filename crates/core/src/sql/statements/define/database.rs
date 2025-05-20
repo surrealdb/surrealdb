@@ -3,8 +3,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 
-use crate::sql::{Base, Ident, Strand, SqlValue, changefeed::ChangeFeed};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Ident, SqlValue, Strand, changefeed::ChangeFeed};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -26,7 +26,6 @@ pub struct DefineDatabaseStatement {
 	pub overwrite: bool,
 }
 
-
 impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE DATABASE")?;
@@ -46,7 +45,6 @@ impl Display for DefineDatabaseStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseStatement {
 	fn from(v: DefineDatabaseStatement) -> Self {

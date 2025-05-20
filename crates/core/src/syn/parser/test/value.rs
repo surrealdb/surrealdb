@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use crate::{
 	sql::{
 		Array, Constant, Expression, Geometry, Id, Ident, Idiom, Number, Object, Operator, Part,
-		Query, Statement, Statements, Strand, Thing, SqlValue,
+		Query, SqlValue, Statement, Statements, Strand, Thing,
 	},
 	syn::parser::{Parser, ParserSettings, mac::test_parse},
 };

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Block, Geometry, Object, Strand, SqlValue},
+	sql::{Block, Geometry, Object, SqlValue, Strand},
 	syn::{
 		error::bail,
 		lexer::compound,
@@ -433,7 +433,11 @@ impl Parser<'_> {
 	///
 	/// This function tries to match an object to an geometry like object and if it is unable
 	/// fallsback to parsing normal objects.
-	async fn parse_object_or_geometry(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<SqlValue> {
+	async fn parse_object_or_geometry(
+		&mut self,
+		ctx: &mut Stk,
+		start: Span,
+	) -> ParseResult<SqlValue> {
 		// empty object was already matched previously so next must be a key.
 		let key = self.parse_object_key()?;
 		// the order of fields of a geometry does not matter so check if it is any of geometry like keys

@@ -24,7 +24,6 @@ impl fmt::Display for Ordering {
 	}
 }
 
-
 impl From<Ordering> for crate::expr::order::Ordering {
 	fn from(v: Ordering) -> Self {
 		match v {
@@ -143,7 +142,6 @@ impl From<crate::expr::order::Order> for Order {
 		}
 	}
 }
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

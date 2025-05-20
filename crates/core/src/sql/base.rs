@@ -1,4 +1,3 @@
-
 use crate::sql::{Ident, SqlValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -33,7 +32,6 @@ impl fmt::Display for Base {
 		}
 	}
 }
-
 
 impl From<Base> for crate::expr::Base {
 	fn from(v: Base) -> Self {

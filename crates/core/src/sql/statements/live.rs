@@ -3,9 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 
-use crate::sql::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, SqlValue};
 use crate::iam::Auth;
 use crate::kvs::Live;
+use crate::sql::{Cond, Fetchs, Fields, FlowResultExt as _, SqlValue, Uuid};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -75,8 +75,7 @@ impl LiveStatement {
 			..Default::default()
 		}
 	}
-
-	}
+}
 
 impl fmt::Display for LiveStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -90,7 +89,6 @@ impl fmt::Display for LiveStatement {
 		Ok(())
 	}
 }
-
 
 impl From<LiveStatement> for crate::expr::statements::LiveStatement {
 	fn from(v: LiveStatement) -> Self {
@@ -124,11 +122,11 @@ impl From<crate::expr::statements::LiveStatement> for LiveStatement {
 #[cfg(test)]
 mod tests {
 	use crate::dbs::{Action, Capabilities, Notification, Session};
-	use crate::sql::Thing;
-	use crate::sql::SqlValue;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
+	use crate::sql::SqlValue;
+	use crate::sql::Thing;
 	use crate::syn::Parse;
 	use anyhow::Result;
 

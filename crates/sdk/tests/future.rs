@@ -24,13 +24,15 @@ async fn future_function_simple() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val =
-		SqlValue::parse("[{ id: person:test, birthday: d'2007-06-22T00:00:00Z', can_drive: false }]");
+	let val = SqlValue::parse(
+		"[{ id: person:test, birthday: d'2007-06-22T00:00:00Z', can_drive: false }]",
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val =
-		SqlValue::parse("[{ id: person:test, birthday: d'2001-06-22T00:00:00Z', can_drive: true }]");
+	let val = SqlValue::parse(
+		"[{ id: person:test, birthday: d'2001-06-22T00:00:00Z', can_drive: true }]",
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

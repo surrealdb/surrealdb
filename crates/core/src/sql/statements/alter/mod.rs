@@ -39,7 +39,6 @@ impl Display for AlterStatement {
 	}
 }
 
-
 impl From<AlterStatement> for crate::expr::statements::AlterStatement {
 	fn from(v: AlterStatement) -> Self {
 		match v {

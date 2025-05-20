@@ -15,14 +15,14 @@ use crate::rpc::RpcError;
 use crate::{
 	dbs::{QueryType, Response, capabilities::MethodTarget},
 	expr::Value,
+	rpc::args::Take,
 	sql::{
-		Array, Fields, Function, Model, Output, Query, Strand, SqlValue as SqlValue,
+		Array, Fields, Function, Model, Output, Query, SqlValue, Strand,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
 	},
-	rpc::args::Take,
 };
 
 #[expect(async_fn_in_trait)]
@@ -136,7 +136,9 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
 		let out: Result<Value> =
-			crate::iam::signup::signup(self.kvs(), &mut session, params.into()).await.map(|v| v.token.into());
+			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
+				.await
+				.map(|v| v.token.into());
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -159,10 +161,11 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
-		let out: Result<Value> = crate::iam::signin::signin(self.kvs(), &mut session, params.into())
-			.await
-			// The default `signin` method just returns the token
-			.map(|v| v.token.into());
+		let out: Result<Value> =
+			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
+				.await
+				// The default `signin` method just returns the token
+				.map(|v| v.token.into());
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -803,7 +806,7 @@ pub trait RpcProtocolV1: RpcContext {
 			SqlValue::Object(v) => {
 				let mut v: crate::expr::Object = v.into();
 				Some(mrg! {v.0, self.session().parameters})
-			},
+			}
 			SqlValue::None | SqlValue::Null => Some(self.session().parameters.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};

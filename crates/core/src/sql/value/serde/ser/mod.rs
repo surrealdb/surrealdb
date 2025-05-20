@@ -167,7 +167,6 @@ impl TryFrom<(Cow<'static, str>, Content)> for SqlValue {
 	}
 }
 
-
 #[cfg(test)]
 mod tests {
 	use super::*;

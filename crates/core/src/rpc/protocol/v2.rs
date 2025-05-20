@@ -6,23 +6,23 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
-use crate::sql::Uuid;
 use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
 use crate::rpc::statement_options::StatementOptions;
+use crate::sql::Uuid;
 use crate::{
 	dbs::{QueryType, Response, capabilities::MethodTarget},
 	expr::Value,
+	rpc::args::Take,
 	sql::{
-		Array, Fields, Function, Model, Output, Query, Strand, SqlValue as SqlValue,
+		Array, Fields, Function, Model, Output, Query, SqlValue, Strand,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
 	},
-	rpc::args::Take,
 };
 use anyhow::Result;
 
@@ -132,7 +132,9 @@ pub trait RpcProtocolV2: RpcContext {
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
 		let out: Result<Value> =
-			crate::iam::signup::signup(self.kvs(), &mut session, params.into()).await.map(Value::from);
+			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
+				.await
+				.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -154,7 +156,9 @@ pub trait RpcProtocolV2: RpcContext {
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
 		let out: Result<Value> =
-			crate::iam::signin::signin(self.kvs(), &mut session, params.into()).await.map(Value::from);
+			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
+				.await
+				.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -769,7 +773,7 @@ pub trait RpcProtocolV2: RpcContext {
 			SqlValue::Object(v) => {
 				let mut v: crate::expr::Object = v.into();
 				Some(mrg! {v.0, self.session().parameters})
-			},
+			}
 			SqlValue::None | SqlValue::Null => Some(self.session().parameters.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};

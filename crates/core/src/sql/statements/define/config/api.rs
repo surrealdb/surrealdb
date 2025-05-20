@@ -6,7 +6,6 @@ use crate::sql::{Permission, SqlValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -65,7 +64,6 @@ impl Display for ApiConfig {
 		Ok(())
 	}
 }
-
 
 impl From<ApiConfig> for crate::expr::statements::define::config::api::ApiConfig {
 	fn from(v: ApiConfig) -> Self {

@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Subquery, SqlValue, statements::RelateStatement},
+	sql::{SqlValue, Subquery, statements::RelateStatement},
 	syn::{
 		parser::{
 			ParseResult, Parser,
@@ -34,7 +34,10 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_relation(&mut self, stk: &mut Stk) -> ParseResult<(SqlValue, SqlValue, SqlValue)> {
+	pub async fn parse_relation(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<(SqlValue, SqlValue, SqlValue)> {
 		let first = self.parse_relate_value(stk).await?;
 		let next = self.next();
 		let is_o = match next.kind {
@@ -101,7 +104,9 @@ impl Parser<'_> {
 			| t!("ALTER")
 			| t!("REMOVE")
 			| t!("REBUILD")
-			| t!("INFO") => self.parse_inner_subquery(ctx, None).await.map(|x| SqlValue::Subquery(Box::new(x))),
+			| t!("INFO") => {
+				self.parse_inner_subquery(ctx, None).await.map(|x| SqlValue::Subquery(Box::new(x)))
+			}
 			t!("IF") => {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_if_stmt(ctx))

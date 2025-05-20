@@ -62,7 +62,6 @@ impl TryFrom<&str> for Uuid {
 	}
 }
 
-
 impl From<Uuid> for crate::expr::Uuid {
 	fn from(v: Uuid) -> Self {
 		crate::expr::Uuid(v.0)

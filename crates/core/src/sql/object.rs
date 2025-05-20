@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{
-	Operation, Thing, SqlValue,
+	Operation, SqlValue, Thing,
 	escape::EscapeKey,
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
@@ -242,7 +242,6 @@ impl Object {
 impl Object {
 	/// Process this type returning a computed simple Value
 
-
 	/// Checks whether all object values are static values
 	pub(crate) fn is_static(&self) -> bool {
 		self.values().all(SqlValue::is_static)
@@ -321,7 +320,9 @@ mod no_nul_bytes_in_keys {
 		s.end()
 	}
 
-	pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<String, SqlValue>, D::Error>
+	pub(crate) fn deserialize<'de, D>(
+		deserializer: D,
+	) -> Result<BTreeMap<String, SqlValue>, D::Error>
 	where
 		D: Deserializer<'de>,
 	{

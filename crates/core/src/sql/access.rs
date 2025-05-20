@@ -1,6 +1,4 @@
-use crate::sql::{
-	Duration, Id, Ident, Thing, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes,
-};
+use crate::sql::{Duration, Id, Ident, Thing, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -35,7 +33,6 @@ impl Default for AccessDuration {
 		}
 	}
 }
-
 
 impl From<AccessDuration> for crate::expr::access::AccessDuration {
 	fn from(v: AccessDuration) -> Self {

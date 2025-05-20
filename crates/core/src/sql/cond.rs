@@ -1,4 +1,3 @@
-
 use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -23,7 +22,6 @@ impl fmt::Display for Cond {
 		write!(f, "WHERE {}", self.0)
 	}
 }
-
 
 impl From<Cond> for crate::expr::Cond {
 	fn from(v: Cond) -> Self {

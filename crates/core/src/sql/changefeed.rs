@@ -34,7 +34,6 @@ impl Default for ChangeFeed {
 	}
 }
 
-
 impl From<ChangeFeed> for crate::expr::ChangeFeed {
 	fn from(v: ChangeFeed) -> Self {
 		crate::expr::ChangeFeed {

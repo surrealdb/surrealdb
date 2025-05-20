@@ -16,7 +16,6 @@ use crate::dbs::{
 };
 use crate::err::Error;
 use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
-use crate::sql::Query;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -29,6 +28,7 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::sql::Query;
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
 #[allow(unused_imports)]

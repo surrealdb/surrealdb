@@ -17,7 +17,7 @@ use crate::syn::parser::enter_query_recursion;
 use crate::syn::token::{Glued, TokenKind, t};
 use crate::{
 	sql::{
-		Expression, Operator, Statement, Statements, SqlValue,
+		Expression, Operator, SqlValue, Statement, Statements,
 		statements::{
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
 			ForeachStatement, InfoStatement, OutputStatement, UseStatement,

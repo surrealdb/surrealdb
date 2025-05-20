@@ -12,7 +12,8 @@ use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
 use surrealdb_core::expr::{
-	self, LogicalPlan, LogicalPlans, Value as CoreValue, from_value as from_core_value, statements::*,
+	self, LogicalPlan, LogicalPlans, Value as CoreValue, from_value as from_core_value,
+	statements::*,
 };
 
 pub struct Query(pub(crate) ValidQuery);

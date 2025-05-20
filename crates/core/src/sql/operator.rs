@@ -1,5 +1,5 @@
-use crate::sql::index::Distance;
 use crate::idx::ft::MatchRef;
+use crate::sql::index::Distance;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -138,7 +138,6 @@ impl fmt::Display for Operator {
 		}
 	}
 }
-
 
 impl From<Operator> for crate::expr::Operator {
 	fn from(v: Operator) -> Self {

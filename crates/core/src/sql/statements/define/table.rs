@@ -6,13 +6,13 @@ use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
 
+use crate::iam::{Action, ResourceKind};
+use crate::kvs::Transaction;
 use crate::sql::{
-	Base, Ident, Output, Permissions, Strand, SqlValue, Values, View, changefeed::ChangeFeed,
+	Base, Ident, Output, Permissions, SqlValue, Strand, Values, View, changefeed::ChangeFeed,
 	statements::UpdateStatement,
 };
 use crate::sql::{Idiom, Kind, TableType};
-use crate::iam::{Action, ResourceKind};
-use crate::kvs::Transaction;
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -61,8 +61,6 @@ pub struct DefineTableStatement {
 }
 
 impl DefineTableStatement {
-
-
 	fn convert_cache_ts(&self, _revision: u16, _value: Uuid) -> Result<(), RevisionError> {
 		Ok(())
 	}
@@ -195,7 +193,6 @@ impl Display for DefineTableStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatement {
 	fn from(v: DefineTableStatement) -> Self {

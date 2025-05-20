@@ -1,5 +1,5 @@
-use surrealdb::sql::Thing;
 use surrealdb::sql::SqlValue;
+use surrealdb::sql::Thing;
 use surrealdb::sql::thing;
 use surrealdb::sql::value;
 

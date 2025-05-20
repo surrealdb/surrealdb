@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 
 use crate::sql::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Ident, Kind, Literal,
-	Number, Object, Range, Regex, Strand, Table, Thing, Uuid, SqlValue, array::Uniq as _,
+	Number, Object, Range, Regex, SqlValue, Strand, Table, Thing, Uuid, array::Uniq as _,
 	kind::HasKind, value::Null,
 };
 
@@ -495,7 +495,9 @@ impl Cast for Array {
 					value: Box::new(Range::from(range)),
 				})
 			}
-			SqlValue::Bytes(x) => Ok(Array(x.0.into_iter().map(|x| SqlValue::from(x as i64)).collect())),
+			SqlValue::Bytes(x) => {
+				Ok(Array(x.0.into_iter().map(|x| SqlValue::from(x as i64)).collect()))
+			}
 			_ => Err(CastError::InvalidKind {
 				from: v,
 				into: "array".into(),
@@ -744,7 +746,9 @@ impl SqlValue {
 
 	fn can_cast_to_array_len(&self, kind: &Kind, len: u64) -> bool {
 		match self {
-			SqlValue::Array(a) => a.len() as u64 == len && a.iter().all(|x| x.can_cast_to_kind(kind)),
+			SqlValue::Array(a) => {
+				a.len() as u64 == len && a.iter().all(|x| x.can_cast_to_kind(kind))
+			}
 			_ => false,
 		}
 	}

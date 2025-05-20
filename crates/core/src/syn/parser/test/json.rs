@@ -1,5 +1,5 @@
 use crate::{
-	sql::{Object, Strand, SqlValue},
+	sql::{Object, SqlValue, Strand},
 	syn::parser::mac::test_parse,
 };
 

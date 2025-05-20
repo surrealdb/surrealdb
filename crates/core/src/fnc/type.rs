@@ -8,7 +8,8 @@ use crate::expr::table::Table;
 use crate::expr::thing::Thing;
 use crate::expr::value::Value;
 use crate::expr::{
-	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Idiom, Kind, Number, Range, Strand, Uuid
+	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Idiom, Kind, Number,
+	Range, Strand, Uuid,
 };
 use crate::syn;
 use anyhow::{Result, bail, ensure};

@@ -16,7 +16,6 @@ pub struct GraphQLConfig {
 	pub functions: FunctionsConfig,
 }
 
-
 impl From<GraphQLConfig> for crate::expr::statements::define::config::graphql::GraphQLConfig {
 	fn from(v: GraphQLConfig) -> Self {
 		crate::expr::statements::define::config::graphql::GraphQLConfig {
@@ -46,7 +45,6 @@ pub enum TablesConfig {
 	Include(Vec<TableConfig>),
 	Exclude(Vec<TableConfig>),
 }
-
 
 impl From<TablesConfig> for crate::expr::statements::define::config::graphql::TablesConfig {
 	fn from(v: TablesConfig) -> Self {
@@ -81,7 +79,6 @@ impl From<crate::expr::statements::define::config::graphql::TablesConfig> for Ta
 pub struct TableConfig {
 	pub name: String,
 }
-
 
 impl From<TableConfig> for crate::expr::statements::define::config::graphql::TableConfig {
 	fn from(v: TableConfig) -> Self {
@@ -119,7 +116,6 @@ impl Display for GraphQLConfig {
 		Ok(())
 	}
 }
-
 
 impl From<FunctionsConfig> for crate::expr::statements::define::config::graphql::FunctionsConfig {
 	fn from(v: FunctionsConfig) -> Self {
@@ -238,11 +234,3 @@ impl Display for FunctionsConfig {
 		Ok(())
 	}
 }
-
-
-
-
-
-
-
-

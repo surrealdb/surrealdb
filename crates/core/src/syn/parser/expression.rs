@@ -158,7 +158,11 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_prefix_op(&mut self, ctx: &mut Stk, min_bp: BindingPower) -> ParseResult<SqlValue> {
+	async fn parse_prefix_op(
+		&mut self,
+		ctx: &mut Stk,
+		min_bp: BindingPower,
+	) -> ParseResult<SqlValue> {
 		let token = self.peek();
 		let operator = match token.kind {
 			t!("+") => {

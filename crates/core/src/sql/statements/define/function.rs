@@ -4,8 +4,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, SqlValue};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Block, Ident, Kind, Permission, SqlValue, Strand};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -64,7 +64,6 @@ impl fmt::Display for DefineFunctionStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionStatement {
 	fn from(v: DefineFunctionStatement) -> Self {

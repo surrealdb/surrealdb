@@ -1,10 +1,10 @@
-use crate::sql::Array;
-use crate::sql::Number;
 use crate::expr::Part;
 use crate::expr::Value;
 use crate::rpc::Method;
 use crate::rpc::RpcError;
 use crate::rpc::format::cbor::Cbor;
+use crate::sql::Array;
+use crate::sql::Number;
 use crate::sql::SqlValue;
 use std::sync::LazyLock;
 
@@ -31,7 +31,7 @@ impl TryFrom<Cbor> for Request {
 impl TryFrom<SqlValue> for Request {
 	type Error = RpcError;
 	fn try_from(val: SqlValue) -> Result<Self, RpcError> {
-		// Fetch the 'id' argument		
+		// Fetch the 'id' argument
 		let id = match val.get_field_value("id") {
 			v if v.is_none() => None,
 			v if v.is_null() => Some(v),

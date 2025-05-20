@@ -59,7 +59,8 @@ async fn script_function_simple() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(r#"[{ bio: "Line 1\nLine 2", id: person:test, scores: [66, 84, 73] }]"#);
+	let val =
+		SqlValue::parse(r#"[{ bio: "Line 1\nLine 2", id: person:test, scores: [66, 84, 73] }]"#);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

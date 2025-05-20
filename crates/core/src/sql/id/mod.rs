@@ -4,7 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Array, Number, Object, Strand, Thing, Uuid, SqlValue, escape::EscapeRid};
+use crate::sql::{Array, Number, Object, SqlValue, Strand, Thing, Uuid, escape::EscapeRid};
 use anyhow::Result;
 use nanoid::nanoid;
 use range::IdRange;
@@ -276,5 +276,4 @@ impl Display for Id {
 	}
 }
 
-impl Id {
-	}
+impl Id {}

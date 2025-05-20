@@ -1,4 +1,3 @@
-
 use crate::sql::{SqlValue, escape::EscapeIdent, strand::no_nul_bytes};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -23,7 +22,6 @@ impl From<&str> for Ident {
 		Self::from(String::from(v))
 	}
 }
-
 
 impl From<Ident> for crate::expr::Ident {
 	fn from(v: Ident) -> Self {
@@ -76,5 +74,3 @@ impl Display for Ident {
 		EscapeIdent(&self.0).fmt(f)
 	}
 }
-
-

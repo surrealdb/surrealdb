@@ -25,7 +25,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::expr::{
-	self, Object as CoreObject, LogicalPlan, Value as CoreValue, to_value as to_core_value,
+	self, LogicalPlan, Object as CoreObject, Value as CoreValue, to_value as to_core_value,
 };
 
 /// A query future

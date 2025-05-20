@@ -27,7 +27,10 @@ impl Parser<'_> {
 		Ok(Function::Custom(name, args))
 	}
 
-	pub(super) async fn parse_function_args(&mut self, ctx: &mut Stk) -> ParseResult<Vec<SqlValue>> {
+	pub(super) async fn parse_function_args(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<Vec<SqlValue>> {
 		let start = self.last_span();
 		let mut args = Vec::new();
 		loop {
@@ -154,7 +157,10 @@ mod test {
 		assert_eq!("string::is::numeric(NULL)", format!("{}", out));
 		assert_eq!(
 			out,
-			SqlValue::from(Function::Normal(String::from("string::is::numeric"), vec![SqlValue::Null]))
+			SqlValue::from(Function::Normal(
+				String::from("string::is::numeric"),
+				vec![SqlValue::Null]
+			))
 		);
 	}
 

@@ -29,7 +29,6 @@ impl fmt::Display for OutputStatement {
 	}
 }
 
-
 impl From<OutputStatement> for crate::expr::statements::OutputStatement {
 	fn from(v: OutputStatement) -> Self {
 		crate::expr::statements::OutputStatement {

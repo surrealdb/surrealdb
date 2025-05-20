@@ -1,11 +1,11 @@
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
 
-use crate::sql::{Number, SqlValue};
 use crate::fnc::util::math::vector::{
 	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
 	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
 };
+use crate::sql::{Number, SqlValue};
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,6 @@ pub enum Index {
 	#[revision(start = 2)]
 	Hnsw(HnswParams),
 }
-
 
 impl From<Index> for crate::expr::index::Index {
 	fn from(v: Index) -> Self {
@@ -77,7 +76,6 @@ pub struct SearchParams {
 	#[revision(start = 2)]
 	pub terms_cache: u32,
 }
-
 
 impl From<SearchParams> for crate::expr::index::SearchParams {
 	fn from(v: SearchParams) -> Self {
@@ -170,7 +168,6 @@ impl MTreeParams {
 	}
 }
 
-
 impl From<MTreeParams> for crate::expr::index::MTreeParams {
 	fn from(v: MTreeParams) -> Self {
 		crate::expr::index::MTreeParams {
@@ -255,7 +252,6 @@ impl HnswParams {
 	}
 }
 
-
 impl From<HnswParams> for crate::expr::index::HnswParams {
 	fn from(v: HnswParams) -> Self {
 		crate::expr::index::HnswParams {
@@ -288,7 +284,6 @@ impl From<crate::expr::index::HnswParams> for HnswParams {
 	}
 }
 
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -319,7 +314,6 @@ impl Display for Distance {
 		}
 	}
 }
-
 
 impl From<Distance> for crate::expr::index::Distance {
 	fn from(v: Distance) -> Self {
@@ -431,7 +425,6 @@ impl Display for Index {
 		}
 	}
 }
-
 
 impl From<VectorType> for crate::expr::index::VectorType {
 	fn from(v: VectorType) -> Self {

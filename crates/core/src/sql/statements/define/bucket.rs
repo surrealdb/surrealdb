@@ -1,9 +1,9 @@
 use crate::buc::{self, BucketConnectionKey};
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::{Base, FlowResultExt, Ident, Permission, Strand, SqlValue};
 use crate::iam::{Action, ResourceKind};
-use crate::{ctx::Context};
+use crate::sql::{Base, FlowResultExt, Ident, Permission, SqlValue, Strand};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -54,7 +54,6 @@ impl Display for DefineBucketStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineBucketStatement> for crate::expr::statements::define::DefineBucketStatement {
 	fn from(v: DefineBucketStatement) -> Self {
@@ -111,8 +110,6 @@ impl From<BucketDefinition> for DefineBucketStatement {
 		}
 	}
 }
-
-
 
 impl Display for BucketDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

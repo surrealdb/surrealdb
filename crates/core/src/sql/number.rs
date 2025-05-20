@@ -1,7 +1,7 @@
 use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
-use crate::sql::strand::Strand;
 use crate::fnc::util::math::ToFloat;
+use crate::sql::strand::Strand;
 use anyhow::{Result, bail};
 use revision::revisioned;
 use rust_decimal::prelude::*;
@@ -38,7 +38,6 @@ impl Default for Number {
 		Self::Int(0)
 	}
 }
-
 
 impl From<Number> for crate::expr::Number {
 	fn from(v: Number) -> Self {

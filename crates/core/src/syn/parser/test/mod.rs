@@ -1,5 +1,5 @@
 use crate::{
-	sql::{self, Id, Ident, Idiom, Part, Query, Statement, Statements, Thing, SqlValue},
+	sql::{self, Id, Ident, Idiom, Part, Query, SqlValue, Statement, Statements, Thing},
 	syn::parser::mac::test_parse,
 };
 
@@ -98,9 +98,9 @@ fn ident_is_field() {
 		test_parse!(parse_query, src).inspect_err(|e| eprintln!("{}", e.render_on(src))).unwrap();
 	assert_eq!(
 		field,
-		Query(Statements(vec![Statement::Value(SqlValue::Idiom(Idiom(vec![Part::Field(Ident(
-			"foo".to_string()
-		))])))]))
+		Query(Statements(vec![Statement::Value(SqlValue::Idiom(Idiom(vec![Part::Field(
+			Ident("foo".to_string())
+		)])))]))
 	);
 }
 

@@ -4,8 +4,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::define::DefineTableStatement;
 
-use crate::sql::{Base, Ident, Strand, SqlValue, Values};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Ident, SqlValue, Strand, Values};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -45,7 +45,6 @@ impl Display for DefineEventStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatement {
 	fn from(v: DefineEventStatement) -> Self {

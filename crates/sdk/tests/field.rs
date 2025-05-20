@@ -6,8 +6,8 @@ use helpers::new_ds;
 use helpers::with_enough_stack;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Thing;
 use surrealdb::sql::SqlValue;
+use surrealdb::sql::Thing;
 
 #[tokio::test]
 async fn field_definition_value_reference() -> Result<()> {

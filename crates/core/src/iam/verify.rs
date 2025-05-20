@@ -1,7 +1,7 @@
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
 use crate::expr::Thing;
+use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
 use crate::expr::{Algorithm, Value, statements::DefineUserStatement};
 use crate::iam::access::{authenticate_generic, authenticate_record};
 #[cfg(feature = "jwks")]

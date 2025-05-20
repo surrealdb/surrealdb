@@ -2,14 +2,14 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::fnc;
+use crate::iam::Action;
 use crate::sql::Permission;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::operator::BindingPower;
 use crate::sql::script::Script;
 use crate::sql::value::SqlValue;
-use crate::fnc;
-use crate::iam::Action;
 use anyhow::Result;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
@@ -222,7 +222,6 @@ impl fmt::Display for Function {
 		}
 	}
 }
-
 
 impl From<Function> for crate::expr::Function {
 	fn from(v: Function) -> Self {

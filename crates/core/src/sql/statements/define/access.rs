@@ -3,8 +3,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 
-use crate::sql::{AccessType, Base, Ident, Strand, SqlValue, access::AccessDuration};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{AccessType, Base, Ident, SqlValue, Strand, access::AccessDuration};
 use anyhow::{Result, bail};
 
 use rand::Rng;
@@ -111,8 +111,6 @@ impl Display for DefineAccessStatement {
 		Ok(())
 	}
 }
-
-
 
 impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatement {
 	fn from(v: DefineAccessStatement) -> Self {

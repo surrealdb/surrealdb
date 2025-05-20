@@ -26,7 +26,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
-	Object as CoreObject, Param, Query, LogicalPlan, Value as CoreValue,
+	LogicalPlan, Object as CoreObject, Param, Query, Value as CoreValue,
 	from_value as from_core_value, statements::OutputStatement,
 };
 use url::Url;

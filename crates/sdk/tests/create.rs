@@ -5,8 +5,8 @@ use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Role;
-use surrealdb::sql::Thing;
 use surrealdb::sql::SqlValue;
+use surrealdb::sql::Thing;
 
 #[tokio::test]
 async fn create_or_insert_with_permissions() -> Result<()> {

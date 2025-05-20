@@ -80,7 +80,6 @@ impl Display for RemoveStatement {
 	}
 }
 
-
 impl From<RemoveStatement> for crate::expr::statements::RemoveStatement {
 	fn from(v: RemoveStatement) -> Self {
 		match v {

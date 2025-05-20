@@ -41,8 +41,6 @@ impl Edges {
 		self.what = old.into();
 		Ok(())
 	}
-
-
 }
 
 impl fmt::Display for Edges {
@@ -54,7 +52,6 @@ impl fmt::Display for Edges {
 		}
 	}
 }
-
 
 impl From<Edges> for crate::expr::Edges {
 	fn from(v: Edges) -> Self {

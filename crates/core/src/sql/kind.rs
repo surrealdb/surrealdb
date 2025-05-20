@@ -5,7 +5,7 @@ use super::{
 };
 
 use crate::sql::{
-	Table, SqlValue,
+	SqlValue, Table,
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
@@ -298,7 +298,6 @@ impl Kind {
 	}
 }
 
-
 impl From<Kind> for crate::expr::Kind {
 	fn from(v: Kind) -> Self {
 		match v {
@@ -586,8 +585,6 @@ impl Display for Kind {
 	}
 }
 
-
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -847,7 +844,6 @@ impl Display for Literal {
 		}
 	}
 }
-
 
 impl From<Literal> for crate::expr::Literal {
 	fn from(v: Literal) -> Self {

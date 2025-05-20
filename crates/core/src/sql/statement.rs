@@ -150,7 +150,6 @@ impl Display for Statement {
 	}
 }
 
-
 impl From<Statement> for crate::expr::LogicalPlan {
 	fn from(v: Statement) -> Self {
 		match v {

@@ -189,8 +189,6 @@ impl Display for Idiom {
 	}
 }
 
-
-
 /// A trie structure for storing idioms.
 ///
 /// This is used for efficient searching and retrieval of idioms based on their path parts.

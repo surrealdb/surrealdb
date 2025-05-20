@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::{Base, Ident, SqlValue};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Ident, SqlValue};
 use anyhow::Result;
 
 use revision::revisioned;
@@ -29,7 +29,6 @@ impl Display for RemoveAnalyzerStatement {
 		Ok(())
 	}
 }
-
 
 impl From<RemoveAnalyzerStatement> for crate::expr::statements::RemoveAnalyzerStatement {
 	fn from(v: RemoveAnalyzerStatement) -> Self {

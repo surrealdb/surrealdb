@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 
-use crate::sql::{Base, Ident, Timeout, SqlValue};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Ident, SqlValue, Timeout};
 use anyhow::{Result, bail};
 
 use crate::key::database::sq::Sq;
@@ -41,7 +41,6 @@ impl Display for DefineSequenceStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineSequenceStatement> for crate::expr::statements::define::DefineSequenceStatement {
 	fn from(v: DefineSequenceStatement) -> Self {

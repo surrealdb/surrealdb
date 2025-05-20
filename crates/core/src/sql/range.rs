@@ -137,7 +137,6 @@ impl Range {
 	}
 }
 
-
 impl From<Range> for crate::expr::Range {
 	fn from(value: Range) -> Self {
 		crate::expr::Range {
@@ -292,7 +291,6 @@ impl Range {
 	}
 
 	/// Process this type returning a computed simple Value
-
 
 	/// Validate that a Range contains only computed Values
 	pub fn validate_computed(&self) -> Result<()> {

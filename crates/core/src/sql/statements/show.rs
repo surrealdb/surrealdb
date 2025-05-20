@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::sql::{Base, Datetime, Table, SqlValue};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Datetime, SqlValue, Table};
 use crate::vs::VersionStamp;
 use anyhow::Result;
 
@@ -31,7 +31,6 @@ impl ShowSince {
 		}
 	}
 }
-
 
 impl From<ShowSince> for crate::expr::statements::show::ShowSince {
 	fn from(v: ShowSince) -> Self {
@@ -81,7 +80,6 @@ impl fmt::Display for ShowStatement {
 		Ok(())
 	}
 }
-
 
 impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 	fn from(v: ShowStatement) -> Self {

@@ -54,7 +54,6 @@ impl FromIterator<SqlValue> for Array {
 	}
 }
 
-
 impl From<Array> for crate::expr::Array {
 	fn from(s: Array) -> Self {
 		Self(s.0.into_iter().map(Into::into).collect())
@@ -108,7 +107,6 @@ impl Array {
 }
 
 impl Array {
-
 	pub(crate) fn is_all_none_or_null(&self) -> bool {
 		self.0.iter().all(|v| v.is_none_or_null())
 	}
@@ -338,7 +336,10 @@ pub(crate) trait Matches<T> {
 
 impl Matches<Array> for Array {
 	fn matches(self, compare_val: SqlValue) -> Array {
-		self.iter().map(|arr_val| (arr_val == &compare_val).into()).collect::<Vec<SqlValue>>().into()
+		self.iter()
+			.map(|arr_val| (arr_val == &compare_val).into())
+			.collect::<Vec<SqlValue>>()
+			.into()
 	}
 }
 

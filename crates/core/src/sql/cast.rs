@@ -39,14 +39,13 @@ impl Cast {
 	pub(crate) fn is_static(&self) -> bool {
 		self.1.is_static()
 	}
-	}
+}
 
 impl fmt::Display for Cast {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "<{}> {}", self.0, self.1)
 	}
 }
-
 
 impl From<Cast> for crate::expr::Cast {
 	fn from(v: Cast) -> Self {

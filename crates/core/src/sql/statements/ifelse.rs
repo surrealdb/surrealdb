@@ -29,7 +29,6 @@ impl IfelseStatement {
 	}
 }
 
-
 impl From<IfelseStatement> for crate::expr::statements::IfelseStatement {
 	fn from(v: IfelseStatement) -> Self {
 		crate::expr::statements::IfelseStatement {
@@ -47,7 +46,6 @@ impl From<crate::expr::statements::IfelseStatement> for IfelseStatement {
 		}
 	}
 }
-
 
 impl Display for IfelseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

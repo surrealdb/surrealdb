@@ -7,11 +7,11 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::statements::DefineTableStatement;
 
-use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, SqlValue};
-use crate::sql::{Literal, Part};
-use crate::sql::{Relation, TableType};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
+use crate::sql::{Base, Ident, Idiom, Kind, Permissions, SqlValue, Strand};
+use crate::sql::{Literal, Part};
+use crate::sql::{Relation, TableType};
 use anyhow::{Result, bail, ensure};
 
 use revision::revisioned;
@@ -49,7 +49,6 @@ pub struct DefineFieldStatement {
 }
 
 impl DefineFieldStatement {
-
 	/// Get the correct reference type if needed.
 	pub(crate) async fn get_reference_kind(
 		&self,
@@ -146,7 +145,6 @@ impl Display for DefineFieldStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatement {
 	fn from(v: DefineFieldStatement) -> Self {

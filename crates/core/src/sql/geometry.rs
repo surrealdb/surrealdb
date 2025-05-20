@@ -450,7 +450,6 @@ impl FromIterator<Geometry> for geo::Geometry<f64> {
 	}
 }
 
-
 impl From<Geometry> for crate::expr::Geometry {
 	fn from(v: Geometry) -> Self {
 		match v {
@@ -480,7 +479,6 @@ impl From<crate::expr::Geometry> for Geometry {
 		}
 	}
 }
-
 
 impl Geometry {
 	// -----------------------------------

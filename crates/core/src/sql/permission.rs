@@ -121,7 +121,6 @@ impl Display for Permissions {
 	}
 }
 
-
 impl From<Permissions> for crate::expr::Permissions {
 	fn from(v: Permissions) -> Self {
 		crate::expr::Permissions {
@@ -203,7 +202,6 @@ impl Display for Permission {
 		}
 	}
 }
-
 
 impl From<Permission> for crate::expr::Permission {
 	fn from(v: Permission) -> Self {

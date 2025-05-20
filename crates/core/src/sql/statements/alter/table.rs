@@ -2,11 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{Base, ChangeFeed, Ident, Permissions, Strand, SqlValue};
+use crate::sql::{Base, ChangeFeed, Ident, Permissions, SqlValue, Strand};
 use crate::sql::{Kind, TableType};
-use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
 use reblessive::tree::Stk;

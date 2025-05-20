@@ -1,9 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Base, Ident, Timeout, SqlValue};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::sql::{Base, Ident, SqlValue, Timeout};
 use anyhow::Result;
 
 use crate::key::database::sq::Sq;
@@ -41,7 +41,6 @@ impl Display for AlterSequenceStatement {
 		Ok(())
 	}
 }
-
 
 impl From<AlterSequenceStatement> for crate::expr::statements::alter::AlterSequenceStatement {
 	fn from(v: AlterSequenceStatement) -> Self {

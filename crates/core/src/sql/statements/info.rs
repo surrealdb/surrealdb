@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Base, Ident, Object, SqlValue, Version};
 use crate::iam::Action;
 use crate::iam::ResourceKind;
+use crate::sql::{Base, Ident, Object, SqlValue, Version};
 use crate::sys::INFORMATION;
 use anyhow::Result;
 use anyhow::bail;
@@ -100,7 +100,6 @@ impl fmt::Display for InfoStatement {
 		}
 	}
 }
-
 
 impl From<InfoStatement> for crate::expr::statements::InfoStatement {
 	fn from(v: InfoStatement) -> Self {

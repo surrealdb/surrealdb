@@ -9,22 +9,18 @@ use serde_content::{Data, Expected, Unexpected};
 pub(super) fn to_value(content: Content) -> Result<SqlValue> {
 	match content {
 		Content::Struct(v) => match v.name.as_ref() {
-			sql::strand::TOKEN => {
-				sql::Strand::deserialize(Content::Struct(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
+			sql::strand::TOKEN => sql::Strand::deserialize(Content::Struct(v).into_deserializer())
+				.map(Into::into)
+				.map_err(Into::into),
 			sql::model::TOKEN => sql::Model::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
 			sql::query::TOKEN => sql::Query::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			sql::future::TOKEN => {
-				sql::Future::deserialize(Content::Struct(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
+			sql::future::TOKEN => sql::Future::deserialize(Content::Struct(v).into_deserializer())
+				.map(Into::into)
+				.map_err(Into::into),
 			sql::edges::TOKEN => sql::Edges::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
@@ -52,11 +48,9 @@ pub(super) fn to_value(content: Content) -> Result<SqlValue> {
 			sql::thing::TOKEN => sql::Thing::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			sql::object::TOKEN => {
-				sql::Object::deserialize(Content::Struct(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
+			sql::object::TOKEN => sql::Object::deserialize(Content::Struct(v).into_deserializer())
+				.map(Into::into)
+				.map_err(Into::into),
 			sql::array::TOKEN => sql::Array::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),

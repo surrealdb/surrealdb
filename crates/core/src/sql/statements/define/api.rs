@@ -1,11 +1,11 @@
 use crate::api::method::Method;
 use crate::api::path::Path;
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::fmt::{Fmt, pretty_indent};
-use crate::sql::{Base, FlowResultExt as _, Object, Strand, SqlValue};
 use crate::iam::{Action, ResourceKind};
-use crate::{ctx::Context};
+use crate::sql::fmt::{Fmt, pretty_indent};
+use crate::sql::{Base, FlowResultExt as _, Object, SqlValue, Strand};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -70,7 +70,6 @@ impl Display for DefineApiStatement {
 	}
 }
 
-
 impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
 	fn from(v: DefineApiStatement) -> Self {
 		crate::expr::statements::DefineApiStatement {
@@ -125,8 +124,6 @@ impl From<ApiDefinition> for DefineApiStatement {
 	}
 }
 
-
-
 impl Display for ApiDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let da: DefineApiStatement = self.clone().into();
@@ -156,7 +153,6 @@ impl Display for ApiAction {
 		Ok(())
 	}
 }
-
 
 impl From<ApiAction> for crate::expr::statements::define::ApiAction {
 	fn from(v: ApiAction) -> Self {

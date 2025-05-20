@@ -6,7 +6,7 @@ use crate::{
 	err::Error,
 	exe::try_join_all_buffered,
 	sql::{
-		FlowResultExt as _, Graph, Ident, Idiom, Number, Thing, SqlValue, fmt::Fmt,
+		FlowResultExt as _, Graph, Ident, Idiom, Number, SqlValue, Thing, fmt::Fmt,
 		strand::no_nul_bytes,
 	},
 };
@@ -116,7 +116,6 @@ impl From<&str> for Part {
 		}
 	}
 }
-
 
 impl From<Part> for crate::expr::Part {
 	fn from(v: Part) -> Self {
@@ -471,7 +470,6 @@ impl fmt::Display for DestructurePart {
 	}
 }
 
-
 impl From<DestructurePart> for crate::expr::part::DestructurePart {
 	fn from(v: DestructurePart) -> Self {
 		match v {
@@ -500,7 +498,6 @@ impl From<crate::expr::part::DestructurePart> for DestructurePart {
 		}
 	}
 }
-
 
 // ------------------------------
 

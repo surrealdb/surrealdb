@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::{Base, Ident, SqlValue};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Ident, SqlValue};
 use anyhow::Result;
 
 use revision::revisioned;
@@ -31,7 +31,6 @@ impl Display for RemoveNamespaceStatement {
 		Ok(())
 	}
 }
-
 
 impl From<RemoveNamespaceStatement> for crate::expr::statements::RemoveNamespaceStatement {
 	fn from(v: RemoveNamespaceStatement) -> Self {

@@ -99,8 +99,6 @@ impl Display for Block {
 	}
 }
 
-
-
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

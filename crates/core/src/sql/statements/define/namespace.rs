@@ -3,8 +3,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 
-use crate::sql::{Base, Ident, Strand, SqlValue};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Ident, SqlValue, Strand};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -41,7 +41,6 @@ impl Display for DefineNamespaceStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespaceStatement {
 	fn from(v: DefineNamespaceStatement) -> Self {

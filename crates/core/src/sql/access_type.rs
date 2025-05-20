@@ -24,7 +24,6 @@ pub enum AccessType {
 	Bearer(BearerAccess),
 }
 
-
 impl From<AccessType> for crate::expr::AccessType {
 	fn from(v: AccessType) -> Self {
 		match v {
@@ -44,7 +43,6 @@ impl From<crate::expr::AccessType> for AccessType {
 		}
 	}
 }
-
 
 // Allows retrieving the JWT configuration for any access type.
 pub trait Jwt {
@@ -100,8 +98,6 @@ impl Display for AccessType {
 		Ok(())
 	}
 }
-
-
 
 impl AccessType {
 	/// Returns whether or not the access method can issue non-token grants
@@ -242,7 +238,6 @@ impl Default for JwtAccessIssue {
 	}
 }
 
-
 impl From<JwtAccessIssue> for crate::expr::access_type::JwtAccessIssue {
 	fn from(v: JwtAccessIssue) -> Self {
 		Self {
@@ -278,7 +273,6 @@ impl Default for JwtAccessVerify {
 	}
 }
 
-
 impl From<JwtAccessVerify> for crate::expr::access_type::JwtAccessVerify {
 	fn from(v: JwtAccessVerify) -> Self {
 		match v {
@@ -296,7 +290,6 @@ impl From<crate::expr::access_type::JwtAccessVerify> for JwtAccessVerify {
 		}
 	}
 }
-
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
@@ -317,7 +310,6 @@ impl Default for JwtAccessVerifyKey {
 	}
 }
 
-
 impl From<JwtAccessVerifyKey> for crate::expr::access_type::JwtAccessVerifyKey {
 	fn from(v: JwtAccessVerifyKey) -> Self {
 		Self {
@@ -336,14 +328,12 @@ impl From<crate::expr::access_type::JwtAccessVerifyKey> for JwtAccessVerifyKey {
 	}
 }
 
-
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
-
 
 impl From<JwtAccessVerifyJwks> for crate::expr::access_type::JwtAccessVerifyJwks {
 	fn from(v: JwtAccessVerifyJwks) -> Self {
@@ -404,7 +394,6 @@ impl Jwt for RecordAccess {
 		&self.jwt
 	}
 }
-
 
 impl From<RecordAccess> for crate::expr::RecordAccess {
 	fn from(v: RecordAccess) -> Self {
@@ -503,7 +492,6 @@ impl FromStr for BearerAccessType {
 		}
 	}
 }
-
 
 impl From<BearerAccessType> for crate::expr::access_type::BearerAccessType {
 	fn from(v: BearerAccessType) -> Self {

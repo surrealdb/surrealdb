@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{Cond, Explain, FlowResultExt as _, Output, Timeout, SqlValue, Values, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
+use crate::sql::{Cond, Explain, FlowResultExt as _, Output, SqlValue, Timeout, Values, With};
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -57,7 +57,6 @@ impl fmt::Display for DeleteStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DeleteStatement> for crate::expr::statements::DeleteStatement {
 	fn from(v: DeleteStatement) -> Self {

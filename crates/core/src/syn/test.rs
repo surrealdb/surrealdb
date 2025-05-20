@@ -5,7 +5,7 @@ use super::lexer::Lexer;
 use super::parse;
 use super::parser::Parser;
 use crate::err::Error;
-use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, Thing, SqlValue};
+use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, SqlValue, Thing};
 use crate::syn::token::{TokenKind, t};
 
 impl Parse<Self> for SqlValue {

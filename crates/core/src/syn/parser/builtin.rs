@@ -536,7 +536,11 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<SqlValue> {
+	pub(super) async fn parse_builtin(
+		&mut self,
+		stk: &mut Stk,
+		start: Span,
+	) -> ParseResult<SqlValue> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let peek = self.peek();

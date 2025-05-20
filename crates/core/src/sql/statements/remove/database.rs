@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::sql::{Base, Ident, SqlValue};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, Ident, SqlValue};
 use anyhow::Result;
 
 use revision::revisioned;
@@ -31,7 +31,6 @@ impl Display for RemoveDatabaseStatement {
 		Ok(())
 	}
 }
-
 
 impl From<RemoveDatabaseStatement> for crate::expr::statements::RemoveDatabaseStatement {
 	fn from(v: RemoveDatabaseStatement) -> Self {

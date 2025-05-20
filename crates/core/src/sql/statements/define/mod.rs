@@ -131,7 +131,6 @@ impl Display for DefineStatement {
 	}
 }
 
-
 impl From<DefineStatement> for crate::expr::statements::DefineStatement {
 	fn from(v: DefineStatement) -> Self {
 		match v {

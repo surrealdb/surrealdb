@@ -1,4 +1,3 @@
-
 use crate::sql::{Kind, SqlValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -62,7 +61,6 @@ impl From<crate::expr::TableType> for TableType {
 		}
 	}
 }
-
 
 #[revisioned(revision = 2)]
 #[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]

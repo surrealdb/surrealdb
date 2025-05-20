@@ -55,7 +55,6 @@ impl From<&str> for Strand {
 	}
 }
 
-
 impl From<Strand> for crate::expr::Strand {
 	fn from(v: Strand) -> Self {
 		Self(v.0)

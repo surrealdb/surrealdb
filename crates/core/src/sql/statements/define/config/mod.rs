@@ -6,8 +6,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 
-use crate::sql::{Base, SqlValue};
 use crate::iam::{Action, ConfigKind, ResourceKind};
+use crate::sql::{Base, SqlValue};
 
 use anyhow::{Result, bail};
 use api::ApiConfig;
@@ -25,7 +25,6 @@ pub struct DefineConfigStatement {
 	pub if_not_exists: bool,
 	pub overwrite: bool,
 }
-
 
 impl From<DefineConfigStatement> for crate::expr::statements::define::DefineConfigStatement {
 	fn from(v: DefineConfigStatement) -> Self {
@@ -56,8 +55,7 @@ pub enum ConfigInner {
 	Api(ApiConfig),
 }
 
-impl DefineConfigStatement {
-	}
+impl DefineConfigStatement {}
 
 impl ConfigInner {
 	pub fn name(&self) -> String {
@@ -94,8 +92,6 @@ impl From<&ConfigInner> for ConfigKind {
 	}
 }
 
-
-
 impl Display for DefineConfigStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE CONFIG")?;
@@ -120,7 +116,6 @@ impl Display for ConfigInner {
 		}
 	}
 }
-
 
 impl From<ConfigInner> for crate::expr::statements::define::config::ConfigInner {
 	fn from(v: ConfigInner) -> Self {

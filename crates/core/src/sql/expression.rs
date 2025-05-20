@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::fnc;
 use crate::sql::operator::Operator;
 use crate::sql::value::SqlValue;
-use crate::fnc;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -85,8 +85,7 @@ impl Expression {
 			} => o,
 		}
 	}
-
-	}
+}
 
 impl fmt::Display for Expression {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

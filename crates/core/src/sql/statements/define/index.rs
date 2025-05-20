@@ -6,12 +6,12 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::DefineTableStatement;
 
+use crate::iam::{Action, ResourceKind};
 #[cfg(target_family = "wasm")]
 use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::sql::{Base, Ident, Idioms, Index, Part, Strand, SqlValue};
+use crate::sql::{Base, Ident, Idioms, Index, Part, SqlValue, Strand};
 #[cfg(target_family = "wasm")]
 use crate::sql::{Output, Values};
-use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -62,7 +62,6 @@ impl Display for DefineIndexStatement {
 	}
 }
 
-
 impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatement {
 	fn from(v: DefineIndexStatement) -> Self {
 		Self {
@@ -92,4 +91,3 @@ impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatemen
 		}
 	}
 }
-

@@ -4,8 +4,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
-use crate::sql::{Base, FlowResultExt as _, Ident, Permission, Strand, SqlValue};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Base, FlowResultExt as _, Ident, Permission, SqlValue, Strand};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -51,7 +51,6 @@ impl Display for DefineParamStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineParamStatement> for crate::expr::statements::DefineParamStatement {
 	fn from(v: DefineParamStatement) -> Self {

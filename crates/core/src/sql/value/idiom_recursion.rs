@@ -61,7 +61,8 @@ pub(crate) fn get_final(v: &SqlValue) -> SqlValue {
 
 pub(crate) fn clean_iteration(v: SqlValue) -> SqlValue {
 	if let SqlValue::Array(v) = v {
-		SqlValue::from(v.0.into_iter().filter(|v| !is_final(v)).collect::<Vec<SqlValue>>()).flatten()
+		SqlValue::from(v.0.into_iter().filter(|v| !is_final(v)).collect::<Vec<SqlValue>>())
+			.flatten()
 	} else {
 		v
 	}

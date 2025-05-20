@@ -2,11 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
 use crate::sql::reference::Reference;
 use crate::sql::statements::DefineTableStatement;
-use crate::sql::{Base, Ident, Permissions, Strand, SqlValue};
+use crate::sql::{Base, Ident, Permissions, SqlValue, Strand};
 use crate::sql::{Idiom, Kind};
-use crate::iam::{Action, ResourceKind};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -110,7 +110,6 @@ impl Display for AlterFieldStatement {
 		Ok(())
 	}
 }
-
 
 impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldStatement {
 	fn from(v: AlterFieldStatement) -> Self {

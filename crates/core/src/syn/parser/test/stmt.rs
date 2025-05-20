@@ -3,8 +3,8 @@ use crate::{
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Scoring, Split, Splits, Start, Statement, Strand, Subquery, Table,
-		TableType, Tables, Thing, Timeout, Uuid, SqlValue, Values, Version, With,
+		Permission, Permissions, Scoring, Split, Splits, SqlValue, Start, Statement, Strand,
+		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Values, Version, With,
 		access::AccessDuration,
 		access_type::{
 			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
@@ -2191,7 +2191,9 @@ pub fn parse_for() {
 				l: SqlValue::Subquery(Box::new(Subquery::Select(SelectStatement {
 					expr: Fields(
 						vec![Field::Single {
-							expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
+							expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident(
+								"foo".to_owned()
+							))])),
 							alias: None
 						}],
 						false
@@ -2329,7 +2331,10 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			),
 			omit: Some(Idioms(vec![Idiom(vec![Part::Field(Ident("bar".to_owned()))])])),
 			only: true,
-			what: Values(vec![SqlValue::Table(Table("a".to_owned())), SqlValue::Number(Number::Int(1))]),
+			what: Values(vec![
+				SqlValue::Table(Table("a".to_owned())),
+				SqlValue::Number(Number::Int(1))
+			]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(SqlValue::Bool(true))),
 			split: Some(Splits(vec![
@@ -2582,7 +2587,9 @@ fn parse_insert_select() {
 				SelectStatement {
 					expr: Fields(
 						vec![Field::Single {
-							expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("foo".to_string()))])),
+							expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident(
+								"foo".to_string()
+							))])),
 							alias: None
 						}],
 						false
@@ -2873,9 +2880,9 @@ fn parse_update() {
 		Statement::Update(UpdateStatement {
 			only: true,
 			what: Values(vec![
-				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(Strand(
-					"text".to_string()
-				)))])))),
+				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
+					Strand("text".to_string())
+				))])))),
 				SqlValue::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
@@ -2919,9 +2926,9 @@ fn parse_upsert() {
 		Statement::Upsert(UpsertStatement {
 			only: true,
 			what: Values(vec![
-				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(Strand(
-					"text".to_string()
-				)))])))),
+				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
+					Strand("text".to_string())
+				))])))),
 				SqlValue::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {

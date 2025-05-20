@@ -31,7 +31,6 @@ impl fmt::Display for Dir {
 	}
 }
 
-
 impl From<Dir> for crate::expr::Dir {
 	fn from(v: Dir) -> Self {
 		match v {

@@ -11,9 +11,7 @@ use crate::expr::ControlFlow;
 use crate::expr::FlowResult;
 use crate::expr::paths::DB;
 use crate::expr::paths::NS;
-use crate::sql::query::Query;
 use crate::expr::statement::LogicalPlan;
-use crate::sql::statements::{OptionStatement, UseStatement};
 use crate::expr::value::Value;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
@@ -21,7 +19,9 @@ use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
 use crate::sql::planner::SqlToLogical;
+use crate::sql::query::Query;
 use crate::sql::statement::Statement;
+use crate::sql::statements::{OptionStatement, UseStatement};
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
@@ -114,7 +114,6 @@ impl Executor {
 		txn: Arc<Transaction>,
 		plan: LogicalPlan,
 	) -> FlowResult<Value> {
-
 		let res = match plan {
 			LogicalPlan::Set(stm) => {
 				// Avoid moving in and out of the context via Arc::get_mut

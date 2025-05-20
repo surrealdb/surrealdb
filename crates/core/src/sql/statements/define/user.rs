@@ -3,10 +3,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 
-use crate::sql::{
-	Base, Duration, Ident, Strand, SqlValue, escape::QuoteStr, fmt::Fmt, user::UserDuration,
-};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{
+	Base, Duration, Ident, SqlValue, Strand, escape::QuoteStr, fmt::Fmt, user::UserDuration,
+};
 use anyhow::{Result, bail};
 use argon2::{
 	Argon2,
@@ -100,8 +100,7 @@ impl DefineUserStatement {
 	pub(crate) fn set_session_duration(&mut self, duration: Option<Duration>) {
 		self.duration.session = duration;
 	}
-
-	}
+}
 
 impl Display for DefineUserStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -148,7 +147,6 @@ impl Display for DefineUserStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement {
 	fn from(v: DefineUserStatement) -> Self {

@@ -53,7 +53,7 @@ use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::{
 	dbs::{Response, Session},
 	expr::{
-		Data, Field, Output, Query, LogicalPlan, Value as CoreValue,
+		Data, Field, LogicalPlan, Output, Query, Value as CoreValue,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
 			UpdateStatement, UpsertStatement,

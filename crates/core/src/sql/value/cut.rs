@@ -168,7 +168,8 @@ mod tests {
 		let mut val = SqlValue::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		);
-		let res = SqlValue::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }");
+		let res =
+			SqlValue::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }");
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}

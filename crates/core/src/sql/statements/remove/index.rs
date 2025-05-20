@@ -1,9 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::{Base, Ident, SqlValue};
-use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
 use revision::revisioned;

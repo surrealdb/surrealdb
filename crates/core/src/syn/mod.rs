@@ -5,8 +5,8 @@ use crate::{
 	dbs::{Capabilities, capabilities::ExperimentalTarget},
 	err::Error,
 	sql::{
-		Block, Datetime, Duration, Fetchs, Fields, Idiom, Kind, Output, Query, Range, Subquery,
-		Thing, SqlValue,
+		Block, Datetime, Duration, Fetchs, Fields, Idiom, Kind, Output, Query, Range, SqlValue,
+		Subquery, Thing,
 	},
 };
 

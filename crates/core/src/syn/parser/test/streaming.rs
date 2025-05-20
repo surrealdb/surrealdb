@@ -3,8 +3,8 @@ use crate::{
 		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Regex, Scoring, Script, Split, Splits, Start, Statement, Strand,
-		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, SqlValue, Values, Version, With,
+		Permission, Permissions, Regex, Scoring, Script, Split, Splits, SqlValue, Start, Statement,
+		Strand, Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Values, Version, With,
 		access::AccessDuration,
 		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
 		block::Entry,
@@ -450,7 +450,9 @@ fn statements() -> Vec<Statement> {
 				l: SqlValue::Subquery(Box::new(Subquery::Select(SelectStatement {
 					expr: Fields(
 						vec![Field::Single {
-							expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
+							expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident(
+								"foo".to_owned(),
+							))])),
 							alias: None,
 						}],
 						false,
@@ -509,7 +511,10 @@ fn statements() -> Vec<Statement> {
 			),
 			omit: Some(Idioms(vec![Idiom(vec![Part::Field(Ident("bar".to_owned()))])])),
 			only: true,
-			what: Values(vec![SqlValue::Table(Table("a".to_owned())), SqlValue::Number(Number::Int(1))]),
+			what: Values(vec![
+				SqlValue::Table(Table("a".to_owned())),
+				SqlValue::Number(Number::Int(1)),
+			]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(SqlValue::Bool(true))),
 			split: Some(Splits(vec![
@@ -672,9 +677,9 @@ fn statements() -> Vec<Statement> {
 		Statement::Update(UpdateStatement {
 			only: true,
 			what: Values(vec![
-				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(Strand(
-					"text".to_string(),
-				)))])))),
+				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
+					Strand("text".to_string()),
+				))])))),
 				SqlValue::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
@@ -706,9 +711,9 @@ fn statements() -> Vec<Statement> {
 		Statement::Upsert(UpsertStatement {
 			only: true,
 			what: Values(vec![
-				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(Strand(
-					"text".to_string(),
-				)))])))),
+				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
+					Strand("text".to_string()),
+				))])))),
 				SqlValue::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {

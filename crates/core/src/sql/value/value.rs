@@ -8,6 +8,7 @@ use crate::sql::id::range::IdRange;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 
+use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::{
 	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
 	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
@@ -17,7 +18,6 @@ use crate::sql::{
 	model::Model,
 };
 use crate::sql::{Closure, ControlFlow, FlowResult, Ident, Kind};
-use crate::fnc::util::string::fuzzy::Fuzzy;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -1011,7 +1011,6 @@ impl From<crate::expr::Value> for SqlValue {
 	}
 }
 
-
 // ------------------------------
 
 pub(crate) trait TryAdd<Rhs = Self> {
@@ -1581,7 +1580,8 @@ mod tests {
 		assert_eq!(8, enc.len());
 		let enc: Vec<u8> = revision::to_vec(&SqlValue::parse("{ hello: 'world' }")).unwrap();
 		assert_eq!(19, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&SqlValue::parse("{ compact: true, schema: 0 }")).unwrap();
+		let enc: Vec<u8> =
+			revision::to_vec(&SqlValue::parse("{ compact: true, schema: 0 }")).unwrap();
 		assert_eq!(27, enc.len());
 	}
 

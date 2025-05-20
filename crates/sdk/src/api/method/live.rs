@@ -23,7 +23,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::expr::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, LogicalPlan, Table,
+	Cond, Expression, Field, Fields, Ident, Idiom, LogicalPlan, Operator, Part, Table,
 	Value as CoreValue, statements::LiveStatement,
 };
 use uuid::Uuid;

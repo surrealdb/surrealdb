@@ -2,12 +2,12 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::iam::{Action, ResourceKind};
 use crate::sql::access_type::BearerAccessSubject;
 use crate::sql::{
-	AccessType, Array, Base, Cond, Datetime, Duration, FlowResultExt as _, Ident, Object, Strand,
-	Thing, Uuid, SqlValue,
+	AccessType, Array, Base, Cond, Datetime, Duration, FlowResultExt as _, Ident, Object, SqlValue,
+	Strand, Thing, Uuid,
 };
-use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;
@@ -39,7 +39,6 @@ pub enum AccessStatement {
 	Revoke(AccessStatementRevoke), // Revoke access grant.
 	Purge(AccessStatementPurge),   // Purge access grants.
 }
-
 
 impl From<AccessStatement> for crate::expr::statements::access::AccessStatement {
 	fn from(v: AccessStatement) -> Self {
@@ -73,7 +72,6 @@ pub struct AccessStatementGrant {
 	pub subject: Subject,
 }
 
-
 impl From<AccessStatementGrant> for crate::expr::statements::access::AccessStatementGrant {
 	fn from(v: AccessStatementGrant) -> Self {
 		Self {
@@ -104,7 +102,6 @@ pub struct AccessStatementShow {
 	pub gr: Option<Ident>,
 	pub cond: Option<Cond>,
 }
-
 
 impl From<AccessStatementShow> for crate::expr::statements::access::AccessStatementShow {
 	fn from(v: AccessStatementShow) -> Self {
@@ -138,7 +135,6 @@ pub struct AccessStatementRevoke {
 	pub gr: Option<Ident>,
 	pub cond: Option<Cond>,
 }
-
 
 impl From<AccessStatementRevoke> for crate::expr::statements::access::AccessStatementRevoke {
 	fn from(v: AccessStatementRevoke) -> Self {
@@ -174,7 +170,6 @@ pub struct AccessStatementPurge {
 	pub grace: Duration,
 }
 
-
 impl From<AccessStatementPurge> for crate::expr::statements::access::AccessStatementPurge {
 	fn from(v: AccessStatementPurge) -> Self {
 		Self {
@@ -198,7 +193,6 @@ impl From<crate::expr::statements::access::AccessStatementPurge> for AccessState
 		}
 	}
 }
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

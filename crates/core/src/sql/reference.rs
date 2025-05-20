@@ -10,7 +10,7 @@ use crate::{
 	err::Error,
 };
 
-use super::{Array, Idiom, Table, Thing, SqlValue, array::Uniq};
+use super::{Array, Idiom, SqlValue, Table, Thing, array::Uniq};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -41,7 +41,6 @@ impl From<crate::expr::reference::Reference> for Reference {
 		}
 	}
 }
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -111,7 +110,6 @@ impl From<crate::expr::reference::ReferenceDeleteStrategy> for ReferenceDeleteSt
 		}
 	}
 }
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]

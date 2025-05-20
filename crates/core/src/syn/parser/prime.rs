@@ -5,7 +5,7 @@ use super::{ParseResult, Parser, mac::pop_glued};
 use crate::{
 	sql::{
 		Array, Closure, Dir, Duration, Function, Geometry, Ident, Idiom, Kind, Mock, Number, Param,
-		Part, Script, Strand, Subquery, Table, SqlValue,
+		Part, Script, SqlValue, Strand, Subquery, Table,
 	},
 	syn::{
 		error::bail,
@@ -96,11 +96,15 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE")
 			| t!("REBUILD")
-			| t!("INFO") => self.parse_inner_subquery(ctx, None).await.map(|x| SqlValue::Subquery(Box::new(x))),
+			| t!("INFO") => {
+				self.parse_inner_subquery(ctx, None).await.map(|x| SqlValue::Subquery(Box::new(x)))
+			}
 			t!("fn") => {
 				self.pop_peek();
-				let value =
-					self.parse_custom_function(ctx).await.map(|x| SqlValue::Function(Box::new(x)))?;
+				let value = self
+					.parse_custom_function(ctx)
+					.await
+					.map(|x| SqlValue::Function(Box::new(x)))?;
 				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("ml") => {
@@ -325,9 +329,10 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE")
 			| t!("REBUILD")
-			| t!("INFO") => {
-				self.parse_inner_subquery(ctx, None).await.map(|x| SqlValue::Subquery(Box::new(x)))?
-			}
+			| t!("INFO") => self
+				.parse_inner_subquery(ctx, None)
+				.await
+				.map(|x| SqlValue::Subquery(Box::new(x)))?,
 			t!("fn") => {
 				self.pop_peek();
 				self.parse_custom_function(ctx).await.map(|x| SqlValue::Function(Box::new(x)))?
@@ -429,7 +434,11 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(super) async fn parse_closure(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<SqlValue> {
+	pub(super) async fn parse_closure(
+		&mut self,
+		ctx: &mut Stk,
+		start: Span,
+	) -> ParseResult<SqlValue> {
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!("|")) {
@@ -467,7 +476,8 @@ impl Parser<'_> {
 		let (returns, body) = if self.eat(t!("->")) {
 			let returns = Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?);
 			let start = expected!(self, t!("{")).span;
-			let body = SqlValue::Block(Box::new(ctx.run(|ctx| self.parse_block(ctx, start)).await?));
+			let body =
+				SqlValue::Block(Box::new(ctx.run(|ctx| self.parse_block(ctx, start)).await?));
 			(returns, body)
 		} else {
 			let body = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;

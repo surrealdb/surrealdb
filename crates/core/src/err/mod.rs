@@ -12,7 +12,6 @@ use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
 use core::fmt;
-use std::fmt::Display;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -21,6 +20,7 @@ use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
+use std::fmt::Display;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;

@@ -18,7 +18,6 @@ impl fmt::Display for Explain {
 	}
 }
 
-
 impl From<Explain> for crate::expr::Explain {
 	fn from(v: Explain) -> Self {
 		Self(v.0)

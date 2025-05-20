@@ -8,7 +8,7 @@ use crate::syn::error::bail;
 use crate::{
 	sql::{
 		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, Tables, Timeout, SqlValue, View,
+		Permission, Permissions, SqlValue, Tables, Timeout, View,
 		changefeed::ChangeFeed,
 		index::{Distance, VectorType},
 	},

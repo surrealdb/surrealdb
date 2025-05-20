@@ -3,8 +3,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 
-use crate::sql::{Array, Base, Ident, Strand, SqlValue, filter::Filter, tokenizer::Tokenizer};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{Array, Base, Ident, SqlValue, Strand, filter::Filter, tokenizer::Tokenizer};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -55,7 +55,6 @@ impl Display for DefineAnalyzerStatement {
 		Ok(())
 	}
 }
-
 
 impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerStatement {
 	fn from(v: DefineAnalyzerStatement) -> Self {

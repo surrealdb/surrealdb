@@ -77,7 +77,6 @@ impl fmt::Display for Algorithm {
 	}
 }
 
-
 impl From<Algorithm> for crate::expr::Algorithm {
 	fn from(v: Algorithm) -> Self {
 		match v {

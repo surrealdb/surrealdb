@@ -3,8 +3,8 @@ use crate::{
 	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
-	sql::{Permission, ident::Ident, value::SqlValue},
 	iam::Action,
+	sql::{Permission, ident::Ident, value::SqlValue},
 };
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -53,7 +53,6 @@ impl fmt::Display for Param {
 		write!(f, "${}", &self.0.0)
 	}
 }
-
 
 impl From<Param> for crate::expr::Param {
 	fn from(v: Param) -> Self {
