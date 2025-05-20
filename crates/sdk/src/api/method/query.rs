@@ -18,6 +18,7 @@ use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use surrealdb_core::sql::Statement;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
@@ -25,8 +26,9 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::expr::{
-	self, LogicalPlan, Object as CoreObject, Value as CoreValue, to_value as to_core_value,
+	Object as CoreObject, Value as CoreValue, to_value as to_core_value,
 };
+use surrealdb_core::sql;
 
 /// A query future
 #[derive(Debug)]
@@ -43,7 +45,7 @@ pub(crate) enum ValidQuery {
 		bindings: CoreObject,
 	},
 	Normal {
-		query: Vec<LogicalPlan>,
+		query: Vec<Statement>,
 		register_live_queries: bool,
 		bindings: CoreObject,
 	},
@@ -55,7 +57,7 @@ where
 {
 	pub(crate) fn normal(
 		client: Cow<'r, Surreal<C>>,
-		query: Vec<LogicalPlan>,
+		query: Vec<Statement>,
 		bindings: CoreObject,
 		register_live_queries: bool,
 	) -> Self {
@@ -133,12 +135,12 @@ where
 							.filter(|x| {
 								!matches!(
 									x,
-									LogicalPlan::Begin(_)
-										| LogicalPlan::Commit(_) | LogicalPlan::Cancel(_)
+									Statement::Begin(_)
+										| Statement::Commit(_) | Statement::Cancel(_)
 								)
 							})
 							.enumerate()
-							.filter(|(_, x)| matches!(x, LogicalPlan::Live(_)))
+							.filter(|(_, x)| matches!(x, Statement::Live(_)))
 							.map(|(i, _)| i)
 							.collect()
 					} else {
@@ -152,7 +154,7 @@ where
 						return Err(Error::LiveQueriesNotSupported.into());
 					}
 
-					let mut query = expr::Query::default();
+					let mut query = sql::Query::default();
 					query.0.0 = query_statements;
 
 					let mut response = router

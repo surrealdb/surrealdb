@@ -3,7 +3,7 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::{Data, FlowResultExt as _, Output, SqlValue, Timeout, Values, Version};
+use crate::sql::{Data, FlowResultExt as _, Output, SqlValue, Timeout, SqlValues, Version};
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -20,7 +20,7 @@ pub struct CreateStatement {
 	#[revision(start = 2)]
 	pub only: bool,
 	// Where we are creating (i.e. table, or record ID)
-	pub what: Values,
+	pub what: SqlValues,
 	// The data associated with the record being created
 	pub data: Option<Data>,
 	//  What the result of the statement should resemble (i.e. Diff or no result etc).

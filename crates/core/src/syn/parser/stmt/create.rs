@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Values, statements::CreateStatement},
+	sql::{SqlValues, statements::CreateStatement},
 	syn::{
 		parser::{ParseResult, Parser},
 		token::t,
@@ -14,7 +14,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 	) -> ParseResult<CreateStatement> {
 		let only = self.eat(t!("ONLY"));
-		let what = Values(self.parse_what_list(ctx).await?);
+		let what = SqlValues(self.parse_what_list(ctx).await?);
 		let data = self.try_parse_data(ctx).await?;
 		let output = self.try_parse_output(ctx).await?;
 		let version = self.try_parse_version(ctx).await?;

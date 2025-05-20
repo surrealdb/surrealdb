@@ -178,7 +178,7 @@ async fn router_handle_route(
 		} => {
 			effect = RequestEffect::Set {
 				key: key.clone(),
-				value: value.clone(),
+				value: value.clone().into(),
 			};
 		}
 		Command::Unset {
@@ -444,7 +444,7 @@ async fn router_reconnect(
 				for (key, value) in &state.vars {
 					let request = Command::Set {
 						key: key.as_str().into(),
-						value: value.clone(),
+						value: value.clone().into(),
 					}
 					.into_router_request(None)
 					.unwrap();

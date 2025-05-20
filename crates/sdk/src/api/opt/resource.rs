@@ -7,6 +7,7 @@ use surrealdb_core::expr::{
 	Edges as CoreEdges, Id as CoreId, IdRange as CoreIdRange, Table as CoreTable,
 	Thing as CoreThing,
 };
+use surrealdb_core::sql::Table as CoreSqlTable;
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_core::expr::Value as CoreValue;
@@ -26,6 +27,12 @@ where
 {
 	pub(crate) fn into_core(self) -> CoreTable {
 		let mut t = CoreTable::default();
+		t.0 = self.0.into();
+		t
+	}
+
+	pub(crate) fn into_core_sql(self) -> CoreSqlTable {
+		let mut t = CoreSqlTable::default();
 		t.0 = self.0.into();
 		t
 	}

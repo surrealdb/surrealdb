@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{
-	Cond, Data, Explain, FlowResultExt as _, Output, SqlValue, Timeout, Values, With,
+	Cond, Data, Explain, FlowResultExt as _, Output, SqlValue, Timeout, SqlValues, With,
 };
 use anyhow::{Result, ensure};
 
@@ -19,7 +19,7 @@ use std::fmt;
 #[non_exhaustive]
 pub struct UpsertStatement {
 	pub only: bool,
-	pub what: Values,
+	pub what: SqlValues,
 	#[revision(start = 2)]
 	pub with: Option<With>,
 	pub data: Option<Data>,

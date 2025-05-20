@@ -4,7 +4,7 @@ use crate::{
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
 		Permission, Permissions, Regex, Scoring, Script, Split, Splits, SqlValue, Start, Statement,
-		Strand, Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Values, Version, With,
+		Strand, Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, SqlValues, Version, With,
 		access::AccessDuration,
 		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
 		block::Entry,
@@ -142,7 +142,7 @@ fn statements() -> Vec<Statement> {
 		Statement::Continue(ContinueStatement),
 		Statement::Create(CreateStatement {
 			only: true,
-			what: Values(vec![SqlValue::Table(Table("foo".to_owned()))]),
+			what: SqlValues(vec![SqlValue::Table(Table("foo".to_owned()))]),
 			data: Some(Data::SetExpression(vec![
 				(
 					Idiom(vec![Part::Field(Ident("bar".to_owned()))]),
@@ -302,7 +302,7 @@ fn statements() -> Vec<Statement> {
 			name: Ident("event".to_owned()),
 			what: Ident("table".to_owned()),
 			when: SqlValue::Null,
-			then: Values(vec![SqlValue::Null, SqlValue::None]),
+			then: SqlValues(vec![SqlValue::Null, SqlValue::None]),
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
@@ -415,7 +415,7 @@ fn statements() -> Vec<Statement> {
 		})),
 		Statement::Delete(DeleteStatement {
 			only: true,
-			what: Values(vec![SqlValue::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
+			what: SqlValues(vec![SqlValue::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(SqlValue::Number(Number::Int(2)))),
 			output: Some(Output::After),
@@ -425,7 +425,7 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Delete(DeleteStatement {
 			only: true,
-			what: Values(vec![SqlValue::Idiom(Idiom(vec![
+			what: SqlValues(vec![SqlValue::Idiom(Idiom(vec![
 				Part::Start(SqlValue::Edges(Box::new(Edges {
 					dir: Dir::Out,
 					from: Thing {
@@ -457,7 +457,7 @@ fn statements() -> Vec<Statement> {
 						}],
 						false,
 					),
-					what: Values(vec![SqlValue::Table(Table("bar".to_owned()))]),
+					what: SqlValues(vec![SqlValue::Table(Table("bar".to_owned()))]),
 					..Default::default()
 				}))),
 				o: Operator::Mul,
@@ -511,7 +511,7 @@ fn statements() -> Vec<Statement> {
 			),
 			omit: Some(Idioms(vec![Idiom(vec![Part::Field(Ident("bar".to_owned()))])])),
 			only: true,
-			what: Values(vec![
+			what: SqlValues(vec![
 				SqlValue::Table(Table("a".to_owned())),
 				SqlValue::Number(Number::Int(1)),
 			]),
@@ -644,7 +644,7 @@ fn statements() -> Vec<Statement> {
 			])),
 			with: SqlValue::Subquery(Box::new(Subquery::Create(CreateStatement {
 				only: false,
-				what: Values(vec![SqlValue::Table(Table("foo".to_owned()))]),
+				what: SqlValues(vec![SqlValue::Table(Table("foo".to_owned()))]),
 				data: None,
 				output: None,
 				timeout: None,
@@ -676,7 +676,7 @@ fn statements() -> Vec<Statement> {
 		})),
 		Statement::Update(UpdateStatement {
 			only: true,
-			what: Values(vec![
+			what: SqlValues(vec![
 				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
 					Strand("text".to_string()),
 				))])))),
@@ -710,7 +710,7 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Upsert(UpsertStatement {
 			only: true,
-			what: Values(vec![
+			what: SqlValues(vec![
 				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
 					Strand("text".to_string()),
 				))])))),

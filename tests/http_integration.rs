@@ -1770,7 +1770,7 @@ mod http_integration {
 			let stmt: sql::Statement = {
 				let mut tmp = sql::statements::CreateStatement::default();
 				let rid = sql::thing("foo:42").unwrap();
-				let mut tmp_values = sql::Values::default();
+				let mut tmp_values = sql::SqlValues::default();
 				tmp_values.0 = vec![rid.into()];
 				tmp.what = tmp_values;
 				sql::Statement::Create(tmp)

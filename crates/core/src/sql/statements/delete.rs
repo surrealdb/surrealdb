@@ -3,7 +3,7 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::{Cond, Explain, FlowResultExt as _, Output, SqlValue, Timeout, Values, With};
+use crate::sql::{Cond, Explain, FlowResultExt as _, Output, SqlValue, Timeout, SqlValues, With};
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -18,7 +18,7 @@ use std::fmt;
 pub struct DeleteStatement {
 	#[revision(start = 2)]
 	pub only: bool,
-	pub what: Values,
+	pub what: SqlValues,
 	#[revision(start = 3)]
 	pub with: Option<With>,
 	pub cond: Option<Cond>,

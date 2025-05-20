@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::statements::define::DefineTableStatement;
 
 use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Ident, SqlValue, Strand, Values};
+use crate::sql::{Base, Ident, SqlValue, Strand, SqlValues};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -21,7 +21,7 @@ pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub when: SqlValue,
-	pub then: Values,
+	pub then: SqlValues,
 	pub comment: Option<Strand>,
 	#[revision(start = 2)]
 	pub if_not_exists: bool,

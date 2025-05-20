@@ -11,7 +11,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::sql::{Base, Ident, Idioms, Index, Part, SqlValue, Strand};
 #[cfg(target_family = "wasm")]
-use crate::sql::{Output, Values};
+use crate::sql::{Output, SqlValues};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;

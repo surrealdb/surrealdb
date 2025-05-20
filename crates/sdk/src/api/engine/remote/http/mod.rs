@@ -24,11 +24,13 @@ use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
+use surrealdb_core::sql::Statement;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
-	LogicalPlan, Object as CoreObject, Param, Query, Value as CoreValue,
-	from_value as from_core_value, statements::OutputStatement,
+	Object as CoreObject, Value as CoreValue,
 };
+use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue, from_value as from_core_value};
+use surrealdb_core::sql::statements::OutputStatement;
 use url::Url;
 
 #[cfg(not(target_family = "wasm"))]
@@ -403,10 +405,10 @@ async fn router(
 			value,
 		} => {
 			let mut output_stmt = OutputStatement::default();
-			output_stmt.what = CoreValue::Param(Param::from(key.clone()));
-			let query = Query::from(LogicalPlan::Output(output_stmt));
+			output_stmt.what = CoreSqlValue::Param(Param::from(key.clone()));
+			let query = Query::from(Statement::Output(output_stmt));
 			let mut variables = CoreObject::default();
-			variables.insert(key.clone(), value);
+			variables.insert(key.clone(), value.into());
 			let req = Command::Query {
 				query,
 				variables,

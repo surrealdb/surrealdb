@@ -16,7 +16,7 @@ use crate::syn::token::Token;
 use crate::{
 	sql::{
 		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType,
-		Values, access_type,
+		SqlValues, access_type,
 		base::Base,
 		filter::Filter,
 		index::{Distance, VectorType},
@@ -929,7 +929,7 @@ impl Parser<'_> {
 				}
 				t!("THEN") => {
 					self.pop_peek();
-					res.then = Values(vec![ctx.run(|ctx| self.parse_value_field(ctx)).await?]);
+					res.then = SqlValues(vec![ctx.run(|ctx| self.parse_value_field(ctx)).await?]);
 					while self.eat(t!(",")) {
 						res.then.0.push(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 					}

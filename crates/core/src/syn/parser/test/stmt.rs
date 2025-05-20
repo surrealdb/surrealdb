@@ -4,7 +4,7 @@ use crate::{
 		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
 		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
 		Permission, Permissions, Scoring, Split, Splits, SqlValue, Start, Statement, Strand,
-		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Values, Version, With,
+		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, SqlValues, Version, With,
 		access::AccessDuration,
 		access_type::{
 			AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess,
@@ -108,7 +108,7 @@ fn parse_create() {
 		res,
 		Statement::Create(CreateStatement {
 			only: true,
-			what: Values(vec![SqlValue::Table(Table("foo".to_owned()))]),
+			what: SqlValues(vec![SqlValue::Table(Table("foo".to_owned()))]),
 			data: Some(Data::SetExpression(vec![
 				(
 					Idiom(vec![Part::Field(Ident("bar".to_owned()))]),
@@ -1879,7 +1879,7 @@ fn parse_define_event() {
 			name: Ident("event".to_owned()),
 			what: Ident("table".to_owned()),
 			when: SqlValue::Null,
-			then: Values(vec![SqlValue::Null, SqlValue::None]),
+			then: SqlValues(vec![SqlValue::Null, SqlValue::None]),
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
@@ -2128,7 +2128,7 @@ fn parse_delete() {
 		res,
 		Statement::Delete(DeleteStatement {
 			only: true,
-			what: Values(vec![SqlValue::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
+			what: SqlValues(vec![SqlValue::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(SqlValue::Number(Number::Int(2)))),
 			output: Some(Output::After),
@@ -2151,7 +2151,7 @@ fn parse_delete_2() {
 		res,
 		Statement::Delete(DeleteStatement {
 			only: true,
-			what: Values(vec![SqlValue::Idiom(Idiom(vec![
+			what: SqlValues(vec![SqlValue::Idiom(Idiom(vec![
 				Part::Start(SqlValue::Edges(Box::new(Edges {
 					dir: Dir::Out,
 					from: Thing {
@@ -2198,7 +2198,7 @@ pub fn parse_for() {
 						}],
 						false
 					),
-					what: Values(vec![SqlValue::Table(Table("bar".to_owned()))]),
+					what: SqlValues(vec![SqlValue::Table(Table("bar".to_owned()))]),
 					..Default::default()
 				}))),
 				o: Operator::Mul,
@@ -2331,7 +2331,7 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			),
 			omit: Some(Idioms(vec![Idiom(vec![Part::Field(Ident("bar".to_owned()))])])),
 			only: true,
-			what: Values(vec![
+			what: SqlValues(vec![
 				SqlValue::Table(Table("a".to_owned())),
 				SqlValue::Number(Number::Int(1))
 			]),
@@ -2596,7 +2596,7 @@ fn parse_insert_select() {
 					),
 					omit: None,
 					only: false,
-					what: Values(vec![SqlValue::Table(Table("baz".to_string()))]),
+					what: SqlValues(vec![SqlValue::Table(Table("baz".to_string()))]),
 					with: None,
 					cond: None,
 					split: None,
@@ -2726,7 +2726,7 @@ fn parse_relate() {
 			])),
 			with: SqlValue::Subquery(Box::new(Subquery::Create(CreateStatement {
 				only: false,
-				what: Values(vec![SqlValue::Table(Table("foo".to_owned()))]),
+				what: SqlValues(vec![SqlValue::Table(Table("foo".to_owned()))]),
 				data: None,
 				output: None,
 				timeout: None,
@@ -2879,7 +2879,7 @@ fn parse_update() {
 		res,
 		Statement::Update(UpdateStatement {
 			only: true,
-			what: Values(vec![
+			what: SqlValues(vec![
 				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
 					Strand("text".to_string())
 				))])))),
@@ -2925,7 +2925,7 @@ fn parse_upsert() {
 		res,
 		Statement::Upsert(UpsertStatement {
 			only: true,
-			what: Values(vec![
+			what: SqlValues(vec![
 				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
 					Strand("text".to_string())
 				))])))),

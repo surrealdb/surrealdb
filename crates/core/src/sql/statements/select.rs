@@ -6,7 +6,7 @@ use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::FlowResultExt as _;
 use crate::sql::{
 	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, SqlValue, Start, Timeout,
-	Values, Version, With,
+	SqlValues, Version, With,
 	order::{OldOrders, Order, OrderList, Ordering},
 };
 use anyhow::{Result, ensure};
@@ -28,7 +28,7 @@ pub struct SelectStatement {
 	#[revision(start = 2)]
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
-	pub what: Values,
+	pub what: SqlValues,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,

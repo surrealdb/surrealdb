@@ -39,9 +39,9 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Values(pub Vec<SqlValue>);
+pub struct SqlValues(pub Vec<SqlValue>);
 
-impl<V> From<V> for Values
+impl<V> From<V> for SqlValues
 where
 	V: Into<Vec<SqlValue>>,
 {
@@ -50,14 +50,14 @@ where
 	}
 }
 
-impl Deref for Values {
+impl Deref for SqlValues {
 	type Target = Vec<SqlValue>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
-impl IntoIterator for Values {
+impl IntoIterator for SqlValues {
 	type Item = SqlValue;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
@@ -65,25 +65,25 @@ impl IntoIterator for Values {
 	}
 }
 
-impl Display for Values {
+impl Display for SqlValues {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 
-impl From<&Tables> for Values {
+impl From<&Tables> for SqlValues {
 	fn from(tables: &Tables) -> Self {
 		Self(tables.0.iter().map(|t| SqlValue::Table(t.clone())).collect())
 	}
 }
 
-impl From<Values> for crate::expr::Values {
-	fn from(v: Values) -> Self {
+impl From<SqlValues> for crate::expr::Values {
+	fn from(v: SqlValues) -> Self {
 		Self(v.0.into_iter().map(Into::into).collect())
 	}
 }
 
-impl From<crate::expr::Values> for Values {
+impl From<crate::expr::Values> for SqlValues {
 	fn from(v: crate::expr::Values) -> Self {
 		Self(v.0.into_iter().map(Into::into).collect())
 	}

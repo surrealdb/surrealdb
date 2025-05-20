@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		Field, Fields, Idioms, Limit, Order, Split, Splits, Start, Values, Version,
+		Field, Fields, Idioms, Limit, Order, Split, Splits, Start, SqlValues, Version,
 		order::{OrderList, Ordering},
 		statements::SelectStatement,
 	},
@@ -37,7 +37,7 @@ impl Parser<'_> {
 		while self.eat(t!(",")) {
 			what.push(stk.run(|ctx| self.parse_value_table(ctx)).await?);
 		}
-		let what = Values(what);
+		let what = SqlValues(what);
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(stk).await?;
