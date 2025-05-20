@@ -450,7 +450,6 @@ pub enum Action {
 	Create,
 	Update,
 	Delete,
-	Killed,
 }
 
 impl Action {
@@ -460,7 +459,6 @@ impl Action {
 			CoreAction::Create => Self::Create,
 			CoreAction::Update => Self::Update,
 			CoreAction::Delete => Self::Delete,
-			CoreAction::Killed => Self::Killed,
 			_ => panic!("unimplemented variant of action"),
 		}
 	}
@@ -477,18 +475,4 @@ pub struct Notification<R> {
 	pub query_id: Uuid,
 	pub action: Action,
 	pub data: R,
-}
-
-impl Notification<CoreValue> {
-	pub fn map_deserialize<R>(self) -> Result<Notification<R>>
-	where
-		R: DeserializeOwned,
-	{
-		let data = surrealdb_core::expr::from_value(self.data)?;
-		Ok(Notification {
-			query_id: self.query_id,
-			action: self.action,
-			data,
-		})
-	}
 }

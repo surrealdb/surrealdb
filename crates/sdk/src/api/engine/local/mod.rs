@@ -29,7 +29,6 @@ use crate::{
 	},
 	method::Stats,
 	opt::{IntoEndpoint, Table},
-	value::Notification,
 };
 #[cfg(not(target_family = "wasm"))]
 use anyhow::bail;
@@ -51,7 +50,7 @@ use surrealdb_core::expr::Function;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::{
-	dbs::{Response, Session},
+	dbs::{Notification, Response, Session},
 	expr::{
 		Data, Field, Output, Query, Statement, Value as CoreValue,
 		statements::{
@@ -99,7 +98,7 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-type LiveQueryMap = HashMap<Uuid, Sender<Notification<CoreValue>>>;
+type LiveQueryMap = HashMap<Uuid, Sender<Notification>>;
 
 /// In-memory database
 ///
