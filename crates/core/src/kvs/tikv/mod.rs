@@ -4,12 +4,12 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::kvs::Check;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::vs::VersionStamp;
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;

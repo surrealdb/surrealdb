@@ -10,7 +10,7 @@ use std::{
 	thread,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use process::SurrealProcess;
 use protocol::{ProxyObject, ProxyValue};
@@ -23,9 +23,9 @@ use crate::{
 	format::Progress,
 	temp_dir::TempDir,
 	tests::{
+		TestSet,
 		report::{TestGrade, TestReport, TestTaskResult},
 		set::TestId,
-		TestSet,
 	},
 };
 
@@ -207,7 +207,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		if let Some(DsVersion::Version(v)) =
 			all_versions.iter().find(|x| **x < DsVersion::Version(Version::new(2, 0, 0)))
 		{
-			bail!("Cannot run with backend surrealkv and version {v}, surrealkv was not yet available on this version")
+			bail!(
+				"Cannot run with backend surrealkv and version {v}, surrealkv was not yet available on this version"
+			)
 		}
 	}
 
@@ -249,31 +251,34 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	loop {
 		while join_set.len() < config.jobs as usize {
 			// Schedule new tasks.
-			if let Some(mut task) = task_iter.next() {
-				// find a port.
-				let port = reuse_port.pop().or_else(|| {
-					while let Some(x) = start_port.checked_add(1) {
-						start_port = x;
-						if is_port_available(x) {
-							return Some(x);
+			match task_iter.next() {
+				Some(mut task) => {
+					// find a port.
+					let port = reuse_port.pop().or_else(|| {
+						while let Some(x) = start_port.checked_add(1) {
+							start_port = x;
+							if is_port_available(x) {
+								return Some(x);
+							}
 						}
-					}
-					None
-				});
+						None
+					});
 
-				let Some(port) = port else {
-					// wait for some more ports to be available.
+					let Some(port) = port else {
+						// wait for some more ports to be available.
+						break;
+					};
+
+					task.port = port;
+
+					let id = task.id;
+					let name = task.name(&subset);
+					join_set.spawn(run_task(task, subset.clone(), config.clone()));
+					progress.start_item(id, &name).unwrap();
+				}
+				_ => {
 					break;
-				};
-
-				task.port = port;
-
-				let id = task.id;
-				let name = task.name(&subset);
-				join_set.spawn(run_task(task, subset.clone(), config.clone()));
-				progress.start_item(id, &name).unwrap();
-			} else {
-				break;
+				}
 			}
 		}
 
@@ -409,7 +414,7 @@ async fn run_imports(
 						return Ok(Some(TestTaskResult::Import(
 							import.path.clone().to_owned(),
 							format!("Failed to run import: {e:?}"),
-						)))
+						)));
 					}
 					Err(e) => {
 						return Ok(Some(TestTaskResult::Import(

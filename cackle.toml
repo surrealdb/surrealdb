@@ -902,6 +902,7 @@ allow_unsafe = true
 allow_apis = ["net"]
 
 [pkg.surreal]
+allow_unsafe = true
 allow_apis = ["fs", "net", "process"]
 build.allow_build_instructions = ["cargo:rustc-env=*"]
 

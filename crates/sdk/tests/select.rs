@@ -1,12 +1,12 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use helpers::{new_ds, Test};
-use surrealdb::sql::Number;
+use helpers::{Test, new_ds};
 use surrealdb::Result;
+use surrealdb::sql::Number;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::expr::Value;
 use surrealdb_core::iam::Role;
-use surrealdb_core::sql::Value;
 
 #[tokio::test]
 async fn select_field_value() -> Result<()> {
@@ -865,28 +865,116 @@ async fn select_with_function_field() -> Result<()> {
 async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true, "owner at root level should be able to select"),
-		((().into(), Role::Editor), ("NS", "DB"), true, "editor at root level should be able to select"),
-		((().into(), Role::Viewer), ("NS", "DB"), true, "viewer at root level should not be able to select"),
-
+		(
+			(().into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at root level should be able to select",
+		),
+		(
+			(().into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at root level should be able to select",
+		),
+		(
+			(().into(), Role::Viewer),
+			("NS", "DB"),
+			true,
+			"viewer at root level should not be able to select",
+		),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true, "owner at namespace level should be able to select on its namespace"),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at namespace level should not be able to select on another namespace"),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true, "editor at namespace level should be able to select on its namespace"),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at namespace level should not be able to select on another namespace"),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), true, "viewer at namespace level should not be able to select on its namespace"),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at namespace level should not be able to select on another namespace"),
-
+		(
+			(("NS",).into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at namespace level should be able to select on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at namespace level should not be able to select on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at namespace level should be able to select on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at namespace level should not be able to select on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("NS", "DB"),
+			true,
+			"viewer at namespace level should not be able to select on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to select on another namespace",
+		),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true, "owner at database level should be able to select on its database"),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false, "owner at database level should not be able to select on another database"),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at database level should not be able to select on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true, "editor at database level should be able to select on its database"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false, "editor at database level should not be able to select on another database"),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at database level should not be able to select on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), true, "viewer at database level should not be able to select on its database"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false, "viewer at database level should not be able to select on another database"),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at database level should not be able to select on another namespace even if the database name matches"),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at database level should be able to select on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "OTHER_DB"),
+			false,
+			"owner at database level should not be able to select on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at database level should not be able to select on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at database level should be able to select on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "OTHER_DB"),
+			false,
+			"editor at database level should not be able to select on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at database level should not be able to select on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "DB"),
+			true,
+			"viewer at database level should not be able to select on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "OTHER_DB"),
+			false,
+			"viewer at database level should not be able to select on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at database level should not be able to select on another namespace even if the database name matches",
+		),
 	];
 	let statement = "SELECT * FROM person";
 

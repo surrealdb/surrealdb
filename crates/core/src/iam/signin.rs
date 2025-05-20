@@ -5,18 +5,18 @@ use super::access::{
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Session;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::expr::statements::{AccessGrant, DefineAccessStatement, access};
+use crate::expr::{AccessType, Datetime, Object, Value, access_type};
+use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
-use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::sql::statements::{access, AccessGrant, DefineAccessStatement};
-use crate::sql::{access_type, AccessType, Datetime, Object, Value};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use chrono::Utc;
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use md5::Digest;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -227,7 +227,9 @@ pub async fn db_access(
 													if !kvs.get_capabilities().allows_experimental(
 														&ExperimentalTarget::BearerAccess,
 													) {
-														debug!("Will not create refresh token with disabled bearer access feature");
+														debug!(
+															"Will not create refresh token with disabled bearer access feature"
+														);
 														None
 													} else {
 														Some(
@@ -285,7 +287,9 @@ pub async fn db_access(
 									// If the SIGNIN clause failed due to an unexpected error, be more specific
 									// This allows clients to handle these errors, which may be retryable
 									Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
-										debug!("Unexpected error found while executing a SIGNIN clause: {e}");
+										debug!(
+											"Unexpected error found while executing a SIGNIN clause: {e}"
+										);
 										Err(anyhow::Error::new(Error::UnexpectedAuth))
 									}
 									// Otherwise, return a generic error unless it should be forwarded
@@ -369,7 +373,9 @@ pub async fn db_user(
 		}
 		// The password did not verify
 		Err(e) => {
-			debug!("Failed to verify signin credentials for user `{user}` in database `{ns}/{db}`: {e}");
+			debug!(
+				"Failed to verify signin credentials for user `{user}` in database `{ns}/{db}`: {e}"
+			);
 			Err(anyhow::Error::new(Error::InvalidAuth))
 		}
 	}
@@ -660,7 +666,9 @@ pub async fn signin_bearer(
 								.await?;
 						Some(refresh)
 					} else {
-						debug!("Invalid attempt to authenticate as a record without a namespace and database");
+						debug!(
+							"Invalid attempt to authenticate as a record without a namespace and database"
+						);
 						bail!(Error::InvalidAuth);
 					}
 				}
@@ -708,7 +716,9 @@ pub async fn signin_bearer(
 				if let (Some(ns), Some(db)) = (ns, db) {
 					Level::Record(ns, db, rid.to_string())
 				} else {
-					debug!("Invalid attempt to authenticate as a record without a namespace and database");
+					debug!(
+						"Invalid attempt to authenticate as a record without a namespace and database"
+					);
 					bail!(Error::InvalidAuth);
 				},
 			)));
@@ -787,7 +797,7 @@ mod tests {
 	use super::*;
 	use crate::{dbs::Capabilities, iam::Role};
 	use chrono::Duration;
-	use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 	use regex::Regex;
 	use std::collections::HashMap;
 
@@ -1974,21 +1984,22 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			match (res1, res2) {
-				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
-				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
-				(Err(e1), Ok(_)) => {
-					match e1.downcast().expect("Unexpected error kind") {
-						Error::InvalidAuth => {}
-						e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-					}
-
-				}
-				(Ok(_), Err(e2)) =>{
-					match e2.downcast().expect("Unexpected error kind") {
-						Error::InvalidAuth => {}
-						e => panic!("Unexpected error, expected InvalidAuth found {e}"),
-					}
-				}
+				(Ok(r1), Ok(r2)) => panic!(
+					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
+					r1, r2
+				),
+				(Err(e1), Err(e2)) => panic!(
+					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
+					e1, e2
+				),
+				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
+					Error::InvalidAuth => {}
+					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
+				},
+				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
+					Error::InvalidAuth => {}
+					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
+				},
 			}
 		}
 
@@ -2055,21 +2066,22 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			match (res1, res2) {
-				(Ok(r1), Ok(r2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", r1, r2),
-				(Err(e1), Err(e2)) => panic!("Expected authentication to fail in one instance, but instead received: {:?} and {:?}", e1, e2),
-				(Err(e1), Ok(_)) => {
-					match e1.downcast().expect("Unexpected error kind") {
-						Error::InvalidAuth => {}
-						e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
-					}
-
-				}
-				(Ok(_), Err(e2)) =>{
-					match e2.downcast().expect("Unexpected error kind") {
-						Error::InvalidAuth => {}
-						e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
-					}
-				}
+				(Ok(r1), Ok(r2)) => panic!(
+					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
+					r1, r2
+				),
+				(Err(e1), Err(e2)) => panic!(
+					"Expected authentication to fail in one instance, but instead received: {:?} and {:?}",
+					e1, e2
+				),
+				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
+					Error::InvalidAuth => {}
+					e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
+				},
+				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
+					Error::InvalidAuth => {}
+					e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
+				},
 			}
 		}
 	}
@@ -4073,12 +4085,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 	#[tokio::test]
 	async fn test_signin_nonexistent_role() {
-		use crate::iam::Error as IamError;
-		use crate::sql::{
-			statements::{define::DefineStatement, DefineUserStatement},
-			user::UserDuration,
+		use crate::expr::{
 			Base, Statement,
+			statements::{DefineUserStatement, define::DefineStatement},
+			user::UserDuration,
 		};
+		use crate::iam::Error as IamError;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",

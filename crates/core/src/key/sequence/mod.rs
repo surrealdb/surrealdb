@@ -2,7 +2,7 @@
 pub mod ba;
 pub mod st;
 
-use crate::kvs::{impl_key, KeyEncode};
+use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 

@@ -3,23 +3,23 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::array::Array;
-use crate::sql::array::Clump;
-use crate::sql::array::Combine;
-use crate::sql::array::Complement;
-use crate::sql::array::Difference;
-use crate::sql::array::Flatten;
-use crate::sql::array::Intersect;
-use crate::sql::array::Matches;
-use crate::sql::array::Transpose;
-use crate::sql::array::Union;
-use crate::sql::array::Uniq;
-use crate::sql::array::Windows;
-use crate::sql::value::Value;
-use crate::sql::Closure;
-use crate::sql::FlowResultExt as _;
-use crate::sql::Function;
-use anyhow::{bail, ensure, Result};
+use crate::expr::Closure;
+use crate::expr::FlowResultExt as _;
+use crate::expr::Function;
+use crate::expr::array::Array;
+use crate::expr::array::Clump;
+use crate::expr::array::Combine;
+use crate::expr::array::Complement;
+use crate::expr::array::Difference;
+use crate::expr::array::Flatten;
+use crate::expr::array::Intersect;
+use crate::expr::array::Matches;
+use crate::expr::array::Transpose;
+use crate::expr::array::Union;
+use crate::expr::array::Uniq;
+use crate::expr::array::Windows;
+use crate::expr::value::Value;
+use anyhow::{Result, bail, ensure};
 use rand::prelude::SliceRandom;
 use reblessive::tree::Stk;
 use std::cmp::Ordering;
@@ -757,8 +757,8 @@ pub fn windows((array, window_size): (Array, i64)) -> Result<Value> {
 
 pub mod sort {
 
-	use crate::sql::array::Array;
-	use crate::sql::value::Value;
+	use crate::expr::array::Array;
+	use crate::expr::value::Value;
 	use anyhow::Result;
 
 	pub fn asc((mut array,): (Array,)) -> Result<Value> {
@@ -776,8 +776,8 @@ pub mod sort {
 mod tests {
 	use super::{at, first, join, last, slice};
 	use crate::{
+		expr::{Array, Value},
 		fnc::args::Optional,
-		sql::{Array, Value},
 	};
 
 	#[test]

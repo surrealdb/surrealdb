@@ -4,10 +4,10 @@ mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
 use helpers::skip_ok;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use surrealdb::Result;
-use surrealdb_core::sql::Thing;
+use surrealdb_core::expr::Thing;
 
 #[tokio::test]
 async fn select_aggregate() -> Result<()> {

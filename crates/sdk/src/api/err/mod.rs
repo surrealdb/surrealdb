@@ -1,4 +1,4 @@
-use crate::{api::Response, Value};
+use crate::{Value, api::Response};
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
@@ -62,7 +62,9 @@ pub enum Error {
 	RangeOnUnspecified,
 
 	/// Tried to use `table:id` syntax as a method parameter when `(table, id)` should be used instead
-	#[error("Table name `{table}` contained a colon (:), this is dissallowed to avoid confusion with record-id's try `Table(\"{table}\")` instead.")]
+	#[error(
+		"Table name `{table}` contained a colon (:), this is dissallowed to avoid confusion with record-id's try `Table(\"{table}\")` instead."
+	)]
 	TableColonId {
 		table: String,
 	},
@@ -155,14 +157,18 @@ pub enum Error {
 	BackupsNotSupported,
 
 	/// The version of the server is not compatible with the versions supported by this SDK
-	#[error("server version `{server_version}` does not match the range supported by the client `{supported_versions}`")]
+	#[error(
+		"server version `{server_version}` does not match the range supported by the client `{supported_versions}`"
+	)]
 	VersionMismatch {
 		server_version: semver::Version,
 		supported_versions: String,
 	},
 
 	/// The build metadata of the server is older than the minimum supported by this SDK
-	#[error("server build `{server_metadata}` is older than the minimum supported build `{supported_metadata}`")]
+	#[error(
+		"server build `{server_metadata}` is older than the minimum supported build `{supported_metadata}`"
+	)]
 	BuildMetadataMismatch {
 		server_metadata: semver::BuildMetadata,
 		supported_metadata: semver::BuildMetadata,
@@ -241,7 +247,9 @@ pub enum Error {
 	Deserializer(String),
 
 	/// Tried to convert an value which contained something like for example a query or future.
-	#[error("tried to convert from a value which contained non-primitive values to a value which only allows primitive values.")]
+	#[error(
+		"tried to convert from a value which contained non-primitive values to a value which only allows primitive values."
+	)]
 	RecievedInvalidValue,
 
 	/// The engine used does not support data versioning

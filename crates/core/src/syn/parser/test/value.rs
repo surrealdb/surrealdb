@@ -4,11 +4,11 @@ use reblessive::Stack;
 use rust_decimal::Decimal;
 
 use crate::{
-	sql::{
+	expr::{
 		Array, Constant, Expression, Geometry, Id, Ident, Idiom, Number, Object, Operator, Part,
 		Query, Statement, Statements, Strand, Thing, Value,
 	},
-	syn::parser::{mac::test_parse, Parser, ParserSettings},
+	syn::parser::{Parser, ParserSettings, mac::test_parse},
 };
 
 #[test]
@@ -88,7 +88,7 @@ fn parse_large_depth_object() {
 	};
 	let mut object = object;
 	for _ in 0..999 {
-		let Some(Value::Object(ref new_object)) = object.get("foo") else {
+		let Some(Value::Object(new_object)) = object.get("foo") else {
 			panic!()
 		};
 		object = new_object

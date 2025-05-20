@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::{
 	dbs::Capabilities,
-	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, Start, Timeout, Value, Version},
+	expr::{Cond, Data, Fetchs, Fields, Limit, Number, Output, Start, Timeout, Value, Version},
 	syn::{
 		fetchs_with_capabilities, fields_with_capabilities, output_with_capabilities,
 		value_with_capabilities,

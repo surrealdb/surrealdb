@@ -5,7 +5,7 @@ use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use anyhow::Result;
-use revision::{revisioned, Revisioned};
+use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
@@ -244,8 +244,8 @@ impl Resolved {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::docids::{DocIds, Resolved};
 	use crate::idx::IndexKeyBase;
+	use crate::idx::docids::{DocIds, Resolved};
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 

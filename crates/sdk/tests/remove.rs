@@ -8,10 +8,10 @@ use helpers::*;
 mod util;
 
 use std::collections::HashMap;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::iam::Role;
 use surrealdb::sql::Value;
-use surrealdb::Result;
 
 #[tokio::test]
 async fn remove_statement_table() -> Result<()> {
@@ -494,9 +494,13 @@ async fn permissions_checks_remove_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -536,9 +540,13 @@ async fn permissions_checks_remove_analyzer() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -620,8 +628,10 @@ async fn permissions_checks_remove_ns_access() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }"],
-    ];
+		vec![
+			"{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -661,9 +671,13 @@ async fn permissions_checks_remove_db_access() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -745,8 +759,10 @@ async fn permissions_checks_remove_ns_user() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
-    ];
+		vec![
+			"{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -786,9 +802,13 @@ async fn permissions_checks_remove_db_user() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }"],
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -828,9 +848,13 @@ async fn permissions_checks_remove_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, sequences: {  }, tables: {  }, users: {  } }"],
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -870,9 +894,13 @@ async fn permissions_checks_remove_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -913,8 +941,10 @@ async fn permissions_checks_remove_event() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
-        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
-    ];
+		vec![
+			"{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -955,8 +985,10 @@ async fn permissions_checks_remove_field() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
-        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"],
-    ];
+		vec![
+			"{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -997,8 +1029,10 @@ async fn permissions_checks_remove_index() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
-        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
-    ];
+		vec![
+			"{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level

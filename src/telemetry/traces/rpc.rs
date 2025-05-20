@@ -1,4 +1,4 @@
-use tracing::{field, Span};
+use tracing::{Span, field};
 use uuid::Uuid;
 
 pub fn span_for_request(ws_id: &Uuid) -> Span {

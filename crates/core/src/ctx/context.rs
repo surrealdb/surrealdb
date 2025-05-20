@@ -7,25 +7,25 @@ use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
+use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache::ds::DatastoreCache;
-use crate::kvs::sequences::Sequences;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
+use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
-use crate::sql::value::Value;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use async_channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use trice::Instant;
 #[cfg(feature = "http")]

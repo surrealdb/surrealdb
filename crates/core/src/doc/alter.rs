@@ -5,14 +5,14 @@ use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
-use crate::sql::data::Data;
-use crate::sql::operator::Operator;
-use crate::sql::paths::EDGE;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
-use crate::sql::value::Value;
-use crate::sql::FlowResultExt;
-use anyhow::{bail, ensure, Result};
+use crate::expr::FlowResultExt;
+use crate::expr::data::Data;
+use crate::expr::operator::Operator;
+use crate::expr::paths::EDGE;
+use crate::expr::paths::IN;
+use crate::expr::paths::OUT;
+use crate::expr::value::Value;
+use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -30,7 +30,7 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<()> {
 		// Check if we need to generate a record id
-		if let Some(tb) = &self.gen {
+		if let Some(tb) = &self.r#gen {
 			// This is a CREATE, UPSERT, UPDATE statement
 			if let Workable::Normal = &self.extras {
 				// Fetch the record id if specified

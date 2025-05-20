@@ -1,7 +1,7 @@
-use crate::{error::Api as ApiError, Result};
+use crate::{Result, error::Api as ApiError};
 use chrono::{DateTime, Utc};
 use revision::revisioned;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
 	cmp::{Ordering, PartialEq, PartialOrd},
 	fmt,
@@ -10,7 +10,7 @@ use std::{
 };
 use surrealdb_core::{
 	dbs::Action as CoreAction,
-	sql::{
+	expr::{
 		Array as CoreArray, Datetime as CoreDatetime, Id as CoreId, Number as CoreNumber,
 		Thing as CoreThing, Value as CoreValue,
 	},
@@ -22,11 +22,11 @@ mod obj;
 pub use obj::{IntoIter, Iter, IterMut, Object};
 
 pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
-	surrealdb_core::sql::from_value(value.0)
+	surrealdb_core::expr::from_value(value.0)
 }
 
 pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value> {
-	Ok(Value(surrealdb_core::sql::to_value(value)?))
+	Ok(Value(surrealdb_core::expr::to_value(value)?))
 }
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
@@ -233,7 +233,10 @@ pub struct RecordIdKeyFromValueError(());
 
 impl fmt::Display for RecordIdKeyFromValueError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		writeln!(f,"tried to convert a value to a record id key with a value type that is not allowed in a record id key")
+		writeln!(
+			f,
+			"tried to convert a value to a record id key with a value type that is not allowed in a record id key"
+		)
 	}
 }
 
@@ -447,7 +450,6 @@ pub enum Action {
 	Create,
 	Update,
 	Delete,
-	Killed,
 }
 
 impl Action {
@@ -457,7 +459,6 @@ impl Action {
 			CoreAction::Create => Self::Create,
 			CoreAction::Update => Self::Update,
 			CoreAction::Delete => Self::Delete,
-			CoreAction::Killed => Self::Killed,
 			_ => panic!("unimplemented variant of action"),
 		}
 	}
@@ -474,18 +475,4 @@ pub struct Notification<R> {
 	pub query_id: Uuid,
 	pub action: Action,
 	pub data: R,
-}
-
-impl Notification<CoreValue> {
-	pub fn map_deserialize<R>(self) -> Result<Notification<R>>
-	where
-		R: DeserializeOwned,
-	{
-		let data = surrealdb_core::sql::from_value(self.data)?;
-		Ok(Notification {
-			query_id: self.query_id,
-			action: self.action,
-			data,
-		})
-	}
 }

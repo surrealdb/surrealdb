@@ -1,8 +1,8 @@
 use std::{cmp::Ordering, fmt::Write, ops::Range};
 
-use crate::tests::{report::TestOutputs, ConfigKind, TestSet};
+use crate::tests::{ConfigKind, TestSet, report::TestOutputs};
 use anyhow::Result;
-use surrealdb_core::sql::Value as SurValue;
+use surrealdb_core::expr::Value as SurValue;
 use tokio::{fs, io::AsyncWriteExt};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 

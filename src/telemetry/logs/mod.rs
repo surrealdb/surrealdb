@@ -3,9 +3,9 @@ use anyhow::Result;
 use tracing::Level;
 use tracing::Subscriber;
 use tracing_appender::non_blocking::NonBlocking;
+use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
-use tracing_subscriber::Layer;
 
 pub fn new<S>(
 	filter: CustomEnvFilter,

@@ -1,13 +1,13 @@
 use crate::err::Error;
+use crate::expr::{Object, Value};
+use crate::idx::VersionedStore;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
-use crate::idx::VersionedStore;
 use crate::kvs::{Key, Transaction, Val};
-use crate::sql::{Object, Value};
 #[cfg(debug_assertions)]
 use ahash::HashSet;
-use anyhow::{bail, Result};
-use revision::{revisioned, Revisioned};
+use anyhow::{Result, bail};
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
@@ -770,7 +770,9 @@ where
 				} else {
 					// CLRS 3b successor
 					#[cfg(debug_assertions)]
-					debug!("CLRS: 3b merge - keys: {keys} - xci_child: {child_stored_node} - right_sibling_child: {right_child_stored_node}");
+					debug!(
+						"CLRS: 3b merge - keys: {keys} - xci_child: {child_stored_node} - right_sibling_child: {right_child_stored_node}"
+					);
 					Self::merge_nodes(
 						store,
 						keys,
@@ -791,7 +793,9 @@ where
 				let left_child_stored_node = store.get_node_mut(tx, children[child_idx]).await?;
 				return if left_child_stored_node.n.keys().len() >= self.state.minimum_degree {
 					#[cfg(debug_assertions)]
-					debug!("CLRS: 3a - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}",);
+					debug!(
+						"CLRS: 3a - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}",
+					);
 					Self::delete_adjust_predecessor(
 						store,
 						keys,
@@ -805,7 +809,9 @@ where
 				} else {
 					// CLRS 3b predecessor
 					#[cfg(debug_assertions)]
-					debug!("CLRS: 3b merge - keys: {keys} - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}");
+					debug!(
+						"CLRS: 3b merge - keys: {keys} - left_sibling_child: {left_child_stored_node} - xci_child: {child_stored_node}"
+					);
 					Self::merge_nodes(
 						store,
 						keys,
@@ -997,12 +1003,12 @@ where
 
 #[cfg(test)]
 mod tests {
+	use crate::idx::VersionedStore;
 	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::trees::btree::{
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
-	use crate::idx::VersionedStore;
 	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
 	use anyhow::Result;
 	use rand::prelude::SliceRandom;
@@ -1510,7 +1516,7 @@ mod tests {
 		t: &mut BTree<BK>,
 		mut st: BTreeStore<BK>,
 		tx: Transaction,
-		mut gen: u64,
+		mut r#gen: u64,
 		info: String,
 	) -> Result<u64>
 	where
@@ -1519,10 +1525,10 @@ mod tests {
 		if st.finish(&tx).await?.is_some() {
 			t.state.generation += 1;
 		}
-		gen += 1;
-		assert_eq!(t.state.generation, gen, "{}", info);
+		r#gen += 1;
+		assert_eq!(t.state.generation, r#gen, "{}", info);
 		tx.commit().await?;
-		Ok(gen)
+		Ok(r#gen)
 	}
 
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501

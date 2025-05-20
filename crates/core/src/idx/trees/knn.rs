@@ -616,11 +616,11 @@ pub struct KnnResult {
 
 #[cfg(test)]
 pub(super) mod tests {
+	use crate::expr::index::{Distance, VectorType};
+	use crate::expr::{Array, Number, Value};
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::sql::index::{Distance, VectorType};
-	use crate::sql::{Array, Number, Value};
 	use crate::syn::Parse;
 	#[cfg(debug_assertions)]
 	use ahash::HashMap;
@@ -700,16 +700,16 @@ pub(super) mod tests {
 		rng: &mut SmallRng,
 		t: VectorType,
 		dim: usize,
-		gen: &RandomItemGenerator,
+		r#gen: &RandomItemGenerator,
 	) -> SharedVector {
 		let mut vec: Vec<Number> = Vec::with_capacity(dim);
 		for _ in 0..dim {
-			vec.push(gen.generate(rng));
+			vec.push(r#gen.generate(rng));
 		}
 		let vec = Vector::try_from_vector(t, &vec).unwrap();
 		if vec.is_null() {
 			// Some similarities (cosine) is undefined for null vector.
-			new_random_vec(rng, t, dim, gen)
+			new_random_vec(rng, t, dim, r#gen)
 		} else {
 			vec.into()
 		}
@@ -736,11 +736,11 @@ pub(super) mod tests {
 			distance: &Distance,
 		) -> Self {
 			let mut rng = get_seed_rnd();
-			let gen = RandomItemGenerator::new(distance, dimension);
+			let r#gen = RandomItemGenerator::new(distance, dimension);
 			if unique {
-				TestCollection::new_unique(collection_size, vt, dimension, &gen, &mut rng)
+				TestCollection::new_unique(collection_size, vt, dimension, &r#gen, &mut rng)
 			} else {
-				TestCollection::new_random(collection_size, vt, dimension, &gen, &mut rng)
+				TestCollection::new_random(collection_size, vt, dimension, &r#gen, &mut rng)
 			}
 		}
 
@@ -756,13 +756,13 @@ pub(super) mod tests {
 			collection_size: usize,
 			vector_type: VectorType,
 			dimension: usize,
-			gen: &RandomItemGenerator,
+			r#gen: &RandomItemGenerator,
 			rng: &mut SmallRng,
 		) -> Self {
 			let mut vector_set = HashSet::default();
 			let mut attempts = collection_size * 2;
 			while vector_set.len() < collection_size {
-				vector_set.insert(new_random_vec(rng, vector_type, dimension, gen));
+				vector_set.insert(new_random_vec(rng, vector_type, dimension, r#gen));
 				attempts -= 1;
 				if attempts == 0 {
 					panic!("Fail generating a unique random collection {vector_type} {dimension}");
@@ -779,13 +779,13 @@ pub(super) mod tests {
 			collection_size: usize,
 			vector_type: VectorType,
 			dimension: usize,
-			gen: &RandomItemGenerator,
+			r#gen: &RandomItemGenerator,
 			rng: &mut SmallRng,
 		) -> Self {
 			let mut coll = TestCollection::NonUnique(Vec::with_capacity(collection_size));
 			// Prepare data set
 			for doc_id in 0..collection_size {
-				coll.add(doc_id as DocId, new_random_vec(rng, vector_type, dimension, gen));
+				coll.add(doc_id as DocId, new_random_vec(rng, vector_type, dimension, r#gen));
 			}
 			coll
 		}

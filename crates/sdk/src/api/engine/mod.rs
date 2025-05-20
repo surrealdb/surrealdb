@@ -2,11 +2,10 @@
 
 pub mod any;
 #[cfg(any(
+	kv_fdb,
 	feature = "kv-mem",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
-	feature = "kv-fdb-7_1",
-	feature = "kv-fdb-7_3",
 	feature = "kv-indxdb",
 	feature = "kv-surrealkv",
 ))]
@@ -21,7 +20,7 @@ use futures::Stream;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::sql::Values as CoreValues;
+use surrealdb_core::expr::Values as CoreValues;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]

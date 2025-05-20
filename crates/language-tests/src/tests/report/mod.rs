@@ -4,13 +4,13 @@ use std::collections::BTreeMap;
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use crate::tests::schema::{self, TestConfig};
 use crate::tests::{
+	TestSet,
 	schema::{BoolOr, TestDetailsResults},
 	set::TestId,
-	TestSet,
 };
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::sql::Value as SurValue;
+use surrealdb_core::expr::Value as SurValue;
 use surrealdb_core::syn::error::RenderedError;
 
 mod display;
@@ -343,14 +343,14 @@ impl TestReport {
 					TestExpectation::Unspecified => {
 						return TestReportKind::NoExpectation {
 							output: TestOutputs::ParsingError(results.to_string()),
-						}
+						};
 					}
 					TestExpectation::Parsing(x) => x,
 					TestExpectation::Values(x) => {
 						return TestReportKind::MismatchedType(TypeMismatchReport::ExpectedValues {
 							got: results.to_string(),
 							expected: x,
-						})
+						});
 					}
 				};
 
@@ -387,13 +387,13 @@ impl TestReport {
 			TestExpectation::Unspecified => {
 				return TestReportKind::NoExpectation {
 					output: TestOutputs::Values(results),
-				}
+				};
 			}
 			TestExpectation::Parsing(expected) => {
 				return TestReportKind::MismatchedType(TypeMismatchReport::ExpectedParsingError {
 					got: results,
 					expected,
-				})
+				});
 			}
 			TestExpectation::Values(None) => return TestReportKind::Valid,
 			TestExpectation::Values(Some(ref x)) => x,
@@ -545,7 +545,7 @@ impl TestReport {
 				return Some(MatcherMismatch::Error {
 					error: e.to_string(),
 					got: value,
-				})
+				});
 			}
 			Ok(x) => x,
 		};
@@ -555,7 +555,7 @@ impl TestReport {
 			got => {
 				return Some(MatcherMismatch::OutputType {
 					got,
-				})
+				});
 			}
 		};
 

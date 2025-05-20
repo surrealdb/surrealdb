@@ -5,7 +5,7 @@ use std::{
 	ops::Deref,
 };
 
-use crate::sql::Value;
+use crate::expr::Value;
 
 /// Path represents a normalized file path in the object store.
 #[derive(Clone, Debug)]

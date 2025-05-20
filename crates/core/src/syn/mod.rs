@@ -2,9 +2,9 @@
 
 use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
-	dbs::{capabilities::ExperimentalTarget, Capabilities},
+	dbs::{Capabilities, capabilities::ExperimentalTarget},
 	err::Error,
-	sql::{
+	expr::{
 		Block, Datetime, Duration, Fetchs, Fields, Idiom, Kind, Output, Query, Range, Subquery,
 		Thing, Value,
 	},
@@ -23,8 +23,8 @@ pub trait Parse<T> {
 #[cfg(test)]
 mod test;
 
-use anyhow::{bail, ensure, Result};
-use lexer::{compound, Lexer};
+use anyhow::{Result, bail, ensure};
+use lexer::{Lexer, compound};
 use parser::{Parser, ParserSettings};
 use reblessive::Stack;
 use token::t;

@@ -1,11 +1,11 @@
 use super::headers::Accept;
 use anyhow::Result;
 use axum::response::{IntoResponse, Response};
-use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
+use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
 use serde_json::Value as Json;
-use surrealdb::sql;
+use surrealdb::expr;
 
 pub enum Output {
 	None,
@@ -50,7 +50,7 @@ impl Output {
 
 /// Convert and simplify the value into JSON
 pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json> {
-	Ok(sql::to_value(v)?.into())
+	Ok(expr::to_value(v)?.into())
 }
 
 impl IntoResponse for Output {

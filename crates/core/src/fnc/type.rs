@@ -4,15 +4,15 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::table::Table;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::{
+use crate::expr::table::Table;
+use crate::expr::thing::Thing;
+use crate::expr::value::Value;
+use crate::expr::{
 	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Kind, Number, Range,
 	Strand, Uuid,
 };
 use crate::syn;
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use geo::Point;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -187,10 +187,10 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 }
 
 pub mod is {
+	use crate::expr::Geometry;
+	use crate::expr::table::Table;
+	use crate::expr::value::Value;
 	use crate::fnc::args::Optional;
-	use crate::sql::table::Table;
-	use crate::sql::value::Value;
-	use crate::sql::Geometry;
 	use anyhow::Result;
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
@@ -296,8 +296,8 @@ pub mod is {
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;
+	use crate::expr::value::Value;
 	use crate::fnc::args::Optional;
-	use crate::sql::value::Value;
 
 	#[test]
 	fn is_array() {

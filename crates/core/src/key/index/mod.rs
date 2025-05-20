@@ -21,11 +21,11 @@ pub mod ia;
 pub mod ip;
 pub mod vm;
 
+use crate::expr::array::Array;
+use crate::expr::id::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
-use crate::sql::array::Array;
-use crate::sql::id::Id;
+use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;

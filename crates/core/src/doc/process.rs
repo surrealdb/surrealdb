@@ -5,7 +5,7 @@ use crate::dbs::Workable;
 use crate::dbs::{Options, Processed};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
@@ -47,7 +47,7 @@ impl Document {
 			stm => {
 				return Err(IgnoreError::from(anyhow::Error::new(Error::unreachable(
 					format_args!("Unexpected statement type: {stm:?}"),
-				))))
+				))));
 			}
 		};
 		Ok(res)

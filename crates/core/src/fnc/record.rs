@@ -1,13 +1,13 @@
 use crate::ctx::Context;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::paths::ID;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::{Array, FlowResultExt as _, Idiom, Kind, Literal, Part, Table};
-use anyhow::{ensure, Result};
+use crate::expr::paths::ID;
+use crate::expr::thing::Thing;
+use crate::expr::value::Value;
+use crate::expr::{Array, FlowResultExt as _, Idiom, Kind, Literal, Part, Table};
+use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
 use super::args::Optional;

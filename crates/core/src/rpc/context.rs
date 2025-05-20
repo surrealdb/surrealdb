@@ -10,8 +10,8 @@ use super::RpcError;
 use super::RpcProtocolV1;
 use super::RpcProtocolV2;
 use crate::dbs::Session;
+use crate::expr::Array;
 use crate::kvs::Datastore;
-use crate::sql::Array;
 
 #[expect(async_fn_in_trait)]
 pub trait RpcContext {

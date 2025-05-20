@@ -2,22 +2,22 @@
 
 use reblessive::Stk;
 
-use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
-use crate::sql::{Explain, Fetch, With};
+use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
+use crate::expr::{Explain, Fetch, With};
 use crate::syn::error::bail;
 use crate::{
-	sql::{
-		changefeed::ChangeFeed,
-		index::{Distance, VectorType},
+	expr::{
 		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
 		Permission, Permissions, Tables, Timeout, Value, View,
+		changefeed::ChangeFeed,
+		index::{Distance, VectorType},
 	},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
 			ParseResult, Parser,
+			mac::{expected, unexpected},
 		},
-		token::{t, DistanceKind, Span, TokenKind, VectorTypeKind},
+		token::{DistanceKind, Span, TokenKind, VectorTypeKind, t},
 	},
 };
 
@@ -341,7 +341,9 @@ impl Parser<'_> {
 				t!("DELETE") => {
 					// TODO(gguillemas): Return a parse error instead of logging a warning in 3.0.0.
 					if field {
-						warn!("The DELETE permission has no effect on fields and is deprecated, but was found in a DEFINE FIELD statement.");
+						warn!(
+							"The DELETE permission has no effect on fields and is deprecated, but was found in a DEFINE FIELD statement."
+						);
 					} else {
 						delete = true;
 					}

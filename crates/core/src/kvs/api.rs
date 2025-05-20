@@ -11,10 +11,10 @@ use crate::kvs::savepoint::SaveOperation;
 use crate::kvs::savepoint::SavePoints;
 use crate::kvs::savepoint::SavePrepare;
 use crate::kvs::savepoint::SavedValue;
-use crate::kvs::{batch::Batch, Key, KeyEncode, Val, Version};
+use crate::kvs::{Key, KeyEncode, Val, Version, batch::Batch};
 use crate::vs::VersionStamp;
-use anyhow::ensure;
 use anyhow::Result;
+use anyhow::ensure;
 use async_trait::async_trait;
 use std::ops::Range;
 
@@ -121,7 +121,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 	///
 	/// This function fetches the full range of keys without values, in a single request to the underlying datastore.
 	async fn keys(&mut self, rng: Range<Key>, limit: u32, version: Option<u64>)
-		-> Result<Vec<Key>>;
+	-> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///

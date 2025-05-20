@@ -4,7 +4,7 @@ use crate::cli::abstraction::{
 };
 use crate::cnf::PKG_VERSION;
 use crate::dbs::DbsCapabilities;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Args;
 use futures::StreamExt;
 use rustyline::error::ReadlineError;
@@ -14,9 +14,9 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{self, connect};
+use surrealdb::expr::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
-use surrealdb::sql::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::{Notification, Response, Value};
 
 #[derive(Args, Debug)]
@@ -132,8 +132,11 @@ pub async fn init(
 	if !hide_welcome {
 		let hints = [
 			(true, "Different statements within a query should be separated by a (;) semicolon."),
-			(!multi, "To create a multi-line query, end your lines with a (\\) backslash, and press enter."),
-			(true, "To exit, send a SIGTERM or press CTRL+C")
+			(
+				!multi,
+				"To create a multi-line query, end your lines with a (\\) backslash, and press enter.",
+			),
+			(true, "To exit, send a SIGTERM or press CTRL+C"),
 		]
 		.iter()
 		.filter(|(show, _)| *show)
@@ -335,7 +338,9 @@ fn process(
 					);
 					data.into_inner().into_json().serialize(&mut serializer).unwrap();
 					let output = String::from_utf8(buf).unwrap();
-					format!("-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}")
+					format!(
+						"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
+					)
 				}
 			};
 			print(Ok(format!("\n{message}")));
@@ -422,10 +427,11 @@ impl Validator for InputValidator<'_> {
 			Incomplete // The line ends with a backslash
 		} else if input.is_empty() {
 			Valid(None) // Ignore empty lines
-		} else if let Err(e) = surrealdb::syn::parse_with_capabilities(input, self.capabilities) {
-			Invalid(Some(format!(" --< {e}")))
 		} else {
-			Valid(None)
+			match surrealdb::syn::parse_with_capabilities(input, self.capabilities) {
+				Err(e) => Invalid(Some(format!(" --< {e}"))),
+				_ => Valid(None),
+			}
 		};
 		// Validation complete
 		Ok(result)

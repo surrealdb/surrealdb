@@ -1,9 +1,9 @@
 //! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
 
 use axum::{
+	Router,
 	extract::DefaultBodyLimit,
 	routing::{get, post},
-	Router,
 };
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -24,22 +24,22 @@ where
 #[cfg(feature = "ml")]
 mod implementation {
 	use anyhow::Context;
-	use axum::{body::Body, extract::Path, response::Response, Extension};
+	use axum::{Extension, body::Body, extract::Path, response::Response};
 	use bytes::Bytes;
 	use futures_util::StreamExt;
 	use http::StatusCode;
 	use surrealdb_core::{
-		dbs::{capabilities::RouteTarget, Session},
-		iam::{check::check_ns_db, Action, ResourceKind},
+		dbs::{Session, capabilities::RouteTarget},
+		expr::statements::{DefineModelStatement, DefineStatement},
+		iam::{Action, ResourceKind, check::check_ns_db},
 		kvs::{LockType, TransactionType},
 		ml::storage::surml_file::SurMlFile,
-		sql::statements::{DefineModelStatement, DefineStatement},
 	};
 
 	use crate::net::{
+		AppState,
 		error::{Error as NetError, ResponseError},
 		output::Output,
-		AppState,
 	};
 
 	/// This endpoint allows the user to import a model into the database.
@@ -150,12 +150,12 @@ mod implementation {
 
 #[cfg(not(feature = "ml"))]
 mod implementation {
-	use axum::{body::Body, extract::Path, Extension};
-	use surrealdb_core::dbs::{capabilities::RouteTarget, Session};
+	use axum::{Extension, body::Body, extract::Path};
+	use surrealdb_core::dbs::{Session, capabilities::RouteTarget};
 
 	use crate::net::{
-		error::{Error as NetError, ResponseError},
 		AppState,
+		error::{Error as NetError, ResponseError},
 	};
 
 	/// This endpoint allows the user to import a model into the database.

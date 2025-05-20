@@ -2,7 +2,7 @@ use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Args;
 use futures_util::StreamExt;
 use surrealdb::engine::any::{self, connect};

@@ -7,7 +7,7 @@ use tower_http::{
 	request_id::RequestId,
 	trace::{MakeSpan, OnFailure, OnRequest, OnResponse},
 };
-use tracing::{field, Level, Span};
+use tracing::{Level, Span, field};
 
 use super::client_ip::ExtractClientIP;
 

@@ -1,10 +1,10 @@
 //! Stores a graph edge pointer
+use crate::expr::dir::Dir;
+use crate::expr::id::Id;
+use crate::expr::thing::Thing;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
-use crate::sql::dir::Dir;
-use crate::sql::id::Id;
-use crate::sql::thing::Thing;
+use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 

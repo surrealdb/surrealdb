@@ -1,11 +1,11 @@
 use crate::err::Error;
+use crate::expr::index::{Distance, VectorType};
+use crate::expr::{Number, Value};
 use crate::fnc::util::math::ToFloat;
 use crate::idx::VersionedStore;
-use crate::sql::index::{Distance, VectorType};
-use crate::sql::{Number, Value};
 use ahash::AHasher;
 use ahash::HashSet;
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
@@ -555,9 +555,9 @@ impl Distance {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec, RandomItemGenerator};
+	use crate::expr::index::{Distance, VectorType};
+	use crate::idx::trees::knn::tests::{RandomItemGenerator, get_seed_rnd, new_random_vec};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::sql::index::{Distance, VectorType};
 
 	fn test_distance(dist: Distance, a1: &[f64], a2: &[f64], res: f64) {
 		// Convert the arrays to Vec<Number>
@@ -581,11 +581,11 @@ mod tests {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
-			let gen = RandomItemGenerator::new(&dist, dim);
+			let r#gen = RandomItemGenerator::new(&dist, dim);
 			let mut num_zero = 0;
 			for i in 0..size {
-				let v1 = new_random_vec(&mut rng, vt, dim, &gen);
-				let v2 = new_random_vec(&mut rng, vt, dim, &gen);
+				let v1 = new_random_vec(&mut rng, vt, dim, &r#gen);
+				let v2 = new_random_vec(&mut rng, vt, dim, &r#gen);
 				let d = dist.calculate(&v1, &v2);
 				assert!(
 					d.is_finite() && !d.is_nan(),

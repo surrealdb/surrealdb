@@ -1,7 +1,7 @@
 use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
 use crate::kvs::Datastore;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::jwk::{
 	AlgorithmParameters::*, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
@@ -59,9 +59,9 @@ static CACHE_COOLDOWN: LazyLock<chrono::Duration> =
 static REMOTE_TIMEOUT: LazyLock<chrono::Duration> =
 	LazyLock::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS") {
 		Ok(milliseconds_str) => {
-			let milliseconds = milliseconds_str
-				.parse::<u64>()
-				.expect("Expected a valid number of milliseconds for SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS");
+			let milliseconds = milliseconds_str.parse::<u64>().expect(
+				"Expected a valid number of milliseconds for SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS",
+			);
 			Duration::milliseconds(milliseconds as i64)
 		}
 		Err(_) => {
@@ -92,7 +92,9 @@ pub(super) async fn config(
 				match jwks.jwks.find(kid) {
 					Some(jwk) => jwk.to_owned(),
 					_ => {
-						trace!("Could not find valid JWK object with key identifier '{kid}' in cached JWKS object");
+						trace!(
+							"Could not find valid JWK object with key identifier '{kid}' in cached JWKS object"
+						);
 						// Check that the cached JWKS object has not been recently updated
 						if Utc::now().signed_duration_since(jwks.time) < *CACHE_COOLDOWN {
 							debug!("Refused to refresh cache before cooldown period is over");
@@ -241,7 +243,9 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk>
 			match jwks.find(kid) {
 				Some(jwk) => Ok(jwk.to_owned()),
 				_ => {
-					debug!("Failed to find JWK object with key identifier '{kid}' in remote JWKS object");
+					debug!(
+						"Failed to find JWK object with key identifier '{kid}' in remote JWKS object"
+					);
 					Err(anyhow::Error::new(Error::InvalidAuth)) // Return opaque error
 				}
 			}
@@ -296,7 +300,10 @@ async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Resul
 	#[cfg(target_family = "wasm")]
 	let res = client.get(url).send().await?;
 	if !res.status().is_success() {
-		warn!("Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'", res.status());
+		warn!(
+			"Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'",
+			res.status()
+		);
 		bail!(Error::InvalidAuth); // Return opaque error
 	}
 	let jwks = res.bytes().await?;
@@ -358,7 +365,7 @@ fn cache_key_from_url(url: &str) -> String {
 mod tests {
 	use super::*;
 	use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
-	use rand::{distributions::Alphanumeric, Rng};
+	use rand::{Rng, distributions::Alphanumeric};
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 

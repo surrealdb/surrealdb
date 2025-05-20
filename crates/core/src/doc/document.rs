@@ -3,23 +3,23 @@ use crate::ctx::MutableContext;
 use crate::dbs::Options;
 use crate::dbs::Workable;
 use crate::err::Error;
+use crate::expr::Base;
+use crate::expr::FlowResultExt as _;
+use crate::expr::permission::Permission;
+use crate::expr::statements::define::DefineDatabaseStatement;
+use crate::expr::statements::define::DefineEventStatement;
+use crate::expr::statements::define::DefineFieldStatement;
+use crate::expr::statements::define::DefineIndexStatement;
+use crate::expr::statements::define::DefineTableStatement;
+use crate::expr::statements::live::LiveStatement;
+use crate::expr::table::Table;
+use crate::expr::thing::Thing;
+use crate::expr::value::Value;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
-use crate::idx::planner::iterators::IteratorRecord;
 use crate::idx::planner::RecordStrategy;
+use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
-use crate::sql::permission::Permission;
-use crate::sql::statements::define::DefineDatabaseStatement;
-use crate::sql::statements::define::DefineEventStatement;
-use crate::sql::statements::define::DefineFieldStatement;
-use crate::sql::statements::define::DefineIndexStatement;
-use crate::sql::statements::define::DefineTableStatement;
-use crate::sql::statements::live::LiveStatement;
-use crate::sql::table::Table;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::Base;
-use crate::sql::FlowResultExt as _;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
@@ -31,7 +31,7 @@ pub(crate) struct Document {
 	/// The record id of this document
 	pub(super) id: Option<Arc<Thing>>,
 	/// The table that we should generate a record id from
-	pub(super) gen: Option<Table>,
+	pub(super) r#gen: Option<Table>,
 	/// Whether this is the second iteration of the processing
 	pub(super) retry: bool,
 	pub(super) extras: Workable,
@@ -175,7 +175,7 @@ impl Document {
 	pub fn new(
 		id: Option<Arc<Thing>>,
 		ir: Option<Arc<IteratorRecord>>,
-		gen: Option<Table>,
+		r#gen: Option<Table>,
 		val: Arc<Value>,
 		extras: Workable,
 		retry: bool,
@@ -183,7 +183,7 @@ impl Document {
 	) -> Self {
 		Document {
 			id: id.clone(),
-			gen,
+			r#gen,
 			retry,
 			extras,
 			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
@@ -247,7 +247,7 @@ impl Document {
 	pub(crate) fn is_specific_record_id(&self) -> bool {
 		match self.extras {
 			Workable::Insert(ref v) if v.rid().is_some() => true,
-			Workable::Normal if self.gen.is_none() => true,
+			Workable::Normal if self.r#gen.is_none() => true,
 			_ => false,
 		}
 	}
@@ -261,7 +261,7 @@ impl Document {
 	pub fn modify_for_update_retry(&mut self, id: Thing, value: Arc<Value>) {
 		let retry = Arc::new(id);
 		self.id = Some(retry.clone());
-		self.gen = None;
+		self.r#gen = None;
 		self.retry = true;
 		self.record_strategy = RecordStrategy::KeysAndValues;
 

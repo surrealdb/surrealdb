@@ -8,7 +8,6 @@
 //! key-value store.
 
 #![deny(clippy::mem_forget)]
-#![forbid(unsafe_code)]
 
 #[macro_use]
 extern crate surrealdb_core;

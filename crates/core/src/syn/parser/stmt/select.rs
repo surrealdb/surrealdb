@@ -1,14 +1,14 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{
+	expr::{
+		Field, Fields, Idioms, Limit, Order, Split, Splits, Start, Values, Version,
 		order::{OrderList, Ordering},
 		statements::SelectStatement,
-		Field, Fields, Idioms, Limit, Order, Split, Splits, Start, Values, Version,
 	},
 	syn::{
-		parser::{mac::expected, ParseResult, Parser},
-		token::{t, Span},
+		parser::{ParseResult, Parser, mac::expected},
+		token::{Span, t},
 	},
 };
 

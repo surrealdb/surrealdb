@@ -1,47 +1,46 @@
-use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
+use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
+use crate::api::ExtraFeatures;
+use crate::api::Result;
+use crate::api::Surreal;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::conn::{self, RequestData};
 use crate::api::conn::{Command, DbResponse};
+use crate::api::engine::remote::Response;
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::PING_INTERVAL;
-use crate::api::engine::remote::Response;
 use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
+use crate::engine::remote::Data;
 use crate::opt::WaitFor;
-use crate::{Action, Notification};
 use async_channel::Receiver;
-use futures::stream::{SplitSink, SplitStream};
 use futures::SinkExt;
 use futures::StreamExt;
+use futures::stream::{SplitSink, SplitStream};
 use revision::revisioned;
 use serde::Deserialize;
-use std::collections::hash_map::Entry;
 use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::error::Error as WsError;
-use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
-use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::Connector;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::error::Error as WsError;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
+use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use trice::Instant;
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
@@ -278,53 +277,60 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 					// If `id` is set this is a normal response
 					Some(id) => {
 						if let Ok(id) = id.coerce_to() {
-							if let Some(pending) = state.pending_requests.remove(&id) {
-								let resp = match DbResponse::from_server_result(response.result) {
-									Ok(x) => x,
-									Err(e) => {
-										let _ = pending.response_channel.send(Err(e)).await;
-										return HandleResult::Ok;
-									}
-								};
-								// We can only route responses with IDs
-								match pending.effect {
-									RequestEffect::None => {}
-									RequestEffect::Insert => {
-										// For insert, we need to flatten single responses in an array
-										if let DbResponse::Other(CoreValue::Array(array)) = resp {
-											if array.len() == 1 {
-												let _ = pending
-													.response_channel
-													.send(Ok(DbResponse::Other(
-														array.into_iter().next().unwrap(),
-													)))
-													.await;
-											} else {
-												let _ = pending
-													.response_channel
-													.send(Ok(DbResponse::Other(CoreValue::Array(
-														array,
-													))))
-													.await;
-											}
+							match state.pending_requests.remove(&id) {
+								Some(pending) => {
+									let resp = match DbResponse::from_server_result(response.result)
+									{
+										Ok(x) => x,
+										Err(e) => {
+											let _ = pending.response_channel.send(Err(e)).await;
 											return HandleResult::Ok;
 										}
+									};
+									// We can only route responses with IDs
+									match pending.effect {
+										RequestEffect::None => {}
+										RequestEffect::Insert => {
+											// For insert, we need to flatten single responses in an array
+											if let DbResponse::Other(CoreValue::Array(array)) = resp
+											{
+												if array.len() == 1 {
+													let _ = pending
+														.response_channel
+														.send(Ok(DbResponse::Other(
+															array.into_iter().next().unwrap(),
+														)))
+														.await;
+												} else {
+													let _ = pending
+														.response_channel
+														.send(Ok(DbResponse::Other(
+															CoreValue::Array(array),
+														)))
+														.await;
+												}
+												return HandleResult::Ok;
+											}
+										}
+										RequestEffect::Set {
+											key,
+											value,
+										} => {
+											state.vars.insert(key, value);
+										}
+										RequestEffect::Clear {
+											key,
+										} => {
+											state.vars.shift_remove(&key);
+										}
 									}
-									RequestEffect::Set {
-										key,
-										value,
-									} => {
-										state.vars.insert(key, value);
-									}
-									RequestEffect::Clear {
-										key,
-									} => {
-										state.vars.shift_remove(&key);
-									}
+									let _res = pending.response_channel.send(Ok(resp)).await;
 								}
-								let _res = pending.response_channel.send(Ok(resp)).await;
-							} else {
-								warn!("got response for request with id '{id}', which was not in pending requests")
+								_ => {
+									warn!(
+										"got response for request with id '{id}', which was not in pending requests"
+									)
+								}
 							}
 						}
 					}
@@ -336,12 +342,6 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 								// Check if this live query is registered
 								if let Some(sender) = state.live_queries.get(&live_query_id) {
 									// Send the notification back to the caller or kill live query if the receiver is already dropped
-
-									let notification = Notification {
-										query_id: *notification.id,
-										action: Action::from_core(notification.action),
-										data: notification.result,
-									};
 									if sender.send(notification).await.is_err() {
 										state.live_queries.remove(&live_query_id);
 										let kill = {
@@ -354,7 +354,9 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 											Message::Binary(value)
 										};
 										if let Err(error) = state.sink.send(kill).await {
-											trace!("failed to send kill query to the server; {error:?}");
+											trace!(
+												"failed to send kill query to the server; {error:?}"
+											);
 											return HandleResult::Disconnected;
 										}
 									}
@@ -376,21 +378,28 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 
 			// Let's try to find out the ID of the response that failed to deserialise
 			if let Message::Binary(binary) = response {
-				if let Ok(ErrorResponse {
-					id,
-				}) = deserialize(&binary, true)
-				{
-					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
-						if let Some(pending) = state.pending_requests.remove(&id) {
-							let _res = pending.response_channel.send(Err(error)).await;
-						} else {
-							warn!("got response for request with id '{id}', which was not in pending requests")
+				match deserialize(&binary, true) {
+					Ok(ErrorResponse {
+						id,
+					}) => {
+						// Return an error if an ID was returned
+						if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
+							match state.pending_requests.remove(&id) {
+								Some(pending) => {
+									let _res = pending.response_channel.send(Err(error)).await;
+								}
+								_ => {
+									warn!(
+										"got response for request with id '{id}', which was not in pending requests"
+									)
+								}
+							}
 						}
 					}
-				} else {
-					// Unfortunately, we don't know which response failed to deserialize
-					warn!("Failed to deserialise message; {error:?}");
+					_ => {
+						// Unfortunately, we don't know which response failed to deserialize
+						warn!("Failed to deserialise message; {error:?}");
+					}
 				}
 			}
 		}
@@ -626,13 +635,13 @@ impl Response {
 mod tests {
 	use super::serialize;
 	use bincode::Options;
-	use flate2::write::GzEncoder;
 	use flate2::Compression;
-	use rand::{thread_rng, Rng};
+	use flate2::write::GzEncoder;
+	use rand::{Rng, thread_rng};
 	use std::io::Write;
 	use std::time::SystemTime;
+	use surrealdb_core::expr::{Array, Value};
 	use surrealdb_core::rpc::format::cbor::Cbor;
-	use surrealdb_core::sql::{Array, Value};
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {
@@ -657,7 +666,7 @@ mod tests {
 		let mut vector: Vec<i32> = Vec::new();
 		let mut rng = thread_rng();
 		for _ in 0..vector_size {
-			vector.push(rng.gen());
+			vector.push(rng.r#gen());
 		}
 		//	Store the results
 		let mut results = vec![];

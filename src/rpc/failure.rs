@@ -1,5 +1,5 @@
-use revision::revisioned;
 use revision::Revisioned;
+use revision::revisioned;
 use serde::Serialize;
 use std::borrow::Cow;
 use surrealdb::rpc::RpcError;

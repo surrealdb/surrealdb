@@ -1,11 +1,11 @@
+use crate::expr::with::With;
+use crate::expr::{Array, Expression, Idiom, Number, Object};
+use crate::expr::{Operator, Value};
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
-use crate::sql::with::With;
-use crate::sql::{Array, Expression, Idiom, Number, Object};
-use crate::sql::{Operator, Value};
 use anyhow::Result;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -588,9 +588,9 @@ impl UnionRangeQueryBuilder {
 
 #[cfg(test)]
 mod tests {
+	use crate::expr::{Array, Idiom, Value};
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-	use crate::sql::{Array, Idiom, Value};
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 	use std::sync::Arc;

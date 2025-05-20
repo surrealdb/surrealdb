@@ -1,12 +1,12 @@
 //! Executes functions from SQL. If there is an SQL function it will be defined in this module.
 
 use crate::ctx::Context;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
+use crate::expr::Thing;
+use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::value::Value;
-use crate::sql::Thing;
 use anyhow::Result;
 use reblessive::tree::Stk;
 pub mod api;
@@ -100,9 +100,9 @@ pub async fn run(
 /// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
-    ($ctx: ident, $name: ident, $args: expr, $message: expr,
+    ($ctx: ident, $name: ident, $args: expr_2021, $message: expr_2021,
         $($(exp($exp_target: ident))? $function_name: literal =>
-            $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+
+            $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr_2021))* $(.$await:tt)*,)+
     ) => {
         {
             match $name {
@@ -543,13 +543,13 @@ pub async fn asynchronous(
 		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
 		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
-		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
+		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::r#gen.await,
 		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
-		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
+		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::r#gen.await,
 		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
-		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
+		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::r#gen.await,
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
-		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::r#gen.await,
 		//
 		exp(Files) "file::put" => file::put((stk, ctx, opt, doc)).await,
 		exp(Files) "file::put_if_not_exists" => file::put_if_not_exists((stk, ctx, opt, doc)).await,
@@ -1518,15 +1518,15 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 		"number" => ("math", name),
 		"string" => match name {
 			"distance_damerau_levenshtein" => {
-				return "string::distance::damerau_levenshtein".to_string()
+				return "string::distance::damerau_levenshtein".to_string();
 			}
 			"distance_hamming" => return "string::distance::hamming".to_string(),
 			"distance_levenshtein" => return "string::distance::levenshtein".to_string(),
 			"distance_normalized_damerau_levenshtein" => {
-				return "string::distance::normalized_damerau_levenshtein".to_string()
+				return "string::distance::normalized_damerau_levenshtein".to_string();
 			}
 			"distance_normalized_levenshtein" => {
-				return "string::distance::normalized_levenshtein".to_string()
+				return "string::distance::normalized_levenshtein".to_string();
 			}
 			"html_encode" => return "string::html::encode".to_string(),
 			"html_sanitize" => return "string::html::sanitize".to_string(),
@@ -1582,7 +1582,7 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::{
 		dbs::capabilities::ExperimentalTarget,
-		sql::{statements::OutputStatement, Function, Query, Statement, Value},
+		expr::{Function, Query, Statement, Value, statements::OutputStatement},
 	};
 
 	#[tokio::test]
@@ -1646,7 +1646,7 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::sql::Value;
+				use crate::expr::Value;
 
 				let name = name.replace("::", ".");
 				let sql =
@@ -1671,7 +1671,9 @@ mod tests {
 			for problem in problems {
 				eprintln!(" - {problem}");
 			}
-			panic!("ensure functions can be parsed in core/src/sql/function.rs and are exported to JS in core/src/fnc/script/modules/surrealdb");
+			panic!(
+				"ensure functions can be parsed in core/src/sql/function.rs and are exported to JS in core/src/fnc/script/modules/surrealdb"
+			);
 		}
 	}
 }

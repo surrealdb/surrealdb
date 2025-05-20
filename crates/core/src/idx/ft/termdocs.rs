@@ -1,7 +1,7 @@
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::terms::TermId;
-use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use anyhow::Result;
 use roaring::RoaringTreemap;

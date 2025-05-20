@@ -1,26 +1,26 @@
 use crate::ctx::Context;
 use crate::ctx::{Canceller, MutableContext};
+use crate::dbs::Options;
+use crate::dbs::Statement;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
-use crate::dbs::Options;
-use crate::dbs::Statement;
 use crate::doc::{Document, IgnoreError};
 use crate::err::Error;
+use crate::expr::array::Array;
+use crate::expr::edges::Edges;
+use crate::expr::mock::Mock;
+use crate::expr::object::Object;
+use crate::expr::table::Table;
+use crate::expr::thing::Thing;
+use crate::expr::value::Value;
+use crate::expr::{Fields, Id, IdRange};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::sql::array::Array;
-use crate::sql::edges::Edges;
-use crate::sql::mock::Mock;
-use crate::sql::object::Object;
-use crate::sql::table::Table;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::{Fields, Id, IdRange};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::mem;
 use std::sync::Arc;

@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
 	cli::ColorMode,
-	format::{ansi, IndentFormatter},
+	format::{IndentFormatter, ansi},
 	tests::TestSet,
 };
 
@@ -15,7 +15,7 @@ use super::{
 	TestReport, TestValueExpectation, TypeMismatchReport, ValueMismatchKind,
 };
 use similar::{Algorithm, TextDiff};
-use surrealdb_core::sql::Value as SurValue;
+use surrealdb_core::expr::Value as SurValue;
 
 type Fmt<'a> = IndentFormatter<&'a mut String>;
 
@@ -345,7 +345,7 @@ impl TestReport {
 					}
 					MatcherMismatch::Failed {
 						matcher,
-						ref value,
+						value,
 					} => {
 						writeln!(f, "> Value failed to match matching expression")?;
 						f.indent(|f| {

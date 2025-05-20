@@ -1,19 +1,19 @@
 use crate::dbs::Options;
+use crate::expr::FlowResultExt as _;
+use crate::expr::index::Index;
+use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
+use crate::expr::{
+	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Part, Subquery, Table, Value,
+	With,
+	order::{OrderList, Ordering},
+};
+use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
 };
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
-use crate::idx::planner::StatementContext;
 use crate::kvs::Transaction;
-use crate::sql::index::Index;
-use crate::sql::statements::{DefineFieldStatement, DefineIndexStatement};
-use crate::sql::FlowResultExt as _;
-use crate::sql::{
-	order::{OrderList, Ordering},
-	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Part, Subquery, Table, Value,
-	With,
-};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use std::collections::HashMap;

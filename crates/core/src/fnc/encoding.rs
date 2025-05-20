@@ -1,13 +1,13 @@
 pub mod base64 {
 	use crate::err::Error;
+	use crate::expr::{Bytes, Value};
 	use crate::fnc::args::Optional;
-	use crate::sql::{Bytes, Value};
 	use anyhow::Result;
+	use base64::engine::DecodePaddingMode;
 	use base64::engine::general_purpose::{
 		GeneralPurpose, GeneralPurposeConfig, STANDARD, STANDARD_NO_PAD,
 	};
-	use base64::engine::DecodePaddingMode;
-	use base64::{alphabet, Engine};
+	use base64::{Engine, alphabet};
 
 	/// Base64 configuration which supports decoding with or without padding.
 	const STANDARD_GENERIC_DECODER: GeneralPurpose = GeneralPurpose::new(
@@ -41,8 +41,8 @@ pub mod base64 {
 }
 pub mod cbor {
 	use crate::err::Error;
+	use crate::expr::{Bytes, Value};
 	use crate::rpc::format::cbor::Cbor;
-	use crate::sql::{Bytes, Value};
 	use anyhow::Result;
 	use ciborium::Value as Data;
 
@@ -85,8 +85,8 @@ mod tests {
 	use super::*;
 
 	use crate::{
+		expr::{Bytes, Value},
 		fnc::args::Optional,
-		sql::{Bytes, Value},
 	};
 
 	#[test]

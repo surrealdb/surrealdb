@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use super::AppState;
 use super::error::ResponseError;
 use super::params::Params;
-use super::AppState;
 use crate::cnf::HTTP_MAX_API_BODY_SIZE;
 use crate::net::error::Error as NetError;
+use axum::Extension;
+use axum::Router;
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::Path;
@@ -13,20 +15,18 @@ use axum::http::HeaderMap;
 use axum::http::Method;
 use axum::response::IntoResponse;
 use axum::routing::any;
-use axum::Extension;
-use axum::Router;
 use http::header::CONTENT_TYPE;
+use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::dbs::Session;
+use surrealdb::expr::Value;
+use surrealdb::expr::statements::FindApi;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
+use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::cbor;
 use surrealdb::rpc::format::json;
 use surrealdb::rpc::format::revision;
-use surrealdb::rpc::format::Format;
-use surrealdb::sql::statements::FindApi;
-use surrealdb::sql::Value;
 use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::{
 	body::ApiBody, invocation::ApiInvocation, method::Method as ApiMethod,
@@ -57,6 +57,8 @@ async fn handler(
 	let url = format!("/api/{ns}/{db}/{path}");
 	// Get a database reference
 	let ds = &state.datastore;
+	// Update the session with the NS & DB
+	let session = session.with_ns(&ns).with_db(&db);
 	// Check if the experimental capability is enabled
 	if !state.datastore.get_capabilities().allows_experimental(&ExperimentalTarget::DefineApi) {
 		warn!("Experimental capability for API routes is not enabled");
@@ -86,8 +88,8 @@ async fn handler(
 	let apis = tx.all_db_apis(&ns, &db).await.map_err(ResponseError)?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-	let (mut res, res_instruction) =
-		if let Some((api, params)) = apis.as_ref().find_api(segments, method) {
+	let res = match apis.as_ref().find_api(segments, method) {
+		Some((api, params)) => {
 			let invocation = ApiInvocation {
 				params,
 				method,
@@ -105,16 +107,23 @@ async fn handler(
 				)
 				.await
 			{
-				Ok(Some(v)) => v,
-				Ok(None) => return Err(NetError::NotFound(url).into()),
-				Err(e) => return Err(ResponseError(e)),
+				Ok(Some(v)) => Ok(v),
+				Ok(None) => Err(NetError::NotFound(url).into()),
+				Err(e) => Err(ResponseError(e)),
 			}
-		} else {
-			return Err(NetError::NotFound(url).into());
-		};
+		}
+		_ => Err(NetError::NotFound(url).into()),
+	};
 
-	// Commit the transaction
-	tx.commit().await.map_err(ResponseError)?;
+	// Handle committing or cancelling the transaction
+	if res.is_ok() {
+		tx.commit().await.map_err(ResponseError)?;
+	} else {
+		tx.cancel().await.map_err(ResponseError)?;
+	}
+
+	// Process the result
+	let (mut res, res_instruction) = res?;
 
 	let res_body: Vec<u8> = if let Some(body) = res.body {
 		match res_instruction {
@@ -139,7 +148,7 @@ async fn handler(
 							"Expected bytes or string, found {}",
 							v.kindof()
 						))
-						.into())
+						.into());
 					}
 				}
 			}
@@ -170,7 +179,7 @@ async fn handler(
 				return Err(ApiError::Unreachable(
 					"Found a native response instruction where this is not supported".into(),
 				)
-				.into())
+				.into());
 			}
 		}
 	} else {

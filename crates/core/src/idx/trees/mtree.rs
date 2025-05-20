@@ -14,6 +14,8 @@ use tokio::sync::RwLock;
 
 use crate::err::Error;
 
+use crate::expr::index::{Distance, MTreeParams, VectorType};
+use crate::expr::{Number, Object, Thing, Value};
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::planner::checker::MTreeConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
@@ -23,8 +25,6 @@ use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider, T
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use crate::sql::index::{Distance, MTreeParams, VectorType};
-use crate::sql::{Number, Object, Thing, Value};
 
 #[non_exhaustive]
 pub struct MTreeIndex {
@@ -347,13 +347,7 @@ impl MTree {
 		#[cfg(debug_assertions)]
 		debug!(
 			"New internal root - node: {} - e1.node: {} - e1.obj: {:?} - e1.radius: {} - e2.node: {} - e2.obj: {:?} - e2.radius: {}",
-			new_root_id,
-			p1.node,
-			o1,
-			p1.radius,
-			p2.node,
-			o2,
-			p2.radius
+			new_root_id, p1.node, o1, p1.radius, p2.node, o2, p2.radius
 		);
 		let mut entries = InternalMap::new();
 		entries.insert(o1, p1);
@@ -1474,17 +1468,17 @@ impl VersionedStore for MState {}
 #[cfg(test)]
 mod tests {
 	use crate::ctx::{Context, MutableContext};
+	use crate::expr::index::{Distance, VectorType};
+	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::{DocId, DocIds};
 	use crate::idx::planner::checker::MTreeConditionChecker;
 	use crate::idx::trees::knn::tests::TestCollection;
 	use crate::idx::trees::mtree::{MState, MTree, MTreeNode, MTreeSearchContext, MTreeStore};
 	use crate::idx::trees::store::{NodeId, TreeNodeProvider, TreeStore};
 	use crate::idx::trees::vector::SharedVector;
-	use crate::idx::IndexKeyBase;
 	use crate::kvs::LockType::*;
 	use crate::kvs::Transaction;
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::sql::index::{Distance, VectorType};
 	use ahash::{HashMap, HashMapExt, HashSet};
 	use anyhow::Result;
 	use reblessive::tree::Stk;
@@ -2130,7 +2124,11 @@ mod tests {
 						if let Some(center) = center.as_ref() {
 							let pd = t.calculate_distance(center, o)?;
 							debug!("calc_dist: {:?} {:?} = {}", center, &o, pd);
-							assert_eq!(pd, p.parent_dist, "Invalid parent distance ({}): {} - Expected: {} - Node Id: {} - Obj: {:?} - Center: {:?}", p.parent_dist, t.distance, pd, node_id, o, center);
+							assert_eq!(
+								pd, p.parent_dist,
+								"Invalid parent distance ({}): {} - Expected: {} - Node Id: {} - Obj: {:?} - Center: {:?}",
+								p.parent_dist, t.distance, pd, node_id, o, center
+							);
 						}
 						checks.doc_count += p.docs.len() as usize;
 					}

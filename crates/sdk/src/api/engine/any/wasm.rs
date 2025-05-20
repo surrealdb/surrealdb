@@ -1,3 +1,5 @@
+use crate::api::ExtraFeatures;
+use crate::api::Surreal;
 use crate::api::conn;
 use crate::api::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
@@ -6,11 +8,9 @@ use crate::api::engine::any::Any;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
-use crate::api::ExtraFeatures;
-use crate::api::Surreal;
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use tokio::sync::watch;
@@ -37,14 +37,14 @@ impl conn::Sealed for Any {
 
 			match EndpointKind::from(address.url.scheme()) {
 				EndpointKind::FoundationDb => {
-					#[cfg(any(feature = "kv-fdb-7_1", feature = "kv-fdb-7_3"))]
+					#[cfg(kv_fdb)]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.recv().await??;
 					}
 
-					#[cfg(not(any(feature = "kv-fdb-7_1", feature = "kv-fdb-7_3")))]
+					#[cfg(not(kv_fdb))]
 					bail!(
 						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
