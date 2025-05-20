@@ -15,6 +15,7 @@ use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
 };
 use crate::err::Error;
+use crate::expr::{Base, FlowResultExt as _, Query, Value, statements::DefineUserStatement};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -27,10 +28,11 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::FlowResultExt as _;
-use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
+#[allow(unused_imports)]
+use anyhow::bail;
+use anyhow::{Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
@@ -41,7 +43,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
-use std::task::{ready, Poll};
+use std::task::{Poll, ready};
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -113,11 +115,7 @@ impl TransactionFactory {
 		unused_variables,
 		reason = "Some variables are unused when no backends are enabled."
 	)]
-	pub async fn transaction(
-		&self,
-		write: TransactionType,
-		lock: LockType,
-	) -> Result<Transaction, Error> {
+	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
 		// Specify if the transaction is writeable
 		let write = match write {
 			Read => false,
@@ -133,32 +131,32 @@ impl TransactionFactory {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::Mem(tx), true, false)
+				(tx, true, false)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::RocksDB(tx), true, true)
+				(tx, true, true)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			DatastoreFlavor::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::IndxDB(tx), true, false)
+				(tx, true, false)
 			}
 			#[cfg(feature = "kv-tikv")]
 			DatastoreFlavor::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::TiKV(tx), false, true)
+				(tx, false, true)
 			}
 			#[cfg(feature = "kv-fdb")]
 			DatastoreFlavor::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::FoundationDB(tx), false, false)
+				(tx, false, false)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(super::tr::Inner::SurrealKV(tx), true, false)
+				(tx, true, false)
 			}
 			_ => unreachable!(),
 		};
@@ -169,7 +167,6 @@ impl TransactionFactory {
 				inner,
 				stash: super::stash::Stash::default(),
 				cf: cf::Writer::new(),
-				clock: self.clock.clone(),
 			},
 		))
 	}
@@ -219,9 +216,9 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// # use surrealdb_core::kvs::Datastore;
-	/// # use surrealdb_core::err::Error;
+	/// # use anyhow::Error;
 	/// # #[tokio::main]
-	/// # async fn main() -> Result<(), Error> {
+	/// # async fn main() -> Result<(),Error> {
 	/// let ds = Datastore::new("memory").await?;
 	/// # Ok(())
 	/// # }
@@ -231,9 +228,9 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// # use surrealdb_core::kvs::Datastore;
-	/// # use surrealdb_core::err::Error;
+	/// # use anyhow::Error;
 	/// # #[tokio::main]
-	/// # async fn main() -> Result<(), Error> {
+	/// # async fn main() -> Result<(),Error> {
 	/// let ds = Datastore::new("surrealkv://temp.skv").await?;
 	/// # Ok(())
 	/// # }
@@ -243,24 +240,21 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// # use surrealdb_core::kvs::Datastore;
-	/// # use surrealdb_core::err::Error;
+	/// # use anyhow::Error;
 	/// # #[tokio::main]
-	/// # async fn main() -> Result<(), Error> {
+	/// # async fn main() -> Result<(),Error> {
 	/// let ds = Datastore::new("tikv://127.0.0.1:2379").await?;
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(path: &str) -> Result<Self, Error> {
+	pub async fn new(path: &str) -> Result<Self> {
 		Self::new_with_clock(path, None).await
 	}
 
 	#[allow(unused_variables)]
-	pub async fn new_with_clock(
-		path: &str,
-		clock: Option<Arc<SizedClock>>,
-	) -> Result<Datastore, Error> {
+	pub async fn new_with_clock(path: &str, clock: Option<Arc<SizedClock>>) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (flavor, clock): (Result<DatastoreFlavor, Error>, Arc<SizedClock>) = match path {
+		let (flavor, clock): (Result<DatastoreFlavor>, Arc<SizedClock>) = match path {
 			// Initiate an in-memory datastore
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
@@ -273,7 +267,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
-                return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a File datastore
 			s if s.starts_with("file:") => {
@@ -292,7 +286,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-                return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a RocksDB datastore
 			s if s.starts_with("rocksdb:") => {
@@ -310,7 +304,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-                return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a SurrealKV datastore
 			s if s.starts_with("surrealkv") => {
@@ -330,7 +324,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
-                return Err(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
@@ -345,7 +339,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
-                return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a TiKV datastore
 			s if s.starts_with("tikv:") => {
@@ -360,7 +354,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
-                return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a FoundationDB datastore
 			s if s.starts_with("fdb:") => {
@@ -375,7 +369,7 @@ impl Datastore {
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
-                return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
@@ -510,8 +504,7 @@ impl Datastore {
 		self.capabilities.allows_http_route(route_target)
 	}
 
-	/// Does the datastore allow requesting an HTTP route?
-	/// This function needs to be public to allow access from the CLI crate.
+	/// Is the user allowed to query?
 	pub fn allows_query_by_subject(&self, subject: impl Into<ArbitraryQueryTarget>) -> bool {
 		self.capabilities.allows_query(&subject.into())
 	}
@@ -543,11 +536,11 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn check_version(&self) -> Result<Version, Error> {
+	pub async fn check_version(&self) -> Result<Version> {
 		let version = self.get_version().await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
-			return Err(Error::OutdatedStorageVersion);
+			bail!(Error::OutdatedStorageVersion);
 		}
 		// Everything ok
 		Ok(version)
@@ -555,7 +548,7 @@ impl Datastore {
 
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn get_version(&self) -> Result<Version, Error> {
+	pub async fn get_version(&self) -> Result<Version> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Pessimistic).await?.enclose();
 		// Create the key where the version is stored
@@ -573,7 +566,7 @@ impl Datastore {
 						// We didn't write anything, so just rollback
 						catch!(txn, txn.cancel().await);
 						// Return the error
-						return Err(err);
+						bail!(err);
 					}
 					// We could decode the version correctly
 					Ok(val) => {
@@ -613,7 +606,7 @@ impl Datastore {
 
 	/// Setup the initial cluster access credentials
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<(), Error> {
+	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
@@ -642,7 +635,7 @@ impl Datastore {
 
 	/// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn bootstrap(&self) -> Result<(), Error> {
+	pub async fn bootstrap(&self) -> Result<()> {
 		// Insert this node in the cluster
 		self.insert_node(self.id).await?;
 		// Mark inactive nodes as archived
@@ -655,7 +648,7 @@ impl Datastore {
 
 	/// Run the background task to update node registration information
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn node_membership_update(&self) -> Result<(), Error> {
+	pub async fn node_membership_update(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Updating node registration information");
 		// Update this node in the cluster
@@ -666,7 +659,7 @@ impl Datastore {
 
 	/// Run the background task to process and archive inactive nodes
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn node_membership_expire(&self) -> Result<(), Error> {
+	pub async fn node_membership_expire(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Processing and archiving inactive nodes");
 		// Mark expired nodes as archived
@@ -677,7 +670,7 @@ impl Datastore {
 
 	/// Run the background task to process and cleanup archived nodes
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn node_membership_remove(&self) -> Result<(), Error> {
+	pub async fn node_membership_remove(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Processing and cleaning archived nodes");
 		// Cleanup expired nodes data
@@ -688,7 +681,7 @@ impl Datastore {
 
 	/// Run the background task to perform changefeed garbage collection
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process(&self) -> Result<(), Error> {
+	pub async fn changefeed_process(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
 		// Calculate the current system time
@@ -708,7 +701,7 @@ impl Datastore {
 
 	/// Run the background task to perform changefeed garbage collection
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process_at(&self, ts: u64) -> Result<(), Error> {
+	pub async fn changefeed_process_at(&self, ts: u64) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
 		// Save timestamps for current versionstamps
@@ -721,7 +714,7 @@ impl Datastore {
 
 	/// Run the datastore shutdown tasks, perfoming any necessary cleanup
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn shutdown(&self) -> Result<(), Error> {
+	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore shutdown operations");
 		// Delete this datastore from the cluster
@@ -749,33 +742,29 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::{Datastore, TransactionType::*, LockType::*};
-	/// use surrealdb_core::err::Error;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<(), Error> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("file://database.db").await?;
 	///     let mut tx = ds.transaction(Write, Optimistic).await?;
 	///     tx.cancel().await?;
 	///     Ok(())
 	/// }
 	/// ```
-	pub async fn transaction(
-		&self,
-		write: TransactionType,
-		lock: LockType,
-	) -> Result<Transaction, Error> {
+	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
 		self.transaction_factory.transaction(write, lock).await
 	}
 
 	/// Parse and execute an SQL query
 	///
 	/// ```rust,no_run
+	/// use anyhow::Error;
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<(), Error> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let ast = "USE NS test DB test; SELECT * FROM person;";
@@ -789,7 +778,7 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Variables,
-	) -> Result<Vec<Response>, Error> {
+	) -> Result<Vec<Response>> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
 		// Process the AST
@@ -802,21 +791,21 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 		query: S,
-	) -> Result<Vec<Response>, Error>
+	) -> Result<Vec<Response>>
 	where
-		S: Stream<Item = Result<Bytes, Error>>,
+		S: Stream<Item = Result<Bytes>>,
 	{
 		// Check if the session has expired
-		if sess.expired() {
-			return Err(Error::ExpiredSession);
-		}
+		ensure!(!sess.expired(), Error::ExpiredSession);
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
-			actor: "anonymous".to_string(),
-			action: "process".to_string(),
-			resource: "query".to_string(),
+		self.check_anon(sess).map_err(|_| {
+			Error::from(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "query".to_string(),
+			})
 		})?;
 
 		// Create a new query options
@@ -850,48 +839,54 @@ impl Datastore {
 		let mut complete = false;
 		let mut filling = true;
 
-		let stream = futures::stream::poll_fn(move |cx| loop {
-			// fill the buffer to at least parse_size when filling is required.
-			while filling {
-				let bytes = ready!(bytes_stream.as_mut().poll_next(cx));
-				let bytes = match bytes {
-					Some(Err(e)) => return Poll::Ready(Some(Err(e))),
-					Some(Ok(x)) => x,
-					None => {
-						complete = true;
-						filling = false;
-						break;
+		let stream = futures::stream::poll_fn(move |cx| {
+			loop {
+				// fill the buffer to at least parse_size when filling is required.
+				while filling {
+					let bytes = ready!(bytes_stream.as_mut().poll_next(cx));
+					let bytes = match bytes {
+						Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+						Some(Ok(x)) => x,
+						None => {
+							complete = true;
+							filling = false;
+							break;
+						}
+					};
+
+					buffer.extend_from_slice(&bytes);
+					filling = buffer.len() < parse_size
+				}
+
+				// if we finished streaming we can parse with complete so that the parser can be sure
+				// of it's results.
+				if complete {
+					return match statements_stream.parse_complete(&mut buffer) {
+						Err(e) => {
+							Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e)))))
+						}
+						Ok(None) => Poll::Ready(None),
+						Ok(Some(x)) => Poll::Ready(Some(Ok(x))),
+					};
+				}
+
+				// otherwise try to parse a single statement.
+				match statements_stream.parse_partial(&mut buffer) {
+					Err(e) => {
+						return Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e)))));
 					}
-				};
-
-				buffer.extend_from_slice(&bytes);
-				filling = buffer.len() < parse_size
-			}
-
-			// if we finished streaming we can parse with complete so that the parser can be sure
-			// of it's results.
-			if complete {
-				return match statements_stream.parse_complete(&mut buffer) {
-					Err(e) => Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
-					Ok(None) => Poll::Ready(None),
-					Ok(Some(x)) => Poll::Ready(Some(Ok(x))),
-				};
-			}
-
-			// otherwise try to parse a single statement.
-			match statements_stream.parse_partial(&mut buffer) {
-				Err(e) => return Poll::Ready(Some(Err(Error::InvalidQuery(e)))),
-				Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
-				Ok(None) => {
-					// Couldn't parse a statement for sure.
-					if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
-						// the buffer already contained more or equal to parse_size bytes
-						// this means we are trying to parse a statement of more then buffer size.
-						// so we need to increase the buffer size.
-						parse_size = (parse_size + 1).next_power_of_two();
+					Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
+					Ok(None) => {
+						// Couldn't parse a statement for sure.
+						if buffer.len() >= parse_size && parse_size < u32::MAX as usize {
+							// the buffer already contained more or equal to parse_size bytes
+							// this means we are trying to parse a statement of more then buffer size.
+							// so we need to increase the buffer size.
+							parse_size = (parse_size + 1).next_power_of_two();
+						}
+						// start filling the buffer again.
+						filling = true;
 					}
-					// start filling the buffer again.
-					filling = true;
 				}
 			}
 		});
@@ -903,12 +898,12 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::sql::parse;
+	/// use surrealdb_core::expr::parse;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<(), Error> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let ast = parse("USE NS test DB test; SELECT * FROM person;")?;
@@ -922,17 +917,17 @@ impl Datastore {
 		ast: Query,
 		sess: &Session,
 		vars: Variables,
-	) -> Result<Vec<Response>, Error> {
+	) -> Result<Vec<Response>> {
 		// Check if the session has expired
-		if sess.expired() {
-			return Err(Error::ExpiredSession);
-		}
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
-			actor: "anonymous".to_string(),
-			action: "process".to_string(),
-			resource: "query".to_string(),
+		self.check_anon(sess).map_err(|_| {
+			Error::from(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "query".to_string(),
+			})
 		})?;
 
 		// Create a new query options
@@ -952,13 +947,13 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::sql::Future;
-	/// use surrealdb_core::sql::Value;
+	/// use surrealdb_core::expr::Future;
+	/// use surrealdb_core::expr::Value;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<(), Error> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
@@ -967,22 +962,17 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(
-		&self,
-		val: Value,
-		sess: &Session,
-		vars: Variables,
-	) -> Result<Value, Error> {
+	pub async fn compute(&self, val: Value, sess: &Session, vars: Variables) -> Result<Value> {
 		// Check if the session has expired
-		if sess.expired() {
-			return Err(Error::ExpiredSession);
-		}
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can compute values when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| IamError::NotAllowed {
-			actor: "anonymous".to_string(),
-			action: "compute".to_string(),
-			resource: "value".to_string(),
+		self.check_anon(sess).map_err(|_| {
+			Error::from(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "compute".to_string(),
+				resource: "value".to_string(),
+			})
 		})?;
 
 		// Create a new memory stack
@@ -1033,13 +1023,13 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::sql::Future;
-	/// use surrealdb_core::sql::Value;
+	/// use surrealdb_core::expr::Future;
+	/// use surrealdb_core::expr::Value;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<(), Error> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
 	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
@@ -1048,16 +1038,9 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(
-		&self,
-		val: &Value,
-		sess: &Session,
-		vars: Variables,
-	) -> Result<Value, Error> {
+	pub async fn evaluate(&self, val: &Value, sess: &Session, vars: Variables) -> Result<Value> {
 		// Check if the session has expired
-		if sess.expired() {
-			return Err(Error::ExpiredSession);
-		}
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
@@ -1102,11 +1085,11 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::err::Error;
 	/// use surrealdb_core::dbs::Session;
+	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<(), Error> {
+	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("memory").await?.with_notifications();
 	///     let ses = Session::owner();
 	/// 	if let Some(channel) = ds.notifications() {
@@ -1124,25 +1107,21 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
 		// Check if the session has expired
-		if sess.expired() {
-			return Err(Error::ExpiredSession);
-		}
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<Response>, Error>
+	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<Response>>
 	where
-		S: Stream<Item = Result<Bytes, Error>>,
+		S: Stream<Item = Result<Bytes>>,
 	{
 		// Check if the session has expired
-		if sess.expired() {
-			return Err(Error::ExpiredSession);
-		}
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
 		self.execute_import(sess, None, stream).await
 	}
@@ -1153,7 +1132,7 @@ impl Datastore {
 		&self,
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
-	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+	) -> Result<impl Future<Output = Result<()>>> {
 		// Create a default export config
 		let cfg = super::export::Config::default();
 		self.export_with_config(sess, chn, cfg).await
@@ -1166,11 +1145,9 @@ impl Datastore {
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
 		cfg: export::Config,
-	) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+	) -> Result<impl Future<Output = Result<()>> + use<>> {
 		// Check if the session has expired
-		if sess.expired() {
-			return Err(Error::ExpiredSession);
-		}
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
@@ -1186,11 +1163,9 @@ impl Datastore {
 
 	/// Checks the required permissions level for this session
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, sess))]
-	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<(), Error> {
+	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<()> {
 		// Check if the session has expired
-		if sess.expired() {
-			return Err(Error::ExpiredSession);
-		}
+		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {
@@ -1210,7 +1185,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
 	}
-	pub fn setup_ctx(&self) -> Result<MutableContext, Error> {
+	pub fn setup_ctx(&self) -> Result<MutableContext> {
 		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
 			self.capabilities.clone(),
@@ -1246,14 +1221,14 @@ impl Datastore {
 
 #[cfg(test)]
 mod test {
-	use crate::sql::FlowResultExt as _;
+	use crate::expr::FlowResultExt as _;
 
 	use super::*;
 
 	#[tokio::test]
-	pub async fn very_deep_query() -> Result<(), Error> {
+	pub async fn very_deep_query() -> Result<()> {
+		use crate::expr::{Expression, Future, Number, Operator, Value};
 		use crate::kvs::Datastore;
-		use crate::sql::{Expression, Future, Number, Operator, Value};
 		use reblessive::{Stack, Stk};
 
 		// build query manually to bypass query limits.

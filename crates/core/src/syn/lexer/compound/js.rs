@@ -1,7 +1,7 @@
 use crate::syn::{
 	error::{MessageKind, SyntaxError},
 	lexer::unicode::chars::JS_LINE_TERIMATORS,
-	token::{t, Token},
+	token::{Token, t},
 };
 
 use super::Lexer;

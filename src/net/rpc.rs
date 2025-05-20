@@ -1,38 +1,39 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use super::AppState;
+use super::error::ResponseError;
 use super::headers::Accept;
 use super::headers::ContentType;
 use super::headers::SurrealId;
-use super::AppState;
 use crate::cnf;
 use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
-use crate::err::Error;
+use crate::net::error::Error as NetError;
+use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::http::Http;
 use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::websocket::Websocket;
-use crate::rpc::RpcState;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::routing::options;
 use axum::{
+	Extension, Router,
 	extract::ws::{WebSocket, WebSocketUpgrade},
 	response::IntoResponse,
-	Extension, Router,
 };
-use axum_extra::headers::Header;
 use axum_extra::TypedHeader;
+use axum_extra::headers::Header;
 use bytes::Bytes;
-use http::header::SEC_WEBSOCKET_PROTOCOL;
 use http::HeaderMap;
-use surrealdb::dbs::capabilities::RouteTarget;
+use http::header::SEC_WEBSOCKET_PROTOCOL;
 use surrealdb::dbs::Session;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
+use surrealdb::rpc::RpcContext;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::PROTOCOLS;
-use surrealdb::rpc::RpcContext;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -57,12 +58,14 @@ async fn get_handler(
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Rpc) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
-		return Err(Error::ForbiddenRoute(RouteTarget::Rpc.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Rpc.to_string()));
 	}
 	// Check that a valid header has been specified
 	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {
 		warn!("A connection was made without a specified protocol.");
-		warn!("Automatic inference of the protocol format is deprecated in SurrealDB 2.0 and will be removed in SurrealDB 3.0.");
+		warn!(
+			"Automatic inference of the protocol format is deprecated in SurrealDB 2.0 and will be removed in SurrealDB 3.0."
+		);
 		warn!("Please upgrade any client to ensure that the connection format is specified.");
 	}
 	// Check if there is a connection id header specified
@@ -76,10 +79,10 @@ async fn get_handler(
 						// The specified request id was a valid UUID
 						Ok(id) => id,
 						// The specified request id was not a UUID
-						Err(_) => return Err(Error::Request),
+						Err(_) => return Err(NetError::Request),
 					}
 				}
-				Err(_) => return Err(Error::Request),
+				Err(_) => return Err(NetError::Request),
 			}
 		}
 		// Otherwise, use the generic WebSocket connection id header
@@ -93,10 +96,10 @@ async fn get_handler(
 					// The specified request id was a valid UUID
 					Ok(id) => id,
 					// The specified request id was not a UUID
-					Err(_) => return Err(Error::Request),
+					Err(_) => return Err(NetError::Request),
 				},
 				// The request id contained invalid characters
-				Err(_) => return Err(Error::Request),
+				Err(_) => return Err(NetError::Request),
 			},
 		},
 	};
@@ -106,7 +109,7 @@ async fn get_handler(
 	session.id = Some(id.to_string());
 	// Check if a connection with this id already exists
 	if rpc_state.web_sockets.read().await.contains_key(&id) {
-		return Err(Error::Request);
+		return Err(NetError::Request);
 	}
 	// Now let's upgrade the WebSocket connection
 	Ok(ws
@@ -150,33 +153,33 @@ async fn post_handler(
 	accept: Option<TypedHeader<Accept>>,
 	content_type: TypedHeader<ContentType>,
 	body: Bytes,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> Result<impl IntoResponse, ResponseError> {
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Rpc) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
-		return Err(Error::ForbiddenRoute(RouteTarget::Rpc.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Rpc.to_string()).into());
 	}
 	// Get the input format from the Content-Type header
 	let fmt: Format = content_type.deref().into();
 	// Check that the input format is a valid format
 	if matches!(fmt, Format::Unsupported) {
-		return Err(Error::InvalidType);
+		return Err(NetError::InvalidType.into());
 	}
 	// Get the output format from the Accept header
 	let out: Option<Format> = accept.as_deref().map(Into::into);
 	// Check that the input format and the output format match
 	if let Some(out) = out {
 		if fmt != out {
-			return Err(Error::InvalidType);
+			return Err(NetError::InvalidType.into());
 		}
 	}
 	// Create a new HTTP instance
 	let rpc = Http::new(&state.datastore, session);
 	// Check to see available memory
 	if ALLOC.is_beyond_threshold() {
-		return Err(Error::ServerOverloaded);
+		return Err(NetError::ServerOverloaded.into());
 	}
 	// Parse the HTTP request body
 	match fmt.req_http(body) {
@@ -184,8 +187,8 @@ async fn post_handler(
 			// Execute the specified method
 			let res = RpcContext::execute(&rpc, req.version, req.method, req.params).await;
 			// Return the HTTP response
-			fmt.res_http(res.into_response(None)).map_err(Error::from)
+			Ok(fmt.res_http(res.into_response(None))?)
 		}
-		Err(err) => Err(Error::from(err)),
+		Err(err) => Err(err.into()),
 	}
 }

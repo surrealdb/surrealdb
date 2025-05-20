@@ -3,10 +3,10 @@
 use std::{fmt, hash::Hash};
 
 mod keyword;
-pub(crate) use keyword::keyword_t;
 pub use keyword::Keyword;
+pub(crate) use keyword::keyword_t;
 mod mac;
-use crate::sql::{language::Language, Algorithm};
+use crate::expr::{Algorithm, language::Language};
 pub(crate) use mac::t;
 
 /// A location in the source passed to the lexer.

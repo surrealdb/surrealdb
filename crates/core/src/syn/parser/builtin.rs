@@ -1,10 +1,10 @@
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{Constant, Function, Value},
+	expr::{Constant, Function, Value},
 	syn::{
-		error::{bail, MessageKind},
-		parser::{mac::expected, unexpected, SyntaxError},
-		token::{t, Span},
+		error::{MessageKind, bail},
+		parser::{SyntaxError, mac::expected, unexpected},
+		token::{Span, t},
 	},
 };
 use phf::phf_map;
@@ -203,11 +203,13 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("not") => PathKind::Function,
 		//
 		UniCase::ascii("object::entries") => PathKind::Function,
+		UniCase::ascii("object::extend") => PathKind::Function,
 		UniCase::ascii("object::from_entries") => PathKind::Function,
 		UniCase::ascii("object::is_empty") => PathKind::Function,
 		UniCase::ascii("object::keys") => PathKind::Function,
 		UniCase::ascii("object::len") => PathKind::Function,
 		UniCase::ascii("object::matches") => PathKind::Function,
+		UniCase::ascii("object::remove") => PathKind::Function,
 		UniCase::ascii("object::values") => PathKind::Function,
 		//
 		UniCase::ascii("parse::email::host") => PathKind::Function,

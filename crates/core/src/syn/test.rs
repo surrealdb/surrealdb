@@ -1,12 +1,12 @@
 use reblessive::Stack;
 
+use super::Parse;
 use super::lexer::Lexer;
 use super::parse;
 use super::parser::Parser;
-use super::Parse;
 use crate::err::Error;
-use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, Thing, Value};
-use crate::syn::token::{t, TokenKind};
+use crate::expr::{Array, Expression, Ident, Idiom, Param, Script, Thing, Value};
+use crate::syn::token::{TokenKind, t};
 
 impl Parse<Self> for Value {
 	fn parse(val: &str) -> Self {

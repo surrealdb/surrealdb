@@ -1,13 +1,13 @@
 use crate::dbs::plan::Explanation;
 #[cfg(not(target_family = "wasm"))]
 use crate::err::Error;
-use crate::sql::order::OrderList;
-use crate::sql::value::Value;
+use crate::expr::order::OrderList;
+use crate::expr::value::Value;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 
 use rand::prelude::SliceRandom;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 #[cfg(not(target_family = "wasm"))]
 use rayon::prelude::ParallelSliceMut;
 use std::mem;
@@ -319,13 +319,26 @@ impl MemoryOrderedLimit {
 	}
 
 	pub(in crate::dbs) fn push(&mut self, value: Value) {
-		let value = OrderedValue {
-			value,
-			orders: self.orders.clone(),
-		};
-		self.heap.push(Reverse(value));
-		if self.heap.len() > self.limit {
-			self.heap.pop();
+		if self.heap.len() >= self.limit {
+			// When the heap is full, first check if the new value
+			// if smaller that the top of this min-heap in order to
+			// prevent unnecessary push/pop and Arc::clone.
+			if let Some(top) = self.heap.peek() {
+				let cmp = self.orders.compare(&value, &top.0.value);
+				if cmp == Ordering::Less {
+					self.heap.push(Reverse(OrderedValue {
+						value,
+						orders: self.orders.clone(),
+					}));
+					self.heap.pop();
+				}
+			}
+		} else {
+			// Push the value onto the heap because it's not full.
+			self.heap.push(Reverse(OrderedValue {
+				value,
+				orders: self.orders.clone(),
+			}));
 		}
 	}
 

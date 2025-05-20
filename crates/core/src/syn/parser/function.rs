@@ -1,11 +1,11 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Function, Ident, Model, Value},
+	expr::{Function, Ident, Model, Value},
 	syn::{
 		error::syntax_error,
 		parser::mac::{expected, expected_whitespace, unexpected},
-		token::{t, TokenKind},
+		token::{TokenKind, t},
 	},
 };
 
@@ -117,7 +117,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod test {
 	use crate::{
-		sql::{Script, Value},
+		expr::{Script, Value},
 		syn::{self, Parse},
 	};
 
@@ -200,7 +200,10 @@ mod test {
 		})
 		"#;
 		let out = Value::parse(sql);
-		assert_eq!("ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",out.to_string());
+		assert_eq!(
+			"ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",
+			out.to_string()
+		);
 	}
 
 	#[test]

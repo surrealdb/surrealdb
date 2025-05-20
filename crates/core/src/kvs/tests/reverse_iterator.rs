@@ -214,6 +214,6 @@ macro_rules! define_tests {
 		}
 	};
 }
-use crate::sql::Value;
+use crate::expr::Value;
 use crate::syn::Parse;
 pub(crate) use define_tests;

@@ -1,20 +1,20 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{
+	expr::{
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Value,
 		graph::GraphSubjects,
 		part::{DestructurePart, Recurse, RecurseInstruction},
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Value,
 	},
 	syn::{
 		error::bail,
-		token::{t, Glued, Span, TokenKind},
+		token::{Glued, Span, TokenKind, t},
 	},
 };
 
 use super::{
-	mac::{expected, parse_option, unexpected},
 	ParseResult, Parser,
+	mac::{expected, parse_option, unexpected},
 };
 
 impl Parser<'_> {
@@ -752,7 +752,7 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::{Expression, Id, Number, Object, Operator, Param, Strand, Thing};
+	use crate::expr::{Expression, Id, Number, Object, Operator, Param, Strand, Thing};
 	use crate::syn::Parse;
 
 	use super::*;

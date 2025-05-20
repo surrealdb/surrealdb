@@ -1,13 +1,13 @@
-use crate::err::Error;
+use crate::expr::index::HnswParams;
+use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::docs::VecDocs;
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::{SharedVector, Vector};
-use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
-use crate::sql::index::HnswParams;
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 pub(super) enum HnswFlavor {
@@ -28,7 +28,7 @@ pub(super) enum HnswFlavor {
 }
 
 impl HnswFlavor {
-	pub(super) fn new(ibk: IndexKeyBase, p: &HnswParams) -> Result<Self, Error> {
+	pub(super) fn new(ibk: IndexKeyBase, p: &HnswParams) -> Result<Self> {
 		let res = match p.m {
 			1..=4 => match p.m0 {
 				1..=8 => Self::H5_9(Hnsw::<ArraySet<9>, ArraySet<5>>::new(ibk, p)?),
@@ -54,7 +54,7 @@ impl HnswFlavor {
 		Ok(res)
 	}
 
-	pub(super) async fn check_state(&mut self, tx: &Transaction) -> Result<(), Error> {
+	pub(super) async fn check_state(&mut self, tx: &Transaction) -> Result<()> {
 		match self {
 			HnswFlavor::H5_9(h) => h.check_state(tx).await,
 			HnswFlavor::H5_17(h) => h.check_state(tx).await,
@@ -73,11 +73,7 @@ impl HnswFlavor {
 		}
 	}
 
-	pub(super) async fn insert(
-		&mut self,
-		tx: &Transaction,
-		q_pt: Vector,
-	) -> Result<ElementId, Error> {
+	pub(super) async fn insert(&mut self, tx: &Transaction, q_pt: Vector) -> Result<ElementId> {
 		match self {
 			HnswFlavor::H5_9(h) => h.insert(tx, q_pt).await,
 			HnswFlavor::H5_17(h) => h.insert(tx, q_pt).await,
@@ -95,11 +91,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.insert(tx, q_pt).await,
 		}
 	}
-	pub(super) async fn remove(
-		&mut self,
-		tx: &Transaction,
-		e_id: ElementId,
-	) -> Result<bool, Error> {
+	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool> {
 		match self {
 			HnswFlavor::H5_9(h) => h.remove(tx, e_id).await,
 			HnswFlavor::H5_17(h) => h.remove(tx, e_id).await,
@@ -121,7 +113,7 @@ impl HnswFlavor {
 		&self,
 		tx: &Transaction,
 		search: &HnswSearch,
-	) -> Result<Vec<(f64, ElementId)>, Error> {
+	) -> Result<Vec<(f64, ElementId)>> {
 		match self {
 			HnswFlavor::H5_9(h) => h.knn_search(tx, search).await,
 			HnswFlavor::H5_17(h) => h.knn_search(tx, search).await,
@@ -147,7 +139,7 @@ impl HnswFlavor {
 		hnsw_docs: &HnswDocs,
 		vec_docs: &VecDocs,
 		chk: &mut HnswConditionChecker<'_>,
-	) -> Result<Vec<(f64, ElementId)>, Error> {
+	) -> Result<Vec<(f64, ElementId)>> {
 		match self {
 			HnswFlavor::H5_9(h) => {
 				h.knn_search_checked(tx, stk, search, hnsw_docs, vec_docs, chk).await
@@ -197,7 +189,7 @@ impl HnswFlavor {
 		&self,
 		tx: &Transaction,
 		e_id: &ElementId,
-	) -> Result<Option<SharedVector>, Error> {
+	) -> Result<Option<SharedVector>> {
 		match self {
 			HnswFlavor::H5_9(h) => h.get_vector(tx, e_id).await,
 			HnswFlavor::H5_17(h) => h.get_vector(tx, e_id).await,

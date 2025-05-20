@@ -8,25 +8,22 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use crate::api::{self, conn::DbResponse, err::Error, method::query::QueryResult, Result};
+use crate::api::{self, Result, conn::DbResponse, err::Error, method::query::QueryResult};
 use crate::dbs::{self, Status};
 use crate::method::Stats;
 use indexmap::IndexMap;
-use revision::revisioned;
 use revision::Revisioned;
-use rust_decimal::prelude::ToPrimitive;
+use revision::revisioned;
 use rust_decimal::Decimal;
-use serde::de::DeserializeOwned;
+use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use std::time::Duration;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;
 const NANOS_PER_MICRO: i64 = 1_000;
-
-#[deprecated(since = "2.3.0")]
-pub struct WsNotification {}
 
 // Converts a debug representation of `std::time::Duration` back
 fn duration_from_str(duration: &str) -> Option<std::time::Duration> {
@@ -108,13 +105,6 @@ impl From<Failure> for Error {
 	}
 }
 
-impl From<Failure> for crate::Error {
-	fn from(value: Failure) -> Self {
-		let api_err: Error = value.into();
-		api_err.into()
-	}
-}
-
 impl DbResponse {
 	fn from_server_result(result: ServerResult) -> Result<Self> {
 		match result.map_err(Error::from)? {
@@ -165,10 +155,12 @@ where
 {
 	if revisioned {
 		let mut buf = Vec::new();
-		value.serialize_revisioned(&mut buf).map_err(|error| crate::Error::Db(error.into()))?;
+		value.serialize_revisioned(&mut buf)?;
 		return Ok(buf);
 	}
-	surrealdb_core::sql::serde::serialize(value).map_err(|error| crate::Error::Db(error.into()))
+	surrealdb_core::expr::serde::serialize(value)
+		.map_err(surrealdb_core::err::Error::from)
+		.map_err(anyhow::Error::new)
 }
 
 fn deserialize<T>(bytes: &[u8], revisioned: bool) -> Result<T>
@@ -177,7 +169,11 @@ where
 {
 	if revisioned {
 		let mut read = std::io::Cursor::new(bytes);
-		return T::deserialize_revisioned(&mut read).map_err(|x| crate::Error::Db(x.into()));
+		return T::deserialize_revisioned(&mut read)
+			.map_err(surrealdb_core::err::Error::from)
+			.map_err(anyhow::Error::new);
 	}
-	surrealdb_core::sql::serde::deserialize(bytes).map_err(|error| crate::Error::Db(error.into()))
+	surrealdb_core::expr::serde::deserialize(bytes)
+		.map_err(surrealdb_core::err::Error::from)
+		.map_err(anyhow::Error::new)
 }

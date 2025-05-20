@@ -1,9 +1,9 @@
 use crate::{
-	sql::File,
+	expr::File,
 	syn::{
-		error::{bail, SyntaxError},
+		error::{SyntaxError, bail},
 		lexer::Lexer,
-		token::{t, Token},
+		token::{Token, t},
 	},
 };
 

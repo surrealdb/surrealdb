@@ -1,5 +1,5 @@
+use crate::expr::Number;
 use crate::fnc::util::math::ToFloat;
-use crate::sql::Number;
 
 pub trait Mean {
 	fn mean(&self) -> f64;

@@ -3,12 +3,12 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Block, Geometry, Object, Strand, Value},
+	expr::{Block, Geometry, Object, Strand, Value},
 	syn::{
 		error::bail,
 		lexer::compound,
-		parser::{enter_object_recursion, mac::expected, ParseResult, Parser},
-		token::{t, Glued, Span, TokenKind},
+		parser::{ParseResult, Parser, enter_object_recursion, mac::expected},
+		token::{Glued, Span, TokenKind, t},
 	},
 };
 
@@ -712,7 +712,10 @@ mod tests {
 		}"#;
 		let out = Value::parse(sql);
 		assert!(matches!(out, Value::Geometry(_)));
-		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }", format!("{}", out));
+		assert_eq!(
+			"{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }",
+			format!("{}", out)
+		);
 	}
 
 	#[test]
@@ -734,6 +737,9 @@ mod tests {
 		}"#;
 		let out = Value::parse(sql);
 		assert!(matches!(out, Value::Geometry(_)));
-		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }", format!("{}", out));
+		assert_eq!(
+			"{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }",
+			format!("{}", out)
+		);
 	}
 }

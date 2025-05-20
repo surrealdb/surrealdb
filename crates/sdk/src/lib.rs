@@ -157,8 +157,8 @@ extern crate tracing;
 #[doc(hidden)]
 pub use surrealdb_core::*;
 
-#[deprecated(since = "2.3.0")]
-pub use uuid::Uuid;
+// Temporarily re-export `expr` as `sql` in order to maintain backwards compatibility.
+pub use surrealdb_core::expr as sql;
 
 #[expect(hidden_glob_reexports)]
 mod api;
@@ -166,10 +166,10 @@ mod api;
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
-	pub use async_channel::bounded;
-	pub use async_channel::unbounded;
 	pub use async_channel::Receiver;
 	pub use async_channel::Sender;
+	pub use async_channel::bounded;
+	pub use async_channel::unbounded;
 }
 
 /// Different error types for embedded and remote databases
@@ -184,20 +184,12 @@ pub use crate::api::headers;
 
 #[doc(inline)]
 pub use crate::api::{
-	engine, method, opt,
+	Connect, Connection, Response, Surreal, engine, method, opt,
 	value::{
 		self, Action, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value,
 	},
-	Connect, Connection, Response, Result, Surreal,
 };
 
-/// An error originating from the SurrealDB client library
-#[derive(Debug, thiserror::Error, serde::Serialize)]
-pub enum Error {
-	/// An error with an embedded storage engine
-	#[error("{0}")]
-	Db(#[from] crate::error::Db),
-	/// An error with a remote database instance
-	#[error("{0}")]
-	Api(#[from] crate::error::Api),
-}
+/// A specialized `Result` type
+pub type Result<T> = anyhow::Result<T>;
+pub use anyhow::Error;

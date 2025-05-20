@@ -1,4 +1,8 @@
-use crate::api::conn::Connection;
+#[allow(unused_imports, reason = "Used by the DB engines.")]
+use crate::api::ExtraFeatures;
+use crate::api::Result;
+use crate::api::Surreal;
+use crate::api::conn;
 use crate::api::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::engine;
@@ -11,27 +15,24 @@ use crate::api::method::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind};
-#[allow(unused_imports, reason = "Used by the DB engines.")]
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
-#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
-use crate::error::Db as DbError;
 use crate::opt::WaitFor;
+#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
+use anyhow::bail;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
+#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
+use surrealdb_core::err::Error as DbError;
 use tokio::sync::watch;
-#[cfg(feature = "protocol-ws")]
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 #[cfg(feature = "protocol-ws")]
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use tokio_tungstenite::Connector;
+#[cfg(feature = "protocol-ws")]
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 impl crate::api::Connection for Any {}
-
-impl Connection for Any {
+impl conn::Sealed for Any {
 	#[allow(
 		unused_variables,
 		unreachable_code,
@@ -51,7 +52,7 @@ impl Connection for Any {
 
 			match EndpointKind::from(address.url.scheme()) {
 				EndpointKind::FoundationDb => {
-					#[cfg(feature = "kv-fdb")]
+					#[cfg(kv_fdb)]
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
@@ -59,9 +60,9 @@ impl Connection for Any {
 						conn_rx.recv().await??
 					}
 
-					#[cfg(not(feature = "kv-fdb"))]
-					return Err(
-						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
+					#[cfg(not(kv_fdb))]
+					bail!(
+						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -75,8 +76,8 @@ impl Connection for Any {
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
-					return Err(
-						DbError::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
+					bail!(
+						DbError::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -90,10 +91,9 @@ impl Connection for Any {
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
-					return Err(DbError::Ds(
+					bail!(DbError::Ds(
 						"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-					)
-					.into());
+					))
 				}
 
 				EndpointKind::TiKv => {
@@ -106,8 +106,8 @@ impl Connection for Any {
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
-					return Err(
-						DbError::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
+					bail!(
+						DbError::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -121,10 +121,10 @@ impl Connection for Any {
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
-					return Err(DbError::Ds(
+					bail!(DbError::Ds(
 						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
-					.into());
+					);
 				}
 
 				EndpointKind::Http | EndpointKind::Https => {
@@ -155,10 +155,10 @@ impl Connection for Any {
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
-					return Err(DbError::Ds(
+					bail!(DbError::Ds(
 						"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
-					.into());
+					);
 				}
 
 				EndpointKind::Ws | EndpointKind::Wss => {
@@ -195,10 +195,9 @@ impl Connection for Any {
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
-					return Err(DbError::Ds(
+					bail!(DbError::Ds(
 						"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
-					)
-					.into());
+					));
 				}
 				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
 			}

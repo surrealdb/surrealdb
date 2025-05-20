@@ -1,6 +1,6 @@
 use crate::cnf::TELEMETRY_NAMESPACE;
 use axum::extract::MatchedPath;
-use opentelemetry::{metrics::MetricsError, KeyValue};
+use opentelemetry::{KeyValue, metrics::MetricsError};
 use pin_project_lite::pin_project;
 use std::{
 	cell::Cell,

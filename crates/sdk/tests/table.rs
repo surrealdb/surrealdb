@@ -3,12 +3,13 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::skip_ok;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn define_foreign_table() -> Result<(), Error> {
+async fn define_foreign_table() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMALESS;
 		DEFINE TABLE person_by_age AS
@@ -140,7 +141,7 @@ async fn define_foreign_table() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp, Error::InvalidAggregation { .. }));
+	assert!(matches!(tmp.downcast_ref(), Some(Error::InvalidAggregation { .. })));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
@@ -162,7 +163,7 @@ async fn define_foreign_table() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_foreign_table_no_doubles() -> Result<(), Error> {
+async fn define_foreign_table_no_doubles() -> Result<()> {
 	// From: https://github.com/surrealdb/surrealdb/issues/3556
 	let sql = "
 		CREATE happy:1 SET year=2024, month=1, day=1;
@@ -210,7 +211,7 @@ async fn define_foreign_table_no_doubles() -> Result<(), Error> {
 	Ok(())
 }
 
-async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> {
+async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<()> {
 	let cond = if cond {
 		"WHERE value >= 5"
 	} else {
@@ -280,51 +281,51 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<(), Error> 
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_cond_group_mean() -> Result<(), Error> {
+async fn define_foreign_table_with_cond_group_mean() -> Result<()> {
 	define_foreign_table_group(true, "math::mean(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_with_cond_group_count() -> Result<(), Error> {
+async fn define_foreign_table_with_with_cond_group_count() -> Result<()> {
 	define_foreign_table_group(true, "count()").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_cond_group_min() -> Result<(), Error> {
+async fn define_foreign_table_with_cond_group_min() -> Result<()> {
 	define_foreign_table_group(true, "math::min(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_cond_group_max() -> Result<(), Error> {
+async fn define_foreign_table_with_cond_group_max() -> Result<()> {
 	define_foreign_table_group(true, "math::max(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_cond_group_sum() -> Result<(), Error> {
+async fn define_foreign_table_with_cond_group_sum() -> Result<()> {
 	define_foreign_table_group(true, "math::sum(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_no_cond_and_group_mean() -> Result<(), Error> {
+async fn define_foreign_table_with_no_cond_and_group_mean() -> Result<()> {
 	define_foreign_table_group(false, "math::mean(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_no_cond_and_group_count() -> Result<(), Error> {
+async fn define_foreign_table_with_no_cond_and_group_count() -> Result<()> {
 	define_foreign_table_group(false, "count()").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_no_cond_and_group_min() -> Result<(), Error> {
+async fn define_foreign_table_with_no_cond_and_group_min() -> Result<()> {
 	define_foreign_table_group(false, "math::min(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_no_cond_and_group_max() -> Result<(), Error> {
+async fn define_foreign_table_with_no_cond_and_group_max() -> Result<()> {
 	define_foreign_table_group(false, "math::max(value)").await
 }
 
 #[tokio::test]
-async fn define_foreign_table_with_no_cond_and_group_sum() -> Result<(), Error> {
+async fn define_foreign_table_with_no_cond_and_group_sum() -> Result<()> {
 	define_foreign_table_group(false, "math::sum(value)").await
 }
