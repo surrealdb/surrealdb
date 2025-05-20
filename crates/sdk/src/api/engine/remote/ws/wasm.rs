@@ -15,7 +15,6 @@ use crate::api::opt::Endpoint;
 use crate::engine::IntervalStream;
 use crate::engine::remote::Data;
 use crate::opt::WaitFor;
-use crate::{Action, Notification};
 use anyhow::Result;
 use async_channel::{Receiver, Sender};
 use futures::FutureExt;
@@ -281,12 +280,6 @@ async fn router_handle_response(
 							// Check if this live query is registered
 							if let Some(sender) = state.live_queries.get(&live_query_id) {
 								// Send the notification back to the caller or kill live query if the receiver is already dropped
-								let notification = Notification {
-									query_id: notification.id.0,
-									action: Action::from_core(notification.action),
-									data: notification.result,
-								};
-
 								if sender.send(notification).await.is_err() {
 									state.live_queries.remove(&live_query_id);
 									let kill = {
