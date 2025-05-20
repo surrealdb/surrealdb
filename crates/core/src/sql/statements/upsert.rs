@@ -1,6 +1,4 @@
-use crate::sql::{
-	Cond, Data, Explain, Output, SqlValues, Timeout, With,
-};
+use crate::sql::{Cond, Data, Explain, Output, SqlValues, Timeout, With};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

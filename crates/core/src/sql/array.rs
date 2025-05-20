@@ -12,7 +12,6 @@ use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
 #[revisioned(revision = 1)]

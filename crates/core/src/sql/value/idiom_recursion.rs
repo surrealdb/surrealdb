@@ -1,8 +1,8 @@
 use super::SqlValue;
 use crate::sql::{
-		Array, Part,
-		part::{RecurseInstruction, RecursionPlan},
-	};
+	Array, Part,
+	part::{RecurseInstruction, RecursionPlan},
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Recursion<'a> {

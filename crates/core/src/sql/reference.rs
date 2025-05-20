@@ -2,7 +2,6 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-
 use super::{Idiom, SqlValue, Table};
 
 #[revisioned(revision = 1)]

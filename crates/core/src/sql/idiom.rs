@@ -1,4 +1,3 @@
-
 use crate::sql::{
 	Part,
 	fmt::{Fmt, fmt_separated_by},
@@ -11,7 +10,6 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
-
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 

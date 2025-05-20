@@ -1,5 +1,5 @@
-use crate::sql::SqlValue;
 use crate::sql::Kind;
+use crate::sql::SqlValue;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

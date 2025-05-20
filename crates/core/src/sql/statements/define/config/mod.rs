@@ -1,7 +1,6 @@
 pub mod api;
 pub mod graphql;
 
-
 use crate::iam::ConfigKind;
 
 use anyhow::Result;

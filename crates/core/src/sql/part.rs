@@ -1,10 +1,7 @@
 use crate::{
 	cnf::IDIOM_RECURSION_LIMIT,
 	err::Error,
-	sql::{
-		Graph, Ident, Idiom, Number, SqlValue, fmt::Fmt,
-		strand::no_nul_bytes,
-	},
+	sql::{Graph, Ident, Idiom, Number, SqlValue, fmt::Fmt, strand::no_nul_bytes},
 };
 use anyhow::Result;
 use revision::revisioned;

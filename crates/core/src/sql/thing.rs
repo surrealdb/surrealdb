@@ -1,5 +1,5 @@
-use super::id::range::IdRange;
 use super::Table;
+use super::id::range::IdRange;
 use crate::sql::{Strand, escape::EscapeRid, id::Id};
 use crate::syn;
 use anyhow::Result;

@@ -1,4 +1,3 @@
-
 use crate::sql::{Ident, Strand, filter::Filter, tokenizer::Tokenizer};
 
 use revision::revisioned;

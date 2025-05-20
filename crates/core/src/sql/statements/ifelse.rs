@@ -1,5 +1,5 @@
-use crate::sql::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use crate::sql::SqlValue;
+use crate::sql::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

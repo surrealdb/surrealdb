@@ -1,4 +1,3 @@
-
 use crate::sql::{Idiom, SqlValue, fmt::Fmt};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

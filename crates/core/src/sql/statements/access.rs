@@ -1,7 +1,4 @@
-use crate::sql::{
-	Base, Cond, Datetime, Duration, Ident, Object, SqlValue,
-	Strand, Thing, Uuid,
-};
+use crate::sql::{Base, Cond, Datetime, Duration, Ident, Object, SqlValue, Strand, Thing, Uuid};
 use md5::Digest;
 use rand::Rng;
 use revision::revisioned;

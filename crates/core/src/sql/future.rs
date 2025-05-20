@@ -4,7 +4,6 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
 #[revisioned(revision = 1)]

@@ -3,9 +3,7 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::paths::{IN, OUT};
 
 use crate::kvs::Transaction;
-use crate::sql::{
-	Ident, Permissions, Strand, View, changefeed::ChangeFeed,
-};
+use crate::sql::{Ident, Permissions, Strand, View, changefeed::ChangeFeed};
 use crate::sql::{Idiom, Kind, TableType};
 use anyhow::Result;
 

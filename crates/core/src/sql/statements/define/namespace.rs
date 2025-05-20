@@ -1,4 +1,3 @@
-
 use crate::sql::{Ident, Strand};
 
 use revision::revisioned;

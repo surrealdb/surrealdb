@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
-
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
 
 #[revisioned(revision = 1)]
