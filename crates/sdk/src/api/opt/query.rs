@@ -11,9 +11,9 @@ use futures::stream::select_all;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
-use surrealdb_core::expr::{
-	self, Statement, Statements, Value as CoreValue, from_value as from_core_value, statements::*,
-};
+use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::from_value as from_core_value;
+use surrealdb_core::sql::{self, Statement, Statements, statements::*};
 
 pub struct Query(pub(crate) ValidQuery);
 /// A trait for converting inputs into SQL statements
@@ -32,10 +32,8 @@ pub(crate) mod into_query {
 	}
 }
 
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for expr::Query {}
-impl into_query::Sealed for expr::Query {
+impl IntoQuery for sql::Query {}
+impl into_query::Sealed for sql::Query {
 	fn into_query(self) -> Query {
 		Query(ValidQuery::Normal {
 			query: self.0.0,

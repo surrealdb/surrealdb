@@ -5,7 +5,7 @@ use reblessive::TreeStack;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
-use surrealdb::sql::index::Distance;
+use surrealdb::expr::index::Distance;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::expr::index::{HnswParams, VectorType};
 use surrealdb_core::expr::{Array, Id, Number, Thing, Value, value};

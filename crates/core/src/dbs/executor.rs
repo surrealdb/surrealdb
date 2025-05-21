@@ -11,15 +11,17 @@ use crate::expr::ControlFlow;
 use crate::expr::FlowResult;
 use crate::expr::paths::DB;
 use crate::expr::paths::NS;
-use crate::expr::query::Query;
-use crate::expr::statement::Statement;
-use crate::expr::statements::{OptionStatement, UseStatement};
+use crate::expr::statement::LogicalPlan;
 use crate::expr::value::Value;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
+use crate::sql::planner::SqlToLogical;
+use crate::sql::query::Query;
+use crate::sql::statement::Statement;
+use crate::sql::statements::{OptionStatement, UseStatement};
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
@@ -107,13 +109,13 @@ impl Executor {
 
 	/// Executes a statement which needs a transaction with the supplied transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	async fn execute_transaction_statement(
+	async fn execute_plan_in_transaction(
 		&mut self,
 		txn: Arc<Transaction>,
-		stmt: Statement,
+		plan: LogicalPlan,
 	) -> FlowResult<Value> {
-		let res = match stmt {
-			Statement::Set(stm) => {
+		let res = match plan {
+			LogicalPlan::Set(stm) => {
 				// Avoid moving in and out of the context via Arc::get_mut
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
@@ -147,7 +149,7 @@ impl Executor {
 				}
 			}
 			// Process all other normal statements
-			stmt => {
+			plan => {
 				// The transaction began successfully
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
@@ -158,7 +160,7 @@ impl Executor {
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Process the statement
-				self.stack.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None)).finish().await
+				self.stack.enter(|stk| plan.compute(stk, &self.ctx, &self.opt, None)).finish().await
 			}
 		};
 
@@ -193,64 +195,71 @@ impl Executor {
 			// These statements don't need a transaction.
 			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 			stmt => {
-				let writeable = stmt.writeable();
-				let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
-				let receiver = self.ctx.has_notifications().then(|| {
-					let (send, recv) = async_channel::unbounded();
-					self.opt.sender = Some(send);
-					recv
-				});
+				let planner = SqlToLogical::new();
+				let plan = planner.statement_to_logical(stmt)?;
 
-				match self.execute_transaction_statement(txn.clone(), stmt).await {
-					Ok(value) | Err(ControlFlow::Return(value)) => {
-						let mut lock = txn.lock().await;
+				self.execute_plan_impl(kvs, plan).await
+			}
+		}
+	}
 
-						// non-writable transactions might return an error on commit.
-						// So cancel them instead. This is fine since a non-writable transaction
-						// has nothing to commit anyway.
-						if !writeable {
-							let _ = lock.cancel().await;
-							return Ok(value);
-						}
+	async fn execute_plan_impl(&mut self, kvs: &Datastore, plan: LogicalPlan) -> Result<Value> {
+		let writeable = plan.writeable();
+		let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
+		let receiver = self.ctx.has_notifications().then(|| {
+			let (send, recv) = async_channel::unbounded();
+			self.opt.sender = Some(send);
+			recv
+		});
 
-						if let Err(e) = lock.complete_changes(false).await {
-							let _ = lock.cancel().await;
+		match self.execute_plan_in_transaction(txn.clone(), plan).await {
+			Ok(value) | Err(ControlFlow::Return(value)) => {
+				let mut lock = txn.lock().await;
 
-							bail!(Error::QueryNotExecutedDetail {
-								message: e.to_string(),
-							});
-						}
+				// non-writable transactions might return an error on commit.
+				// So cancel them instead. This is fine since a non-writable transaction
+				// has nothing to commit anyway.
+				if !writeable {
+					let _ = lock.cancel().await;
+					return Ok(value);
+				}
 
-						if let Err(e) = lock.commit().await {
-							bail!(Error::QueryNotExecutedDetail {
-								message: e.to_string(),
-							});
-						}
+				if let Err(e) = lock.complete_changes(false).await {
+					let _ = lock.cancel().await;
 
-						// flush notifications.
-						if let Some(recv) = receiver {
-							self.opt.sender = None;
-							if let Some(sink) = self.ctx.notifications() {
-								spawn(async move {
-									while let Ok(x) = recv.recv().await {
-										if sink.send(x).await.is_err() {
-											break;
-										}
-									}
-								});
+					bail!(Error::QueryNotExecutedDetail {
+						message: e.to_string(),
+					});
+				}
+
+				if let Err(e) = lock.commit().await {
+					bail!(Error::QueryNotExecutedDetail {
+						message: e.to_string(),
+					});
+				}
+
+				// flush notifications.
+				if let Some(recv) = receiver {
+					self.opt.sender = None;
+					if let Some(sink) = self.ctx.notifications() {
+						spawn(async move {
+							while let Ok(x) = recv.recv().await {
+								if sink.send(x).await.is_err() {
+									break;
+								}
 							}
-						}
-
-						Ok(value)
-					}
-					Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
-						bail!(Error::InvalidControlFlow)
-					}
-					Err(ControlFlow::Err(e)) => {
-						let _ = txn.cancel().await;
-						Err(e)
+						});
 					}
 				}
+
+				Ok(value)
+			}
+			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
+				bail!(Error::InvalidControlFlow)
+			}
+			Err(ControlFlow::Err(e)) => {
+				let _ = txn.cancel().await;
+				Err(e)
 			}
 		}
 	}
@@ -461,7 +470,10 @@ impl Executor {
 				stmt => {
 					skip_remaining = matches!(stmt, Statement::Output(_));
 
-					let r = match self.execute_transaction_statement(txn.clone(), stmt).await {
+					let planner = SqlToLogical::new();
+					let plan = planner.statement_to_logical(stmt)?;
+
+					let r = match self.execute_plan_in_transaction(txn.clone(), plan).await {
 						Ok(x) => Ok(x),
 						Err(ControlFlow::Return(value)) => {
 							skip_remaining = true;
@@ -549,6 +561,30 @@ impl Executor {
 	) -> Result<Vec<Response>> {
 		let stream = futures::stream::iter(qry.into_iter().map(Ok));
 		Self::execute_stream(kvs, ctx, opt, stream).await
+	}
+
+	pub async fn execute_plan(
+		kvs: &Datastore,
+		ctx: Context,
+		opt: Options,
+		plan: LogicalPlan,
+	) -> Result<Vec<Response>> {
+		let mut this = Executor::new(ctx, opt);
+
+		let query_type = match &plan {
+			LogicalPlan::Live(_) => QueryType::Live,
+			LogicalPlan::Kill(_) => QueryType::Kill,
+			_ => QueryType::Other,
+		};
+
+		let now = Instant::now();
+		let result = this.execute_plan_impl(kvs, plan).await;
+
+		Ok(vec![Response {
+			time: now.elapsed(),
+			result,
+			query_type,
+		}])
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]

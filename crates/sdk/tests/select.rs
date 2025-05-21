@@ -3,10 +3,11 @@ use parse::Parse;
 mod helpers;
 use helpers::{Test, new_ds};
 use surrealdb::Result;
-use surrealdb::sql::Number;
+use surrealdb::expr::Number;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::expr::Value;
 use surrealdb_core::iam::Role;
+use surrealdb_core::sql::SqlValue;
 
 #[tokio::test]
 async fn select_field_value() -> Result<()> {
@@ -22,38 +23,41 @@ async fn select_field_value() -> Result<()> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:tobie,
 				name: 'Tobie'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:jaime,
 				name: 'Jaime'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			'Jaime',
 			'Tobie',
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				name: 'Jaime'
@@ -62,7 +66,8 @@ async fn select_field_value() -> Result<()> {
 				name: 'Tobie'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -82,7 +87,7 @@ async fn select_field_and_omit() -> Result<()> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:tobie,
@@ -93,11 +98,12 @@ async fn select_field_and_omit() -> Result<()> {
 				},
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:jaime,
@@ -108,11 +114,12 @@ async fn select_field_and_omit() -> Result<()> {
 				},
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:jaime,
@@ -125,11 +132,12 @@ async fn select_field_and_omit() -> Result<()> {
 				opts: {},
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:jaime,
@@ -148,7 +156,8 @@ async fn select_field_and_omit() -> Result<()> {
 				},
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -169,7 +178,7 @@ async fn select_expression_value() -> Result<()> {
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				boolean: true,
@@ -177,11 +186,12 @@ async fn select_expression_value() -> Result<()> {
 				number: 5
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				boolean: false,
@@ -189,29 +199,32 @@ async fn select_expression_value() -> Result<()> {
 				number: -5
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			-5,
 			5,
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			false,
 			true
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -239,7 +252,8 @@ async fn select_expression_value() -> Result<()> {
 					operation: 'Fetch'
 				}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -284,7 +298,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: documentation:test,
@@ -310,11 +324,12 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				tags: {
@@ -322,43 +337,47 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 				}
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				content: 'this is english'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				content: 'my primary text'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				content: 'my secondary text'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -383,27 +402,28 @@ async fn select_writeable_subqueries() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: tester:test
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[tester:test]");
+	let val = SqlValue::parse("[tester:test]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("tester:test");
+	let val = SqlValue::parse("tester:test").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -426,40 +446,43 @@ async fn select_where_field_is_bool() -> Result<()> {
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:1,
 				active: false
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:2,
 				active: false
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:3,
 				active: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:1,
@@ -470,11 +493,12 @@ async fn select_where_field_is_bool() -> Result<()> {
 				active: false
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:1,
@@ -485,18 +509,20 @@ async fn select_where_field_is_bool() -> Result<()> {
 				active: false
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:3,
 				active: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 
 	Ok(())
@@ -523,7 +549,7 @@ async fn select_where_field_is_thing_and_with_index() -> Result<()> {
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -543,11 +569,12 @@ async fn select_where_field_is_thing_and_with_index() -> Result<()> {
 					operation: 'Collector'
 				}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -579,11 +606,12 @@ async fn select_where_field_is_thing_and_with_index() -> Result<()> {
 					operation: 'Fetch'
 				}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				author: person:tobie,
@@ -594,7 +622,8 @@ async fn select_where_field_is_thing_and_with_index() -> Result<()> {
 				id: post:2
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -617,7 +646,7 @@ async fn select_where_and_with_index() -> Result<()> {
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -637,17 +666,19 @@ async fn select_where_and_with_index() -> Result<()> {
 					operation: 'Collector'
 				}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				name: 'Tobie'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -670,7 +701,7 @@ async fn select_where_and_with_unique_index() -> Result<()> {
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -690,17 +721,19 @@ async fn select_where_and_with_unique_index() -> Result<()> {
 					operation: 'Collector'
 				}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				name: 'Jaime'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -725,7 +758,7 @@ async fn select_where_and_with_fulltext_index() -> Result<()> {
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -745,17 +778,19 @@ async fn select_where_and_with_fulltext_index() -> Result<()> {
 					operation: 'Collector'
 				}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				name: 'Jaime'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -778,7 +813,7 @@ async fn select_where_explain() -> Result<()> {
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -801,11 +836,12 @@ async fn select_where_explain() -> Result<()> {
 					operation: 'Collector'
 				},
 			]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -840,7 +876,8 @@ async fn select_where_explain() -> Result<()> {
 					operation: 'Fetch'
 				},
 			]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -853,7 +890,7 @@ async fn select_with_function_field() -> Result<()> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ a: 1, b: 1 }]");
+	let val = SqlValue::parse("[{ a: 1, b: 1 }]").into();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -978,7 +1015,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	];
 	let statement = "SELECT * FROM person";
 
-	let empty_array = Value::parse("[]");
+	let empty_array = SqlValue::parse("[]").into();
 
 	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
@@ -1066,7 +1103,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == Value::parse("[]"),
+			res.unwrap() == SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should not be able to select if the table has no permissions"
 		);
@@ -1094,7 +1131,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -1136,7 +1173,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to select if the table has no permissions"
 		);
@@ -1164,7 +1201,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -1188,7 +1225,7 @@ async fn select_issue_3510() -> Result<()> {
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					link: {
@@ -1217,7 +1254,7 @@ async fn select_destructure() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:1,
@@ -1234,11 +1271,12 @@ async fn select_destructure() -> Result<()> {
                 }
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				obj: {
@@ -1250,11 +1288,12 @@ async fn select_destructure() -> Result<()> {
                 }
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:1,
@@ -1267,7 +1306,8 @@ async fn select_destructure() -> Result<()> {
                 }
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1289,16 +1329,17 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
     		{ id: a:1 },
     		{ id: a:2 }
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: b:1,
@@ -1307,11 +1348,12 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 				list: [1, 2, 3]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: b:2,
@@ -1320,11 +1362,12 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 				list: [4, 5, 6]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 		    [
     			[
@@ -1339,7 +1382,8 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
                 ]
 			]
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1366,7 +1410,7 @@ async fn select_field_value_permissions() -> Result<()> {
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: data:1,
@@ -1374,20 +1418,22 @@ async fn select_field_value_permissions() -> Result<()> {
 				private: 'private'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let _ = res.remove(0).result?;
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: user:1
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 
 	let sql = r#"
@@ -1396,37 +1442,39 @@ async fn select_field_value_permissions() -> Result<()> {
 		SELECT public FROM data WHERE private = "private";
 		SELECT VALUE private FROM data WHERE id = data:1;
 	"#;
-	let ses = Session::for_record("test", "test", "user", Value::parse("user:1"));
+	let ses = Session::for_record("test", "test", "user", SqlValue::parse("user:1").into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: data:1,
 				public: 'public'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				public: NONE
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[NONE]");
+	let val = SqlValue::parse("[NONE]").into();
 	assert_eq!(tmp, val);
 
 	Ok(())

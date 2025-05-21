@@ -1,5 +1,5 @@
 use crate::{
-	expr::Bytes,
+	sql::Bytes,
 	syn::{
 		error::{SyntaxError, bail},
 		lexer::Lexer,

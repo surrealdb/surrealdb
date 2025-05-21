@@ -7,10 +7,11 @@ use helpers::new_ds;
 use parse::Parse;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
+use surrealdb::expr::Value;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 use surrealdb_core::vs::VersionStamp;
 
 mod helpers;
@@ -75,7 +76,7 @@ async fn database_change_feeds() -> Result<()> {
 		.map(|(vs1, vs2)| {
 			let vs1 = vs1.into_u128();
 			let vs2 = vs2.into_u128();
-			Value::parse(
+			SqlValue::parse(
 				format!(
 					r#"[
 						{{ versionstamp: {}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
@@ -85,6 +86,7 @@ async fn database_change_feeds() -> Result<()> {
 				)
 				.as_str(),
 			)
+			.into()
 		})
 		.collect();
 
@@ -99,21 +101,22 @@ async fn database_change_feeds() -> Result<()> {
 		assert_eq!(res.len(), 3);
 		// UPDATE CONTENT
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-		);
+		)
+		.into();
 		Some(&tmp)
 			.filter(|x| *x == &val)
 			.map(|_v| ())
 			.ok_or_else(|| anyhow!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
-		let val = Value::parse("[]");
+		let val = SqlValue::parse("[]").into();
 		Some(&tmp)
 			.filter(|x| *x == &val)
 			.map(|_v| ())
@@ -174,7 +177,7 @@ async fn database_change_feeds() -> Result<()> {
 	dbs.changefeed_process_at(current_time).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val: Value = SqlValue::parse("[]").into();
 	assert_eq!(val, tmp);
 	//
 	Ok(())
@@ -223,14 +226,15 @@ async fn table_change_feeds() -> Result<()> {
 	tmp.unwrap();
 	// UPDATE CONTENT
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	// UPDATE REPLACE
 	let tmp = res.remove(0).result;
@@ -240,14 +244,15 @@ async fn table_change_feeds() -> Result<()> {
 	));
 	// UPDATE MERGE
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Jaime',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	// UPDATE SET
 	let tmp = res.remove(0).result;
@@ -257,18 +262,19 @@ async fn table_change_feeds() -> Result<()> {
 	));
 	// UPDATE SET
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	// DELETE
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	// CREATE
 	let _tmp = res.remove(0).result?;
@@ -301,7 +307,7 @@ async fn table_change_feeds() -> Result<()> {
 					vs5.into_u128(),
 					vs6.into_u128(),
 				);
-				Value::parse(
+				SqlValue::parse(
 					format!(
 						r#"[
 						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person' }} }} ] }},
@@ -313,7 +319,7 @@ async fn table_change_feeds() -> Result<()> {
 						]"#
 					)
 					.as_str(),
-				)
+				).into()
 			})
 			.collect();
 	assert!(
@@ -347,7 +353,7 @@ async fn table_change_feeds() -> Result<()> {
 	dbs.changefeed_process_at(end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -379,7 +385,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	}
 	let sql = format!("UPDATE {table} SET name = 'Doe'");
 	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
-	let expected = Value::parse(
+	let expected = SqlValue::parse(
 		"[
 		{
 			id: user:amos,
@@ -390,7 +396,8 @@ async fn changefeed_with_ts() -> Result<()> {
 			name: 'Doe',
 		},
 	]",
-	);
+	)
+	.into();
 	assert_eq!(users, expected);
 	let sql = format!("SELECT * FROM {table}");
 	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
@@ -414,7 +421,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 		{
 			define_table: {
@@ -436,7 +443,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 		{
 			update: {
@@ -460,7 +467,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 					{
 						 update: {
@@ -484,7 +491,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 		{
 			update: {
@@ -508,7 +515,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 		{
 			update: {
@@ -551,7 +558,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 					{
 						 update: {

@@ -15,7 +15,8 @@ use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
 };
 use crate::err::Error;
-use crate::expr::{Base, FlowResultExt as _, Query, Value, statements::DefineUserStatement};
+use crate::expr::LogicalPlan;
+use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -28,6 +29,7 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
+use crate::sql::Query;
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
 #[allow(unused_imports)]
@@ -899,7 +901,7 @@ impl Datastore {
 	/// ```rust,no_run
 	/// use surrealdb_core::kvs::Datastore;
 	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::expr::parse;
+	/// use surrealdb_core::sql::parse;
 	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
@@ -941,6 +943,38 @@ impl Datastore {
 		vars.attach(&mut ctx)?;
 		// Process all statements
 		Executor::execute(self, ctx.freeze(), opt, ast).await
+	}
+
+	pub async fn process_plan(
+		&self,
+		plan: LogicalPlan,
+		sess: &Session,
+		vars: Variables,
+	) -> Result<Vec<Response>> {
+		// Check if the session has expired
+		ensure!(!sess.expired(), Error::ExpiredSession);
+		// Check if anonymous actors can execute queries when auth is enabled
+		// TODO(sgirones): Check this as part of the authorisation layer
+		self.check_anon(sess).map_err(|_| {
+			Error::from(IamError::NotAllowed {
+				actor: "anonymous".to_string(),
+				action: "process".to_string(),
+				resource: "query".to_string(),
+			})
+		})?;
+
+		// Create a new query options
+		let opt = self.setup_options(sess);
+
+		// Create a default context
+		let mut ctx = self.setup_ctx()?;
+		// Start an execution context
+		sess.context(&mut ctx);
+		// Store the query variables
+		vars.attach(&mut ctx)?;
+
+		// Process all statements
+		Executor::execute_plan(self, ctx.freeze(), opt, plan).await
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed

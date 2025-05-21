@@ -5,7 +5,7 @@ use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn future_function_simple() -> Result<()> {
@@ -20,17 +20,21 @@ async fn future_function_simple() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:test, can_drive: NONE }]");
+	let val = SqlValue::parse("[{ id: person:test, can_drive: NONE }]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val =
-		Value::parse("[{ id: person:test, birthday: d'2007-06-22T00:00:00Z', can_drive: false }]");
+	let val = SqlValue::parse(
+		"[{ id: person:test, birthday: d'2007-06-22T00:00:00Z', can_drive: false }]",
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val =
-		Value::parse("[{ id: person:test, birthday: d'2001-06-22T00:00:00Z', can_drive: true }]");
+	let val = SqlValue::parse(
+		"[{ id: person:test, birthday: d'2001-06-22T00:00:00Z', can_drive: true }]",
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -52,7 +56,7 @@ async fn future_function_arguments() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				a: 'test@surrealdb.com',
@@ -62,7 +66,8 @@ async fn future_function_arguments() -> Result<()> {
 				y: 'b-test',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -80,7 +85,7 @@ async fn future_disabled() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("<future> { 123 }");
+	let val = SqlValue::parse("<future> { 123 }").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

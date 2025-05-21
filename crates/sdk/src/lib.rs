@@ -24,10 +24,6 @@ extern crate tracing;
 #[doc(hidden)]
 pub use surrealdb_core::*;
 
-// Temporarily re-export `expr` as `sql` in order to maintain backwards compatibility.
-#[doc(hidden)]
-pub use surrealdb_core::expr as sql;
-
 #[expect(hidden_glob_reexports)]
 mod api;
 

@@ -184,14 +184,14 @@ mod tests {
 
 	#[test]
 	fn start() {
-		let part = Part::Start(expr::thing("foo:bar").unwrap().into());
+		let part = Part::Start(sql::thing("foo:bar").unwrap().into());
 		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
 	fn value() {
-		let part = Part::Value(expr::thing("foo:bar").unwrap().into());
+		let part = Part::Value(sql::thing("foo:bar").unwrap().into());
 		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
