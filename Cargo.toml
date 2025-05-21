@@ -182,6 +182,8 @@ storage-fdb-7_3 = ["surrealdb/kv-fdb-7_3"]
 # Deprecated features
 # Doesn't do anything. Use a version specific `storage-fdb-*` feature instead.
 storage-fdb = ["surrealdb/kv-fdb"]
+# This feature doesn't do anything yet
+enterprise = []
 
 [profile.release]
 lto = true
