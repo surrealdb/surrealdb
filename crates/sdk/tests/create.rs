@@ -60,7 +60,7 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("{ id: foo:bar}");
+	let val = SqlValue::parse("{ id: foo:bar}").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
