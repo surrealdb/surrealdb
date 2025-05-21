@@ -8,6 +8,7 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::expr::function::CustomFunctionName;
 use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
@@ -839,7 +840,16 @@ pub trait RpcProtocolV1: RpcContext {
 		};
 		// Specify the function to run
 		let func: Query = match &name[0..4] {
-			"fn::" => Function::Custom(name.chars().skip(4).collect(), args).into(),
+			"fn::" => Function::Custom(
+				CustomFunctionName {
+					name: name.chars().skip(4).collect::<String>().into(),
+					// TODO(kearfy): support version and submodule specification here
+					version: None,
+					submodule: None,
+				},
+				args,
+			)
+			.into(),
 			"ml::" => Model {
 				name: name.chars().skip(4).collect(),
 				version: version.ok_or(RpcError::InvalidParams)?,

@@ -37,6 +37,8 @@ pub(crate) enum Lookup<'a> {
 	Bus(&'a str, &'a str),
 	/// A cache key for functions (on a database)
 	Fcs(&'a str, &'a str),
+	/// A cache key for silo functions (on a database)
+	Sis(&'a str, &'a str),
 	/// A cache key for models (on a database)
 	Mls(&'a str, &'a str),
 	/// A cache key for configs (on a database)
@@ -89,6 +91,8 @@ pub(crate) enum Lookup<'a> {
 	Bu(&'a str, &'a str, &'a str),
 	/// A cache key for a function (on a database)
 	Fc(&'a str, &'a str, &'a str),
+	/// A cache key for a silo function (on a database)
+	Si(&'a str, &'a str, &'a str),
 	/// A cache key for a model (on a database)
 	Ml(&'a str, &'a str, &'a str, &'a str),
 	/// A cache key for a config (on a database)
@@ -130,6 +134,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Azs(la, lb), Key::Azs(ka, kb)) => la == ka && lb == kb,
 			(Self::Bus(la, lb), Key::Bus(ka, kb)) => la == ka && lb == kb,
 			(Self::Fcs(la, lb), Key::Fcs(ka, kb)) => la == ka && lb == kb,
+			(Self::Sis(la, lb), Key::Sis(ka, kb)) => la == ka && lb == kb,
 			(Self::Mls(la, lb), Key::Mls(ka, kb)) => la == ka && lb == kb,
 			(Self::Cgs(la, lb), Key::Cgs(ka, kb)) => la == ka && lb == kb,
 			(Self::Pas(la, lb), Key::Pas(ka, kb)) => la == ka && lb == kb,
@@ -156,6 +161,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Az(la, lb, lc), Key::Az(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Bu(la, lb, lc), Key::Bu(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fc(la, lb, lc), Key::Fc(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Si(la, lb, lc), Key::Si(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Ml(la, lb, lc, ld), Key::Ml(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Cg(la, lb, lc), Key::Cg(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Pa(la, lb, lc), Key::Pa(ka, kb, kc)) => la == ka && lb == kb && lc == kc,

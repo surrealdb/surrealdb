@@ -170,6 +170,7 @@ use std::{
 	mem,
 	sync::Arc,
 };
+use surrealdb_core::expr::CustomFunctionName;
 use surrealdb_core::expr::Function;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
@@ -1186,7 +1187,12 @@ async fn router(
 			args,
 		} => {
 			let func: CoreValue = match name.strip_prefix("fn::") {
-				Some(name) => Function::Custom(name.to_owned(), args.0).into(),
+				Some(name) => Function::Custom(
+					// TODO(kearfy): support version and submodule specification here
+					CustomFunctionName::new(name.to_owned().into(), None, None),
+					args.0,
+				)
+				.into(),
 				None => match name.strip_prefix("ml::") {
 					#[cfg(feature = "ml")]
 					Some(name) => {
