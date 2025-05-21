@@ -107,7 +107,7 @@ impl<'a> StatementContext<'a> {
 				// permissions are NONE, because
 				// there is no point in processing
 				// a table which we can't access.
-				let perms = self.stm.permissions(&table, false);
+				let perms = self.stm.permissions(&table, self.stm.is_create());
 				// If permissions are specific, we
 				// need to fetch the record content.
 				if perms.is_specific() {
