@@ -43,6 +43,8 @@ impl into_query::Sealed for sql::Query {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for Statements {}
 impl into_query::Sealed for Statements {
 	fn into_query(self) -> Query {
@@ -54,6 +56,8 @@ impl into_query::Sealed for Statements {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for Vec<Statement> {}
 impl into_query::Sealed for Vec<Statement> {
 	fn into_query(self) -> Query {
@@ -65,6 +69,8 @@ impl into_query::Sealed for Vec<Statement> {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for Statement {}
 impl into_query::Sealed for Statement {
 	fn into_query(self) -> Query {
@@ -76,6 +82,8 @@ impl into_query::Sealed for Statement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for UseStatement {}
 impl into_query::Sealed for UseStatement {
 	fn into_query(self) -> Query {
@@ -87,6 +95,8 @@ impl into_query::Sealed for UseStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for SetStatement {}
 impl into_query::Sealed for SetStatement {
 	fn into_query(self) -> Query {
@@ -98,6 +108,8 @@ impl into_query::Sealed for SetStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for InfoStatement {}
 impl into_query::Sealed for InfoStatement {
 	fn into_query(self) -> Query {
@@ -109,6 +121,8 @@ impl into_query::Sealed for InfoStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for LiveStatement {}
 impl into_query::Sealed for LiveStatement {
 	fn into_query(self) -> Query {
@@ -120,6 +134,8 @@ impl into_query::Sealed for LiveStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for KillStatement {}
 impl into_query::Sealed for KillStatement {
 	fn into_query(self) -> Query {
@@ -131,6 +147,8 @@ impl into_query::Sealed for KillStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for BeginStatement {}
 impl into_query::Sealed for BeginStatement {
 	fn into_query(self) -> Query {
@@ -142,6 +160,8 @@ impl into_query::Sealed for BeginStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for CancelStatement {}
 impl into_query::Sealed for CancelStatement {
 	fn into_query(self) -> Query {
@@ -153,6 +173,8 @@ impl into_query::Sealed for CancelStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for CommitStatement {}
 impl into_query::Sealed for CommitStatement {
 	fn into_query(self) -> Query {
@@ -164,6 +186,8 @@ impl into_query::Sealed for CommitStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for OutputStatement {}
 impl into_query::Sealed for OutputStatement {
 	fn into_query(self) -> Query {
@@ -175,6 +199,8 @@ impl into_query::Sealed for OutputStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for IfelseStatement {}
 impl into_query::Sealed for IfelseStatement {
 	fn into_query(self) -> Query {
@@ -186,6 +212,8 @@ impl into_query::Sealed for IfelseStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for SelectStatement {}
 impl into_query::Sealed for SelectStatement {
 	fn into_query(self) -> Query {
@@ -197,6 +225,8 @@ impl into_query::Sealed for SelectStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for CreateStatement {}
 impl into_query::Sealed for CreateStatement {
 	fn into_query(self) -> Query {
@@ -208,6 +238,8 @@ impl into_query::Sealed for CreateStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for UpdateStatement {}
 impl into_query::Sealed for UpdateStatement {
 	fn into_query(self) -> Query {
@@ -219,6 +251,8 @@ impl into_query::Sealed for UpdateStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for RelateStatement {}
 impl into_query::Sealed for RelateStatement {
 	fn into_query(self) -> Query {
@@ -230,6 +264,8 @@ impl into_query::Sealed for RelateStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for DeleteStatement {}
 impl into_query::Sealed for DeleteStatement {
 	fn into_query(self) -> Query {
@@ -241,6 +277,8 @@ impl into_query::Sealed for DeleteStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for InsertStatement {}
 impl into_query::Sealed for InsertStatement {
 	fn into_query(self) -> Query {
@@ -252,6 +290,8 @@ impl into_query::Sealed for InsertStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for DefineStatement {}
 impl into_query::Sealed for DefineStatement {
 	fn into_query(self) -> Query {
@@ -263,6 +303,8 @@ impl into_query::Sealed for DefineStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for AlterStatement {}
 impl into_query::Sealed for AlterStatement {
 	fn into_query(self) -> Query {
@@ -274,6 +316,8 @@ impl into_query::Sealed for AlterStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for RemoveStatement {}
 impl into_query::Sealed for RemoveStatement {
 	fn into_query(self) -> Query {
@@ -285,6 +329,8 @@ impl into_query::Sealed for RemoveStatement {
 	}
 }
 
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
 impl IntoQuery for OptionStatement {}
 impl into_query::Sealed for OptionStatement {
 	fn into_query(self) -> Query {

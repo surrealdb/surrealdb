@@ -33,6 +33,12 @@ No details provided.
 
 - [ ] No documentation needed
 
+## Does this change make any alterations to environment variables or CLI commands?
+
+<!-- Please add the label "Modifies env vars or commands" from the Labels dropdown to the right and detail the changes. -->
+
+- [ ] No changes made to env vars
+
 ## Have you read the Contributing Guidelines?
 
 <!-- All pull requests require that the contributing guidelines have been read and agreed to. -->

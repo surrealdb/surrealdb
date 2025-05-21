@@ -1,5 +1,5 @@
 use super::MlExportConfig;
-use crate::{Result, opt::Resource, value::Notification};
+use crate::{Result, opt::Resource};
 use async_channel::Sender;
 use bincode::Options;
 use revision::Revisioned;
@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use surrealdb_core::expr::{
 	Array as CoreArray, Object as CoreObject, Query as CoreQuery, Value as CoreValue,
 };
+use surrealdb_core::dbs::Notification;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::sql::{
 	Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
@@ -114,7 +115,7 @@ pub(crate) enum Command {
 	},
 	SubscribeLive {
 		uuid: Uuid,
-		notification_sender: Sender<Notification<CoreValue>>,
+		notification_sender: Sender<Notification>,
 	},
 	Kill {
 		uuid: Uuid,

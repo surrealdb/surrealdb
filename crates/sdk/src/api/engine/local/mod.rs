@@ -20,6 +20,130 @@
 //! useful is to only enable the in-memory engine (`kv-mem`) during development. Besides letting you not
 //! worry about those dependencies on your dev machine, it allows you to keep compile times low
 //! during development while allowing you to test your code fully.
+//!
+//! When running SurrealDB as an embedded database within Rust, using the correct release profile and
+//! memory allocator can greatly improve the performance of the database core engine. In addition using
+//! an optimised asynchronous runtime configuration can help speed up concurrent queries and increase
+//! database throughput.
+//!
+//! In your project’s Cargo.toml file, ensure that the release profile uses the following configuration:
+//!
+//! ```toml
+//! [profile.release]
+//! lto = true
+//! strip = true
+//! opt-level = 3
+//! panic = 'abort'
+//! codegen-units = 1
+//! ```
+//!
+//! In your project’s Cargo.toml file, ensure that the allocator feature is among those enabled on the
+//! surrealdb dependency:
+//!
+//! ```toml
+//! [dependencies]
+//! surrealdb = { version = "2", features = ["allocator", "storage-rocksdb"] }
+//! ```
+//!
+//! When running SurrealDB within your Rust code, ensure that the asynchronous runtime is configured
+//! correctly, making use of multiple threads, an increased stack size, and an optimised number of threads:
+//!
+//! ```toml
+//! [dependencies]
+//! tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
+//! ```
+//!
+//! ```no_run
+//! tokio::runtime::Builder::new_multi_thread()
+//!     .enable_all()
+//!     .thread_stack_size(10 * 1024 * 1024) // 10MiB
+//!     .build()
+//!     .unwrap()
+//!     .block_on(async {
+//!         // Your application code
+//!     })
+//! ```
+//!
+//! # Example
+//!
+//! ```no_run
+//! use std::borrow::Cow;
+//! use serde::{Serialize, Deserialize};
+//! use serde_json::json;
+//! use surrealdb::{Error, Surreal};
+//! use surrealdb::opt::auth::Root;
+//! use surrealdb::engine::local::RocksDb;
+//!
+//! #[derive(Serialize, Deserialize)]
+//! struct Person {
+//!     title: String,
+//!     name: Name,
+//!     marketing: bool,
+//! }
+//!
+//! // Pro tip: Replace String with Cow<'static, str> to
+//! // avoid unnecessary heap allocations when inserting
+//!
+//! #[derive(Serialize, Deserialize)]
+//! struct Name {
+//!     first: Cow<'static, str>,
+//!     last: Cow<'static, str>,
+//! }
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Error> {
+//!     let db = Surreal::new::<RocksDb>("path/to/database/folder").await?;
+//!
+//!     // Select a specific namespace / database
+//!     db.use_ns("namespace").use_db("database").await?;
+//!
+//!     // Create a new person with a random ID
+//!     let created: Option<Person> = db.create("person")
+//!         .content(Person {
+//!             title: "Founder & CEO".into(),
+//!             name: Name {
+//!                 first: "Tobie".into(),
+//!                 last: "Morgan Hitchcock".into(),
+//!             },
+//!             marketing: true,
+//!         })
+//!         .await?;
+//!
+//!     // Create a new person with a specific ID
+//!     let created: Option<Person> = db.create(("person", "jaime"))
+//!         .content(Person {
+//!             title: "Founder & COO".into(),
+//!             name: Name {
+//!                 first: "Jaime".into(),
+//!                 last: "Morgan Hitchcock".into(),
+//!             },
+//!             marketing: false,
+//!         })
+//!         .await?;
+//!
+//!     // Update a person record with a specific ID
+//!     let updated: Option<Person> = db.update(("person", "jaime"))
+//!         .merge(json!({"marketing": true}))
+//!         .await?;
+//!
+//!     // Select all people records
+//!     let people: Vec<Person> = db.select("person").await?;
+//!
+//!     // Perform a custom advanced query
+//!     let query = r#"
+//!         SELECT marketing, count()
+//!         FROM type::table($table)
+//!         GROUP BY marketing
+//!     "#;
+//!
+//!     let groups = db.query(query)
+//!         .bind(("table", "person"))
+//!         .await?;
+//!
+//!     Ok(())
+//! }
+//! ```
+
 use crate::api::err::Error;
 use crate::{
 	Result,
@@ -29,7 +153,6 @@ use crate::{
 	},
 	method::Stats,
 	opt::{IntoEndpoint, Table},
-	value::Notification,
 };
 #[cfg(not(target_family = "wasm"))]
 use anyhow::bail;
@@ -56,7 +179,7 @@ use surrealdb_core::expr::statements::{
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::{
-	dbs::{Response, Session},
+	dbs::{Notification, Response, Session},
 	expr::{Data, Field, Output, Value as CoreValue},
 	iam,
 	kvs::Datastore,
@@ -98,7 +221,7 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-type LiveQueryMap = HashMap<Uuid, Sender<Notification<CoreValue>>>;
+type LiveQueryMap = HashMap<Uuid, Sender<Notification>>;
 
 /// In-memory database
 ///

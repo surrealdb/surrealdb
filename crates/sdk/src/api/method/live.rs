@@ -1,3 +1,4 @@
+use crate::Action;
 use crate::Surreal;
 use crate::Value;
 use crate::api::Connection;
@@ -23,6 +24,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
 use surrealdb_core::sql::Statement;
 use surrealdb_core::sql::{
 	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, SqlValue as CoreSqlValue, Table,
@@ -102,10 +104,7 @@ where
 	})
 }
 
-pub(crate) async fn register(
-	router: &Router,
-	id: Uuid,
-) -> Result<Receiver<Notification<CoreValue>>> {
+pub(crate) async fn register(router: &Router, id: Uuid) -> Result<Receiver<CoreNotification>> {
 	let (tx, rx) = async_channel::unbounded();
 	router
 		.execute_unit(Command::SubscribeLive {
@@ -162,7 +161,7 @@ pub struct Stream<R> {
 	// We no longer need the lifetime and the type parameter
 	// Leaving them in for backwards compatibility
 	pub(crate) id: Uuid,
-	pub(crate) rx: Option<Pin<Box<Receiver<Notification<CoreValue>>>>>,
+	pub(crate) rx: Option<Pin<Box<Receiver<CoreNotification>>>>,
 	pub(crate) response_type: PhantomData<R>,
 }
 
@@ -170,7 +169,7 @@ impl<R> Stream<R> {
 	pub(crate) fn new(
 		client: Surreal<Any>,
 		id: Uuid,
-		rx: Option<Receiver<Notification<CoreValue>>>,
+		rx: Option<Receiver<CoreNotification>>,
 	) -> Self {
 		Self {
 			id,
@@ -201,23 +200,26 @@ impl futures::Stream for Stream<Value> {
 
 	poll_next! {
 		notification => {
-			let r = Notification{
-				query_id: notification.query_id,
-				action: notification.action,
-				data: Value::from_inner(notification.data),
-			};
-			Poll::Ready(Some(r))
+			match notification.action {
+				CoreAction::Killed => Poll::Ready(None),
+				action => Poll::Ready(Some(Notification {
+					query_id: *notification.id,
+					action: Action::from_core(action),
+					data: Value::from_inner(notification.result),
+				})),
+			}
 		}
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		(0, None)
 	}
 }
 
 macro_rules! poll_next_and_convert {
 	() => {
 		poll_next! {
-			notification => match notification.map_deserialize(){
-				Ok(data) => Poll::Ready(Some(Ok(data))),
-				Err(error) => Poll::Ready(Some(Err(error.into()))),
-			}
+			notification => Poll::Ready(deserialize(notification))
 		}
 	};
 }
@@ -274,5 +276,24 @@ impl<R> Drop for Stream<R> {
 		if self.rx.is_some() {
 			kill(&self.client, self.id);
 		}
+	}
+}
+
+fn deserialize<R>(notification: CoreNotification) -> Option<Result<crate::Notification<R>>>
+where
+	R: DeserializeOwned,
+{
+	let query_id = *notification.id;
+	let action = notification.action;
+	match action {
+		CoreAction::Killed => None,
+		action => match surrealdb_core::expr::from_value(notification.result) {
+			Ok(data) => Some(Ok(Notification {
+				query_id,
+				data,
+				action: Action::from_core(action),
+			})),
+			Err(error) => Some(Err(error)),
+		},
 	}
 }
