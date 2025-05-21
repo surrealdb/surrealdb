@@ -591,10 +591,10 @@ mod tests {
 	use crate::expr::{Array, Idiom, Value};
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
+	use crate::sql::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 	use std::sync::Arc;
-	use crate::sql::Idiom as SqlIdiom;
 
 	#[expect(clippy::mutable_key_type)]
 	#[test]

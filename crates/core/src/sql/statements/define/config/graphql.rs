@@ -83,14 +83,14 @@ pub struct TableConfig {
 impl From<TableConfig> for crate::expr::statements::define::config::graphql::TableConfig {
 	fn from(v: TableConfig) -> Self {
 		crate::expr::statements::define::config::graphql::TableConfig {
-			name: v.name.into(),
+			name: v.name,
 		}
 	}
 }
 impl From<crate::expr::statements::define::config::graphql::TableConfig> for TableConfig {
 	fn from(v: crate::expr::statements::define::config::graphql::TableConfig) -> Self {
 		TableConfig {
-			name: v.name.into(),
+			name: v.name,
 		}
 	}
 }

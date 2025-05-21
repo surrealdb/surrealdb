@@ -107,8 +107,8 @@ impl From<bool> for ArrayBehaviour {
 mod tests {
 
 	use super::*;
-	use crate::{sql::SqlValue, syn::Parse};
 	use crate::sql::idiom::Idiom as SqlIdiom;
+	use crate::{sql::SqlValue, syn::Parse};
 
 	#[test]
 	fn every_empty() {
@@ -119,7 +119,8 @@ mod tests {
 
 	#[test]
 	fn every_with_empty_objects_arrays() {
-		let val: Value = SqlValue::parse("{ test: {}, status: false, something: {age: 45}, tags: []}").into();
+		let val: Value =
+			SqlValue::parse("{ test: {}, status: false, something: {age: 45}, tags: []}").into();
 		let res: Vec<Idiom> = vec![
 			SqlIdiom::parse("something.age").into(),
 			SqlIdiom::parse("status").into(),
@@ -177,7 +178,8 @@ mod tests {
 		let val: Value = SqlValue::parse(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
 		).into();
-		let res: Vec<Idiom> = vec![SqlIdiom::parse("test").into(), SqlIdiom::parse("test.something").into()];
+		let res: Vec<Idiom> =
+			vec![SqlIdiom::parse("test").into(), SqlIdiom::parse("test.something").into()];
 		assert_eq!(res, val.every(None, true, false));
 	}
 
@@ -243,7 +245,10 @@ mod tests {
 			SqlIdiom::parse("test.something[0].tags[1]").into(),
 			SqlIdiom::parse("test.something[0].tags[0]").into(),
 		];
-		assert_eq!(res, val.every(Some(&Idiom::from(SqlIdiom::parse("test.something"))), true, true));
+		assert_eq!(
+			res,
+			val.every(Some(&Idiom::from(SqlIdiom::parse("test.something"))), true, true)
+		);
 	}
 
 	#[test]
@@ -264,14 +269,18 @@ mod tests {
 			SqlIdiom::parse("test.something[0].tags[1]").into(),
 			SqlIdiom::parse("test.something[0].tags[0]").into(),
 		];
-		assert_eq!(res, val.every(Some(&Idiom::from(SqlIdiom::parse("test.something.*"))), true, true));
+		assert_eq!(
+			res,
+			val.every(Some(&Idiom::from(SqlIdiom::parse("test.something.*"))), true, true)
+		);
 	}
 
 	#[test]
 	fn every_wildcards() {
 		let val: Value = SqlValue::parse(
 			"{ test: { a: { color: 'red' }, b: { color: 'blue' }, c: { color: 'green' } } }",
-		).into();
+		)
+		.into();
 
 		let res: Vec<Idiom> = vec![
 			SqlIdiom::parse("test.*.color").into(),

@@ -22,9 +22,7 @@ use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::expr::Values as CoreValues;
 use surrealdb_core::sql::SqlValues as CoreSqlValues;
-use surrealdb_core::sql::{
-	Edges as CoreSqlEdges, Object as CoreSqlObject, SqlValue as CoreSqlValue, Thing as CoreSqlThing,
-};
+use surrealdb_core::sql::{Edges as CoreSqlEdges, Object as CoreSqlObject, Thing as CoreSqlThing};
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]

@@ -10,7 +10,7 @@ use std::ops;
 use std::str::{Chars, FromStr};
 
 use super::Strand;
-use super::value::{TryAdd, TrySub};
+use super::value::TryAdd;
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -237,17 +237,6 @@ impl ops::Sub for Bytesize {
 	}
 }
 
-impl TrySub for Bytesize {
-	type Output = Self;
-	fn try_sub(self, other: Self) -> Result<Self> {
-		self.0
-			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
-			.map_err(anyhow::Error::new)
-			.map(Bytesize::new)
-	}
-}
-
 impl<'b> ops::Sub<&'b Bytesize> for &Bytesize {
 	type Output = Bytesize;
 	fn sub(self, other: &'b Bytesize) -> Bytesize {
@@ -255,17 +244,6 @@ impl<'b> ops::Sub<&'b Bytesize> for &Bytesize {
 			Some(v) => Bytesize::new(v),
 			None => Bytesize::default(),
 		}
-	}
-}
-
-impl<'b> TrySub<&'b Bytesize> for &Bytesize {
-	type Output = Bytesize;
-	fn try_sub(self, other: &'b Bytesize) -> Result<Bytesize> {
-		self.0
-			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
-			.map_err(anyhow::Error::new)
-			.map(Bytesize::new)
 	}
 }
 

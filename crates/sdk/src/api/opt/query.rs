@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 use std::mem;
 use surrealdb_core::expr::Value as CoreValue;
 use surrealdb_core::expr::from_value as from_core_value;
-use surrealdb_core::sql::{self, SqlValue as CoreSqlValue, Statement, Statements, statements::*};
+use surrealdb_core::sql::{self, Statement, Statements, statements::*};
 
 pub struct Query(pub(crate) ValidQuery);
 /// A trait for converting inputs into SQL statements

@@ -12,7 +12,7 @@ use surrealdb_core::expr::{
 };
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::sql::{
-	Array as CoreSqlArray, Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
+	Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
 };
 use uuid::Uuid;
 

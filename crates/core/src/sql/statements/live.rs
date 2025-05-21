@@ -114,6 +114,7 @@ impl From<crate::expr::statements::LiveStatement> for LiveStatement {
 #[cfg(test)]
 mod tests {
 	use crate::dbs::{Action, Capabilities, Notification, Session};
+	use crate::expr::Value;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
@@ -147,7 +148,7 @@ mod tests {
 
 		let live_id = live_query_response.remove(0).result.unwrap();
 		let live_id = match live_id {
-			SqlValue::Uuid(id) => id,
+			Value::Uuid(id) => id,
 			_ => panic!("expected uuid"),
 		};
 
@@ -162,12 +163,13 @@ mod tests {
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record = SqlValue::parse(&format!(
+		let expected_record: Value = SqlValue::parse(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
 			}}]"
-		));
+		))
+		.into();
 
 		let tmp = create_response.remove(0).result.unwrap();
 		assert_eq!(tmp, expected_record);
@@ -187,13 +189,14 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
-				SqlValue::Thing(Thing::from((tb, "test_true"))),
+				SqlValue::Thing(Thing::from((tb, "test_true"))).into(),
 				SqlValue::parse(&format!(
 					"{{
 						id: {tb}:test_true,
 						condition: true,
 					}}"
-				),),
+				))
+				.into(),
 			)
 		);
 	}

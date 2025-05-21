@@ -1542,9 +1542,12 @@ mod tests {
 		assert_eq!(3, enc.len());
 		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
 		assert_eq!(8, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::from(SqlValue::parse("{ hello: 'world' }"))).unwrap();
+		let enc: Vec<u8> =
+			revision::to_vec(&Value::from(SqlValue::parse("{ hello: 'world' }"))).unwrap();
 		assert_eq!(19, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::from(SqlValue::parse("{ compact: true, schema: 0 }"))).unwrap();
+		let enc: Vec<u8> =
+			revision::to_vec(&Value::from(SqlValue::parse("{ compact: true, schema: 0 }")))
+				.unwrap();
 		assert_eq!(27, enc.len());
 	}
 
@@ -1552,10 +1555,12 @@ mod tests {
 	fn serialize_deserialize() {
 		let val: Value = SqlValue::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
-		).into();
+		)
+		.into();
 		let res: Value = SqlValue::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
-		).into();
+		)
+		.into();
 		let enc: Vec<u8> = revision::to_vec(&val).unwrap();
 		let dec: Value = revision::from_slice(&enc).unwrap();
 		assert_eq!(res, dec);

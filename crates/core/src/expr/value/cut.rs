@@ -105,10 +105,10 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::expr::idiom::Idiom;
 	use crate::sql::SqlValue;
-use crate::syn::Parse;
+	use crate::sql::idiom::Idiom as SqlIdiom;
+	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn cut_none() {
@@ -169,8 +169,11 @@ use crate::syn::Parse;
 		let idi: Idiom = SqlIdiom::parse("test.something[1].age").into();
 		let mut val: Value = SqlValue::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
-		).into();
-		let res: Value = SqlValue::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }").into();
+		)
+		.into();
+		let res: Value =
+			SqlValue::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }")
+				.into();
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -180,8 +183,10 @@ use crate::syn::Parse;
 		let idi: Idiom = SqlIdiom::parse("test.something[*].age").into();
 		let mut val: Value = SqlValue::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
-		).into();
-		let res: Value = SqlValue::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }").into();
+		)
+		.into();
+		let res: Value =
+			SqlValue::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }").into();
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}
@@ -191,8 +196,10 @@ use crate::syn::Parse;
 		let idi: Idiom = SqlIdiom::parse("test.something.age").into();
 		let mut val: Value = SqlValue::parse(
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
-		).into();
-		let res: Value = SqlValue::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }").into();
+		)
+		.into();
+		let res: Value =
+			SqlValue::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }").into();
 		val.cut(&idi);
 		assert_eq!(res, val);
 	}

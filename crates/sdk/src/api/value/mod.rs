@@ -461,6 +461,7 @@ impl SqlValue {
 		}
 	}
 
+	#[expect(dead_code)]
 	pub(crate) fn array_to_core(v: Vec<SqlValue>) -> Vec<CoreSqlValue> {
 		unsafe {
 			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue

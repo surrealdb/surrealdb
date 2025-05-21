@@ -169,11 +169,11 @@ impl TryFrom<(Cow<'static, str>, Content)> for Value {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql;
 	use crate::expr::Number;
 	use crate::expr::block::Entry;
 	use crate::expr::statements::CreateStatement;
 	use crate::expr::*;
+	use crate::sql;
 	use ::serde::Serialize;
 	use graph::{GraphSubject, GraphSubjects};
 	use std::ops::Bound;

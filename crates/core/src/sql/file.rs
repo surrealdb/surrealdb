@@ -17,19 +17,6 @@ pub struct File {
 }
 
 impl File {
-	pub(crate) fn new(bucket: String, key: String) -> Self {
-		let key = if key.starts_with("/") {
-			key
-		} else {
-			format!("/{key}")
-		};
-
-		Self {
-			bucket,
-			key,
-		}
-	}
-
 	/// Check if this File belongs to a certain bucket type
 	pub fn is_bucket_type(&self, types: &[Ident]) -> bool {
 		types.is_empty() || types.iter().any(|buc| buc.0 == self.bucket)

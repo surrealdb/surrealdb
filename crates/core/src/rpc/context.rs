@@ -76,9 +76,9 @@ pub trait RpcContext {
 		Self: RpcProtocolV2,
 	{
 		match version {
-			Some(1) => RpcProtocolV1::execute(self, method, params.into()).await,
-			Some(2) => RpcProtocolV2::execute(self, method, params.into()).await,
-			_ => RpcProtocolV1::execute(self, method, params.into()).await,
+			Some(1) => RpcProtocolV1::execute(self, method, params).await,
+			Some(2) => RpcProtocolV2::execute(self, method, params).await,
+			_ => RpcProtocolV1::execute(self, method, params).await,
 		}
 	}
 }

@@ -50,7 +50,8 @@ mod tests {
 					initials: 'TMH',
 				},
 			}",
-		).into();
+		)
+		.into();
 		let none = Value::None;
 		match res.merge(none.clone()).unwrap_err().downcast() {
 			Ok(Error::InvalidMerge {
@@ -72,7 +73,8 @@ mod tests {
 					initials: 'TMH',
 				},
 			}",
-		).into();
+		)
+		.into();
 		let val: Value = SqlValue::parse(
 			"{
 				test: true,
@@ -82,7 +84,8 @@ mod tests {
 					initials: 'TMH',
 				},
 			}",
-		).into();
+		)
+		.into();
 		let mrg = Value::Object(Default::default());
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
@@ -99,7 +102,8 @@ mod tests {
 					initials: 'TMH',
 				},
 			}",
-		).into();
+		)
+		.into();
 		let mrg: Value = SqlValue::parse(
 			"{
 				name: {
@@ -108,7 +112,8 @@ mod tests {
 				},
 				tags: ['Rust', 'Golang', 'JavaScript'],
 			}",
-		).into();
+		)
+		.into();
 		let val: Value = SqlValue::parse(
 			"{
 				test: true,
@@ -119,7 +124,8 @@ mod tests {
 				},
 				tags: ['Rust', 'Golang', 'JavaScript'],
 			}",
-		).into();
+		)
+		.into();
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}
@@ -135,7 +141,8 @@ mod tests {
 					b: 2,
 				}
 			}",
-		).into();
+		)
+		.into();
 		let mrg: Value = SqlValue::parse(
 			"{
 				name: {
@@ -147,7 +154,8 @@ mod tests {
 					b: NONE,
 				}
 			}",
-		).into();
+		)
+		.into();
 		let val: Value = SqlValue::parse(
 			"{
 				test: true,
@@ -158,7 +166,8 @@ mod tests {
 					a: 2,
 				},
 			}",
-		).into();
+		)
+		.into();
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}

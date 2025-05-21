@@ -29,15 +29,15 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::expr::idiom::Idiom;
 	use crate::sql::SqlValue;
+	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn increment_none() {
 		let idi: Idiom = SqlIdiom::parse("other").into();
-		let val: Value = SqlValue::parse("{ test: 100 }").into();
+		let mut val: Value = SqlValue::parse("{ test: 100 }").into();
 		let res: Value = SqlValue::parse("{ test: 100, other: +10 }").into();
 		val.inc(&idi, Value::from(10));
 		assert_eq!(res, val);
@@ -46,7 +46,7 @@ mod tests {
 	#[tokio::test]
 	async fn increment_number() {
 		let idi: Idiom = SqlIdiom::parse("test").into();
-		let val: Value = SqlValue::parse("{ test: 100 }").into();
+		let mut val: Value = SqlValue::parse("{ test: 100 }").into();
 		let res: Value = SqlValue::parse("{ test: 110 }").into();
 		val.inc(&idi, Value::from(10));
 		assert_eq!(res, val);
@@ -55,7 +55,7 @@ mod tests {
 	#[tokio::test]
 	async fn increment_array_number() {
 		let idi: Idiom = SqlIdiom::parse("test[1]").into();
-		let val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
+		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
 		let res: Value = SqlValue::parse("{ test: [100, 210, 300] }").into();
 		val.inc(&idi, Value::from(10));
 		assert_eq!(res, val);
@@ -64,7 +64,7 @@ mod tests {
 	#[tokio::test]
 	async fn increment_array_value() {
 		let idi: Idiom = SqlIdiom::parse("test").into();
-		let val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
+		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
 		let res: Value = SqlValue::parse("{ test: [100, 200, 300, 200] }").into();
 		val.inc(&idi, Value::from(200));
 		assert_eq!(res, val);
@@ -73,7 +73,7 @@ mod tests {
 	#[tokio::test]
 	async fn increment_array_array() {
 		let idi: Idiom = SqlIdiom::parse("test").into();
-		let val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
+		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
 		let res: Value = SqlValue::parse("{ test: [100, 200, 300, 100, 300, 400, 500] }").into();
 		val.inc(&idi, SqlValue::parse("[100, 300, 400, 500]").into());
 		assert_eq!(res, val);

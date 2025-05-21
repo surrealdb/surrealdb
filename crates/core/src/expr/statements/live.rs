@@ -58,24 +58,6 @@ impl LiveStatement {
 		}
 	}
 
-	/// Creates a live statement from parts that can be set during a query.
-	pub(crate) fn from_source_parts(
-		expr: Fields,
-		what: Value,
-		cond: Option<Cond>,
-		fetch: Option<Fetchs>,
-	) -> Self {
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			expr,
-			what,
-			cond,
-			fetch,
-			..Default::default()
-		}
-	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -178,7 +160,7 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::sql::SqlValue;
-use crate::syn::Parse;
+	use crate::syn::Parse;
 	use anyhow::Result;
 
 	pub async fn new_ds() -> Result<Datastore> {
@@ -226,7 +208,8 @@ use crate::syn::Parse;
 				id: {tb}:test_true,
 				condition: true,
 			}}]"
-		)).into();
+		))
+		.into();
 
 		let tmp = create_response.remove(0).result.unwrap();
 		assert_eq!(tmp, expected_record);
@@ -252,7 +235,8 @@ use crate::syn::Parse;
 						id: {tb}:test_true,
 						condition: true,
 					}}"
-				)).into(),
+				))
+				.into(),
 			)
 		);
 	}

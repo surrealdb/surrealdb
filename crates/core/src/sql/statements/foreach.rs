@@ -1,4 +1,3 @@
-use crate::sql::range::TypedRange;
 use crate::sql::{Block, Param, SqlValue};
 
 use revision::revisioned;
@@ -13,22 +12,6 @@ pub struct ForeachStatement {
 	pub param: Param,
 	pub range: SqlValue,
 	pub block: Block,
-}
-
-enum ForeachIter {
-	Array(std::vec::IntoIter<SqlValue>),
-	Range(std::iter::Map<TypedRange<i64>, fn(i64) -> SqlValue>),
-}
-
-impl Iterator for ForeachIter {
-	type Item = SqlValue;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		match self {
-			ForeachIter::Array(iter) => iter.next(),
-			ForeachIter::Range(iter) => iter.next(),
-		}
-	}
 }
 
 impl Display for ForeachStatement {

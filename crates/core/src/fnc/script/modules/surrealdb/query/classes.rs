@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::expr::{Value as SurValue};
+use crate::expr::Value as SurValue;
 use crate::sql;
 use js::{
 	Array, Ctx, Exception, FromJs, JsLifetime, Result, Value,

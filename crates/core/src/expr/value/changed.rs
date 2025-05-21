@@ -46,8 +46,10 @@ mod tests {
 
 	#[test]
 	fn changed_none() {
-		let old: Value = SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
-		let now: Value = SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
+		let old: Value =
+			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
+		let now: Value =
+			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
 		let res: Value = SqlValue::parse("{}").into();
 		assert_eq!(res, old.changed(&now));
 	}

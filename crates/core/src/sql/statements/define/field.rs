@@ -1,13 +1,7 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
-use crate::err::Error;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 
-use crate::sql::Part;
 use crate::sql::{Ident, Idiom, Kind, Permissions, SqlValue, Strand};
-use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -39,50 +33,6 @@ pub struct DefineFieldStatement {
 	pub reference: Option<Reference>,
 	#[revision(start = 6)]
 	pub default_always: bool,
-}
-
-impl DefineFieldStatement {
-	/// Get the correct reference type if needed.
-	pub(crate) async fn get_reference_kind(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Option<Kind>> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(None);
-		}
-
-		if let Some(Kind::References(Some(ft), Some(ff))) = &self.kind {
-			// Obtain the field definition
-			let (ns, db) = opt.ns_db()?;
-			let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
-				Ok(fd) => fd,
-				// If the field does not exist, there is nothing to correct
-				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
-						return Ok(None);
-					} else {
-						return Err(e);
-					}
-				}
-			};
-
-			// Check if the field is an array-like value and thus "containing" references
-			let is_array_like = fd
-				.kind
-				.as_ref()
-				.map(|kind| kind.get_optional_inner_kind().is_array_like())
-				.unwrap_or_default();
-
-			// If the field is an array-like value, add the `.*` part
-			if is_array_like {
-				let ff = ff.clone().push(Part::All);
-				return Ok(Some(Kind::References(Some(ft.clone()), Some(ff))));
-			}
-		}
-
-		Ok(None)
-	}
 }
 
 impl Display for DefineFieldStatement {

@@ -223,9 +223,9 @@ mod tests {
 	mod into_json {
 		use crate::expr;
 		use crate::expr::Thing;
-use crate::expr::Value;
+		use crate::expr::Value;
 		use crate::expr::from_value;
-use crate::sql;
+		use crate::sql;
 		use chrono::DateTime;
 		use chrono::Utc;
 		use geo::LineString;

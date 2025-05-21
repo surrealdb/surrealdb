@@ -3,13 +3,11 @@ use super::id::range::IdRange;
 use crate::sql::{Strand, escape::EscapeRid, id::Id};
 use crate::syn;
 use anyhow::Result;
-use futures::StreamExt;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-const ID: &str = "id";
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
 #[revisioned(revision = 1)]

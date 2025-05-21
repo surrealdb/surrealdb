@@ -134,14 +134,16 @@ mod tests {
 	async fn patch_add_simple() {
 		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		let ops: Value = SqlValue::parse("[{ op: 'add', path: '/temp', value: true }]").into();
-		let res: Value = SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
+		let res: Value =
+			SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn patch_remove_simple() {
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
 		let ops: Value = SqlValue::parse("[{ op: 'remove', path: '/temp' }]").into();
 		let res: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		val.patch(ops).unwrap();
@@ -150,20 +152,26 @@ mod tests {
 
 	#[tokio::test]
 	async fn patch_replace_simple() {
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
-		let ops: Value = SqlValue::parse("[{ op: 'replace', path: '/temp', value: 'text' }]").into();
-		let res: Value = SqlValue::parse("{ test: { other: null, something: 123 }, temp: 'text' }").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
+		let ops: Value =
+			SqlValue::parse("[{ op: 'replace', path: '/temp', value: 'text' }]").into();
+		let res: Value =
+			SqlValue::parse("{ test: { other: null, something: 123 }, temp: 'text' }").into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn patch_change_simple() {
-		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 }, temp: 'test' }").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: null, something: 123 }, temp: 'test' }").into();
 		let ops: Value = SqlValue::parse(
 			"[{ op: 'change', path: '/temp', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]",
-		).into();
-		let res: Value = SqlValue::parse("{ test: { other: null, something: 123 }, temp: 'text' }").into();
+		)
+		.into();
+		let res: Value =
+			SqlValue::parse("{ test: { other: null, something: 123 }, temp: 'text' }").into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
 	}
@@ -188,10 +196,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn patch_test_simple() {
-		let mut val: Value = SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
 		let ops: Value = SqlValue::parse(
 			"[{ op: 'remove', path: '/test/something' }, { op: 'test', path: '/temp', value: true }]",
-		).into();
+		)
+		.into();
 		let res: Value = SqlValue::parse("{ test: { other: 'test' }, temp: true }").into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
@@ -201,14 +211,17 @@ mod tests {
 	async fn patch_add_embedded() {
 		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		let ops: Value = SqlValue::parse("[{ op: 'add', path: '/temp/test', value: true }]").into();
-		let res: Value = SqlValue::parse("{ test: { other: null, something: 123 }, temp: { test: true } }").into();
+		let res: Value =
+			SqlValue::parse("{ test: { other: null, something: 123 }, temp: { test: true } }")
+				.into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn patch_remove_embedded() {
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
 		let ops: Value = SqlValue::parse("[{ op: 'remove', path: '/test/other' }]").into();
 		let res: Value = SqlValue::parse("{ test: { something: 123 }, temp: true }").into();
 		val.patch(ops).unwrap();
@@ -217,20 +230,26 @@ mod tests {
 
 	#[tokio::test]
 	async fn patch_replace_embedded() {
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
-		let ops: Value = SqlValue::parse("[{ op: 'replace', path: '/test/other', value: 'text' }]").into();
-		let res: Value = SqlValue::parse("{ test: { other: 'text', something: 123 }, temp: true }").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: null, something: 123 }, temp: true }").into();
+		let ops: Value =
+			SqlValue::parse("[{ op: 'replace', path: '/test/other', value: 'text' }]").into();
+		let res: Value =
+			SqlValue::parse("{ test: { other: 'text', something: 123 }, temp: true }").into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn patch_change_embedded() {
-		let mut val: Value = SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
 		let ops: Value = SqlValue::parse(
 			"[{ op: 'change', path: '/test/other', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]",
-		).into();
-		let res: Value = SqlValue::parse("{ test: { other: 'text', something: 123 }, temp: true }").into();
+		)
+		.into();
+		let res: Value =
+			SqlValue::parse("{ test: { other: 'text', something: 123 }, temp: true }").into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
 	}
@@ -238,7 +257,8 @@ mod tests {
 	#[tokio::test]
 	async fn patch_copy_embedded() {
 		let mut val: Value = SqlValue::parse("{ test: { other: null }, temp: 123 }").into();
-		let ops: Value = SqlValue::parse("[{ op: 'copy', path: '/test/other', from: '/temp' }]").into();
+		let ops: Value =
+			SqlValue::parse("[{ op: 'copy', path: '/test/other', from: '/temp' }]").into();
 		let res: Value = SqlValue::parse("{ test: { other: 123 }, temp: 123 }").into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
@@ -247,7 +267,8 @@ mod tests {
 	#[tokio::test]
 	async fn patch_move_embedded() {
 		let mut val: Value = SqlValue::parse("{ test: { other: ':3', some: 123 }}").into();
-		let ops: Value = SqlValue::parse("[{ op: 'move', path: '/temp', from: '/test/other' }]").into();
+		let ops: Value =
+			SqlValue::parse("[{ op: 'move', path: '/temp', from: '/test/other' }]").into();
 		let res: Value = SqlValue::parse("{ test: { some: 123 }, temp: ':3' }").into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
@@ -255,10 +276,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn patch_test_embedded() {
-		let mut val: Value = SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
 		let ops: Value = SqlValue::parse(
 			"[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 123 }]",
-		).into();
+		)
+		.into();
 		let res: Value = SqlValue::parse("{ test: { something: 123 }, temp: true }").into();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
@@ -267,14 +290,17 @@ mod tests {
 	#[tokio::test]
 	async fn patch_change_invalid() {
 		// See https://github.com/surrealdb/surrealdb/issues/2001
-		let mut val: Value = SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
-		let ops: Value = SqlValue::parse("[{ op: 'change', path: '/test/other', value: 'text' }]").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
+		let ops: Value =
+			SqlValue::parse("[{ op: 'change', path: '/test/other', value: 'text' }]").into();
 		assert!(val.patch(ops).is_err());
 	}
 
 	#[tokio::test]
 	async fn patch_test_invalid() {
-		let mut val: Value = SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
+		let mut val: Value =
+			SqlValue::parse("{ test: { other: 'test', something: 123 }, temp: true }").into();
 		let should = val.clone();
 		let ops: Value = SqlValue::parse(
 			"[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 'not same' }]",

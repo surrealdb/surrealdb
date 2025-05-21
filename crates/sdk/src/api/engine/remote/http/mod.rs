@@ -408,7 +408,7 @@ async fn router(
 			output_stmt.what = CoreSqlValue::Param(Param::from(key.clone()));
 			let query = Query::from(Statement::Output(output_stmt));
 			let mut variables = CoreObject::default();
-			variables.insert(key.clone(), value.into());
+			variables.insert(key.clone(), value);
 			let req = Command::Query {
 				query,
 				variables,

@@ -54,10 +54,10 @@ mod tests {
 
 	use super::*;
 	use crate::expr::id::Id;
-	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::expr::idiom::Idiom;
 	use crate::expr::thing::Thing;
 	use crate::sql::SqlValue;
+	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 
 	#[test]
@@ -101,7 +101,8 @@ mod tests {
 	#[test]
 	fn pick_array_thing() {
 		let idi: Idiom = SqlIdiom::parse("test.something[1]").into();
-		let val: Value = SqlValue::parse("{ test: { something: [test:tobie, test:jaime] } }").into();
+		let val: Value =
+			SqlValue::parse("{ test: { something: [test:tobie, test:jaime] } }").into();
 		let res = val.pick(&idi);
 		assert_eq!(
 			res,
@@ -115,7 +116,8 @@ mod tests {
 	#[test]
 	fn pick_array_field() {
 		let idi: Idiom = SqlIdiom::parse("test.something[1].age").into();
-		let val: Value = SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let val: Value =
+			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(36));
 	}
@@ -123,7 +125,8 @@ mod tests {
 	#[test]
 	fn pick_array_fields() {
 		let idi: Idiom = SqlIdiom::parse("test.something[*].age").into();
-		let val: Value = SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let val: Value =
+			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
@@ -131,7 +134,8 @@ mod tests {
 	#[test]
 	fn pick_array_fields_flat() {
 		let idi: Idiom = SqlIdiom::parse("test.something.age").into();
-		let val: Value = SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let val: Value =
+			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}

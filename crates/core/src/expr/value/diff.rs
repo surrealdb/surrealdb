@@ -78,13 +78,15 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::{sql::SqlValue, syn::Parse};
 	use crate::expr::Idiom;
+	use crate::{sql::SqlValue, syn::Parse};
 
 	#[test]
 	fn diff_none() {
-		let old: Value = SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
-		let now: Value = SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
+		let old: Value =
+			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
+		let now: Value =
+			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
 		let res: Value = SqlValue::parse("[]").into();
 		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
 	}
@@ -117,7 +119,8 @@ mod tests {
 	fn diff_replace_embedded() {
 		let old: Value = SqlValue::parse("{ test: { other: 'test' } }").into();
 		let now: Value = SqlValue::parse("{ test: { other: false } }").into();
-		let res: Value = SqlValue::parse("[{ op: 'replace', path: '/test/other', value: false }]").into();
+		let res: Value =
+			SqlValue::parse("[{ op: 'replace', path: '/test/other', value: false }]").into();
 		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
 	}
 
@@ -127,7 +130,8 @@ mod tests {
 		let now: Value = SqlValue::parse("{ test: { other: 'text' } }").into();
 		let res: Value = SqlValue::parse(
 			"[{ op: 'change', path: '/test/other', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]",
-		).into();
+		)
+		.into();
 		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
 	}
 }

@@ -850,13 +850,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
+		use crate::iam::Error as IamError;
 		use crate::sql::{
-			Base,
-			Statement,
+			Base, Statement,
 			statements::{DefineUserStatement, define::DefineStatement},
 			user::UserDuration,
 		};
-		use crate::iam::Error as IamError;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",

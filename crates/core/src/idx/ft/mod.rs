@@ -526,13 +526,13 @@ mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::SearchParams;
-	use crate::expr::statements::{DefineAnalyzerStatement};
-	use crate::sql::{Statement, statements::DefineStatement};
+	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
+	use crate::sql::{Statement, statements::DefineStatement};
 	use crate::syn;
 	use reblessive::tree::Stk;
 	use std::collections::HashMap;

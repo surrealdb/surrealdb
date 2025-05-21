@@ -1,6 +1,7 @@
 mod parse;
 
 use parse::Parse;
+use surrealdb_core::expr::Value;
 mod helpers;
 use crate::helpers::Test;
 use helpers::{new_ds, skip_ok};

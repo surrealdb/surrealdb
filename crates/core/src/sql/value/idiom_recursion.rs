@@ -31,30 +31,10 @@ impl<'a> Recursion<'a> {
 	}
 }
 
-// Method used to check if the value
-// inside a recursed idiom path is final
-pub(crate) fn is_final(v: &SqlValue) -> bool {
-	match v {
-		SqlValue::None => true,
-		SqlValue::Null => true,
-		SqlValue::Array(v) => v.is_empty() || v.is_all_none_or_null(),
-		_ => false,
-	}
-}
-
 pub(crate) fn get_final(v: &SqlValue) -> SqlValue {
 	match v {
 		SqlValue::Array(_) => SqlValue::Array(Array(vec![])),
 		SqlValue::Null => SqlValue::Null,
 		_ => SqlValue::None,
-	}
-}
-
-pub(crate) fn clean_iteration(v: SqlValue) -> SqlValue {
-	if let SqlValue::Array(v) = v {
-		SqlValue::from(v.0.into_iter().filter(|v| !is_final(v)).collect::<Vec<SqlValue>>())
-			.flatten()
-	} else {
-		v
 	}
 }

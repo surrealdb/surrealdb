@@ -14,7 +14,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::time;
 
-use super::value::{TryAdd, TrySub};
+use super::value::TryAdd;
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
@@ -299,17 +299,6 @@ impl ops::Sub for Duration {
 	}
 }
 
-impl TrySub for Duration {
-	type Output = Self;
-	fn try_sub(self, other: Self) -> Result<Self> {
-		self.0
-			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
-			.map_err(anyhow::Error::new)
-			.map(Duration::from)
-	}
-}
-
 impl<'b> ops::Sub<&'b Duration> for &Duration {
 	type Output = Duration;
 	fn sub(self, other: &'b Duration) -> Duration {
@@ -317,17 +306,6 @@ impl<'b> ops::Sub<&'b Duration> for &Duration {
 			Some(v) => Duration::from(v),
 			None => Duration::default(),
 		}
-	}
-}
-
-impl<'b> TrySub<&'b Duration> for &Duration {
-	type Output = Duration;
-	fn try_sub(self, other: &'b Duration) -> Result<Duration> {
-		self.0
-			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
-			.map_err(anyhow::Error::new)
-			.map(Duration::from)
 	}
 }
 
@@ -370,23 +348,6 @@ impl ops::Sub<Datetime> for Duration {
 				None => Datetime::default(),
 			},
 			Err(_) => Datetime::default(),
-		}
-	}
-}
-
-impl TrySub<Datetime> for Duration {
-	type Output = Datetime;
-	fn try_sub(self, other: Datetime) -> Result<Datetime> {
-		match chrono::Duration::from_std(self.0) {
-			Ok(d) => match other.0.checked_sub_signed(d) {
-				Some(v) => Ok(Datetime::from(v)),
-				None => Err(anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!(
-					"{self} - {other}"
-				)))),
-			},
-			Err(_) => Err(anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!(
-				"{self} - {other}"
-			)))),
 		}
 	}
 }

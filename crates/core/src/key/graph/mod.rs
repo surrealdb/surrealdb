@@ -223,7 +223,7 @@ impl<'a> Graph<'a> {
 mod tests {
 	use super::*;
 	use crate::kvs::KeyDecode;
-	
+
 	use crate::sql::Thing as SqlThing;
 
 	#[test]

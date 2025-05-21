@@ -1,8 +1,8 @@
-use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
+use super::value::{TryAdd, TryNeg};
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
-use anyhow::{Result, bail};
+use anyhow::Result;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
-use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+use std::ops::{self, Add, Neg};
 
 pub mod decimal;
 
@@ -42,9 +42,9 @@ impl Default for Number {
 impl From<Number> for crate::expr::Number {
 	fn from(v: Number) -> Self {
 		match v {
-			Number::Int(v) => Self::Int(v.into()),
-			Number::Float(v) => Self::Float(v.into()),
-			Number::Decimal(v) => Self::Decimal(v.into()),
+			Number::Int(v) => Self::Int(v),
+			Number::Float(v) => Self::Float(v),
+			Number::Decimal(v) => Self::Decimal(v),
 		}
 	}
 }
@@ -52,9 +52,9 @@ impl From<Number> for crate::expr::Number {
 impl From<crate::expr::Number> for Number {
 	fn from(v: crate::expr::Number) -> Self {
 		match v {
-			crate::expr::Number::Int(v) => Self::Int(v.into()),
-			crate::expr::Number::Float(v) => Self::Float(v.into()),
-			crate::expr::Number::Decimal(v) => Self::Decimal(v.into()),
+			crate::expr::Number::Int(v) => Self::Int(v),
+			crate::expr::Number::Float(v) => Self::Float(v),
+			crate::expr::Number::Decimal(v) => Self::Decimal(v),
 		}
 	}
 }
@@ -776,55 +776,6 @@ macro_rules! impl_simple_try_op {
 }
 
 impl_simple_try_op!(TryAdd, try_add, add, checked_add);
-impl_simple_try_op!(TrySub, try_sub, sub, checked_sub);
-impl_simple_try_op!(TryMul, try_mul, mul, checked_mul);
-impl_simple_try_op!(TryDiv, try_div, div, checked_div);
-impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
-
-impl TryPow for Number {
-	type Output = Self;
-	fn try_pow(self, power: Self) -> Result<Self> {
-		Ok(match (self, power) {
-			(Self::Int(v), Self::Int(p)) => Self::Int(match v {
-				0 => match p.cmp(&0) {
-					// 0^(-x)
-					Ordering::Less => bail!(Error::TryPow(v.to_string(), p.to_string())),
-					// 0^0
-					Ordering::Equal => 1,
-					// 0^x
-					Ordering::Greater => 0,
-				},
-				// 1^p
-				1 => 1,
-				-1 => {
-					if p % 2 == 0 {
-						// (-1)^even
-						1
-					} else {
-						// (-1)^odd
-						-1
-					}
-				}
-				// try_into may cause an error, which would be wrong for the above cases.
-				_ => p
-					.try_into()
-					.ok()
-					.and_then(|p| v.checked_pow(p))
-					.ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			}),
-			(Self::Decimal(v), Self::Int(p)) => Self::Decimal(
-				v.checked_powi(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			),
-			(Self::Decimal(v), Self::Float(p)) => Self::Decimal(
-				v.checked_powf(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			),
-			(Self::Decimal(v), Self::Decimal(p)) => Self::Decimal(
-				v.checked_powd(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			),
-			(v, p) => v.as_float().powf(p.as_float()).into(),
-		})
-	}
-}
 
 impl TryNeg for Number {
 	type Output = Self;
@@ -836,24 +787,6 @@ impl TryNeg for Number {
 			}
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
-		})
-	}
-}
-
-impl TryFloatDiv for Number {
-	type Output = Self;
-	fn try_float_div(self, other: Self) -> Result<Self> {
-		Ok(match (self, other) {
-			(Number::Int(v), Number::Int(w)) => {
-				let quotient = (v as f64).div(w as f64);
-				if quotient.fract() != 0.0 {
-					return Ok(Number::Float(quotient));
-				}
-				Number::Int(
-					v.checked_div(w).ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
-				)
-			}
-			(v, w) => v.try_div(w)?,
 		})
 	}
 }
@@ -1020,22 +953,6 @@ impl<'a> Product<&'a Self> for Number {
 	}
 }
 
-#[non_exhaustive]
-pub struct Sorted<T>(pub T);
-
-pub trait Sort {
-	fn sorted(&mut self) -> Sorted<&Self>
-	where
-		Self: Sized;
-}
-
-impl Sort for Vec<Number> {
-	fn sorted(&mut self) -> Sorted<&Vec<Number>> {
-		self.sort();
-		Sorted(self)
-	}
-}
-
 impl ToFloat for Number {
 	fn to_float(&self) -> f64 {
 		self.to_float()
@@ -1052,19 +969,6 @@ mod tests {
 	use rust_decimal::Decimal;
 
 	use super::*;
-
-	#[test]
-	fn test_try_float_div() {
-		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
-		assert_eq!(sum_one.try_float_div(count_one).unwrap(), Number::Float(2.5));
-		// i64::MIN
-
-		let (sum_two, count_two) = (Number::Int(10), Number::Int(5));
-		assert_eq!(sum_two.try_float_div(count_two).unwrap(), Number::Int(2));
-
-		let (sum_three, count_three) = (Number::Float(6.3), Number::Int(3));
-		assert_eq!(sum_three.try_float_div(count_three).unwrap(), Number::Float(2.1));
-	}
 
 	#[test]
 	fn ord_test() {

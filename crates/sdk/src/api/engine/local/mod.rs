@@ -47,7 +47,6 @@ use std::{
 	mem,
 	sync::Arc,
 };
-use surrealdb_core::dbs::sql_variables_to_expr_variables;
 use surrealdb_core::expr::Function;
 use surrealdb_core::expr::LogicalPlan;
 use surrealdb_core::expr::statements::{
@@ -56,13 +55,11 @@ use surrealdb_core::expr::statements::{
 };
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::sql::Statement;
 use surrealdb_core::{
 	dbs::{Response, Session},
 	expr::{Data, Field, Output, Value as CoreValue},
 	iam,
 	kvs::Datastore,
-	sql::{Query, SqlValue as CoreSqlValue},
 };
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
@@ -94,7 +91,7 @@ use surrealdb_core::{
 	sql::statements::{DefineModelStatement, DefineStatement},
 };
 
-use super::{resource_to_sql_values, resource_to_values};
+use super::resource_to_values;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -506,18 +503,14 @@ async fn router(
 			credentials,
 		} => {
 			let response =
-				iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
-					.await?
-					.token;
+				iam::signup::signup(kvs, &mut *session.write().await, credentials).await?.token;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Signin {
 			credentials,
 		} => {
 			let response =
-				iam::signin::signin(kvs, &mut *session.write().await, credentials.into())
-					.await?
-					.token;
+				iam::signin::signin(kvs, &mut *session.write().await, credentials).await?.token;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Authenticate {
@@ -586,7 +579,6 @@ async fn router(
 			what,
 			data,
 		} => {
-			let mut query = Query::default();
 			let one = !data.is_array();
 			let insert_plan = {
 				let mut stmt = InsertStatement::default();
@@ -605,7 +597,6 @@ async fn router(
 			what,
 			data,
 		} => {
-			let mut query = Query::default();
 			let one = !data.is_array();
 			let insert_plan = {
 				let mut stmt = InsertStatement::default();
@@ -627,7 +618,6 @@ async fn router(
 			data,
 			upsert,
 		} => {
-			let mut query = Query::default();
 			let plan = if upsert {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = resource_to_values(what);
@@ -651,7 +641,6 @@ async fn router(
 			data,
 			upsert,
 		} => {
-			let mut query = Query::default();
 			let plan = if upsert {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = resource_to_values(what);
@@ -673,7 +662,6 @@ async fn router(
 		Command::Select {
 			what,
 		} => {
-			let mut query = Query::default();
 			let one = what.is_single_recordid();
 			let select_plan = {
 				let mut stmt = SelectStatement::default();
@@ -690,7 +678,6 @@ async fn router(
 		Command::Delete {
 			what,
 		} => {
-			let mut query = Query::default();
 			let one = what.is_single_recordid();
 			let delete_plan = {
 				let mut stmt = DeleteStatement::default();
@@ -700,7 +687,7 @@ async fn router(
 			};
 			let plan = LogicalPlan::Delete(delete_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
+			let response = kvs.process_plan(plan, &*session.read().await, Some(vars)).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
@@ -1023,7 +1010,6 @@ async fn router(
 			value,
 		} => {
 			let mut tmp_vars = vars.read().await.clone();
-			let value: CoreValue = value.into();
 			tmp_vars.insert(key.clone(), value.clone());
 
 			// Need to compute because certain keys might not be allowed to be set and those should

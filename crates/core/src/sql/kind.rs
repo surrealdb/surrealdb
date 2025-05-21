@@ -1,7 +1,7 @@
 use super::escape::EscapeKey;
 use super::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Part,
-	Range, Regex, Strand, Thing, Uuid,
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Range,
+	Regex, Strand, Thing, Uuid,
 };
 
 use crate::sql::{
@@ -103,11 +103,6 @@ impl Kind {
 		matches!(self, Kind::Any)
 	}
 
-	/// Returns true if this type is a record
-	pub(crate) fn is_record(&self) -> bool {
-		matches!(self, Kind::Record(_))
-	}
-
 	/// Returns true if this type is optional
 	pub(crate) fn can_be_none(&self) -> bool {
 		matches!(self, Kind::Option(_) | Kind::Any)
@@ -119,28 +114,6 @@ impl Kind {
 			Kind::Literal(l) => l.to_kind(),
 			k => k.to_owned(),
 		}
-	}
-
-	/// Returns true if this type is a literal, or contains a literal
-	pub(crate) fn contains_literal(&self) -> bool {
-		if matches!(self, Kind::Literal(_)) {
-			return true;
-		}
-
-		if let Kind::Option(x) = self {
-			return x.contains_literal();
-		}
-
-		if let Kind::Either(x) = self {
-			return x.iter().any(|x| x.contains_literal());
-		}
-
-		false
-	}
-
-	/// Returns true if this type is a set or array.
-	pub(crate) fn is_array_like(&self) -> bool {
-		matches!(self, Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_)))
 	}
 
 	/// Returns Some if this type can be converted into a discriminated object, None otherwise
@@ -200,100 +173,6 @@ impl Kind {
 				None
 			}
 			_ => None,
-		}
-	}
-
-	// Return the kind of the contained value.
-	//
-	// For example: for `array<number>` or `set<number>` this returns `number`.
-	// For `array<number> | set<float>` this returns `number | float`.
-	pub(crate) fn inner_kind(&self) -> Option<Kind> {
-		let mut this = self;
-		loop {
-			match &this {
-				Kind::Any
-				| Kind::Null
-				| Kind::Bool
-				| Kind::Bytes
-				| Kind::Datetime
-				| Kind::Decimal
-				| Kind::Duration
-				| Kind::Float
-				| Kind::Int
-				| Kind::Number
-				| Kind::Object
-				| Kind::Point
-				| Kind::String
-				| Kind::Uuid
-				| Kind::Regex
-				| Kind::Record(_)
-				| Kind::Geometry(_)
-				| Kind::Function(_, _)
-				| Kind::Range
-				| Kind::Literal(_)
-				| Kind::References(_, _)
-				| Kind::File(_) => return None,
-				Kind::Option(x) => {
-					this = x;
-				}
-				Kind::Array(x, _) | Kind::Set(x, _) => return Some(x.as_ref().clone()),
-				Kind::Either(x) => {
-					// a either shouldn't be able to contain a either itself so recursing here
-					// should be fine.
-					let kinds: Vec<Kind> = x.iter().filter_map(Self::inner_kind).collect();
-					if kinds.is_empty() {
-						return None;
-					}
-					return Some(Kind::Either(kinds));
-				}
-			}
-		}
-	}
-
-	/// Get the inner kind of a [`Kind::Option`] or return the original [`Kind`] if it is not the Option variant.
-	pub(crate) fn get_optional_inner_kind(&self) -> &Kind {
-		match self {
-			Kind::Option(k) => k.as_ref().get_optional_inner_kind(),
-			_ => self,
-		}
-	}
-
-	pub(crate) fn allows_nested_kind(&self, path: &[Part], kind: &Kind) -> bool {
-		// ANY type won't cause a mismatch
-		if self.is_any() || kind.is_any() {
-			return true;
-		}
-
-		if !path.is_empty() {
-			match self {
-				Kind::Object => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
-				Kind::Either(kinds) => {
-					return kinds.iter().all(|k| k.allows_nested_kind(path, kind));
-				}
-				Kind::Array(inner, len) | Kind::Set(inner, len) => {
-					return match path.first() {
-						Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
-						Some(Part::Index(i)) => {
-							if let Some(len) = len {
-								if i.as_usize() >= *len as usize {
-									return false;
-								}
-							}
-
-							inner.allows_nested_kind(&path[1..], kind)
-						}
-						_ => false,
-					};
-				}
-				_ => (),
-			}
-		}
-
-		match self {
-			Kind::Literal(lit) => lit.allows_nested_kind(path, kind),
-			Kind::Option(inner) => inner.allows_nested_kind(path, kind),
-			_ if path.is_empty() => self == kind,
-			_ => false,
 		}
 	}
 }
@@ -708,61 +587,6 @@ impl Literal {
 			},
 		}
 	}
-
-	pub(crate) fn allows_nested_kind(&self, path: &[Part], kind: &Kind) -> bool {
-		// ANY type won't cause a mismatch
-		if kind.is_any() {
-			return true;
-		}
-
-		// We reached the end of the path
-		// Check if the literal is equal to the kind
-		if path.is_empty() {
-			return match kind {
-				Kind::Literal(lit) => self == lit,
-				_ => &self.to_kind() == kind,
-			};
-		}
-
-		match self {
-			Literal::Array(x) => match path.first() {
-				Some(Part::All) => x.iter().all(|y| y.allows_nested_kind(&path[1..], kind)),
-				Some(Part::Index(i)) => {
-					if let Some(y) = x.get(i.as_usize()) {
-						y.allows_nested_kind(&path[1..], kind)
-					} else {
-						false
-					}
-				}
-				_ => false,
-			},
-			Literal::Object(x) => match path.first() {
-				Some(Part::All) => x.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind)),
-				Some(Part::Field(k)) => {
-					if let Some(y) = x.get(&k.0) {
-						y.allows_nested_kind(&path[1..], kind)
-					} else {
-						false
-					}
-				}
-				_ => false,
-			},
-			Literal::DiscriminatedObject(_, discriminants) => match path.first() {
-				Some(Part::All) => discriminants
-					.iter()
-					.all(|o| o.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind))),
-				Some(Part::Field(k)) => discriminants.iter().all(|o| {
-					if let Some(y) = o.get(&k.0) {
-						y.allows_nested_kind(&path[1..], kind)
-					} else {
-						false
-					}
-				}),
-				_ => false,
-			},
-			_ => false,
-		}
-	}
 }
 
 impl Display for Literal {
@@ -882,74 +706,5 @@ impl From<crate::expr::Literal> for Literal {
 			),
 			crate::expr::Literal::Bool(b) => Self::Bool(b),
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	use rstest::rstest;
-
-	#[rstest]
-	#[case::any(Kind::Any, false)]
-	#[case::null(Kind::Null, false)]
-	#[case::bool(Kind::Bool, false)]
-	#[case::bytes(Kind::Bytes, false)]
-	#[case::datetime(Kind::Datetime, false)]
-	#[case::decimal(Kind::Decimal, false)]
-	#[case::duration(Kind::Duration, false)]
-	#[case::float(Kind::Float, false)]
-	#[case::int(Kind::Int, false)]
-	#[case::number(Kind::Number, false)]
-	#[case::object(Kind::Object, false)]
-	#[case::point(Kind::Point, false)]
-	#[case::string(Kind::String, false)]
-	#[case::uuid(Kind::Uuid, false)]
-	#[case::regex(Kind::Regex, false)]
-	#[case::function(Kind::Function(None, None), false)]
-	#[case::function(Kind::Function(Some(vec![]), None), false)]
-	#[case::function(Kind::Function(Some(vec![Kind::Literal(Literal::String("a".into()))]), None), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Any)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Null)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Bool)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Bytes)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Datetime)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Decimal)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Duration)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Float)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Int)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Number)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Object)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Point)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Literal(Literal::Bool(true)))), false)]
-	#[case::literal(Kind::Literal(Literal::String("a".into())), false)]
-	#[case::literal(Kind::Literal(Literal::Number(1.into())), false)]
-	#[case::literal(Kind::Literal(Literal::Duration(Duration::new(1, 0))), false)]
-	#[case::literal(Kind::Literal(Literal::Bool(true)), false)]
-	#[case::literal(Kind::Literal(Literal::Array(vec![])), true)]
-	#[case::array(Kind::Array(Box::new(Kind::Bool), None), true)]
-	#[case::array(Kind::Array(Box::new(Kind::Literal(Literal::String("a".into()))), None), true)]
-	#[case::object(Kind::Object, false)]
-	#[case::geometry(Kind::Geometry(vec![]), false)]
-	#[case::geometry(Kind::Geometry(vec!["point".to_string()]), false)]
-	#[case::set(Kind::Set(Box::new(Kind::Bool), None), true)]
-	#[case::set(Kind::Set(Box::new(Kind::Literal(Literal::String("a".into()))), None), true)]
-	#[case::either(Kind::Either(vec![]), false)]
-	#[case::either(Kind::Either(vec![Kind::Bool]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::String("a".into()))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Number(1.into()))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Duration(Duration::new(1, 0)))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Bool(true))]), false)]
-	#[case::range(Kind::Range, false)]
-	#[case::references(Kind::References(None, None), false)]
-	#[case::references(Kind::References(Some(Table("table".to_string())), None), false)]
-	#[case::references(Kind::References(Some(Table("table".to_string())), Some(Idiom(vec!["idiom".into()]))), false)]
-	#[case::file(Kind::File(vec![]), false)]
-	#[case::file(Kind::File(vec![Ident("bucket".to_string())]), false)]
-	#[case::file(Kind::File(vec![Ident("bucket".to_string()), Ident("key".to_string())]), false)]
-
-	fn is_array_like(#[case] kind: Kind, #[case] expected: bool) {
-		assert_eq!(kind.is_array_like(), expected);
 	}
 }

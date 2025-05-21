@@ -82,8 +82,8 @@ impl fmt::Display for Mock {
 impl From<Mock> for crate::expr::Mock {
 	fn from(v: Mock) -> Self {
 		match v {
-			Mock::Count(tb, c) => crate::expr::Mock::Count(tb.into(), c),
-			Mock::Range(tb, b, e) => crate::expr::Mock::Range(tb.into(), b, e),
+			Mock::Count(tb, c) => crate::expr::Mock::Count(tb, c),
+			Mock::Range(tb, b, e) => crate::expr::Mock::Range(tb, b, e),
 		}
 	}
 }
@@ -91,8 +91,8 @@ impl From<Mock> for crate::expr::Mock {
 impl From<crate::expr::Mock> for Mock {
 	fn from(v: crate::expr::Mock) -> Self {
 		match v {
-			crate::expr::Mock::Count(tb, c) => Mock::Count(tb.into(), c),
-			crate::expr::Mock::Range(tb, b, e) => Mock::Range(tb.into(), b, e),
+			crate::expr::Mock::Count(tb, c) => Mock::Count(tb, c),
+			crate::expr::Mock::Range(tb, b, e) => Mock::Range(tb, b, e),
 		}
 	}
 }
