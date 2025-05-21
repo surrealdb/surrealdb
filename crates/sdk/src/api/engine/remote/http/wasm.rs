@@ -1,16 +1,16 @@
 use super::Client;
-use crate::api::conn::Connection;
+use crate::api::Result;
+use crate::api::Surreal;
+use crate::api::conn;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
-use crate::api::Result;
-use crate::api::Surreal;
 use crate::opt::WaitFor;
 use async_channel::{Receiver, Sender};
 use indexmap::IndexMap;
-use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
+use reqwest::header::HeaderMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use tokio::sync::watch;
@@ -18,8 +18,7 @@ use url::Url;
 use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Client {}
-
-impl Connection for Client {
+impl conn::Sealed for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {

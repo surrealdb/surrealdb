@@ -1,11 +1,11 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{statements::RelateStatement, Subquery, Value},
+	sql::{SqlValue, Subquery, statements::RelateStatement},
 	syn::{
 		parser::{
-			mac::{expected, expected_whitespace, unexpected},
 			ParseResult, Parser,
+			mac::{expected, expected_whitespace, unexpected},
 		},
 		token::t,
 	},
@@ -34,7 +34,10 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_relation(&mut self, stk: &mut Stk) -> ParseResult<(Value, Value, Value)> {
+	pub async fn parse_relation(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<(SqlValue, SqlValue, SqlValue)> {
 		let first = self.parse_relate_value(stk).await?;
 		let next = self.next();
 		let is_o = match next.kind {
@@ -60,22 +63,22 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_relate_kind(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub async fn parse_relate_kind(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		match self.peek_kind() {
-			t!("$param") => self.next_token_value().map(Value::Param),
+			t!("$param") => self.next_token_value().map(SqlValue::Param),
 			t!("(") => {
 				let span = self.pop_peek().span;
 				let res = self
 					.parse_inner_subquery(ctx, Some(span))
 					.await
-					.map(|x| Value::Subquery(Box::new(x)))?;
+					.map(|x| SqlValue::Subquery(Box::new(x)))?;
 				Ok(res)
 			}
 			_ => self.parse_thing_or_table(ctx).await,
 		}
 	}
 
-	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub async fn parse_relate_value(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
 		let r = self.parse_relate_value_inner(ctx).await;
@@ -83,13 +86,13 @@ impl Parser<'_> {
 		r
 	}
 
-	async fn parse_relate_value_inner(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	async fn parse_relate_value_inner(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
-				self.parse_array(ctx, start).await.map(Value::Array)
+				self.parse_array(ctx, start).await.map(SqlValue::Array)
 			}
-			t!("$param") => self.next_token_value().map(Value::Param),
+			t!("$param") => self.next_token_value().map(SqlValue::Param),
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
@@ -101,30 +104,32 @@ impl Parser<'_> {
 			| t!("ALTER")
 			| t!("REMOVE")
 			| t!("REBUILD")
-			| t!("INFO") => self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x))),
+			| t!("INFO") => {
+				self.parse_inner_subquery(ctx, None).await.map(|x| SqlValue::Subquery(Box::new(x)))
+			}
 			t!("IF") => {
 				self.pop_peek();
 				ctx.run(|ctx| self.parse_if_stmt(ctx))
 					.await
-					.map(|x| Value::Subquery(Box::new(Subquery::Ifelse(x))))
+					.map(|x| SqlValue::Subquery(Box::new(Subquery::Ifelse(x))))
 			}
 			t!("(") => {
 				let span = self.pop_peek().span;
 				let res = self
 					.parse_inner_subquery(ctx, Some(span))
 					.await
-					.map(|x| Value::Subquery(Box::new(x)))?;
+					.map(|x| SqlValue::Subquery(Box::new(x)))?;
 				Ok(res)
 			}
-			_ => self.parse_thing(ctx).await.map(Value::Thing),
+			_ => self.parse_thing(ctx).await.map(SqlValue::Thing),
 		}
 	}
 
-	pub async fn parse_thing_or_table(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub async fn parse_thing_or_table(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		if self.peek_whitespace1().kind == t!(":") {
-			self.parse_thing(ctx).await.map(Value::Thing)
+			self.parse_thing(ctx).await.map(SqlValue::Thing)
 		} else {
-			self.next_token_value().map(Value::Table)
+			self.next_token_value().map(SqlValue::Table)
 		}
 	}
 }

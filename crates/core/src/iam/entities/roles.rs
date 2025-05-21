@@ -1,5 +1,5 @@
+use crate::expr::Ident;
 use crate::iam::Error;
-use crate::sql::Ident;
 use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -36,13 +36,6 @@ impl FromStr for Role {
 			"owner" => Ok(Self::Owner),
 			_ => Err(Error::InvalidRole(s.to_string())),
 		}
-	}
-}
-
-impl std::convert::TryFrom<&Ident> for Role {
-	type Error = Error;
-	fn try_from(id: &Ident) -> Result<Self, Self::Error> {
-		Role::from_str(id)
 	}
 }
 

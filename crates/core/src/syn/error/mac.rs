@@ -17,8 +17,8 @@
 /// }
 /// ```
 macro_rules! syntax_error {
-	($format:literal $(, $expr:expr)*
-		$(, @ $span:expr $(=> $label_format:literal $(, $label_expr:expr)* $(,)? )? )*
+	($format:literal $(, $expr:expr_2021)*
+		$(, @ $span:expr_2021 $(=> $label_format:literal $(, $label_expr:expr_2021)* $(,)? )? )*
 	) => {{
 		let __error: $crate::syn::error::SyntaxError = $crate::syn::error::SyntaxError::new(format_args!($format $(, $expr)*));
 		$(
@@ -27,11 +27,11 @@ macro_rules! syntax_error {
 		__error
 	}};
 
-	(#label $name:ident, $span:expr => $label_format:literal $(, $label_expr:expr)* ) => {
+	(#label $name:ident, $span:expr_2021 => $label_format:literal $(, $label_expr:expr_2021)* ) => {
 		let $name = $name.with_labeled_span($span,$crate::syn::error::MessageKind::Error, format_args!($label_format $(, $label_expr)*));
 	};
 
-	(#label $name:ident, $span:expr ) => {
+	(#label $name:ident, $span:expr_2021 ) => {
 	    let $name = $crate::syn::error::SyntaxError::with_span($name,$span, $crate::syn::error::MessageKind::Error);
 	};
 }

@@ -1,14 +1,14 @@
 use std::str::FromStr;
 
 use wiremock::{
-	matchers::{body_string, header, method, path},
 	Mock, MockServer, ResponseTemplate,
+	matchers::{body_string, header, method, path},
 };
 
 use crate::{
 	dbs::{
-		capabilities::{NetTarget, Targets},
 		Capabilities, Session,
+		capabilities::{NetTarget, Targets},
 	},
 	kvs::Datastore,
 };

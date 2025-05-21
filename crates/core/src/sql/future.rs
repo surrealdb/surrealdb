@@ -1,15 +1,8 @@
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::sql::block::Block;
-use crate::sql::value::Value;
-use crate::{ctx::Context, dbs::Futures};
-use reblessive::tree::Stk;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use super::FlowResultExt as _;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
@@ -20,33 +13,26 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 #[non_exhaustive]
 pub struct Future(pub Block);
 
-impl From<Value> for Future {
-	fn from(v: Value) -> Self {
+impl From<SqlValue> for Future {
+	fn from(v: SqlValue) -> Self {
 		Future(Block::from(v))
-	}
-}
-
-impl Future {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Process the future if enabled
-		match opt.futures {
-			Futures::Enabled => {
-				stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return()?.ok()
-			}
-			_ => Ok(self.clone().into()),
-		}
 	}
 }
 
 impl fmt::Display for Future {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "<future> {}", self.0)
+	}
+}
+
+impl From<Future> for crate::expr::Future {
+	fn from(v: Future) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Future> for Future {
+	fn from(v: crate::expr::Future) -> Self {
+		Future(v.0.into())
 	}
 }

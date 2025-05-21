@@ -1,11 +1,6 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
+
+use crate::sql::{Block, Ident, Kind, Permission, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -27,51 +22,6 @@ pub struct DefineFunctionStatement {
 	pub overwrite: bool,
 	#[revision(start = 4)]
 	pub returns: Option<Kind>,
-}
-
-impl DefineFunctionStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
-		if txn.get_db_function(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				return Err(Error::FcAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::database::fc::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineFunctionStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
 }
 
 impl fmt::Display for DefineFunctionStatement {
@@ -109,19 +59,32 @@ impl fmt::Display for DefineFunctionStatement {
 	}
 }
 
-impl InfoStructure for DefineFunctionStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"args".to_string() => self.args
-				.into_iter()
-				.map(|(n, k)| vec![n.structure(), k.structure()].into())
-				.collect::<Vec<Value>>()
-				.into(),
-			"block".to_string() => self.block.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-			"returns".to_string(), if let Some(v) = self.returns => v.structure(),
-		})
+impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionStatement {
+	fn from(v: DefineFunctionStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+			block: v.block.into(),
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			returns: v.returns.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionStatement {
+	fn from(v: crate::expr::statements::DefineFunctionStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
+			block: v.block.into(),
+			comment: v.comment.map(Into::into),
+			permissions: v.permissions.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			returns: v.returns.map(Into::into),
+		}
 	}
 }

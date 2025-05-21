@@ -1,11 +1,11 @@
 //! Stores a graph edge pointer
-use crate::err::Error;
+use crate::expr::dir::Dir;
+use crate::expr::id::Id;
+use crate::expr::thing::Thing;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
-use crate::sql::dir::Dir;
-use crate::sql::id::Id;
-use crate::sql::thing::Thing;
+use crate::kvs::{KeyEncode, impl_key};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -133,51 +133,37 @@ pub fn new<'a>(
 	Graph::new(ns, db, tb, id.to_owned(), eg.to_owned(), fk)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>, Error> {
+pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>, Error> {
+pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn egprefix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>, Error> {
+pub fn egprefix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn egsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>, Error> {
+pub fn egsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ftprefix(
-	ns: &str,
-	db: &str,
-	tb: &str,
-	id: &Id,
-	eg: &Dir,
-	ft: &str,
-) -> Result<Vec<u8>, Error> {
+pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(
-	ns: &str,
-	db: &str,
-	tb: &str,
-	id: &Id,
-	eg: &Dir,
-	ft: &str,
-) -> Result<Vec<u8>, Error> {
+pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -235,12 +221,16 @@ impl<'a> Graph<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::kvs::KeyDecode;
+
+	use crate::sql::Thing as SqlThing;
+
 	#[test]
 	fn key() {
-		use super::*;
 		use crate::syn::Parse;
-		let fk = Thing::parse("other:test");
+
+		let fk: Thing = SqlThing::parse("other:test").into();
 		#[rustfmt::skip]
 		let val = Graph::new(
 			"testns",

@@ -1,16 +1,12 @@
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::sql::dir::Dir;
 use crate::sql::table::Tables;
 use crate::sql::thing::Thing;
-use crate::{ctx::Context, sql::dir::Dir};
-use reblessive::tree::Stk;
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use super::graph::GraphSubjects;
-use super::Value;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Edges";
 
@@ -41,20 +37,6 @@ impl Edges {
 		self.what = old.into();
 		Ok(())
 	}
-
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		Ok(Value::Edges(Box::new(Self {
-			dir: self.dir.clone(),
-			from: self.from.clone(),
-			what: self.what.clone().compute(stk, ctx, opt, doc).await?,
-		})))
-	}
 }
 
 impl fmt::Display for Edges {
@@ -63,6 +45,26 @@ impl fmt::Display for Edges {
 			0 => write!(f, "{}{}?", self.from, self.dir,),
 			1 => write!(f, "{}{}{}", self.from, self.dir, self.what),
 			_ => write!(f, "{}{}({})", self.from, self.dir, self.what),
+		}
+	}
+}
+
+impl From<Edges> for crate::expr::Edges {
+	fn from(v: Edges) -> Self {
+		Self {
+			dir: v.dir.into(),
+			from: v.from.into(),
+			what: v.what.into(),
+		}
+	}
+}
+
+impl From<crate::expr::Edges> for Edges {
+	fn from(v: crate::expr::Edges) -> Self {
+		Self {
+			dir: v.dir.into(),
+			from: v.from.into(),
+			what: v.what.into(),
 		}
 	}
 }

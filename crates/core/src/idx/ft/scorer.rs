@@ -1,10 +1,10 @@
-use crate::err::Error;
 use crate::idx::docids::DocId;
+use crate::idx::ft::Bm25Params;
 use crate::idx::ft::doclength::{DocLength, DocLengths};
 use crate::idx::ft::postings::{Postings, TermFrequency};
 use crate::idx::ft::termdocs::TermsDocs;
-use crate::idx::ft::Bm25Params;
 use crate::kvs::Transaction;
+use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -44,18 +44,14 @@ impl BM25Scorer {
 		doc_id: DocId,
 		term_doc_count: DocLength,
 		term_frequency: TermFrequency,
-	) -> Result<Score, Error> {
+	) -> Result<Score> {
 		let dl = self.doc_lengths.read().await;
 		let doc_length = dl.get_doc_length(tx, doc_id).await?.unwrap_or(0);
 		drop(dl);
 		Ok(self.compute_bm25_score(term_frequency as f32, term_doc_count as f32, doc_length as f32))
 	}
 
-	pub(crate) async fn score(
-		&self,
-		tx: &Transaction,
-		doc_id: DocId,
-	) -> Result<Option<Score>, Error> {
+	pub(crate) async fn score(&self, tx: &Transaction, doc_id: DocId) -> Result<Option<Score>> {
 		let mut sc = 0.0;
 		let p = self.postings.read().await;
 		for (term_id, docs) in self.terms_docs.iter().flatten() {

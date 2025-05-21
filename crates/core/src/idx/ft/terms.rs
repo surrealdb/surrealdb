@@ -4,7 +4,8 @@ use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree,
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use revision::{revisioned, Revisioned};
+use anyhow::Result;
+use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +28,7 @@ impl Terms {
 		default_btree_order: u32,
 		tt: TransactionType,
 		cache_size: u32,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let state_key: Key = index_key_base.new_bt_key(None)?;
 		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
@@ -70,11 +71,7 @@ impl Terms {
 		term_id
 	}
 
-	pub(super) async fn resolve_term_id(
-		&mut self,
-		tx: &Transaction,
-		term: &str,
-	) -> Result<TermId, Error> {
+	pub(super) async fn resolve_term_id(&mut self, tx: &Transaction, term: &str) -> Result<TermId> {
 		let term_key = term.into();
 		{
 			if let Some(term_id) = self.btree.search_mut(tx, &mut self.store, &term_key).await? {
@@ -87,19 +84,11 @@ impl Terms {
 		Ok(term_id)
 	}
 
-	pub(super) async fn get_term_id(
-		&self,
-		tx: &Transaction,
-		term: &str,
-	) -> Result<Option<TermId>, Error> {
+	pub(super) async fn get_term_id(&self, tx: &Transaction, term: &str) -> Result<Option<TermId>> {
 		self.btree.search(tx, &self.store, &term.into()).await
 	}
 
-	pub(super) async fn remove_term_id(
-		&mut self,
-		tx: &Transaction,
-		term_id: TermId,
-	) -> Result<(), Error> {
+	pub(super) async fn remove_term_id(&mut self, tx: &Transaction, term_id: TermId) -> Result<()> {
 		let term_id_key = self.index_key_base.new_bu_key(term_id)?;
 		if let Some(term_key) = tx.get(term_id_key.clone(), None).await? {
 			self.btree.delete(tx, &mut self.store, term_key.clone()).await?;
@@ -115,11 +104,11 @@ impl Terms {
 		Ok(())
 	}
 
-	pub(super) async fn statistics(&self, tx: &Transaction) -> Result<BStatistics, Error> {
+	pub(super) async fn statistics(&self, tx: &Transaction) -> Result<BStatistics> {
 		self.btree.statistics(tx, &self.store).await
 	}
 
-	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
+	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let btree = self.btree.inc_generation().clone();
 			let state = State {
@@ -193,7 +182,7 @@ impl State {
 }
 
 impl VersionedStore for State {
-	fn try_from(val: Val) -> Result<Self, Error> {
+	fn try_from(val: Val) -> Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -203,7 +192,7 @@ impl VersionedStore for State {
 				Err(_) => match State1::deserialize_revisioned(&mut val.as_slice()) {
 					Ok(b_old) => Ok(b_old.into()),
 					// Otherwise we return the initial error
-					Err(_) => Err(Error::Revision(e)),
+					Err(_) => Err(anyhow::Error::new(Error::Revision(e))),
 				},
 			},
 		}
@@ -217,7 +206,7 @@ mod tests {
 	use crate::idx::{IndexKeyBase, VersionedStore};
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
-	use rand::{thread_rng, Rng};
+	use rand::{Rng, thread_rng};
 	use std::collections::HashSet;
 	use test_log::test;
 

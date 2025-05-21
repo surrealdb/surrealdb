@@ -531,10 +531,24 @@ pub struct Capabilities {
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
-            f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental, self.allow_arbitrary_query, self.deny_arbitrary_query,
-        )
+			f,
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
+			self.scripting,
+			self.guest_access,
+			self.live_query_notifications,
+			self.allow_funcs,
+			self.deny_funcs,
+			self.allow_net,
+			self.deny_net,
+			self.allow_rpc,
+			self.deny_rpc,
+			self.allow_http,
+			self.deny_http,
+			self.allow_experimental,
+			self.deny_experimental,
+			self.allow_arbitrary_query,
+			self.deny_arbitrary_query,
+		)
 	}
 }
 
@@ -782,58 +796,90 @@ mod tests {
 	#[test]
 	fn test_net_target() {
 		// IPNet IPv4
-		assert!(NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("10.0.1.0/24").unwrap()));
-		assert!(NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("10.0.1.2").unwrap()));
-		assert!(!NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("20.0.1.0/24").unwrap()));
-		assert!(!NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("20.0.1.0").unwrap()));
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("10.0.1.0/24").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("10.0.1.2").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("20.0.1.0/24").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("20.0.1.0").unwrap())
+		);
 
 		// IPNet IPv6
-		assert!(NetTarget::from_str("2001:db8::1")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db8::1").unwrap()));
-		assert!(NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db8::1").unwrap()));
-		assert!(NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db8:abcd:12::/64").unwrap()));
-		assert!(!NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db9::1").unwrap()));
-		assert!(!NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db9:abcd:12::1/64").unwrap()));
+		assert!(
+			NetTarget::from_str("2001:db8::1")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8::1").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8::1").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8:abcd:12::/64").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db9::1").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db9:abcd:12::1/64").unwrap())
+		);
 
 		// Host domain with and without port
-		assert!(NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com:80").unwrap()));
-		assert!(!NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("www.example.com").unwrap()));
-		assert!(!NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("www.example.com:80").unwrap()));
-		assert!(NetTarget::from_str("example.com:80")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com:80").unwrap()));
-		assert!(!NetTarget::from_str("example.com:80")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com:443").unwrap()));
-		assert!(!NetTarget::from_str("example.com:80")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com").unwrap()));
+		assert!(
+			NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:80").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("www.example.com").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("www.example.com:80").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:80").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:443").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
 
 		// Host IPv4 with and without port
 		assert!(
@@ -927,18 +973,26 @@ mod tests {
 
 	#[test]
 	fn test_method_target() {
-		assert!(MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("query").unwrap()));
-		assert!(MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("Query").unwrap()));
-		assert!(MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("QUERY").unwrap()));
-		assert!(!MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("ping").unwrap()));
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("query").unwrap())
+		);
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("Query").unwrap())
+		);
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("QUERY").unwrap())
+		);
+		assert!(
+			!MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("ping").unwrap())
+		);
 	}
 
 	#[test]
@@ -947,14 +1001,22 @@ mod tests {
 		assert!(Targets::<FuncTarget>::All.matches("http::get"));
 		assert!(!Targets::<NetTarget>::None.matches(&NetTarget::from_str("example.com").unwrap()));
 		assert!(!Targets::<FuncTarget>::None.matches("http::get"));
-		assert!(Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
-			.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(!Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
-			.matches(&NetTarget::from_str("www.example.com").unwrap()));
-		assert!(Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches("http::get"));
-		assert!(!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches("http::post"));
+		assert!(
+			Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
+		assert!(
+			!Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
+				.matches(&NetTarget::from_str("www.example.com").unwrap())
+		);
+		assert!(
+			Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
+				.matches("http::get")
+		);
+		assert!(
+			!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
+				.matches("http::post")
+		);
 	}
 
 	#[test]

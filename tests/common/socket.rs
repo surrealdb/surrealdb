@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::result::Result as StdResult;
 use std::time::Duration;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 use tokio::net::TcpStream;
 use tokio::sync::{
 	mpsc::{self, Receiver, Sender},
@@ -17,9 +17,9 @@ use tokio::sync::{
 };
 use tokio::time;
 use tokio_stream::StreamExt;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error};
 
 type Result<T> = StdResult<T, Box<dyn Error>>;
@@ -184,7 +184,7 @@ impl Socket {
 						// First of all we deserialize the CBOR data.
 						let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
 						// Then we convert it to a SurrealQL Value.
-						let msg: Value = Cbor(msg).try_into()?;
+						let msg: SqlValue = Cbor(msg).try_into()?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json();
 						// Then output the response.
@@ -266,11 +266,11 @@ impl Socket {
 					};
 
 					// does the response have an id.
-					if let Some(sender) = res.get("id").and_then(|x| x.as_u64()).and_then(|x| awaiting.remove(&x)){
+					match res.get("id").and_then(|x| x.as_u64()).and_then(|x| awaiting.remove(&x)){ Some(sender) => {
 						let _ = sender.send(res);
-					}else if (other.send(res).await).is_err(){
+					} _ => if (other.send(res).await).is_err(){
 						 return Err("main thread quit unexpectedly".to_string().into())
-					 }
+					 }}
 				}
 			}
 		}

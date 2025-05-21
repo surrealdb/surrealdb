@@ -4,7 +4,7 @@ mod graphql_integration {
 	use std::{str::FromStr, time::Duration};
 
 	macro_rules! assert_equal_arrs {
-		($lhs: expr, $rhs: expr) => {
+		($lhs: expr_2021, $rhs: expr_2021) => {
 			let lhs = $lhs.as_array().unwrap().iter().collect::<std::collections::HashSet<_>>();
 			let rhs = $rhs.as_array().unwrap().iter().collect::<std::collections::HashSet<_>>();
 			assert_eq!(lhs, rhs)

@@ -1,66 +1,66 @@
 mod parse;
 use parse::Parse;
 mod helpers;
+use crate::helpers::skip_ok;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
+use surrealdb::expr::Thing;
 use surrealdb::iam::Role;
-use surrealdb::sql::Thing;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn create_or_insert_with_permissions() -> Result<(), Error> {
+async fn create_or_insert_with_permissions() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL PERMISSIONS FULL;
 		CREATE user:test;
-		DEFINE TABLE demo SCHEMAFULL PERMISSIONS FOR select, create, update WHERE user = $auth.id;
+		DEFINE TABLE demo SCHEMAFULL PERMISSIONS FOR select, create WHERE user = $auth.id;
 		DEFINE FIELD user ON TABLE demo VALUE $auth.id;
+		DEFINE TABLE OVERWRITE foo SCHEMAFULL PERMISSIONS FOR select,create WHERE TRUE;
+		DEFINE FUNCTION OVERWRITE fn::client::foo() { RETURN CREATE ONLY foo:bar CONTENT {};};
 	";
 	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 6);
 	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
+	skip_ok(res, 4)?;
 	//
 	let sql = "
 		CREATE demo SET id = demo:one;
 		INSERT INTO demo (id) VALUES (demo:two);
+		fn::client::foo();
 	";
 	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "test")).into());
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: demo:one,
 				user: user:test,
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: demo:two,
 				user: user:test,
 			},
 		]",
-	);
+	)
+	.into();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = SqlValue::parse("{ id: foo:bar}").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -73,28 +73,116 @@ async fn create_or_insert_with_permissions() -> Result<(), Error> {
 async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true, "owner at root level should be able to create a new record"),
-		((().into(), Role::Editor), ("NS", "DB"), true, "editor at root level should be able to create a new record"),
-		((().into(), Role::Viewer), ("NS", "DB"), false, "viewer at root level should not be able to create a new record"),
-
+		(
+			(().into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at root level should be able to create a new record",
+		),
+		(
+			(().into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at root level should be able to create a new record",
+		),
+		(
+			(().into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at root level should not be able to create a new record",
+		),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true, "owner at namespace level should be able to create a new record on its namespace"),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at namespace level should not be able to create a new record on another namespace"),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true, "editor at namespace level should be able to create a new record on its namespace"),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at namespace level should not be able to create a new record on another namespace"),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false, "viewer at namespace level should not be able to create a new record on its namespace"),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at namespace level should not be able to create a new record on another namespace"),
-
+		(
+			(("NS",).into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at namespace level should be able to create a new record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at namespace level should not be able to create a new record on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at namespace level should be able to create a new record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at namespace level should not be able to create a new record on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to create a new record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to create a new record on another namespace",
+		),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true, "owner at database level should be able to create a new record on its database"),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false, "owner at database level should not be able to create a new record on another database"),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at database level should not be able to create a new record on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true, "editor at database level should be able to create a new record on its database"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false, "editor at database level should not be able to create a new record on another database"),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at database level should not be able to create a new record on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false, "viewer at database level should not be able to create a new record on its database"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false, "viewer at database level should not be able to create a new record on another database"),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at database level should not be able to create a new record on another namespace even if the database name matches"),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at database level should be able to create a new record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "OTHER_DB"),
+			false,
+			"owner at database level should not be able to create a new record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at database level should not be able to create a new record on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at database level should be able to create a new record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "OTHER_DB"),
+			false,
+			"editor at database level should not be able to create a new record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at database level should not be able to create a new record on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at database level should not be able to create a new record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "OTHER_DB"),
+			false,
+			"viewer at database level should not be able to create a new record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at database level should not be able to create a new record on another namespace even if the database name matches",
+		),
 	];
 	let statement = "CREATE person";
 
@@ -110,10 +198,10 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			if should_succeed {
 				assert!(res.is_ok(), "{}: {:?}", msg, res);
-				assert_ne!(res.unwrap(), Value::parse("[]"), "{}", msg);
+				assert_ne!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
 			} else if res.is_ok() {
 				// Permissions clause doesn't allow to query the table
-				assert_eq!(res.unwrap(), Value::parse("[]"), "{}", msg);
+				assert_eq!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -136,7 +224,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 
@@ -146,7 +234,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 
@@ -156,7 +244,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 
@@ -166,10 +254,10 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			if should_succeed {
 				assert!(res.is_ok(), "{}: {:?}", msg, res);
-				assert_ne!(res.unwrap(), Value::parse("[]"), "{}", msg);
+				assert_ne!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
 			} else if res.is_ok() {
 				// Permissions clause doesn't allow to query the table
-				assert_eq!(res.unwrap(), Value::parse("[]"), "{}", msg);
+				assert_eq!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -235,7 +323,11 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(res.unwrap() == Value::parse("[]"), "{}", "anonymous user should not be able to create a new record if the table exists but has no permissions");
+		assert!(
+			res.unwrap() == SqlValue::parse("[]").into(),
+			"{}",
+			"anonymous user should not be able to create a new record if the table exists but has no permissions"
+		);
 	}
 
 	// When the table exists and grants full permissions
@@ -259,7 +351,11 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(res.unwrap() != Value::parse("[]"), "{}", "anonymous user should be able to create a new record if the table exists and grants full permissions");
+		assert!(
+			res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"anonymous user should be able to create a new record if the table exists and grants full permissions"
+		);
 	}
 }
 
@@ -286,7 +382,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to create the table"
 		);
@@ -313,7 +409,11 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(res.unwrap() != Value::parse("[]"), "{}", "anonymous user should not be able to create a new record if the table exists but has no permissions");
+		assert!(
+			res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"anonymous user should not be able to create a new record if the table exists but has no permissions"
+		);
 	}
 
 	{
@@ -337,6 +437,10 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		assert!(res.unwrap() != Value::parse("[]"), "{}", "anonymous user should be able to create a new record if the table exists and grants full permissions");
+		assert!(
+			res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"anonymous user should be able to create a new record if the table exists and grants full permissions"
+		);
 	}
 }

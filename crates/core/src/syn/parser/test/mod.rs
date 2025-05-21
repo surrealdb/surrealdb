@@ -1,5 +1,5 @@
 use crate::{
-	sql::{self, Id, Ident, Idiom, Part, Query, Statement, Statements, Thing, Value},
+	sql::{self, Id, Ident, Idiom, Part, Query, SqlValue, Statement, Statements, Thing},
 	syn::parser::mac::test_parse,
 };
 
@@ -26,28 +26,28 @@ fn multiple_semicolons() {
 #[test]
 fn glued_identifiers() {
 	let res = test_parse!(parse_query, r#"T:1"#).unwrap();
-	let expected = sql::Query(sql::Statements(vec![Statement::Value(Value::Thing(Thing {
+	let expected = sql::Query(sql::Statements(vec![Statement::Value(SqlValue::Thing(Thing {
 		tb: "T".to_string(),
 		id: Id::Number(1),
 	}))]));
 	assert_eq!(res, expected);
 
 	let res = test_parse!(parse_query, r#"T9T9T9T:1"#).unwrap();
-	let expected = sql::Query(sql::Statements(vec![Statement::Value(Value::Thing(Thing {
+	let expected = sql::Query(sql::Statements(vec![Statement::Value(SqlValue::Thing(Thing {
 		tb: "T9T9T9T".to_string(),
 		id: Id::Number(1),
 	}))]));
 	assert_eq!(res, expected);
 
 	let res = test_parse!(parse_query, r#"Z:1"#).unwrap();
-	let expected = sql::Query(sql::Statements(vec![Statement::Value(Value::Thing(Thing {
+	let expected = sql::Query(sql::Statements(vec![Statement::Value(SqlValue::Thing(Thing {
 		tb: "Z".to_string(),
 		id: Id::Number(1),
 	}))]));
 	assert_eq!(res, expected);
 
 	let res = test_parse!(parse_query, r#"Z9Z9Z9Z:1"#).unwrap();
-	let expected = sql::Query(sql::Statements(vec![Statement::Value(Value::Thing(Thing {
+	let expected = sql::Query(sql::Statements(vec![Statement::Value(SqlValue::Thing(Thing {
 		tb: "Z9Z9Z9Z".to_string(),
 		id: Id::Number(1),
 	}))]));
@@ -98,9 +98,9 @@ fn ident_is_field() {
 		test_parse!(parse_query, src).inspect_err(|e| eprintln!("{}", e.render_on(src))).unwrap();
 	assert_eq!(
 		field,
-		Query(Statements(vec![Statement::Value(Value::Idiom(Idiom(vec![Part::Field(Ident(
-			"foo".to_string()
-		))])))]))
+		Query(Statements(vec![Statement::Value(SqlValue::Idiom(Idiom(vec![Part::Field(
+			Ident("foo".to_string())
+		)])))]))
 	);
 }
 

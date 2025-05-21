@@ -1,9 +1,10 @@
 use crate::err::Error;
-use crate::sql::statements::DefineEventStatement;
-use crate::sql::statements::DefineFieldStatement;
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::statements::DefineTableStatement;
-use crate::sql::statements::LiveStatement;
+use crate::expr::statements::DefineEventStatement;
+use crate::expr::statements::DefineFieldStatement;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::statements::DefineTableStatement;
+use crate::expr::statements::LiveStatement;
+use anyhow::Result;
 use std::any::Any;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -30,61 +31,62 @@ pub(crate) enum Entry {
 impl Entry {
 	/// Converts this cache entry into a single entry of arbitrary type.
 	/// This panics if called on a cache entry that is not an [`Entry::Any`].
-	pub(crate) fn try_into_type<T: Send + Sync + 'static>(self: Entry) -> Result<Arc<T>, Error> {
+	pub(crate) fn try_into_type<T: Send + Sync + 'static>(self: Entry) -> Result<Arc<T>> {
 		match self {
-			Entry::Any(v) => {
-				v.downcast::<T>().map_err(|_| fail!("Unable to convert type into Entry::Any"))
-			}
-			_ => Err(fail!("Unable to convert type into Entry::Any")),
+			Entry::Any(v) => v
+				.downcast::<T>()
+				.map_err(|_| Error::unreachable("Unable to convert type into Entry::Any"))
+				.map_err(anyhow::Error::new),
+			_ => fail!("Unable to convert type into Entry::Any"),
 		}
 	}
 	/// Converts this cache entry into a slice of [`DefineEventStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Evs`].
-	pub(crate) fn try_into_evs(self) -> Result<Arc<[DefineEventStatement]>, Error> {
+	pub(crate) fn try_into_evs(self) -> Result<Arc<[DefineEventStatement]>> {
 		match self {
 			Entry::Evs(v) => Ok(v),
-			_ => Err(fail!("Unable to convert type into Entry::Evs")),
+			_ => fail!("Unable to convert type into Entry::Evs"),
 		}
 	}
 	/// Converts this cache entry into a slice of [`DefineFieldStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fds`].
-	pub(crate) fn try_into_fds(self) -> Result<Arc<[DefineFieldStatement]>, Error> {
+	pub(crate) fn try_into_fds(self) -> Result<Arc<[DefineFieldStatement]>> {
 		match self {
 			Entry::Fds(v) => Ok(v),
-			_ => Err(fail!("Unable to convert type into Entry::Fds")),
+			_ => fail!("Unable to convert type into Entry::Fds"),
 		}
 	}
 	/// Converts this cache entry into a slice of [`DefineIndexStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Ixs`].
-	pub(crate) fn try_into_ixs(self) -> Result<Arc<[DefineIndexStatement]>, Error> {
+	pub(crate) fn try_into_ixs(self) -> Result<Arc<[DefineIndexStatement]>> {
 		match self {
 			Entry::Ixs(v) => Ok(v),
-			_ => Err(fail!("Unable to convert type into Entry::Ixs")),
+			_ => fail!("Unable to convert type into Entry::Ixs"),
 		}
 	}
 	/// Converts this cache entry into a slice of [`DefineTableStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fts`].
-	pub(crate) fn try_into_fts(self) -> Result<Arc<[DefineTableStatement]>, Error> {
+	pub(crate) fn try_into_fts(self) -> Result<Arc<[DefineTableStatement]>> {
 		match self {
 			Entry::Fts(v) => Ok(v),
-			_ => Err(fail!("Unable to convert type into Entry::Fts")),
+			_ => fail!("Unable to convert type into Entry::Fts"),
 		}
 	}
 	/// Converts this cache entry into a slice of [`LiveStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
-	pub(crate) fn try_into_lvs(self) -> Result<Arc<[LiveStatement]>, Error> {
+	pub(crate) fn try_into_lvs(self) -> Result<Arc<[LiveStatement]>> {
 		match self {
 			Entry::Lvs(v) => Ok(v),
-			_ => Err(fail!("Unable to convert type into Entry::Lvs")),
+			_ => fail!("Unable to convert type into Entry::Lvs"),
 		}
 	}
 
 	/// Converts this cache entry into a slice of [`LiveStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
-	pub(crate) fn try_info_lvv(self) -> Result<Uuid, Error> {
+	pub(crate) fn try_info_lvv(self) -> Result<Uuid> {
 		match self {
 			Entry::Lvv(v) => Ok(v),
-			_ => Err(fail!("Unable to convert type into Entry::Lvv")),
+			_ => fail!("Unable to convert type into Entry::Lvv"),
 		}
 	}
 }

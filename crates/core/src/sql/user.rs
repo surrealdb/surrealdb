@@ -25,3 +25,20 @@ impl Default for UserDuration {
 		}
 	}
 }
+
+impl From<UserDuration> for crate::expr::user::UserDuration {
+	fn from(v: UserDuration) -> Self {
+		crate::expr::user::UserDuration {
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
+		}
+	}
+}
+impl From<crate::expr::user::UserDuration> for UserDuration {
+	fn from(v: crate::expr::user::UserDuration) -> Self {
+		UserDuration {
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
+		}
+	}
+}

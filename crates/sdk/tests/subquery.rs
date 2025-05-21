@@ -2,12 +2,13 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::expr::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn subquery_select() -> Result<(), Error> {
+async fn subquery_select() -> Result<()> {
 	let sql = "
 		-- Create a record
 		CREATE person:test SET name = 'Tobie', age = 21;
@@ -30,7 +31,7 @@ async fn subquery_select() -> Result<(), Error> {
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 21,
@@ -38,74 +39,81 @@ async fn subquery_select() -> Result<(), Error> {
 				name: 'Tobie'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn subquery_ifelse_set() -> Result<(), Error> {
+async fn subquery_ifelse_set() -> Result<()> {
 	let sql = "
 		-- Check if the record exists
 		LET $record = (SELECT *, count() AS count FROM person:test);
@@ -148,11 +156,11 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				sport: [
@@ -160,7 +168,8 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -168,7 +177,7 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				count: 1,
@@ -178,11 +187,12 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				sport: [
@@ -191,7 +201,8 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -199,7 +210,7 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				count: 1,
@@ -210,11 +221,12 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				sport: [
@@ -223,14 +235,15 @@ async fn subquery_ifelse_set() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn subquery_ifelse_array() -> Result<(), Error> {
+async fn subquery_ifelse_array() -> Result<()> {
 	let sql = "
 		-- Check if the record exists
 		LET $record = (SELECT *, count() AS count FROM person:test);
@@ -273,11 +286,11 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				sport: [
@@ -285,7 +298,8 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -293,7 +307,7 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				count: 1,
@@ -303,11 +317,12 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				sport: [
@@ -316,7 +331,8 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -324,7 +340,7 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				count: 1,
@@ -335,11 +351,12 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				sport: [
@@ -349,7 +366,8 @@ async fn subquery_ifelse_array() -> Result<(), Error> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

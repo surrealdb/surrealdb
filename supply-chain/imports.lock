@@ -2354,28 +2354,6 @@ type/value always.
 """
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
-[[audits.google.audits.rust_decimal]]
-who = "Lukasz Anforowicz <lukasza@chromium.org>"
-criteria = "safe-to-deploy"
-version = "1.36.0"
-notes = '''
-Grepped for `-i cipher`, `-i crypto`, `'\bfs\b'`, `'\bnet\b'`, `'\bunsafe\b'`
-and there were no hits except:
-
-* Some reasonable `fs` usage in `build.rs`, under `make/scripts`, in one test
-* A single `unsafe` usage in one test.  I think this still qualifies this crate
-  as `ub-risk-0`.  FWIW the test usage seems sound - see:
-  https://chromium-review.googlesource.com/c/chromium/src/+/6187726/2/third_party/rust/chromium_crates_io/vendor/rust_decimal-1.36.0/tests/decimal_tests.rs
-'''
-aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.rust_decimal]]
-who = "Chris Palmer <palmer@google.com>"
-criteria = "safe-to-deploy"
-delta = "1.36.0 -> 1.37.0"
-notes = "New `unsafe` in a test."
-aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
 [[audits.google.audits.rustversion]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"

@@ -1,23 +1,13 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	fmt::{fmt_separated_by, Fmt},
-	part::{Next, NextMethod},
-	paths::{ID, IN, META, OUT},
-	Part, Value,
+	Part,
+	fmt::{Fmt, fmt_separated_by},
 };
-use md5::{Digest, Md5};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
-
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
@@ -48,9 +38,14 @@ impl Display for Idioms {
 	}
 }
 
-impl InfoStructure for Idioms {
-	fn structure(self) -> Value {
-		self.to_string().into()
+impl From<Idioms> for crate::expr::Idioms {
+	fn from(v: Idioms) -> Self {
+		crate::expr::Idioms(v.0.into_iter().map(Into::into).collect())
+	}
+}
+impl From<crate::expr::Idioms> for Idioms {
+	fn from(v: crate::expr::Idioms) -> Self {
+		Idioms(v.0.into_iter().map(Into::into).collect())
 	}
 }
 
@@ -98,17 +93,23 @@ impl From<Part> for Idiom {
 	}
 }
 
+impl From<Idiom> for crate::expr::Idiom {
+	fn from(v: Idiom) -> Self {
+		crate::expr::Idiom(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Idiom> for Idiom {
+	fn from(v: crate::expr::Idiom) -> Self {
+		Idiom(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 impl Idiom {
 	/// Appends a part to the end of this Idiom
 	pub(crate) fn push(mut self, n: Part) -> Idiom {
 		self.0.push(n);
 		self
-	}
-	/// Convert this Idiom to a unique hash
-	pub(crate) fn to_hash(&self) -> String {
-		let mut hasher = Md5::new();
-		hasher.update(self.to_string().as_str());
-		format!("{:x}", hasher.finalize())
 	}
 	/// Convert this Idiom to a JSON Path string
 	pub(crate) fn to_path(&self) -> String {
@@ -122,83 +123,6 @@ impl Idiom {
 			.cloned()
 			.collect::<Vec<_>>()
 			.into()
-	}
-	/// Check if this Idiom is an 'id' field
-	pub(crate) fn is_id(&self) -> bool {
-		self.0.len() == 1 && self.0[0].eq(&ID[0])
-	}
-	/// Check if this Idiom is a special field such as `id`, `in`, `out` or `meta`.
-	pub(crate) fn is_special(&self) -> bool {
-		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0], &META[0]].contains(&&self.0[0])
-	}
-	/// Check if this Idiom is an specific field
-	pub(crate) fn is_field(&self, other: &[Part]) -> bool {
-		self.as_ref().eq(other)
-	}
-	/// Check if this is an expression with multiple yields
-	pub(crate) fn is_multi_yield(&self) -> bool {
-		self.iter().any(Self::split_multi_yield)
-	}
-	/// Check if the path part is a yield in a multi-yield expression
-	pub(crate) fn split_multi_yield(v: &Part) -> bool {
-		matches!(v, Part::Graph(g) if g.alias.is_some())
-	}
-	/// Check if the path part is a yield in a multi-yield expression
-	pub(crate) fn remove_trailing_all(&mut self) {
-		if self.ends_with(&[Part::All]) {
-			self.0.truncate(self.len() - 1);
-		}
-	}
-	/// Check if this Idiom starts with a specific path part
-	pub(crate) fn starts_with(&self, other: &[Part]) -> bool {
-		self.0.starts_with(other)
-	}
-}
-
-impl Idiom {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.0.iter().any(|v| v.writeable())
-	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		match self.first() {
-			// The starting part is a value
-			Some(Part::Start(v)) => {
-				v.compute(stk, ctx, opt, doc)
-					.await?
-					.get(stk, ctx, opt, doc, self.as_ref().next())
-					.await?
-					.compute(stk, ctx, opt, doc)
-					.await
-			}
-			// Otherwise use the current document
-			_ => match doc {
-				// There is a current document
-				Some(v) => {
-					v.doc
-						.as_ref()
-						.get(stk, ctx, opt, doc, self)
-						.await?
-						.compute(stk, ctx, opt, doc)
-						.await
-				}
-				// There isn't any document
-				None => {
-					Value::None
-						.get(stk, ctx, opt, doc, self.next_method())
-						.await?
-						.compute(stk, ctx, opt, doc)
-						.await
-				}
-			},
-		}
 	}
 }
 
@@ -217,83 +141,4 @@ impl Display for Idiom {
 			f,
 		)
 	}
-}
-
-impl InfoStructure for Idiom {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
-
-/// A trie structure for storing idioms.
-///
-/// This is used for efficient searching and retrieval of idioms based on their path parts.
-///
-/// Note: This is a simplified version of a trie and does not implement all the features of a full trie.
-#[derive(Debug)]
-pub(crate) struct IdiomTrie<T> {
-	/// The children of this node, indexed by their path part.
-	pub(crate) children: HashMap<Part, IdiomTrie<T>>,
-	/// The data associated with this node, if any.
-	pub(crate) data: Option<T>,
-}
-
-impl<T: Clone + std::fmt::Debug> IdiomTrie<T> {
-	/// Creates a new empty [`IdiomTrie`].
-	pub(crate) fn new() -> Self {
-		IdiomTrie {
-			children: HashMap::new(),
-			data: None,
-		}
-	}
-
-	/// Inserts a new path and associated data into the trie.
-	pub(crate) fn insert(&mut self, path: &[Part], data: T) {
-		let mut node = self;
-		for part in path {
-			node = node.children.entry(part.clone()).or_insert_with(IdiomTrie::new);
-		}
-		node.data = Some(data);
-	}
-
-	/// Checks if the trie contains a path and returns the associated data.
-	///
-	/// If the path is found, it returns [`IdiomTrieContains::Exact`].
-	/// If the path is not found but an ancestor is found, it returns [`IdiomTrieContains::Ancestor`].
-	/// If an ancestor is not found, it returns [`IdiomTrieContains::None`].
-	pub(crate) fn contains(&self, path: &[Part]) -> IdiomTrieContains<T> {
-		let mut node = self;
-		let mut last_node_had_data = false;
-
-		for part in path {
-			if let Some(child) = node.children.get(part) {
-				last_node_had_data = child.data.is_some();
-				node = child;
-			} else {
-				// No more children, stop searching
-				last_node_had_data = false;
-				break;
-			}
-		}
-
-		if let Some(data) = node.data.as_ref() {
-			if last_node_had_data {
-				IdiomTrieContains::Exact(data.clone())
-			} else {
-				IdiomTrieContains::Ancestor(data.clone())
-			}
-		} else {
-			IdiomTrieContains::None
-		}
-	}
-}
-
-/// The result of a search in the [`IdiomTrie`].
-pub(crate) enum IdiomTrieContains<T> {
-	/// The path was not found and none of it had no ancestors in the trie.
-	None,
-	/// The path was found and the data is associated with it.
-	Exact(T),
-	/// The path was not found, but an ancestor was found.
-	Ancestor(T),
 }

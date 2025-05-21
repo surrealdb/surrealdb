@@ -4,13 +4,13 @@ mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
 use helpers::with_enough_stack;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Thing;
-use surrealdb::sql::Value;
+use surrealdb::expr::Thing;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn field_definition_value_reference() -> Result<(), Error> {
+async fn field_definition_value_reference() -> Result<()> {
 	let sql = "
 		DEFINE TABLE product;
 		DEFINE FIELD subproducts ON product VALUE ->contains->product;
@@ -32,7 +32,7 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: product:one,
@@ -43,11 +43,12 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: contains:test,
@@ -55,11 +56,12 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 				out: product:two,
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: product:one,
@@ -70,28 +72,12 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: product:one,
-				subproducts: [
-					product:two,
-				],
-			},
-			{
-				id: product:two,
-				subproducts: [],
-			},
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: product:one,
@@ -104,14 +90,33 @@ async fn field_definition_value_reference() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-	);
+	)
+	.into();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = SqlValue::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [
+					product:two,
+				],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn field_definition_value_reference_with_future() -> Result<(), Error> {
+async fn field_definition_value_reference_with_future() -> Result<()> {
 	with_enough_stack(async {
 		let sql = "
 		DEFINE TABLE product;
@@ -134,7 +139,7 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: product:one,
@@ -145,11 +150,12 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: contains:test,
@@ -157,11 +163,12 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 				out: product:two,
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: product:one,
@@ -174,11 +181,12 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: product:one,
@@ -191,11 +199,12 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: product:one,
@@ -208,7 +217,8 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -216,7 +226,7 @@ async fn field_definition_value_reference_with_future() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn field_definition_edge_permissions() -> Result<(), Error> {
+async fn field_definition_edge_permissions() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE TABLE business SCHEMAFULL;
@@ -243,7 +253,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: user:one,
@@ -252,11 +262,12 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 				id: user:two,
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: business:one,
@@ -267,7 +278,8 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 				owner: user:two,
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let sql = "
@@ -279,7 +291,7 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: contact:one,
@@ -287,18 +299,19 @@ async fn field_definition_edge_permissions() -> Result<(), Error> {
 				out: business:two,
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn field_definition_readonly() -> Result<(), Error> {
+async fn field_definition_readonly() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD birthdate ON person TYPE datetime READONLY;
@@ -318,25 +331,27 @@ async fn field_definition_readonly() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				birthdate: d'2023-12-13T21:27:55.632Z',
 				id: person:test
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				birthdate: d'2023-12-13T21:27:55.632Z',
 				id: person:test
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -354,7 +369,7 @@ async fn field_definition_readonly() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn field_definition_flexible_array_any() -> Result<(), Error> {
+async fn field_definition_flexible_array_any() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE FIELD custom ON user TYPE option<array>;
@@ -403,7 +418,7 @@ async fn field_definition_flexible_array_any() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn field_definition_array_any() -> Result<(), Error> {
+async fn field_definition_array_any() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE FIELD custom ON user TYPE array<any>;

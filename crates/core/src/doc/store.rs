@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
+use anyhow::Result;
 
 impl Document {
 	pub(super) async fn store_record_data(
@@ -10,7 +11,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check if changed
 		if !self.changed() {
 			return Ok(());
@@ -32,7 +33,7 @@ impl Document {
 		// The cloning of the doc is required because the resulting doc
 		// must be returned to the caller with the id present.
 		let mut doc_without_id = self.current.doc.clone();
-		if let crate::sql::Value::Object(obj) = doc_without_id.to_mut() {
+		if let crate::expr::Value::Object(obj) = doc_without_id.to_mut() {
 			obj.0.remove("id");
 		}
 		// Match the statement type
@@ -53,9 +54,15 @@ impl Document {
 					.await
 				{
 					// The key already exists, so return an error
-					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
-						thing: rid.as_ref().to_owned(),
-					}),
+					Err(e) => {
+						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+							Err(anyhow::Error::new(Error::RecordExists {
+								thing: rid.as_ref().to_owned(),
+							}))
+						} else {
+							Err(e)
+						}
+					}
 					// Return other values
 					x => x,
 				}
@@ -73,9 +80,15 @@ impl Document {
 					.await
 				{
 					// The key already exists, so return an error
-					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
-						thing: rid.as_ref().to_owned(),
-					}),
+					Err(e) => {
+						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+							Err(anyhow::Error::new(Error::RecordExists {
+								thing: rid.as_ref().to_owned(),
+							}))
+						} else {
+							Err(e)
+						}
+					}
 					// Return other values
 					x => x,
 				}
@@ -93,9 +106,15 @@ impl Document {
 					.await
 				{
 					// The key already exists, so return an error
-					Err(Error::TxKeyAlreadyExists) => Err(Error::RecordExists {
-						thing: rid.as_ref().to_owned(),
-					}),
+					Err(e) => {
+						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+							Err(anyhow::Error::new(Error::RecordExists {
+								thing: rid.as_ref().to_owned(),
+							}))
+						} else {
+							Err(e)
+						}
+					}
 					x => x,
 				}
 			}

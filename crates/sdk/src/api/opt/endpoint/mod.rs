@@ -3,7 +3,7 @@ mod http;
 #[cfg(feature = "protocol-ws")]
 mod ws;
 
-#[cfg(feature = "kv-fdb")]
+#[cfg(kv_fdb)]
 mod fdb;
 #[cfg(feature = "kv-indxdb")]
 mod indxdb;
@@ -16,9 +16,9 @@ mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
-use crate::api::err::Error;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::api::err::Error;
 use url::Url;
 
 use super::Config;
@@ -52,12 +52,15 @@ impl Endpoint {
 }
 
 /// A trait for converting inputs to a server address object
-pub trait IntoEndpoint<Scheme> {
-	/// The client implied by this scheme and address combination
-	type Client: Connection;
-	/// Converts an input into a server address object
-	#[deprecated(since = "2.3.0")]
-	fn into_endpoint(self) -> Result<Endpoint>;
+pub trait IntoEndpoint<Scheme>: into_endpoint::Sealed<Scheme> {}
+
+pub(crate) mod into_endpoint {
+	pub trait Sealed<Scheme> {
+		/// The client implied by this scheme and address combination
+		type Client: super::Connection;
+		/// Converts an input into a server address object
+		fn into_endpoint(self) -> super::Result<super::Endpoint>;
+	}
 }
 
 fn replace_tilde(path: &str) -> String {

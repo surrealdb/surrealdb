@@ -1,12 +1,13 @@
 use crate::ctx::Context;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::paths::ID;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::{Array, FlowResultExt as _, Idiom, Kind, Literal, Part, Table};
+use crate::expr::paths::ID;
+use crate::expr::thing::Thing;
+use crate::expr::value::Value;
+use crate::expr::{Array, FlowResultExt as _, Idiom, Kind, Literal, Part, Table};
+use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
 use super::args::Optional;
@@ -14,40 +15,39 @@ use super::args::Optional;
 pub async fn exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
 	(arg,): (Thing,),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	if let Some(opt) = opt {
-		Ok(match Value::Thing(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()? {
-			Value::None => Value::Bool(false),
-			_ => Value::Bool(true),
-		})
+		let v = Value::Thing(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()?;
+		Ok(Value::Bool(!v.is_none()))
 	} else {
 		Ok(Value::None)
 	}
 }
 
-pub fn id((arg,): (Thing,)) -> Result<Value, Error> {
+pub fn id((arg,): (Thing,)) -> Result<Value> {
 	Ok(arg.id.into())
 }
 
-pub fn tb((arg,): (Thing,)) -> Result<Value, Error> {
+pub fn tb((arg,): (Thing,)) -> Result<Value> {
 	Ok(arg.tb.into())
 }
 
 pub async fn refs(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(id, Optional(ft), Optional(ff)): (Thing, Optional<String>, Optional<String>),
-) -> Result<Value, Error> {
-	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-		return Err(Error::InvalidFunction {
+) -> Result<Value> {
+	ensure!(
+		ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences),
+		Error::InvalidFunction {
 			name: "record::refs".to_string(),
 			message: "Experimental feature is disabled".to_string(),
-		});
-	}
+		}
+	);
 
 	// Process the inputs and make sure they are valid
 	let ft = ft.map(Table::from);
 	let ff = match ff {
-		Some(ff) => Some(crate::syn::idiom(&ff)?),
+		Some(ff) => Some(crate::syn::idiom(&ff)?.into()),
 		None => None,
 	};
 
@@ -70,21 +70,19 @@ pub async fn refs(
 	Ok(Value::Array(val))
 }
 
-async fn correct_refs_field(
-	ctx: &Context,
-	opt: &Options,
-	ft: &Table,
-	ff: Idiom,
-) -> Result<Idiom, Error> {
+async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom) -> Result<Idiom> {
 	// Obtain the field definition
 	let (ns, db) = opt.ns_db()?;
 	let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
 		Ok(fd) => fd,
-		// If the field does not exist, there is nothing to correct
-		Err(Error::FdNotFound {
-			..
-		}) => return Ok(ff),
-		Err(e) => return Err(e),
+		Err(e) => {
+			// If the field does not exist, there is nothing to correct
+			if matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
+				return Ok(ff);
+			} else {
+				return Err(e);
+			}
+		}
 	};
 
 	// Check if the field is an array-like value and thus "containing" references

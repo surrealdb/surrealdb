@@ -2,9 +2,9 @@
 
 use bytes::{Bytes, BytesMut};
 use js::{
+	ArrayBuffer, Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value,
 	class::Trace,
 	prelude::{Coerced, Opt},
-	ArrayBuffer, Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value,
 };
 
 #[derive(Clone, Copy)]
@@ -199,7 +199,7 @@ impl Blob {
 #[cfg(test)]
 mod test {
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::{promise::Promise, CatchResultExt};
+	use js::{CatchResultExt, promise::Promise};
 
 	#[tokio::test]
 	async fn basic_blob_use() {
