@@ -8,10 +8,12 @@ use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
 use surrealdb_core::dbs::Notification;
+#[allow(dead_code)]
 use surrealdb_core::expr::{
 	Array as CoreArray, Object as CoreObject, Query as CoreQuery, Value as CoreValue,
 };
 use surrealdb_core::kvs::export::Config as DbExportConfig;
+#[allow(dead_code)]
 use surrealdb_core::sql::{
 	Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
 };

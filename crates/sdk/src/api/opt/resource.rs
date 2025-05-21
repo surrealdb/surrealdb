@@ -31,6 +31,7 @@ where
 		t
 	}
 
+	#[allow(dead_code)]
 	pub(crate) fn into_core_sql(self) -> CoreSqlTable {
 		let mut t = CoreSqlTable::default();
 		t.0 = self.0.into();

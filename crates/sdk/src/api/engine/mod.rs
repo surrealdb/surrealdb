@@ -38,6 +38,7 @@ use super::opt::Resource;
 use super::opt::Table;
 
 // used in http and all local engines.
+#[allow(dead_code)]
 pub(crate) fn resource_to_sql_values(r: Resource) -> CoreSqlValues {
 	let mut res = CoreSqlValues::default();
 	match r {
