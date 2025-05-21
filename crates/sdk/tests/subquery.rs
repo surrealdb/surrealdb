@@ -4,6 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
+use surrealdb::expr::Value;
 use surrealdb::sql::SqlValue;
 
 #[tokio::test]
@@ -38,7 +39,8 @@ async fn subquery_select() -> Result<()> {
 				name: 'Tobie'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -48,7 +50,8 @@ async fn subquery_select() -> Result<()> {
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -58,7 +61,8 @@ async fn subquery_select() -> Result<()> {
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -68,7 +72,8 @@ async fn subquery_select() -> Result<()> {
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -78,7 +83,8 @@ async fn subquery_select() -> Result<()> {
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -88,7 +94,8 @@ async fn subquery_select() -> Result<()> {
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -98,7 +105,8 @@ async fn subquery_select() -> Result<()> {
 				adult: true
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -144,11 +152,11 @@ async fn subquery_ifelse_set() -> Result<()> {
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::None;
+	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -160,42 +168,12 @@ async fn subquery_ifelse_set() -> Result<()> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
-		"[
-			{
-				count: 1,
-				id: person:test,
-				sport: [
-					'basketball',
-				]
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
-		"[
-			{
-				sport: [
-					'basketball',
-					'football',
-				]
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::None;
+	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -206,11 +184,11 @@ async fn subquery_ifelse_set() -> Result<()> {
 				id: person:test,
 				sport: [
 					'basketball',
-					'football',
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -223,7 +201,42 @@ async fn subquery_ifelse_set() -> Result<()> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = SqlValue::parse(
+		"[
+			{
+				count: 1,
+				id: person:test,
+				sport: [
+					'basketball',
+					'football',
+				]
+			}
+		]",
+	)
+	.into();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = SqlValue::parse(
+		"[
+			{
+				sport: [
+					'basketball',
+					'football',
+				]
+			}
+		]",
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -269,11 +282,11 @@ async fn subquery_ifelse_array() -> Result<()> {
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::None;
+	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -285,42 +298,12 @@ async fn subquery_ifelse_array() -> Result<()> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
-		"[
-			{
-				count: 1,
-				id: person:test,
-				sport: [
-					'basketball',
-				]
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
-		"[
-			{
-				sport: [
-					'basketball',
-					'football',
-				]
-			}
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::None;
+	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -331,11 +314,45 @@ async fn subquery_ifelse_array() -> Result<()> {
 				id: person:test,
 				sport: [
 					'basketball',
+				]
+			}
+		]",
+	)
+	.into();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = SqlValue::parse(
+		"[
+			{
+				sport: [
+					'basketball',
 					'football',
 				]
 			}
 		]",
-	);
+	)
+	.into();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = SqlValue::parse(
+		"[
+			{
+				count: 1,
+				id: person:test,
+				sport: [
+					'basketball',
+					'football',
+				]
+			}
+		]",
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -349,7 +366,8 @@ async fn subquery_ifelse_array() -> Result<()> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

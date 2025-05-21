@@ -4,6 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
+use surrealdb::expr::Value;
 use surrealdb::sql::SqlValue;
 
 #[tokio::test]
@@ -20,19 +21,19 @@ async fn query_basic() -> Result<()> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::None;
+	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("['Tobie']");
+	let val = SqlValue::parse("['Tobie']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::from("Tobie");
+	let val = SqlValue::from("Tobie").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::from("Tobie");
+	let val = SqlValue::from("Tobie").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -52,19 +53,19 @@ async fn query_basic_with_modification() -> Result<()> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::None;
+	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[45062]");
+	let val = SqlValue::parse("[45062]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::from(45062);
+	let val = Value::from(45062);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::from(45062);
+	let val = Value::from(45062);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -84,19 +85,19 @@ async fn query_root_function() -> Result<()> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::None;
+	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::from("THIS IS A TEST");
+	let val = Value::from("THIS IS A TEST");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::from("this is a test");
+	let val = Value::from("this is a test");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::from("this-is-a-test");
+	let val = Value::from("this-is-a-test");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -124,7 +125,8 @@ async fn query_root_record() -> Result<()> {
 				name: 'Tobie'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -135,7 +137,8 @@ async fn query_root_record() -> Result<()> {
 				name: 'Jaime'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -148,15 +151,16 @@ async fn query_root_record() -> Result<()> {
 				brother: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("['Jaime']");
+	let val = SqlValue::parse("['Jaime']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("['Jaime']");
+	let val = SqlValue::parse("['Jaime']").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

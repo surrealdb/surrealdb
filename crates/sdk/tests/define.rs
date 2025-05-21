@@ -4,16 +4,17 @@ use parse::Parse;
 
 mod helpers;
 use helpers::*;
+use surrealdb_core::expr::Value;
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::expr::{Idiom, Part};
 use surrealdb::iam::Role;
 use surrealdb::kvs::{LockType, TransactionType};
-use surrealdb::sql::Idiom;
-use surrealdb::sql::{Part, SqlValue};
+use surrealdb::sql::SqlValue;
 use test_log::test;
 use tracing::info;
 
@@ -52,7 +53,8 @@ async fn define_statement_namespace() -> Result<()> {
 			},
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -79,7 +81,8 @@ async fn define_statement_database() -> Result<()> {
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -216,9 +219,9 @@ async fn define_statement_index_concurrently_building_status(
 		// We monitor the status
 		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
 		let tmp = r.remove(0).result?;
-		if let SqlValue::Object(o) = &tmp {
-			if let Some(SqlValue::Object(o)) = o.get("building") {
-				if let Some(SqlValue::Strand(s)) = o.get("status") {
+		if let Value::Object(o) = &tmp {
+			if let Some(Value::Object(o)) = o.get("building") {
+				if let Some(Value::Strand(s)) = o.get("status") {
 					let new_initial = o.get("initial").cloned();
 					let new_pending = o.get("pending").cloned();
 					let new_updated = o.get("updated").cloned();
@@ -401,25 +404,25 @@ async fn define_statement_search_index() -> Result<()> {
 
 	let tmp = res.remove(0).result?;
 
-	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, SqlValue::from(2)));
-	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, SqlValue::from(1)));
-	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, SqlValue::from(1)));
-	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, SqlValue::from(62)));
+	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
+	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(62)));
 
-	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, SqlValue::from(2)));
-	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, SqlValue::from(1)));
-	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, SqlValue::from(1)));
-	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, SqlValue::from(56)));
+	check_path(&tmp, &["doc_lengths", "keys_count"], |v| assert_eq!(v, Value::from(2)));
+	check_path(&tmp, &["doc_lengths", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_lengths", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["doc_lengths", "total_size"], |v| assert_eq!(v, Value::from(56)));
 
-	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, SqlValue::from(17)));
-	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, SqlValue::from(1)));
-	check_path(&tmp, &["postings", "nodes_count"], |v| assert_eq!(v, SqlValue::from(1)));
-	check_path(&tmp, &["postings", "total_size"], |v| assert!(v > SqlValue::from(150)));
+	check_path(&tmp, &["postings", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["postings", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["postings", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["postings", "total_size"], |v| assert!(v > Value::from(150)));
 
-	check_path(&tmp, &["terms", "keys_count"], |v| assert_eq!(v, SqlValue::from(17)));
-	check_path(&tmp, &["terms", "max_depth"], |v| assert_eq!(v, SqlValue::from(1)));
-	check_path(&tmp, &["terms", "nodes_count"], |v| assert_eq!(v, SqlValue::from(1)));
-	check_path(&tmp, &["terms", "total_size"], |v| assert!(v.gt(&SqlValue::from(150))));
+	check_path(&tmp, &["terms", "keys_count"], |v| assert_eq!(v, Value::from(17)));
+	check_path(&tmp, &["terms", "max_depth"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["terms", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
+	check_path(&tmp, &["terms", "total_size"], |v| assert!(v.gt(&Value::from(150))));
 
 	Ok(())
 }
@@ -581,9 +584,9 @@ async fn define_statement_user_db() -> Result<()> {
 	Ok(())
 }
 
-fn check_path<F>(val: &SqlValue, path: &[&str], check: F)
+fn check_path<F>(val: &Value, path: &[&str], check: F)
 where
-	F: Fn(SqlValue),
+	F: Fn(Value),
 {
 	let part: Vec<Part> = path.iter().map(|p| Part::from(*p)).collect();
 	let res = val.walk(&part);
@@ -1345,7 +1348,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	res.remove(0).result.unwrap();
 	res.remove(0).result.unwrap();
 	let lqid = res.remove(0).result?;
-	assert!(matches!(lqid, SqlValue::Uuid(_)));
+	assert!(matches!(lqid, Value::Uuid(_)));
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_define = txn.get_tb("test", "test", "test").await?;

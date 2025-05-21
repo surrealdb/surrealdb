@@ -6,8 +6,8 @@ use helpers::new_ds;
 use helpers::with_enough_stack;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
+use surrealdb::expr::Thing;
 use surrealdb::sql::SqlValue;
-use surrealdb::sql::Thing;
 
 #[tokio::test]
 async fn field_definition_value_reference() -> Result<()> {
@@ -43,7 +43,8 @@ async fn field_definition_value_reference() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -55,7 +56,8 @@ async fn field_definition_value_reference() -> Result<()> {
 				out: product:two,
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -70,24 +72,8 @@ async fn field_definition_value_reference() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
-		"[
-			{
-				id: product:one,
-				subproducts: [
-					product:two,
-				],
-			},
-			{
-				id: product:two,
-				subproducts: [],
-			},
-		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -104,7 +90,26 @@ async fn field_definition_value_reference() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-	);
+	)
+	.into();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = SqlValue::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [
+					product:two,
+				],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -145,7 +150,8 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
@@ -157,7 +163,8 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				out: product:two,
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
@@ -174,7 +181,8 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
@@ -191,7 +199,8 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
@@ -208,7 +217,8 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.into();
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -252,7 +262,8 @@ async fn field_definition_edge_permissions() -> Result<()> {
 				id: user:two,
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -267,7 +278,8 @@ async fn field_definition_edge_permissions() -> Result<()> {
 				owner: user:two,
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let sql = "
@@ -287,11 +299,12 @@ async fn field_definition_edge_permissions() -> Result<()> {
 				out: business:two,
 			},
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -325,7 +338,8 @@ async fn field_definition_readonly() -> Result<()> {
 				id: person:test
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -336,7 +350,8 @@ async fn field_definition_readonly() -> Result<()> {
 				id: person:test
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;

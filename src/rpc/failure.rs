@@ -3,7 +3,6 @@ use revision::revisioned;
 use serde::Serialize;
 use std::borrow::Cow;
 use surrealdb::rpc::RpcError;
-use surrealdb::sql::SqlValue;
 use surrealdb_core::expr::Value;
 
 #[derive(Clone, Debug, Serialize)]

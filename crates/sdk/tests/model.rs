@@ -25,7 +25,8 @@ async fn model_count() -> Result<()> {
 		"[{
 			count: 1000
 		}]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -50,7 +51,8 @@ async fn model_range() -> Result<()> {
 		"[{
 			count: 1000
 		}]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -38,18 +38,19 @@ async fn define_global_param() -> Result<()> {
 			tables: {},
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[12345]");
+	let val = SqlValue::parse("[12345]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[56789]");
+	let val = SqlValue::parse("[56789]").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -78,7 +79,8 @@ async fn define_protected_param() -> Result<()> {
 				some: 'thing'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;

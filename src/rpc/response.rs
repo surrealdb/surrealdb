@@ -8,7 +8,6 @@ use serde::Serialize;
 use std::sync::Arc;
 use surrealdb::rpc::Data;
 use surrealdb::rpc::format::Format;
-use surrealdb::sql::SqlValue;
 use surrealdb_core::expr::Value;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;

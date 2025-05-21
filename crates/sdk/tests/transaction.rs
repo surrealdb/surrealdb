@@ -26,7 +26,8 @@ async fn transaction_basic() -> Result<()> {
 				id: person:tobie,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -36,7 +37,8 @@ async fn transaction_basic() -> Result<()> {
 				id: person:jaime,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -62,7 +64,8 @@ async fn transaction_with_return() -> Result<()> {
 			tobie: person:tobie,
 			jaime: person:jaime,
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

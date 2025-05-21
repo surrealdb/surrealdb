@@ -53,7 +53,7 @@ async fn define_foreign_table() -> Result<()> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	).into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -65,7 +65,8 @@ async fn define_foreign_table() -> Result<()> {
 				score: 72,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -81,7 +82,8 @@ async fn define_foreign_table() -> Result<()> {
 				total: 39
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -93,7 +95,8 @@ async fn define_foreign_table() -> Result<()> {
 				score: 83,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -109,7 +112,8 @@ async fn define_foreign_table() -> Result<()> {
 				total: 78
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -121,7 +125,8 @@ async fn define_foreign_table() -> Result<()> {
 				score: 91,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -137,7 +142,8 @@ async fn define_foreign_table() -> Result<()> {
 				total: 78
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
@@ -156,7 +162,8 @@ async fn define_foreign_table() -> Result<()> {
 				total: 78
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -191,7 +198,8 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 				month: 1,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -205,7 +213,8 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 				day: 1,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

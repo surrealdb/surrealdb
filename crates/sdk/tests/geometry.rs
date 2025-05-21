@@ -28,7 +28,8 @@ async fn geometry_point() -> Result<()> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -42,7 +43,8 @@ async fn geometry_point() -> Result<()> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -93,7 +95,8 @@ async fn geometry_polygon() -> Result<()> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -115,7 +118,8 @@ async fn geometry_polygon() -> Result<()> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -137,7 +141,8 @@ async fn geometry_polygon() -> Result<()> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -181,7 +186,8 @@ async fn geometry_multipoint() -> Result<()> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -198,7 +204,8 @@ async fn geometry_multipoint() -> Result<()> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -215,7 +222,8 @@ async fn geometry_multipoint() -> Result<()> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -263,7 +271,8 @@ async fn geometry_multipolygon() -> Result<()> {
 				"id": r"university:oxford"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -284,7 +293,8 @@ async fn geometry_multipolygon() -> Result<()> {
 				"id": r"university:oxford"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -305,7 +315,8 @@ async fn geometry_multipolygon() -> Result<()> {
 				"id": r"university:oxford"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -359,7 +370,8 @@ async fn geometry_inner_access() -> Result<()> {
 				type: 'Point'
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -371,7 +383,8 @@ async fn geometry_inner_access() -> Result<()> {
 				type: 'Point'
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -404,7 +417,8 @@ async fn geometry_inner_access() -> Result<()> {
 				]
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -465,7 +479,8 @@ async fn geometry_inner_access() -> Result<()> {
 				]
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

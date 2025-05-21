@@ -35,7 +35,8 @@ async fn merge_record() -> Result<()> {
 				}
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -51,7 +52,8 @@ async fn merge_record() -> Result<()> {
 				}
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -10,9 +10,10 @@ use helpers::new_ds;
 use rust_decimal::Decimal;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Geometry;
-use surrealdb::sql::Number;
+use surrealdb::expr::Geometry;
+use surrealdb::expr::Number;
 use surrealdb::sql::SqlValue;
+use surrealdb_core::expr::Value;
 
 #[tokio::test]
 async fn script_function_error() -> Result<()> {
@@ -60,7 +61,8 @@ async fn script_function_simple() -> Result<()> {
 	//
 	let tmp = res.remove(0).result?;
 	let val =
-		SqlValue::parse(r#"[{ bio: "Line 1\nLine 2", id: person:test, scores: [66, 84, 73] }]"#);
+		SqlValue::parse(r#"[{ bio: "Line 1\nLine 2", id: person:test, scores: [66, 84, 73] }]"#)
+			.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -102,7 +104,8 @@ async fn script_function_context() -> Result<()> {
 				]
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -136,7 +139,8 @@ async fn script_function_arguments() -> Result<()> {
 				summary: 'SurrealDB is awesome, advanced, cool',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -183,7 +187,8 @@ async fn script_function_types() -> Result<()> {
 				identifier: u'03412258-988f-47cd-82db-549902cdaffe',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -236,7 +241,8 @@ async fn script_query_from_script_select() -> Result<()> {
 				number: 1
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 
 	// indirect query
@@ -256,7 +262,8 @@ async fn script_query_from_script_select() -> Result<()> {
 				number: 2
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 
 	Ok(())
@@ -280,7 +287,8 @@ async fn script_query_from_script() -> Result<()> {
 				name: "The daily news",
 				issue_number: 3.0
 		}"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 
 	let sql = r#"
@@ -295,7 +303,8 @@ async fn script_query_from_script() -> Result<()> {
 				name: "The daily news",
 				issue_number: 3.0
 		}]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -313,7 +322,7 @@ async fn script_value_function_params() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	let tmp = res.remove(1).result?;
-	let val = SqlValue::parse(r#""The daily news""#);
+	let val = SqlValue::parse(r#""The daily news""#).into();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -373,15 +382,15 @@ async fn script_function_number_conversion_test() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let SqlValue::Object(res) = res.remove(0).result? else {
+	let Value::Object(res) = res.remove(0).result? else {
 		panic!("not an object")
 	};
-	assert_eq!(res.get("a").unwrap(), &SqlValue::Number(Number::Float(9007199254740991f64)));
-	assert_eq!(res.get("b").unwrap(), &SqlValue::Number(Number::Float(-9007199254740992f64)));
-	assert_eq!(res.get("c").unwrap(), &SqlValue::Number(Number::Int(100000000000000000i64)));
+	assert_eq!(res.get("a").unwrap(), &Value::Number(Number::Float(9007199254740991f64)));
+	assert_eq!(res.get("b").unwrap(), &Value::Number(Number::Float(-9007199254740992f64)));
+	assert_eq!(res.get("c").unwrap(), &Value::Number(Number::Int(100000000000000000i64)));
 	assert_eq!(
 		res.get("d").unwrap(),
-		&SqlValue::Number(Number::Decimal(Decimal::from(9223372036854775808u128)))
+		&Value::Number(Number::Decimal(Decimal::from(9223372036854775808u128)))
 	);
 
 	Ok(())
@@ -399,7 +408,7 @@ async fn script_bytes() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let SqlValue::Bytes(b) = res.remove(0).result? else {
+	let Value::Bytes(b) = res.remove(0).result? else {
 		panic!("not bytes");
 	};
 
@@ -425,7 +434,7 @@ async fn script_geometry_point() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let SqlValue::Geometry(Geometry::Point(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::Point(x)) = res.remove(0).result? else {
 		panic!("not a geometry");
 	};
 
@@ -453,7 +462,7 @@ async fn script_geometry_line() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let SqlValue::Geometry(Geometry::Line(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::Line(x)) = res.remove(0).result? else {
 		panic!("not a geometry");
 	};
 
@@ -489,7 +498,7 @@ async fn script_geometry_polygon() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let SqlValue::Geometry(Geometry::Polygon(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::Polygon(x)) = res.remove(0).result? else {
 		panic!("not a geometry");
 	};
 
@@ -524,7 +533,7 @@ async fn script_geometry_multi_point() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let SqlValue::Geometry(Geometry::MultiPoint(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::MultiPoint(x)) = res.remove(0).result? else {
 		panic!("not a geometry");
 	};
 
@@ -560,7 +569,7 @@ async fn script_geometry_multi_line() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let SqlValue::Geometry(Geometry::MultiLine(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::MultiLine(x)) = res.remove(0).result? else {
 		panic!("not a geometry");
 	};
 
@@ -604,7 +613,7 @@ async fn script_geometry_multi_polygon() -> Result<()> {
 	assert_eq!(res.len(), 1);
 
 	let v = res.remove(0).result?;
-	let SqlValue::Geometry(Geometry::MultiPolygon(x)) = v else {
+	let Value::Geometry(Geometry::MultiPolygon(x)) = v else {
 		panic!("{:?} is not the right geometry", v);
 	};
 
@@ -645,7 +654,7 @@ async fn script_geometry_collection() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let SqlValue::Geometry(Geometry::Collection(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::Collection(x)) = res.remove(0).result? else {
 		panic!("not a geometry");
 	};
 

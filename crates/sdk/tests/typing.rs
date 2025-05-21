@@ -36,7 +36,8 @@ async fn strict_typing_inline() -> Result<()> {
 				age: 18,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -51,7 +52,8 @@ async fn strict_typing_inline() -> Result<()> {
 				enabled: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -64,7 +66,8 @@ async fn strict_typing_inline() -> Result<()> {
 				name: 'Tobie Morgan Hitchcock',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -78,7 +81,8 @@ async fn strict_typing_inline() -> Result<()> {
 				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -92,7 +96,8 @@ async fn strict_typing_inline() -> Result<()> {
 				scores: [1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -106,7 +111,8 @@ async fn strict_typing_inline() -> Result<()> {
 				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -177,7 +183,8 @@ async fn strict_typing_defined() -> Result<()> {
 				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -29,7 +29,8 @@ async fn clear_transaction_cache_table() -> Result<()> {
 				x: 0
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -40,7 +41,8 @@ async fn clear_transaction_cache_table() -> Result<()> {
 				x: 0
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -54,7 +56,8 @@ async fn clear_transaction_cache_table() -> Result<()> {
 				x: 0
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -89,7 +92,8 @@ async fn clear_transaction_cache_field() -> Result<()> {
 				x: 0
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -101,7 +105,8 @@ async fn clear_transaction_cache_field() -> Result<()> {
 				x: 0
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -115,7 +120,8 @@ async fn clear_transaction_cache_field() -> Result<()> {
 				x: 0
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -131,7 +137,8 @@ async fn clear_transaction_cache_field() -> Result<()> {
 				x: 0
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

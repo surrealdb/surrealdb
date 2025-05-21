@@ -39,7 +39,8 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2020-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -51,7 +52,8 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2020-02-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -63,7 +65,8 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2020-03-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -75,7 +78,8 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -87,7 +91,8 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -99,7 +104,8 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -111,7 +117,8 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -123,7 +130,8 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -135,7 +143,8 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2023-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -196,7 +205,8 @@ async fn select_aggregate() -> Result<()> {
 				year: 2023
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -245,7 +255,8 @@ async fn select_aggregate() -> Result<()> {
 					year: 2021
 				}
 			]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -314,7 +325,8 @@ async fn select_multi_aggregate() -> Result<()> {
 				two: 2.4,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -327,7 +339,8 @@ async fn select_multi_aggregate() -> Result<()> {
 				two: 3.9,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -340,7 +353,8 @@ async fn select_multi_aggregate() -> Result<()> {
 				two: 9.7,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -353,7 +367,8 @@ async fn select_multi_aggregate() -> Result<()> {
 				two: 3.0,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -372,7 +387,8 @@ async fn select_multi_aggregate() -> Result<()> {
 					two: 12.7
 				}
 			]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -393,7 +409,8 @@ async fn select_multi_aggregate() -> Result<()> {
 					two: 12.7
 				}
 			]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -462,7 +479,8 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 2.4,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -475,7 +493,8 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 3.9,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -488,7 +507,8 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 9.7,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -501,7 +521,8 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 3.0,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -518,7 +539,8 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 12,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -535,7 +557,8 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 13,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -552,7 +575,8 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 13,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -702,11 +726,12 @@ async fn select_aggregate_mean_update() -> Result<()> {
 				a: 3
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("None");
+	let val = SqlValue::parse("None").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -717,7 +742,8 @@ async fn select_aggregate_mean_update() -> Result<()> {
 				a: 2
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -727,7 +753,8 @@ async fn select_aggregate_mean_update() -> Result<()> {
 				avg: 2
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -196,11 +196,11 @@ async fn strict_mode_all_ok() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -226,11 +226,11 @@ async fn loose_mode_all_ok() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -242,7 +242,7 @@ async fn loose_mode_all_ok() -> Result<()> {
 			system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 },
 			users: { },
 		}"
-	);
+	).into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -252,7 +252,8 @@ async fn loose_mode_all_ok() -> Result<()> {
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -270,7 +271,8 @@ async fn loose_mode_all_ok() -> Result<()> {
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -282,7 +284,8 @@ async fn loose_mode_all_ok() -> Result<()> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -31,7 +31,8 @@ async fn option_import_indexes_should_be_populated() -> Result<()> {
 			id: test:1,
 			num: 123
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -42,7 +43,8 @@ async fn option_import_indexes_should_be_populated() -> Result<()> {
 				num: 123
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -66,7 +68,8 @@ async fn option_import_indexes_should_be_populated() -> Result<()> {
 				operation: 'Collector'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

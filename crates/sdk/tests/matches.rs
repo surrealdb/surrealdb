@@ -5,6 +5,7 @@ use crate::helpers::{Test, skip_ok};
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
+use surrealdb::expr::Value;
 use surrealdb::sql::SqlValue;
 
 #[tokio::test]
@@ -539,7 +540,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 
 	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[]");
+	let val: Value = SqlValue::parse("[]").into();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }

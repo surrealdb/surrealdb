@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::str::FromStr;
 use surrealdb::expr::Value;
-use surrealdb::sql::SqlValue;
 
 use super::error::ResponseError;
 
