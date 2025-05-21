@@ -370,35 +370,7 @@ impl Value {
 			std::mem::transmute::<&mut Vec<Value>, &mut Vec<CoreValue>>(v)
 		}
 	}
-}
 
-impl Index<usize> for Value {
-	type Output = Self;
-
-	fn index(&self, index: usize) -> &Self::Output {
-		match &self.0 {
-			CoreValue::Array(map) => {
-				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
-			}
-			_ => &Value(CoreValue::None),
-		}
-	}
-}
-
-impl Index<&str> for Value {
-	type Output = Self;
-
-	fn index(&self, index: &str) -> &Self::Output {
-		match &self.0 {
-			CoreValue::Object(map) => {
-				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
-			}
-			_ => &Value(CoreValue::None),
-		}
-	}
-}
-
-impl Value {
 	/// Accesses the value found at a certain field
 	/// if an object, and a certain index if an array.
 	/// Will not err if no value is found at this point,
@@ -424,6 +396,32 @@ impl Value {
 	/// Checks to see if a Value is a Value::None.
 	pub fn is_none(&self) -> bool {
 		matches!(&self, Value(CoreValue::None))
+	}
+}
+
+impl Index<usize> for Value {
+	type Output = Self;
+
+	fn index(&self, index: usize) -> &Self::Output {
+		match &self.0 {
+			CoreValue::Array(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
+			}
+			_ => &Value(CoreValue::None),
+		}
+	}
+}
+
+impl Index<&str> for Value {
+	type Output = Self;
+
+	fn index(&self, index: &str) -> &Self::Output {
+		match &self.0 {
+			CoreValue::Object(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
+			}
+			_ => &Value(CoreValue::None),
+		}
 	}
 }
 

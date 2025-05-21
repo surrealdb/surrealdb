@@ -97,9 +97,7 @@ impl Array {
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
 	}
-}
 
-impl Array {
 	/// Checks whether all array values are static values
 	pub(crate) fn is_static(&self) -> bool {
 		self.iter().all(SqlValue::is_static)

@@ -46,9 +46,7 @@ impl Expression {
 			r,
 		}
 	}
-}
 
-impl Expression {
 	/// Checks whether all expression parts are static values
 	pub(crate) fn is_static(&self) -> bool {
 		match self {

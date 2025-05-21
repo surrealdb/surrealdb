@@ -20,9 +20,7 @@ impl FakeAlloc {
 	pub const fn new() -> Self {
 		Self {}
 	}
-}
 
-impl FakeAlloc {
 	/// Returns the number of bytes that are allocated to the process
 	pub fn current_usage(&self) -> (usize, usize) {
 		(0, 0)

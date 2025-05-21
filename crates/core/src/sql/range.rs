@@ -26,6 +26,28 @@ pub struct Range {
 }
 
 impl Range {
+	/// Construct a new range
+	pub fn new(beg: Bound<SqlValue>, end: Bound<SqlValue>) -> Self {
+		Self {
+			beg,
+			end,
+		}
+	}
+
+	/// Validate that a Range contains only computed Values
+	pub fn validate_computed(&self) -> Result<()> {
+		match &self.beg {
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
+			Bound::Unbounded => {}
+		}
+		match &self.end {
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
+			Bound::Unbounded => {}
+		}
+
+		Ok(())
+	}
+
 	pub fn can_coerce_to_typed<T: Coerce>(&self) -> bool {
 		match self.beg {
 			Bound::Included(ref x) | Bound::Excluded(ref x) => {
@@ -274,30 +296,6 @@ impl FromStr for Range {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
-	}
-}
-
-impl Range {
-	/// Construct a new range
-	pub fn new(beg: Bound<SqlValue>, end: Bound<SqlValue>) -> Self {
-		Self {
-			beg,
-			end,
-		}
-	}
-
-	/// Validate that a Range contains only computed Values
-	pub fn validate_computed(&self) -> Result<()> {
-		match &self.beg {
-			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
-			Bound::Unbounded => {}
-		}
-		match &self.end {
-			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
-			Bound::Unbounded => {}
-		}
-
-		Ok(())
 	}
 }
 

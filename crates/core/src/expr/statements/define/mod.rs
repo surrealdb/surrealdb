@@ -107,9 +107,7 @@ impl DefineStatement {
 	) -> Result<Self, revision::Error> {
 		Ok(DefineStatement::Access(fields.0.into()))
 	}
-}
 
-impl DefineStatement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true

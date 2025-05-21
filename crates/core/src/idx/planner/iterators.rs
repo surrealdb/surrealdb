@@ -803,9 +803,7 @@ impl JoinThingIterator {
 			distinct: Default::default(),
 		})
 	}
-}
 
-impl JoinThingIterator {
 	async fn next_current_remote_batch(
 		&mut self,
 		ctx: &Context,

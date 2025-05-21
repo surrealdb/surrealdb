@@ -21,6 +21,21 @@ pub struct Thing {
 	pub id: Id,
 }
 
+impl Thing {
+	/// Convert the Thing to a raw String
+	pub fn to_raw(&self) -> String {
+		self.to_string()
+	}
+	/// Check if this Thing is a range
+	pub fn is_range(&self) -> bool {
+		matches!(self.id, Id::Range(_))
+	}
+	/// Check if this Thing is of a certain table type
+	pub fn is_record_type(&self, types: &[Table]) -> bool {
+		types.is_empty() || types.iter().any(|tb| tb.0 == self.tb)
+	}
+}
+
 impl From<(&str, Id)> for Thing {
 	fn from((tb, id): (&str, Id)) -> Self {
 		Self {
@@ -118,28 +133,11 @@ impl From<crate::expr::Thing> for Thing {
 	}
 }
 
-impl Thing {
-	/// Convert the Thing to a raw String
-	pub fn to_raw(&self) -> String {
-		self.to_string()
-	}
-	/// Check if this Thing is a range
-	pub fn is_range(&self) -> bool {
-		matches!(self.id, Id::Range(_))
-	}
-	/// Check if this Thing is of a certain table type
-	pub fn is_record_type(&self, types: &[Table]) -> bool {
-		types.is_empty() || types.iter().any(|tb| tb.0 == self.tb)
-	}
-}
-
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}:{}", EscapeRid(&self.tb), self.id)
 	}
 }
-
-impl Thing {}
 
 #[cfg(test)]
 mod test {

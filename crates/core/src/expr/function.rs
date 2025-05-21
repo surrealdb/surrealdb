@@ -50,28 +50,7 @@ impl Function {
 	) -> Result<Self, revision::Error> {
 		Ok(Function::Anonymous(old.0, old.1, false))
 	}
-}
 
-pub(crate) enum OptimisedAggregate {
-	None,
-	Count,
-	CountFunction,
-	MathMax,
-	MathMin,
-	MathSum,
-	MathMean,
-	TimeMax,
-	TimeMin,
-}
-
-impl PartialOrd for Function {
-	#[inline]
-	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
-		None
-	}
-}
-
-impl Function {
 	/// Get function name if applicable
 	pub fn name(&self) -> Option<&str> {
 		match self {
@@ -212,9 +191,7 @@ impl Function {
 	pub(crate) fn is_count_all(&self) -> bool {
 		matches!(self, Self::Normal(f, p) if f == "count" && p.is_empty() )
 	}
-}
 
-impl Function {
 	/// Process this type returning a computed simple Value
 	///
 	/// Was marked recursive
@@ -413,4 +390,23 @@ impl fmt::Display for Function {
 			}
 		}
 	}
+}
+
+impl PartialOrd for Function {
+	#[inline]
+	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
+		None
+	}
+}
+
+pub(crate) enum OptimisedAggregate {
+	None,
+	Count,
+	CountFunction,
+	MathMax,
+	MathMin,
+	MathSum,
+	MathMean,
+	TimeMax,
+	TimeMin,
 }

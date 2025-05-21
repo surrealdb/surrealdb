@@ -182,6 +182,33 @@ impl Thing {
 
 		Ok(ids)
 	}
+
+	/// Convert the Thing to a raw String
+	pub fn to_raw(&self) -> String {
+		self.to_string()
+	}
+	/// Check if this Thing is a range
+	pub fn is_range(&self) -> bool {
+		matches!(self.id, Id::Range(_))
+	}
+	/// Check if this Thing is of a certain table type
+	pub fn is_record_type(&self, types: &[Table]) -> bool {
+		types.is_empty() || types.iter().any(|tb| tb.0 == self.tb)
+	}
+
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
+		Ok(Value::Thing(Thing {
+			tb: self.tb.clone(),
+			id: self.id.compute(stk, ctx, opt, doc).await?,
+		}))
+	}
 }
 
 impl From<(&str, Id)> for Thing {
@@ -263,40 +290,9 @@ impl TryFrom<&str> for Thing {
 	}
 }
 
-impl Thing {
-	/// Convert the Thing to a raw String
-	pub fn to_raw(&self) -> String {
-		self.to_string()
-	}
-	/// Check if this Thing is a range
-	pub fn is_range(&self) -> bool {
-		matches!(self.id, Id::Range(_))
-	}
-	/// Check if this Thing is of a certain table type
-	pub fn is_record_type(&self, types: &[Table]) -> bool {
-		types.is_empty() || types.iter().any(|tb| tb.0 == self.tb)
-	}
-}
-
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}:{}", EscapeRid(&self.tb), self.id)
-	}
-}
-
-impl Thing {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
-		Ok(Value::Thing(Thing {
-			tb: self.tb.clone(),
-			id: self.id.compute(stk, ctx, opt, doc).await?,
-		}))
 	}
 }
 

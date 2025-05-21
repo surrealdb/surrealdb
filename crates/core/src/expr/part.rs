@@ -57,15 +57,6 @@ pub enum Part {
 	RepeatRecurse,
 }
 
-impl Part {
-	fn convert_recurse_add_instruction(
-		fields: OldRecurseFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(Part::Recurse(fields.0, fields.1, None))
-	}
-}
-
 impl From<i32> for Part {
 	fn from(v: i32) -> Self {
 		Self::Index(v.into())
@@ -118,6 +109,13 @@ impl From<&str> for Part {
 }
 
 impl Part {
+	fn convert_recurse_add_instruction(
+		fields: OldRecurseFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
+		Ok(Part::Recurse(fields.0, fields.1, None))
+	}
+
 	pub(crate) fn is_index(&self) -> bool {
 		matches!(self, Part::Index(_) | Part::First | Part::Last)
 	}

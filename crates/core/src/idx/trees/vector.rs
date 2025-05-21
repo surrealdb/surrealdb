@@ -312,115 +312,7 @@ impl Vector {
 			_ => f64::NAN,
 		}
 	}
-}
 
-/// For vectors, as we want to support very large vectors, we want to avoid copy or clone.
-/// So the requirement is multiple ownership but not thread safety.
-/// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
-/// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
-/// As computing the hash for a large vector is costly, this structures also caches the hashcode to avoid recomputing it.
-#[derive(Debug, Clone)]
-pub struct SharedVector(Arc<Vector>, u64);
-impl From<Vector> for SharedVector {
-	fn from(v: Vector) -> Self {
-		let mut h = AHasher::default();
-		v.hash(&mut h);
-		Self(Arc::new(v), h.finish())
-	}
-}
-
-impl Deref for SharedVector {
-	type Target = Vector;
-
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl Hash for SharedVector {
-	fn hash<H: Hasher>(&self, state: &mut H) {
-		state.write_u64(self.1);
-	}
-}
-
-impl PartialEq for SharedVector {
-	fn eq(&self, other: &Self) -> bool {
-		self.1 == other.1 && self.0 == other.0
-	}
-}
-impl Eq for SharedVector {}
-
-impl Serialize for SharedVector {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		// We only serialize the vector part, not the u64
-		let ser: SerializedVector = self.0.as_ref().into();
-		ser.serialize(serializer)
-	}
-}
-
-impl<'de> Deserialize<'de> for SharedVector {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: Deserializer<'de>,
-	{
-		// We deserialize into a vector and construct the struct
-		let v: Vector = SerializedVector::deserialize(deserializer)?.into();
-		Ok(v.into())
-	}
-}
-
-impl Hash for Vector {
-	fn hash<H: Hasher>(&self, state: &mut H) {
-		match self {
-			Vector::F64(v) => {
-				let h = v.iter().fold(0, |acc, &x| acc ^ x.to_bits());
-				state.write_u64(h);
-			}
-			Vector::F32(v) => {
-				let h = v.iter().fold(0, |acc, &x| acc ^ x.to_bits());
-				state.write_u32(h);
-			}
-			Vector::I64(v) => {
-				let h = v.iter().fold(0, |acc, &x| acc ^ x);
-				state.write_i64(h);
-			}
-			Vector::I32(v) => {
-				let h = v.iter().fold(0, |acc, &x| acc ^ x);
-				state.write_i32(h);
-			}
-			Vector::I16(v) => {
-				let h = v.iter().fold(0, |acc, &x| acc ^ x);
-				state.write_i16(h);
-			}
-		}
-	}
-}
-
-#[cfg(test)]
-impl SharedVector {
-	pub(crate) fn clone_vector(&self) -> Vector {
-		self.0.as_ref().clone()
-	}
-}
-
-#[cfg(test)]
-impl From<&Vector> for Value {
-	fn from(v: &Vector) -> Self {
-		let vec: Vec<Number> = match v {
-			Vector::F64(a) => a.iter().map(|i| Number::Float(*i)).collect(),
-			Vector::F32(a) => a.iter().map(|i| Number::Float(*i as f64)).collect(),
-			Vector::I64(a) => a.iter().map(|i| Number::Int(*i)).collect(),
-			Vector::I32(a) => a.iter().map(|i| Number::Int(*i as i64)).collect(),
-			Vector::I16(a) => a.iter().map(|i| Number::Int(*i as i64)).collect(),
-		};
-		Value::from(vec)
-	}
-}
-
-impl Vector {
 	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
@@ -535,6 +427,112 @@ impl Vector {
 
 	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<()> {
 		Self::check_expected_dimension(self.len(), expected_dim)
+	}
+}
+
+/// For vectors, as we want to support very large vectors, we want to avoid copy or clone.
+/// So the requirement is multiple ownership but not thread safety.
+/// However, because we are running in an async context, and because we are using cache structures that use the Arc as a key,
+/// the cached objects has to be Sent, which then requires the use of Arc (rather than just Rc).
+/// As computing the hash for a large vector is costly, this structures also caches the hashcode to avoid recomputing it.
+#[derive(Debug, Clone)]
+pub struct SharedVector(Arc<Vector>, u64);
+impl From<Vector> for SharedVector {
+	fn from(v: Vector) -> Self {
+		let mut h = AHasher::default();
+		v.hash(&mut h);
+		Self(Arc::new(v), h.finish())
+	}
+}
+
+impl Deref for SharedVector {
+	type Target = Vector;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl Hash for SharedVector {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		state.write_u64(self.1);
+	}
+}
+
+impl PartialEq for SharedVector {
+	fn eq(&self, other: &Self) -> bool {
+		self.1 == other.1 && self.0 == other.0
+	}
+}
+impl Eq for SharedVector {}
+
+impl Serialize for SharedVector {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		// We only serialize the vector part, not the u64
+		let ser: SerializedVector = self.0.as_ref().into();
+		ser.serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for SharedVector {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		// We deserialize into a vector and construct the struct
+		let v: Vector = SerializedVector::deserialize(deserializer)?.into();
+		Ok(v.into())
+	}
+}
+
+impl Hash for Vector {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		match self {
+			Vector::F64(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x.to_bits());
+				state.write_u64(h);
+			}
+			Vector::F32(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x.to_bits());
+				state.write_u32(h);
+			}
+			Vector::I64(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x);
+				state.write_i64(h);
+			}
+			Vector::I32(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x);
+				state.write_i32(h);
+			}
+			Vector::I16(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x);
+				state.write_i16(h);
+			}
+		}
+	}
+}
+
+#[cfg(test)]
+impl SharedVector {
+	pub(crate) fn clone_vector(&self) -> Vector {
+		self.0.as_ref().clone()
+	}
+}
+
+#[cfg(test)]
+impl From<&Vector> for Value {
+	fn from(v: &Vector) -> Self {
+		let vec: Vec<Number> = match v {
+			Vector::F64(a) => a.iter().map(|i| Number::Float(*i)).collect(),
+			Vector::F32(a) => a.iter().map(|i| Number::Float(*i as f64)).collect(),
+			Vector::I64(a) => a.iter().map(|i| Number::Int(*i)).collect(),
+			Vector::I32(a) => a.iter().map(|i| Number::Int(*i as i64)).collect(),
+			Vector::I16(a) => a.iter().map(|i| Number::Int(*i as i64)).collect(),
+		};
+		Value::from(vec)
 	}
 }
 

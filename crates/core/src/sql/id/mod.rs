@@ -271,5 +271,3 @@ impl Display for Id {
 		}
 	}
 }
-
-impl Id {}

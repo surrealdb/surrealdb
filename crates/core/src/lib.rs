@@ -54,6 +54,9 @@ pub mod str;
 pub mod syn;
 pub mod vs;
 
+#[cfg(test)]
+mod revision_checks;
+
 #[cfg(feature = "ml")]
 pub use surrealml as ml;
 

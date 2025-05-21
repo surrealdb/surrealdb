@@ -163,17 +163,7 @@ impl Value {
 			})),
 		}))
 	}
-}
 
-impl Eq for Value {}
-
-impl Ord for Value {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.partial_cmp(other).unwrap_or(Ordering::Equal)
-	}
-}
-
-impl Value {
 	// -----------------------------------
 	// Initial record value
 	// -----------------------------------
@@ -972,6 +962,14 @@ impl fmt::Display for Value {
 impl InfoStructure for Value {
 	fn structure(self) -> Value {
 		self.to_string().into()
+	}
+}
+
+impl Eq for Value {}
+
+impl Ord for Value {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.partial_cmp(other).unwrap_or(Ordering::Equal)
 	}
 }
 

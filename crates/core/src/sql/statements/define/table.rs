@@ -54,9 +54,7 @@ impl DefineTableStatement {
 	fn convert_cache_ts(&self, _revision: u16, _value: Uuid) -> Result<(), RevisionError> {
 		Ok(())
 	}
-}
 
-impl DefineTableStatement {
 	/// Checks if this is a TYPE RELATION table
 	pub fn is_relation(&self) -> bool {
 		matches!(self.kind, TableType::Relation(_))
