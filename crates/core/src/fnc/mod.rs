@@ -1519,7 +1519,10 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 			"is_valid" => return "geo::is::valid".to_string(),
 			_ => ("geo", name),
 		},
-		"number" => ("math", name),
+		"number" => match name {
+			"format" => return "number::format".to_string(),
+			_ => ("math", name),
+		},
 		"string" => match name {
 			"distance_damerau_levenshtein" => {
 				return "string::distance::damerau_levenshtein".to_string();
