@@ -11,7 +11,7 @@ COMMAND="${1}"
 
 # Note: Keep these in sync with the `members` array in the `Cargo.toml` file.
 members=("surrealdb-catalog" "surrealdb-common" "surrealdb-expr" "surrealdb-core" "surrealdb-sql" "surrealdb")
-member_paths=("crates/catalog", "crates/common" "crates/expr" "crates/core" "crates/sql" "crates/sdk")
+member_paths=("crates/catalog" "crates/common" "crates/expr" "crates/core" "crates/sql" "crates/sdk")
 
 # Get the path of a crate based on its name
 # Usage: get_member_path <crate_name>
