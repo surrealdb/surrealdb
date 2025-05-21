@@ -8,6 +8,7 @@ use surrealdb::expr::Thing;
 use surrealdb::iam::Role;
 use surrealdb::sql::SqlValue;
 
+
 #[tokio::test]
 async fn create_or_insert_with_permissions() -> Result<()> {
 	let sql = "
