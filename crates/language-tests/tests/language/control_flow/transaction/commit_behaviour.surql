@@ -6,5 +6,4 @@ error = "Invalid statement: COMMIT cannot be used outside of a manual transactio
 
 */
 
-
 COMMIT;

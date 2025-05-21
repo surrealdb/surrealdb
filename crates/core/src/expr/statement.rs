@@ -193,6 +193,11 @@ impl Statement {
 				// Process the output value
 				return v.compute(stk, ctx, opt, doc).await;
 			}
+			Self::Cancel(_) => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+					"CANCEL cannot be used outside of a manual transaction".to_string(),
+				))));
+			}
 			Self::Commit(_) => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
 					"COMMIT cannot be used outside of a manual transaction".to_string(),
