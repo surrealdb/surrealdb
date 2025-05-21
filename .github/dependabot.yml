@@ -8,25 +8,29 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: ci
-      include: scope
+    open-pull-requests-limit: 0 #Security Updates only
+    groups:
+      actions:
+        applies-to: security-updates
+        patterns:
+          - "*"
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: fix
-      prefix-development: chore
-      include: scope
+    open-pull-requests-limit: 0 #Security Updates only 
+    groups:
+      rust:
+        applies-to: security-updates
+        patterns:
+          - "*"
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: fix
-      prefix-development: chore
-      include: scope
+    open-pull-requests-limit: 0 # Security updates only
+    groups:
+      actions:
+        applies-to: security-updates
+        patterns:
+          - "*"
