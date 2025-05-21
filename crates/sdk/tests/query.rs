@@ -2,12 +2,12 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn query_basic() -> Result<(), Error> {
+async fn query_basic() -> Result<()> {
 	let sql = "
 		LET $test = 'Tobie';
 		SELECT * FROM $test;
@@ -39,7 +39,7 @@ async fn query_basic() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn query_basic_with_modification() -> Result<(), Error> {
+async fn query_basic_with_modification() -> Result<()> {
 	let sql = "
 		LET $test = 33693;
 		SELECT * FROM $test + 11369;
@@ -71,7 +71,7 @@ async fn query_basic_with_modification() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn query_root_function() -> Result<(), Error> {
+async fn query_root_function() -> Result<()> {
 	let sql = "
 		LET $test = 'This is a test';
 		string::uppercase($test);
@@ -103,7 +103,7 @@ async fn query_root_function() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn query_root_record() -> Result<(), Error> {
+async fn query_root_record() -> Result<()> {
 	let sql = "
 		UPSERT person:tobie SET name = 'Tobie';
 		UPSERT person:jaime SET name = 'Jaime';

@@ -2,10 +2,14 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
+use crate::err;
 use crate::err::Error;
-use crate::sql::statements::InsertStatement;
-use crate::sql::value::Value;
+use crate::expr::statements::InsertStatement;
+use crate::expr::value::Value;
+use anyhow::Result;
 use reblessive::tree::Stk;
+
+use super::IgnoreError;
 
 impl Document {
 	pub(super) async fn insert(
@@ -14,7 +18,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &InsertStatement,
-	) -> Result<Value, Error> {
+	) -> Result<Value, IgnoreError> {
 		// Even though we haven't tried to create first this can still not be the 'initial iteration' if
 		// the initial doc is not set.
 		//
@@ -29,7 +33,7 @@ impl Document {
 		let retryable = stm.update.is_some();
 		if retryable {
 			// it is retryable so generate a save point we can roll back to.
-			ctx.tx().lock().await.new_save_point().await;
+			ctx.tx().lock().await.new_save_point();
 		}
 
 		// First try to create the value and if that is not possible due to an existing value fall
@@ -42,70 +46,80 @@ impl Document {
 			// ignore the error, and attempt to update the
 			// record using the ON DUPLICATE KEY UPDATE
 			// clause with the ID received in the error
-			Err(Error::IndexExists {
-				thing,
-				index,
-				value,
-			}) => {
-				// if not retryable return the error.
-				//
-				// or if the statement contained a specific record id, we
-				// don't retry to
-				if !retryable || self.is_specific_record_id() {
+			Err(IgnoreError::Error(e)) => match e.downcast_ref::<err::Error>() {
+				Some(Error::IndexExists {
+					..
+				}) => {
+					// if not retryable return the error.
+					//
+					// or if the statement contained a specific record id, we
+					// don't retry to
+					if !retryable || self.is_specific_record_id() {
+						if retryable {
+							ctx.tx().lock().await.rollback_to_save_point().await?;
+						}
+
+						// Ignore flag; disables error.
+						// Error::Ignore is never raised to the user.
+						if stm.ignore {
+							return Err(IgnoreError::Ignore);
+						}
+
+						return Err(IgnoreError::Error(e));
+					}
+					let Ok(Error::IndexExists {
+						thing,
+						..
+					}) = e.downcast()
+					else {
+						// Checked above
+						unreachable!()
+					};
+					thing
+				}
+				// We attempted to INSERT a document with an ID,
+				// and this ID already exists in the database,
+				// so we need to update the record instead using
+				// the ON DUPLICATE KEY UPDATE statement clause
+				Some(Error::RecordExists {
+					..
+				}) => {
+					// if not retryable return the error.
+					if !retryable {
+						// Ignore flag; disables error.
+						// Error::Ignore is never raised to the user.
+						if stm.ignore {
+							return Err(IgnoreError::Ignore);
+						}
+						return Err(IgnoreError::Error(e));
+					}
+					let Ok(Error::RecordExists {
+						thing,
+						..
+					}) = e.downcast()
+					else {
+						// Checked above
+						unreachable!()
+					};
+					thing
+				}
+				_ => {
+					// if retryable we need to do something with the savepoint.
 					if retryable {
 						ctx.tx().lock().await.rollback_to_save_point().await?;
 					}
-
-					// Ignore flag; disables error.
-					// Error::Ignore is never raised to the user.
-					if stm.ignore {
-						return Err(Error::Ignore);
-					}
-
-					return Err(Error::IndexExists {
-						thing,
-						index,
-						value,
-					});
+					return Err(IgnoreError::Error(e));
 				}
-				thing
-			}
-			// We attempted to INSERT a document with an ID,
-			// and this ID already exists in the database,
-			// so we need to update the record instead using
-			// the ON DUPLICATE KEY UPDATE statement clause
-			Err(Error::RecordExists {
-				thing,
-			}) => {
-				// if not retryable return the error.
-				if !retryable {
-					// Ignore flag; disables error.
-					// Error::Ignore is never raised to the user.
-					if stm.ignore {
-						return Err(Error::Ignore);
-					}
-					return Err(Error::RecordExists {
-						thing,
-					});
-				}
-				thing
-			}
-			Err(Error::Ignore) => {
+			},
+			Err(IgnoreError::Ignore) => {
 				if retryable {
-					ctx.tx().lock().await.release_last_save_point().await?;
+					ctx.tx().lock().await.release_last_save_point()?;
 				}
-				return Err(Error::Ignore);
-			}
-			Err(e) => {
-				// if retryable we need to do something with the savepoint.
-				if retryable {
-					ctx.tx().lock().await.rollback_to_save_point().await?;
-				}
-				return Err(e);
+				return Err(IgnoreError::Ignore);
 			}
 			Ok(x) => {
 				if retryable {
-					ctx.tx().lock().await.release_last_save_point().await?;
+					ctx.tx().lock().await.release_last_save_point()?;
 				}
 				return Ok(x);
 			}
@@ -116,7 +130,7 @@ impl Document {
 
 		if ctx.is_done(true).await? {
 			// Don't process the document
-			return Err(Error::Ignore);
+			return Err(IgnoreError::Ignore);
 		}
 
 		let (ns, db) = opt.ns_db()?;
@@ -138,7 +152,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, Error> {
+	) -> Result<Value, IgnoreError> {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
@@ -164,7 +178,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, Error> {
+	) -> Result<Value, IgnoreError> {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;

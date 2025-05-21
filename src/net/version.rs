@@ -1,6 +1,6 @@
 use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERSION;
-use crate::err::Error;
+use crate::net::error::Error as NetError;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Extension, Router};
@@ -15,9 +15,7 @@ where
 	Router::new().route("/version", get(handler))
 }
 
-async fn handler(
-	Extension(state): Extension<AppState>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+async fn handler(Extension(state): Extension<AppState>) -> Result<impl IntoResponse, NetError> {
 	// Get the datastore reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route
@@ -26,7 +24,7 @@ async fn handler(
 			"Capabilities denied HTTP route request attempt, target: '{}'",
 			&RouteTarget::Version
 		);
-		return Err(Error::ForbiddenRoute(RouteTarget::Version.to_string()));
+		return Err(NetError::ForbiddenRoute(RouteTarget::Version.to_string()));
 	}
 
 	Ok(format!("{PKG_NAME}-{}", *PKG_VERSION))

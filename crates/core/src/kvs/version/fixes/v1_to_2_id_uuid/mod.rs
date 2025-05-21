@@ -2,12 +2,10 @@ mod deps;
 use deps::*;
 use std::sync::Arc;
 
-use crate::{
-	err::Error,
-	kvs::{KeyDecode as _, KeyEncode as _, Transaction},
-};
+use crate::kvs::{KeyDecode as _, KeyEncode as _, Transaction};
+use anyhow::Result;
 
-pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<(), Error> {
+pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<()> {
 	for ns in tx.all_ns().await?.iter() {
 		let ns = ns.name.as_str();
 		for db in tx.all_db(ns).await?.iter() {
@@ -22,12 +20,7 @@ pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<(), Error> {
 	Ok(())
 }
 
-async fn migrate_tb_records(
-	tx: Arc<Transaction>,
-	ns: &str,
-	db: &str,
-	tb: &str,
-) -> Result<(), Error> {
+async fn migrate_tb_records(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) -> Result<()> {
 	// mutable beg, as we update it each iteration to the last record id + a null byte
 	let mut beg = crate::key::thing::prefix(ns, db, tb)?;
 	let end = crate::key::thing::suffix(ns, db, tb)?;
@@ -71,7 +64,7 @@ async fn migrate_tb_records(
 	Ok(())
 }
 
-async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) -> Result<(), Error> {
+async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) -> Result<()> {
 	// mutable beg, as we update it each iteration to the last record id + a null byte
 	let mut beg = crate::key::table::all::new(ns, db, tb).encode_owned()?;
 	beg.extend_from_slice(&[b'~', 0x00]);

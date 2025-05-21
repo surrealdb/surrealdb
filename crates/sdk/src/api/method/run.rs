@@ -1,19 +1,19 @@
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
+use crate::Surreal;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
+use crate::expr::Value;
 use crate::method::OnceLockExt;
-use crate::sql::Value;
-use crate::Surreal;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_content::Serializer;
 use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::to_value;
-use surrealdb_core::sql::Array;
+use surrealdb_core::expr::Array;
+use surrealdb_core::expr::to_value;
 
 /// A run future
 #[derive(Debug)]
@@ -88,13 +88,10 @@ where
 }
 
 /// Converts a function into name and version parts
-pub trait IntoFn {
-	/// Handles the conversion of the function string
-	#[deprecated(since = "2.3.0")]
-	fn into_fn(self) -> Result<(String, Option<String>)>;
-}
+pub trait IntoFn: into_fn::Sealed {}
 
-impl IntoFn for String {
+impl IntoFn for String {}
+impl into_fn::Sealed for String {
 	fn into_fn(self) -> Result<(String, Option<String>)> {
 		match self.split_once('<') {
 			Some((name, rest)) => match rest.strip_suffix('>') {
@@ -110,7 +107,8 @@ impl IntoFn for String {
 	}
 }
 
-impl IntoFn for &str {
+impl IntoFn for &str {}
+impl into_fn::Sealed for &str {
 	fn into_fn(self) -> Result<(String, Option<String>)> {
 		match self.split_once('<') {
 			Some((name, rest)) => match rest.strip_suffix('>') {
@@ -126,9 +124,16 @@ impl IntoFn for &str {
 	}
 }
 
-impl IntoFn for &String {
+impl IntoFn for &String {}
+impl into_fn::Sealed for &String {
 	fn into_fn(self) -> Result<(String, Option<String>)> {
-		#[expect(deprecated)]
 		self.as_str().into_fn()
+	}
+}
+
+mod into_fn {
+	pub trait Sealed {
+		/// Handles the conversion of the function string
+		fn into_fn(self) -> super::Result<(String, Option<String>)>;
 	}
 }

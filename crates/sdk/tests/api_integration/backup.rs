@@ -12,11 +12,11 @@
 // Supported by the storage engines and the HTTP protocol
 
 use futures::StreamExt as _;
-use surrealdb::{Error, Value};
+use surrealdb::Value;
 use tokio::fs::remove_file;
 use ulid::Ulid;
 
-use super::{ApiRecordId, CreateDb, Record, NS};
+use super::{ApiRecordId, CreateDb, NS, Record};
 
 pub async fn export_import(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
@@ -45,7 +45,7 @@ pub async fn export_import(new_db: impl CreateDb) {
 		db.export(&file).await?;
 		db.query("REMOVE TABLE user").await?;
 		db.import(&file).await?;
-		Result::<(), Error>::Ok(())
+		Result::<(), anyhow::Error>::Ok(())
 	}
 	.await;
 
@@ -103,7 +103,7 @@ pub async fn export_with_config(new_db: impl CreateDb) {
 		db.export(&file).with_config().tables(vec!["user"]).await?;
 		db.query("REMOVE TABLE user; REMOVE TABLE group;").await?;
 		db.import(&file).await?;
-		Result::<(), Error>::Ok(())
+		Result::<(), anyhow::Error>::Ok(())
 	}
 	.await;
 

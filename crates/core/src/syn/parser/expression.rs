@@ -5,14 +5,14 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::mac::{expected_whitespace, unexpected};
-use crate::sql::operator::BindingPower;
-use crate::sql::{value::TryNeg, Cast, Expression, Number, Operator, Value};
-use crate::sql::{Function, Range};
+use crate::expr::operator::BindingPower;
+use crate::expr::{Cast, Expression, Number, Operator, Value, value::TryNeg};
+use crate::expr::{Function, Range};
 use crate::syn::error::bail;
 use crate::syn::token::{self, Token};
 use crate::syn::{
-	parser::{mac::expected, ParseResult, Parser},
-	token::{t, TokenKind},
+	parser::{ParseResult, Parser, mac::expected},
+	token::{TokenKind, t},
 };
 
 impl Parser<'_> {
@@ -578,7 +578,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod test {
 	use super::*;
-	use crate::sql::{Block, Future, Kind};
+	use crate::expr::{Block, Future, Kind};
 	use crate::syn::Parse;
 
 	#[test]

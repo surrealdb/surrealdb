@@ -3,8 +3,8 @@ use parse::Parse;
 
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::{Action, Notification, Session};
-use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::{Thing, Value};
 
@@ -15,28 +15,116 @@ use surrealdb::sql::{Thing, Value};
 async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true, "owner at root level should be able to delete a record"),
-		((().into(), Role::Editor), ("NS", "DB"), true, "editor at root level should be able to delete a record"),
-		((().into(), Role::Viewer), ("NS", "DB"), false, "viewer at root level should not be able to delete a record"),
-
+		(
+			(().into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at root level should be able to delete a record",
+		),
+		(
+			(().into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at root level should be able to delete a record",
+		),
+		(
+			(().into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at root level should not be able to delete a record",
+		),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true, "owner at namespace level should be able to delete a record on its namespace"),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at namespace level should not be able to delete a record on another namespace"),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true, "editor at namespace level should be able to delete a record on its namespace"),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at namespace level should not be able to delete a record on another namespace"),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false, "viewer at namespace level should not be able to delete a record on its namespace"),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at namespace level should not be able to delete a record on another namespace"),
-
+		(
+			(("NS",).into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at namespace level should be able to delete a record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at namespace level should not be able to delete a record on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at namespace level should be able to delete a record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at namespace level should not be able to delete a record on another namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to delete a record on its namespace",
+		),
+		(
+			(("NS",).into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at namespace level should not be able to delete a record on another namespace",
+		),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true, "owner at database level should be able to delete a record on its database"),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false, "owner at database level should not be able to delete a record on another database"),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at database level should not be able to delete a record on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true, "editor at database level should be able to delete a record on its database"),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false, "editor at database level should not be able to delete a record on another database"),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at database level should not be able to delete a record on another namespace even if the database name matches"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false, "viewer at database level should not be able to delete a record on its database"),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false, "viewer at database level should not be able to delete a record on another database"),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at database level should not be able to delete a record on another namespace even if the database name matches"),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "DB"),
+			true,
+			"owner at database level should be able to delete a record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("NS", "OTHER_DB"),
+			false,
+			"owner at database level should not be able to delete a record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Owner),
+			("OTHER_NS", "DB"),
+			false,
+			"owner at database level should not be able to delete a record on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "DB"),
+			true,
+			"editor at database level should be able to delete a record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("NS", "OTHER_DB"),
+			false,
+			"editor at database level should not be able to delete a record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Editor),
+			("OTHER_NS", "DB"),
+			false,
+			"editor at database level should not be able to delete a record on another namespace even if the database name matches",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "DB"),
+			false,
+			"viewer at database level should not be able to delete a record on its database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("NS", "OTHER_DB"),
+			false,
+			"viewer at database level should not be able to delete a record on another database",
+		),
+		(
+			(("NS", "DB").into(), Role::Viewer),
+			("OTHER_NS", "DB"),
+			false,
+			"viewer at database level should not be able to delete a record on another namespace even if the database name matches",
+		),
 	];
 
 	let statement = "DELETE person:test";
@@ -340,7 +428,7 @@ async fn check_permissions_auth_disabled() {
 }
 
 #[tokio::test]
-async fn delete_filtered_live_notification() -> Result<(), Error> {
+async fn delete_filtered_live_notification() -> Result<()> {
 	let dbs = new_ds().await?.with_notifications();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;

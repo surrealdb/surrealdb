@@ -4,13 +4,13 @@ mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
 use helpers::skip_ok;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 use surrealdb::sql::Value;
-use surrealdb_core::sql::Thing;
+use surrealdb_core::expr::Thing;
 
 #[tokio::test]
-async fn select_aggregate() -> Result<(), Error> {
+async fn select_aggregate() -> Result<()> {
 	let sql = "
 		CREATE temperature:1 SET country = 'GBP', time = d'2020-01-01T08:00:00Z';
 		CREATE temperature:2 SET country = 'GBP', time = d'2020-02-01T08:00:00Z';
@@ -289,7 +289,7 @@ async fn select_aggregate() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_multi_aggregate() -> Result<(), Error> {
+async fn select_multi_aggregate() -> Result<()> {
 	let sql = "
 		CREATE test:1 SET group = 1, one = 1.7, two = 2.4;
 		CREATE test:2 SET group = 1, one = 4.7, two = 3.9;
@@ -436,7 +436,7 @@ async fn select_multi_aggregate() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_multi_aggregate_composed() -> Result<(), Error> {
+async fn select_multi_aggregate_composed() -> Result<()> {
 	let sql = "
 		CREATE test:1 SET group = 1, one = 1.7, two = 2.4;
 		CREATE test:2 SET group = 1, one = 4.7, two = 3.9;
@@ -590,7 +590,7 @@ async fn select_multi_aggregate_composed() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_array_group_group_by() -> Result<(), Error> {
+async fn select_array_group_group_by() -> Result<()> {
 	let sql = "
 		CREATE test:1 SET user = 1, role = 1;
         CREATE test:2 SET user = 1, role = 2;
@@ -628,7 +628,7 @@ async fn select_array_group_group_by() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_array_count_subquery_group_by() -> Result<(), Error> {
+async fn select_array_count_subquery_group_by() -> Result<()> {
 	let sql = r#"
 		CREATE table CONTENT { bar: "hello", foo: "Man"};
 		CREATE table CONTENT { bar: "hello", foo: "World"};
@@ -682,7 +682,7 @@ async fn select_array_count_subquery_group_by() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_aggregate_mean_update() -> Result<(), Error> {
+async fn select_aggregate_mean_update() -> Result<()> {
 	let sql = "
 		CREATE test:a SET a = 3;
 		DEFINE TABLE foo AS SELECT math::mean(a) AS avg FROM test GROUP ALL;
@@ -734,7 +734,7 @@ async fn select_aggregate_mean_update() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_count_group_all() -> Result<(), Error> {
+async fn select_count_group_all() -> Result<()> {
 	let sql = r#"
 		CREATE table CONTENT { bar: "hello", foo: "Man"};
 		CREATE table CONTENT { bar: "hello", foo: "World"};
@@ -818,7 +818,7 @@ async fn select_count_group_all_permissions(
 	perm: &str,
 	expect_count_optim: Option<bool>,
 	expect_result: &str,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Define the permissions
 	let sql = format!(
 		r"
@@ -924,22 +924,22 @@ async fn select_count_group_all_permissions(
 }
 
 #[tokio::test]
-async fn select_count_group_all_permissions_select_none() -> Result<(), Error> {
+async fn select_count_group_all_permissions_select_none() -> Result<()> {
 	select_count_group_all_permissions("FOR SELECT NONE", None, "[]").await
 }
 
 #[tokio::test]
-async fn select_count_group_all_permissions_select_full() -> Result<(), Error> {
+async fn select_count_group_all_permissions_select_full() -> Result<()> {
 	select_count_group_all_permissions("FOR SELECT FULL", Some(true), "[{ count: 1}]").await
 }
 
 #[tokio::test]
-async fn select_count_group_all_permissions_select_where_false() -> Result<(), Error> {
+async fn select_count_group_all_permissions_select_where_false() -> Result<()> {
 	select_count_group_all_permissions("FOR SELECT WHERE FALSE", Some(false), "[]").await
 }
 
 #[tokio::test]
-async fn select_count_range_keys_only() -> Result<(), Error> {
+async fn select_count_range_keys_only() -> Result<()> {
 	let sql = r#"
 		CREATE table:1 CONTENT { bar: "hello", foo: "Man"};
 		CREATE table:2 CONTENT { bar: "hello", foo: "World"};
@@ -1026,7 +1026,7 @@ async fn select_count_range_keys_only_permissions(
 	expect_count_optim: Option<bool>,
 	expect_group_all: &str,
 	expect_count: &str,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Define the permissions and create some records
 	let sql = format!(
 		r"
@@ -1139,12 +1139,12 @@ async fn select_count_range_keys_only_permissions(
 }
 
 #[tokio::test]
-async fn select_count_range_keys_only_permissions_select_none() -> Result<(), Error> {
+async fn select_count_range_keys_only_permissions_select_none() -> Result<()> {
 	select_count_range_keys_only_permissions("FOR SELECT NONE", None, "[]", "[]").await
 }
 
 #[tokio::test]
-async fn select_count_range_keys_only_permissions_select_full() -> Result<(), Error> {
+async fn select_count_range_keys_only_permissions_select_full() -> Result<()> {
 	select_count_range_keys_only_permissions(
 		"FOR SELECT FULL",
 		Some(true),
@@ -1155,13 +1155,13 @@ async fn select_count_range_keys_only_permissions_select_full() -> Result<(), Er
 }
 
 #[tokio::test]
-async fn select_count_range_keys_only_permissions_select_where_false() -> Result<(), Error> {
+async fn select_count_range_keys_only_permissions_select_where_false() -> Result<()> {
 	select_count_range_keys_only_permissions("FOR SELECT WHERE FALSE", Some(false), "[]", "[]")
 		.await
 }
 
 #[tokio::test]
-async fn select_count_range_only_permissions_select_where_match() -> Result<(), Error> {
+async fn select_count_range_only_permissions_select_where_match() -> Result<()> {
 	select_count_range_keys_only_permissions(
 		"FOR SELECT WHERE bar = 'hello'",
 		Some(false),

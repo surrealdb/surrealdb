@@ -1,33 +1,33 @@
 //! HTTP engine
+use crate::Value;
+use crate::api::Connect;
+use crate::api::Result;
+use crate::api::Surreal;
 use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
 use crate::api::conn::RequestData;
 use crate::api::conn::RouterRequest;
 use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
-use crate::api::Connect;
-use crate::api::Result;
-use crate::api::Surreal;
 use crate::engine::remote::Response;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
 use crate::headers::NS;
 use crate::opt::IntoEndpoint;
-use crate::Value;
 use futures::TryStreamExt;
 use indexmap::IndexMap;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
+use reqwest::RequestBuilder;
 use reqwest::header::ACCEPT;
 use reqwest::header::CONTENT_TYPE;
-use reqwest::RequestBuilder;
+use reqwest::header::HeaderMap;
+use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{
-	from_value as from_core_value, statements::OutputStatement, Object as CoreObject, Param, Query,
-	Statement, Value as CoreValue,
+use surrealdb_core::expr::{
+	Object as CoreObject, Param, Query, Statement, Value as CoreValue,
+	from_value as from_core_value, statements::OutputStatement,
 };
 use url::Url;
 
@@ -87,7 +87,6 @@ impl Surreal<Client> {
 	) -> Connect<Client, ()> {
 		Connect {
 			surreal: self.inner.clone().into(),
-			#[expect(deprecated)]
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -170,7 +169,7 @@ async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		.await?
 		.error_for_status()?
 		.bytes_stream()
-		.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+		.map_err(futures::io::Error::other)
 		.into_async_read()
 		.compat();
 	let mut file =
@@ -357,23 +356,25 @@ async fn router(
 				.into());
 			};
 
-			if let Ok(Credentials {
-				user,
-				pass,
-				ns,
-				db,
-			}) = from_core_value(credentials.into())
-			{
-				*auth = Some(Auth::Basic {
+			match from_core_value(credentials.into()) {
+				Ok(Credentials {
 					user,
 					pass,
 					ns,
 					db,
-				});
-			} else {
-				*auth = Some(Auth::Bearer {
-					token: value.to_raw_string(),
-				});
+				}) => {
+					*auth = Some(Auth::Basic {
+						user,
+						pass,
+						ns,
+						db,
+					});
+				}
+				_ => {
+					*auth = Some(Auth::Bearer {
+						token: value.to_raw_string(),
+					});
+				}
 			}
 
 			Ok(DbResponse::Other(value))

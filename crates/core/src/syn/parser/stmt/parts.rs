@@ -2,22 +2,22 @@
 
 use reblessive::Stk;
 
-use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
-use crate::sql::{Explain, Fetch, With};
+use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
+use crate::expr::{Explain, Fetch, With};
 use crate::syn::error::bail;
 use crate::{
-	sql::{
-		changefeed::ChangeFeed,
-		index::{Distance, VectorType},
+	expr::{
 		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
 		Permission, Permissions, Tables, Timeout, Value, View,
+		changefeed::ChangeFeed,
+		index::{Distance, VectorType},
 	},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
 			ParseResult, Parser,
+			mac::{expected, unexpected},
 		},
-		token::{t, DistanceKind, Span, TokenKind, VectorTypeKind},
+		token::{DistanceKind, Span, TokenKind, VectorTypeKind, t},
 	},
 };
 
@@ -77,6 +77,11 @@ impl Parser<'_> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
 		}
+		self.parse_output(ctx).await.map(Some)
+	}
+
+	/// Needed because some part of the RPC needs to call into the parser for this specific part.
+	pub async fn parse_output(&mut self, ctx: &mut Stk) -> ParseResult<Output> {
 		let res = match self.peek_kind() {
 			t!("NONE") => {
 				self.pop_peek();
@@ -100,7 +105,7 @@ impl Parser<'_> {
 			}
 			_ => Output::Fields(self.parse_fields(ctx).await?),
 		};
-		Ok(Some(res))
+		Ok(res)
 	}
 
 	/// Parses a statement timeout if the next token is `TIMEOUT`.
@@ -116,11 +121,15 @@ impl Parser<'_> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
+		Ok(Some(self.parse_fetchs(ctx).await?))
+	}
+
+	pub async fn parse_fetchs(&mut self, ctx: &mut Stk) -> ParseResult<Fetchs> {
 		let mut fetchs = self.try_parse_param_or_idiom_or_fields(ctx).await?;
 		while self.eat(t!(",")) {
 			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields(ctx).await?);
 		}
-		Ok(Some(Fetchs(fetchs)))
+		Ok(Fetchs(fetchs))
 	}
 
 	pub async fn try_parse_param_or_idiom_or_fields(
@@ -332,7 +341,9 @@ impl Parser<'_> {
 				t!("DELETE") => {
 					// TODO(gguillemas): Return a parse error instead of logging a warning in 3.0.0.
 					if field {
-						warn!("The DELETE permission has no effect on fields and is deprecated, but was found in a DEFINE FIELD statement.");
+						warn!(
+							"The DELETE permission has no effect on fields and is deprecated, but was found in a DEFINE FIELD statement."
+						);
 					} else {
 						delete = true;
 					}

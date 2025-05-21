@@ -1,6 +1,6 @@
-use crate::fnc::script::fetch::{stream::ReadableStream, RequestError};
+use crate::fnc::script::fetch::{RequestError, stream::ReadableStream};
 use bytes::{Bytes, BytesMut};
-use futures::{future, Stream, TryStreamExt};
+use futures::{Stream, TryStreamExt, future};
 use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
 use std::{
 	cell::{Cell, RefCell},
@@ -144,7 +144,7 @@ impl<'js> FromJs<'js> for Body {
 					from: x.as_str(),
 					to: "Blob, TypedArray, FormData, URLSearchParams, or String",
 					message: None,
-				})
+				});
 			}
 		};
 		if let Some(x) = Class::<Blob>::from_object(object) {

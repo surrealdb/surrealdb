@@ -55,7 +55,7 @@ fn _is_allowed(
 mod tests {
 	use cedar_policy::{ValidationMode, ValidationResult, Validator};
 
-	use crate::iam::{default_schema, entities::Level, ResourceKind, Role};
+	use crate::iam::{ResourceKind, Role, default_schema, entities::Level};
 
 	use super::*;
 

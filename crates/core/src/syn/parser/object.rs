@@ -3,12 +3,12 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Block, Geometry, Object, Strand, Value},
+	expr::{Block, Geometry, Object, Strand, Value},
 	syn::{
 		error::bail,
 		lexer::compound,
-		parser::{enter_object_recursion, mac::expected, ParseResult, Parser},
-		token::{t, Glued, Span, TokenKind},
+		parser::{ParseResult, Parser, enter_object_recursion, mac::expected},
+		token::{Glued, Span, TokenKind, t},
 	},
 };
 
@@ -278,43 +278,49 @@ impl Parser<'_> {
 		// match the type and then match the coordinates field to a value of that type.
 		match type_value.as_str() {
 			"Point" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_point(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::Point(point)));
 					}
 				}
 			}
 			"LineString" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_line(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::Line(point)));
 					}
 				}
 			}
 			"Polygon" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_polygon(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::Polygon(point)));
 					}
 				}
 			}
 			"MultiPoint" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_multipolygon(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
 					}
 				}
 			}
 			"MultiLineString" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_multiline(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::MultiLine(point)));
 					}
 				}
 			}
 			"MultiPolygon" => {
-				if self.eat(t!("}")) {
+				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_multipolygon(&value) {
+						self.pop_peek();
 						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
 					}
 				}
@@ -706,7 +712,10 @@ mod tests {
 		}"#;
 		let out = Value::parse(sql);
 		assert!(matches!(out, Value::Geometry(_)));
-		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }", format!("{}", out));
+		assert_eq!(
+			"{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }",
+			format!("{}", out)
+		);
 	}
 
 	#[test]
@@ -728,6 +737,9 @@ mod tests {
 		}"#;
 		let out = Value::parse(sql);
 		assert!(matches!(out, Value::Geometry(_)));
-		assert_eq!("{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }", format!("{}", out));
+		assert_eq!(
+			"{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }",
+			format!("{}", out)
+		);
 	}
 }

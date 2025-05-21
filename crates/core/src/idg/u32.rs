@@ -1,5 +1,5 @@
-use crate::err::Error;
 use crate::kvs::{Key, Val};
+use anyhow::Result;
 use roaring::RoaringBitmap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ pub struct U32 {
 }
 
 impl U32 {
-	pub(crate) async fn new(state_key: Key, v: Option<Val>) -> Result<Self, Error> {
+	pub(crate) async fn new(state_key: Key, v: Option<Val>) -> Result<Self> {
 		let state: State = if let Some(val) = v {
 			State::try_from_val(val)?
 		} else {
@@ -96,11 +96,11 @@ pub(crate) trait SerdeState
 where
 	Self: Sized + Serialize + DeserializeOwned,
 {
-	fn try_to_val(&self) -> Result<Val, Error> {
+	fn try_to_val(&self) -> Result<Val> {
 		Ok(bincode::serialize(self)?)
 	}
 
-	fn try_from_val(val: Val) -> Result<Self, Error> {
+	fn try_from_val(val: Val) -> Result<Self> {
 		Ok(bincode::deserialize(&val)?)
 	}
 }
@@ -110,9 +110,9 @@ impl SerdeState for State {}
 
 #[cfg(test)]
 mod tests {
-	use crate::err::Error;
 	use crate::idg::u32::U32;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
+	use anyhow::Result;
 
 	async fn get_ids(ds: &Datastore) -> (Transaction, U32) {
 		let txn = ds.transaction(Write, Optimistic).await.unwrap();
@@ -122,7 +122,7 @@ mod tests {
 		(txn, d)
 	}
 
-	async fn finish(txn: Transaction, mut d: U32) -> Result<(), Error> {
+	async fn finish(txn: Transaction, mut d: U32) -> Result<()> {
 		if let Some((key, val)) = d.finish() {
 			txn.set(key, val, None).await?;
 		}

@@ -1,8 +1,8 @@
 use crate::tests::schema::{BoolOr, SchemaTarget, TestConfig, TestLevel, TestLogin, TestRole};
 use surrealdb_core::{
 	dbs::{
-		capabilities::{Capabilities, Targets},
 		Session,
+		capabilities::{Capabilities, Targets},
 	},
 	iam::{Level, Role},
 };

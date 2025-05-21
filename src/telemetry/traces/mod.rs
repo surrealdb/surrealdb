@@ -2,8 +2,8 @@ pub mod rpc;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use crate::cnf::{TELEMETRY_DISABLE_TRACING, TELEMETRY_PROVIDER};
-use crate::err::Error;
 use crate::telemetry::OTEL_DEFAULT_RESOURCE;
+use anyhow::Result;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_sdk::trace::{Config, TracerProvider};
@@ -11,7 +11,7 @@ use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
 // Returns a tracer provider based on the SURREAL_TELEMETRY_PROVIDER environment variable
-pub fn new<S>(filter: CustomEnvFilter) -> Result<Option<Box<dyn Layer<S> + Send + Sync>>, Error>
+pub fn new<S>(filter: CustomEnvFilter) -> Result<Option<Box<dyn Layer<S> + Send + Sync>>>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
@@ -48,8 +48,8 @@ where
 pub mod tests {
 	use futures::StreamExt;
 	use opentelemetry_proto::tonic::collector::trace::v1::{
-		trace_service_server::{TraceService, TraceServiceServer},
 		ExportTraceServiceRequest, ExportTraceServiceResponse,
+		trace_service_server::{TraceService, TraceServiceServer},
 	};
 	use std::{net::SocketAddr, sync::Mutex};
 	use tokio::sync::mpsc;

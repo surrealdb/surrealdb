@@ -6,8 +6,8 @@ pub mod revision;
 use ::revision::Revisioned;
 use serde::Serialize;
 
-use super::{request::Request, RpcError};
-use crate::sql::Value;
+use super::{RpcError, request::Request};
+use crate::expr::Value;
 
 pub const PROTOCOLS: [&str; 4] = [
 	"json",     // For basic JSON serialisation

@@ -1,12 +1,12 @@
-use crate::err::Error;
+use crate::expr::with::With;
+use crate::expr::{Array, Expression, Idiom, Number, Object};
+use crate::expr::{Operator, Value};
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
-use crate::sql::with::With;
-use crate::sql::{Array, Expression, Idiom, Number, Object};
-use crate::sql::{Operator, Value};
+use anyhow::Result;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
@@ -40,7 +40,7 @@ impl PlanBuilder {
 	pub(super) async fn build(
 		ctx: &StatementContext<'_>,
 		p: PlanBuilderParameters,
-	) -> Result<Plan, Error> {
+	) -> Result<Plan> {
 		let mut b = PlanBuilder {
 			has_indexes: false,
 			non_range_indexes: Default::default(),
@@ -89,8 +89,13 @@ impl PlanBuilder {
 					// Evaluate the record strategy
 					let record_strategy =
 						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+					let is_order = if let Some(io) = p.order_limit {
+						io.ixr == ir
+					} else {
+						false
+					};
 					// Return the plan
-					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
+					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy, is_order));
 				}
 			}
 
@@ -136,7 +141,7 @@ impl PlanBuilder {
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
 		granted_permission: GrantedPermission,
-	) -> Result<Plan, Error> {
+	) -> Result<Plan> {
 		// Evaluate the record strategy
 		let rs = ctx.check_record_strategy(false, granted_permission)?;
 		// Evaluate the scan direction
@@ -301,7 +306,8 @@ pub(super) enum Plan {
 	/// 1. The reference to index
 	/// 2. The index range
 	/// 3. A record strategy
-	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy),
+	/// 4. True if it matches an order option
+	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, bool),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
@@ -346,6 +352,10 @@ impl IndexOption {
 
 	pub(super) fn require_distinct(&self) -> bool {
 		matches!(self.op.as_ref(), IndexOperator::Union(_))
+	}
+
+	pub(super) fn is_order(&self) -> bool {
+		matches!(self.op.as_ref(), IndexOperator::Order(_))
 	}
 
 	pub(super) fn ix_ref(&self) -> &IndexReference {
@@ -578,9 +588,9 @@ impl UnionRangeQueryBuilder {
 
 #[cfg(test)]
 mod tests {
+	use crate::expr::{Array, Idiom, Value};
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-	use crate::sql::{Array, Idiom, Value};
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 	use std::sync::Arc;

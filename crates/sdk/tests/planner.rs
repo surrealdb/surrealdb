@@ -4,13 +4,13 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::{new_ds, skip_ok};
+use surrealdb::Result;
 use surrealdb::dbs::{Response, Session};
-use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
 #[tokio::test]
-async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
+async fn select_where_iterate_three_multi_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &three_multi_index_query("", ""), 12).await?;
 	skip_ok(&mut res, 8)?;
@@ -24,7 +24,7 @@ async fn select_where_iterate_three_multi_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_iterate_three_multi_index_parallel() -> Result<(), Error> {
+async fn select_where_iterate_three_multi_index_parallel() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &three_multi_index_query("", "PARALLEL"), 12).await?;
 	skip_ok(&mut res, 8)?;
@@ -38,7 +38,7 @@ async fn select_where_iterate_three_multi_index_parallel() -> Result<(), Error> 
 }
 
 #[tokio::test]
-async fn select_where_iterate_three_multi_index_with_all_index() -> Result<(), Error> {
+async fn select_where_iterate_three_multi_index_with_all_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(
 		&dbs,
@@ -57,7 +57,7 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<(), E
 }
 
 #[tokio::test]
-async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<(), Error> {
+async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res =
 		execute_test(&dbs, &three_multi_index_query("WITH INDEX ft_company", ""), 12).await?;
@@ -73,7 +73,7 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 }
 
 #[tokio::test]
-async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), Error> {
+async fn select_where_iterate_three_multi_index_with_one_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res =
 		execute_test(&dbs, &three_multi_index_query("WITH INDEX uniq_name", ""), 12).await?;
@@ -89,7 +89,7 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<(), E
 }
 
 #[tokio::test]
-async fn select_where_iterate_two_multi_index() -> Result<(), Error> {
+async fn select_where_iterate_two_multi_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &two_multi_index_query("", ""), 9).await?;
 	skip_ok(&mut res, 5)?;
@@ -103,7 +103,7 @@ async fn select_where_iterate_two_multi_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_iterate_two_multi_index_with_one_index() -> Result<(), Error> {
+async fn select_where_iterate_two_multi_index_with_one_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre", ""), 9).await?;
 	skip_ok(&mut res, 5)?;
@@ -117,7 +117,7 @@ async fn select_where_iterate_two_multi_index_with_one_index() -> Result<(), Err
 }
 
 #[tokio::test]
-async fn select_where_iterate_two_multi_index_with_two_index() -> Result<(), Error> {
+async fn select_where_iterate_two_multi_index_with_two_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res =
 		execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre,uniq_name", ""), 9).await?;
@@ -132,7 +132,7 @@ async fn select_where_iterate_two_multi_index_with_two_index() -> Result<(), Err
 }
 
 #[tokio::test]
-async fn select_where_iterate_two_no_index() -> Result<(), Error> {
+async fn select_where_iterate_two_no_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &two_multi_index_query("WITH NOINDEX", ""), 9).await?;
 	skip_ok(&mut res, 5)?;
@@ -145,18 +145,14 @@ async fn select_where_iterate_two_no_index() -> Result<(), Error> {
 	Ok(())
 }
 
-async fn execute_test(
-	dbs: &Datastore,
-	sql: &str,
-	expected_result: usize,
-) -> Result<Vec<Response>, Error> {
+async fn execute_test(dbs: &Datastore, sql: &str, expected_result: usize) -> Result<Vec<Response>> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	Ok(res)
 }
 
-fn check_result(res: &mut Vec<Response>, expected: &str) -> Result<(), Error> {
+fn check_result(res: &mut Vec<Response>, expected: &str) -> Result<()> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(expected);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
@@ -494,7 +490,7 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 			]";
 
 #[tokio::test]
-async fn select_with_no_index_unary_operator() -> Result<(), Error> {
+async fn select_with_no_index_unary_operator() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res = dbs
@@ -530,7 +526,7 @@ async fn select_with_no_index_unary_operator() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_unsupported_unary_operator() -> Result<(), Error> {
+async fn select_unsupported_unary_operator() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res =
@@ -565,7 +561,7 @@ async fn select_unsupported_unary_operator() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_compound_index() -> Result<(), Error> {
+async fn select_with_compound_index() -> Result<()> {
 	let sql = r"
 		DEFINE INDEX idxNameEvent ON event FIELDS name, event;
 		DEFINE INDEX idxNameEventPath ON event FIELDS name, event, path;
@@ -683,7 +679,7 @@ async fn select_range(
 	to_incl: bool,
 	explain: &str,
 	result: &str,
-) -> Result<(), Error> {
+) -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &range_test(unique, from_incl, to_incl), 8).await?;
 	skip_ok(&mut res, 6)?;
@@ -738,12 +734,12 @@ const RESULT_FROM_TO: &str = r"[
 		}
 	]";
 #[tokio::test]
-async fn select_index_range_from_to() -> Result<(), Error> {
+async fn select_index_range_from_to() -> Result<()> {
 	select_range(false, false, false, EXPLAIN_FROM_TO, RESULT_FROM_TO).await
 }
 
 #[tokio::test]
-async fn select_unique_range_from_to() -> Result<(), Error> {
+async fn select_unique_range_from_to() -> Result<()> {
 	select_range(true, false, false, EXPLAIN_FROM_TO, RESULT_FROM_TO).await
 }
 
@@ -789,12 +785,12 @@ const RESULT_FROM_INCL_TO: &str = r"[
 	]";
 
 #[tokio::test]
-async fn select_index_range_from_incl_to() -> Result<(), Error> {
+async fn select_index_range_from_incl_to() -> Result<()> {
 	select_range(false, true, false, EXPLAIN_FROM_INCL_TO, RESULT_FROM_INCL_TO).await
 }
 
 #[tokio::test]
-async fn select_unique_range_from_incl_to() -> Result<(), Error> {
+async fn select_unique_range_from_incl_to() -> Result<()> {
 	select_range(true, true, false, EXPLAIN_FROM_INCL_TO, RESULT_FROM_INCL_TO).await
 }
 
@@ -840,12 +836,12 @@ const RESULT_FROM_TO_INCL: &str = r"[
 	]";
 
 #[tokio::test]
-async fn select_index_range_from_to_incl() -> Result<(), Error> {
+async fn select_index_range_from_to_incl() -> Result<()> {
 	select_range(false, false, true, EXPLAIN_FROM_TO_INCL, RESULT_FROM_TO_INCL).await
 }
 
 #[tokio::test]
-async fn select_unique_range_from_to_incl() -> Result<(), Error> {
+async fn select_unique_range_from_to_incl() -> Result<()> {
 	select_range(true, false, true, EXPLAIN_FROM_TO_INCL, RESULT_FROM_TO_INCL).await
 }
 
@@ -894,12 +890,12 @@ const RESULT_FROM_INCL_TO_INCL: &str = r"[
 	]";
 
 #[tokio::test]
-async fn select_index_range_from_incl_to_incl() -> Result<(), Error> {
+async fn select_index_range_from_incl_to_incl() -> Result<()> {
 	select_range(false, true, true, EXPLAIN_FROM_INCL_TO_INCL, RESULT_FROM_INCL_TO_INCL).await
 }
 
 #[tokio::test]
-async fn select_unique_range_from_incl_to_incl() -> Result<(), Error> {
+async fn select_unique_range_from_incl_to_incl() -> Result<()> {
 	select_range(true, true, true, EXPLAIN_FROM_INCL_TO_INCL, RESULT_FROM_INCL_TO_INCL).await
 }
 
@@ -926,7 +922,7 @@ async fn select_single_range_operator(
 	op: &str,
 	explain: &str,
 	result: &str,
-) -> Result<(), Error> {
+) -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, &single_range_operator_test(unique, op), 6).await?;
 	skip_ok(&mut res, 4)?;
@@ -975,12 +971,12 @@ const RESULT_LESS: &str = r"[
 		}
 	]";
 #[tokio::test]
-async fn select_index_single_range_operator_less() -> Result<(), Error> {
+async fn select_index_single_range_operator_less() -> Result<()> {
 	select_single_range_operator(false, "<", EXPLAIN_LESS, RESULT_LESS).await
 }
 
 #[tokio::test]
-async fn select_unique_single_range_operator_less() -> Result<(), Error> {
+async fn select_unique_single_range_operator_less() -> Result<()> {
 	select_single_range_operator(true, "<", EXPLAIN_LESS, RESULT_LESS).await
 }
 
@@ -1020,12 +1016,12 @@ const RESULT_LESS_OR_EQUAL: &str = r"[
 	]";
 
 #[tokio::test]
-async fn select_index_single_range_operator_less_or_equal() -> Result<(), Error> {
+async fn select_index_single_range_operator_less_or_equal() -> Result<()> {
 	select_single_range_operator(false, "<=", EXPLAIN_LESS_OR_EQUAL, RESULT_LESS_OR_EQUAL).await
 }
 
 #[tokio::test]
-async fn select_unique_single_range_operator_less_or_equal() -> Result<(), Error> {
+async fn select_unique_single_range_operator_less_or_equal() -> Result<()> {
 	select_single_range_operator(true, "<=", EXPLAIN_LESS_OR_EQUAL, RESULT_LESS_OR_EQUAL).await
 }
 
@@ -1061,12 +1057,12 @@ const RESULT_MORE: &str = r"[
 		}
 	]";
 #[tokio::test]
-async fn select_index_single_range_operator_more() -> Result<(), Error> {
+async fn select_index_single_range_operator_more() -> Result<()> {
 	select_single_range_operator(false, ">", EXPLAIN_MORE, RESULT_MORE).await
 }
 
 #[tokio::test]
-async fn select_unique_single_range_operator_more() -> Result<(), Error> {
+async fn select_unique_single_range_operator_more() -> Result<()> {
 	select_single_range_operator(true, ">", EXPLAIN_MORE, RESULT_MORE).await
 }
 
@@ -1106,17 +1102,17 @@ const RESULT_MORE_OR_EQUAL: &str = r"[
 	]";
 
 #[tokio::test]
-async fn select_index_single_range_operator_more_or_equal() -> Result<(), Error> {
+async fn select_index_single_range_operator_more_or_equal() -> Result<()> {
 	select_single_range_operator(false, ">=", EXPLAIN_MORE_OR_EQUAL, RESULT_MORE_OR_EQUAL).await
 }
 
 #[tokio::test]
-async fn select_unique_single_range_operator_more_or_equal() -> Result<(), Error> {
+async fn select_unique_single_range_operator_more_or_equal() -> Result<()> {
 	select_single_range_operator(true, ">=", EXPLAIN_MORE_OR_EQUAL, RESULT_MORE_OR_EQUAL).await
 }
 
 #[tokio::test]
-async fn select_with_idiom_param_value() -> Result<(), Error> {
+async fn select_with_idiom_param_value() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let sql = "
@@ -1200,7 +1196,7 @@ async fn test_contains(
 	sql: &str,
 	index_explain: &str,
 	result: &str,
-) -> Result<(), Error> {
+) -> Result<()> {
 	let mut res = execute_test(dbs, sql, 5).await?;
 
 	{
@@ -1228,7 +1224,7 @@ async fn test_contains(
 }
 
 #[tokio::test]
-async fn select_contains() -> Result<(), Error> {
+async fn select_contains() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
 	skip_ok(&mut res, 3)?;
@@ -1273,7 +1269,7 @@ async fn select_contains() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_contains_all() -> Result<(), Error> {
+async fn select_contains_all() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
 	skip_ok(&mut res, 3)?;
@@ -1316,7 +1312,7 @@ async fn select_contains_all() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_contains_any() -> Result<(), Error> {
+async fn select_contains_any() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
 	skip_ok(&mut res, 3)?;
@@ -1364,7 +1360,7 @@ const CONTAINS_UNIQUE_CONTENT: &str = r#"
 		CREATE student:3 CONTENT { subject: "hindi", mark: 30 };"#;
 
 #[tokio::test]
-async fn select_unique_contains() -> Result<(), Error> {
+async fn select_unique_contains() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res = execute_test(&dbs, CONTAINS_UNIQUE_CONTENT, 3).await?;
 	skip_ok(&mut res, 3)?;
@@ -1409,7 +1405,7 @@ async fn select_unique_contains() -> Result<(), Error> {
 // This test checks that:
 // 1. Datetime are recognized by the query planner
 // 2. we can take the value store in a variable
-async fn select_with_datetime_value() -> Result<(), Error> {
+async fn select_with_datetime_value() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
@@ -1472,7 +1468,7 @@ async fn select_with_datetime_value() -> Result<(), Error> {
 // This test checks that:
 // 1. UUID are recognized by the query planner
 // 2. we can take the value from a object stored as a variable
-async fn select_with_uuid_value() -> Result<(), Error> {
+async fn select_with_uuid_value() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
@@ -1533,7 +1529,7 @@ async fn select_with_uuid_value() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_in_operator() -> Result<(), Error> {
+async fn select_with_in_operator() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
@@ -1593,7 +1589,7 @@ async fn select_with_in_operator() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
+async fn select_with_in_operator_uniq_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
@@ -1657,7 +1653,7 @@ async fn select_with_in_operator_uniq_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_in_and_not_valid_compound_index() -> Result<(), Error> {
+async fn select_with_in_and_not_valid_compound_index() -> Result<()> {
 	let sql = "
 		DEFINE INDEX idx_account_type ON test FIELDS account, type;
 		DEFINE INDEX idx_type_value ON test FIELDS type, value;
@@ -1758,7 +1754,7 @@ async fn select_with_in_and_not_valid_compound_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_record_id_link_no_index() -> Result<(), Error> {
+async fn select_with_record_id_link_no_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
@@ -1810,7 +1806,7 @@ async fn select_with_record_id_link_no_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_record_id_link_index() -> Result<(), Error> {
+async fn select_with_record_id_link_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
@@ -1875,7 +1871,7 @@ async fn select_with_record_id_link_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_record_id_link_unique_index() -> Result<(), Error> {
+async fn select_with_record_id_link_unique_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
@@ -1939,7 +1935,7 @@ async fn select_with_record_id_link_unique_index() -> Result<(), Error> {
 	Ok(())
 }
 #[tokio::test]
-async fn select_with_record_id_link_unique_remote_index() -> Result<(), Error> {
+async fn select_with_record_id_link_unique_remote_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
@@ -2007,7 +2003,7 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
+async fn select_with_record_id_link_full_text_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
@@ -2065,7 +2061,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Error> {
+async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
@@ -2112,7 +2108,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<(), Er
 }
 
 #[tokio::test]
-async fn select_with_record_id_index() -> Result<(), Error> {
+async fn select_with_record_id_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
@@ -2260,7 +2256,7 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_exact_operator() -> Result<(), Error> {
+async fn select_with_exact_operator() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
@@ -2356,7 +2352,7 @@ async fn select_with_exact_operator() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_with_non_boolean_expression() -> Result<(), Error> {
+async fn select_with_non_boolean_expression() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
@@ -2428,363 +2424,7 @@ async fn select_with_non_boolean_expression() -> Result<(), Error> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn select_from_standard_index() -> Result<(), Error> {
-	//
-	let sql = "
-		DEFINE INDEX time ON TABLE session COLUMNS time;
-		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
-		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
-		CREATE session:3 SET other = 'test';
-		CREATE session:4 SET time = null;
-		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
-		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
-		SELECT * FROM session ORDER BY time ASC LIMIT 4 EXPLAIN;
-		SELECT * FROM session ORDER BY time ASC LIMIT 4;
-		SELECT * FROM session ORDER BY time ASC EXPLAIN;
-		SELECT * FROM session ORDER BY time ASC;
-		SELECT * FROM session ORDER BY time DESC LIMIT 4 EXPLAIN;
-		SELECT * FROM session ORDER BY time DESC LIMIT 4;
-		SELECT * FROM session ORDER BY time DESC EXPLAIN;
-		SELECT * FROM session ORDER BY time DESC;
-	";
-	let mut t = Test::new(sql).await?;
-	t.expect_size(15)?;
-	t.skip_ok(7)?;
-	//
-	t.expect_vals(&[
-		"[
-			{
-				detail: {
-					plan: {
-						index: 'time',
-						operator: 'Order'
-					},
-					table: 'session'
-				},
-				operation: 'Iterate Index'
-			},
-			{
-				detail: {
-					limit: 4,
-					type: 'MemoryOrderedLimit'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:3,
-				other: 'test'
-			},
-			{
-				id: session:4,
-				time: NULL
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			}
-		]",
-		"[
-			{
-				detail: {
-					plan: {
-						index: 'time',
-						operator: 'Order'
-					},
-					table: 'session'
-				},
-				operation: 'Iterate Index'
-			},
-			{
-				detail: {
-					type: 'MemoryOrdered'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:3,
-				other: 'test'
-			},
-			{
-				id: session:4,
-				time: NULL
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			}
-		]",
-		"[
-			{
-				detail: {
-					direction: 'forward',
-					table: 'session'
-				},
-				operation: 'Iterate Table'
-			},
-			{
-				detail: {
-					limit: 4,
-					type: 'MemoryOrderedLimit'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			}
-		]",
-		"[
-			{
-				detail: {
-					direction: 'forward',
-					table: 'session'
-				},
-				operation: 'Iterate Table'
-			},
-			{
-				detail: {
-					type: 'MemoryOrdered'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:4,
-				time: NULL
-			},
-			{
-				id: session:3,
-				other: 'test'
-			}
-		]",
-	])?;
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn select_from_unique_index() -> Result<(), Error> {
-	//
-	let sql = "
-		DEFINE INDEX time ON TABLE session COLUMNS time UNIQUE;
-		CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
-		CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
-		CREATE session:3 SET other = 'test';
-		CREATE session:4 SET time = null;
-		CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
-		CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
-		SELECT * FROM session ORDER BY time ASC LIMIT 3 EXPLAIN;
-		SELECT * FROM session ORDER BY time ASC LIMIT 3;
-		SELECT * FROM session ORDER BY time ASC EXPLAIN;
-		SELECT * FROM session ORDER BY time ASC;
-		SELECT * FROM session ORDER BY time DESC LIMIT 3 EXPLAIN;
-		SELECT * FROM session ORDER BY time DESC LIMIT 3;
-		SELECT * FROM session ORDER BY time DESC EXPLAIN;
-		SELECT * FROM session ORDER BY time DESC;
-	";
-	let mut t = Test::new(sql).await?;
-	t.expect_size(15)?;
-	t.skip_ok(7)?;
-	//
-	t.expect_vals(&[
-		"[
-			{
-				detail: {
-					plan: {
-						index: 'time',
-						operator: 'Order'
-					},
-					table: 'session'
-				},
-				operation: 'Iterate Index'
-			},
-			{
-				detail: {
-					limit: 3,
-					type: 'MemoryOrderedLimit'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			}
-		]",
-		"[
-			{
-				detail: {
-					plan: {
-						index: 'time',
-						operator: 'Order'
-					},
-					table: 'session'
-				},
-				operation: 'Iterate Index'
-			},
-			{
-				detail: {
-					type: 'MemoryOrdered'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			}
-		]",
-		"[
-			{
-				detail: {
-					direction: 'forward',
-					table: 'session'
-				},
-				operation: 'Iterate Table'
-			},
-			{
-				detail: {
-					limit: 3,
-					type: 'MemoryOrderedLimit'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			}
-		]",
-		" [
-			{
-				detail: {
-					direction: 'forward',
-					table: 'session'
-				},
-				operation: 'Iterate Table'
-			},
-			{
-				detail: {
-					type: 'MemoryOrdered'
-				},
-				operation: 'Collector'
-			}
-		]",
-		"[
-			{
-				id: session:5,
-				time: d'2024-07-01T02:00:00Z'
-			},
-			{
-				id: session:1,
-				time: d'2024-07-01T01:00:00Z'
-			},
-			{
-				id: session:6,
-				time: d'2024-06-30T23:30:00Z'
-			},
-			{
-				id: session:2,
-				time: d'2024-06-30T23:00:00Z'
-			},
-			{
-				id: session:4,
-				time: NULL
-			},
-			{
-				id: session:3,
-				other: 'test'
-			}
-		]",
-	])?;
-	//
-	Ok(())
-}
-
-async fn select_composite_index(unique: bool) -> Result<(), Error> {
+async fn select_composite_index(unique: bool) -> Result<()> {
 	//
 	let sql = format!(
 		"
@@ -2873,17 +2513,17 @@ async fn select_composite_index(unique: bool) -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_composite_standard_index() -> Result<(), Error> {
+async fn select_composite_standard_index() -> Result<()> {
 	select_composite_index(false).await
 }
 
 #[tokio::test]
-async fn select_composite_unique_index() -> Result<(), Error> {
+async fn select_composite_unique_index() -> Result<()> {
 	select_composite_index(true).await
 }
 
 #[tokio::test]
-async fn select_where_index_boolean_behaviour() -> Result<(), Error> {
+async fn select_where_index_boolean_behaviour() -> Result<()> {
 	let sql = r"
 		DEFINE INDEX flagIndex ON TABLE test COLUMNS flag;
 		CREATE test:t CONTENT { flag:true };
@@ -2915,7 +2555,7 @@ async fn select_where_index_boolean_behaviour() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_memory_ordered_collector() -> Result<(), Error> {
+async fn select_memory_ordered_collector() -> Result<()> {
 	let sql = r"
 		CREATE |i:1500| SET v = rand::guid() RETURN NONE;
 		SELECT v FROM i ORDER BY RAND() EXPLAIN;
@@ -2968,11 +2608,11 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 	}
 
 	// Extract the array from a value
-	let mut get_array = || {
+	let mut get_array = || -> Result<_> {
 		let v = t.next_value()?;
 		if let Value::Array(a) = &v {
 			assert_eq!(a.len(), 1500);
-			Ok::<_, Error>(a.to_vec())
+			Ok(a.to_vec())
 		} else {
 			panic!("Expected a Value::Array but get: {v}");
 		}
@@ -2997,7 +2637,7 @@ async fn select_memory_ordered_collector() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_limit_start() -> Result<(), Error> {
+async fn select_limit_start() -> Result<()> {
 	let sql = r"
 		CREATE |item:1000|;
 		SELECT * FROM item LIMIT 10 START 2 PARALLEL EXPLAIN FULL;
@@ -3055,7 +2695,7 @@ async fn select_limit_start() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_limit_start_order() -> Result<(), Error> {
+async fn select_limit_start_order() -> Result<()> {
 	let sql = r"
 		CREATE |item:1000| RETURN NONE;
 		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL EXPLAIN;
@@ -3095,7 +2735,7 @@ async fn select_limit_start_order() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
+async fn select_count_group_all_with_or_without_index() -> Result<()> {
 	let sql = r"
 		FOR $i IN 0..10000 {
 			 CREATE indexPerformance3 CONTENT {
@@ -3184,7 +2824,7 @@ async fn select_count_group_all_with_or_without_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_limit_start_array() -> Result<(), Error> {
+async fn select_limit_start_array() -> Result<()> {
 	Test::new("SELECT * FROM [1,2,3,4,5,6,7,8,9,10] LIMIT 5 START 0;")
 		.await?
 		.expect_val("[1, 2, 3, 4, 5]")?;

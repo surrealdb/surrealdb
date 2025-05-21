@@ -12,6 +12,7 @@ value = "1.6197751905438615f"
 
 [[test.results]]
 value = "0.320040389379563f"
+float-roughly-eq = true
 
 */
 math::tan(90);

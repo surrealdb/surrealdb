@@ -1,16 +1,17 @@
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
+use crate::expr::idiom::Idiom;
+use crate::expr::index::Distance;
+use crate::expr::thing::Thing;
+use crate::expr::value::{CastError, CoerceError, Value};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
-use crate::sql::idiom::Idiom;
-use crate::sql::index::Distance;
-use crate::sql::thing::Thing;
-use crate::sql::value::{CastError, CoerceError, Value};
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
+use core::fmt;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -29,11 +30,6 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
-	/// This error is used for ignoring a document when processing a query
-	#[doc(hidden)]
-	#[error("Conditional clause is not truthy")]
-	Ignore,
-
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),
@@ -83,7 +79,9 @@ pub enum Error {
 	TxValueTooLarge,
 
 	/// There was a transaction error that can be retried
-	#[error("Failed to commit transaction due to a read or write conflict. This transaction can be retried")]
+	#[error(
+		"Failed to commit transaction due to a read or write conflict. This transaction can be retried"
+	)]
 	TxRetryable,
 
 	/// The transaction writes too much data for the KV store
@@ -129,7 +127,9 @@ pub enum Error {
 	},
 
 	/// Given test operation failed for JSON Patch
-	#[error("Given test operation failed for JSON Patch. Expected `{expected}`, but got `{got}` instead.")]
+	#[error(
+		"Given test operation failed for JSON Patch. Expected `{expected}`, but got `{got}` instead."
+	)]
 	PatchTest {
 		expected: String,
 		got: String,
@@ -145,7 +145,9 @@ pub enum Error {
 		name: String,
 	},
 
-	#[error("Found '{field}' in SELECT clause on line {line}, but field is not an aggregate function, and is not present in GROUP BY expression")]
+	#[error(
+		"Found '{field}' in SELECT clause on line {line}, but field is not an aggregate function, and is not present in GROUP BY expression"
+	)]
 	InvalidField {
 		line: usize,
 		field: String,
@@ -157,19 +159,25 @@ pub enum Error {
 		value: Value,
 	},
 
-	#[error("Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression")]
+	#[error(
+		"Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression"
+	)]
 	InvalidSplit {
 		line: usize,
 		field: String,
 	},
 
-	#[error("Found '{field}' in ORDER BY clause on line {line}, but field is not present in SELECT expression")]
+	#[error(
+		"Found '{field}' in ORDER BY clause on line {line}, but field is not present in SELECT expression"
+	)]
 	InvalidOrder {
 		line: usize,
 		field: String,
 	},
 
-	#[error("Found '{field}' in GROUP BY clause on line {line}, but field is not present in SELECT expression")]
+	#[error(
+		"Found '{field}' in GROUP BY clause on line {line}, but field is not present in SELECT expression"
+	)]
 	InvalidGroup {
 		line: usize,
 		field: String,
@@ -222,7 +230,9 @@ pub enum Error {
 	},
 
 	/// The wrong quantity or magnitude of arguments was given for the specified function
-	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
+	#[error(
+		"There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}"
+	)]
 	FunctionCheck {
 		name: String,
 		value: String,
@@ -241,7 +251,9 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
-	#[error("Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}")]
+	#[error(
+		"Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}"
+	)]
 	InvalidVectorDistance {
 		left: SharedVector,
 		right: SharedVector,
@@ -605,7 +617,9 @@ pub enum Error {
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
-	#[error("Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}")]
+	#[error(
+		"Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}"
+	)]
 	FieldValue {
 		thing: String,
 		value: String,
@@ -815,12 +829,6 @@ pub enum Error {
 	/// There was an error with model computation
 	#[error("There was an error with model computation: {0}")]
 	ModelComputation(String),
-
-	/// The feature has not yet being implemented
-	#[error("Feature not yet implemented: {feature}")]
-	FeatureNotYetImplemented {
-		feature: String,
-	},
 
 	/// Duplicated match references are not allowed
 	#[error("Duplicated Match reference: {mr}")]
@@ -1069,7 +1077,7 @@ pub enum Error {
 	#[error("A node task has failed: {0}")]
 	NodeAgent(&'static str),
 
-	/// The supplied type could not be serialiazed into `sql::Value`
+	/// The supplied type could not be serialiazed into `expr::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
 
@@ -1217,7 +1225,9 @@ pub enum Error {
 	InvalidStorageVersion,
 
 	/// There was an outdated storage version stored in the database
-	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
+	#[error(
+		"The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation"
+	)]
 	OutdatedStorageVersion,
 
 	#[error("Found a non-computed value where they are not allowed")]
@@ -1297,7 +1307,9 @@ pub enum Error {
 	RefsTypeConflict(String, String),
 
 	/// The `references` type cannot be used with other clauses altering or working with the value
-	#[error("When specifying a `TYPE` clause with `references`, all variants must be of type `references`.")]
+	#[error(
+		"When specifying a `TYPE` clause with `references`, all variants must be of type `references`."
+	)]
 	RefsMismatchingVariants,
 
 	/// Something went wrong while updating references
@@ -1305,10 +1317,14 @@ pub enum Error {
 	RefsUpdateFailure(String, String),
 
 	/// Cannot process `Value::Refs` as there is no Record ID in the context for the operation
-	#[error("Cannot obtain a list of references as there is no Record ID in the context for the operation")]
+	#[error(
+		"Cannot obtain a list of references as there is no Record ID in the context for the operation"
+	)]
 	InvalidRefsContext,
 
-	#[error("Cannot set field `{name}` with type `{kind}` as it mismatched with field `{existing_name}` with type `{existing_kind}`")]
+	#[error(
+		"Cannot set field `{name}` with type `{kind}` as it mismatched with field `{existing_name}` with type `{existing_kind}`"
+	)]
 	MismatchedFieldTypes {
 		name: String,
 		kind: String,
@@ -1354,6 +1370,15 @@ pub enum Error {
 
 	#[error("Failed to connect to bucket: {0}")]
 	BucketConnectionFailed(String),
+}
+
+impl Error {
+	#[track_caller]
+	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
+		let location = std::panic::Location::caller();
+		let message = format!("{}:{}: {}", location.file(), location.line(), message);
+		Error::Unreachable(message)
+	}
 }
 
 impl From<Error> for String {
