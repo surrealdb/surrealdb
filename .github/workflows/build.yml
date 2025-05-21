@@ -33,6 +33,11 @@ on:
         type: boolean
         default: true
         description: "Upload build artifacts"
+      release:
+        required: false
+        type: boolean
+        default: true
+        description: "Compile with release flag"
     secrets:
       AWS_CI_ACCESS_KEY_ID:
         description: "AWS access key ID"
@@ -116,8 +121,12 @@ jobs:
               brew install protobuf
 
               # Build
+              extra_args=""
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -126,7 +135,7 @@ jobs:
                 tar -xz -C /tmp/onnxruntime/
               export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
-              cargo build $extraFeatures --release --locked --target x86_64-apple-darwin
+              cargo build ${extra_args} --locked --target x86_64-apple-darwin
 
               # Package
               cp target/x86_64-apple-darwin/release/surreal surreal
@@ -145,8 +154,12 @@ jobs:
               brew install protobuf
 
               # Build
+              extra_args=""
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -155,7 +168,7 @@ jobs:
                 tar -xz -C /tmp/onnxruntime/
               export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
-              cargo build $extraFeatures --release --locked --target aarch64-apple-darwin
+              cargo build ${extra_args} --locked --target aarch64-apple-darwin
 
               # Package
               cp target/aarch64-apple-darwin/release/surreal surreal
@@ -169,8 +182,12 @@ jobs:
             file: surreal-${{ inputs.name }}.linux-amd64
             build-step: |
               # Build
+              extra_args=""
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -189,7 +206,7 @@ jobs:
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
-                  --target x86_64-unknown-linux-gnu ${extraFeatures} --release --locked
+                  --target x86_64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
               cp target/x86_64-unknown-linux-gnu/release/surreal surreal
@@ -209,8 +226,12 @@ jobs:
               set -x
 
               # Build
+              extra_args=""
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -229,7 +250,7 @@ jobs:
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
-                  --target aarch64-unknown-linux-gnu ${extraFeatures} --release --locked
+                  --target aarch64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
               cp target/aarch64-unknown-linux-gnu/release/surreal surreal
@@ -252,8 +273,12 @@ jobs:
               vcpkg integrate install
 
               # Build
+              extra_args=""
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -262,7 +287,7 @@ jobs:
               unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
 
-              cargo build $extraFeatures --release --locked --target x86_64-pc-windows-msvc
+              cargo build ${extra_args} --locked --target x86_64-pc-windows-msvc
 
               # Package
               ./target/x86_64-pc-windows-msvc/release/surreal.exe version
