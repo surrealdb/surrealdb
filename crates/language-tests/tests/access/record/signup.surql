@@ -1,6 +1,6 @@
 /**
 [env]
-imports = ["access/record/signin_signup_import.surql"]
+imports = ["access/record/signup_import.surql"]
 
 signup = """{
 	ns: "test",

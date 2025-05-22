@@ -35,7 +35,7 @@ DEFINE TABLE foo
 	PERMISSIONS
 		FOR select
 			WHERE published = true
-			OR user = $auth.id;
+			OR user = $auth;
 
 CREATE foo:bar SET published = true, user = user:other;
 CREATE foo:baz SET published = false, user = user:other;
