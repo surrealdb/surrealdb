@@ -4,17 +4,18 @@ use crate::dbs::{Force, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::ft::search::Search2;
+use crate::expr::array::Array;
+use crate::expr::index::{HnswParams, Index, MTreeParams, SearchParams};
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{FlowResultExt as _, Part, Thing, Value};
+use crate::idx::IndexKeyBase;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::IndexKeyBase;
 use crate::key;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
-use crate::sql::array::Array;
-use crate::sql::index::{HnswParams, Index, MTreeParams, Search2Params, SearchParams};
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{FlowResultExt as _, Part, Thing, Value};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 impl Document {
@@ -24,7 +25,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Was this force targeted at a specific index?
 		let targeted_force = matches!(opt.force, Force::Index(_));
 		// Collect indexes or skip
@@ -71,7 +72,7 @@ impl Document {
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
 		rid: &Thing,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			match ib.consume(ctx, opt.ns_db()?, ix, o, n, rid).await? {
@@ -110,7 +111,7 @@ impl Document {
 		opt: &Options,
 		ix: &DefineIndexStatement,
 		doc: &CursorDoc,
-	) -> Result<Option<Vec<Value>>, Error> {
+	) -> Result<Option<Vec<Value>>> {
 		if !doc.doc.as_ref().is_some() {
 			return Ok(None);
 		}
@@ -289,17 +290,17 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
+	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, None))
 	}
 
-	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index, Error> {
+	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
 	}
 
-	async fn index_unique(&mut self, ctx: &Context) -> Result<(), Error> {
+	async fn index_unique(&mut self, ctx: &Context) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Lock the transaction
@@ -310,8 +311,13 @@ impl<'a> IndexOperation<'a> {
 			for o in i {
 				let key = self.get_unique_index_key(&o)?;
 				match txn.delc(key, Some(revision::to_vec(self.rid)?)).await {
-					Err(Error::TxConditionNotMet) => Ok(()),
-					Err(e) => Err(e),
+					Err(e) => {
+						if matches!(e.downcast_ref(), Some(Error::TxConditionNotMet)) {
+							Ok(())
+						} else {
+							Err(e)
+						}
+					}
 					Ok(v) => Ok(v),
 				}?
 			}
@@ -334,7 +340,7 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_non_unique(&mut self, ctx: &Context) -> Result<(), Error> {
+	async fn index_non_unique(&mut self, ctx: &Context) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Lock the transaction
@@ -345,8 +351,13 @@ impl<'a> IndexOperation<'a> {
 			for o in i {
 				let key = self.get_non_unique_index_key(&o)?;
 				match txn.delc(key, Some(revision::to_vec(self.rid)?)).await {
-					Err(Error::TxConditionNotMet) => Ok(()),
-					Err(e) => Err(e),
+					Err(e) => {
+						if matches!(e.downcast_ref(), Some(Error::TxConditionNotMet)) {
+							Ok(())
+						} else {
+							Err(e)
+						}
+					}
 					Ok(v) => Ok(v),
 				}?
 			}
@@ -367,8 +378,8 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<(), Error> {
-		Err(Error::IndexExists {
+	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<()> {
+		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
 			value: match n.len() {
@@ -383,7 +394,7 @@ impl<'a> IndexOperation<'a> {
 		stk: &mut Stk,
 		ctx: &Context,
 		p: &SearchParams,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let (ns, db) = self.opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 
@@ -416,12 +427,7 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_mtree(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		p: &MTreeParams,
-	) -> Result<(), Error> {
+	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
 		let (ns, db) = self.opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
@@ -437,7 +443,7 @@ impl<'a> IndexOperation<'a> {
 		mt.finish(&txn).await
 	}
 
-	async fn index_hnsw(&mut self, ctx: &Context, p: &HnswParams) -> Result<(), Error> {
+	async fn index_hnsw(&mut self, ctx: &Context, p: &HnswParams) -> Result<()> {
 		let hnsw = ctx.get_index_stores().get_index_hnsw(ctx, self.opt, self.ix, p).await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data

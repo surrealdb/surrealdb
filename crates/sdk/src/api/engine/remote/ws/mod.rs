@@ -5,19 +5,19 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-use crate::api::conn::Command;
-use crate::api::conn::DbResponse;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::api::conn::Command;
+use crate::api::conn::DbResponse;
 use crate::opt::IntoEndpoint;
-use crate::value::Notification;
 use async_channel::Sender;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Duration;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::dbs::Notification;
+use surrealdb_core::expr::Value as CoreValue;
 use trice::Instant;
 use uuid::Uuid;
 
@@ -63,7 +63,7 @@ struct RouterState<Sink, Stream> {
 	/// Messages which aught to be replayed on a reconnect.
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
-	live_queries: HashMap<Uuid, async_channel::Sender<Notification<CoreValue>>>,
+	live_queries: HashMap<Uuid, async_channel::Sender<Notification>>,
 	/// Send requests which are still awaiting an awnser.
 	pending_requests: HashMap<i64, PendingRequest>,
 	/// The last time a message was recieved from the server.

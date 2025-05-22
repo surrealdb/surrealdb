@@ -2,12 +2,12 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn option_import_indexes_should_be_populated() -> Result<(), Error> {
+async fn option_import_indexes_should_be_populated() -> Result<()> {
 	let sql = "
 		OPTION IMPORT;
 		DEFINE INDEX field_num ON test FIELDS num;
@@ -26,27 +26,29 @@ async fn option_import_indexes_should_be_populated() -> Result<(), Error> {
 	assert!(tmp.is_ok(), "{:?}", tmp.err());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			id: test:1,
 			num: 123
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:1,
 				num: 123
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				detail: {
@@ -66,7 +68,8 @@ async fn option_import_indexes_should_be_populated() -> Result<(), Error> {
 				operation: 'Collector'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

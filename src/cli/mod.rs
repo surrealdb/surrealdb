@@ -205,17 +205,20 @@ async fn check_upgrade<C: VersionClient>(
 	client: &C,
 	pkg_version: &str,
 ) -> Result<(), Option<Version>> {
-	if let Ok(version) = client.fetch("latest").await {
-		// Request was successful, compare against current
-		let old_version = upgrade::parse_version(pkg_version).unwrap();
-		let new_version = upgrade::parse_version(&version).unwrap();
-		if old_version < new_version {
-			return Err(Some(new_version));
+	match client.fetch("latest").await {
+		Ok(version) => {
+			// Request was successful, compare against current
+			let old_version = upgrade::parse_version(pkg_version).unwrap();
+			let new_version = upgrade::parse_version(&version).unwrap();
+			if old_version < new_version {
+				return Err(Some(new_version));
+			}
 		}
-	} else {
-		// Request failed, check against date
-		// TODO: We don't have an "expiry" set per-version, so this is a todo
-		// It would return Err(None) if the version is too old
+		_ => {
+			// Request failed, check against date
+			// TODO: We don't have an "expiry" set per-version, so this is a todo
+			// It would return Err(None) if the version is too old
+		}
 	}
 	Ok(())
 }

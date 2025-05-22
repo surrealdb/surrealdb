@@ -1,18 +1,18 @@
 use super::validate_data;
+use crate::Surreal;
+use crate::api::Connection;
+use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::method::OnceLockExt;
 use crate::value::Value;
-use crate::Surreal;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
+use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
 
 /// A merge future
 #[derive(Debug)]
@@ -53,9 +53,12 @@ macro_rules! into_future {
 				let content = match content? {
 					CoreValue::None | CoreValue::Null => None,
 					data => {
-						validate_data(&data, "Tried to merge non-object-like data, only structs and objects are supported")?;
+						validate_data(
+							&data,
+							"Tried to merge non-object-like data, only structs and objects are supported",
+						)?;
 						Some(data)
-					},
+					}
 				};
 
 				let router = client.inner.router.extract()?;

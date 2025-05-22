@@ -1,9 +1,11 @@
-use crate::err::Error;
+use anyhow::Context as _;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::str::FromStr;
-use surrealdb::sql::Value;
+use surrealdb::expr::Value;
+
+use super::error::ResponseError;
 
 #[derive(Debug, Clone)]
 pub struct Param(pub String);
@@ -17,11 +19,13 @@ impl Deref for Param {
 }
 
 impl FromStr for Param {
-	type Err = Error;
+	type Err = ResponseError;
 	#[inline]
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		let s = urlencoding::decode(s)?.into_owned();
-		Ok(Param(s))
+		let s = urlencoding::decode(s)
+			.context("Failed to url-decode query parameter")
+			.map_err(ResponseError)?;
+		Ok(Param(s.into_owned()))
 	}
 }
 
@@ -49,8 +53,10 @@ impl From<Params> for BTreeMap<String, Value> {
 		v.inner
 			.into_iter()
 			.map(|(k, v)| {
-				let value = surrealdb::syn::json_legacy_strand(&v);
-				(k, value.unwrap_or_else(|_| Value::from(v)))
+				let value = surrealdb::syn::json_legacy_strand(&v)
+					.map(Into::into)
+					.unwrap_or_else(|_| Value::from(v));
+				(k, value)
 			})
 			.collect::<BTreeMap<_, _>>()
 	}

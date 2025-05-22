@@ -1,12 +1,12 @@
 use super::escape::EscapeKey;
 use super::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Part,
-	Range, Regex, Strand, Thing, Uuid,
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Range,
+	Regex, Strand, Thing, Uuid,
 };
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::{
-	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
-	Table, Value,
+	SqlValue, Table,
+	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
@@ -15,37 +15,72 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
+/// The kind, or data type, of a value or field.
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Kind {
+	/// The most generic type, can be anything.
 	Any,
+	/// Null type.
 	Null,
+	/// Boolean type.
 	Bool,
+	/// Bytes type.
 	Bytes,
+	/// Datetime type.
 	Datetime,
+	/// Decimal type.
 	Decimal,
+	/// Duration type.
 	Duration,
+	/// 64-bit floating point type.
 	Float,
+	/// 64-bit signed integer type.
 	Int,
+	/// Number type, can be either a float, int or decimal.
+	/// This is the most generic type for numbers.
 	Number,
+	/// Object type.
 	Object,
+	/// Geometric 2D point type with longitude *then* latitude coordinates.
+	/// This follows the GeoJSON spec.
 	Point,
+	/// String type.
 	String,
+	/// UUID type.
 	Uuid,
+	/// Regular expression type.
 	#[revision(start = 2)]
 	Regex,
+	/// A record type.
 	Record(Vec<Table>),
+	/// A geometry type.
+	/// The vec contains the geometry types as strings, for example `"point"` or `"polygon"`.
 	Geometry(Vec<String>),
+	/// An optional type.
 	Option(Box<Kind>),
+	/// An either type.
+	/// Can be any of the kinds in the vec.
 	Either(Vec<Kind>),
+	/// A set type.
 	Set(Box<Kind>, Option<u64>),
+	/// An array type.
 	Array(Box<Kind>, Option<u64>),
+	/// A function type.
+	/// The first option is the argument types, the second is the optional return type.
 	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
+	/// A range type.
 	Range,
+	/// A literal type.
+	/// The literal type is used to represent a type that can only be a single value.
+	/// For example, `"a"` is a literal type which can only ever be `"a"`.
+	/// This can be used in the `Kind::Either` type to represent an enum.
 	Literal(Literal),
+	/// A references type representing a link to another table or field.
 	References(Option<Table>, Option<Idiom>),
+	/// A file type.
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<Ident>),
@@ -68,11 +103,6 @@ impl Kind {
 		matches!(self, Kind::Any)
 	}
 
-	/// Returns true if this type is a record
-	pub(crate) fn is_record(&self) -> bool {
-		matches!(self, Kind::Record(_))
-	}
-
 	/// Returns true if this type is optional
 	pub(crate) fn can_be_none(&self) -> bool {
 		matches!(self, Kind::Option(_) | Kind::Any)
@@ -84,23 +114,6 @@ impl Kind {
 			Kind::Literal(l) => l.to_kind(),
 			k => k.to_owned(),
 		}
-	}
-
-	/// Returns true if this type is a literal, or contains a literal
-	pub(crate) fn contains_literal(&self) -> bool {
-		if matches!(self, Kind::Literal(_)) {
-			return true;
-		}
-
-		if let Kind::Option(x) = self {
-			return x.contains_literal();
-		}
-
-		if let Kind::Either(x) = self {
-			return x.iter().any(|x| x.contains_literal());
-		}
-
-		false
 	}
 
 	/// Returns Some if this type can be converted into a discriminated object, None otherwise
@@ -162,97 +175,98 @@ impl Kind {
 			_ => None,
 		}
 	}
+}
 
-	// Return the kind of the contained value.
-	//
-	// For example: for `array<number>` or `set<number>` this returns `number`.
-	// For `array<number> | set<float>` this returns `number | float`.
-	pub(crate) fn inner_kind(&self) -> Option<Kind> {
-		let mut this = self;
-		loop {
-			match &this {
-				Kind::Any
-				| Kind::Null
-				| Kind::Bool
-				| Kind::Bytes
-				| Kind::Datetime
-				| Kind::Decimal
-				| Kind::Duration
-				| Kind::Float
-				| Kind::Int
-				| Kind::Number
-				| Kind::Object
-				| Kind::Point
-				| Kind::String
-				| Kind::Uuid
-				| Kind::Regex
-				| Kind::Record(_)
-				| Kind::Geometry(_)
-				| Kind::Function(_, _)
-				| Kind::Range
-				| Kind::Literal(_)
-				| Kind::References(_, _)
-				| Kind::File(_) => return None,
-				Kind::Option(x) => {
-					this = x;
-				}
-				Kind::Array(x, _) | Kind::Set(x, _) => return Some(x.as_ref().clone()),
-				Kind::Either(x) => {
-					// a either shouldn't be able to contain a either itself so recursing here
-					// should be fine.
-					let kinds: Vec<Kind> = x.iter().filter_map(Self::inner_kind).collect();
-					if kinds.is_empty() {
-						return None;
-					}
-					return Some(Kind::Either(kinds));
-				}
+impl From<Kind> for crate::expr::Kind {
+	fn from(v: Kind) -> Self {
+		match v {
+			Kind::Any => crate::expr::Kind::Any,
+			Kind::Null => crate::expr::Kind::Null,
+			Kind::Bool => crate::expr::Kind::Bool,
+			Kind::Bytes => crate::expr::Kind::Bytes,
+			Kind::Datetime => crate::expr::Kind::Datetime,
+			Kind::Decimal => crate::expr::Kind::Decimal,
+			Kind::Duration => crate::expr::Kind::Duration,
+			Kind::Float => crate::expr::Kind::Float,
+			Kind::Int => crate::expr::Kind::Int,
+			Kind::Number => crate::expr::Kind::Number,
+			Kind::Object => crate::expr::Kind::Object,
+			Kind::Point => crate::expr::Kind::Point,
+			Kind::String => crate::expr::Kind::String,
+			Kind::Uuid => crate::expr::Kind::Uuid,
+			Kind::Regex => crate::expr::Kind::Regex,
+			Kind::Record(tables) => {
+				crate::expr::Kind::Record(tables.into_iter().map(Into::into).collect())
 			}
+			Kind::Geometry(geometries) => {
+				crate::expr::Kind::Geometry(geometries.into_iter().collect())
+			}
+			Kind::Option(k) => crate::expr::Kind::Option(Box::new(k.as_ref().clone().into())),
+			Kind::Either(kinds) => {
+				crate::expr::Kind::Either(kinds.into_iter().map(Into::into).collect())
+			}
+			Kind::Set(k, l) => crate::expr::Kind::Set(Box::new(k.as_ref().clone().into()), l),
+			Kind::Array(k, l) => crate::expr::Kind::Array(Box::new(k.as_ref().clone().into()), l),
+			Kind::Function(args, ret) => crate::expr::Kind::Function(
+				args.map(|args| args.into_iter().map(Into::into).collect()),
+				ret.map(|ret| Box::new((*ret).into())),
+			),
+			Kind::Range => crate::expr::Kind::Range,
+			Kind::Literal(l) => crate::expr::Kind::Literal(l.into()),
+			Kind::References(t, i) => {
+				crate::expr::Kind::References(t.map(Into::into), i.map(Into::into))
+			}
+			Kind::File(k) => crate::expr::Kind::File(k.into_iter().map(Into::into).collect()),
 		}
 	}
+}
 
-	pub(crate) fn non_optional(&self) -> &Kind {
-		match self {
-			Kind::Option(k) => k.as_ref().non_optional(),
-			_ => self,
-		}
-	}
-
-	pub(crate) fn allows_nested_kind(&self, path: &[Part], kind: &Kind) -> bool {
-		// ANY type won't cause a mismatch
-		if self.is_any() || kind.is_any() {
-			return true;
-		}
-
-		if !path.is_empty() {
-			match self {
-				Kind::Object => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
-				Kind::Either(kinds) => {
-					return kinds.iter().all(|k| k.allows_nested_kind(path, kind))
-				}
-				Kind::Array(inner, len) | Kind::Set(inner, len) => {
-					return match path.first() {
-						Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
-						Some(Part::Index(i)) => {
-							if let Some(len) = len {
-								if i.as_usize() >= *len as usize {
-									return false;
-								}
-							}
-
-							inner.allows_nested_kind(&path[1..], kind)
-						}
-						_ => false,
-					}
-				}
-				_ => (),
+impl From<crate::expr::Kind> for Kind {
+	fn from(v: crate::expr::Kind) -> Self {
+		match v {
+			crate::expr::Kind::Any => Kind::Any,
+			crate::expr::Kind::Null => Kind::Null,
+			crate::expr::Kind::Bool => Kind::Bool,
+			crate::expr::Kind::Bytes => Kind::Bytes,
+			crate::expr::Kind::Datetime => Kind::Datetime,
+			crate::expr::Kind::Decimal => Kind::Decimal,
+			crate::expr::Kind::Duration => Kind::Duration,
+			crate::expr::Kind::Float => Kind::Float,
+			crate::expr::Kind::Int => Kind::Int,
+			crate::expr::Kind::Number => Kind::Number,
+			crate::expr::Kind::Object => Kind::Object,
+			crate::expr::Kind::Point => Kind::Point,
+			crate::expr::Kind::String => Kind::String,
+			crate::expr::Kind::Uuid => Kind::Uuid,
+			crate::expr::Kind::Regex => Kind::Regex,
+			crate::expr::Kind::Record(tables) => {
+				Kind::Record(tables.into_iter().map(Into::<Table>::into).collect())
 			}
-		}
-
-		match self {
-			Kind::Literal(lit) => lit.allows_nested_kind(path, kind),
-			Kind::Option(inner) => inner.allows_nested_kind(path, kind),
-			_ if path.is_empty() => self == kind,
-			_ => false,
+			crate::expr::Kind::Geometry(geometries) => {
+				Kind::Geometry(geometries.into_iter().collect())
+			}
+			crate::expr::Kind::Option(k) => Kind::Option(Box::new((*k).into())),
+			crate::expr::Kind::Either(kinds) => {
+				let kinds: Vec<Kind> = kinds.into_iter().map(Into::into).collect();
+				if kinds.is_empty() {
+					return Self::Either(vec![Self::Any]);
+				}
+				Self::Either(kinds)
+			}
+			crate::expr::Kind::Set(k, l) => Self::Set(Box::new((*k).into()), l),
+			crate::expr::Kind::Array(k, l) => Self::Array(Box::new((*k).into()), l),
+			crate::expr::Kind::Function(args, ret) => Self::Function(
+				args.map(|args| args.into_iter().map(Into::into).collect()),
+				ret.map(|ret| Box::new((*ret).into())),
+			),
+			crate::expr::Kind::Range => Self::Range,
+			crate::expr::Kind::Literal(l) => Self::Literal(l.into()),
+			crate::expr::Kind::References(t, i) => {
+				Self::References(t.map(Into::into), i.map(Into::into))
+			}
+			crate::expr::Kind::File(k) => {
+				Kind::File(k.into_iter().map(Into::<Ident>::into).collect())
+			}
 		}
 	}
 }
@@ -450,12 +464,6 @@ impl Display for Kind {
 	}
 }
 
-impl InfoStructure for Kind {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -491,26 +499,26 @@ impl Literal {
 		}
 	}
 
-	pub fn validate_value(&self, value: &Value) -> bool {
+	pub fn validate_value(&self, value: &SqlValue) -> bool {
 		match self {
 			Self::String(v) => match value {
-				Value::Strand(s) => s == v,
+				SqlValue::Strand(s) => s == v,
 				_ => false,
 			},
 			Self::Number(v) => match value {
-				Value::Number(n) => n == v,
+				SqlValue::Number(n) => n == v,
 				_ => false,
 			},
 			Self::Duration(v) => match value {
-				Value::Duration(n) => n == v,
+				SqlValue::Duration(n) => n == v,
 				_ => false,
 			},
 			Self::Bool(v) => match value {
-				Value::Bool(b) => b == v,
+				SqlValue::Bool(b) => b == v,
 				_ => false,
 			},
 			Self::Array(a) => match value {
-				Value::Array(x) => {
+				SqlValue::Array(x) => {
 					if a.len() != x.len() {
 						return false;
 					}
@@ -530,7 +538,7 @@ impl Literal {
 				_ => false,
 			},
 			Self::Object(o) => match value {
-				Value::Object(x) => {
+				SqlValue::Object(x) => {
 					if o.len() < x.len() {
 						return false;
 					}
@@ -550,8 +558,8 @@ impl Literal {
 				_ => false,
 			},
 			Self::DiscriminatedObject(key, discriminants) => match value {
-				Value::Object(x) => {
-					let value = x.get(key).unwrap_or(&Value::None);
+				SqlValue::Object(x) => {
+					let value = x.get(key).unwrap_or(&SqlValue::None);
 					if let Some(o) = discriminants
 						.iter()
 						.find(|o| value.to_owned().coerce_to_kind(&o[key]).is_ok())
@@ -577,61 +585,6 @@ impl Literal {
 				}
 				_ => false,
 			},
-		}
-	}
-
-	pub(crate) fn allows_nested_kind(&self, path: &[Part], kind: &Kind) -> bool {
-		// ANY type won't cause a mismatch
-		if kind.is_any() {
-			return true;
-		}
-
-		// We reached the end of the path
-		// Check if the literal is equal to the kind
-		if path.is_empty() {
-			return match kind {
-				Kind::Literal(lit) => self == lit,
-				_ => &self.to_kind() == kind,
-			};
-		}
-
-		match self {
-			Literal::Array(x) => match path.first() {
-				Some(Part::All) => x.iter().all(|y| y.allows_nested_kind(&path[1..], kind)),
-				Some(Part::Index(i)) => {
-					if let Some(y) = x.get(i.as_usize()) {
-						y.allows_nested_kind(&path[1..], kind)
-					} else {
-						false
-					}
-				}
-				_ => false,
-			},
-			Literal::Object(x) => match path.first() {
-				Some(Part::All) => x.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind)),
-				Some(Part::Field(k)) => {
-					if let Some(y) = x.get(&k.0) {
-						y.allows_nested_kind(&path[1..], kind)
-					} else {
-						false
-					}
-				}
-				_ => false,
-			},
-			Literal::DiscriminatedObject(_, discriminants) => match path.first() {
-				Some(Part::All) => discriminants
-					.iter()
-					.all(|o| o.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind))),
-				Some(Part::Field(k)) => discriminants.iter().all(|o| {
-					if let Some(y) = o.get(&k.0) {
-						y.allows_nested_kind(&path[1..], kind)
-					} else {
-						false
-					}
-				}),
-				_ => false,
-			},
-			_ => false,
 		}
 	}
 }
@@ -712,6 +665,46 @@ impl Display for Literal {
 
 				Ok(())
 			}
+		}
+	}
+}
+
+impl From<Literal> for crate::expr::Literal {
+	fn from(v: Literal) -> Self {
+		match v {
+			Literal::String(s) => Self::String(s.into()),
+			Literal::Number(n) => Self::Number(n.into()),
+			Literal::Duration(d) => Self::Duration(d.into()),
+			Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
+			Literal::Object(o) => Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect()),
+			Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
+				k,
+				o.into_iter()
+					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
+					.collect(),
+			),
+			Literal::Bool(b) => Self::Bool(b),
+		}
+	}
+}
+
+impl From<crate::expr::Literal> for Literal {
+	fn from(v: crate::expr::Literal) -> Self {
+		match v {
+			crate::expr::Literal::String(s) => Self::String(s.into()),
+			crate::expr::Literal::Number(n) => Self::Number(n.into()),
+			crate::expr::Literal::Duration(d) => Self::Duration(d.into()),
+			crate::expr::Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
+			crate::expr::Literal::Object(o) => {
+				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
+			}
+			crate::expr::Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
+				k,
+				o.into_iter()
+					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
+					.collect(),
+			),
+			crate::expr::Literal::Bool(b) => Self::Bool(b),
 		}
 	}
 }

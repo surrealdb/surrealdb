@@ -1,10 +1,10 @@
 //! Stores a graph edge pointer
-use crate::err::Error;
+use crate::expr::id::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
 use crate::kvs::KeyEncode;
-use crate::sql::id::Id;
+use crate::kvs::impl_key;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -138,51 +138,37 @@ pub fn new<'a>(
 	Ref::new(ns, db, tb, id.to_owned(), ft, ff, fk.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>, Error> {
+pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_owned()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>, Error> {
+pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_owned()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>, Error> {
+pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>, Error> {
+pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ffprefix(
-	ns: &str,
-	db: &str,
-	tb: &str,
-	id: &Id,
-	ft: &str,
-	ff: &str,
-) -> Result<Vec<u8>, Error> {
+pub fn ffprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ffsuffix(
-	ns: &str,
-	db: &str,
-	tb: &str,
-	id: &Id,
-	ft: &str,
-	ff: &str,
-) -> Result<Vec<u8>, Error> {
+pub fn ffsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)

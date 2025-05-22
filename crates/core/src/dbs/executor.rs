@@ -1,27 +1,31 @@
-use crate::ctx::reason::Reason;
 use crate::ctx::Context;
-use crate::dbs::response::Response;
+use crate::ctx::reason::Reason;
 use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::dbs::QueryType;
+use crate::dbs::response::Response;
+use crate::err;
 use crate::err::Error;
+use crate::expr::Base;
+use crate::expr::ControlFlow;
+use crate::expr::FlowResult;
+use crate::expr::paths::DB;
+use crate::expr::paths::NS;
+use crate::expr::statement::LogicalPlan;
+use crate::expr::value::Value;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
-use crate::sql::paths::DB;
-use crate::sql::paths::NS;
+use crate::sql::planner::SqlToLogical;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::statements::{OptionStatement, UseStatement};
-use crate::sql::value::Value;
-use crate::sql::Base;
-use crate::sql::ControlFlow;
-use crate::sql::FlowResult;
+use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
-use std::pin::{pin, Pin};
+use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
@@ -50,9 +54,12 @@ impl Executor {
 		}
 	}
 
-	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<(), Error> {
-		let ctx_ref = Arc::get_mut(&mut self.ctx)
-			.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?;
+	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<()> {
+		let ctx_ref = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
+			err::Error::unreachable(format_args!(
+				"Tried to unfreeze a Context with multiple references"
+			))
+		})?;
 
 		if let Some(ns) = stmt.ns {
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
@@ -69,7 +76,7 @@ impl Executor {
 		Ok(())
 	}
 
-	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<(), Error> {
+	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<()> {
 		// Allowed to run?
 		self.opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
 		// Convert to uppercase
@@ -102,16 +109,21 @@ impl Executor {
 
 	/// Executes a statement which needs a transaction with the supplied transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	async fn execute_transaction_statement(
+	async fn execute_plan_in_transaction(
 		&mut self,
 		txn: Arc<Transaction>,
-		stmt: Statement,
+		plan: LogicalPlan,
 	) -> FlowResult<Value> {
-		let res = match stmt {
-			Statement::Set(stm) => {
+		let res = match plan {
+			LogicalPlan::Set(stm) => {
 				// Avoid moving in and out of the context via Arc::get_mut
 				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Run the statement
 				match self
@@ -124,8 +136,11 @@ impl Executor {
 						// Set the parameter
 						Arc::get_mut(&mut self.ctx)
 							.ok_or_else(|| {
-								fail!("Tried to unfreeze a Context with multiple references")
-							})?
+								err::Error::unreachable(
+									"Tried to unfreeze a Context with multiple references",
+								)
+							})
+							.map_err(anyhow::Error::new)?
 							.add_value(stm.name, val.into());
 						// Finalise transaction, returning nothing unless it couldn't commit
 						Ok(Value::None)
@@ -134,13 +149,18 @@ impl Executor {
 				}
 			}
 			// Process all other normal statements
-			stmt => {
+			plan => {
 				// The transaction began successfully
 				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))?
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Process the statement
-				self.stack.enter(|stk| stmt.compute(stk, &self.ctx, &self.opt, None)).finish().await
+				self.stack.enter(|stk| plan.compute(stk, &self.ctx, &self.opt, None)).finish().await
 			}
 		};
 
@@ -148,10 +168,10 @@ impl Executor {
 		match self.ctx.done(true)? {
 			None => {}
 			Some(Reason::Timedout) => {
-				return Err(ControlFlow::from(Error::QueryTimedout));
+				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout)));
 			}
 			Some(Reason::Canceled) => {
-				return Err(ControlFlow::from(Error::QueryCancelled));
+				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryCancelled)));
 			}
 		}
 
@@ -159,19 +179,15 @@ impl Executor {
 	}
 
 	/// Execute a query not wrapped in a transaction block.
-	async fn execute_bare_statement(
-		&mut self,
-		kvs: &Datastore,
-		stmt: Statement,
-	) -> Result<Value, Error> {
+	async fn execute_bare_statement(&mut self, kvs: &Datastore, stmt: Statement) -> Result<Value> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
 			None => {}
 			Some(Reason::Timedout) => {
-				return Err(Error::QueryTimedout);
+				bail!(Error::QueryTimedout);
 			}
 			Some(Reason::Canceled) => {
-				return Err(Error::QueryCancelled);
+				bail!(Error::QueryCancelled);
 			}
 		}
 
@@ -179,64 +195,71 @@ impl Executor {
 			// These statements don't need a transaction.
 			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 			stmt => {
-				let writeable = stmt.writeable();
-				let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
-				let receiver = self.ctx.has_notifications().then(|| {
-					let (send, recv) = async_channel::unbounded();
-					self.opt.sender = Some(send);
-					recv
-				});
+				let planner = SqlToLogical::new();
+				let plan = planner.statement_to_logical(stmt)?;
 
-				match self.execute_transaction_statement(txn.clone(), stmt).await {
-					Ok(value) | Err(ControlFlow::Return(value)) => {
-						let mut lock = txn.lock().await;
+				self.execute_plan_impl(kvs, plan).await
+			}
+		}
+	}
 
-						// non-writable transactions might return an error on commit.
-						// So cancel them instead. This is fine since a non-writable transaction
-						// has nothing to commit anyway.
-						if !writeable {
-							let _ = lock.cancel().await;
-							return Ok(value);
-						}
+	async fn execute_plan_impl(&mut self, kvs: &Datastore, plan: LogicalPlan) -> Result<Value> {
+		let writeable = plan.writeable();
+		let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
+		let receiver = self.ctx.has_notifications().then(|| {
+			let (send, recv) = async_channel::unbounded();
+			self.opt.sender = Some(send);
+			recv
+		});
 
-						if let Err(e) = lock.complete_changes(false).await {
-							let _ = lock.cancel().await;
+		match self.execute_plan_in_transaction(txn.clone(), plan).await {
+			Ok(value) | Err(ControlFlow::Return(value)) => {
+				let mut lock = txn.lock().await;
 
-							return Err(Error::QueryNotExecutedDetail {
-								message: e.to_string(),
-							});
-						}
+				// non-writable transactions might return an error on commit.
+				// So cancel them instead. This is fine since a non-writable transaction
+				// has nothing to commit anyway.
+				if !writeable {
+					let _ = lock.cancel().await;
+					return Ok(value);
+				}
 
-						if let Err(e) = lock.commit().await {
-							return Err(Error::QueryNotExecutedDetail {
-								message: e.to_string(),
-							});
-						}
+				if let Err(e) = lock.complete_changes(false).await {
+					let _ = lock.cancel().await;
 
-						// flush notifications.
-						if let Some(recv) = receiver {
-							self.opt.sender = None;
-							if let Some(sink) = self.ctx.notifications() {
-								spawn(async move {
-									while let Ok(x) = recv.recv().await {
-										if sink.send(x).await.is_err() {
-											break;
-										}
-									}
-								});
+					bail!(Error::QueryNotExecutedDetail {
+						message: e.to_string(),
+					});
+				}
+
+				if let Err(e) = lock.commit().await {
+					bail!(Error::QueryNotExecutedDetail {
+						message: e.to_string(),
+					});
+				}
+
+				// flush notifications.
+				if let Some(recv) = receiver {
+					self.opt.sender = None;
+					if let Some(sink) = self.ctx.notifications() {
+						spawn(async move {
+							while let Ok(x) = recv.recv().await {
+								if sink.send(x).await.is_err() {
+									break;
+								}
 							}
-						}
-
-						Ok(value)
-					}
-					Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
-						Err(Error::InvalidControlFlow)
-					}
-					Err(ControlFlow::Err(e)) => {
-						let _ = txn.cancel().await;
-						Err(*e)
+						});
 					}
 				}
+
+				Ok(value)
+			}
+			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
+				bail!(Error::InvalidControlFlow)
+			}
+			Err(ControlFlow::Err(e)) => {
+				let _ = txn.cancel().await;
+				Err(e)
 			}
 		}
 	}
@@ -246,9 +269,9 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		mut stream: Pin<&mut S>,
-	) -> Result<(), Error>
+	) -> Result<()>
 	where
-		S: Stream<Item = Result<Statement, Error>>,
+		S: Stream<Item = Result<Statement>>,
 	{
 		let Ok(txn) = kvs.transaction(TransactionType::Write, LockType::Optimistic).await else {
 			// couldn't create a transaction.
@@ -262,7 +285,7 @@ impl Executor {
 
 				self.results.push(Response {
 					time: Duration::ZERO,
-					result: Err(Error::QueryNotExecuted),
+					result: Err(anyhow!(Error::QueryNotExecuted)),
 					query_type: QueryType::Other,
 				});
 			}
@@ -304,7 +327,7 @@ impl Executor {
 
 				for res in &mut self.results[start_results..] {
 					res.query_type = QueryType::Other;
-					res.result = Err(Error::QueryCancelled);
+					res.result = Err(anyhow!(Error::QueryCancelled));
 				}
 
 				while let Some(stmt) = stream.next().await {
@@ -317,8 +340,8 @@ impl Executor {
 					self.results.push(Response {
 						time: Duration::ZERO,
 						result: Err(match done {
-							Reason::Timedout => Error::QueryTimedout,
-							Reason::Canceled => Error::QueryCancelled,
+							Reason::Timedout => anyhow!(Error::QueryTimedout),
+							Reason::Canceled => anyhow!(Error::QueryCancelled),
 						}),
 						query_type: QueryType::Other,
 					});
@@ -348,16 +371,16 @@ impl Executor {
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(Error::QueryNotExecuted);
+						res.result = Err(anyhow!(Error::QueryNotExecuted));
 					}
 
 					self.results.push(Response {
 						time: Duration::ZERO,
-						result: Err(Error::QueryNotExecutedDetail {
+						result: Err(anyhow!(Error::QueryNotExecutedDetail {
 							message:
 								"Tried to start a transaction while another transaction was open"
 									.to_string(),
-						}),
+						})),
 						query_type: QueryType::Other,
 					});
 
@@ -372,7 +395,7 @@ impl Executor {
 
 						self.results.push(Response {
 							time: Duration::ZERO,
-							result: Err(Error::QueryNotExecuted),
+							result: Err(anyhow!(Error::QueryNotExecuted)),
 							query_type: QueryType::Other,
 						});
 					}
@@ -386,7 +409,7 @@ impl Executor {
 					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(Error::QueryCancelled);
+						res.result = Err(anyhow!(Error::QueryCancelled));
 					}
 
 					self.opt.sender = None;
@@ -426,9 +449,9 @@ impl Executor {
 					// failed to commit
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(Error::QueryNotExecutedDetail {
+						res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
 							message: e.to_string(),
-						});
+						}));
 					}
 
 					self.opt.sender = None;
@@ -447,25 +470,28 @@ impl Executor {
 				stmt => {
 					skip_remaining = matches!(stmt, Statement::Output(_));
 
-					let r = match self.execute_transaction_statement(txn.clone(), stmt).await {
+					let planner = SqlToLogical::new();
+					let plan = planner.statement_to_logical(stmt)?;
+
+					let r = match self.execute_plan_in_transaction(txn.clone(), plan).await {
 						Ok(x) => Ok(x),
 						Err(ControlFlow::Return(value)) => {
 							skip_remaining = true;
 							Ok(value)
 						}
 						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-							Err(Error::InvalidControlFlow)
+							Err(anyhow!(Error::InvalidControlFlow))
 						}
 						Err(ControlFlow::Err(e)) => {
 							for res in &mut self.results[start_results..] {
 								res.query_type = QueryType::Other;
-								res.result = Err(Error::QueryNotExecuted);
+								res.result = Err(anyhow!(Error::QueryNotExecuted));
 							}
 
 							// statement return an error. Consume all the other statement until we hit a cancel or commit.
 							self.results.push(Response {
 								time: before.elapsed(),
-								result: Err(*e),
+								result: Err(e),
 								query_type,
 							});
 
@@ -482,7 +508,7 @@ impl Executor {
 
 								self.results.push(Response {
 									time: Duration::ZERO,
-									result: Err(Error::QueryNotExecuted),
+									result: Err(anyhow!(Error::QueryNotExecuted)),
 									query_type: QueryType::Other,
 								});
 							}
@@ -516,9 +542,9 @@ impl Executor {
 
 		for res in &mut self.results[start_results..] {
 			res.query_type = QueryType::Other;
-			res.result = Err(Error::QueryNotExecutedDetail {
+			res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
 				message: "Missing COMMIT statement".to_string(),
-			});
+			}));
 		}
 
 		self.opt.sender = None;
@@ -532,9 +558,33 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		qry: Query,
-	) -> Result<Vec<Response>, Error> {
+	) -> Result<Vec<Response>> {
 		let stream = futures::stream::iter(qry.into_iter().map(Ok));
 		Self::execute_stream(kvs, ctx, opt, stream).await
+	}
+
+	pub async fn execute_plan(
+		kvs: &Datastore,
+		ctx: Context,
+		opt: Options,
+		plan: LogicalPlan,
+	) -> Result<Vec<Response>> {
+		let mut this = Executor::new(ctx, opt);
+
+		let query_type = match &plan {
+			LogicalPlan::Live(_) => QueryType::Live,
+			LogicalPlan::Kill(_) => QueryType::Kill,
+			_ => QueryType::Other,
+		};
+
+		let now = Instant::now();
+		let result = this.execute_plan_impl(kvs, plan).await;
+
+		Ok(vec![Response {
+			time: now.elapsed(),
+			result,
+			query_type,
+		}])
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -543,9 +593,9 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		stream: S,
-	) -> Result<Vec<Response>, Error>
+	) -> Result<Vec<Response>>
 	where
-		S: Stream<Item = Result<Statement, Error>>,
+		S: Stream<Item = Result<Statement>>,
 	{
 		let mut this = Executor::new(ctx, opt);
 		let mut stream = pin!(stream);
@@ -580,11 +630,7 @@ impl Executor {
 					}
 				}
 				stmt => {
-					let query_type = match stmt {
-						Statement::Live(_) => QueryType::Live,
-						Statement::Kill(_) => QueryType::Kill,
-						_ => QueryType::Other,
-					};
+					let query_type: QueryType = (&stmt).into();
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, stmt).await;
@@ -607,27 +653,93 @@ mod tests {
 	#[tokio::test]
 	async fn check_execute_option_permissions() {
 		let tests = vec![
-            // Root level
-            (Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at root level should be able to set options"),
-            (Session::for_level(().into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at root level should be able to set options"),
-            (Session::for_level(().into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at root level should not be able to set options"),
-
-            // Namespace level
-            (Session::for_level(("NS", ).into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at namespace level should be able to set options on its namespace"),
-            (Session::for_level(("NS", ).into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at namespace level should not be able to set options on another namespace"),
-            (Session::for_level(("NS", ).into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at namespace level should be able to set options on its namespace"),
-            (Session::for_level(("NS", ).into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at namespace level should not be able to set options on another namespace"),
-            (Session::for_level(("NS", ).into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at namespace level should not be able to set options on its namespace"),
-
-            // Database level
-            (Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB"), true, "owner at database level should be able to set options on its database"),
-            (Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("OTHER_DB"), false, "owner at database level should not be able to set options on another database"),
-            (Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"), false, "owner at database level should not be able to set options on another namespace even if the database name matches"),
-            (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("DB"), true, "editor at database level should be able to set options on its database"),
-            (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("OTHER_DB"), false, "editor at database level should not be able to set options on another database"),
-            (Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"), false, "editor at database level should not be able to set options on another namespace even if the database name matches"),
-            (Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"), false, "viewer at database level should not be able to set options on its database"),
-        ];
+			// Root level
+			(
+				Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB"),
+				true,
+				"owner at root level should be able to set options",
+			),
+			(
+				Session::for_level(().into(), Role::Editor).with_ns("NS").with_db("DB"),
+				true,
+				"editor at root level should be able to set options",
+			),
+			(
+				Session::for_level(().into(), Role::Viewer).with_ns("NS").with_db("DB"),
+				false,
+				"viewer at root level should not be able to set options",
+			),
+			// Namespace level
+			(
+				Session::for_level(("NS",).into(), Role::Owner).with_ns("NS").with_db("DB"),
+				true,
+				"owner at namespace level should be able to set options on its namespace",
+			),
+			(
+				Session::for_level(("NS",).into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"),
+				false,
+				"owner at namespace level should not be able to set options on another namespace",
+			),
+			(
+				Session::for_level(("NS",).into(), Role::Editor).with_ns("NS").with_db("DB"),
+				true,
+				"editor at namespace level should be able to set options on its namespace",
+			),
+			(
+				Session::for_level(("NS",).into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"),
+				false,
+				"editor at namespace level should not be able to set options on another namespace",
+			),
+			(
+				Session::for_level(("NS",).into(), Role::Viewer).with_ns("NS").with_db("DB"),
+				false,
+				"viewer at namespace level should not be able to set options on its namespace",
+			),
+			// Database level
+			(
+				Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB"),
+				true,
+				"owner at database level should be able to set options on its database",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Owner)
+					.with_ns("NS")
+					.with_db("OTHER_DB"),
+				false,
+				"owner at database level should not be able to set options on another database",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Owner)
+					.with_ns("OTHER_NS")
+					.with_db("DB"),
+				false,
+				"owner at database level should not be able to set options on another namespace even if the database name matches",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("DB"),
+				true,
+				"editor at database level should be able to set options on its database",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Editor)
+					.with_ns("NS")
+					.with_db("OTHER_DB"),
+				false,
+				"editor at database level should not be able to set options on another database",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Editor)
+					.with_ns("OTHER_NS")
+					.with_db("DB"),
+				false,
+				"editor at database level should not be able to set options on another namespace even if the database name matches",
+			),
+			(
+				Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"),
+				false,
+				"viewer at database level should not be able to set options on its database",
+			),
+		];
 		let statement = "OPTION IMPORT = false";
 
 		for test in tests.iter() {

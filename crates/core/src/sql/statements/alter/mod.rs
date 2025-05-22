@@ -1,21 +1,16 @@
+mod field;
 mod sequence;
 mod table;
 
+pub use field::AlterFieldStatement;
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::value::Value;
-
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -23,26 +18,8 @@ pub enum AlterStatement {
 	Table(AlterTableStatement),
 	#[revision(start = 2)]
 	Sequence(AlterSequenceStatement),
-}
-
-impl AlterStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self {
-			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Sequence(ref v) => v.compute(ctx, opt).await,
-		}
-	}
+	#[revision(start = 3)]
+	Field(AlterFieldStatement),
 }
 
 impl Display for AlterStatement {
@@ -50,6 +27,27 @@ impl Display for AlterStatement {
 		match self {
 			Self::Table(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
+			Self::Field(v) => Display::fmt(v, f),
+		}
+	}
+}
+
+impl From<AlterStatement> for crate::expr::statements::AlterStatement {
+	fn from(v: AlterStatement) -> Self {
+		match v {
+			AlterStatement::Table(v) => Self::Table(v.into()),
+			AlterStatement::Sequence(v) => Self::Sequence(v.into()),
+			AlterStatement::Field(v) => Self::Field(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::AlterStatement> for AlterStatement {
+	fn from(v: crate::expr::statements::AlterStatement) -> Self {
+		match v {
+			crate::expr::statements::AlterStatement::Table(v) => Self::Table(v.into()),
+			crate::expr::statements::AlterStatement::Sequence(v) => Self::Sequence(v.into()),
+			crate::expr::statements::AlterStatement::Field(v) => Self::Field(v.into()),
 		}
 	}
 }
@@ -58,7 +56,7 @@ impl Display for AlterStatement {
 mod tests {
 
 	use super::*;
-	use crate::sql::Ident;
+	use crate::sql::{Ident, Idiom};
 
 	#[test]
 	fn check_alter_serialize_table() {
@@ -67,7 +65,7 @@ mod tests {
 			..Default::default()
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(16, enc.len());
+		assert_eq!(15, enc.len());
 	}
 
 	#[test]
@@ -78,5 +76,16 @@ mod tests {
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
 		assert_eq!(11, enc.len());
+	}
+
+	#[test]
+	fn check_alter_serialize_field() {
+		let stm = AlterStatement::Field(AlterFieldStatement {
+			name: Idiom::from("test"),
+			what: Ident::from("test"),
+			..Default::default()
+		});
+		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
+		assert_eq!(30, enc.len());
 	}
 }

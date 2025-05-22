@@ -2,11 +2,11 @@ use std::time::Instant;
 
 use crate::cnf::TELEMETRY_NAMESPACE;
 use opentelemetry::metrics::Meter;
-use opentelemetry::{global, KeyValue};
 use opentelemetry::{
-	metrics::{Histogram, MetricsError, UpDownCounter},
 	Context as TelemetryContext,
+	metrics::{Histogram, MetricsError, UpDownCounter},
 };
+use opentelemetry::{KeyValue, global};
 use std::sync::LazyLock;
 
 static METER: LazyLock<Meter> = LazyLock::new(|| global::meter("surrealdb.rpc"));

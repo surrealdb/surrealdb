@@ -1,4 +1,4 @@
-use js::{module::ModuleDef, Class, Ctx, Function, Module, Result, String as JsString, Value};
+use js::{Class, Ctx, Function, Module, Result, String as JsString, Value, module::ModuleDef};
 
 mod functions;
 pub mod query;

@@ -1,9 +1,9 @@
-use crate::err::Error;
+use crate::expr::index::Distance;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::Transaction;
-use crate::sql::index::Distance;
+use anyhow::Result;
 use dashmap::DashMap;
 
 pub(super) struct HnswElements {
@@ -52,7 +52,7 @@ impl HnswElements {
 		id: ElementId,
 		vec: Vector,
 		ser_vec: &SerializedVector,
-	) -> Result<SharedVector, Error> {
+	) -> Result<SharedVector> {
 		let key = self.ikb.new_he_key(id)?;
 		let val = VersionedStore::try_into(ser_vec)?;
 		tx.set(key, val, None).await?;
@@ -65,7 +65,7 @@ impl HnswElements {
 		&self,
 		tx: &Transaction,
 		e_id: &ElementId,
-	) -> Result<Option<SharedVector>, Error> {
+	) -> Result<Option<SharedVector>> {
 		if let Some(r) = self.elements.get(e_id) {
 			return Ok(Some(r.value().clone()));
 		}
@@ -91,11 +91,11 @@ impl HnswElements {
 		tx: &Transaction,
 		q: &SharedVector,
 		e_id: &ElementId,
-	) -> Result<Option<f64>, Error> {
+	) -> Result<Option<f64>> {
 		Ok(self.get_vector(tx, e_id).await?.map(|r| self.dist.calculate(&r, q)))
 	}
 
-	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<(), Error> {
+	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<()> {
 		self.elements.remove(&e_id);
 		let key = self.ikb.new_he_key(e_id)?;
 		tx.del(key).await?;

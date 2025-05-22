@@ -1,5 +1,5 @@
 use futures::{
-	future::IntoFuture, ready, stream::FuturesOrdered, TryFuture, TryFutureExt, TryStream,
+	TryFuture, TryFutureExt, TryStream, future::IntoFuture, ready, stream::FuturesOrdered,
 };
 use pin_project_lite::pin_project;
 use std::future::Future;
@@ -85,13 +85,13 @@ mod tests {
 	use super::try_join_all_buffered;
 	use futures::ready;
 	use pin_project_lite::pin_project;
-	use rand::{thread_rng, Rng};
+	use rand::{Rng, thread_rng};
 	use std::{
 		future::Future,
 		task::Poll,
 		time::{Duration, Instant},
 	};
-	use tokio::time::{sleep, Sleep};
+	use tokio::time::{Sleep, sleep};
 
 	pin_project! {
 		struct BenchFuture {

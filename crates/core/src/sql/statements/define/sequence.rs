@@ -1,12 +1,5 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Timeout, Value};
+use crate::sql::{Ident, Timeout};
 
-use crate::key::database::sq::Sq;
-use crate::key::sequence::Prefix;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -22,47 +15,6 @@ pub struct DefineSequenceStatement {
 	pub batch: u32,
 	pub start: i64,
 	pub timeout: Option<Timeout>,
-}
-
-impl DefineSequenceStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		let (ns, db) = opt.ns_db()?;
-		// Check if the definition exists
-		if txn.get_db_sequence(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				return Err(Error::SeqAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = Sq::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		let sq = DefineSequenceStatement {
-			// Don't persist the `IF NOT EXISTS` clause to schema
-			if_not_exists: false,
-			overwrite: false,
-			..self.clone()
-		};
-		// Set the definition
-		txn.set(key, revision::to_vec(&sq)?, None).await?;
-		// Clear any pre-existing sequence records
-		let (beg, end) = Prefix::new_ba_range(ns, db, &sq.name)?;
-		txn.delr(beg..end).await?;
-		let (beg, end) = Prefix::new_st_range(ns, db, &sq.name)?;
-		txn.delr(beg..end).await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
 }
 
 impl Display for DefineSequenceStatement {
@@ -82,13 +34,28 @@ impl Display for DefineSequenceStatement {
 	}
 }
 
-impl InfoStructure for DefineSequenceStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-				"name".to_string() => self.name.structure(),
-				"batch".to_string() => Value::from(self.batch).structure(),
-				"start".to_string() => Value::from(self.start).structure(),
-				"timeout".to_string() => self.timeout.as_ref().map(|t|t.0.into()).unwrap_or(Value::None),
-		})
+impl From<DefineSequenceStatement> for crate::expr::statements::define::DefineSequenceStatement {
+	fn from(v: DefineSequenceStatement) -> Self {
+		Self {
+			name: v.name.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			batch: v.batch,
+			start: v.start,
+			timeout: v.timeout.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::define::DefineSequenceStatement> for DefineSequenceStatement {
+	fn from(v: crate::expr::statements::define::DefineSequenceStatement) -> Self {
+		DefineSequenceStatement {
+			name: v.name.into(),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+			batch: v.batch,
+			start: v.start,
+			timeout: v.timeout.map(Into::into),
+		}
 	}
 }

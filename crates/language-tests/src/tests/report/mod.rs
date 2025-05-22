@@ -4,13 +4,13 @@ use std::collections::BTreeMap;
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use crate::tests::schema::{self, TestConfig};
 use crate::tests::{
+	TestSet,
 	schema::{BoolOr, TestDetailsResults},
 	set::TestId,
-	TestSet,
 };
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::sql::Value as SurValue;
+use surrealdb_core::expr::Value as SurValue;
 use surrealdb_core::syn::error::RenderedError;
 
 mod display;
@@ -214,6 +214,8 @@ impl TestExpectation {
 								uuid: x.skip_uuid.map(|x| !x).unwrap_or(true),
 								datetime: x.skip_datetime.map(|x| !x).unwrap_or(true),
 								record_id_keys: x.skip_record_id_key.map(|x| !x).unwrap_or(true),
+								float: x.float_roughly_eq.unwrap_or_default(),
+								decimal: x.decimal_roughly_eq.unwrap_or_default(),
 							};
 							TestValueExpectation::Value(Some(ValueExpectation {
 								expected: x.value.0.clone(),
@@ -341,14 +343,14 @@ impl TestReport {
 					TestExpectation::Unspecified => {
 						return TestReportKind::NoExpectation {
 							output: TestOutputs::ParsingError(results.to_string()),
-						}
+						};
 					}
 					TestExpectation::Parsing(x) => x,
 					TestExpectation::Values(x) => {
 						return TestReportKind::MismatchedType(TypeMismatchReport::ExpectedValues {
 							got: results.to_string(),
 							expected: x,
-						})
+						});
 					}
 				};
 
@@ -385,13 +387,13 @@ impl TestReport {
 			TestExpectation::Unspecified => {
 				return TestReportKind::NoExpectation {
 					output: TestOutputs::Values(results),
-				}
+				};
 			}
 			TestExpectation::Parsing(expected) => {
 				return TestReportKind::MismatchedType(TypeMismatchReport::ExpectedParsingError {
 					got: results,
 					expected,
-				})
+				});
 			}
 			TestExpectation::Values(None) => return TestReportKind::Valid,
 			TestExpectation::Values(Some(ref x)) => x,
@@ -543,7 +545,7 @@ impl TestReport {
 				return Some(MatcherMismatch::Error {
 					error: e.to_string(),
 					got: value,
-				})
+				});
 			}
 			Ok(x) => x,
 		};
@@ -553,7 +555,7 @@ impl TestReport {
 			got => {
 				return Some(MatcherMismatch::OutputType {
 					got,
-				})
+				});
 			}
 		};
 

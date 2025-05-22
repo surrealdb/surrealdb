@@ -1,5 +1,5 @@
 use criterion::measurement::WallTime;
-use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
+use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 use surrealdb_core::idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};

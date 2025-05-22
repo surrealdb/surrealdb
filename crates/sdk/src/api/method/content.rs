@@ -1,10 +1,10 @@
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::method::OnceLockExt;
 use crate::Surreal;
 use crate::Value;
+use crate::api::Connection;
+use crate::api::Result;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
+use crate::method::OnceLockExt;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;

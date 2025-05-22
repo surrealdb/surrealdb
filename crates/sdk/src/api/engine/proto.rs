@@ -1,5 +1,3 @@
-#![expect(deprecated)]
-
 use revision::revisioned;
 use serde::Deserialize;
 
@@ -10,17 +8,6 @@ use crate::Value;
 pub(crate) struct Failure {
 	pub(crate) code: i64,
 	pub(crate) message: String,
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-#[non_exhaustive]
-#[deprecated(since = "2.3.0")]
-pub enum ResponseAction {
-	Create,
-	Update,
-	Delete,
 }
 
 #[revisioned(revision = 1)]

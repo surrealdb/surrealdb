@@ -1,10 +1,10 @@
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{Constant, Function, Value},
+	sql::{Constant, Function, SqlValue},
 	syn::{
-		error::{bail, MessageKind},
-		parser::{mac::expected, unexpected, SyntaxError},
-		token::{t, Span},
+		error::{MessageKind, bail},
+		parser::{SyntaxError, mac::expected, unexpected},
+		token::{Span, t},
 	},
 };
 use phf::phf_map;
@@ -203,11 +203,13 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("not") => PathKind::Function,
 		//
 		UniCase::ascii("object::entries") => PathKind::Function,
+		UniCase::ascii("object::extend") => PathKind::Function,
 		UniCase::ascii("object::from_entries") => PathKind::Function,
 		UniCase::ascii("object::is_empty") => PathKind::Function,
 		UniCase::ascii("object::keys") => PathKind::Function,
 		UniCase::ascii("object::len") => PathKind::Function,
 		UniCase::ascii("object::matches") => PathKind::Function,
+		UniCase::ascii("object::remove") => PathKind::Function,
 		UniCase::ascii("object::values") => PathKind::Function,
 		//
 		UniCase::ascii("parse::email::host") => PathKind::Function,
@@ -534,7 +536,11 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Value> {
+	pub(super) async fn parse_builtin(
+		&mut self,
+		stk: &mut Stk,
+		start: Span,
+	) -> ParseResult<SqlValue> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let peek = self.peek();
@@ -549,7 +555,7 @@ impl Parser<'_> {
 		let str = self.lexer.span_str(span);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
-			Some((_, PathKind::Constant(x))) => Ok(Value::Constant(x.clone())),
+			Some((_, PathKind::Constant(x))) => Ok(SqlValue::Constant(x.clone())),
 			Some((k, PathKind::Function)) => {
 				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
 					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
@@ -557,7 +563,7 @@ impl Parser<'_> {
 
 				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
 					.await
-					.map(|x| Value::Function(Box::new(x)))
+					.map(|x| SqlValue::Function(Box::new(x)))
 			}
 			None => {
 				if let Some(suggest) = find_suggestion(str) {

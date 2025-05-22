@@ -1,4 +1,4 @@
-use http::{header, HeaderMap, StatusCode};
+use http::{HeaderMap, StatusCode, header};
 use reqwest::Client;
 use std::process::Command;
 use std::time::{Duration, SystemTime};

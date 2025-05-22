@@ -10,7 +10,10 @@ pub(crate) mod terms;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
+use crate::expr::index::SearchParams;
+use crate::expr::scoring::Scoring;
+use crate::expr::statements::DefineAnalyzerStatement;
+use crate::expr::{Idiom, Object, Thing, Value};
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::doclength::DocLengths;
@@ -25,14 +28,11 @@ use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::Transaction;
 use crate::kvs::{Key, TransactionType};
-use crate::sql::index::SearchParams;
-use crate::sql::scoring::Scoring;
-use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::{Idiom, Object, Thing, Value};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use roaring::treemap::IntoIter;
 use roaring::RoaringTreemap;
+use roaring::treemap::IntoIter;
 use serde::{Deserialize, Serialize};
 use std::ops::BitAnd;
 use std::sync::Arc;
@@ -105,7 +105,7 @@ impl FtIndex {
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let tx = ctx.tx();
 		let ixs = ctx.get_index_stores();
 		let (ns, db) = opt.ns_db()?;
@@ -120,7 +120,7 @@ impl FtIndex {
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let state_key: Key = index_key_base.new_bs_key()?;
 		let state: State = if let Some(val) = txn.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
@@ -189,11 +189,7 @@ impl FtIndex {
 		self.analyzer.clone()
 	}
 
-	pub(crate) async fn remove_document(
-		&mut self,
-		ctx: &Context,
-		rid: &Thing,
-	) -> Result<(), Error> {
+	pub(crate) async fn remove_document(&mut self, ctx: &Context, rid: &Thing) -> Result<()> {
 		let tx = ctx.tx();
 		// Extract and remove the doc_id (if any)
 		let mut doc_ids = self.doc_ids.write().await;
@@ -248,7 +244,7 @@ impl FtIndex {
 		opt: &Options,
 		rid: &Thing,
 		content: Vec<Value>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let tx = ctx.tx();
 		// Resolve the doc_id
 		let resolved = {
@@ -357,7 +353,7 @@ impl FtIndex {
 		ctx: &Context,
 		opt: &Options,
 		query_string: String,
-	) -> Result<(TermsList, TermsSet), Error> {
+	) -> Result<(TermsList, TermsSet)> {
 		let t = self.terms.read().await;
 		let res = self.analyzer.extract_querying_terms(stk, ctx, opt, &t, query_string).await?;
 		Ok(res)
@@ -367,7 +363,7 @@ impl FtIndex {
 		&self,
 		tx: &Transaction,
 		terms: &TermsList,
-	) -> Result<Vec<Option<(TermId, RoaringTreemap)>>, Error> {
+	) -> Result<Vec<Option<(TermId, RoaringTreemap)>>> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
 		for opt_term in terms {
 			if let Some((term_id, _)) = opt_term {
@@ -384,10 +380,7 @@ impl FtIndex {
 		Ok(terms_docs)
 	}
 
-	pub(super) fn new_hits_iterator(
-		&self,
-		terms_docs: TermsDocs,
-	) -> Result<Option<HitsIterator>, Error> {
+	pub(super) fn new_hits_iterator(&self, terms_docs: TermsDocs) -> Result<Option<HitsIterator>> {
 		let mut hits: Option<RoaringTreemap> = None;
 		for opt_term_docs in terms_docs.iter() {
 			if let Some((_, term_docs)) = opt_term_docs {
@@ -408,7 +401,7 @@ impl FtIndex {
 		Ok(None)
 	}
 
-	pub(super) fn new_scorer(&self, terms_docs: TermsDocs) -> Result<Option<BM25Scorer>, Error> {
+	pub(super) fn new_scorer(&self, terms_docs: TermsDocs) -> Result<Option<BM25Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			return Ok(Some(BM25Scorer::new(
 				self.postings.clone(),
@@ -430,7 +423,7 @@ impl FtIndex {
 		hlp: HighlightParams,
 		idiom: &Idiom,
 		doc: &Value,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		let doc_key: Key = revision::to_vec(thg)?;
 		let di = self.doc_ids.read().await;
 		let doc_id = di.get_doc_id(tx, doc_key).await?;
@@ -454,7 +447,7 @@ impl FtIndex {
 		thg: &Thing,
 		terms: &[Option<(TermId, u32)>],
 		partial: bool,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		let doc_key: Key = revision::to_vec(thg)?;
 		let doc_id = {
 			let di = self.doc_ids.read().await;
@@ -468,12 +461,12 @@ impl FtIndex {
 					or.highlight(*term_len, o.0);
 				}
 			}
-			return or.try_into();
+			return or.try_into().map_err(anyhow::Error::new);
 		}
 		Ok(Value::None)
 	}
 
-	pub(crate) async fn statistics(&self, ctx: &Context) -> Result<FtStatistics, Error> {
+	pub(crate) async fn statistics(&self, ctx: &Context) -> Result<FtStatistics> {
 		let txn = ctx.tx();
 		let res = FtStatistics {
 			doc_ids: self.doc_ids.read().await.statistics(&txn).await?,
@@ -484,7 +477,7 @@ impl FtIndex {
 		Ok(res)
 	}
 
-	pub(crate) async fn finish(&self, ctx: &Context) -> Result<(), Error> {
+	pub(crate) async fn finish(&self, ctx: &Context) -> Result<()> {
 		let txn = ctx.tx();
 		self.doc_ids.write().await.finish(&txn).await?;
 		self.doc_lengths.write().await.finish(&txn).await?;
@@ -516,7 +509,7 @@ impl HitsIterator {
 		self.iter.size_hint().0
 	}
 
-	pub(crate) async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>, Error> {
+	pub(crate) async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>> {
 		let di = self.doc_ids.read().await;
 		for doc_id in self.iter.by_ref() {
 			if let Some(doc_key) = di.get_doc_key(tx, doc_id).await? {
@@ -532,13 +525,14 @@ impl HitsIterator {
 mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
+	use crate::expr::index::SearchParams;
+	use crate::expr::statements::DefineAnalyzerStatement;
+	use crate::expr::{Array, Thing, Value};
+	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
-	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
-	use crate::sql::index::SearchParams;
-	use crate::sql::statements::{DefineAnalyzerStatement, DefineStatement};
-	use crate::sql::{Array, Statement, Thing, Value};
+	use crate::sql::{Statement, statements::DefineStatement};
 	use crate::syn;
 	use reblessive::tree::Stk;
 	use std::collections::HashMap;
@@ -631,10 +625,10 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
-		let az = Arc::new(az);
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		let mut stack = reblessive::TreeStack::new();
 
 		let btree_order = 5;
@@ -770,10 +764,10 @@ mod tests {
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-			let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 				panic!()
 			};
-			let az = Arc::new(az);
+			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 			let mut stack = reblessive::TreeStack::new();
 
 			let doc1: Thing = ("t", "doc1").into();
@@ -904,7 +898,33 @@ mod tests {
 	async fn concurrent_task(ds: Arc<Datastore>, az: Arc<DefineAnalyzerStatement>) {
 		let btree_order = 5;
 		let doc1: Thing = ("t", "doc1").into();
-		let content1 = Value::from(Array::from(vec!["Enter a search term", "Welcome", "Docusaurus blogging features are powered by the blog plugin.", "Simply add Markdown files (or folders) to the blog directory.", "blog", "Regular blog authors can be added to authors.yml.", "authors.yml", "The blog post date can be extracted from filenames, such as:", "2019-05-30-welcome.md", "2019-05-30-welcome/index.md", "A blog post folder can be convenient to co-locate blog post images:", "The blog supports tags as well!", "And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.", "blog: false", "MDX Blog Post", "Blog posts support Docusaurus Markdown features, such as MDX.", "Use the power of React to create interactive blog posts.", "Long Blog Post", "This is the summary of a very long blog post,", "Use a <!-- truncate --> comment to limit blog post size in the list view.", "<!--", "truncate", "-->", "First Blog Post", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+		let content1 = Value::from(Array::from(vec![
+			"Enter a search term",
+			"Welcome",
+			"Docusaurus blogging features are powered by the blog plugin.",
+			"Simply add Markdown files (or folders) to the blog directory.",
+			"blog",
+			"Regular blog authors can be added to authors.yml.",
+			"authors.yml",
+			"The blog post date can be extracted from filenames, such as:",
+			"2019-05-30-welcome.md",
+			"2019-05-30-welcome/index.md",
+			"A blog post folder can be convenient to co-locate blog post images:",
+			"The blog supports tags as well!",
+			"And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.",
+			"blog: false",
+			"MDX Blog Post",
+			"Blog posts support Docusaurus Markdown features, such as MDX.",
+			"Use the power of React to create interactive blog posts.",
+			"Long Blog Post",
+			"This is the summary of a very long blog post,",
+			"Use a <!-- truncate --> comment to limit blog post size in the list view.",
+			"<!--",
+			"truncate",
+			"-->",
+			"First Blog Post",
+			"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
+		]));
 		let mut stack = reblessive::TreeStack::new();
 
 		let start = std::time::Instant::now();
@@ -924,10 +944,10 @@ mod tests {
 	async fn concurrent_test() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
-		let az = Arc::new(az);
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		concurrent_task(ds.clone(), az.clone()).await;
 		let task1 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
 		let task2 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
@@ -953,12 +973,38 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0 .0.pop().unwrap() else {
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
-		let az = Arc::new(az);
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		let doc: Thing = ("t", "doc1").into();
-		let content = Value::from(Array::from(vec!["Enter a search term","Welcome","Docusaurus blogging features are powered by the blog plugin.","Simply add Markdown files (or folders) to the blog directory.","blog","Regular blog authors can be added to authors.yml.","authors.yml","The blog post date can be extracted from filenames, such as:","2019-05-30-welcome.md","2019-05-30-welcome/index.md","A blog post folder can be convenient to co-locate blog post images:","The blog supports tags as well!","And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.","blog: false","MDX Blog Post","Blog posts support Docusaurus Markdown features, such as MDX.","Use the power of React to create interactive blog posts.","Long Blog Post","This is the summary of a very long blog post,","Use a <!-- truncate --> comment to limit blog post size in the list view.","<!--","truncate","-->","First Blog Post","Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet"]));
+		let content = Value::from(Array::from(vec![
+			"Enter a search term",
+			"Welcome",
+			"Docusaurus blogging features are powered by the blog plugin.",
+			"Simply add Markdown files (or folders) to the blog directory.",
+			"blog",
+			"Regular blog authors can be added to authors.yml.",
+			"authors.yml",
+			"The blog post date can be extracted from filenames, such as:",
+			"2019-05-30-welcome.md",
+			"2019-05-30-welcome/index.md",
+			"A blog post folder can be convenient to co-locate blog post images:",
+			"The blog supports tags as well!",
+			"And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.",
+			"blog: false",
+			"MDX Blog Post",
+			"Blog posts support Docusaurus Markdown features, such as MDX.",
+			"Use the power of React to create interactive blog posts.",
+			"Long Blog Post",
+			"This is the summary of a very long blog post,",
+			"Use a <!-- truncate --> comment to limit blog post size in the list view.",
+			"<!--",
+			"truncate",
+			"-->",
+			"First Blog Post",
+			"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
+		]));
 
 		for i in 0..5 {
 			debug!("Attempt {i}");

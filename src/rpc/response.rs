@@ -6,9 +6,9 @@ use opentelemetry::Context as TelemetryContext;
 use revision::revisioned;
 use serde::Serialize;
 use std::sync::Arc;
-use surrealdb::rpc::format::Format;
 use surrealdb::rpc::Data;
-use surrealdb::sql::Value;
+use surrealdb::rpc::format::Format;
+use surrealdb_core::expr::Value;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
 

@@ -122,13 +122,13 @@ impl From<Vec<Statement>> for Query {
 impl Deref for Query {
 	type Target = Vec<Statement>;
 	fn deref(&self) -> &Self::Target {
-		&self.0 .0
+		&self.0.0
 	}
 }
 
 impl DerefMut for Query {
 	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0 .0
+		&mut self.0.0
 	}
 }
 
@@ -143,5 +143,17 @@ impl IntoIterator for Query {
 impl Display for Query {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(Pretty::from(f), "{}", &self.0)
+	}
+}
+
+impl From<Query> for crate::expr::Query {
+	fn from(v: Query) -> Self {
+		Self(v.0.into())
+	}
+}
+
+impl From<crate::expr::Query> for Query {
+	fn from(v: crate::expr::Query) -> Self {
+		Self(v.0.into())
 	}
 }

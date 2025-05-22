@@ -1,12 +1,8 @@
-use crate::err::Error;
-use crate::fnc::util::math::vector::{
-	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
-	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
-};
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Number, Value};
+use crate::sql::Number;
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -194,21 +190,6 @@ pub enum Distance {
 	Pearson,
 }
 
-impl Distance {
-	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number, Error> {
-		match self {
-			Self::Cosine => v1.cosine_distance(v2),
-			Self::Chebyshev => v1.chebyshev_distance(v2),
-			Self::Euclidean => v1.euclidean_distance(v2),
-			Self::Hamming => v1.hamming_distance(v2),
-			Self::Jaccard => v1.jaccard_similarity(v2),
-			Self::Manhattan => v1.manhattan_distance(v2),
-			Self::Minkowski(r) => v1.minkowski_distance(v2, r),
-			Self::Pearson => v1.pearson_similarity(v2),
-		}
-	}
-}
-
 impl Display for Distance {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
@@ -285,7 +266,13 @@ impl Display for Index {
 				write!(
 					f,
 					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
-					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order, p.doc_ids_cache, p.mtree_cache
+					p.dimension,
+					p.distance,
+					p.vector_type,
+					p.capacity,
+					p.doc_ids_order,
+					p.doc_ids_cache,
+					p.mtree_cache
 				)
 			}
 			Self::Hnsw(p) => {
@@ -307,7 +294,7 @@ impl Display for Index {
 }
 
 impl InfoStructure for Index {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
+    fn structure(self) -> Value {
+        self.to_string().into()
+    }
 }

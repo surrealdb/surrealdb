@@ -27,3 +27,21 @@ impl fmt::Display for UseStatement {
 		Ok(())
 	}
 }
+
+impl From<UseStatement> for crate::expr::statements::UseStatement {
+	fn from(v: UseStatement) -> Self {
+		crate::expr::statements::UseStatement {
+			ns: v.ns,
+			db: v.db,
+		}
+	}
+}
+
+impl From<crate::expr::statements::UseStatement> for UseStatement {
+	fn from(v: crate::expr::statements::UseStatement) -> Self {
+		UseStatement {
+			ns: v.ns,
+			db: v.db,
+		}
+	}
+}

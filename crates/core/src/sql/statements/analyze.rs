@@ -1,16 +1,4 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::idx::ft::FtIndex;
-use crate::idx::trees::mtree::MTreeIndex;
-use crate::idx::IndexKeyBase;
-use crate::kvs::TransactionType;
 use crate::sql::ident::Ident;
-use crate::sql::index::Index;
-use crate::sql::value::Value;
-use crate::sql::Base;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -25,43 +13,19 @@ pub enum AnalyzeStatement {
 	Idx(Ident, Ident),
 }
 
-impl AnalyzeStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self {
-			AnalyzeStatement::Idx(tb, idx) => {
-				// Allowed to run?
-				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
-				// Read the index
-				let (ns, db) = opt.ns_db()?;
-				let ix = ctx.tx().get_tb_index(ns, db, tb, idx).await?;
-				let ikb = IndexKeyBase::new(ns, db, &ix)?;
-				// Index operation dispatching
-				let value: Value = match &ix.index {
-					Index::Search(p) => {
-						let ft =
-							FtIndex::new(ctx, opt, p.az.as_str(), ikb, p, TransactionType::Read)
-								.await?;
-						ft.statistics(ctx).await?.into()
-					}
-					Index::MTree(p) => {
-						let tx = ctx.tx();
-						let mt = MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
-						mt.statistics(&tx).await?.into()
-					}
-					_ => {
-						return Err(Error::FeatureNotYetImplemented {
-							feature: "Statistics on unique and non-unique indexes.".to_string(),
-						})
-					}
-				};
-				// Return the result object
-				Ok(value)
+impl From<AnalyzeStatement> for crate::expr::statements::analyze::AnalyzeStatement {
+	fn from(value: AnalyzeStatement) -> Self {
+		match value {
+			AnalyzeStatement::Idx(tb, idx) => Self::Idx(tb.into(), idx.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::analyze::AnalyzeStatement> for AnalyzeStatement {
+	fn from(value: crate::expr::statements::analyze::AnalyzeStatement) -> Self {
+		match value {
+			crate::expr::statements::analyze::AnalyzeStatement::Idx(tb, idx) => {
+				Self::Idx(tb.into(), idx.into())
 			}
 		}
 	}

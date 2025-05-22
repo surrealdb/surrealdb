@@ -9,13 +9,14 @@ pub(in crate::idx) mod tree;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::err::Error;
+use crate::expr::with::With;
+use crate::expr::{Cond, Fields, Groups, Table, order::Ordering};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
-use crate::sql::with::With;
-use crate::sql::{order::Ordering, Cond, Fields, Groups, Table};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -70,11 +71,7 @@ pub(crate) enum GrantedPermission {
 }
 
 impl<'a> StatementContext<'a> {
-	pub(crate) fn new(
-		ctx: &'a Context,
-		opt: &'a Options,
-		stm: &'a Statement<'a>,
-	) -> Result<Self, Error> {
+	pub(crate) fn new(ctx: &'a Context, opt: &'a Options, stm: &'a Statement<'a>) -> Result<Self> {
 		let is_perm = opt.check_perms(stm.into())?;
 		let (ns, db) = opt.ns_db()?;
 		Ok(Self {
@@ -92,10 +89,7 @@ impl<'a> StatementContext<'a> {
 		})
 	}
 
-	pub(crate) async fn check_table_permission(
-		&self,
-		tb: &str,
-	) -> Result<GrantedPermission, Error> {
+	pub(crate) async fn check_table_permission(&self, tb: &str) -> Result<GrantedPermission> {
 		if !self.is_perm {
 			return Ok(GrantedPermission::Full);
 		}
@@ -107,7 +101,7 @@ impl<'a> StatementContext<'a> {
 				// permissions are NONE, because
 				// there is no point in processing
 				// a table which we can't access.
-				let perms = self.stm.permissions(&table, false);
+				let perms = self.stm.permissions(&table, self.stm.is_create());
 				// If permissions are specific, we
 				// need to fetch the record content.
 				if perms.is_specific() {
@@ -119,14 +113,14 @@ impl<'a> StatementContext<'a> {
 					return Ok(GrantedPermission::None);
 				}
 			}
-			Err(Error::TbNotFound {
-				..
-			}) => {
-				// We can safely ignore this error,
-				// as it just means that there is no
-				// table and no permissions defined.
+			Err(e) => {
+				if !matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
+					// We can safely ignore this error,
+					// as it just means that there is no
+					// table and no permissions defined.
+					return Err(e);
+				}
 			}
-			Err(e) => return Err(e),
 		}
 		Ok(GrantedPermission::Full)
 	}
@@ -135,7 +129,7 @@ impl<'a> StatementContext<'a> {
 		&self,
 		all_expressions_with_index: bool,
 		granted_permission: GrantedPermission,
-	) -> Result<RecordStrategy, Error> {
+	) -> Result<RecordStrategy> {
 		// Update / Upsert / Delete need to retrieve the values:
 		// 1. So they can be removed from any existing index
 		// 2. To hydrate live queries
@@ -226,7 +220,7 @@ pub(crate) struct QueryPlanner {
 	fallbacks: Vec<String>,
 	iteration_workflow: Vec<IterationStage>,
 	iteration_index: AtomicU8,
-	orders: Vec<IteratorRef>,
+	ordering_indexes: Vec<IteratorRef>,
 	granted_permissions: HashMap<String, GrantedPermission>,
 	any_specific_permission: bool,
 }
@@ -239,7 +233,7 @@ impl QueryPlanner {
 			fallbacks: vec![],
 			iteration_workflow: Vec::default(),
 			iteration_index: AtomicU8::new(0),
-			orders: vec![],
+			ordering_indexes: vec![],
 			granted_permissions: HashMap::default(),
 			any_specific_permission: false,
 		}
@@ -251,7 +245,7 @@ impl QueryPlanner {
 		&mut self,
 		ctx: &StatementContext<'_>,
 		tb: &str,
-	) -> Result<GrantedPermission, Error> {
+	) -> Result<GrantedPermission> {
 		if ctx.is_perm {
 			if let Some(p) = self.granted_permissions.get(tb) {
 				return Ok(*p);
@@ -273,7 +267,7 @@ impl QueryPlanner {
 		t: Table,
 		gp: GrantedPermission,
 		it: &mut Iterator,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let mut is_table_iterator = false;
 
 		let tree = Tree::build(stk, ctx, &t).await?;
@@ -306,11 +300,11 @@ impl QueryPlanner {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
-				let is_order = exp.is_none();
+				let is_order = io.is_order();
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 				self.add(t.clone(), Some(ir), exe, it, rs);
 				if is_order {
-					self.orders.push(ir);
+					self.ordering_indexes.push(ir);
 				}
 			}
 			Plan::MultiIndex(non_range_indexes, ranges_indexes, rs) => {
@@ -327,8 +321,11 @@ impl QueryPlanner {
 				self.requires_distinct = true;
 				self.add(t.clone(), None, exe, it, rs);
 			}
-			Plan::SingleIndexRange(ixn, rq, keys_only) => {
+			Plan::SingleIndexRange(ixn, rq, keys_only, is_order) => {
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to));
+				if is_order {
+					self.ordering_indexes.push(ir);
+				}
 				self.add(t.clone(), Some(ir), exe, it, keys_only);
 			}
 			Plan::TableIterator(reason, rs, sc) => {
@@ -378,7 +375,7 @@ impl QueryPlanner {
 	}
 
 	pub(crate) fn is_order(&self, irf: &IteratorRef) -> bool {
-		self.orders.contains(irf)
+		self.ordering_indexes.contains(irf)
 	}
 
 	pub(crate) fn is_any_specific_permission(&self) -> bool {

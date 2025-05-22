@@ -1,10 +1,6 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::{FlowResult, Value};
+use crate::sql::SqlValue;
+use crate::sql::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
@@ -15,44 +11,34 @@ use std::fmt::{self, Display, Write};
 #[non_exhaustive]
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of else if's
-	pub exprs: Vec<(Value, Value)>,
+	pub exprs: Vec<(SqlValue, SqlValue)>,
 	/// the final else body, if there is one
-	pub close: Option<Value>,
+	pub close: Option<SqlValue>,
 }
 
 impl IfelseStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		for (cond, then) in self.exprs.iter() {
-			if cond.writeable() || then.writeable() {
-				return true;
-			}
-		}
-		self.close.as_ref().is_some_and(Value::writeable)
-	}
-	/// Check if we require a writeable transaction
+	/// Check if the statement is bracketed
 	pub(crate) fn bracketed(&self) -> bool {
-		self.exprs.iter().all(|(_, v)| matches!(v, Value::Block(_)))
+		self.exprs.iter().all(|(_, v)| matches!(v, SqlValue::Block(_)))
 			&& (self.close.as_ref().is_none()
-				|| self.close.as_ref().is_some_and(|v| matches!(v, Value::Block(_))))
+				|| self.close.as_ref().is_some_and(|v| matches!(v, SqlValue::Block(_))))
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		for (ref cond, ref then) in &self.exprs {
-			let v = cond.compute(stk, ctx, opt, doc).await?;
-			if v.is_truthy() {
-				return then.compute(stk, ctx, opt, doc).await;
-			}
+}
+
+impl From<IfelseStatement> for crate::expr::statements::IfelseStatement {
+	fn from(v: IfelseStatement) -> Self {
+		crate::expr::statements::IfelseStatement {
+			exprs: v.exprs.into_iter().map(|(e1, e2)| (e1.into(), e2.into())).collect(),
+			close: v.close.map(Into::into),
 		}
-		match self.close {
-			Some(ref v) => v.compute(stk, ctx, opt, doc).await,
-			None => Ok(Value::None),
+	}
+}
+
+impl From<crate::expr::statements::IfelseStatement> for IfelseStatement {
+	fn from(v: crate::expr::statements::IfelseStatement) -> Self {
+		IfelseStatement {
+			exprs: v.exprs.into_iter().map(|(e1, e2)| (e1.into(), e2.into())).collect(),
+			close: v.close.map(Into::into),
 		}
 	}
 }

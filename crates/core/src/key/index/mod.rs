@@ -23,12 +23,12 @@ pub mod ip;
 pub mod td;
 pub mod vm;
 
-use crate::err::Error;
+use crate::expr::array::Array;
+use crate::expr::id::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
-use crate::sql::array::Array;
-use crate::sql::id::Id;
+use crate::kvs::{KeyEncode, impl_key};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
@@ -147,45 +147,33 @@ impl<'a> Index<'a> {
 		}
 	}
 
-	fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>, Error> {
+	fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		Prefix::new(ns, db, tb, ix).encode()
 	}
 
-	pub fn prefix_beg(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>, Error> {
+	pub fn prefix_beg(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0x00]);
 		Ok(beg)
 	}
 
-	pub fn prefix_end(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>, Error> {
+	pub fn prefix_end(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0xff]);
 		Ok(beg)
 	}
 
-	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>, Error> {
+	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
 		PrefixIds::new(ns, db, tb, ix, fd).encode()
 	}
 
-	pub fn prefix_ids_beg(
-		ns: &str,
-		db: &str,
-		tb: &str,
-		ix: &str,
-		fd: &Array,
-	) -> Result<Vec<u8>, Error> {
+	pub fn prefix_ids_beg(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0x00]);
 		Ok(beg)
 	}
 
-	pub fn prefix_ids_end(
-		ns: &str,
-		db: &str,
-		tb: &str,
-		ix: &str,
-		fd: &Array,
-	) -> Result<Vec<u8>, Error> {
+	pub fn prefix_ids_end(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0xff]);
 		Ok(beg)
@@ -197,7 +185,7 @@ impl<'a> Index<'a> {
 		tb: &str,
 		ix: &str,
 		fd: &Array,
-	) -> Result<Vec<u8>, Error> {
+	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0x00;
 		Ok(beg)
@@ -209,7 +197,7 @@ impl<'a> Index<'a> {
 		tb: &str,
 		ix: &str,
 		fd: &Array,
-	) -> Result<Vec<u8>, Error> {
+	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		*beg.last_mut().unwrap() = 0xff;
 		Ok(beg)

@@ -1,5 +1,5 @@
 use super::lookup::Lookup;
-use crate::sql::id::Id;
+use crate::expr::id::Id;
 use uuid::Uuid;
 
 #[derive(Clone, Hash, Eq, PartialEq)]

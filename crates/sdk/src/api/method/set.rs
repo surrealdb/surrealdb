@@ -1,12 +1,12 @@
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
+use crate::Surreal;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
 use crate::method::OnceLockExt;
-use crate::Surreal;
 use std::borrow::Cow;
 use std::future::IntoFuture;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 
 /// A set future
 #[derive(Debug)]

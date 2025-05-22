@@ -1,8 +1,8 @@
 use std::string::String as StdString;
 
 use js::{
-	class::{Trace, Tracer},
 	Class, Coerced, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value,
+	class::{Trace, Tracer},
 };
 
 use crate::fnc::script::fetch::{classes::Headers, util};
