@@ -33,6 +33,11 @@ on:
         type: boolean
         default: true
         description: "Upload build artifacts"
+      release:
+        required: false
+        type: boolean
+        default: true
+        description: "Compile with release flag"
     secrets:
       AWS_CI_ACCESS_KEY_ID:
         description: "AWS access key ID"
@@ -116,8 +121,14 @@ jobs:
               brew install protobuf
 
               # Build
+              extra_args=""
+              compile_profile="debug"
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
+                compile_profile="release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -126,10 +137,10 @@ jobs:
                 tar -xz -C /tmp/onnxruntime/
               export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
-              cargo build $extraFeatures --release --locked --target x86_64-apple-darwin
+              cargo build ${extra_args} --locked --target x86_64-apple-darwin
 
               # Package
-              cp target/x86_64-apple-darwin/release/surreal surreal
+              cp target/x86_64-apple-darwin/${compile_profile}/surreal surreal
               ./surreal version
               tar -zcvf surreal-${{ inputs.name }}.darwin-amd64.tgz surreal
               echo $(shasum -a 256 surreal-${{ inputs.name }}.darwin-amd64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.darwin-amd64.txt
@@ -145,8 +156,14 @@ jobs:
               brew install protobuf
 
               # Build
+              extra_args=""
+              compile_profile="debug"
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
+                compile_profile="release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -155,10 +172,10 @@ jobs:
                 tar -xz -C /tmp/onnxruntime/
               export ORT_STRATEGY=system ORT_LIB_LOCATION=/tmp/onnxruntime/lib
 
-              cargo build $extraFeatures --release --locked --target aarch64-apple-darwin
+              cargo build ${extra_args} --locked --target aarch64-apple-darwin
 
               # Package
-              cp target/aarch64-apple-darwin/release/surreal surreal
+              cp target/aarch64-apple-darwin/${compile_profile}/surreal surreal
               ./surreal version
               tar -zcvf surreal-${{ inputs.name }}.darwin-arm64.tgz surreal
               echo $(shasum -a 256 surreal-${{ inputs.name }}.darwin-arm64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.darwin-arm64.txt
@@ -169,8 +186,14 @@ jobs:
             file: surreal-${{ inputs.name }}.linux-amd64
             build-step: |
               # Build
+              extra_args=""
+              compile_profile="debug"
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
+                compile_profile="release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -189,17 +212,17 @@ jobs:
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
-                  --target x86_64-unknown-linux-gnu ${extraFeatures} --release --locked
+                  --target x86_64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
-              cp target/x86_64-unknown-linux-gnu/release/surreal surreal
+              cp target/x86_64-unknown-linux-gnu/${compile_profile}/surreal surreal
               tar -zcvf surreal-${{ inputs.name }}.linux-amd64.tgz surreal
               echo $(shasum -a 256 surreal-${{ inputs.name }}.linux-amd64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.linux-amd64.txt
 
               # Verify the binary is compatible with various Linux distributions
-              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal ubuntu:20.04 /surreal version
-              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal rockylinux:8 /surreal version
-              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/release/surreal:/surreal debian:11 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/${compile_profile}/surreal:/surreal ubuntu:20.04 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/${compile_profile}/surreal:/surreal rockylinux:8 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/${compile_profile}/surreal:/surreal debian:11 /surreal version
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
@@ -209,8 +232,14 @@ jobs:
               set -x
 
               # Build
+              extra_args=""
+              compile_profile="debug"
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
+                compile_profile="release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -229,17 +258,17 @@ jobs:
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
                 ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
-                  --target aarch64-unknown-linux-gnu ${extraFeatures} --release --locked
+                  --target aarch64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
-              cp target/aarch64-unknown-linux-gnu/release/surreal surreal
+              cp target/aarch64-unknown-linux-gnu/${compile_profile}/surreal surreal
               tar -zcvf surreal-${{ inputs.name }}.linux-arm64.tgz surreal
               echo $(shasum -a 256 surreal-${{ inputs.name }}.linux-arm64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.linux-arm64.txt
 
               # Verify the binary is compatible with various Linux distributions
-              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal ubuntu:20.04 /surreal version
-              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal rockylinux:8 /surreal version
-              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/release/surreal:/surreal debian:11 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/${compile_profile}/surreal:/surreal ubuntu:20.04 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/${compile_profile}/surreal:/surreal rockylinux:8 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/${compile_profile}/surreal:/surreal debian:11 /surreal version
 
           # Windows amd64
           - arch: x86_64-pc-windows-msvc
@@ -252,8 +281,14 @@ jobs:
               vcpkg integrate install
 
               # Build
+              extra_args=""
+              compile_profile="debug"
               if [[ ! -z "${{ inputs.extra-features }}" ]]; then
-                extraFeatures="--features ${{ inputs.extra-features }}"
+                extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+              fi
+              if [[ "${{ inputs.release }}" == "true" ]]; then
+                extra_args="${extra_args} --release"
+                compile_profile="release"
               fi
 
               # Download libonnxruntime's static library and tell ORT crate to use it
@@ -262,11 +297,11 @@ jobs:
               unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
 
-              cargo build $extraFeatures --release --locked --target x86_64-pc-windows-msvc
+              cargo build ${extra_args} --locked --target x86_64-pc-windows-msvc
 
               # Package
-              ./target/x86_64-pc-windows-msvc/release/surreal.exe version
-              cp target/x86_64-pc-windows-msvc/release/surreal.exe surreal-${{ inputs.name }}.windows-amd64.exe
+              ./target/x86_64-pc-windows-msvc/${compile_profile}/surreal.exe version
+              cp target/x86_64-pc-windows-msvc/${compile_profile}/surreal.exe surreal-${{ inputs.name }}.windows-amd64.exe
               echo $(certutil -hashfile surreal-${{ inputs.name }}.windows-amd64.exe SHA256 | sed -n '2p') > surreal-${{ inputs.name }}.windows-amd64.txt
 
     runs-on: ${{ matrix.runner }}

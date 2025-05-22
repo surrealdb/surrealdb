@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	expr::{Duration, Idiom, Kind, Strand, Table, kind::Literal},
+	sql::{Duration, Idiom, Kind, Strand, Table, kind::Literal},
 	syn::{
 		error::bail,
 		lexer::compound,
@@ -281,7 +281,7 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
-	use crate::expr::{Ident, table::Table};
+	use crate::sql::{Ident, table::Table};
 
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());

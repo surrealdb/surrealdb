@@ -24,9 +24,9 @@ use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::expr::{
-	self, Object as CoreObject, Statement, Value as CoreValue, to_value as to_core_value,
-};
+use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::sql;
+use surrealdb_core::sql::Statement;
 
 /// A query future
 #[derive(Debug)]
@@ -152,7 +152,7 @@ where
 						return Err(Error::LiveQueriesNotSupported.into());
 					}
 
-					let mut query = expr::Query::default();
+					let mut query = sql::Query::default();
 					query.0.0 = query_statements;
 
 					let mut response = router

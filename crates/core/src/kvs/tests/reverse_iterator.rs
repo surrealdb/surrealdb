@@ -2,6 +2,7 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::{Response, Session};
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
+use crate::sql::SqlValue;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -32,7 +33,7 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 }
 
 fn check(r: &mut Vec<Response>, tmp: &str) {
-	let tmp = Value::parse(tmp);
+	let tmp = SqlValue::parse(tmp);
 	let val = match r.remove(0).result {
 		Ok(v) => v,
 		Err(err) => panic!("{err}"),

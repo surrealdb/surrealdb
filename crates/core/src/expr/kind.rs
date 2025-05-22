@@ -113,14 +113,6 @@ impl Kind {
 		matches!(self, Kind::Option(_) | Kind::Any)
 	}
 
-	/// Returns the kind in case of a literal, otherwise returns the kind itself
-	fn to_non_literal_kind(&self) -> Self {
-		match self {
-			Kind::Literal(l) => l.to_kind(),
-			k => k.to_owned(),
-		}
-	}
-
 	/// Returns true if this type is a literal, or contains a literal
 	pub(crate) fn contains_literal(&self) -> bool {
 		if matches!(self, Kind::Literal(_)) {
@@ -141,66 +133,6 @@ impl Kind {
 	/// Returns true if this type is a set or array.
 	pub(crate) fn is_array_like(&self) -> bool {
 		matches!(self, Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_)))
-	}
-
-	/// Returns Some if this type can be converted into a discriminated object, None otherwise
-	pub(crate) fn to_discriminated(&self) -> Option<Kind> {
-		match self {
-			Kind::Either(nested) => {
-				if let Some(nested) = nested
-					.iter()
-					.map(|k| match k {
-						Kind::Literal(Literal::Object(o)) => Some(o),
-						_ => None,
-					})
-					.collect::<Option<Vec<&BTreeMap<String, Kind>>>>()
-				{
-					if let Some(first) = nested.first() {
-						let mut key: Option<String> = None;
-
-						'key: for (k, v) in first.iter() {
-							let mut kinds: Vec<Kind> = vec![v.to_owned()];
-							for item in nested[1..].iter() {
-								if let Some(kind) = item.get(k) {
-									match kind {
-										Kind::Literal(l)
-											if kinds.contains(&l.to_kind())
-												|| kinds.contains(&Kind::Literal(l.to_owned())) =>
-										{
-											continue 'key;
-										}
-										kind if kinds
-											.iter()
-											.any(|k| *kind == k.to_non_literal_kind()) =>
-										{
-											continue 'key;
-										}
-										kind => {
-											kinds.push(kind.to_owned());
-										}
-									}
-								} else {
-									continue 'key;
-								}
-							}
-
-							key = Some(k.clone());
-							break;
-						}
-
-						if let Some(key) = key {
-							return Some(Kind::Literal(Literal::DiscriminatedObject(
-								key.clone(),
-								nested.into_iter().map(|o| o.to_owned()).collect(),
-							)));
-						}
-					}
-				}
-
-				None
-			}
-			_ => None,
-		}
 	}
 
 	// Return the kind of the contained value.

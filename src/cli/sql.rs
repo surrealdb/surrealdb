@@ -14,10 +14,11 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{self, connect};
-use surrealdb::expr::{Param, Statement, Uuid as CoreUuid, Value as CoreValue};
+use surrealdb::expr::{Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::{Notification, Response, Value};
+use surrealdb_core::sql::{Param, SqlValue as CoreSqlValue, Statement};
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -213,7 +214,7 @@ pub async fn init(
 				}
 
 				for var in &vars {
-					query.push(Statement::Value(CoreValue::Param(Param::from(var.as_str()))))
+					query.push(Statement::Value(CoreSqlValue::Param(Param::from(var.as_str()))))
 				}
 
 				// Extract the namespace and database from the current prompt

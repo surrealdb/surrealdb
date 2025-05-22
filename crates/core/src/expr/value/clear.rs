@@ -10,11 +10,11 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::syn::Parse;
+	use crate::{sql::SqlValue, syn::Parse};
 
 	#[tokio::test]
 	async fn clear_value() {
-		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
+		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		let res = Value::None;
 		val.clear();
 		assert_eq!(res, val);
