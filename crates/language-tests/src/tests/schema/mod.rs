@@ -11,7 +11,8 @@ use surrealdb_core::{
 		Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 		RouteTarget, Targets,
 	},
-	expr::{Object as CoreObject, Thing, Value as CoreValue},
+	expr::{Thing, Value as CoreValue},
+	sql::Object as CoreObject,
 	syn,
 };
 
@@ -449,7 +450,8 @@ impl<'de> Deserialize<'de> for SurrealValue {
 		let source = String::deserialize(deserializer)?;
 		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
 		let mut v: CoreValue = syn::value_with_capabilities(&source, &capabilities)
-			.map_err(<D::Error as serde::de::Error>::custom)?.into();
+			.map_err(<D::Error as serde::de::Error>::custom)?
+			.into();
 		bytes_hack::compute_bytes_inplace(&mut v);
 		Ok(SurrealValue(v))
 	}
@@ -476,7 +478,8 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 		let source = String::deserialize(deserializer)?;
 		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
 		let v: CoreValue = syn::value_with_capabilities(&source, &capabilities)
-			.map_err(<D::Error as serde::de::Error>::custom)?.into();
+			.map_err(<D::Error as serde::de::Error>::custom)?
+			.into();
 		if let CoreValue::Thing(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {
