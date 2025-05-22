@@ -1,8 +1,9 @@
-use crate::tests::schema::{BoolOr, SchemaTarget, TestConfig};
+use crate::tests::schema::{AuthLevel, BoolOr, SchemaTarget, TestAuth, TestConfig};
 use surrealdb_core::dbs::{
 	Session,
 	capabilities::{Capabilities, Targets},
 };
+use surrealdb_core::expr::Value as SurValue;
 
 /// Creates the right core capabilities from a test config.
 pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
@@ -70,7 +71,49 @@ pub fn session_from_test_config(config: &TestConfig) -> Session {
 	let ns = env.namespace();
 	let db = env.database();
 
-	let mut session = if env.signin.is_none() && env.signin.is_none() {
+	let mut session = if let Some(auth) = env.auth.as_ref() {
+		match auth {
+			TestAuth::Root {
+				level,
+			} => match level {
+				AuthLevel::Owner => Session::owner(),
+				AuthLevel::Editor => Session::editor(),
+				AuthLevel::Viewer => Session::viewer(),
+			},
+			TestAuth::Namespace {
+				namespace,
+				level,
+			} => {
+				let session = match level {
+					AuthLevel::Owner => Session::owner(),
+					AuthLevel::Editor => Session::editor(),
+					AuthLevel::Viewer => Session::viewer(),
+				};
+				session.with_ns(&namespace)
+			}
+			TestAuth::Database {
+				namespace,
+				database,
+				level,
+			} => {
+				let session = match level {
+					AuthLevel::Owner => Session::owner(),
+					AuthLevel::Editor => Session::editor(),
+					AuthLevel::Viewer => Session::viewer(),
+				};
+				session.with_ns(&namespace).with_db(&database)
+			}
+			TestAuth::Record {
+				namespace,
+				database,
+				access,
+				rid,
+			} => {
+				let v = SurValue::Thing(rid.0.clone());
+				Session::for_record(&namespace, &database, &access, v)
+			}
+		}
+	} else if env.signin.is_none() && env.signin.is_none() {
 		Session::owner()
 	} else {
 		Session::default()

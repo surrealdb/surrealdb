@@ -517,18 +517,38 @@ impl<'de> Deserialize<'de> for SurrealObject {
 	}
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(untagged)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
-pub enum TestAuth {}
+pub enum AuthLevel {
+	#[default]
+	Owner,
+	Editor,
+	Viewer,
+}
 
-impl<'de> Deserialize<'de> for TestAuth {
-	fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-	where
-		D: de::Deserializer<'de>,
-	{
-		Err(<D::Error as serde::de::Error>::custom("Not yet implemented"))
-	}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", untagged)]
+pub enum TestAuth {
+	Record {
+		namespace: String,
+		database: String,
+		access: String,
+		rid: SurrealRecordId,
+	},
+	Database {
+		namespace: String,
+		database: String,
+		#[serde(default)]
+		level: AuthLevel,
+	},
+	Namespace {
+		namespace: String,
+		#[serde(default)]
+		level: AuthLevel,
+	},
+	Root {
+		level: AuthLevel,
+	},
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

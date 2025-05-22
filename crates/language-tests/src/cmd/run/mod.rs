@@ -375,7 +375,7 @@ async fn run_test_with_dbs(
 		if let Err(e) =
 			surrealdb_core::iam::signup::signup(dbs, &mut session, signup_vars.0.clone()).await
 		{
-			return Ok(TestTaskResult::SigninError(e));
+			return Ok(TestTaskResult::SignupError(e));
 		}
 	}
 
@@ -383,7 +383,7 @@ async fn run_test_with_dbs(
 		if let Err(e) =
 			surrealdb_core::iam::signin::signin(dbs, &mut session, signin_vars.0.clone()).await
 		{
-			return Ok(TestTaskResult::SignupError(e));
+			return Ok(TestTaskResult::SigninError(e));
 		}
 	}
 
