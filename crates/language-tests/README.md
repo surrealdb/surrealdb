@@ -46,6 +46,9 @@ See below an example of a surrealql test file.
 [env]
 namespace = false
 database = false
+auth = { level = "owner" }
+signin = {}
+signup = {}
 
 [test]
 # Sets the reason behind this test; what exactly this test is testing.
@@ -360,12 +363,34 @@ than that error will be the result of a test. This error can be matched against
 just like a parsing error.
 
 
+This field is not supported for upgrade tests.
 
 #### `[env.auth]`
 Specify the authority with which the test is run, unlike `[env.signin]` and
 `[env.signup]` this field bypasses the normal checks and code run to validate
-signin and signups.
+signin and signups. This field can be one of 4 different variants:
+```toml
+[env]
+auth = { level = "viewer" }
+```
+Will authenticate with the viewer role on the datastore root.
+```toml
+[env]
+auth = { namespace = "ns", level = "viewer" }
+```
+Will authenticate with the viewer role on the namespace `ns` .
+```toml
+[env]
+auth = { namespace = "ns", database = "db", level = "viewer" }
+```
+Will authenticate with the viewer role on the namespace `ns` and the database `db`.
+```toml
+[env]
+auth = { namespace = "ns", database = "db", access = "access_definition", rid = "user:account" }
+```
+Will authenticate on the namespace `ns` and database `db` as the access method `access_definition` with the record id `user:acount`.
 
+This field is not supported for upgrade tests.
 
 #### `[env.capabilities]`
 
