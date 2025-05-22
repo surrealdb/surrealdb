@@ -787,6 +787,16 @@ impl Datastore {
 		self.process(ast, sess, vars).await
 	}
 
+	pub async fn parse_query(
+		&self,
+		surql: &str,
+	) -> Result<Query> {
+		// Parse the SQL query text
+		let ast = syn::parse_with_capabilities(surql, &self.capabilities)?;
+		// Return the AST
+		Ok(ast)
+	}
+
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute_import<S>(
 		&self,

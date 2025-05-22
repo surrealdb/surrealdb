@@ -5,17 +5,16 @@ pub use convert::Cbor;
 use crate::expr::Value;
 use crate::rpc::RpcError;
 use crate::rpc::request::Request;
-use crate::sql::SqlValue;
 use ciborium::Value as Data;
 
 use super::ResTrait;
 
-pub fn parse_value(val: Vec<u8>) -> Result<SqlValue, RpcError> {
+pub fn parse_value(val: Vec<u8>) -> Result<Value, RpcError> {
 	let cbor = ciborium::from_reader::<Data, _>(&mut val.as_slice())
 		.map_err(|_| RpcError::ParseError)
 		.map(Cbor)?;
 
-	SqlValue::try_from(cbor).map_err(|v: &str| RpcError::Thrown(v.into()))
+	Value::try_from(cbor).map_err(|v: &str| RpcError::Thrown(v.into()))
 }
 
 pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
