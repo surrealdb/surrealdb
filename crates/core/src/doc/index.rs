@@ -3,13 +3,13 @@ use crate::dbs::Options;
 use crate::dbs::{Force, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::idx::ft::search::Search2;
 use crate::expr::array::Array;
-use crate::expr::index::{HnswParams, Index, MTreeParams, SearchParams};
+use crate::expr::index::{HnswParams, Index, MTreeParams, Search2Params, SearchParams};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{FlowResultExt as _, Part, Thing, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::FtIndex;
+use crate::idx::ft::search::Search2;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 #[cfg(not(target_family = "wasm"))]
@@ -413,7 +413,7 @@ impl<'a> IndexOperation<'a> {
 		stk: &mut Stk,
 		ctx: &Context,
 		p: &Search2Params,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Build a Search2 instance
 		let s = Search2::new(ctx, self.opt, p).await?;
 		// Delete the old index data

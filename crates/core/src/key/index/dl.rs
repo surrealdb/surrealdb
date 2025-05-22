@@ -1,8 +1,8 @@
 //! Stores the doc length
+use crate::expr::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
-use crate::sql::Id;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

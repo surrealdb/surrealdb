@@ -1156,6 +1156,47 @@ impl Parser<'_> {
 						terms_cache,
 					});
 				}
+				t!("SEARCH2") => {
+					self.pop_peek();
+					let mut analyzer: Option<Ident> = None;
+					let mut scoring = None;
+					let mut hl = false;
+
+					loop {
+						match self.peek_kind() {
+							t!("ANALYZER") => {
+								self.pop_peek();
+								analyzer = Some(self.next_token_value()).transpose()?;
+							}
+							t!("BM25") => {
+								self.pop_peek();
+								if self.eat(t!("(")) {
+									let open = self.last_span();
+									let k1 = self.next_token_value()?;
+									expected!(self, t!(","));
+									let b = self.next_token_value()?;
+									self.expect_closing_delimiter(t!(")"), open)?;
+									scoring = Some(Scoring::Bm {
+										k1,
+										b,
+									})
+								} else {
+									scoring = Some(Default::default());
+								};
+							}
+							t!("HIGHLIGHTS") => {
+								self.pop_peek();
+								hl = true;
+							}
+							_ => break,
+						}
+					}
+					res.index = Index::Search2(crate::sql::index::Search2Params {
+						az: analyzer.unwrap_or_else(|| Ident::from("like")),
+						sc: scoring.unwrap_or_else(Default::default),
+						hl,
+					});
+				}
 				t!("MTREE") => {
 					self.pop_peek();
 					expected!(self, t!("DIMENSION"));

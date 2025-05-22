@@ -1,25 +1,24 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
+use crate::expr::index::Search2Params;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{Thing, Value};
+use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
-use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::offsets::Offset;
 use crate::idx::ft::postings::TermFrequency;
 use crate::key::index::dl::Dl;
 use crate::key::index::td::Td;
 use crate::kvs::Transaction;
-use crate::sql::index::Search2Params;
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Thing, Value};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default)]
 struct TermDocument {
 	f: TermFrequency,
 	o: Vec<Offset>,
@@ -31,11 +30,7 @@ pub(crate) struct Search2 {
 }
 
 impl Search2 {
-	pub(crate) async fn new(
-		ctx: &Context,
-		opt: &Options,
-		p: &Search2Params,
-	) -> Result<Self, Error> {
+	pub(crate) async fn new(ctx: &Context, opt: &Options, p: &Search2Params) -> Result<Self> {
 		let tx = ctx.tx();
 		let ixs = ctx.get_index_stores();
 		let (ns, db) = opt.ns_db()?;
@@ -56,7 +51,7 @@ impl Search2 {
 		ix: &DefineIndexStatement,
 		rid: &Thing,
 		content: Vec<Value>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let (ns, db) = opt.ns_db()?;
 		// Collect the tokens.
 		let tokens =
@@ -91,7 +86,7 @@ impl Search2 {
 		ix: &DefineIndexStatement,
 		rid: &Thing,
 		content: Vec<Value>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let (ns, db) = opt.ns_db()?;
 		let tx = ctx.tx();
 		// Collect the tokens.
@@ -116,7 +111,7 @@ impl Search2 {
 		ix: &DefineIndexStatement,
 		rid: &Thing,
 		tokens: Vec<Tokens>,
-	) -> Result<DocLength, Error> {
+	) -> Result<DocLength> {
 		let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, o) in offsets {
@@ -135,7 +130,7 @@ impl Search2 {
 		ix: &DefineIndexStatement,
 		rid: &Thing,
 		tokens: Vec<Tokens>,
-	) -> Result<DocLength, Error> {
+	) -> Result<DocLength> {
 		let (dl, tf) = Analyzer::extract_frequencies(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, f) in tf {

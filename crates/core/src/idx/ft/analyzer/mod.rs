@@ -127,7 +127,7 @@ impl Analyzer {
 
 	pub(in crate::idx::ft) fn extract_frequencies(
 		inputs: &[Tokens],
-	) -> Result<(DocLength, HashMap<&str, TermFrequency>), Error> {
+	) -> Result<(DocLength, HashMap<&str, TermFrequency>)> {
 		let mut dl = 0;
 		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
 		for tks in inputs {
@@ -174,7 +174,7 @@ impl Analyzer {
 
 	pub(in crate::idx::ft) fn extract_offsets(
 		inputs: &[Tokens],
-	) -> Result<(DocLength, HashMap<&str, Vec<Offset>>), Error> {
+	) -> Result<(DocLength, HashMap<&str, Vec<Offset>>)> {
 		let mut dl = 0;
 		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
 		for (i, tks) in inputs.iter().enumerate() {
@@ -228,7 +228,7 @@ impl Analyzer {
 		opt: &Options,
 		content: Vec<Value>,
 		stage: FilteringStage,
-	) -> Result<Vec<Tokens>, Error> {
+	) -> Result<Vec<Tokens>> {
 		let mut tks = Vec::with_capacity(content.len());
 		for v in content {
 			self.analyze_value(stk, ctx, opt, v, stage, &mut tks).await?;

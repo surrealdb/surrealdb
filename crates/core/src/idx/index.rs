@@ -3,7 +3,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::index::{HnswParams, MTreeParams, SearchParams, Search2Params};
+use crate::expr::index::{HnswParams, MTreeParams, Search2Params, SearchParams};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Array, Index, Part, Thing, Value};
 use crate::idx::IndexKeyBase;
@@ -172,7 +172,7 @@ impl<'a> IndexOperation<'a> {
 		&mut self,
 		_stk: &mut Stk,
 		_p: &Search2Params,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		todo!("index_full_text_multiwriter")
 	}
 

@@ -926,7 +926,7 @@ impl QueryExecutor {
 		&self,
 		_ir: IteratorRef,
 		_io: IndexOption,
-	) -> Result<Option<ThingIterator>, Error> {
+	) -> Result<Option<ThingIterator>> {
 		todo!("new_search2_index_iterator")
 	}
 
