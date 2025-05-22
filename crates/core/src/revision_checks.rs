@@ -81,7 +81,12 @@ test_revisioned_equality!(
 	expr::Id,
 	sql::Id::Object([("key".to_string(), sql::SqlValue::from(1))].into_iter().collect())
 );
-test_revisioned_equality!(sql_Id_Generate, sql::Id, expr::Id, sql::Id::Generate(sql::id::Gen::Ulid));
+test_revisioned_equality!(
+	sql_Id_Generate,
+	sql::Id,
+	expr::Id,
+	sql::Id::Generate(sql::id::Gen::Ulid)
+);
 test_revisioned_equality!(
 	sql_Id_Range,
 	sql::Id,
@@ -603,7 +608,12 @@ test_revisioned_equality!(
 	expr::AccessType,
 	sql::AccessType::default()
 );
-test_revisioned_equality!(sql_JwtAccess, sql::JwtAccess, expr::JwtAccess, sql::JwtAccess::default());
+test_revisioned_equality!(
+	sql_JwtAccess,
+	sql::JwtAccess,
+	expr::JwtAccess,
+	sql::JwtAccess::default()
+);
 test_revisioned_equality!(
 	sql_access_type_JwtAccessIssue,
 	sql::access_type::JwtAccessIssue,
@@ -658,7 +668,12 @@ test_revisioned_equality!(
 	expr::access::AccessDuration,
 	sql::access::AccessDuration::default()
 );
-test_revisioned_equality!(sql_Algorithm, sql::Algorithm, expr::Algorithm, sql::Algorithm::default());
+test_revisioned_equality!(
+	sql_Algorithm,
+	sql::Algorithm,
+	expr::Algorithm,
+	sql::Algorithm::default()
+);
 test_revisioned_equality!(sql_Array, sql::Array, expr::Array, sql::Array::default());
 test_revisioned_equality!(sql_Base, sql::Base, expr::Base, sql::Base::default());
 test_revisioned_equality!(sql_Block, sql::Block, expr::Block, sql::Block::default());
@@ -747,7 +762,12 @@ test_revisioned_equality!(
 	expr::Function,
 	sql::Function::Normal("test".to_string(), vec![sql::SqlValue::default()])
 );
-test_revisioned_equality!(sql_Future, sql::Future, expr::Future, sql::Future(sql::Block::default()));
+test_revisioned_equality!(
+	sql_Future,
+	sql::Future,
+	expr::Future,
+	sql::Future(sql::Block::default())
+);
 test_revisioned_equality!(
 	sql_Geometry,
 	sql::Geometry,
@@ -970,7 +990,12 @@ test_revisioned_equality!(
 	expr::Subquery,
 	sql::Subquery::Value(sql::SqlValue::default())
 );
-test_revisioned_equality!(sql_TableType, sql::TableType, expr::TableType, sql::TableType::default());
+test_revisioned_equality!(
+	sql_TableType,
+	sql::TableType,
+	expr::TableType,
+	sql::TableType::default()
+);
 test_revisioned_equality!(sql_Relation, sql::Relation, expr::Relation, sql::Relation::default());
 test_revisioned_equality!(sql_Tables, sql::Tables, expr::Tables, sql::Tables::default());
 test_revisioned_equality!(sql_Table, sql::Table, expr::Table, sql::Table::default());
