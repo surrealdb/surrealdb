@@ -835,7 +835,7 @@ jobs:
       - name: Run SurrealQL test suite
         run: |
           cd crates/language-tests
-          ./target/debug/surrealql-test --color always --no-wip run -j 3
+          ./target/debug/surrealql-test --color always run --no-wip -j 3
 
   upgrade-tests:
     name: Run SurrealQL upgrade tests
