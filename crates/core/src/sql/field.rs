@@ -1,19 +1,8 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{fmt::Fmt, Idiom, Part, Value};
-use crate::syn;
-use reblessive::tree::Stk;
+use crate::sql::{Idiom, SqlValue, fmt::Fmt};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
-
-use super::paths::ID;
-use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -30,16 +19,6 @@ impl Fields {
 	pub fn is_all(&self) -> bool {
 		self.0.iter().any(|v| matches!(v, Field::All))
 	}
-	/// Create a new `VALUE id` field projection
-	pub(crate) fn value_id() -> Self {
-		Self(
-			vec![Field::Single {
-				expr: Value::Idiom(Idiom(ID.to_vec())),
-				alias: None,
-			}],
-			true,
-		)
-	}
 	/// Get all fields which are not an `*` projection
 	pub fn other(&self) -> impl Iterator<Item = &Field> {
 		self.0.iter().filter(|v| !matches!(v, Field::All))
@@ -55,23 +34,17 @@ impl Fields {
 			_ => None,
 		}
 	}
-	/// Check if the fields are only about counting
-	pub(crate) fn is_count_all_only(&self) -> bool {
-		let mut is_count_only = false;
-		for field in &self.0 {
-			if let Field::Single {
-				expr: Value::Function(func),
-				..
-			} = field
-			{
-				if func.is_count_all() {
-					is_count_only = true;
-					continue;
-				}
-			}
-			return false;
-		}
-		is_count_only
+}
+
+impl From<Fields> for crate::expr::field::Fields {
+	fn from(v: Fields) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect(), v.1)
+	}
+}
+
+impl From<crate::expr::field::Fields> for Fields {
+	fn from(v: crate::expr::field::Fields) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect(), false)
 	}
 }
 
@@ -99,194 +72,6 @@ impl Display for Fields {
 	}
 }
 
-impl InfoStructure for Fields {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
-
-impl Fields {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		group: bool,
-	) -> Result<Value, Error> {
-		if let Some(doc) = doc {
-			self.compute_value(stk, ctx, opt, doc, group).await
-		} else {
-			let doc = Value::None.into();
-			self.compute_value(stk, ctx, opt, &doc, group).await
-		}
-	}
-
-	async fn compute_value(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: &CursorDoc,
-		group: bool,
-	) -> Result<Value, Error> {
-		// Ensure futures are run
-		let opt = &opt.new_with_futures(true);
-		// Process the desired output
-		let mut out = match self.is_all() {
-			true => doc.doc.as_ref().compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-			false => Value::base(),
-		};
-		for v in self.other() {
-			match v {
-				Field::All => (),
-				Field::Single {
-					expr,
-					alias,
-				} => {
-					let name = alias
-						.as_ref()
-						.map(Cow::Borrowed)
-						.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
-					match expr {
-						// This expression is a grouped aggregate function
-						Value::Function(f) if group && f.is_aggregate() => {
-							let x = match f.args().len() {
-								// If no function arguments, then compute the result
-								0 => f.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-								// If arguments, then pass the first value through
-								_ => f.args()[0]
-									.compute(stk, ctx, opt, Some(doc))
-									.await
-									.catch_return()?,
-							};
-							// Check if this is a single VALUE field expression
-							match self.single().is_some() {
-								false => out.set(stk, ctx, opt, name.as_ref(), x).await?,
-								true => out = x,
-							}
-						}
-						// This expression is a multi-output graph traversal
-						Value::Idiom(v) if v.is_multi_yield() => {
-							// Store the different output yields here
-							let mut res: Vec<(&[Part], Value)> = Vec::new();
-							// Split the expression by each output alias
-							for v in v.split_inclusive(Idiom::split_multi_yield) {
-								// Use the last fetched value for each fetch
-								let x = match res.last() {
-									Some((_, r)) => r,
-									None => doc.doc.as_ref(),
-								};
-								// Continue fetching the next idiom part
-								let x = x
-									.get(stk, ctx, opt, Some(doc), v)
-									.await
-									.catch_return()?
-									.compute(stk, ctx, opt, Some(doc))
-									.await
-									// TODO: Controlflow winding up to here has some strange
-									// implications, check validity.
-									.catch_return()?
-									.flatten();
-								// Add the result to the temporary store
-								res.push((v, x));
-							}
-							// Assign each fetched yield to the output
-							for (p, x) in res {
-								match p.last().unwrap().alias() {
-									// This is an alias expression part
-									Some(a) => {
-										if let Some(i) = alias {
-											out.set(stk, ctx, opt, i, x.clone()).await?;
-										}
-										out.set(stk, ctx, opt, a, x).await?;
-									}
-									// This is the end of the expression
-									None => {
-										out.set(stk, ctx, opt, alias.as_ref().unwrap_or(v), x)
-											.await?
-									}
-								}
-							}
-						}
-						// This expression is a variable fields expression
-						Value::Function(f) if f.name() == Some("type::fields") => {
-							// Process the function using variable field projections
-							let expr =
-								expr.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
-							// Check if this is a single VALUE field expression
-							match self.single().is_some() {
-								false => {
-									// Get the first argument which is guaranteed to exist
-									let args = match f.args().first().unwrap() {
-										Value::Param(v) => {
-											v.compute(stk, ctx, opt, Some(doc)).await?
-										}
-										v => v.to_owned(),
-									};
-									// This value is always an array, so we can convert it
-									let expr: Vec<Value> = expr.try_into()?;
-									// This value is always an array, so we can convert it
-									let args: Vec<Value> = args.try_into()?;
-									// This value is always an array, so we can convert it
-									for (name, expr) in args.into_iter().zip(expr) {
-										// This value is always a string, so we can convert it
-										let name = syn::idiom(&name.to_raw_string())?;
-										// Check if this is a single VALUE field expression
-										out.set(stk, ctx, opt, name.as_ref(), expr).await?
-									}
-								}
-								true => out = expr,
-							}
-						}
-						// This expression is a variable field expression
-						Value::Function(f) if f.name() == Some("type::field") => {
-							// Process the function using variable field projections
-							let expr =
-								expr.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
-							// Check if this is a single VALUE field expression
-							match self.single().is_some() {
-								false => {
-									// Get the first argument which is guaranteed to exist
-									let name = match f.args().first().unwrap() {
-										Value::Param(v) => {
-											v.compute(stk, ctx, opt, Some(doc)).await?
-										}
-										v => v.to_owned(),
-									};
-									// find the name for the field, either from the argument or the
-									// alias.
-									let name = if let Some(x) = alias.as_ref().map(Cow::Borrowed) {
-										x
-									} else {
-										Cow::Owned(syn::idiom(&name.to_raw_string())?)
-									};
-									// Add the projected field to the output document
-									out.set(stk, ctx, opt, name.as_ref(), expr).await?
-								}
-								true => out = expr,
-							}
-						}
-						// This expression is a normal field expression
-						_ => {
-							let expr =
-								expr.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
-							// Check if this is a single VALUE field expression
-							if self.single().is_some() {
-								out = expr;
-							} else {
-								out.set(stk, ctx, opt, name.as_ref(), expr).await?;
-							}
-						}
-					}
-				}
-			}
-		}
-		Ok(out)
-	}
-}
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -297,7 +82,7 @@ pub enum Field {
 	All,
 	/// The 'rating' in `SELECT rating FROM ...`
 	Single {
-		expr: Value,
+		expr: SqlValue,
 		/// The `quality` in `SELECT rating AS quality FROM ...`
 		alias: Option<Idiom>,
 	},
@@ -319,6 +104,36 @@ impl Display for Field {
 					Ok(())
 				}
 			}
+		}
+	}
+}
+
+impl From<Field> for crate::expr::field::Field {
+	fn from(v: Field) -> Self {
+		match v {
+			Field::All => Self::All,
+			Field::Single {
+				expr,
+				alias,
+			} => Self::Single {
+				expr: expr.into(),
+				alias: alias.map(Into::into),
+			},
+		}
+	}
+}
+
+impl From<crate::expr::field::Field> for Field {
+	fn from(v: crate::expr::field::Field) -> Self {
+		match v {
+			crate::expr::field::Field::All => Self::All,
+			crate::expr::field::Field::Single {
+				expr,
+				alias,
+			} => Self::Single {
+				expr: expr.into(),
+				alias: alias.map(Into::into),
+			},
 		}
 	}
 }

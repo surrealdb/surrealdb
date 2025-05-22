@@ -8,7 +8,7 @@ use regex::Regex;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::{Capabilities, Session};
 use surrealdb::iam::Role;
-use surrealdb::sql::{Base, Value};
+use surrealdb::sql::{Base, SqlValue};
 use tokio::time::Duration;
 
 struct TestLevel {
@@ -400,7 +400,7 @@ async fn access_bearer_revoke() {
 		let re =
 			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
-		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+		let kid = &re.captures(&tmp).unwrap()[1];
 		// Consume the results of the other three
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
@@ -542,7 +542,7 @@ async fn access_bearer_show() {
 		let re =
 			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
-		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+		let kid = &re.captures(&tmp).unwrap()[1];
 		// Consume the results of the other three
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
@@ -603,7 +603,11 @@ async fn access_bearer_show() {
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Show all active bearer grants
 		let res = &mut dbs
-			.execute("ACCESS srv SHOW WHERE revocation IS NONE AND (expiration IS NONE OR expiration > time::now())", &ses, None)
+			.execute(
+				"ACCESS srv SHOW WHERE revocation IS NONE AND (expiration IS NONE OR expiration > time::now())",
+				&ses,
+				None,
+			)
 			.await
 			.unwrap();
 		let tmp = res.remove(0).result.unwrap().to_string();
@@ -703,7 +707,7 @@ async fn access_bearer_purge() {
 		let re =
 			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: d'.*?', grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
 					.unwrap();
-		let kid = re.captures(&tmp).unwrap().get(1).unwrap().as_str();
+		let kid = &re.captures(&tmp).unwrap()[1];
 		// Consume the results of the other three
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
@@ -790,38 +794,146 @@ async fn permissions_access_grant() {
 
 		let tests = vec![
 			// Root level
-			((().into(), Role::Owner), ("NS", "DB"), true, "owner at root level should be able to issue a grant"),
-			((().into(), Role::Editor), ("NS", "DB"), false, "editor at root level should not be able to issue a grant"),
-			((().into(), Role::Viewer), ("NS", "DB"), false, "viewer at root level should not be able to issue a grant"),
-
+			(
+				(().into(), Role::Owner),
+				("NS", "DB"),
+				true,
+				"owner at root level should be able to issue a grant",
+			),
+			(
+				(().into(), Role::Editor),
+				("NS", "DB"),
+				false,
+				"editor at root level should not be able to issue a grant",
+			),
+			(
+				(().into(), Role::Viewer),
+				("NS", "DB"),
+				false,
+				"viewer at root level should not be able to issue a grant",
+			),
 			// Namespace level
 			match level {
-				Base::Db => ((("NS",).into(), Role::Owner), ("NS", "DB"), true, "owner at namespace level should be able to issue a grant on its namespace"),
-				Base::Ns => ((("NS",).into(), Role::Owner), ("NS", "DB"), true, "owner at namespace level should be able to issue a grant on its namespace"),
-				Base::Root => ((("NS",).into(), Role::Owner), ("NS", "DB"), false, "owner at namespace level should not be able to issue a grant on its namespace"),
-				_ => panic!("Invalid base")
+				Base::Db => (
+					(("NS",).into(), Role::Owner),
+					("NS", "DB"),
+					true,
+					"owner at namespace level should be able to issue a grant on its namespace",
+				),
+				Base::Ns => (
+					(("NS",).into(), Role::Owner),
+					("NS", "DB"),
+					true,
+					"owner at namespace level should be able to issue a grant on its namespace",
+				),
+				Base::Root => (
+					(("NS",).into(), Role::Owner),
+					("NS", "DB"),
+					false,
+					"owner at namespace level should not be able to issue a grant on its namespace",
+				),
+				_ => panic!("Invalid base"),
 			},
-			((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at namespace level should not be able to issue a grant on another namespace"),
-			((("NS",).into(), Role::Editor), ("NS", "DB"), false, "editor at namespace level should not be able to issue a grant on its namespace"),
-			((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at namespace level should not be able to issue a grant on another namespace"),
-			((("NS",).into(), Role::Viewer), ("NS", "DB"), false, "viewer at namespace level should not be able to issue a grant on its namespace"),
-			((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at namespace level should not be able to issue a grant on another namespace"),
-
+			(
+				(("NS",).into(), Role::Owner),
+				("OTHER_NS", "DB"),
+				false,
+				"owner at namespace level should not be able to issue a grant on another namespace",
+			),
+			(
+				(("NS",).into(), Role::Editor),
+				("NS", "DB"),
+				false,
+				"editor at namespace level should not be able to issue a grant on its namespace",
+			),
+			(
+				(("NS",).into(), Role::Editor),
+				("OTHER_NS", "DB"),
+				false,
+				"editor at namespace level should not be able to issue a grant on another namespace",
+			),
+			(
+				(("NS",).into(), Role::Viewer),
+				("NS", "DB"),
+				false,
+				"viewer at namespace level should not be able to issue a grant on its namespace",
+			),
+			(
+				(("NS",).into(), Role::Viewer),
+				("OTHER_NS", "DB"),
+				false,
+				"viewer at namespace level should not be able to issue a grant on another namespace",
+			),
 			// Database level
 			match level {
-				Base::Db => ((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true, "owner at database level should be able to issue a grant on its database"),
-				Base::Ns => ((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false, "owner at database level should not be able to issue a grant on its database"),
-				Base::Root => ((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false, "owner at database level should not be able to issue a grant on its database"),
-				_ => panic!("Invalid base")
+				Base::Db => (
+					(("NS", "DB").into(), Role::Owner),
+					("NS", "DB"),
+					true,
+					"owner at database level should be able to issue a grant on its database",
+				),
+				Base::Ns => (
+					(("NS", "DB").into(), Role::Owner),
+					("NS", "DB"),
+					false,
+					"owner at database level should not be able to issue a grant on its database",
+				),
+				Base::Root => (
+					(("NS", "DB").into(), Role::Owner),
+					("NS", "DB"),
+					false,
+					"owner at database level should not be able to issue a grant on its database",
+				),
+				_ => panic!("Invalid base"),
 			},
-			((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false, "owner at database level should not be able to issue a grant on another database"),
-			((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false, "owner at database level should not be able to issue a grant on another namespace even if the database name matches"),
-			((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false, "editor at database level should not be able to issue a grant on its database"),
-			((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false, "editor at database level should not be able to issue a grant on another database"),
-			((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false, "editor at database level should not be able to issue a grant on another namespace even if the database name matches"),
-			((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false, "viewer at database level should not be able to issue a grant on its database"),
-			((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false, "viewer at database level should not be able to issue a grant on another database"),
-			((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false, "viewer at database level should not be able to issue a grant on another namespace even if the database name matches"),
+			(
+				(("NS", "DB").into(), Role::Owner),
+				("NS", "OTHER_DB"),
+				false,
+				"owner at database level should not be able to issue a grant on another database",
+			),
+			(
+				(("NS", "DB").into(), Role::Owner),
+				("OTHER_NS", "DB"),
+				false,
+				"owner at database level should not be able to issue a grant on another namespace even if the database name matches",
+			),
+			(
+				(("NS", "DB").into(), Role::Editor),
+				("NS", "DB"),
+				false,
+				"editor at database level should not be able to issue a grant on its database",
+			),
+			(
+				(("NS", "DB").into(), Role::Editor),
+				("NS", "OTHER_DB"),
+				false,
+				"editor at database level should not be able to issue a grant on another database",
+			),
+			(
+				(("NS", "DB").into(), Role::Editor),
+				("OTHER_NS", "DB"),
+				false,
+				"editor at database level should not be able to issue a grant on another namespace even if the database name matches",
+			),
+			(
+				(("NS", "DB").into(), Role::Viewer),
+				("NS", "DB"),
+				false,
+				"viewer at database level should not be able to issue a grant on its database",
+			),
+			(
+				(("NS", "DB").into(), Role::Viewer),
+				("NS", "OTHER_DB"),
+				false,
+				"viewer at database level should not be able to issue a grant on another database",
+			),
+			(
+				(("NS", "DB").into(), Role::Viewer),
+				("OTHER_NS", "DB"),
+				false,
+				"viewer at database level should not be able to issue a grant on another namespace even if the database name matches",
+			),
 		];
 		let statement = format!("ACCESS api ON {base} GRANT FOR USER tobie");
 
@@ -840,8 +952,9 @@ async fn permissions_access_grant() {
 				}
 				_ => panic!("Invalid base"),
 			};
-			let statement_setup =
-				format!("DEFINE ACCESS api ON {base} TYPE BEARER FOR USER; DEFINE USER tobie ON {base} ROLES OWNER");
+			let statement_setup = format!(
+				"DEFINE ACCESS api ON {base} TYPE BEARER FOR USER; DEFINE USER tobie ON {base} ROLES OWNER"
+			);
 
 			{
 				let ds = new_ds().await.unwrap().with_auth_enabled(true).with_capabilities(
@@ -860,7 +973,7 @@ async fn permissions_access_grant() {
 
 				if should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
-					assert_ne!(res.unwrap(), Value::parse("[]"), "{}", msg);
+					assert_ne!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
 				} else {
 					let err = res.unwrap_err().to_string();
 					assert!(

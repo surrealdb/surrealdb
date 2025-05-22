@@ -1,14 +1,14 @@
 use reblessive::Stack;
 
+use super::Parse;
 use super::lexer::Lexer;
 use super::parse;
 use super::parser::Parser;
-use super::Parse;
 use crate::err::Error;
-use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, Thing, Value};
-use crate::syn::token::{t, TokenKind};
+use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, SqlValue, Thing};
+use crate::syn::token::{TokenKind, t};
 
-impl Parse<Self> for Value {
+impl Parse<Self> for SqlValue {
 	fn parse(val: &str) -> Self {
 		let mut parser = Parser::new(val.as_bytes());
 		let mut stack = Stack::new();
@@ -73,7 +73,7 @@ impl Parse<Self> for Expression {
 			.finish()
 			.map_err(|e| e.render_on(val))
 			.unwrap();
-		if let Value::Expression(x) = value {
+		if let SqlValue::Expression(x) = value {
 			return *x;
 		}
 		panic!("not an expression");

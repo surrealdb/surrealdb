@@ -5,14 +5,19 @@ use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
+use crate::expr::FlowResultExt as _;
+use crate::expr::paths::ID;
+use crate::expr::paths::IN;
+use crate::expr::paths::OUT;
+use crate::expr::permission::Permission;
+use crate::expr::value::Value;
 use crate::iam::Action;
-use crate::sql::paths::ID;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
-use crate::sql::permission::Permission;
-use crate::sql::value::Value;
-use crate::sql::FlowResultExt as _;
+use anyhow::Result;
+use anyhow::bail;
+use anyhow::ensure;
 use reblessive::tree::Stk;
+
+use super::IgnoreError;
 
 impl Document {
 	/// Checks whether this operation is allowed on
@@ -26,56 +31,61 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the table for this document
 		let tb = self.tb(ctx, opt).await?;
 		// Determine the type of statement
 		match stm {
 			Statement::Create(_) => {
-				if !tb.allows_normal() {
-					return Err(Error::TableCheck {
+				ensure!(
+					tb.allows_normal(),
+					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
 						target_type: tb.kind.to_string(),
-					});
-				}
+					}
+				);
 			}
 			Statement::Upsert(_) => {
-				if !tb.allows_normal() {
-					return Err(Error::TableCheck {
+				ensure!(
+					tb.allows_normal(),
+					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
 						target_type: tb.kind.to_string(),
-					});
-				}
+					}
+				);
 			}
 			Statement::Relate(_) => {
-				if !tb.allows_relation() {
-					return Err(Error::TableCheck {
+				ensure!(
+					tb.allows_relation(),
+					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: true,
 						target_type: tb.kind.to_string(),
-					});
-				}
+					}
+				);
 			}
 			Statement::Insert(_) => match self.extras {
 				Workable::Relate(_, _, _) => {
-					if !tb.allows_relation() {
-						return Err(Error::TableCheck {
+					ensure!(
+						tb.allows_relation(),
+						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: true,
 							target_type: tb.kind.to_string(),
-						});
-					}
+						}
+					);
 				}
 				_ => {
-					if !tb.allows_normal() {
-						return Err(Error::TableCheck {
+					ensure!(
+						tb.allows_normal(),
+						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: false,
 							target_type: tb.kind.to_string(),
-						});
-					}
+						}
+					);
 				}
 			},
 			_ => {}
@@ -93,10 +103,10 @@ impl Document {
 		_ctx: &Context,
 		_opt: &Options,
 		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() && self.current.doc.is_none() {
-			return Err(Error::Ignore);
+			return Err(IgnoreError::Ignore);
 		}
 		// Carry on
 		Ok(())
@@ -116,19 +126,20 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the record id
 		let rid = self.id()?;
 		// Don't bother checking if we generated the document id
-		if self.gen.is_some() {
+		if self.r#gen.is_some() {
 			return Ok(());
 		}
 		// You cannot store a range id as the id field on a document
-		if rid.is_range() {
-			return Err(Error::IdInvalid {
+		ensure!(
+			!rid.is_range(),
+			Error::IdInvalid {
 				value: rid.to_string(),
-			});
-		}
+			}
+		);
 		// This is a CREATE, UPSERT, UPDATE statement
 		if let Workable::Normal = &self.extras {
 			// This is a CONTENT, MERGE or SET clause
@@ -138,7 +149,7 @@ impl Document {
 					match field {
 						// You cannot store a range id as the id field on a document
 						Value::Thing(v) if v.is_range() => {
-							return Err(Error::IdInvalid {
+							bail!(Error::IdInvalid {
 								value: v.to_string(),
 							})
 						}
@@ -148,7 +159,7 @@ impl Document {
 						v if rid.id.is(&v) => (),
 						// The id field does not match
 						v => {
-							return Err(Error::IdMismatch {
+							bail!(Error::IdMismatch {
 								value: v.to_string(),
 							})
 						}
@@ -165,7 +176,7 @@ impl Document {
 					match field {
 						// You cannot store a range id as the id field on a document
 						Value::Thing(v) if v.is_range() => {
-							return Err(Error::IdInvalid {
+							bail!(Error::IdInvalid {
 								value: v.to_string(),
 							})
 						}
@@ -177,7 +188,7 @@ impl Document {
 						v if v.is_none() => (),
 						// The id field does not match
 						v => {
-							return Err(Error::IdMismatch {
+							bail!(Error::IdMismatch {
 								value: v.to_string(),
 							})
 						}
@@ -188,7 +199,7 @@ impl Document {
 					match field {
 						// You cannot store a range id as the in field on a document
 						Value::Thing(v) if v.is_range() => {
-							return Err(Error::InInvalid {
+							bail!(Error::InInvalid {
 								value: v.to_string(),
 							})
 						}
@@ -198,7 +209,7 @@ impl Document {
 						v if l.id.is(&v) => (),
 						// The in field does not match
 						v => {
-							return Err(Error::InMismatch {
+							bail!(Error::InMismatch {
 								value: v.to_string(),
 							})
 						}
@@ -209,7 +220,7 @@ impl Document {
 					match field {
 						// You cannot store a range id as the out field on a document
 						Value::Thing(v) if v.is_range() => {
-							return Err(Error::OutInvalid {
+							bail!(Error::OutInvalid {
 								value: v.to_string(),
 							})
 						}
@@ -219,7 +230,7 @@ impl Document {
 						v if r.id.is(&v) => (),
 						// The out field does not match
 						v => {
-							return Err(Error::OutMismatch {
+							bail!(Error::OutMismatch {
 								value: v.to_string(),
 							})
 						}
@@ -237,7 +248,7 @@ impl Document {
 				{
 					// You cannot store a range id as the id field on a document
 					Value::Thing(v) if v.is_range() => {
-						return Err(Error::IdInvalid {
+						bail!(Error::IdInvalid {
 							value: v.to_string(),
 						})
 					}
@@ -249,7 +260,7 @@ impl Document {
 					v if v.is_none() => (),
 					// The id field does not match
 					v => {
-						return Err(Error::IdMismatch {
+						bail!(Error::IdMismatch {
 							value: v.to_string(),
 						})
 					}
@@ -263,7 +274,7 @@ impl Document {
 				{
 					// You cannot store a range id as the in field on a document
 					Value::Thing(v) if v.is_range() => {
-						return Err(Error::InInvalid {
+						bail!(Error::InInvalid {
 							value: v.to_string(),
 						})
 					}
@@ -273,7 +284,7 @@ impl Document {
 					v if l.id.is(&v) => (),
 					// The in field does not match
 					v => {
-						return Err(Error::InMismatch {
+						bail!(Error::InMismatch {
 							value: v.to_string(),
 						})
 					}
@@ -287,7 +298,7 @@ impl Document {
 				{
 					// You cannot store a range id as the out field on a document
 					Value::Thing(v) if v.is_range() => {
-						return Err(Error::OutInvalid {
+						bail!(Error::OutInvalid {
 							value: v.to_string(),
 						})
 					}
@@ -297,7 +308,7 @@ impl Document {
 					v if r.id.is(&v) => (),
 					// The out field does not match
 					v => {
-						return Err(Error::OutMismatch {
+						bail!(Error::OutMismatch {
 							value: v.to_string(),
 						})
 					}
@@ -318,7 +329,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if we have already processed a condition
 		if !self.is_condition_checked() {
 			// Check if a WHERE condition is specified
@@ -331,7 +342,7 @@ impl Document {
 				// Check if the expression is truthy
 				if !cond.compute(stk, ctx, opt, Some(current)).await.catch_return()?.is_truthy() {
 					// Ignore this document
-					return Err(Error::Ignore);
+					return Err(IgnoreError::Ignore);
 				}
 			}
 		}
@@ -352,7 +363,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
@@ -366,14 +377,14 @@ impl Document {
 				};
 				// Process the table permissions
 				match &table.permissions.select {
-					Permission::None => return Err(Error::Ignore),
+					Permission::None => return Err(IgnoreError::Ignore),
 					Permission::Full => (),
 					Permission::Specific(e) => {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
 						if !e.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
-							return Err(Error::Ignore);
+							return Err(IgnoreError::Ignore);
 						}
 					}
 				}
@@ -393,7 +404,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
@@ -404,7 +415,7 @@ impl Document {
 				let perms = stm.permissions(&table, self.is_new());
 				// Exit early if permissions are NONE
 				if perms.is_none() {
-					return Err(Error::Ignore);
+					return Err(IgnoreError::Ignore);
 				}
 			}
 		}
@@ -422,7 +433,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() {
 			// Should we run permissions checks?
@@ -431,15 +442,15 @@ impl Document {
 				if opt.auth.is_record() {
 					let ns = opt.ns()?;
 					if opt.auth.level().ns() != Some(ns) {
-						return Err(Error::NsNotAllowed {
+						return Err(IgnoreError::from(anyhow::Error::new(Error::NsNotAllowed {
 							ns: ns.into(),
-						});
+						})));
 					}
 					let db = opt.db()?;
 					if opt.auth.level().db() != Some(db) {
-						return Err(Error::DbNotAllowed {
+						return Err(IgnoreError::from(anyhow::Error::new(Error::DbNotAllowed {
 							db: db.into(),
-						});
+						})));
 					}
 				}
 				// Get the table
@@ -448,7 +459,7 @@ impl Document {
 				let perms = stm.permissions(&table, self.is_new());
 				// Process the table permissions
 				match perms {
-					Permission::None => return Err(Error::Ignore),
+					Permission::None => return Err(IgnoreError::Ignore),
 					Permission::Full => return Ok(()),
 					Permission::Specific(e) => {
 						// Disable permissions
@@ -468,7 +479,7 @@ impl Document {
 							.catch_return()?
 							.is_truthy()
 						{
-							return Err(Error::Ignore);
+							return Err(IgnoreError::Ignore);
 						}
 					}
 				}

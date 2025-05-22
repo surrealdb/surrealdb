@@ -1,11 +1,9 @@
-#[cfg(test)]
-use crate::dbs::fuzzy_eq::FuzzyEq;
-use crate::sql::{Object, Uuid, Value};
+use crate::expr::{Object, Uuid, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[non_exhaustive]
@@ -13,6 +11,8 @@ pub enum Action {
 	Create,
 	Update,
 	Delete,
+	#[revision(start = 2)]
+	Killed,
 }
 
 impl Display for Action {
@@ -21,6 +21,7 @@ impl Display for Action {
 			Action::Create => write!(f, "CREATE"),
 			Action::Update => write!(f, "UPDATE"),
 			Action::Delete => write!(f, "DELETE"),
+			Action::Killed => write!(f, "KILLED"),
 		}
 	}
 }
@@ -61,12 +62,5 @@ impl Notification {
 			record,
 			result,
 		}
-	}
-}
-
-#[cfg(test)]
-impl FuzzyEq for Notification {
-	fn fuzzy_eq(&self, other: &Self) -> bool {
-		self.action == other.action && self.record == other.record && self.result == other.result
 	}
 }

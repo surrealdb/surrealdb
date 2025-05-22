@@ -1,4 +1,4 @@
-use crate::sql::{id::Gen, id::Id as NewId, Array, IdRange, Object};
+use crate::expr::{Array, IdRange, Object, id::Gen, id::Id as NewId};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -56,8 +56,8 @@ pub mod key {
 	use serde::{Deserialize, Serialize};
 
 	use crate::{
+		expr::{Dir, id::Id as NewId},
 		kvs::impl_key,
-		sql::{id::Id as NewId, Dir},
 	};
 
 	use super::Id;
@@ -116,16 +116,16 @@ pub mod key {
 					self.db,
 					self.tb,
 					id,
-					self.eg.to_owned(),
+					self.eg.clone(),
 					self.ft,
-					NewId::from(self.fk.to_owned()),
+					NewId::from(self.fk.clone()),
 				),
 				(None, Some(fk)) => crate::key::graph::Graph::new_from_id(
 					self.ns,
 					self.db,
 					self.tb,
-					self.id.to_owned().into(),
-					self.eg.to_owned(),
+					self.id.clone().into(),
+					self.eg.clone(),
 					self.ft,
 					fk,
 				),
@@ -134,7 +134,7 @@ pub mod key {
 					self.db,
 					self.tb,
 					id,
-					self.eg.to_owned(),
+					self.eg.clone(),
 					self.ft,
 					fk,
 				),

@@ -1,12 +1,12 @@
-use crate::err::Error;
-use crate::sql::geometry::Geometry;
-use crate::sql::value::Value;
+use crate::expr::geometry::Geometry;
+use crate::expr::value::Value;
+use anyhow::Result;
 use geo::algorithm::bearing::HaversineBearing;
 use geo::algorithm::centroid::Centroid;
 use geo::algorithm::chamberlain_duquette_area::ChamberlainDuquetteArea;
 use geo::algorithm::haversine_distance::HaversineDistance;
 
-pub fn area((arg,): (Geometry,)) -> Result<Value, Error> {
+pub fn area((arg,): (Geometry,)) -> Result<Value> {
 	match arg {
 		Geometry::Point(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
 		Geometry::Line(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
@@ -22,14 +22,14 @@ pub fn area((arg,): (Geometry,)) -> Result<Value, Error> {
 	}
 }
 
-pub fn bearing((v, w): (Geometry, Geometry)) -> Result<Value, Error> {
+pub fn bearing((v, w): (Geometry, Geometry)) -> Result<Value> {
 	Ok(match (v, w) {
 		(Geometry::Point(v), Geometry::Point(w)) => v.haversine_bearing(w).into(),
 		_ => Value::None,
 	})
 }
 
-pub fn centroid((arg,): (Geometry,)) -> Result<Value, Error> {
+pub fn centroid((arg,): (Geometry,)) -> Result<Value> {
 	let centroid = match arg {
 		Geometry::Point(v) => Some(v.centroid()),
 		Geometry::Line(v) => v.centroid(),
@@ -42,7 +42,7 @@ pub fn centroid((arg,): (Geometry,)) -> Result<Value, Error> {
 	Ok(centroid.map(Into::into).unwrap_or(Value::None))
 }
 
-pub fn distance((v, w): (Geometry, Geometry)) -> Result<Value, Error> {
+pub fn distance((v, w): (Geometry, Geometry)) -> Result<Value> {
 	Ok(match (v, w) {
 		(Geometry::Point(v), Geometry::Point(w)) => v.haversine_distance(&w).into(),
 		_ => Value::None,
@@ -52,18 +52,22 @@ pub fn distance((v, w): (Geometry, Geometry)) -> Result<Value, Error> {
 pub mod hash {
 
 	use crate::err::Error;
+	use crate::expr::geometry::Geometry;
+	use crate::expr::value::Value;
+	use crate::fnc::args::Optional;
 	use crate::fnc::util::geo;
-	use crate::sql::geometry::Geometry;
-	use crate::sql::value::Value;
+	use anyhow::{Result, bail};
 
-	pub fn encode((arg, len): (Geometry, Option<usize>)) -> Result<Value, Error> {
+	pub fn encode((arg, Optional(len)): (Geometry, Optional<i64>)) -> Result<Value> {
 		let len = match len {
-			Some(len) if (1..=12).contains(&len) => len,
-			None => 12,
-			_ => return Err(Error::InvalidArguments {
+			Some(len) if (1..=12).contains(&len) => len as usize,
+			None => 12usize,
+			_ => bail!(Error::InvalidArguments {
 				name: String::from("geo::encode"),
-				message: String::from("The second argument must be an integer greater than 0 and less than or equal to 12."),
-			})
+				message: String::from(
+					"The second argument must be an integer greater than 0 and less than or equal to 12."
+				),
+			}),
 		};
 
 		Ok(match arg {
@@ -72,7 +76,7 @@ pub mod hash {
 		})
 	}
 
-	pub fn decode((arg,): (Value,)) -> Result<Value, Error> {
+	pub fn decode((arg,): (Value,)) -> Result<Value> {
 		match arg {
 			Value::Strand(v) => Ok(geo::decode(v).into()),
 			_ => Ok(Value::None),
@@ -81,12 +85,11 @@ pub mod hash {
 }
 
 pub mod is {
+	use crate::expr::geometry::Geometry;
+	use crate::expr::value::Value;
+	use anyhow::Result;
 
-	use crate::err::Error;
-	use crate::sql::geometry::Geometry;
-	use crate::sql::value::Value;
-
-	pub fn valid((arg,): (Geometry,)) -> Result<Value, Error> {
+	pub fn valid((arg,): (Geometry,)) -> Result<Value> {
 		Ok(arg.is_valid().into())
 	}
 }

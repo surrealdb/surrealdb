@@ -1,13 +1,13 @@
 mod helpers;
 mod parse;
-use crate::helpers::{new_ds, skip_ok, Test};
+use crate::helpers::{Test, new_ds, skip_ok};
 use parse::Parse;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn select_where_mtree_knn() -> Result<(), Error> {
+async fn select_where_mtree_knn() -> Result<()> {
 	let sql = r"
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
@@ -64,7 +64,7 @@ async fn select_where_mtree_knn() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn delete_update_mtree_index() -> Result<(), Error> {
+async fn delete_update_mtree_index() -> Result<()> {
 	let sql = r"
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
@@ -85,7 +85,7 @@ async fn delete_update_mtree_index() -> Result<(), Error> {
 		let _ = res.remove(0).result?;
 	}
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				dist: 2f,
@@ -106,7 +106,7 @@ async fn delete_update_mtree_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn index_embedding() -> Result<(), Error> {
+async fn index_embedding() -> Result<()> {
 	let sql = r#"
 		DEFINE INDEX idx_mtree_embedding_manhattan ON Document FIELDS items.embedding MTREE DIMENSION 4 DIST MANHATTAN;
 		DEFINE INDEX idx_mtree_embedding_cosine ON Document FIELDS items.embedding MTREE DIMENSION 4 DIST COSINE;
@@ -132,7 +132,7 @@ async fn index_embedding() -> Result<(), Error> {
 	let _ = res.remove(0).result?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			id: Document:1,
 			items: [
@@ -153,7 +153,7 @@ async fn index_embedding() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_brute_force_knn() -> Result<(), Error> {
+async fn select_where_brute_force_knn() -> Result<()> {
 	let sql = r"
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
@@ -207,7 +207,7 @@ async fn select_where_brute_force_knn() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_hnsw_knn() -> Result<(), Error> {
+async fn select_where_hnsw_knn() -> Result<()> {
 	let sql = r"
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];
@@ -295,7 +295,7 @@ async fn select_where_hnsw_knn() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_mtree_knn_with_condition() -> Result<(), Error> {
+async fn select_mtree_knn_with_condition() -> Result<()> {
 	let sql = r"
 		DEFINE INDEX mt_pt1 ON pts FIELDS point MTREE DIMENSION 1;
 		INSERT INTO pts [
@@ -323,7 +323,7 @@ async fn select_mtree_knn_with_condition() -> Result<(), Error> {
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 					{
 						detail: {
@@ -347,7 +347,7 @@ async fn select_mtree_knn_with_condition() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					id: pts:5,
@@ -367,7 +367,7 @@ async fn select_mtree_knn_with_condition() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
+async fn select_hnsw_knn_with_condition() -> Result<()> {
 	let sql = r"
 		DEFINE INDEX hn_pt1 ON pts FIELDS point HNSW DIMENSION 1;
 		INSERT INTO pts [
@@ -395,7 +395,7 @@ async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 					{
 						detail: {
@@ -419,7 +419,7 @@ async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					distance: 6f,
@@ -439,7 +439,7 @@ async fn select_hnsw_knn_with_condition() -> Result<(), Error> {
 }
 
 #[test_log::test(tokio::test)]
-async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
+async fn select_bruteforce_knn_with_condition() -> Result<()> {
 	let sql = r"
 		INSERT INTO pts [
 			{ id: pts:1, point: [ 10f ], flag: true },
@@ -466,7 +466,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
 	skip_ok(res, 2)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -486,7 +486,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					distance: 6f,
@@ -506,7 +506,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn check_hnsw_persistence() -> Result<(), Error> {
+async fn check_hnsw_persistence() -> Result<()> {
 	let sql = r"
 		CREATE pts:1 SET point = [1,2,3,4];
 		CREATE pts:2 SET point = [4,5,6,7];

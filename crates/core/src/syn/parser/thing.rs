@@ -3,14 +3,15 @@ use reblessive::Stk;
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{
-		id::{range::IdRange, Gen},
 		Id, Ident, Param, Range, Thing,
+		graph::GraphSubject,
+		id::{Gen, range::IdRange},
 	},
 	syn::{
 		error::bail,
 		lexer::compound,
 		parser::mac::{expected, expected_whitespace, unexpected},
-		token::{t, Glued, TokenKind},
+		token::{Glued, TokenKind, t},
 	},
 };
 use std::{cmp::Ordering, ops::Bound};
@@ -22,8 +23,6 @@ impl Parser<'_> {
 		double: bool,
 	) -> ParseResult<Thing> {
 		let thing = self.parse_thing(ctx).await?;
-
-		debug_assert!(self.last_span().is_followed_by(&self.peek_whitespace().span));
 
 		if double {
 			expected_whitespace!(self, t!("\""));
@@ -118,6 +117,48 @@ impl Parser<'_> {
 				tb: ident,
 				id,
 			})
+		}
+	}
+
+	pub(crate) async fn parse_id_range(&mut self, stk: &mut Stk) -> ParseResult<IdRange> {
+		let beg = if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
+			let v = stk.run(|stk| self.parse_id(stk)).await?;
+
+			// check for exclusive
+			if self.eat_whitespace(t!(">")) {
+				Bound::Excluded(v)
+			} else {
+				Bound::Included(v)
+			}
+		} else {
+			Bound::Unbounded
+		};
+
+		expected!(self, t!(".."));
+
+		let end = if self.eat_whitespace(t!("=")) {
+			let id = stk.run(|stk| self.parse_id(stk)).await?;
+			Bound::Included(id)
+		} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
+			let id = stk.run(|stk| self.parse_id(stk)).await?;
+			Bound::Excluded(id)
+		} else {
+			Bound::Unbounded
+		};
+
+		Ok(IdRange {
+			beg,
+			end,
+		})
+	}
+
+	pub(crate) async fn parse_graph_subject(&mut self, stk: &mut Stk) -> ParseResult<GraphSubject> {
+		let tb = self.next_token_value()?;
+		if self.eat_whitespace(t!(":")) {
+			let rng = self.parse_id_range(stk).await?;
+			Ok(GraphSubject::Range(tb, rng))
+		} else {
+			Ok(GraphSubject::Table(tb))
 		}
 	}
 
@@ -329,11 +370,11 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
+	use crate::sql::SqlValue;
 	use crate::sql::array::Array;
 	use crate::sql::object::Object;
-	use crate::sql::Value;
-	use crate::syn::parser::ParserSettings;
 	use crate::syn::Parse as _;
+	use crate::syn::parser::ParserSettings;
 
 	fn thing(i: &str) -> ParseResult<Thing> {
 		let mut parser = Parser::new(i.as_bytes());
@@ -432,8 +473,8 @@ mod tests {
 	#[test]
 	fn thing_string() {
 		let sql = "r'test:001'";
-		let res = Value::parse(sql);
-		let Value::Thing(out) = res else {
+		let res = SqlValue::parse(sql);
+		let SqlValue::Thing(out) = res else {
 			panic!()
 		};
 		assert_eq!("test:1", format!("{}", out));
@@ -446,8 +487,8 @@ mod tests {
 		);
 
 		let sql = "r'test:001'";
-		let res = Value::parse(sql);
-		let Value::Thing(out) = res else {
+		let res = SqlValue::parse(sql);
+		let SqlValue::Thing(out) = res else {
 			panic!()
 		};
 		assert_eq!("test:1", format!("{}", out));
@@ -501,8 +542,8 @@ mod tests {
 			Thing {
 				tb: String::from("test"),
 				id: Id::from(Object::from(map! {
-					"location".to_string() => Value::from("GBR"),
-					"year".to_string() => Value::from(2022),
+					"location".to_string() => SqlValue::from("GBR"),
+					"year".to_string() => SqlValue::from(2022),
 				})),
 			}
 		);
@@ -518,7 +559,7 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: Id::from(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
+				id: Id::from(Array::from(vec![SqlValue::from("GBR"), SqlValue::from(2022)])),
 			}
 		);
 	}
@@ -552,7 +593,7 @@ mod tests {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Thing(
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Thing(
 					sql::Thing {
 						tb: "t".to_string(),
 						id: Id::from(ident.to_string())

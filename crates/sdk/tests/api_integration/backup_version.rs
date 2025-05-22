@@ -5,7 +5,7 @@ use surrealdb_core::cnf::EXPORT_BATCH_SIZE;
 use tokio::fs::remove_file;
 use ulid::Ulid;
 
-use super::{CreateDb, RecordName, NS};
+use super::{CreateDb, NS, RecordName};
 
 pub async fn export_import_versions_with_inserts_updates_deletes(new_db: impl CreateDb) {
 	let (_, db) = new_db.create_db().await;

@@ -1,11 +1,6 @@
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::sql::fetch::Fetchs;
-use crate::sql::value::Value;
-use crate::sql::ControlFlow;
-use crate::{ctx::Context, sql::FlowResult};
+use crate::sql::value::SqlValue;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -15,40 +10,8 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct OutputStatement {
-	pub what: Value,
+	pub what: SqlValue,
 	pub fetch: Option<Fetchs>,
-}
-
-impl OutputStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.what.writeable()
-	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Ensure futures are processed
-		let opt = &opt.new_with_futures(true);
-		// Process the output value
-		let mut value = self.what.compute(stk, ctx, opt, doc).await?;
-		// Fetch any
-		if let Some(fetchs) = &self.fetch {
-			let mut idioms = Vec::with_capacity(fetchs.0.len());
-			for fetch in fetchs.iter() {
-				fetch.compute(stk, ctx, opt, &mut idioms).await?
-			}
-			for i in &idioms {
-				value.fetch(stk, ctx, opt, i).await?;
-			}
-		}
-		//
-		Err(ControlFlow::Return(value))
-	}
 }
 
 impl fmt::Display for OutputStatement {
@@ -58,5 +21,23 @@ impl fmt::Display for OutputStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl From<OutputStatement> for crate::expr::statements::OutputStatement {
+	fn from(v: OutputStatement) -> Self {
+		crate::expr::statements::OutputStatement {
+			what: v.what.into(),
+			fetch: v.fetch.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::OutputStatement> for OutputStatement {
+	fn from(v: crate::expr::statements::OutputStatement) -> Self {
+		OutputStatement {
+			what: v.what.into(),
+			fetch: v.fetch.map(Into::into),
+		}
 	}
 }

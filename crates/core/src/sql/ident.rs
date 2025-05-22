@@ -1,5 +1,4 @@
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{escape::EscapeIdent, strand::no_nul_bytes, Value};
+use crate::sql::{escape::EscapeIdent, strand::no_nul_bytes};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -24,6 +23,18 @@ impl From<&str> for Ident {
 	}
 }
 
+impl From<Ident> for crate::expr::Ident {
+	fn from(v: Ident) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Ident> for Ident {
+	fn from(v: crate::expr::Ident) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Deref for Ident {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {
@@ -36,36 +47,10 @@ impl Ident {
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}
-	/// Checks if this field is the `id` field
-	pub(crate) fn is_dash(&self) -> bool {
-		self.0.as_str() == "-"
-	}
-	/// Checks if this field is the `id` field
-	pub(crate) fn is_id(&self) -> bool {
-		self.0.as_str() == "id"
-	}
-	/// Checks if this field is the `type` field
-	pub(crate) fn is_type(&self) -> bool {
-		self.0.as_str() == "type"
-	}
-	/// Checks if this field is the `coordinates` field
-	pub(crate) fn is_coordinates(&self) -> bool {
-		self.0.as_str() == "coordinates"
-	}
-	/// Checks if this field is the `geometries` field
-	pub(crate) fn is_geometries(&self) -> bool {
-		self.0.as_str() == "geometries"
-	}
 }
 
 impl Display for Ident {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		EscapeIdent(&self.0).fmt(f)
-	}
-}
-
-impl InfoStructure for Ident {
-	fn structure(self) -> Value {
-		self.to_raw().into()
 	}
 }

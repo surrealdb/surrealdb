@@ -1,5 +1,3 @@
-#![cfg(surrealdb_unstable)]
-
 use std::{
 	convert::Infallible,
 	sync::Arc,
@@ -8,29 +6,29 @@ use std::{
 };
 
 use async_graphql::{
-	http::{create_multipart_mixed_stream, is_accept_multipart_mixed},
 	Executor, ParseRequestError,
+	http::{create_multipart_mixed_stream, is_accept_multipart_mixed},
 };
 use async_graphql_axum::{
-	rejection::GraphQLRejection, GraphQLBatchRequest, GraphQLRequest, GraphQLResponse,
+	GraphQLBatchRequest, GraphQLRequest, GraphQLResponse, rejection::GraphQLRejection,
 };
 use axum::{
+	BoxError,
 	body::{Body, HttpBody},
 	extract::FromRequest,
 	http::{Request as HttpRequest, Response as HttpResponse},
 	response::IntoResponse,
-	BoxError,
 };
 use bytes::Bytes;
-use futures_util::{future::BoxFuture, StreamExt};
-use surrealdb::dbs::capabilities::RouteTarget;
+use futures_util::{StreamExt, future::BoxFuture};
 use surrealdb::dbs::Session;
+use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::gql::cache::{Invalidator, SchemaCache};
 use surrealdb::gql::error::resolver_error;
 use surrealdb::kvs::Datastore;
 use tower_service::Service;
 
-use crate::err::Error as SurrealError;
+use crate::net::error::Error as NetError;
 
 /// A GraphQL service.
 #[derive(Clone)]
@@ -77,7 +75,7 @@ where
 					&RouteTarget::GraphQL
 				);
 				return Ok(
-					SurrealError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response()
+					NetError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response()
 				);
 			}
 

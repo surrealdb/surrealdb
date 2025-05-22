@@ -1,3 +1,5 @@
+use axum::Extension;
+use axum::RequestPartsExt;
 use axum::async_trait;
 use axum::extract::ConnectInfo;
 use axum::extract::FromRef;
@@ -5,11 +7,9 @@ use axum::extract::FromRequestParts;
 use axum::extract::Request;
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::Extension;
-use axum::RequestPartsExt;
 use clap::ValueEnum;
-use http::request::Parts;
 use http::StatusCode;
+use http::request::Parts;
 use std::net::SocketAddr;
 
 use super::AppState;
@@ -27,12 +27,12 @@ pub enum ClientIp {
 	CfConnectingIp,
 	/// Fly.io client IP
 	#[clap(name = "Fly-Client-IP")]
-	#[allow(clippy::enum_variant_names)]
+	#[expect(clippy::enum_variant_names)]
 	FlyClientIp,
 	/// Akamai, Cloudflare true client IP
 	#[clap(name = "True-Client-IP")]
-	#[allow(clippy::enum_variant_names)]
-	TrueClientIP,
+	#[expect(clippy::enum_variant_names)]
+	TrueClientIp,
 	/// Nginx real IP
 	#[clap(name = "X-Real-IP")]
 	XRealIp,
@@ -48,7 +48,7 @@ impl std::fmt::Display for ClientIp {
 			ClientIp::Socket => write!(f, "Socket"),
 			ClientIp::CfConnectingIp => write!(f, "CF-Connecting-IP"),
 			ClientIp::FlyClientIp => write!(f, "Fly-Client-IP"),
-			ClientIp::TrueClientIP => write!(f, "True-Client-IP"),
+			ClientIp::TrueClientIp => write!(f, "True-Client-IP"),
 			ClientIp::XRealIp => write!(f, "X-Real-IP"),
 			ClientIp::XForwardedFor => write!(f, "X-Forwarded-For"),
 		}
@@ -62,7 +62,7 @@ impl ClientIp {
 			ClientIp::Socket => false,
 			ClientIp::CfConnectingIp => true,
 			ClientIp::FlyClientIp => true,
-			ClientIp::TrueClientIP => true,
+			ClientIp::TrueClientIp => true,
 			ClientIp::XRealIp => true,
 			ClientIp::XForwardedFor => true,
 		}
@@ -86,12 +86,9 @@ where
 		let res = match app_state.client_ip {
 			ClientIp::None => ExtractClientIP(None),
 			ClientIp::Socket => {
-				if let Ok(ConnectInfo(addr)) =
-					ConnectInfo::<SocketAddr>::from_request_parts(parts, state).await
-				{
-					ExtractClientIP(Some(addr.ip().to_string()))
-				} else {
-					ExtractClientIP(None)
+				match ConnectInfo::<SocketAddr>::from_request_parts(parts, state).await {
+					Ok(ConnectInfo(addr)) => ExtractClientIP(Some(addr.ip().to_string())),
+					_ => ExtractClientIP(None),
 				}
 			}
 			// Get the IP from the corresponding header
@@ -123,12 +120,17 @@ pub(super) async fn client_ip_middleware(
 ) -> Result<Response, StatusCode> {
 	let (mut parts, body) = request.into_parts();
 
-	if let Ok(Extension(state)) = parts.extract::<Extension<AppState>>().await {
-		if let Ok(client_ip) = parts.extract_with_state::<ExtractClientIP, AppState>(&state).await {
-			parts.extensions.insert(client_ip);
+	match parts.extract::<Extension<AppState>>().await {
+		Ok(Extension(state)) => {
+			if let Ok(client_ip) =
+				parts.extract_with_state::<ExtractClientIP, AppState>(&state).await
+			{
+				parts.extensions.insert(client_ip);
+			}
 		}
-	} else {
-		trace!("No AppState found, skipping client_ip_middleware");
+		_ => {
+			trace!("No AppState found, skipping client_ip_middleware");
+		}
 	}
 
 	Ok(next.run(Request::from_parts(parts, body)).await)

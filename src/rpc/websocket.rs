@@ -4,37 +4,36 @@ use crate::cnf::WEBSOCKET_RESPONSE_BUFFER_SIZE;
 use crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_SIZE;
 use crate::cnf::WEBSOCKET_RESPONSE_FLUSH_PERIOD;
 use crate::cnf::{PKG_NAME, PKG_VERSION};
+use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
-use crate::rpc::response::{failure, IntoRpcResponse};
-use crate::rpc::CONN_CLOSED_ERR;
+use crate::rpc::response::{IntoRpcResponse, failure};
 use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
 use arc_swap::ArcSwap;
-use axum::extract::ws::{close_code::AGAIN, CloseFrame, Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code::AGAIN};
 use core::fmt;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
-use opentelemetry::trace::FutureExt;
 use opentelemetry::Context as TelemetryContext;
+use opentelemetry::trace::FutureExt;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::Session;
-#[cfg(surrealdb_unstable)]
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
-use surrealdb::rpc::format::Format;
 use surrealdb::rpc::Data;
 use surrealdb::rpc::Method;
 use surrealdb::rpc::RpcContext;
+use surrealdb::rpc::format::Format;
 use surrealdb::sql::Array;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 use surrealdb_core::rpc::RpcProtocolV1;
 use surrealdb_core::rpc::RpcProtocolV2;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Semaphore;
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
@@ -67,7 +66,6 @@ pub struct Websocket {
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: Sender<Message>,
 	/// The GraphQL schema cache stored in advance
-	#[cfg(surrealdb_unstable)]
 	pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
@@ -95,7 +93,6 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
 			channel: sender.clone(),
-			#[cfg(surrealdb_unstable)]
 			gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		});
@@ -356,7 +353,7 @@ impl Websocket {
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
 					span.record(
 						"rpc.request_id",
-						req.id.clone().map(Value::as_string).unwrap_or_default(),
+						req.id.clone().map(SqlValue::as_string).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(req.method.to_str()).with_size(len),
@@ -372,7 +369,7 @@ impl Websocket {
 							// Don't start processing if we are gracefully shutting down
 							if shutdown.is_cancelled() {
 								// Process the response
-								failure(req.id, Failure::custom(SERVER_SHUTTING_DOWN))
+								failure(req.id.map(Into::into), Failure::custom(SERVER_SHUTTING_DOWN))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -380,7 +377,7 @@ impl Websocket {
 							// Check to see whether we have available memory
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
-								failure(req.id, Failure::custom(SERVER_OVERLOADED))
+								failure(req.id.map(Into::into), Failure::custom(SERVER_OVERLOADED))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -389,7 +386,7 @@ impl Websocket {
 							else {
 								// Process the message
 								Self::process_message(rpc.clone(), req.version, req.method, req.params).await
-									.into_response(req.id)
+									.into_response(req.id.map(Into::into))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -512,10 +509,8 @@ impl RpcContext for Websocket {
 	// ------------------------------
 
 	/// GraphQL queries are enabled on WebSockets
-	#[cfg(surrealdb_unstable)]
 	const GQL_SUPPORT: bool = true;
 
-	#[cfg(surrealdb_unstable)]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema
 	}

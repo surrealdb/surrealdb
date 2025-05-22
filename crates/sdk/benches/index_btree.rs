@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use std::fmt::Debug;
@@ -10,9 +10,7 @@ use surrealdb::idx::trees::store::{TreeNodeProvider, TreeStore};
 use surrealdb::kvs::{Datastore, Key, LockType::*, TransactionType::*};
 use tokio::runtime::Runtime;
 macro_rules! get_key_value {
-	($idx:expr) => {{
-		(format!("{}", $idx).into(), ($idx * 10) as Payload)
-	}};
+	($idx:expr_2021) => {{ (format!("{}", $idx).into(), ($idx * 10) as Payload) }};
 }
 
 fn bench_index_btree(c: &mut Criterion) {

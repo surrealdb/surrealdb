@@ -2,11 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
-use crate::err::Error;
+use crate::expr::function::OptimisedAggregate;
+use crate::expr::value::{TryAdd, TryFloatDiv, Value};
+use crate::expr::{Array, Field, FlowResultExt as _, Function, Idiom};
 use crate::idx::planner::RecordStrategy;
-use crate::sql::function::OptimisedAggregate;
-use crate::sql::value::{TryAdd, TryFloatDiv, Value};
-use crate::sql::{Array, Field, FlowResultExt as _, Function, Idiom};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
@@ -32,7 +32,7 @@ struct Aggregator {
 }
 
 impl GroupsCollector {
-	#[allow(clippy::mutable_key_type)]
+	#[expect(clippy::mutable_key_type)]
 	pub(super) fn new(stm: &Statement<'_>) -> Self {
 		let mut idioms_agr: HashMap<Idiom, Aggregator> = HashMap::new();
 		if let Some(fields) = stm.expr() {
@@ -68,7 +68,7 @@ impl GroupsCollector {
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
 		obj: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if let Some(groups) = stm.group() {
 			// Create a new column set
 			let mut arr = Array::with_capacity(groups.len());
@@ -97,7 +97,7 @@ impl GroupsCollector {
 		idioms: &[Idiom],
 		rs: RecordStrategy,
 		obj: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let mut count_value = None;
 		if matches!(rs, RecordStrategy::Count) {
 			if let Value::Number(n) = obj {
@@ -125,7 +125,7 @@ impl GroupsCollector {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<MemoryCollector, Error> {
+	) -> Result<MemoryCollector> {
 		let mut results = MemoryCollector::default();
 		if let Some(fields) = stm.expr() {
 			// Loop over each grouped collection
@@ -277,7 +277,7 @@ impl Aggregator {
 		opt: &Options,
 		rs: RecordStrategy,
 		val: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if let Some(ref mut c) = self.count {
 			let mut count = 1;
 			if matches!(rs, RecordStrategy::Count) {
@@ -346,7 +346,7 @@ impl Aggregator {
 		Ok(())
 	}
 
-	fn compute(&mut self, a: OptimisedAggregate) -> Result<Value, Error> {
+	fn compute(&mut self, a: OptimisedAggregate) -> Result<Value> {
 		Ok(match a {
 			OptimisedAggregate::None => Value::None,
 			OptimisedAggregate::Count => self.count.take().map(|v| v.into()).unwrap_or(Value::None),

@@ -1,4 +1,98 @@
-//! Protocols for communicating with the server
+//! This SDK can be used as a client to connect to SurrealDB servers.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use std::borrow::Cow;
+//! use serde::{Serialize, Deserialize};
+//! use serde_json::json;
+//! use surrealdb::{Error, Surreal};
+//! use surrealdb::opt::auth::Root;
+//! use surrealdb::engine::remote::ws::Ws;
+//!
+//! #[derive(Serialize, Deserialize)]
+//! struct Person {
+//!     title: String,
+//!     name: Name,
+//!     marketing: bool,
+//! }
+//!
+//! // Pro tip: Replace String with Cow<'static, str> to
+//! // avoid unnecessary heap allocations when inserting
+//!
+//! #[derive(Serialize, Deserialize)]
+//! struct Name {
+//!     first: Cow<'static, str>,
+//!     last: Cow<'static, str>,
+//! }
+//!
+//! // Install at https://surrealdb.com/install
+//! // and use `surreal start --user root --pass root`
+//! // to start a working database to take the following queries
+//!
+//! // See the results via `surreal sql --ns namespace --db database --pretty`
+//! // or https://surrealist.app/
+//! // followed by the query `SELECT * FROM person;`
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Error> {
+//!     let db = Surreal::new::<Ws>("localhost:8000").await?;
+//!
+//!     // Signin as a namespace, database, or root user
+//!     db.signin(Root {
+//!         username: "root",
+//!         password: "root",
+//!     }).await?;
+//!
+//!     // Select a specific namespace / database
+//!     db.use_ns("namespace").use_db("database").await?;
+//!
+//!     // Create a new person with a random ID
+//!     let created: Option<Person> = db.create("person")
+//!         .content(Person {
+//!             title: "Founder & CEO".into(),
+//!             name: Name {
+//!                 first: "Tobie".into(),
+//!                 last: "Morgan Hitchcock".into(),
+//!             },
+//!             marketing: true,
+//!         })
+//!         .await?;
+//!
+//!     // Create a new person with a specific ID
+//!     let created: Option<Person> = db.create(("person", "jaime"))
+//!         .content(Person {
+//!             title: "Founder & COO".into(),
+//!             name: Name {
+//!                 first: "Jaime".into(),
+//!                 last: "Morgan Hitchcock".into(),
+//!             },
+//!             marketing: false,
+//!         })
+//!         .await?;
+//!
+//!     // Update a person record with a specific ID
+//!     let updated: Option<Person> = db.update(("person", "jaime"))
+//!         .merge(json!({"marketing": true}))
+//!         .await?;
+//!
+//!     // Select all people records
+//!     let people: Vec<Person> = db.select("person").await?;
+//!
+//!     // Perform a custom advanced query
+//!     let query = r#"
+//!         SELECT marketing, count()
+//!         FROM type::table($table)
+//!         GROUP BY marketing
+//!     "#;
+//!
+//!     let groups = db.query(query)
+//!         .bind(("table", "person"))
+//!         .await?;
+//!
+//!     Ok(())
+//! }
+//! ```
 
 #[cfg(feature = "protocol-http")]
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-http")))]
@@ -8,24 +102,22 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use crate::api::{self, conn::DbResponse, err::Error, method::query::QueryResult, Result};
+use crate::api::{self, Result, conn::DbResponse, err::Error, method::query::QueryResult};
 use crate::dbs::{self, Status};
 use crate::method::Stats;
 use indexmap::IndexMap;
-use revision::revisioned;
 use revision::Revisioned;
-use rust_decimal::prelude::ToPrimitive;
+use revision::revisioned;
 use rust_decimal::Decimal;
-use serde::de::DeserializeOwned;
+use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use std::time::Duration;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;
 const NANOS_PER_MICRO: i64 = 1_000;
-
-pub struct WsNotification {}
 
 // Converts a debug representation of `std::time::Duration` back
 fn duration_from_str(duration: &str) -> Option<std::time::Duration> {
@@ -107,13 +199,6 @@ impl From<Failure> for Error {
 	}
 }
 
-impl From<Failure> for crate::Error {
-	fn from(value: Failure) -> Self {
-		let api_err: Error = value.into();
-		api_err.into()
-	}
-}
-
 impl DbResponse {
 	fn from_server_result(result: ServerResult) -> Result<Self> {
 		match result.map_err(Error::from)? {
@@ -164,10 +249,12 @@ where
 {
 	if revisioned {
 		let mut buf = Vec::new();
-		value.serialize_revisioned(&mut buf).map_err(|error| crate::Error::Db(error.into()))?;
+		value.serialize_revisioned(&mut buf)?;
 		return Ok(buf);
 	}
-	surrealdb_core::sql::serde::serialize(value).map_err(|error| crate::Error::Db(error.into()))
+	surrealdb_core::expr::serde::serialize(value)
+		.map_err(surrealdb_core::err::Error::from)
+		.map_err(anyhow::Error::new)
 }
 
 fn deserialize<T>(bytes: &[u8], revisioned: bool) -> Result<T>
@@ -176,7 +263,11 @@ where
 {
 	if revisioned {
 		let mut read = std::io::Cursor::new(bytes);
-		return T::deserialize_revisioned(&mut read).map_err(|x| crate::Error::Db(x.into()));
+		return T::deserialize_revisioned(&mut read)
+			.map_err(surrealdb_core::err::Error::from)
+			.map_err(anyhow::Error::new);
 	}
-	surrealdb_core::sql::serde::deserialize(bytes).map_err(|error| crate::Error::Db(error.into()))
+	surrealdb_core::expr::serde::deserialize(bytes)
+		.map_err(surrealdb_core::err::Error::from)
+		.map_err(anyhow::Error::new)
 }

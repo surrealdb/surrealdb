@@ -1,9 +1,9 @@
 //! Stores change feeds
-use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
+use crate::kvs::{KeyEncode, impl_key};
 use crate::vs::VersionStamp;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::str;
 
@@ -24,19 +24,17 @@ pub struct Cf<'a> {
 }
 impl_key!(Cf<'a>);
 
-#[allow(unused)]
+#[expect(unused)]
 pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
 	Cf::new(ns, db, VersionStamp::from_u64(ts), tb)
 }
 
-#[allow(unused)]
-pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
 	Ok(k)
 }
 
-#[allow(unused)]
 pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 	let mut k: Vec<u8> = vec![];
 	k.extend_from_slice(b"*");
@@ -48,8 +46,7 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
-#[allow(unused)]
-pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>, Error> {
+pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
 	k.extend_from_slice(&vs.as_bytes());
@@ -57,16 +54,15 @@ pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>, Error>
 }
 
 /// Returns the prefix for the whole database change feeds
-#[allow(unused)]
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+#[expect(unused)]
+pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
 	Ok(k)
 }
 
 /// Returns the suffix for the whole database change feeds
-#[allow(unused)]
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(&[b'#', 0xff]);
 	Ok(k)

@@ -1,8 +1,8 @@
 //! Stores a DEFINE TABLE config definition
-use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
+use crate::kvs::{KeyEncode, impl_key};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -24,13 +24,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Tb<'a> {
 	Tb::new(ns, db, tb)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!tb\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>, Error> {
+pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!tb\xff");
 	Ok(k)

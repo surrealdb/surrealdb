@@ -1,12 +1,13 @@
 use crate::err::Error;
+use crate::expr::{Id, Thing};
 use crate::idx::docids::DocId;
-use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, Val};
-use crate::sql::{Id, Thing};
+use anyhow::{Result, bail};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -35,7 +36,7 @@ impl HnswDocs {
 		tx: &Transaction,
 		tb: String,
 		ikb: IndexKeyBase,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let state_key = ikb.new_hd_key(None)?;
 		let state = if let Some(k) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(k)?
@@ -51,7 +52,7 @@ impl HnswDocs {
 		})
 	}
 
-	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &Id) -> Result<DocId, Error> {
+	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &Id) -> Result<DocId> {
 		let id_key = self.ikb.new_hi_key(id.clone())?;
 		if let Some(v) = tx.get(id_key.clone(), None).await? {
 			let doc_id = u64::from_be_bytes(v.try_into().unwrap());
@@ -81,25 +82,21 @@ impl HnswDocs {
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
-	) -> Result<Option<Thing>, Error> {
+	) -> Result<Option<Thing>> {
 		let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
 		if let Some(val) = tx.get(doc_key, None).await? {
 			let id: Id = revision::from_slice(&val)?;
-			Ok(Some(Thing::from((self.tb.to_owned(), id))))
+			Ok(Some(Thing::from((self.tb.clone(), id))))
 		} else {
 			Ok(None)
 		}
 	}
 
-	pub(super) async fn remove(
-		&mut self,
-		tx: &Transaction,
-		id: Id,
-	) -> Result<Option<DocId>, Error> {
+	pub(super) async fn remove(&mut self, tx: &Transaction, id: Id) -> Result<Option<DocId>> {
 		let id_key = self.ikb.new_hi_key(id)?;
 		if let Some(v) = tx.get(id_key.clone(), None).await? {
 			let Ok(array) = v.try_into() else {
-				return Err(Error::CorruptedIndex("Invalid HNSW index id"));
+				bail!(Error::CorruptedIndex("Invalid HNSW index id"));
 			};
 			let doc_id = u64::from_be_bytes(array);
 			let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
@@ -112,7 +109,7 @@ impl HnswDocs {
 		}
 	}
 
-	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
+	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if self.state_updated {
 			tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?, None).await?;
 			self.state_updated = true;
@@ -142,11 +139,7 @@ impl VecDocs {
 		}
 	}
 
-	pub(super) async fn get_docs(
-		&self,
-		tx: &Transaction,
-		pt: &Vector,
-	) -> Result<Option<Ids64>, Error> {
+	pub(super) async fn get_docs(&self, tx: &Transaction, pt: &Vector) -> Result<Option<Ids64>> {
 		let key = self.ikb.new_hv_key(Arc::new(pt.into()))?;
 		if let Some(val) = tx.get(key, None).await? {
 			let ed: ElementDocs = VersionedStore::try_from(val)?;
@@ -162,7 +155,7 @@ impl VecDocs {
 		o: Vector,
 		d: DocId,
 		h: &mut HnswFlavor,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let ser_vec = Arc::new(SerializedVector::from(&o));
 		let key = self.ikb.new_hv_key(ser_vec)?;
 		if let Some(ed) = match tx.get(key.clone(), None).await? {
@@ -196,7 +189,7 @@ impl VecDocs {
 		o: &Vector,
 		d: DocId,
 		h: &mut HnswFlavor,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let key = self.ikb.new_hv_key(Arc::new(o.into()))?;
 		if let Some(val) = tx.get(key.clone(), None).await? {
 			let mut ed: ElementDocs = VersionedStore::try_from(val)?;

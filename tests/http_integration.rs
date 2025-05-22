@@ -5,7 +5,7 @@ mod http_integration {
 	use std::time::Duration;
 
 	use http::header::HeaderValue;
-	use http::{header, Method};
+	use http::{Method, header};
 	use reqwest::Client;
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
@@ -13,7 +13,7 @@ mod http_integration {
 	use test_log::test;
 	use ulid::Ulid;
 
-	use super::common::{self, StartServerArguments, PASS, USER};
+	use super::common::{self, PASS, StartServerArguments, USER};
 
 	#[test(tokio::test)]
 	async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
@@ -904,20 +904,6 @@ mod http_integration {
 			let _: ciborium::Value = ciborium::from_reader(res.as_slice()).unwrap();
 		}
 
-		// Creating a record with Accept PACK encoding is allowed
-		{
-			let res = client
-				.post(url)
-				.basic_auth(USER, Some(PASS))
-				.header(header::ACCEPT, "application/pack")
-				.body("CREATE foo")
-				.send()
-				.await?;
-			assert_eq!(res.status(), 200);
-			let res = res.bytes().await?.to_vec();
-			let _: rmpv::Value = rmpv::decode::read_value(&mut res.as_slice()).unwrap();
-		}
-
 		// Creating a record with Accept Surrealdb encoding is allowed
 		{
 			let res = client
@@ -1784,21 +1770,21 @@ mod http_integration {
 			let stmt: sql::Statement = {
 				let mut tmp = sql::statements::CreateStatement::default();
 				let rid = sql::thing("foo:42").unwrap();
-				let mut tmp_values = sql::Values::default();
+				let mut tmp_values = sql::SqlValues::default();
 				tmp_values.0 = vec![rid.into()];
 				tmp.what = tmp_values;
 				sql::Statement::Create(tmp)
 			};
 
 			let mut obj = sql::Object::default();
-			obj.insert("email".to_string(), sql::Value::Query(stmt.into()));
+			obj.insert("email".to_string(), sql::SqlValue::Query(stmt.into()));
 			obj.insert("pass".to_string(), "foo".into());
 			request.insert(
 				"params".to_string(),
-				sql::Value::Array(vec![sql::Value::Object(obj)].into()),
+				sql::SqlValue::Array(vec![sql::SqlValue::Object(obj)].into()),
 			);
 
-			let req: sql::Value = sql::Value::Object(request);
+			let req: sql::SqlValue = sql::SqlValue::Object(request);
 
 			let req = sql::serde::serialize(&req).unwrap();
 
@@ -2028,6 +2014,203 @@ mod http_integration {
 				.upgrade()
 				.await;
 			assert!(res.is_err(), "Request to \"/rpc\" endpoint unexpectedly succeeded")
+		}
+	}
+
+	#[test(tokio::test)]
+	async fn experimental_capabilities() {
+		// Allow 1
+		{
+			// Start server disallowing routes for queries, exporting and importing
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-experimental * --allow-experimental record_references".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			let res = client
+				.post(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("DEFINE FIELD a ON deny_all_allow_references TYPE record REFERENCE")
+				.send()
+				.await
+				.unwrap();
+			let res = res.text().await.unwrap();
+			assert!(res.contains("[{\"result\":null,\"status\":\"OK\""), "body: {}", res);
+		}
+		// Deny 1
+		{
+			// Start server disallowing routes for queries, exporting and importing
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-experimental record_references --allow-experimental *".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			let res = client
+				.post(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("DEFINE FIELD a ON deny_all_allow_references TYPE record REFERENCE")
+				.send()
+				.await
+				.unwrap();
+			let res = res.text().await.unwrap();
+			assert!(
+				res.contains("Experimental capability `record_references` is not enabled"),
+				"body: {}",
+				res
+			);
+		}
+	}
+
+	#[test(tokio::test)]
+	async fn arbitrary_query_capabilities() {
+		// Allow system
+		{
+			// Start server disallowing routes for queries, exporting and importing
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--allow-arbitrary-query system".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			let res = client
+				.post(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("123")
+				.send()
+				.await
+				.unwrap();
+			let res = res.text().await.unwrap();
+			assert!(res.contains("[{\"result\":123,\"status\":\"OK\""), "body: {}", res);
+		}
+		// Allow record
+		{
+			// Start server disallowing routes for queries, exporting and importing
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--allow-arbitrary-query record".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			let res = client
+				.post(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("123")
+				.send()
+				.await
+				.unwrap();
+			let res = res.text().await.unwrap();
+			assert!(res.contains("The HTTP route 'sql' is forbidden"), "body: {}", res);
+		}
+		// Deny arbitrary querying
+		{
+			// Start server disallowing routes for queries, exporting and importing
+			let (addr, _server) = common::start_server(StartServerArguments {
+				args: "--deny-arbitrary-query *".to_string(),
+				// Auth disabled to ensure unauthorized errors are due to capabilities
+				auth: false,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+
+			// Prepare HTTP client
+			let mut headers = reqwest::header::HeaderMap::new();
+			let ns = Ulid::new().to_string();
+			let db = Ulid::new().to_string();
+			headers.insert("surreal-ns", ns.parse().unwrap());
+			headers.insert("surreal-db", db.parse().unwrap());
+			headers.insert(header::ACCEPT, "application/json".parse().unwrap());
+			let client = reqwest::Client::builder()
+				.connect_timeout(Duration::from_millis(10))
+				.default_headers(headers)
+				.build()
+				.unwrap();
+			let base_url = &format!("http://{addr}");
+
+			// Check that denied routes are disallowed
+			let res = client
+				.post(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("123")
+				.send()
+				.await
+				.unwrap();
+			let res = res.text().await.unwrap();
+			assert!(res.contains("The HTTP route 'sql' is forbidden"), "body: {}", res);
 		}
 	}
 }

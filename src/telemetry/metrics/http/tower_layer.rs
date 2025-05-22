@@ -1,6 +1,6 @@
 use crate::cnf::TELEMETRY_NAMESPACE;
 use axum::extract::MatchedPath;
-use opentelemetry::{metrics::MetricsError, KeyValue};
+use opentelemetry::{KeyValue, metrics::MetricsError};
 use pin_project_lite::pin_project;
 use std::{
 	cell::Cell,
@@ -182,8 +182,8 @@ impl HttpCallMetricTracker {
 			res.push(KeyValue::new("server.address", host.to_owned()));
 		}
 
-		if !TELEMETRY_NAMESPACE.trim().is_empty() {
-			res.push(KeyValue::new("namespace", TELEMETRY_NAMESPACE.clone()));
+		if let Some(namespace) = TELEMETRY_NAMESPACE.clone() {
+			res.push(KeyValue::new("namespace", namespace.trim().to_owned()));
 		};
 
 		res

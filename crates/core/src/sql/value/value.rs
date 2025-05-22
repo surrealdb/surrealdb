@@ -1,29 +1,24 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::id::range::IdRange;
-use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
-use crate::sql::statements::info::InfoStructure;
+
+use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::{
-	array::Uniq,
+	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
+	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
+	Strand, Subquery, Table, Tables, Thing, Uuid,
 	fmt::{Fmt, Pretty},
 	id::{Gen, Id},
 	model::Model,
-	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, Function, Future,
-	Geometry, Idiom, Kind, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Tables, Thing, Uuid,
 };
-use crate::sql::{Closure, ControlFlow, FlowResult};
+use crate::sql::{Closure, Ident, Kind};
+use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -40,56 +35,70 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Values(pub Vec<Value>);
+pub struct SqlValues(pub Vec<SqlValue>);
 
-impl<V> From<V> for Values
+impl<V> From<V> for SqlValues
 where
-	V: Into<Vec<Value>>,
+	V: Into<Vec<SqlValue>>,
 {
 	fn from(value: V) -> Self {
 		Self(value.into())
 	}
 }
 
-impl Deref for Values {
-	type Target = Vec<Value>;
+impl Deref for SqlValues {
+	type Target = Vec<SqlValue>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
-impl IntoIterator for Values {
-	type Item = Value;
+impl IntoIterator for SqlValues {
+	type Item = SqlValue;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
 }
 
-impl Display for Values {
+impl Display for SqlValues {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 
-impl InfoStructure for Values {
-	fn structure(self) -> Value {
-		self.into_iter().map(Value::structure).collect::<Vec<_>>().into()
+impl From<&Tables> for SqlValues {
+	fn from(tables: &Tables) -> Self {
+		Self(tables.0.iter().map(|t| SqlValue::Table(t.clone())).collect())
 	}
 }
 
-impl From<&Tables> for Values {
-	fn from(tables: &Tables) -> Self {
-		Self(tables.0.iter().map(|t| Value::Table(t.clone())).collect())
+impl From<SqlValues> for crate::expr::Values {
+	fn from(v: SqlValues) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
 	}
 }
+
+impl From<crate::expr::Values> for SqlValues {
+	fn from(v: crate::expr::Values) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+/// Marker type for value conversions from Value::None
+#[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
+pub struct SqlNone;
+
+/// Marker type for value conversions from Value::Null
+#[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
+pub struct Null;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub enum Value {
+pub enum SqlValue {
 	// These value types are simple values which
 	// can be used in query responses sent to
 	// the client. They typically do not need to
@@ -139,15 +148,16 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	Refs(Refs),
+	File(File),
 	// Add new variants here
 }
 
-impl Value {
+impl SqlValue {
 	fn convert_old_range(
 		fields: OldValueRangeFields,
 		_revision: u16,
 	) -> Result<Self, revision::Error> {
-		Ok(Value::Thing(Thing {
+		Ok(SqlValue::Thing(Thing {
 			tb: fields.0.tb,
 			id: Id::Range(Box::new(IdRange {
 				beg: fields.0.beg,
@@ -155,753 +165,31 @@ impl Value {
 			})),
 		}))
 	}
+
+	pub(crate) fn get_field_value(&self, name: &str) -> SqlValue {
+		match self {
+			SqlValue::Object(v) => v.get(name).cloned().unwrap_or(SqlValue::None),
+			_ => SqlValue::None,
+		}
+	}
 }
 
-impl Eq for Value {}
+impl Eq for SqlValue {}
 
-impl Ord for Value {
+impl Ord for SqlValue {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.partial_cmp(other).unwrap_or(Ordering::Equal)
 	}
 }
 
-impl From<bool> for Value {
-	#[inline]
-	fn from(v: bool) -> Self {
-		Value::Bool(v)
-	}
-}
-
-impl From<Uuid> for Value {
-	fn from(v: Uuid) -> Self {
-		Value::Uuid(v)
-	}
-}
-
-impl From<Closure> for Value {
-	fn from(v: Closure) -> Self {
-		Value::Closure(Box::new(v))
-	}
-}
-
-impl From<Param> for Value {
-	fn from(v: Param) -> Self {
-		Value::Param(v)
-	}
-}
-
-impl From<Idiom> for Value {
-	fn from(v: Idiom) -> Self {
-		Value::Idiom(v)
-	}
-}
-
-impl From<Mock> for Value {
-	fn from(v: Mock) -> Self {
-		Value::Mock(v)
-	}
-}
-
-impl From<Table> for Value {
-	fn from(v: Table) -> Self {
-		Value::Table(v)
-	}
-}
-
-impl From<Thing> for Value {
-	fn from(v: Thing) -> Self {
-		Value::Thing(v)
-	}
-}
-
-impl From<Regex> for Value {
-	fn from(v: Regex) -> Self {
-		Value::Regex(v)
-	}
-}
-
-impl From<Bytes> for Value {
-	fn from(v: Bytes) -> Self {
-		Value::Bytes(v)
-	}
-}
-
-impl From<Array> for Value {
-	fn from(v: Array) -> Self {
-		Value::Array(v)
-	}
-}
-
-impl From<Object> for Value {
-	fn from(v: Object) -> Self {
-		Value::Object(v)
-	}
-}
-
-impl From<Number> for Value {
-	fn from(v: Number) -> Self {
-		Value::Number(v)
-	}
-}
-
-impl From<Strand> for Value {
-	fn from(v: Strand) -> Self {
-		Value::Strand(v)
-	}
-}
-
-impl From<Geometry> for Value {
-	fn from(v: Geometry) -> Self {
-		Value::Geometry(v)
-	}
-}
-
-impl From<Datetime> for Value {
-	fn from(v: Datetime) -> Self {
-		Value::Datetime(v)
-	}
-}
-
-impl From<Duration> for Value {
-	fn from(v: Duration) -> Self {
-		Value::Duration(v)
-	}
-}
-
-impl From<Constant> for Value {
-	fn from(v: Constant) -> Self {
-		Value::Constant(v)
-	}
-}
-
-impl From<Block> for Value {
-	fn from(v: Block) -> Self {
-		Value::Block(Box::new(v))
-	}
-}
-
-impl From<Range> for Value {
-	fn from(v: Range) -> Self {
-		Value::Range(Box::new(v))
-	}
-}
-
-impl From<Box<Range>> for Value {
-	fn from(v: Box<Range>) -> Self {
-		Value::Range(v)
-	}
-}
-
-impl From<Edges> for Value {
-	fn from(v: Edges) -> Self {
-		Value::Edges(Box::new(v))
-	}
-}
-
-impl From<Future> for Value {
-	fn from(v: Future) -> Self {
-		Value::Future(Box::new(v))
-	}
-}
-
-impl From<Cast> for Value {
-	fn from(v: Cast) -> Self {
-		Value::Cast(Box::new(v))
-	}
-}
-
-impl From<Function> for Value {
-	fn from(v: Function) -> Self {
-		Value::Function(Box::new(v))
-	}
-}
-
-impl From<Model> for Value {
-	fn from(v: Model) -> Self {
-		Value::Model(Box::new(v))
-	}
-}
-
-impl From<Subquery> for Value {
-	fn from(v: Subquery) -> Self {
-		Value::Subquery(Box::new(v))
-	}
-}
-
-impl From<Expression> for Value {
-	fn from(v: Expression) -> Self {
-		Value::Expression(Box::new(v))
-	}
-}
-
-impl From<Box<Edges>> for Value {
-	fn from(v: Box<Edges>) -> Self {
-		Value::Edges(v)
-	}
-}
-
-impl From<i8> for Value {
-	fn from(v: i8) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<i16> for Value {
-	fn from(v: i16) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<i32> for Value {
-	fn from(v: i32) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<i64> for Value {
-	fn from(v: i64) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<i128> for Value {
-	fn from(v: i128) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<isize> for Value {
-	fn from(v: isize) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<u8> for Value {
-	fn from(v: u8) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<u16> for Value {
-	fn from(v: u16) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<u32> for Value {
-	fn from(v: u32) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<u64> for Value {
-	fn from(v: u64) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<u128> for Value {
-	fn from(v: u128) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<usize> for Value {
-	fn from(v: usize) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<f32> for Value {
-	fn from(v: f32) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<f64> for Value {
-	fn from(v: f64) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<Decimal> for Value {
-	fn from(v: Decimal) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
-impl From<String> for Value {
-	fn from(v: String) -> Self {
-		Self::Strand(Strand::from(v))
-	}
-}
-
-impl From<&str> for Value {
-	fn from(v: &str) -> Self {
-		Self::Strand(Strand::from(v))
-	}
-}
-
-impl From<DateTime<Utc>> for Value {
-	fn from(v: DateTime<Utc>) -> Self {
-		Value::Datetime(Datetime::from(v))
-	}
-}
-
-impl From<(f64, f64)> for Value {
-	fn from(v: (f64, f64)) -> Self {
-		Value::Geometry(Geometry::from(v))
-	}
-}
-
-impl From<[f64; 2]> for Value {
-	fn from(v: [f64; 2]) -> Self {
-		Value::Geometry(Geometry::from(v))
-	}
-}
-
-impl From<Point<f64>> for Value {
-	fn from(v: Point<f64>) -> Self {
-		Value::Geometry(Geometry::from(v))
-	}
-}
-
-impl From<Operation> for Value {
-	fn from(v: Operation) -> Self {
-		Value::Object(Object::from(v))
-	}
-}
-
-impl From<uuid::Uuid> for Value {
-	fn from(v: uuid::Uuid) -> Self {
-		Value::Uuid(Uuid(v))
-	}
-}
-
-impl From<Vec<&str>> for Value {
-	fn from(v: Vec<&str>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<String>> for Value {
-	fn from(v: Vec<String>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<i32>> for Value {
-	fn from(v: Vec<i32>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<f32>> for Value {
-	fn from(v: Vec<f32>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<f64>> for Value {
-	fn from(v: Vec<f64>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<usize>> for Value {
-	fn from(v: Vec<usize>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<Value>> for Value {
-	fn from(v: Vec<Value>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<Number>> for Value {
-	fn from(v: Vec<Number>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<Operation>> for Value {
-	fn from(v: Vec<Operation>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<bool>> for Value {
-	fn from(v: Vec<bool>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<HashMap<&str, Value>> for Value {
-	fn from(v: HashMap<&str, Value>) -> Self {
-		Value::Object(Object::from(v))
-	}
-}
-
-impl From<HashMap<String, Value>> for Value {
-	fn from(v: HashMap<String, Value>) -> Self {
-		Value::Object(Object::from(v))
-	}
-}
-
-impl From<BTreeMap<String, Value>> for Value {
-	fn from(v: BTreeMap<String, Value>) -> Self {
-		Value::Object(Object::from(v))
-	}
-}
-
-impl From<BTreeMap<&str, Value>> for Value {
-	fn from(v: BTreeMap<&str, Value>) -> Self {
-		Value::Object(Object::from(v))
-	}
-}
-
-impl From<Option<Value>> for Value {
-	fn from(v: Option<Value>) -> Self {
-		match v {
-			Some(v) => v,
-			None => Value::None,
-		}
-	}
-}
-
-impl From<Option<String>> for Value {
-	fn from(v: Option<String>) -> Self {
-		match v {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		}
-	}
-}
-
-impl From<Option<i64>> for Value {
-	fn from(v: Option<i64>) -> Self {
-		match v {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		}
-	}
-}
-
-impl From<Option<Duration>> for Value {
-	fn from(v: Option<Duration>) -> Self {
-		match v {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		}
-	}
-}
-
-impl From<Option<Datetime>> for Value {
-	fn from(v: Option<Datetime>) -> Self {
-		match v {
-			Some(v) => Value::from(v),
-			None => Value::None,
-		}
-	}
-}
-
-impl From<IdRange> for Value {
-	fn from(v: IdRange) -> Self {
-		let beg = match v.beg {
-			Bound::Included(beg) => Bound::Included(Value::from(beg)),
-			Bound::Excluded(beg) => Bound::Excluded(Value::from(beg)),
-			Bound::Unbounded => Bound::Unbounded,
-		};
-
-		let end = match v.end {
-			Bound::Included(end) => Bound::Included(Value::from(end)),
-			Bound::Excluded(end) => Bound::Excluded(Value::from(end)),
-			Bound::Unbounded => Bound::Unbounded,
-		};
-
-		Value::Range(Box::new(Range {
-			beg,
-			end,
-		}))
-	}
-}
-
-impl From<Id> for Value {
-	fn from(v: Id) -> Self {
-		match v {
-			Id::Number(v) => v.into(),
-			Id::String(v) => v.into(),
-			Id::Uuid(v) => v.into(),
-			Id::Array(v) => v.into(),
-			Id::Object(v) => v.into(),
-			Id::Generate(v) => match v {
-				Gen::Rand => Id::rand().into(),
-				Gen::Ulid => Id::ulid().into(),
-				Gen::Uuid => Id::uuid().into(),
-			},
-			Id::Range(v) => v.deref().to_owned().into(),
-		}
-	}
-}
-
-impl From<Query> for Value {
-	fn from(q: Query) -> Self {
-		Value::Query(q)
-	}
-}
-
-impl TryFrom<Value> for i8 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "i8")),
-		}
-	}
-}
-
-impl TryFrom<Value> for i16 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "i16")),
-		}
-	}
-}
-
-impl TryFrom<Value> for i32 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "i32")),
-		}
-	}
-}
-
-impl TryFrom<Value> for i64 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "i64")),
-		}
-	}
-}
-
-impl TryFrom<Value> for i128 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "i128")),
-		}
-	}
-}
-
-impl TryFrom<Value> for u8 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "u8")),
-		}
-	}
-}
-
-impl TryFrom<Value> for u16 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "u16")),
-		}
-	}
-}
-
-impl TryFrom<Value> for u32 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "u32")),
-		}
-	}
-}
-
-impl TryFrom<Value> for u64 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "u64")),
-		}
-	}
-}
-
-impl TryFrom<Value> for u128 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "u128")),
-		}
-	}
-}
-
-impl TryFrom<Value> for f32 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "f32")),
-		}
-	}
-}
-
-impl TryFrom<Value> for f64 {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "f64")),
-		}
-	}
-}
-
-impl TryFrom<Value> for Decimal {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFrom(value.to_string(), "Decimal")),
-		}
-	}
-}
-
-impl TryFrom<Value> for String {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Strand(x) => Ok(x.into()),
-			_ => Err(Error::TryFrom(value.to_string(), "String")),
-		}
-	}
-}
-
-impl TryFrom<Value> for bool {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Bool(v) => Ok(v),
-			_ => Err(Error::TryFrom(value.to_string(), "bool")),
-		}
-	}
-}
-
-impl TryFrom<Value> for std::time::Duration {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Duration(x) => Ok(x.into()),
-			_ => Err(Error::TryFrom(value.to_string(), "time::Duration")),
-		}
-	}
-}
-
-impl TryFrom<Value> for DateTime<Utc> {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Datetime(x) => Ok(x.into()),
-			_ => Err(Error::TryFrom(value.to_string(), "chrono::DateTime<Utc>")),
-		}
-	}
-}
-
-impl TryFrom<Value> for uuid::Uuid {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Uuid(x) => Ok(x.into()),
-			_ => Err(Error::TryFrom(value.to_string(), "uuid::Uuid")),
-		}
-	}
-}
-
-impl TryFrom<Value> for Vec<Value> {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Array(x) => Ok(x.into()),
-			_ => Err(Error::TryFrom(value.to_string(), "Vec<Value>")),
-		}
-	}
-}
-
-impl TryFrom<Value> for Number {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => Ok(x),
-			_ => Err(Error::TryFrom(value.to_string(), "Number")),
-		}
-	}
-}
-
-impl TryFrom<&Value> for Number {
-	type Error = Error;
-	fn try_from(value: &Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Number(x) => Ok(*x),
-			_ => Err(Error::TryFrom(value.to_string(), "Number")),
-		}
-	}
-}
-
-impl TryFrom<Value> for Datetime {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Datetime(x) => Ok(x),
-			_ => Err(Error::TryFrom(value.to_string(), "Datetime")),
-		}
-	}
-}
-
-impl TryFrom<Value> for Object {
-	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Object(x) => Ok(x),
-			_ => Err(Error::TryFrom(value.to_string(), "Object")),
-		}
-	}
-}
-
-impl FromIterator<Value> for Value {
-	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
-		Value::Array(Array(iter.into_iter().collect()))
-	}
-}
-
-impl FromIterator<(String, Value)> for Value {
-	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
-		Value::Object(Object(iter.into_iter().collect()))
-	}
-}
-
-impl Value {
+impl SqlValue {
 	// -----------------------------------
 	// Initial record value
 	// -----------------------------------
 
 	/// Create an empty Object Value
 	pub fn base() -> Self {
-		Value::Object(Object::default())
+		SqlValue::Object(Object::default())
 	}
 
 	// -----------------------------------
@@ -909,14 +197,14 @@ impl Value {
 	// -----------------------------------
 
 	/// Convert this Value to a Result
-	pub fn ok(self) -> Result<Value, Error> {
+	pub fn ok(self) -> Result<SqlValue> {
 		Ok(self)
 	}
 
 	/// Convert this Value to an Option
-	pub fn some(self) -> Option<Value> {
+	pub fn some(self) -> Option<SqlValue> {
 		match self {
-			Value::None => None,
+			SqlValue::None => None,
 			val => Some(val),
 		}
 	}
@@ -927,26 +215,16 @@ impl Value {
 
 	/// Check if this Value is NONE or NULL
 	pub fn is_none_or_null(&self) -> bool {
-		matches!(self, Value::None | Value::Null)
-	}
-
-	/// Check if this Value is NONE
-	pub fn is_none(&self) -> bool {
-		matches!(self, Value::None)
+		matches!(self, SqlValue::None | SqlValue::Null)
 	}
 
 	/// Check if this Value is NONE
 	pub fn is_empty_array(&self) -> bool {
-		if let Value::Array(v) = self {
+		if let SqlValue::Array(v) = self {
 			v.is_empty()
 		} else {
 			false
 		}
-	}
-
-	/// Check if this Value is NULL
-	pub fn is_null(&self) -> bool {
-		matches!(self, Value::Null)
 	}
 
 	/// Check if this Value not NONE or NULL
@@ -954,52 +232,37 @@ impl Value {
 		!self.is_none() && !self.is_null()
 	}
 
-	/// Check if this Value is a boolean value
-	pub fn is_bool(&self) -> bool {
-		matches!(self, Value::Bool(_))
-	}
-
 	/// Check if this Value is TRUE or 'true'
 	pub fn is_true(&self) -> bool {
-		matches!(self, Value::Bool(true))
+		matches!(self, SqlValue::Bool(true))
 	}
 
 	/// Check if this Value is FALSE or 'false'
 	pub fn is_false(&self) -> bool {
-		matches!(self, Value::Bool(false))
+		matches!(self, SqlValue::Bool(false))
 	}
 
 	/// Check if this Value is truthy
 	pub fn is_truthy(&self) -> bool {
 		match self {
-			Value::Bool(v) => *v,
-			Value::Uuid(_) => true,
-			Value::Thing(_) => true,
-			Value::Geometry(_) => true,
-			Value::Datetime(_) => true,
-			Value::Array(v) => !v.is_empty(),
-			Value::Object(v) => !v.is_empty(),
-			Value::Strand(v) => !v.is_empty(),
-			Value::Number(v) => v.is_truthy(),
-			Value::Duration(v) => v.as_nanos() > 0,
+			SqlValue::Bool(v) => *v,
+			SqlValue::Uuid(_) => true,
+			SqlValue::Thing(_) => true,
+			SqlValue::Geometry(_) => true,
+			SqlValue::Datetime(_) => true,
+			SqlValue::Array(v) => !v.is_empty(),
+			SqlValue::Object(v) => !v.is_empty(),
+			SqlValue::Strand(v) => !v.is_empty(),
+			SqlValue::Number(v) => v.is_truthy(),
+			SqlValue::Duration(v) => v.as_nanos() > 0,
 			_ => false,
 		}
-	}
-
-	/// Check if this Value is a UUID
-	pub fn is_uuid(&self) -> bool {
-		matches!(self, Value::Uuid(_))
-	}
-
-	/// Check if this Value is a Thing
-	pub fn is_thing(&self) -> bool {
-		matches!(self, Value::Thing(_))
 	}
 
 	/// Check if this Value is a single Thing
 	pub fn is_thing_single(&self) -> bool {
 		match self {
-			Value::Thing(t) => !matches!(t.id, Id::Range(_)),
+			SqlValue::Thing(t) => !matches!(t.id, Id::Range(_)),
 			_ => false,
 		}
 	}
@@ -1008,87 +271,17 @@ impl Value {
 	pub fn is_thing_range(&self) -> bool {
 		matches!(
 			self,
-			Value::Thing(Thing {
+			SqlValue::Thing(Thing {
 				id: Id::Range(_),
 				..
 			})
 		)
 	}
 
-	/// Check if this Value is a Mock
-	pub fn is_mock(&self) -> bool {
-		matches!(self, Value::Mock(_))
-	}
-
-	/// Check if this Value is a Param
-	pub fn is_param(&self) -> bool {
-		matches!(self, Value::Param(_))
-	}
-
-	/// Check if this Value is a Range
-	pub fn is_range(&self) -> bool {
-		matches!(self, Value::Range(_))
-	}
-
-	/// Check if this Value is a Table
-	pub fn is_table(&self) -> bool {
-		matches!(self, Value::Table(_))
-	}
-
-	/// Check if this Value is a Strand
-	pub fn is_strand(&self) -> bool {
-		matches!(self, Value::Strand(_))
-	}
-
-	/// Check if this Value is a Query
-	pub fn is_query(&self) -> bool {
-		matches!(self, Value::Query(_))
-	}
-
-	/// Check if this Value is a float Number
-	pub fn is_bytes(&self) -> bool {
-		matches!(self, Value::Bytes(_))
-	}
-
-	/// Check if this Value is an Array
-	pub fn is_array(&self) -> bool {
-		matches!(self, Value::Array(_))
-	}
-
-	/// Check if this Value is an Object
-	pub fn is_object(&self) -> bool {
-		matches!(self, Value::Object(_))
-	}
-
-	/// Check if this Value is a Number
-	pub fn is_number(&self) -> bool {
-		matches!(self, Value::Number(_))
-	}
-
-	/// Check if this Value is a Datetime
-	pub fn is_datetime(&self) -> bool {
-		matches!(self, Value::Datetime(_))
-	}
-
-	/// Check if this Value is a Duration
-	pub fn is_duration(&self) -> bool {
-		matches!(self, Value::Duration(_))
-	}
-
-	/// Check if this Value is a Thing
-	pub fn is_record(&self) -> bool {
-		matches!(self, Value::Thing(_))
-	}
-
-	/// Check if this Value is a Closure
-	pub fn is_closure(&self) -> bool {
-		matches!(self, Value::Closure(_))
-	}
-
 	/// Check if this Value is a Thing, and belongs to a certain table
 	pub fn is_record_of_table(&self, table: String) -> bool {
 		match self {
-			Value::Thing(Thing {
+			SqlValue::Thing(Thing {
 				tb,
 				..
 			}) => *tb == table,
@@ -1096,60 +289,49 @@ impl Value {
 		}
 	}
 
-	/// Check if this Value is a Geometry
-	pub fn is_geometry(&self) -> bool {
-		matches!(self, Value::Geometry(_))
-	}
-
 	/// Check if this Value is an int Number
 	pub fn is_int(&self) -> bool {
-		matches!(self, Value::Number(Number::Int(_)))
+		matches!(self, SqlValue::Number(Number::Int(_)))
+	}
+
+	pub fn into_int(self) -> Option<i64> {
+		if let Number::Int(x) = self.into_number()? {
+			Some(x)
+		} else {
+			None
+		}
 	}
 
 	/// Check if this Value is a float Number
 	pub fn is_float(&self) -> bool {
-		matches!(self, Value::Number(Number::Float(_)))
+		matches!(self, SqlValue::Number(Number::Float(_)))
+	}
+
+	pub fn into_float(self) -> Option<f64> {
+		if let Number::Float(x) = self.into_number()? {
+			Some(x)
+		} else {
+			None
+		}
 	}
 
 	/// Check if this Value is a decimal Number
 	pub fn is_decimal(&self) -> bool {
-		matches!(self, Value::Number(Number::Decimal(_)))
+		matches!(self, SqlValue::Number(Number::Decimal(_)))
 	}
 
-	/// Check if this Value is a Number but is a NAN
-	pub fn is_nan(&self) -> bool {
-		matches!(self, Value::Number(v) if v.is_nan())
-	}
-
-	/// Check if this Value is a Number and is an integer
-	pub fn is_integer(&self) -> bool {
-		matches!(self, Value::Number(v) if v.is_integer())
-	}
-
-	/// Check if this Value is a Number and is positive
-	pub fn is_positive(&self) -> bool {
-		matches!(self, Value::Number(v) if v.is_positive())
-	}
-
-	/// Check if this Value is a Number and is negative
-	pub fn is_negative(&self) -> bool {
-		matches!(self, Value::Number(v) if v.is_negative())
-	}
-
-	/// Check if this Value is a Number and is zero or positive
-	pub fn is_zero_or_positive(&self) -> bool {
-		matches!(self, Value::Number(v) if v.is_zero_or_positive())
-	}
-
-	/// Check if this Value is a Number and is zero or negative
-	pub fn is_zero_or_negative(&self) -> bool {
-		matches!(self, Value::Number(v) if v.is_zero_or_negative())
+	pub fn into_decimal(self) -> Option<Decimal> {
+		if let Number::Decimal(x) = self.into_number()? {
+			Some(x)
+		} else {
+			None
+		}
 	}
 
 	/// Check if this Value is a Thing of a specific type
 	pub fn is_record_type(&self, types: &[Table]) -> bool {
 		match self {
-			Value::Thing(v) => v.is_record_type(types),
+			SqlValue::Thing(v) => v.is_record_type(types),
 			_ => false,
 		}
 	}
@@ -1157,35 +339,36 @@ impl Value {
 	/// Check if this Value is a Geometry of a specific type
 	pub fn is_geometry_type(&self, types: &[String]) -> bool {
 		match self {
-			Value::Geometry(Geometry::Point(_)) => {
+			SqlValue::Geometry(Geometry::Point(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "point"))
 			}
-			Value::Geometry(Geometry::Line(_)) => {
+			SqlValue::Geometry(Geometry::Line(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "line"))
 			}
-			Value::Geometry(Geometry::Polygon(_)) => {
+			SqlValue::Geometry(Geometry::Polygon(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "polygon"))
 			}
-			Value::Geometry(Geometry::MultiPoint(_)) => {
+			SqlValue::Geometry(Geometry::MultiPoint(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipoint"))
 			}
-			Value::Geometry(Geometry::MultiLine(_)) => {
+			SqlValue::Geometry(Geometry::MultiLine(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "multiline"))
 			}
-			Value::Geometry(Geometry::MultiPolygon(_)) => {
+			SqlValue::Geometry(Geometry::MultiPolygon(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipolygon"))
 			}
-			Value::Geometry(Geometry::Collection(_)) => {
+			SqlValue::Geometry(Geometry::Collection(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "collection"))
 			}
 			_ => false,
 		}
 	}
 
-	pub fn is_single(&self) -> bool {
+	/// Returns if selecting on this value returns a single result.
+	pub fn is_singular_selector(&self) -> bool {
 		match self {
-			Value::Object(_) => true,
-			t @ Value::Thing(_) => t.is_thing_single(),
+			SqlValue::Object(_) => true,
+			t @ SqlValue::Thing(_) => t.is_thing_single(),
 			_ => false,
 		}
 	}
@@ -1197,9 +380,9 @@ impl Value {
 	/// Convert this Value into a String
 	pub fn as_string(self) -> String {
 		match self {
-			Value::Strand(v) => v.0,
-			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw(),
+			SqlValue::Strand(v) => v.0,
+			SqlValue::Uuid(v) => v.to_raw(),
+			SqlValue::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
 		}
 	}
@@ -1207,9 +390,9 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn as_raw_string(self) -> String {
 		match self {
-			Value::Strand(v) => v.0,
-			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw(),
+			SqlValue::Strand(v) => v.0,
+			SqlValue::Uuid(v) => v.to_raw(),
+			SqlValue::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
 		}
 	}
@@ -1221,9 +404,9 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			Value::Strand(v) => v.0.to_owned(),
-			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw(),
+			SqlValue::Strand(v) => v.0.clone(),
+			SqlValue::Uuid(v) => v.to_raw(),
+			SqlValue::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
 		}
 	}
@@ -1231,12 +414,12 @@ impl Value {
 	/// Converts this Value into a field name
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
-			Value::Idiom(v) => v.simplify(),
-			Value::Param(v) => v.to_raw().into(),
-			Value::Strand(v) => v.0.to_string().into(),
-			Value::Datetime(v) => v.0.to_string().into(),
-			Value::Future(_) => "future".to_string().into(),
-			Value::Function(v) => v.to_idiom(),
+			SqlValue::Idiom(v) => v.simplify(),
+			SqlValue::Param(v) => v.to_raw().into(),
+			SqlValue::Strand(v) => v.0.to_string().into(),
+			SqlValue::Datetime(v) => v.0.to_string().into(),
+			SqlValue::Future(_) => "future".to_string().into(),
+			SqlValue::Function(v) => v.to_idiom(),
 			_ => self.to_string().into(),
 		}
 	}
@@ -1244,39 +427,39 @@ impl Value {
 	/// Returns if this value can be the start of a idiom production.
 	pub fn can_start_idiom(&self) -> bool {
 		match self {
-			Value::Function(x) => !x.is_script(),
-			Value::Model(_)
-			| Value::Subquery(_)
-			| Value::Constant(_)
-			| Value::Datetime(_)
-			| Value::Duration(_)
-			| Value::Uuid(_)
-			| Value::Number(_)
-			| Value::Object(_)
-			| Value::Array(_)
-			| Value::Param(_)
-			| Value::Edges(_)
-			| Value::Thing(_)
-			| Value::Table(_) => true,
+			SqlValue::Function(x) => !x.is_script(),
+			SqlValue::Model(_)
+			| SqlValue::Subquery(_)
+			| SqlValue::Constant(_)
+			| SqlValue::Datetime(_)
+			| SqlValue::Duration(_)
+			| SqlValue::Uuid(_)
+			| SqlValue::Number(_)
+			| SqlValue::Object(_)
+			| SqlValue::Array(_)
+			| SqlValue::Param(_)
+			| SqlValue::Edges(_)
+			| SqlValue::Thing(_)
+			| SqlValue::Table(_) => true,
 			_ => false,
 		}
 	}
 
 	/// Try to convert this Value into a set of JSONPatch operations
-	pub fn to_operations(&self) -> Result<Vec<Operation>, Error> {
+	pub fn to_operations(&self) -> Result<Vec<Operation>> {
 		match self {
-			Value::Array(v) => v
+			SqlValue::Array(v) => v
 				.iter()
 				.map(|v| match v {
-					Value::Object(v) => v.to_operation(),
-					_ => Err(Error::InvalidPatch {
+					SqlValue::Object(v) => v.to_operation(),
+					_ => Err(anyhow::Error::new(Error::InvalidPatch {
 						message: String::from("Operation must be an object"),
-					}),
+					})),
 				})
-				.collect::<Result<Vec<_>, Error>>(),
-			_ => Err(Error::InvalidPatch {
+				.collect::<Result<Vec<_>>>(),
+			_ => Err(anyhow::Error::new(Error::InvalidPatch {
 				message: String::from("Operations must be an array"),
-			}),
+			})),
 		}
 	}
 
@@ -1293,9 +476,9 @@ impl Value {
 	// -----------------------------------
 
 	/// Treat a string as a table name
-	pub fn could_be_table(self) -> Value {
+	pub fn could_be_table(self) -> SqlValue {
 		match self {
-			Value::Strand(v) => Value::Table(v.0.into()),
+			SqlValue::Strand(v) => SqlValue::Table(v.0.into()),
 			_ => self,
 		}
 	}
@@ -1304,8 +487,60 @@ impl Value {
 	// Simple output of value type
 	// -----------------------------------
 
-	/// Treat a string as a table name
+	pub fn kind(&self) -> Option<Kind> {
+		match self {
+			SqlValue::None => None,
+			SqlValue::Null => Some(Kind::Null),
+			SqlValue::Bool(_) => Some(Kind::Bool),
+			SqlValue::Number(_) => Some(Kind::Number),
+			SqlValue::Strand(_) => Some(Kind::String),
+			SqlValue::Duration(_) => Some(Kind::Duration),
+			SqlValue::Datetime(_) => Some(Kind::Datetime),
+			SqlValue::Uuid(_) => Some(Kind::Uuid),
+			SqlValue::Array(arr) => Some(Kind::Array(
+				Box::new(arr.first().and_then(|v| v.kind()).unwrap_or_default()),
+				None,
+			)),
+			SqlValue::Object(_) => Some(Kind::Object),
+			SqlValue::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
+			SqlValue::Bytes(_) => Some(Kind::Bytes),
+			SqlValue::Thing(thing) => Some(Kind::Record(vec![thing.tb.clone().into()])),
+			SqlValue::Param(_) => None,
+			SqlValue::Idiom(_) => None,
+			SqlValue::Table(_) => None,
+			SqlValue::Mock(_) => None,
+			SqlValue::Regex(_) => None,
+			SqlValue::Cast(_) => None,
+			SqlValue::Block(_) => None,
+			SqlValue::Range(_) => None,
+			SqlValue::Edges(_) => None,
+			SqlValue::Future(_) => None,
+			SqlValue::Constant(_) => None,
+			SqlValue::Function(_) => None,
+			SqlValue::Subquery(_) => None,
+			SqlValue::Query(_) => None,
+			SqlValue::Model(_) => None,
+			SqlValue::Closure(closure) => {
+				let args_kinds =
+					closure.args.iter().map(|(_, kind)| kind.clone()).collect::<Vec<_>>();
+				let returns_kind = closure.returns.clone().map(Box::new);
+
+				Some(Kind::Function(Some(args_kinds), returns_kind))
+			}
+			SqlValue::Refs(_) => None,
+			SqlValue::Expression(_) => None,
+			SqlValue::File(file) => Some(Kind::File(vec![Ident::from(file.bucket.as_str())])),
+		}
+	}
+
+	/// Returns the surql representation of the kind of the value as a string.
+	///
+	/// # Warning
+	/// This function is not fully implement for all variants, make sure you don't accidentally use
+	/// it where it can return an invalid value.
 	pub fn kindof(&self) -> &'static str {
+		// TODO: Look at this function, there are a whole bunch of options for which this returns
+		// "incorrect type" which might sneak into the results where it shouldn.t
 		match self {
 			Self::None => "none",
 			Self::Null => "null",
@@ -1334,1274 +569,6 @@ impl Value {
 	}
 
 	// -----------------------------------
-	// Simple type coercion of values
-	// -----------------------------------
-
-	/// Try to coerce this value to the specified `Kind`
-	pub(crate) fn coerce_to(self, kind: &Kind) -> Result<Value, Error> {
-		// Attempt to convert to the desired type
-		let res = match kind {
-			Kind::Any => Ok(self),
-			Kind::Null => self.coerce_to_null(),
-			Kind::Bool => self.coerce_to_bool().map(Value::from),
-			Kind::Int => self.coerce_to_int().map(Value::from),
-			Kind::Float => self.coerce_to_float().map(Value::from),
-			Kind::Decimal => self.coerce_to_decimal().map(Value::from),
-			Kind::Number => self.coerce_to_number().map(Value::from),
-			Kind::String => self.coerce_to_strand().map(Value::from),
-			Kind::Datetime => self.coerce_to_datetime().map(Value::from),
-			Kind::Duration => self.coerce_to_duration().map(Value::from),
-			Kind::Object => self.coerce_to_object().map(Value::from),
-			Kind::Point => self.coerce_to_point().map(Value::from),
-			Kind::Bytes => self.coerce_to_bytes().map(Value::from),
-			Kind::Uuid => self.coerce_to_uuid().map(Value::from),
-			Kind::Regex => self.coerce_to_regex().map(Value::from),
-			Kind::Range => self.coerce_to_range().map(Value::from),
-			Kind::Function(_, _) => self.coerce_to_function().map(Value::from),
-			Kind::Set(t, l) => match l {
-				Some(l) => self.coerce_to_set_type_len(t, l).map(Value::from),
-				None => self.coerce_to_set_type(t).map(Value::from),
-			},
-			Kind::Array(t, l) => match l {
-				Some(l) => self.coerce_to_array_type_len(t, l).map(Value::from),
-				None => self.coerce_to_array_type(t).map(Value::from),
-			},
-			Kind::Record(t) => match t.is_empty() {
-				true => self.coerce_to_record().map(Value::from),
-				false => self.coerce_to_record_type(t).map(Value::from),
-			},
-			Kind::Geometry(t) => match t.is_empty() {
-				true => self.coerce_to_geometry().map(Value::from),
-				false => self.coerce_to_geometry_type(t).map(Value::from),
-			},
-			Kind::Option(k) => match self {
-				Self::None => Ok(Self::None),
-				v => v.coerce_to(k),
-			},
-			Kind::Either(k) => {
-				let mut val = self;
-				for k in k {
-					match val.coerce_to(k) {
-						Err(Error::CoerceTo {
-							from,
-							..
-						}) => val = from,
-						Err(e) => return Err(e),
-						Ok(v) => return Ok(v),
-					}
-				}
-				Err(Error::CoerceTo {
-					from: val,
-					into: kind.to_string(),
-				})
-			}
-			Kind::Literal(lit) => self.coerce_to_literal(lit),
-			Kind::References(_, _) => Err(Error::CoerceTo {
-				from: self,
-				into: kind.to_string(),
-			}),
-		};
-		// Check for any conversion errors
-		match res {
-			// There was a conversion error
-			Err(Error::CoerceTo {
-				from,
-				..
-			}) => Err(Error::CoerceTo {
-				from,
-				into: kind.to_string(),
-			}),
-			// There was a different error
-			Err(e) => Err(e),
-			// Everything converted ok
-			Ok(v) => Ok(v),
-		}
-	}
-
-	/// Try to coerce this value to an `i64`
-	pub fn coerce_to_i64(self) -> Result<i64, Error> {
-		match self {
-			// Allow any int number
-			Value::Number(Number::Int(v)) => Ok(v),
-			// Attempt to convert an float number
-			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as i64),
-			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
-				// The Decimal can be represented as an i64
-				Ok(v) => Ok(v),
-				// The Decimal is out of bounds
-				_ => Err(Error::CoerceTo {
-					from: self,
-					into: "i64".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "i64".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to an `u64`
-	pub(crate) fn coerce_to_u64(self) -> Result<u64, Error> {
-		match self {
-			// Allow any int number
-			Value::Number(Number::Int(v)) => Ok(v as u64),
-			// Attempt to convert an float number
-			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as u64),
-			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
-				// The Decimal can be represented as an u64
-				Ok(v) => Ok(v),
-				// The Decimal is out of bounds
-				_ => Err(Error::CoerceTo {
-					from: self,
-					into: "u64".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "u64".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to an `f64`
-	pub(crate) fn coerce_to_f64(self) -> Result<f64, Error> {
-		match self {
-			// Allow any float number
-			Value::Number(Number::Float(v)) => Ok(v),
-			// Attempt to convert an int number
-			Value::Number(Number::Int(v)) => Ok(v as f64),
-			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) => match v.try_into() {
-				// The Decimal can be represented as a f64
-				Ok(v) => Ok(v),
-				// This Decimal loses precision
-				_ => Err(Error::CoerceTo {
-					from: self,
-					into: "f64".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "f64".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a Literal, returns a `Value` with the coerced value
-	pub(crate) fn coerce_to_literal(self, literal: &Literal) -> Result<Value, Error> {
-		if literal.validate_value(&self) {
-			Ok(self)
-		} else {
-			Err(Error::CoerceTo {
-				from: self,
-				into: literal.to_string(),
-			})
-		}
-	}
-
-	/// Try to coerce this value to a `null`
-	pub(crate) fn coerce_to_null(self) -> Result<Value, Error> {
-		match self {
-			// Allow any null value
-			Value::Null => Ok(Value::Null),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "null".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `bool`
-	pub(crate) fn coerce_to_bool(self) -> Result<bool, Error> {
-		match self {
-			// Allow any boolean value
-			Value::Bool(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "bool".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to an integer `Number`
-	pub(crate) fn coerce_to_int(self) -> Result<Number, Error> {
-		match self {
-			// Allow any int number
-			Value::Number(v) if v.is_int() => Ok(v),
-			// Attempt to convert an float number
-			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(Number::Int(v as i64)),
-			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.to_i64() {
-				// The Decimal can be represented as an Int
-				Some(v) => Ok(Number::Int(v)),
-				// The Decimal is out of bounds
-				_ => Err(Error::CoerceTo {
-					from: self,
-					into: "int".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "int".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a float `Number`
-	pub(crate) fn coerce_to_float(self) -> Result<Number, Error> {
-		match self {
-			// Allow any float number
-			Value::Number(v) if v.is_float() => Ok(v),
-			// Attempt to convert an int number
-			Value::Number(Number::Int(v)) => Ok(Number::Float(v as f64)),
-			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(ref v)) => match v.to_f64() {
-				// The Decimal can be represented as a Float
-				Some(v) => Ok(Number::Float(v)),
-				// This BigDecimal loses precision
-				None => Err(Error::CoerceTo {
-					from: self,
-					into: "float".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "float".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a decimal `Number`
-	pub(crate) fn coerce_to_decimal(self) -> Result<Number, Error> {
-		match self {
-			// Allow any decimal number
-			Value::Number(v) if v.is_decimal() => Ok(v),
-			// Attempt to convert an int number
-			Value::Number(Number::Int(v)) => match Decimal::from_i64(v) {
-				// The Int can be represented as a Decimal
-				Some(v) => Ok(Number::Decimal(v)),
-				// This Int does not convert to a Decimal
-				None => Err(Error::CoerceTo {
-					from: self,
-					into: "decimal".into(),
-				}),
-			},
-			// Attempt to convert an float number
-			Value::Number(Number::Float(v)) => match Decimal::from_f64(v) {
-				// The Float can be represented as a Decimal
-				Some(v) => Ok(Number::Decimal(v)),
-				// This Float does not convert to a Decimal
-				None => Err(Error::CoerceTo {
-					from: self,
-					into: "decimal".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "decimal".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Number`
-	pub(crate) fn coerce_to_number(self) -> Result<Number, Error> {
-		match self {
-			// Allow any number
-			Value::Number(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "number".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Regex`
-	pub(crate) fn coerce_to_regex(self) -> Result<Regex, Error> {
-		match self {
-			// Allow any Regex value
-			Value::Regex(v) => Ok(v),
-			// Allow any string value
-			Value::Strand(v) => Ok(v.as_str().parse()?),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "regex".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `String`
-	pub(crate) fn coerce_to_string(self) -> Result<String, Error> {
-		match self {
-			// Allow any uuid value
-			Value::Uuid(v) => Ok(v.to_raw()),
-			// Allow any datetime value
-			Value::Datetime(v) => Ok(v.to_raw()),
-			// Allow any string value
-			Value::Strand(v) => Ok(v.as_string()),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "string".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Strand`
-	pub(crate) fn coerce_to_strand(self) -> Result<Strand, Error> {
-		match self {
-			// Allow any uuid value
-			Value::Uuid(v) => Ok(v.to_raw().into()),
-			// Allow any datetime value
-			Value::Datetime(v) => Ok(v.to_raw().into()),
-			// Allow any string value
-			Value::Strand(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "string".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Uuid`
-	pub(crate) fn coerce_to_uuid(self) -> Result<Uuid, Error> {
-		match self {
-			// Uuids are allowed
-			Value::Uuid(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "uuid".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Closure`
-	pub(crate) fn coerce_to_function(self) -> Result<Closure, Error> {
-		match self {
-			// Closures are allowed
-			Value::Closure(v) => Ok(*v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "function".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Datetime`
-	pub(crate) fn coerce_to_datetime(self) -> Result<Datetime, Error> {
-		match self {
-			// Datetimes are allowed
-			Value::Datetime(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "datetime".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Duration`
-	pub(crate) fn coerce_to_duration(self) -> Result<Duration, Error> {
-		match self {
-			// Durations are allowed
-			Value::Duration(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "duration".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Bytes`
-	pub(crate) fn coerce_to_bytes(self) -> Result<Bytes, Error> {
-		match self {
-			// Bytes are allowed
-			Value::Bytes(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "bytes".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to an `Object`
-	pub(crate) fn coerce_to_object(self) -> Result<Object, Error> {
-		match self {
-			// Objects are allowed
-			Value::Object(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "object".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to an `Array`
-	pub(crate) fn coerce_to_array(self) -> Result<Array, Error> {
-		match self {
-			// Arrays are allowed
-			Value::Array(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "array".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Range`
-	pub(crate) fn coerce_to_range(self) -> Result<Range, Error> {
-		match self {
-			// Ranges are allowed
-			Value::Range(v) => Ok(*v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "range".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to an `Geometry` point
-	pub(crate) fn coerce_to_point(self) -> Result<Geometry, Error> {
-		match self {
-			// Geometry points are allowed
-			Value::Geometry(Geometry::Point(v)) => Ok(v.into()),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "point".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a Record or `Thing`
-	pub(crate) fn coerce_to_record(self) -> Result<Thing, Error> {
-		match self {
-			// Records are allowed
-			Value::Thing(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "record".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to an `Geometry` type
-	pub(crate) fn coerce_to_geometry(self) -> Result<Geometry, Error> {
-		match self {
-			// Geometries are allowed
-			Value::Geometry(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "geometry".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a Record of a certain type
-	pub(crate) fn coerce_to_record_type(self, val: &[Table]) -> Result<Thing, Error> {
-		match self {
-			// Records are allowed if correct type
-			Value::Thing(v) if self.is_record_type(val) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "record".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to a `Geometry` of a certain type
-	pub(crate) fn coerce_to_geometry_type(self, val: &[String]) -> Result<Geometry, Error> {
-		match self {
-			// Geometries are allowed if correct type
-			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::CoerceTo {
-				from: self,
-				into: "geometry".into(),
-			}),
-		}
-	}
-
-	/// Try to coerce this value to an `Array` of a certain type
-	pub(crate) fn coerce_to_array_type(self, kind: &Kind) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("array<{kind}>"),
-				},
-				e => e,
-			})
-	}
-
-	/// Try to coerce this value to an `Array` of a certain type, and length
-	pub(crate) fn coerce_to_array_type_len(self, kind: &Kind, len: &u64) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("array<{kind}, {len}>"),
-				},
-				e => e,
-			})
-			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>"),
-					size: v,
-				}),
-				_ => Ok(v),
-			})
-	}
-
-	/// Try to coerce this value to an `Array` of a certain type, unique values
-	pub(crate) fn coerce_to_set_type(self, kind: &Kind) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.uniq()
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("set<{kind}>"),
-				},
-				e => e,
-			})
-	}
-
-	/// Try to coerce this value to an `Array` of a certain type, unique values, and length
-	pub(crate) fn coerce_to_set_type_len(self, kind: &Kind, len: &u64) -> Result<Array, Error> {
-		self.coerce_to_array()?
-			.uniq()
-			.into_iter()
-			.map(|value| value.coerce_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::CoerceTo {
-					from,
-					..
-				} => Error::CoerceTo {
-					from,
-					into: format!("set<{kind}, {len}>"),
-				},
-				e => e,
-			})
-			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>"),
-					size: v,
-				}),
-				_ => Ok(v),
-			})
-	}
-
-	// -----------------------------------
-	// Advanced type conversion of values
-	// -----------------------------------
-
-	/// Try to convert this value to the specified `Kind`
-	pub(crate) fn convert_to(self, kind: &Kind) -> Result<Value, Error> {
-		// Attempt to convert to the desired type
-		let res = match kind {
-			Kind::Any => Ok(self),
-			Kind::Null => self.convert_to_null(),
-			Kind::Bool => self.convert_to_bool().map(Value::from),
-			Kind::Int => self.convert_to_int().map(Value::from),
-			Kind::Float => self.convert_to_float().map(Value::from),
-			Kind::Decimal => self.convert_to_decimal().map(Value::from),
-			Kind::Number => self.convert_to_number().map(Value::from),
-			Kind::String => self.convert_to_strand().map(Value::from),
-			Kind::Datetime => self.convert_to_datetime().map(Value::from),
-			Kind::Duration => self.convert_to_duration().map(Value::from),
-			Kind::Object => self.convert_to_object().map(Value::from),
-			Kind::Point => self.convert_to_point().map(Value::from),
-			Kind::Bytes => self.convert_to_bytes().map(Value::from),
-			Kind::Uuid => self.convert_to_uuid().map(Value::from),
-			Kind::Regex => self.convert_to_regex().map(Value::from),
-			Kind::Range => self.convert_to_range().map(Value::from),
-			Kind::Function(_, _) => self.convert_to_function().map(Value::from),
-			Kind::Set(t, l) => match l {
-				Some(l) => self.convert_to_set_type_len(t, l).map(Value::from),
-				None => self.convert_to_set_type(t).map(Value::from),
-			},
-			Kind::Array(t, l) => match l {
-				Some(l) => self.convert_to_array_type_len(t, l).map(Value::from),
-				None => self.convert_to_array_type(t).map(Value::from),
-			},
-			Kind::Record(t) => match t.is_empty() {
-				true => self.convert_to_record().map(Value::from),
-				false => self.convert_to_record_type(t).map(Value::from),
-			},
-			Kind::Geometry(t) => match t.is_empty() {
-				true => self.convert_to_geometry().map(Value::from),
-				false => self.convert_to_geometry_type(t).map(Value::from),
-			},
-			Kind::Option(k) => match self {
-				Self::None => Ok(Self::None),
-				v => v.convert_to(k),
-			},
-			Kind::Either(k) => {
-				let mut val = self;
-				for k in k {
-					match val.convert_to(k) {
-						Err(Error::ConvertTo {
-							from,
-							..
-						}) => val = from,
-						Err(e) => return Err(e),
-						Ok(v) => return Ok(v),
-					}
-				}
-				Err(Error::ConvertTo {
-					from: val,
-					into: kind.to_string(),
-				})
-			}
-			Kind::Literal(lit) => self.convert_to_literal(lit),
-			Kind::References(_, _) => Err(Error::CoerceTo {
-				from: self,
-				into: kind.to_string(),
-			}),
-		};
-		// Check for any conversion errors
-		match res {
-			// There was a conversion error
-			Err(Error::ConvertTo {
-				from,
-				..
-			}) => Err(Error::ConvertTo {
-				from,
-				into: kind.to_string(),
-			}),
-			// There was a different error
-			Err(e) => Err(e),
-			// Everything converted ok
-			Ok(v) => Ok(v),
-		}
-	}
-
-	/// Try to convert this value to a Literal, returns a `Value` with the coerced value
-	pub(crate) fn convert_to_literal(self, literal: &Literal) -> Result<Value, Error> {
-		if literal.validate_value(&self) {
-			Ok(self)
-		} else {
-			Err(Error::ConvertTo {
-				from: self,
-				into: literal.to_string(),
-			})
-		}
-	}
-
-	/// Try to convert this value to a `null`
-	pub(crate) fn convert_to_null(self) -> Result<Value, Error> {
-		match self {
-			// Allow any boolean value
-			Value::Null => Ok(Value::Null),
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "null".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `bool`
-	pub(crate) fn convert_to_bool(self) -> Result<bool, Error> {
-		match self {
-			// Allow any boolean value
-			Value::Bool(v) => Ok(v),
-			// Attempt to convert a string value
-			Value::Strand(ref v) => match v.parse::<bool>() {
-				// The string can be parsed as a Float
-				Ok(v) => Ok(v),
-				// This string is not a float
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "bool".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "bool".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to an integer `Number`
-	pub(crate) fn convert_to_int(self) -> Result<Number, Error> {
-		match self {
-			// Allow any int number
-			Value::Number(v) if v.is_int() => Ok(v),
-			// Attempt to convert an float number
-			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(Number::Int(v as i64)),
-			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
-				// The Decimal can be parsed as an Int
-				Ok(v) => Ok(Number::Int(v)),
-				// The Decimal is out of bounds
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "int".into(),
-				}),
-			},
-			// Attempt to convert a string value
-			Value::Strand(ref v) => match v.parse::<i64>() {
-				// The string can be parsed as a Float
-				Ok(v) => Ok(Number::Int(v)),
-				// This string is not a float
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "int".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "int".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a float `Number`
-	pub(crate) fn convert_to_float(self) -> Result<Number, Error> {
-		match self {
-			// Allow any float number
-			Value::Number(v) if v.is_float() => Ok(v),
-			// Attempt to convert an int number
-			Value::Number(Number::Int(v)) => Ok(Number::Float(v as f64)),
-			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) => match v.try_into() {
-				// The Decimal can be parsed as a Float
-				Ok(v) => Ok(Number::Float(v)),
-				// The Decimal loses precision
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "float".into(),
-				}),
-			},
-			// Attempt to convert a string value
-			Value::Strand(ref v) => match v.parse::<f64>() {
-				// The string can be parsed as a Float
-				Ok(v) => Ok(Number::Float(v)),
-				// This string is not a float
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "float".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "float".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a decimal `Number`
-	pub(crate) fn convert_to_decimal(self) -> Result<Number, Error> {
-		match self {
-			// Allow any decimal number
-			Value::Number(v) if v.is_decimal() => Ok(v),
-			// Attempt to convert an int number
-			Value::Number(Number::Int(ref v)) => Ok(Number::Decimal(Decimal::from(*v))),
-			// Attempt to convert an float number
-			Value::Number(Number::Float(ref v)) => match Decimal::try_from(*v) {
-				// The Float can be represented as a Decimal
-				Ok(v) => Ok(Number::Decimal(v)),
-				// This Float does not convert to a Decimal
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "decimal".into(),
-				}),
-			},
-			// Attempt to convert a string value
-			Value::Strand(ref v) => match Decimal::from_str(v) {
-				// The string can be parsed as a Decimal
-				Ok(v) => Ok(Number::Decimal(v)),
-				// This string is not a Decimal
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "decimal".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "decimal".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `Number`
-	pub(crate) fn convert_to_number(self) -> Result<Number, Error> {
-		match self {
-			// Allow any number
-			Value::Number(v) => Ok(v),
-			// Attempt to convert a string value
-			Value::Strand(ref v) => match Number::from_str(v) {
-				// The string can be parsed as a number
-				Ok(v) => Ok(v),
-				// This string is not a float
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "number".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "number".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `String`
-	pub fn convert_to_string(self) -> Result<String, Error> {
-		match self {
-			// Bytes can't convert to strings
-			Value::Bytes(_) => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
-			// None can't convert to a string
-			Value::None => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
-			// Null can't convert to a string
-			Value::Null => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
-			// Stringify anything else
-			_ => Ok(self.as_string()),
-		}
-	}
-
-	/// Try to convert this value to a `Strand`
-	pub(crate) fn convert_to_strand(self) -> Result<Strand, Error> {
-		match self {
-			// Bytes can't convert to strings
-			Value::Bytes(_) => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
-			// None can't convert to a string
-			Value::None => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
-			// Null can't convert to a string
-			Value::Null => Err(Error::ConvertTo {
-				from: self,
-				into: "string".into(),
-			}),
-			// Allow any string value
-			Value::Strand(v) => Ok(v),
-			// Stringify anything else
-			Value::Uuid(v) => Ok(v.to_raw().into()),
-			// Stringify anything else
-			Value::Datetime(v) => Ok(v.to_raw().into()),
-			// Stringify anything else
-			_ => Ok(self.to_string().into()),
-		}
-	}
-
-	/// Try to convert this value to a `Uuid`
-	pub(crate) fn convert_to_uuid(self) -> Result<Uuid, Error> {
-		match self {
-			// Uuids are allowed
-			Value::Uuid(v) => Ok(v),
-			// Attempt to parse a string
-			Value::Strand(ref v) => match Uuid::from_str(v) {
-				// The string can be parsed as a uuid
-				Ok(v) => Ok(v),
-				// This string is not a uuid
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "uuid".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "uuid".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `Uuid`
-	pub(crate) fn convert_to_regex(self) -> Result<Regex, Error> {
-		match self {
-			// Uuids are allowed
-			Value::Regex(v) => Ok(v),
-			// Attempt to parse a string
-			Value::Strand(ref v) => match Regex::from_str(v) {
-				// The string can be parsed as a uuid
-				Ok(v) => Ok(v),
-				// This string is not a uuid
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "regex".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "regex".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `Closure`
-	pub(crate) fn convert_to_function(self) -> Result<Closure, Error> {
-		match self {
-			// Closures are allowed
-			Value::Closure(v) => Ok(*v),
-			// Anything else converts to a closure with self as the body
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "function".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `Datetime`
-	pub(crate) fn convert_to_datetime(self) -> Result<Datetime, Error> {
-		match self {
-			// Datetimes are allowed
-			Value::Datetime(v) => Ok(v),
-			// Attempt to parse a string
-			Value::Strand(ref v) => match Datetime::from_str(v) {
-				// The string can be parsed as a datetime
-				Ok(v) => Ok(v),
-				// This string is not a datetime
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "datetime".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "datetime".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `Duration`
-	pub(crate) fn convert_to_duration(self) -> Result<Duration, Error> {
-		match self {
-			// Durations are allowed
-			Value::Duration(v) => Ok(v),
-			// Attempt to parse a string
-			Value::Strand(ref v) => match Duration::from_str(v) {
-				// The string can be parsed as a duration
-				Ok(v) => Ok(v),
-				// This string is not a duration
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "duration".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "duration".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `Bytes`
-	pub(crate) fn convert_to_bytes(self) -> Result<Bytes, Error> {
-		match self {
-			// Bytes are allowed
-			Value::Bytes(v) => Ok(v),
-			// Strings can be converted to bytes
-			Value::Strand(s) => Ok(Bytes(s.0.into_bytes())),
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "bytes".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to an `Object`
-	pub(crate) fn convert_to_object(self) -> Result<Object, Error> {
-		match self {
-			// Objects are allowed
-			Value::Object(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "object".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to an `Array`
-	pub(crate) fn convert_to_array(self) -> Result<Array, Error> {
-		match self {
-			// Arrays are allowed
-			Value::Array(v) => Ok(v),
-			// Ranges convert to an array
-			Value::Range(r) => {
-				let range: std::ops::Range<i64> = r.deref().to_owned().try_into()?;
-				Ok(range.into_iter().map(Value::from).collect::<Vec<Value>>().into())
-			}
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "array".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `Range`
-	pub(crate) fn convert_to_range(self) -> Result<Range, Error> {
-		match self {
-			// Ranges are allowed
-			Value::Range(r) => Ok(*r),
-			// Arrays with two elements are allowed
-			Value::Array(v) if v.len() == 2 => {
-				let mut v = v;
-				Ok(Range {
-					beg: Bound::Included(v.remove(0)),
-					end: Bound::Excluded(v.remove(0)),
-				})
-			}
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "range".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to an `Geometry` point
-	pub(crate) fn convert_to_point(self) -> Result<Geometry, Error> {
-		match self {
-			// Geometry points are allowed
-			Value::Geometry(Geometry::Point(v)) => Ok(v.into()),
-			// An array of two floats are allowed
-			Value::Array(ref v) if v.len() == 2 => match v.as_slice() {
-				// The array can be represented as a point
-				[Value::Number(v), Value::Number(w)] => Ok((v.to_float(), w.to_float()).into()),
-				// The array is not a geometry point
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "point".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "point".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a Record or `Thing`
-	pub(crate) fn convert_to_record(self) -> Result<Thing, Error> {
-		match self {
-			// Records are allowed
-			Value::Thing(v) => Ok(v),
-			// Attempt to parse a string
-			Value::Strand(ref v) => match Thing::from_str(v) {
-				// The string can be parsed as a record
-				Ok(v) => Ok(v),
-				// This string is not a record
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "record".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "record".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to an `Geometry` type
-	pub(crate) fn convert_to_geometry(self) -> Result<Geometry, Error> {
-		match self {
-			// Geometries are allowed
-			Value::Geometry(v) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "geometry".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a Record of a certain type
-	pub(crate) fn convert_to_record_type(self, val: &[Table]) -> Result<Thing, Error> {
-		match self {
-			// Records are allowed if correct type
-			Value::Thing(v) if self.is_record_type(val) => Ok(v),
-			// Attempt to parse a string
-			Value::Strand(ref v) => match Thing::from_str(v) {
-				// The string can be parsed as a record of this type
-				Ok(v) if v.is_record_type(val) => Ok(v),
-				// This string is not a record of this type
-				_ => Err(Error::ConvertTo {
-					from: self,
-					into: "record".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "record".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to a `Geometry` of a certain type
-	pub(crate) fn convert_to_geometry_type(self, val: &[String]) -> Result<Geometry, Error> {
-		match self {
-			// Geometries are allowed if correct type
-			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
-			// Anything else raises an error
-			_ => Err(Error::ConvertTo {
-				from: self,
-				into: "geometry".into(),
-			}),
-		}
-	}
-
-	/// Try to convert this value to ab `Array` of a certain type
-	pub(crate) fn convert_to_array_type(self, kind: &Kind) -> Result<Array, Error> {
-		self.convert_to_array()?
-			.into_iter()
-			.map(|value| value.convert_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::ConvertTo {
-					from,
-					..
-				} => Error::ConvertTo {
-					from,
-					into: format!("array<{kind}>"),
-				},
-				e => e,
-			})
-	}
-
-	/// Try to convert this value to ab `Array` of a certain type and length
-	pub(crate) fn convert_to_array_type_len(self, kind: &Kind, len: &u64) -> Result<Array, Error> {
-		self.convert_to_array()?
-			.into_iter()
-			.map(|value| value.convert_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::ConvertTo {
-					from,
-					..
-				} => Error::ConvertTo {
-					from,
-					into: format!("array<{kind}, {len}>"),
-				},
-				e => e,
-			})
-			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("array<{kind}, {len}>"),
-					size: v,
-				}),
-				_ => Ok(v),
-			})
-	}
-
-	/// Try to convert this value to an `Array` of a certain type, unique values
-	pub(crate) fn convert_to_set_type(self, kind: &Kind) -> Result<Array, Error> {
-		self.convert_to_array()?
-			.uniq()
-			.into_iter()
-			.map(|value| value.convert_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::ConvertTo {
-					from,
-					..
-				} => Error::ConvertTo {
-					from,
-					into: format!("set<{kind}>"),
-				},
-				e => e,
-			})
-	}
-
-	/// Try to convert this value to an `Array` of a certain type, unique values, and length
-	pub(crate) fn convert_to_set_type_len(self, kind: &Kind, len: &u64) -> Result<Array, Error> {
-		self.convert_to_array()?
-			.uniq()
-			.into_iter()
-			.map(|value| value.convert_to(kind))
-			.collect::<Result<Array, Error>>()
-			.map_err(|e| match e {
-				Error::ConvertTo {
-					from,
-					..
-				} => Error::ConvertTo {
-					from,
-					into: format!("set<{kind}, {len}>"),
-				},
-				e => e,
-			})
-			.and_then(|v| match v.len() {
-				v if v > *len as usize => Err(Error::LengthInvalid {
-					kind: format!("set<{kind}, {len}>"),
-					size: v,
-				}),
-				_ => Ok(v),
-			})
-	}
-
-	// -----------------------------------
 	// Record ID extraction
 	// -----------------------------------
 
@@ -2609,17 +576,17 @@ impl Value {
 	pub fn record(self) -> Option<Thing> {
 		match self {
 			// This is an object so look for the id field
-			Value::Object(mut v) => match v.remove("id") {
-				Some(Value::Thing(v)) => Some(v),
+			SqlValue::Object(mut v) => match v.remove("id") {
+				Some(SqlValue::Thing(v)) => Some(v),
 				_ => None,
 			},
 			// This is an array so take the first item
-			Value::Array(mut v) => match v.len() {
+			SqlValue::Array(mut v) => match v.len() {
 				1 => v.remove(0).record(),
 				_ => None,
 			},
 			// This is a record id already
-			Value::Thing(v) => Some(v),
+			SqlValue::Thing(v) => Some(v),
 			// There is no valid record id
 			_ => None,
 		}
@@ -2647,23 +614,23 @@ impl Value {
 	/// Checks whether this value is a static value
 	pub(crate) fn is_static(&self) -> bool {
 		match self {
-			Value::None => true,
-			Value::Null => true,
-			Value::Bool(_) => true,
-			Value::Bytes(_) => true,
-			Value::Uuid(_) => true,
-			Value::Thing(_) => true,
-			Value::Number(_) => true,
-			Value::Strand(_) => true,
-			Value::Duration(_) => true,
-			Value::Datetime(_) => true,
-			Value::Geometry(_) => true,
-			Value::Array(v) => v.is_static(),
-			Value::Object(v) => v.is_static(),
-			Value::Expression(v) => v.is_static(),
-			Value::Function(v) => v.is_static(),
-			Value::Cast(v) => v.is_static(),
-			Value::Constant(_) => true,
+			SqlValue::None => true,
+			SqlValue::Null => true,
+			SqlValue::Bool(_) => true,
+			SqlValue::Bytes(_) => true,
+			SqlValue::Uuid(_) => true,
+			SqlValue::Thing(_) => true,
+			SqlValue::Number(_) => true,
+			SqlValue::Strand(_) => true,
+			SqlValue::Duration(_) => true,
+			SqlValue::Datetime(_) => true,
+			SqlValue::Geometry(_) => true,
+			SqlValue::Array(v) => v.is_static(),
+			SqlValue::Object(v) => v.is_static(),
+			SqlValue::Expression(v) => v.is_static(),
+			SqlValue::Function(v) => v.is_static(),
+			SqlValue::Cast(v) => v.is_static(),
+			SqlValue::Constant(_) => true,
 			_ => false,
 		}
 	}
@@ -2673,58 +640,56 @@ impl Value {
 	// -----------------------------------
 
 	/// Check if this Value is equal to another Value
-	pub fn equal(&self, other: &Value) -> bool {
+	pub fn equal(&self, other: &SqlValue) -> bool {
 		match self {
-			Value::None => other.is_none(),
-			Value::Null => other.is_null(),
-			Value::Bool(v) => match other {
-				Value::Bool(w) => v == w,
+			SqlValue::None => other.is_none(),
+			SqlValue::Null => other.is_null(),
+			SqlValue::Bool(v) => match other {
+				SqlValue::Bool(w) => v == w,
 				_ => false,
 			},
-			Value::Uuid(v) => match other {
-				Value::Uuid(w) => v == w,
-				Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
+			SqlValue::Uuid(v) => match other {
+				SqlValue::Uuid(w) => v == w,
 				_ => false,
 			},
-			Value::Thing(v) => match other {
-				Value::Thing(w) => v == w,
-				Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
+			SqlValue::Thing(v) => match other {
+				SqlValue::Thing(w) => v == w,
+				SqlValue::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
 				_ => false,
 			},
-			Value::Strand(v) => match other {
-				Value::Strand(w) => v == w,
-				Value::Regex(w) => w.regex().is_match(v.as_str()),
+			SqlValue::Strand(v) => match other {
+				SqlValue::Strand(w) => v == w,
+				SqlValue::Regex(w) => w.regex().is_match(v.as_str()),
 				_ => false,
 			},
-			Value::Regex(v) => match other {
-				Value::Regex(w) => v == w,
-				Value::Uuid(w) => v.regex().is_match(w.to_raw().as_str()),
-				Value::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
-				Value::Strand(w) => v.regex().is_match(w.as_str()),
+			SqlValue::Regex(v) => match other {
+				SqlValue::Regex(w) => v == w,
+				SqlValue::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
+				SqlValue::Strand(w) => v.regex().is_match(w.as_str()),
 				_ => false,
 			},
-			Value::Array(v) => match other {
-				Value::Array(w) => v == w,
+			SqlValue::Array(v) => match other {
+				SqlValue::Array(w) => v == w,
 				_ => false,
 			},
-			Value::Object(v) => match other {
-				Value::Object(w) => v == w,
+			SqlValue::Object(v) => match other {
+				SqlValue::Object(w) => v == w,
 				_ => false,
 			},
-			Value::Number(v) => match other {
-				Value::Number(w) => v == w,
+			SqlValue::Number(v) => match other {
+				SqlValue::Number(w) => v == w,
 				_ => false,
 			},
-			Value::Geometry(v) => match other {
-				Value::Geometry(w) => v == w,
+			SqlValue::Geometry(v) => match other {
+				SqlValue::Geometry(w) => v == w,
 				_ => false,
 			},
-			Value::Duration(v) => match other {
-				Value::Duration(w) => v == w,
+			SqlValue::Duration(v) => match other {
+				SqlValue::Duration(w) => v == w,
 				_ => false,
 			},
-			Value::Datetime(v) => match other {
-				Value::Datetime(w) => v == w,
+			SqlValue::Datetime(v) => match other {
+				SqlValue::Datetime(w) => v == w,
 				_ => false,
 			},
 			_ => self == other,
@@ -2732,30 +697,30 @@ impl Value {
 	}
 
 	/// Check if all Values in an Array are equal to another Value
-	pub fn all_equal(&self, other: &Value) -> bool {
+	pub fn all_equal(&self, other: &SqlValue) -> bool {
 		match self {
-			Value::Array(v) => v.iter().all(|v| v.equal(other)),
+			SqlValue::Array(v) => v.iter().all(|v| v.equal(other)),
 			_ => self.equal(other),
 		}
 	}
 
 	/// Check if any Values in an Array are equal to another Value
-	pub fn any_equal(&self, other: &Value) -> bool {
+	pub fn any_equal(&self, other: &SqlValue) -> bool {
 		match self {
-			Value::Array(v) => v.iter().any(|v| v.equal(other)),
+			SqlValue::Array(v) => v.iter().any(|v| v.equal(other)),
 			_ => self.equal(other),
 		}
 	}
 
 	/// Fuzzy check if this Value is equal to another Value
-	pub fn fuzzy(&self, other: &Value) -> bool {
+	pub fn fuzzy(&self, other: &SqlValue) -> bool {
 		match self {
-			Value::Uuid(v) => match other {
-				Value::Strand(w) => v.to_raw().as_str().fuzzy_match(w.as_str()),
+			SqlValue::Uuid(v) => match other {
+				SqlValue::Strand(w) => v.to_raw().as_str().fuzzy_match(w.as_str()),
 				_ => false,
 			},
-			Value::Strand(v) => match other {
-				Value::Strand(w) => v.as_str().fuzzy_match(w.as_str()),
+			SqlValue::Strand(v) => match other {
+				SqlValue::Strand(w) => v.as_str().fuzzy_match(w.as_str()),
 				_ => false,
 			},
 			_ => self.equal(other),
@@ -2763,42 +728,42 @@ impl Value {
 	}
 
 	/// Fuzzy check if all Values in an Array are equal to another Value
-	pub fn all_fuzzy(&self, other: &Value) -> bool {
+	pub fn all_fuzzy(&self, other: &SqlValue) -> bool {
 		match self {
-			Value::Array(v) => v.iter().all(|v| v.fuzzy(other)),
+			SqlValue::Array(v) => v.iter().all(|v| v.fuzzy(other)),
 			_ => self.fuzzy(other),
 		}
 	}
 
 	/// Fuzzy check if any Values in an Array are equal to another Value
-	pub fn any_fuzzy(&self, other: &Value) -> bool {
+	pub fn any_fuzzy(&self, other: &SqlValue) -> bool {
 		match self {
-			Value::Array(v) => v.iter().any(|v| v.fuzzy(other)),
+			SqlValue::Array(v) => v.iter().any(|v| v.fuzzy(other)),
 			_ => self.fuzzy(other),
 		}
 	}
 
 	/// Check if this Value contains another Value
-	pub fn contains(&self, other: &Value) -> bool {
+	pub fn contains(&self, other: &SqlValue) -> bool {
 		match self {
-			Value::Array(v) => v.iter().any(|v| v.equal(other)),
-			Value::Uuid(v) => match other {
-				Value::Strand(w) => v.to_raw().contains(w.as_str()),
+			SqlValue::Array(v) => v.iter().any(|v| v.equal(other)),
+			SqlValue::Uuid(v) => match other {
+				SqlValue::Strand(w) => v.to_raw().contains(w.as_str()),
 				_ => false,
 			},
-			Value::Strand(v) => match other {
-				Value::Strand(w) => v.contains(w.as_str()),
+			SqlValue::Strand(v) => match other {
+				SqlValue::Strand(w) => v.contains(w.as_str()),
 				_ => false,
 			},
-			Value::Geometry(v) => match other {
-				Value::Geometry(w) => v.contains(w),
+			SqlValue::Geometry(v) => match other {
+				SqlValue::Geometry(w) => v.contains(w),
 				_ => false,
 			},
-			Value::Object(v) => match other {
-				Value::Strand(w) => v.0.contains_key(&w.0),
+			SqlValue::Object(v) => match other {
+				SqlValue::Strand(w) => v.0.contains_key(&w.0),
 				_ => false,
 			},
-			Value::Range(r) => {
+			SqlValue::Range(r) => {
 				let beg = match &r.beg {
 					Bound::Unbounded => true,
 					Bound::Included(beg) => beg.le(other),
@@ -2816,27 +781,27 @@ impl Value {
 	}
 
 	/// Check if all Values in an Array contain another Value
-	pub fn contains_all(&self, other: &Value) -> bool {
+	pub fn contains_all(&self, other: &SqlValue) -> bool {
 		match other {
-			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+			SqlValue::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
 				// confirmed as strand so all return false is unreachable
-				let Value::Strand(this) = self else {
+				let SqlValue::Strand(this) = self else {
 					return false;
 				};
 				v.iter().all(|s| {
-					let Value::Strand(other_string) = s else {
+					let SqlValue::Strand(other_string) = s else {
 						return false;
 					};
 					this.0.contains(&other_string.0)
 				})
 			}
-			Value::Array(v) => v.iter().all(|v| match self {
-				Value::Array(w) => w.iter().any(|w| v.equal(w)),
-				Value::Geometry(_) => self.contains(v),
+			SqlValue::Array(v) => v.iter().all(|v| match self {
+				SqlValue::Array(w) => w.iter().any(|w| v.equal(w)),
+				SqlValue::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
-			Value::Strand(other_strand) => match self {
-				Value::Strand(s) => s.0.contains(&other_strand.0),
+			SqlValue::Strand(other_strand) => match self {
+				SqlValue::Strand(s) => s.0.contains(&other_strand.0),
 				_ => false,
 			},
 			_ => false,
@@ -2844,27 +809,27 @@ impl Value {
 	}
 
 	/// Check if any Values in an Array contain another Value
-	pub fn contains_any(&self, other: &Value) -> bool {
+	pub fn contains_any(&self, other: &SqlValue) -> bool {
 		match other {
-			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+			SqlValue::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
 				// confirmed as strand so all return false is unreachable
-				let Value::Strand(this) = self else {
+				let SqlValue::Strand(this) = self else {
 					return false;
 				};
 				v.iter().any(|s| {
-					let Value::Strand(other_string) = s else {
+					let SqlValue::Strand(other_string) = s else {
 						return false;
 					};
 					this.0.contains(&other_string.0)
 				})
 			}
-			Value::Array(v) => v.iter().any(|v| match self {
-				Value::Array(w) => w.iter().any(|w| v.equal(w)),
-				Value::Geometry(_) => self.contains(v),
+			SqlValue::Array(v) => v.iter().any(|v| match self {
+				SqlValue::Array(w) => w.iter().any(|w| v.equal(w)),
+				SqlValue::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
-			Value::Strand(other_strand) => match self {
-				Value::Strand(s) => s.0.contains(&other_strand.0),
+			SqlValue::Strand(other_strand) => match self {
+				SqlValue::Strand(s) => s.0.contains(&other_strand.0),
 				_ => false,
 			},
 			_ => false,
@@ -2872,10 +837,10 @@ impl Value {
 	}
 
 	/// Check if this Value intersects another Value
-	pub fn intersects(&self, other: &Value) -> bool {
+	pub fn intersects(&self, other: &SqlValue) -> bool {
 		match self {
-			Value::Geometry(v) => match other {
-				Value::Geometry(w) => v.intersects(w),
+			SqlValue::Geometry(v) => match other {
+				SqlValue::Geometry(w) => v.intersects(w),
 				_ => false,
 			},
 			_ => false,
@@ -2887,158 +852,158 @@ impl Value {
 	// -----------------------------------
 
 	/// Compare this Value to another Value lexicographically
-	pub fn lexical_cmp(&self, other: &Value) -> Option<Ordering> {
+	pub fn lexical_cmp(&self, other: &SqlValue) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::lexical_cmp(a, b)),
+			(SqlValue::Strand(a), SqlValue::Strand(b)) => Some(lexicmp::lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
 
 	/// Compare this Value to another Value using natural numerical comparison
-	pub fn natural_cmp(&self, other: &Value) -> Option<Ordering> {
+	pub fn natural_cmp(&self, other: &SqlValue) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_cmp(a, b)),
+			(SqlValue::Strand(a), SqlValue::Strand(b)) => Some(lexicmp::natural_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
 
 	/// Compare this Value to another Value lexicographically and using natural numerical comparison
-	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
+	pub fn natural_lexical_cmp(&self, other: &SqlValue) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
+			(SqlValue::Strand(a), SqlValue::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
 
-	pub fn can_be_range_bound(&self) -> bool {
-		matches!(
-			self,
-			Value::None
-				| Value::Null
-				| Value::Array(_)
-				| Value::Block(_)
-				| Value::Bool(_)
-				| Value::Datetime(_)
-				| Value::Duration(_)
-				| Value::Geometry(_)
-				| Value::Number(_)
-				| Value::Object(_)
-				| Value::Param(_)
-				| Value::Strand(_)
-				| Value::Subquery(_)
-				| Value::Table(_)
-				| Value::Uuid(_)
-		)
-	}
-}
-
-impl fmt::Display for Value {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		match self {
-			Value::None => write!(f, "NONE"),
-			Value::Null => write!(f, "NULL"),
-			Value::Array(v) => write!(f, "{v}"),
-			Value::Block(v) => write!(f, "{v}"),
-			Value::Bool(v) => write!(f, "{v}"),
-			Value::Bytes(v) => write!(f, "{v}"),
-			Value::Cast(v) => write!(f, "{v}"),
-			Value::Constant(v) => write!(f, "{v}"),
-			Value::Datetime(v) => write!(f, "{v}"),
-			Value::Duration(v) => write!(f, "{v}"),
-			Value::Edges(v) => write!(f, "{v}"),
-			Value::Expression(v) => write!(f, "{v}"),
-			Value::Function(v) => write!(f, "{v}"),
-			Value::Model(v) => write!(f, "{v}"),
-			Value::Future(v) => write!(f, "{v}"),
-			Value::Geometry(v) => write!(f, "{v}"),
-			Value::Idiom(v) => write!(f, "{v}"),
-			Value::Mock(v) => write!(f, "{v}"),
-			Value::Number(v) => write!(f, "{v}"),
-			Value::Object(v) => write!(f, "{v}"),
-			Value::Param(v) => write!(f, "{v}"),
-			Value::Range(v) => write!(f, "{v}"),
-			Value::Regex(v) => write!(f, "{v}"),
-			Value::Strand(v) => write!(f, "{v}"),
-			Value::Query(v) => write!(f, "{v}"),
-			Value::Subquery(v) => write!(f, "{v}"),
-			Value::Table(v) => write!(f, "{v}"),
-			Value::Thing(v) => write!(f, "{v}"),
-			Value::Uuid(v) => write!(f, "{v}"),
-			Value::Closure(v) => write!(f, "{v}"),
-			Value::Refs(v) => write!(f, "{v}"),
-		}
-	}
-}
-
-impl InfoStructure for Value {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
-
-impl Value {
 	/// Validate that a Value is computed or contains only computed Values
-	pub fn validate_computed(&self) -> Result<(), Error> {
-		use Value::*;
+	pub fn validate_computed(&self) -> Result<()> {
+		use SqlValue::*;
 		match self {
 			None | Null | Bool(_) | Number(_) | Strand(_) | Duration(_) | Datetime(_) | Uuid(_)
 			| Geometry(_) | Bytes(_) | Thing(_) => Ok(()),
 			Array(a) => a.validate_computed(),
 			Object(o) => o.validate_computed(),
 			Range(r) => r.validate_computed(),
-			_ => Err(Error::NonComputed),
+			_ => Err(anyhow::Error::new(Error::NonComputed)),
 		}
 	}
 }
 
-impl Value {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
+impl fmt::Display for SqlValue {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let mut f = Pretty::from(f);
 		match self {
-			Value::Cast(v) => v.writeable(),
-			Value::Block(v) => v.writeable(),
-			Value::Idiom(v) => v.writeable(),
-			Value::Array(v) => v.iter().any(Value::writeable),
-			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
-			Value::Function(v) => v.writeable(),
-			Value::Model(m) => m.args.iter().any(Value::writeable),
-			Value::Subquery(v) => v.writeable(),
-			Value::Expression(v) => v.writeable(),
-			_ => false,
+			SqlValue::None => write!(f, "NONE"),
+			SqlValue::Null => write!(f, "NULL"),
+			SqlValue::Array(v) => write!(f, "{v}"),
+			SqlValue::Block(v) => write!(f, "{v}"),
+			SqlValue::Bool(v) => write!(f, "{v}"),
+			SqlValue::Bytes(v) => write!(f, "{v}"),
+			SqlValue::Cast(v) => write!(f, "{v}"),
+			SqlValue::Constant(v) => write!(f, "{v}"),
+			SqlValue::Datetime(v) => write!(f, "{v}"),
+			SqlValue::Duration(v) => write!(f, "{v}"),
+			SqlValue::Edges(v) => write!(f, "{v}"),
+			SqlValue::Expression(v) => write!(f, "{v}"),
+			SqlValue::Function(v) => write!(f, "{v}"),
+			SqlValue::Model(v) => write!(f, "{v}"),
+			SqlValue::Future(v) => write!(f, "{v}"),
+			SqlValue::Geometry(v) => write!(f, "{v}"),
+			SqlValue::Idiom(v) => write!(f, "{v}"),
+			SqlValue::Mock(v) => write!(f, "{v}"),
+			SqlValue::Number(v) => write!(f, "{v}"),
+			SqlValue::Object(v) => write!(f, "{v}"),
+			SqlValue::Param(v) => write!(f, "{v}"),
+			SqlValue::Range(v) => write!(f, "{v}"),
+			SqlValue::Regex(v) => write!(f, "{v}"),
+			SqlValue::Strand(v) => write!(f, "{v}"),
+			SqlValue::Query(v) => write!(f, "{v}"),
+			SqlValue::Subquery(v) => write!(f, "{v}"),
+			SqlValue::Table(v) => write!(f, "{v}"),
+			SqlValue::Thing(v) => write!(f, "{v}"),
+			SqlValue::Uuid(v) => write!(f, "{v}"),
+			SqlValue::Closure(v) => write!(f, "{v}"),
+			SqlValue::Refs(v) => write!(f, "{v}"),
+			SqlValue::File(v) => write!(f, "{v}"),
 		}
 	}
-	/// Process this type returning a computed simple Value.
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Prevent infinite recursion due to casting, expressions, etc.
-		let opt = &opt.dive(1)?;
+}
 
-		let res = match self {
-			Value::Cast(v) => return v.compute(stk, ctx, opt, doc).await,
-			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Block(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Range(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Idiom(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Array(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Object(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Constant(v) => v.compute(),
-			Value::Function(v) => return v.compute(stk, ctx, opt, doc).await,
-			Value::Model(v) => return v.compute(stk, ctx, opt, doc).await,
-			Value::Subquery(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Expression(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Refs(v) => v.compute(ctx, opt, doc).await,
-			_ => Ok(self.to_owned()),
-		};
+impl From<SqlValue> for crate::expr::Value {
+	fn from(v: SqlValue) -> Self {
+		match v {
+			SqlValue::None => crate::expr::Value::None,
+			SqlValue::Null => crate::expr::Value::Null,
+			SqlValue::Bool(v) => crate::expr::Value::Bool(v),
+			SqlValue::Number(v) => crate::expr::Value::Number(v.into()),
+			SqlValue::Strand(v) => crate::expr::Value::Strand(v.into()),
+			SqlValue::Duration(v) => crate::expr::Value::Duration(v.into()),
+			SqlValue::Datetime(v) => crate::expr::Value::Datetime(v.into()),
+			SqlValue::Uuid(v) => crate::expr::Value::Uuid(v.into()),
+			SqlValue::Array(v) => crate::expr::Value::Array(v.into()),
+			SqlValue::Object(v) => crate::expr::Value::Object(v.into()),
+			SqlValue::Geometry(v) => crate::expr::Value::Geometry(v.into()),
+			SqlValue::Bytes(v) => crate::expr::Value::Bytes(v.into()),
+			SqlValue::Thing(v) => crate::expr::Value::Thing(v.into()),
+			SqlValue::Param(v) => crate::expr::Value::Param(v.into()),
+			SqlValue::Idiom(v) => crate::expr::Value::Idiom(v.into()),
+			SqlValue::Table(v) => crate::expr::Value::Table(v.into()),
+			SqlValue::Mock(v) => crate::expr::Value::Mock(v.into()),
+			SqlValue::Regex(v) => crate::expr::Value::Regex(v.into()),
+			SqlValue::Cast(v) => crate::expr::Value::Cast(Box::new((*v).into())),
+			SqlValue::Block(v) => crate::expr::Value::Block(Box::new((*v).into())),
+			SqlValue::Range(v) => crate::expr::Value::Range(Box::new((*v).into())),
+			SqlValue::Edges(v) => crate::expr::Value::Edges(Box::new((*v).into())),
+			SqlValue::Future(v) => crate::expr::Value::Future(Box::new((*v).into())),
+			SqlValue::Constant(v) => crate::expr::Value::Constant(v.into()),
+			SqlValue::Function(v) => crate::expr::Value::Function(Box::new((*v).into())),
+			SqlValue::Model(v) => crate::expr::Value::Model(Box::new((*v).into())),
+			SqlValue::Subquery(v) => crate::expr::Value::Subquery(Box::new((*v).into())),
+			SqlValue::Expression(v) => crate::expr::Value::Expression(Box::new((*v).into())),
+			SqlValue::Query(v) => crate::expr::Value::Query(v.into()),
+			SqlValue::Closure(v) => crate::expr::Value::Closure(Box::new((*v).into())),
+			SqlValue::Refs(v) => crate::expr::Value::Refs(v.into()),
+			SqlValue::File(v) => crate::expr::Value::File(v.into()),
+		}
+	}
+}
 
-		res.map_err(ControlFlow::from)
+impl From<crate::expr::Value> for SqlValue {
+	fn from(v: crate::expr::Value) -> Self {
+		match v {
+			crate::expr::Value::None => SqlValue::None,
+			crate::expr::Value::Null => SqlValue::Null,
+			crate::expr::Value::Bool(v) => SqlValue::Bool(v),
+			crate::expr::Value::Number(v) => SqlValue::Number(v.into()),
+			crate::expr::Value::Strand(v) => SqlValue::Strand(v.into()),
+			crate::expr::Value::Duration(v) => SqlValue::Duration(v.into()),
+			crate::expr::Value::Datetime(v) => SqlValue::Datetime(v.into()),
+			crate::expr::Value::Uuid(v) => SqlValue::Uuid(v.into()),
+			crate::expr::Value::Array(v) => SqlValue::Array(v.into()),
+			crate::expr::Value::Object(v) => SqlValue::Object(v.into()),
+			crate::expr::Value::Geometry(v) => SqlValue::Geometry(v.into()),
+			crate::expr::Value::Bytes(v) => SqlValue::Bytes(v.into()),
+			crate::expr::Value::Thing(v) => SqlValue::Thing(v.into()),
+			crate::expr::Value::Param(v) => SqlValue::Param(v.into()),
+			crate::expr::Value::Idiom(v) => SqlValue::Idiom(v.into()),
+			crate::expr::Value::Table(v) => SqlValue::Table(v.into()),
+			crate::expr::Value::Mock(v) => SqlValue::Mock(v.into()),
+			crate::expr::Value::Regex(v) => SqlValue::Regex(v.into()),
+			crate::expr::Value::Cast(v) => SqlValue::Cast(Box::new((*v).into())),
+			crate::expr::Value::Block(v) => SqlValue::Block(Box::new((*v).into())),
+			crate::expr::Value::Range(v) => SqlValue::Range(Box::new((*v).into())),
+			crate::expr::Value::Edges(v) => SqlValue::Edges(Box::new((*v).into())),
+			crate::expr::Value::Future(v) => SqlValue::Future(Box::new((*v).into())),
+			crate::expr::Value::Constant(v) => SqlValue::Constant(v.into()),
+			crate::expr::Value::Function(v) => SqlValue::Function(Box::new((*v).into())),
+			crate::expr::Value::Model(v) => SqlValue::Model(Box::new((*v).into())),
+			crate::expr::Value::Subquery(v) => SqlValue::Subquery(Box::new((*v).into())),
+			crate::expr::Value::Expression(v) => SqlValue::Expression(Box::new((*v).into())),
+			crate::expr::Value::Query(v) => SqlValue::Query(v.into()),
+			crate::expr::Value::Closure(v) => SqlValue::Closure(Box::new((*v).into())),
+			crate::expr::Value::Refs(v) => SqlValue::Refs(v.into()),
+			crate::expr::Value::File(v) => SqlValue::File(v.into()),
+		}
 	}
 }
 
@@ -3046,125 +1011,23 @@ impl Value {
 
 pub(crate) trait TryAdd<Rhs = Self> {
 	type Output;
-	fn try_add(self, rhs: Rhs) -> Result<Self::Output, Error>;
+	fn try_add(self, rhs: Rhs) -> Result<Self::Output>;
 }
 
-impl TryAdd for Value {
+use std::ops::Add;
+
+impl TryAdd for SqlValue {
 	type Output = Self;
-	fn try_add(self, other: Self) -> Result<Self, Error> {
+	fn try_add(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
 			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v.try_add(w)?),
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
-			(v, w) => return Err(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
-		})
-	}
-}
-
-// ------------------------------
-
-pub(crate) trait TrySub<Rhs = Self> {
-	type Output;
-	fn try_sub(self, v: Rhs) -> Result<Self::Output, Error>;
-}
-
-impl TrySub for Value {
-	type Output = Self;
-	fn try_sub(self, other: Self) -> Result<Self, Error> {
-		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_sub(w)?),
-			(Self::Datetime(v), Self::Datetime(w)) => Self::Duration(v.try_sub(w)?),
-			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
-			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
-			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
-			(v, w) => return Err(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
-		})
-	}
-}
-
-// ------------------------------
-
-pub(crate) trait TryMul<Rhs = Self> {
-	type Output;
-	fn try_mul(self, v: Self) -> Result<Self::Output, Error>;
-}
-
-impl TryMul for Value {
-	type Output = Self;
-	fn try_mul(self, other: Self) -> Result<Self, Error> {
-		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_mul(w)?),
-			(v, w) => return Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
-		})
-	}
-}
-
-// ------------------------------
-
-pub(crate) trait TryDiv<Rhs = Self> {
-	type Output;
-	fn try_div(self, v: Self) -> Result<Self::Output, Error>;
-}
-
-impl TryDiv for Value {
-	type Output = Self;
-	fn try_div(self, other: Self) -> Result<Self, Error> {
-		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
-			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
-		})
-	}
-}
-
-// ------------------------------
-
-pub(crate) trait TryFloatDiv<Rhs = Self> {
-	type Output;
-	fn try_float_div(self, v: Self) -> Result<Self::Output, Error>;
-}
-
-impl TryFloatDiv for Value {
-	type Output = Self;
-	fn try_float_div(self, other: Self) -> Result<Self::Output, Error> {
-		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
-			(v, w) => return Err(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
-		})
-	}
-}
-
-// ------------------------------
-
-pub(crate) trait TryRem<Rhs = Self> {
-	type Output;
-	fn try_rem(self, v: Self) -> Result<Self::Output, Error>;
-}
-
-impl TryRem for Value {
-	type Output = Self;
-	fn try_rem(self, other: Self) -> Result<Self, Error> {
-		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_rem(w)?),
-			(v, w) => return Err(Error::TryRem(v.to_raw_string(), w.to_raw_string())),
-		})
-	}
-}
-
-// ------------------------------
-
-pub(crate) trait TryPow<Rhs = Self> {
-	type Output;
-	fn try_pow(self, v: Self) -> Result<Self::Output, Error>;
-}
-
-impl TryPow for Value {
-	type Output = Self;
-	fn try_pow(self, other: Self) -> Result<Self, Error> {
-		Ok(match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Self::Number(v.try_pow(w)?),
-			(v, w) => return Err(Error::TryPow(v.to_raw_string(), w.to_raw_string())),
+			(Self::Array(v), Self::Array(w)) => Self::Array(v.add(w)),
+			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
+			(v, w) => bail!(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
 }
@@ -3173,16 +1036,327 @@ impl TryPow for Value {
 
 pub(crate) trait TryNeg<Rhs = Self> {
 	type Output;
-	fn try_neg(self) -> Result<Self::Output, Error>;
+	fn try_neg(self) -> Result<Self::Output>;
 }
 
-impl TryNeg for Value {
+impl TryNeg for SqlValue {
 	type Output = Self;
-	fn try_neg(self) -> Result<Self, Error> {
+	fn try_neg(self) -> Result<Self> {
 		Ok(match self {
 			Self::Number(n) => Self::Number(n.try_neg()?),
-			v => return Err(Error::TryNeg(v.to_string())),
+			v => bail!(Error::TryNeg(v.to_string())),
 		})
+	}
+}
+
+// Conversion methods.
+
+/// Macro implementing conversion methods for the variants of the value enum.
+macro_rules! subtypes {
+	($($name:ident$( ( $($t:tt)* ) )? => ($is:ident,$as:ident,$into:ident)),*$(,)?) => {
+		pub enum Type {
+			$($name),*
+		}
+
+		impl SqlValue {
+
+			pub fn type_of(&self) -> Type {
+				match &self{
+					$(subtypes!{@pat $name $( ($($t)*) )?} => Type::$name),*
+				}
+			}
+
+			$(
+				subtypes!{@method $name $( ($($t)*) )? => $is,$as,$into}
+			)*
+		}
+
+			$(
+				subtypes!{@from $name $( ($($t)*) )? => $is,$as,$into}
+			)*
+
+	};
+
+	(@pat $name:ident($t:ty)) => {
+		SqlValue::$name(_)
+	};
+
+	(@pat $name:ident) => {
+		SqlValue::$name
+	};
+
+	(@method $name:ident($t:ty) => $is:ident,$as:ident,$into:ident) => {
+		#[doc = concat!("Check if the value is a [`",stringify!($name),"`]")]
+		pub fn $is(&self) -> bool{
+			matches!(self,SqlValue::$name(_))
+		}
+
+		#[doc = concat!("Return a reference to [`",stringify!($name),"`] if the value is of that type")]
+		pub fn $as(&self) -> Option<&$t>{
+			if let SqlValue::$name(x) = self{
+				Some(x)
+			}else{
+				None
+			}
+		}
+
+		#[doc = concat!("Turns the value into a [`",stringify!($name),"`] returning None if the value is not of that type")]
+		pub fn $into(self) -> Option<$t>{
+			if let SqlValue::$name(x) = self{
+				Some(x)
+			}else{
+				None
+			}
+		}
+	};
+
+	(@method $name:ident => $is:ident,$as:ident,$into:ident) => {
+		#[doc = concat!("Check if the value is a [`",stringify!($name),"`]")]
+		pub fn $is(&self) -> bool{
+			matches!(self,SqlValue::$name)
+		}
+	};
+
+
+	(@from $name:ident(Box<$inner:ident>) => $is:ident,$as:ident,$into:ident) => {
+		impl From<$inner> for SqlValue{
+			fn from(v: $inner) -> Self{
+				SqlValue::$name(Box::new(v))
+			}
+		}
+
+		impl From<Box<$inner>> for SqlValue{
+			fn from(v: Box<$inner>) -> Self{
+				SqlValue::$name(v)
+			}
+		}
+	};
+
+	(@from $name:ident($t:ident) => $is:ident,$as:ident,$into:ident) => {
+		impl From<$t> for SqlValue{
+			fn from(v: $t) -> Self{
+				SqlValue::$name(v)
+			}
+		}
+	};
+
+	(@from $name:ident => $is:ident,$as:ident,$into:ident) => {
+		// skip
+	};
+
+}
+
+subtypes! {
+	None => (is_none,_unused,_unused),
+	Null => (is_null,_unused,_unused),
+	Bool(bool) => (is_bool,as_bool,into_bool),
+	Number(Number) => (is_number,as_number,into_number),
+	Strand(Strand) => (is_strand,as_strand,into_strand),
+	Duration(Duration) => (is_duration,as_duration,into_duration),
+	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
+	Uuid(Uuid) => (is_uuid,as_uuid,into_uuid),
+	Array(Array) => (is_array,as_array,into_array),
+	Object(Object) => (is_object,as_object,into_object),
+	Geometry(Geometry) => (is_geometry,as_geometry,into_geometry),
+	Bytes(Bytes) => (is_bytes,as_bytes,into_bytes),
+	Thing(Thing) => (is_thing,as_thing,into_thing),
+	Param(Param) => (is_param,as_param,into_param),
+	Idiom(Idiom) => (is_idiom,as_idiom,into_idiom),
+	Table(Table) => (is_table,as_table,into_table),
+	Mock(Mock) => (is_mock,as_mock,into_mock),
+	Regex(Regex) => (is_regex,as_regex,into_regex),
+	Cast(Box<Cast>) => (is_cast,as_cast,into_cast),
+	Block(Box<Block>) => (is_bock,as_block,into_block),
+	Range(Box<Range>) => (is_range,as_range,into_range),
+	Edges(Box<Edges>) => (is_edges,as_edges,into_edges),
+	Future(Box<Future>) => (is_future,as_future,into_future),
+	Constant(Constant) => (is_constant,as_constant,into_constant),
+	Function(Box<Function>) => (is_function,as_function,into_function),
+	Subquery(Box<Subquery>) => (is_subquery,as_subquery,into_subquery),
+	Expression(Box<Expression>) => (is_expression,as_expression,into_expression),
+	Query(Query) => (is_query,as_query,into_query),
+	Model(Box<Model>) => (is_model,as_model,into_model),
+	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
+	Refs(Refs) => (is_refs,as_refs,into_refs),
+	File(File) => (is_file,as_file,into_file),
+}
+
+macro_rules! impl_from_number {
+	($($n:ident),*$(,)?) => {
+		$(
+			impl From<$n> for SqlValue{
+				fn from(v: $n) -> Self{
+					SqlValue::Number(Number::from(v))
+				}
+			}
+		)*
+	};
+}
+impl_from_number!(i8, i16, i32, i64, u8, u16, u32, isize, f32, f64, Decimal);
+
+impl<T> From<Vec<T>> for SqlValue
+where
+	SqlValue: From<T>,
+{
+	fn from(value: Vec<T>) -> Self {
+		let v = value.into_iter().map(SqlValue::from).collect();
+		SqlValue::Array(Array(v))
+	}
+}
+
+impl<T> From<Option<T>> for SqlValue
+where
+	SqlValue: From<T>,
+{
+	fn from(value: Option<T>) -> Self {
+		if let Some(x) = value {
+			SqlValue::from(x)
+		} else {
+			SqlValue::None
+		}
+	}
+}
+
+impl From<Null> for SqlValue {
+	fn from(_v: Null) -> Self {
+		SqlValue::Null
+	}
+}
+
+// TODO: Remove these implementations
+// They truncate by default and therefore should not be implement for value.
+impl From<i128> for SqlValue {
+	fn from(v: i128) -> Self {
+		SqlValue::Number(Number::from(v))
+	}
+}
+
+impl From<u64> for SqlValue {
+	fn from(v: u64) -> Self {
+		SqlValue::Number(Number::from(v))
+	}
+}
+
+impl From<u128> for SqlValue {
+	fn from(v: u128) -> Self {
+		SqlValue::Number(Number::from(v))
+	}
+}
+
+impl From<usize> for SqlValue {
+	fn from(v: usize) -> Self {
+		SqlValue::Number(Number::from(v))
+	}
+}
+
+impl From<String> for SqlValue {
+	fn from(v: String) -> Self {
+		Self::Strand(Strand::from(v))
+	}
+}
+
+impl From<&str> for SqlValue {
+	fn from(v: &str) -> Self {
+		Self::Strand(Strand::from(v))
+	}
+}
+
+impl From<DateTime<Utc>> for SqlValue {
+	fn from(v: DateTime<Utc>) -> Self {
+		SqlValue::Datetime(Datetime::from(v))
+	}
+}
+
+impl From<Point<f64>> for SqlValue {
+	fn from(v: Point<f64>) -> Self {
+		SqlValue::Geometry(Geometry::from(v))
+	}
+}
+
+impl From<Operation> for SqlValue {
+	fn from(v: Operation) -> Self {
+		SqlValue::Object(Object::from(v))
+	}
+}
+
+impl From<uuid::Uuid> for SqlValue {
+	fn from(v: uuid::Uuid) -> Self {
+		SqlValue::Uuid(Uuid(v))
+	}
+}
+
+impl From<HashMap<&str, SqlValue>> for SqlValue {
+	fn from(v: HashMap<&str, SqlValue>) -> Self {
+		SqlValue::Object(Object::from(v))
+	}
+}
+
+impl From<HashMap<String, SqlValue>> for SqlValue {
+	fn from(v: HashMap<String, SqlValue>) -> Self {
+		SqlValue::Object(Object::from(v))
+	}
+}
+
+impl From<BTreeMap<String, SqlValue>> for SqlValue {
+	fn from(v: BTreeMap<String, SqlValue>) -> Self {
+		SqlValue::Object(Object::from(v))
+	}
+}
+
+impl From<BTreeMap<&str, SqlValue>> for SqlValue {
+	fn from(v: BTreeMap<&str, SqlValue>) -> Self {
+		SqlValue::Object(Object::from(v))
+	}
+}
+
+impl From<IdRange> for SqlValue {
+	fn from(v: IdRange) -> Self {
+		let beg = match v.beg {
+			Bound::Included(beg) => Bound::Included(SqlValue::from(beg)),
+			Bound::Excluded(beg) => Bound::Excluded(SqlValue::from(beg)),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		let end = match v.end {
+			Bound::Included(end) => Bound::Included(SqlValue::from(end)),
+			Bound::Excluded(end) => Bound::Excluded(SqlValue::from(end)),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		SqlValue::Range(Box::new(Range {
+			beg,
+			end,
+		}))
+	}
+}
+
+impl From<Id> for SqlValue {
+	fn from(v: Id) -> Self {
+		match v {
+			Id::Number(v) => v.into(),
+			Id::String(v) => v.into(),
+			Id::Uuid(v) => v.into(),
+			Id::Array(v) => v.into(),
+			Id::Object(v) => v.into(),
+			Id::Generate(v) => match v {
+				Gen::Rand => Id::rand().into(),
+				Gen::Ulid => Id::ulid().into(),
+				Gen::Uuid => Id::uuid().into(),
+			},
+			Id::Range(v) => v.deref().to_owned().into(),
+		}
+	}
+}
+
+impl FromIterator<SqlValue> for SqlValue {
+	fn from_iter<I: IntoIterator<Item = SqlValue>>(iter: I) -> Self {
+		SqlValue::Array(Array(iter.into_iter().collect()))
+	}
+}
+
+impl FromIterator<(String, SqlValue)> for SqlValue {
+	fn from_iter<I: IntoIterator<Item = (String, SqlValue)>>(iter: I) -> Self {
+		SqlValue::Object(Object(iter.into_iter().collect()))
 	}
 }
 
@@ -3196,77 +1370,77 @@ mod tests {
 
 	#[test]
 	fn check_none() {
-		assert!(Value::None.is_none());
-		assert!(!Value::Null.is_none());
-		assert!(!Value::from(1).is_none());
+		assert!(SqlValue::None.is_none());
+		assert!(!SqlValue::Null.is_none());
+		assert!(!SqlValue::from(1).is_none());
 	}
 
 	#[test]
 	fn check_null() {
-		assert!(Value::Null.is_null());
-		assert!(!Value::None.is_null());
-		assert!(!Value::from(1).is_null());
+		assert!(SqlValue::Null.is_null());
+		assert!(!SqlValue::None.is_null());
+		assert!(!SqlValue::from(1).is_null());
 	}
 
 	#[test]
 	fn check_true() {
-		assert!(!Value::None.is_true());
-		assert!(Value::Bool(true).is_true());
-		assert!(!Value::Bool(false).is_true());
-		assert!(!Value::from(1).is_true());
-		assert!(!Value::from("something").is_true());
+		assert!(!SqlValue::None.is_true());
+		assert!(SqlValue::Bool(true).is_true());
+		assert!(!SqlValue::Bool(false).is_true());
+		assert!(!SqlValue::from(1).is_true());
+		assert!(!SqlValue::from("something").is_true());
 	}
 
 	#[test]
 	fn check_false() {
-		assert!(!Value::None.is_false());
-		assert!(!Value::Bool(true).is_false());
-		assert!(Value::Bool(false).is_false());
-		assert!(!Value::from(1).is_false());
-		assert!(!Value::from("something").is_false());
+		assert!(!SqlValue::None.is_false());
+		assert!(!SqlValue::Bool(true).is_false());
+		assert!(SqlValue::Bool(false).is_false());
+		assert!(!SqlValue::from(1).is_false());
+		assert!(!SqlValue::from("something").is_false());
 	}
 
 	#[test]
 	fn convert_truthy() {
-		assert!(!Value::None.is_truthy());
-		assert!(!Value::Null.is_truthy());
-		assert!(Value::Bool(true).is_truthy());
-		assert!(!Value::Bool(false).is_truthy());
-		assert!(!Value::from(0).is_truthy());
-		assert!(Value::from(1).is_truthy());
-		assert!(Value::from(-1).is_truthy());
-		assert!(Value::from(1.1).is_truthy());
-		assert!(Value::from(-1.1).is_truthy());
-		assert!(Value::from("true").is_truthy());
-		assert!(Value::from("false").is_truthy());
-		assert!(Value::from("falsey").is_truthy());
-		assert!(Value::from("something").is_truthy());
-		assert!(Value::from(Uuid::new()).is_truthy());
-		assert!(Value::from(Utc.with_ymd_and_hms(1948, 12, 3, 0, 0, 0).unwrap()).is_truthy());
+		assert!(!SqlValue::None.is_truthy());
+		assert!(!SqlValue::Null.is_truthy());
+		assert!(SqlValue::Bool(true).is_truthy());
+		assert!(!SqlValue::Bool(false).is_truthy());
+		assert!(!SqlValue::from(0).is_truthy());
+		assert!(SqlValue::from(1).is_truthy());
+		assert!(SqlValue::from(-1).is_truthy());
+		assert!(SqlValue::from(1.1).is_truthy());
+		assert!(SqlValue::from(-1.1).is_truthy());
+		assert!(SqlValue::from("true").is_truthy());
+		assert!(SqlValue::from("false").is_truthy());
+		assert!(SqlValue::from("falsey").is_truthy());
+		assert!(SqlValue::from("something").is_truthy());
+		assert!(SqlValue::from(Uuid::new()).is_truthy());
+		assert!(SqlValue::from(Utc.with_ymd_and_hms(1948, 12, 3, 0, 0, 0).unwrap()).is_truthy());
 	}
 
 	#[test]
 	fn convert_string() {
-		assert_eq!(String::from("NONE"), Value::None.as_string());
-		assert_eq!(String::from("NULL"), Value::Null.as_string());
-		assert_eq!(String::from("true"), Value::Bool(true).as_string());
-		assert_eq!(String::from("false"), Value::Bool(false).as_string());
-		assert_eq!(String::from("0"), Value::from(0).as_string());
-		assert_eq!(String::from("1"), Value::from(1).as_string());
-		assert_eq!(String::from("-1"), Value::from(-1).as_string());
-		assert_eq!(String::from("1.1f"), Value::from(1.1).as_string());
-		assert_eq!(String::from("-1.1f"), Value::from(-1.1).as_string());
-		assert_eq!(String::from("3"), Value::from("3").as_string());
-		assert_eq!(String::from("true"), Value::from("true").as_string());
-		assert_eq!(String::from("false"), Value::from("false").as_string());
-		assert_eq!(String::from("something"), Value::from("something").as_string());
+		assert_eq!(String::from("NONE"), SqlValue::None.as_string());
+		assert_eq!(String::from("NULL"), SqlValue::Null.as_string());
+		assert_eq!(String::from("true"), SqlValue::Bool(true).as_string());
+		assert_eq!(String::from("false"), SqlValue::Bool(false).as_string());
+		assert_eq!(String::from("0"), SqlValue::from(0).as_string());
+		assert_eq!(String::from("1"), SqlValue::from(1).as_string());
+		assert_eq!(String::from("-1"), SqlValue::from(-1).as_string());
+		assert_eq!(String::from("1.1f"), SqlValue::from(1.1).as_string());
+		assert_eq!(String::from("-1.1f"), SqlValue::from(-1.1).as_string());
+		assert_eq!(String::from("3"), SqlValue::from("3").as_string());
+		assert_eq!(String::from("true"), SqlValue::from("true").as_string());
+		assert_eq!(String::from("false"), SqlValue::from("false").as_string());
+		assert_eq!(String::from("something"), SqlValue::from("something").as_string());
 	}
 
 	#[test]
 	fn check_size() {
-		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
+		assert!(64 >= std::mem::size_of::<SqlValue>(), "size of value too big");
 		assert!(104 >= std::mem::size_of::<Error>());
-		assert!(104 >= std::mem::size_of::<Result<Value, Error>>());
+		assert!(104 >= std::mem::size_of::<Result<SqlValue>>());
 		assert!(24 >= std::mem::size_of::<crate::sql::number::Number>());
 		assert!(24 >= std::mem::size_of::<crate::sql::strand::Strand>());
 		assert!(16 >= std::mem::size_of::<crate::sql::duration::Duration>());
@@ -3284,46 +1458,47 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		let enc: Vec<u8> = revision::to_vec(&Value::None).unwrap();
+		let enc: Vec<u8> = revision::to_vec(&SqlValue::None).unwrap();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::Null).unwrap();
+		let enc: Vec<u8> = revision::to_vec(&SqlValue::Null).unwrap();
 		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::Bool(true)).unwrap();
+		let enc: Vec<u8> = revision::to_vec(&SqlValue::Bool(true)).unwrap();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::Bool(false)).unwrap();
+		let enc: Vec<u8> = revision::to_vec(&SqlValue::Bool(false)).unwrap();
 		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
+		let enc: Vec<u8> = revision::to_vec(&SqlValue::from("test")).unwrap();
 		assert_eq!(8, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::parse("{ hello: 'world' }")).unwrap();
+		let enc: Vec<u8> = revision::to_vec(&SqlValue::parse("{ hello: 'world' }")).unwrap();
 		assert_eq!(19, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::parse("{ compact: true, schema: 0 }")).unwrap();
+		let enc: Vec<u8> =
+			revision::to_vec(&SqlValue::parse("{ compact: true, schema: 0 }")).unwrap();
 		assert_eq!(27, enc.len());
 	}
 
 	#[test]
 	fn serialize_deserialize() {
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
-		let res = Value::parse(
+		let res = SqlValue::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
 		);
 		let enc: Vec<u8> = revision::to_vec(&val).unwrap();
-		let dec: Value = revision::from_slice(&enc).unwrap();
+		let dec: SqlValue = revision::from_slice(&enc).unwrap();
 		assert_eq!(res, dec);
 	}
 
 	#[test]
 	fn test_value_from_vec_i32() {
 		let vector: Vec<i32> = vec![1, 2, 3, 4, 5, 6];
-		let value = Value::from(vector);
-		assert!(matches!(value, Value::Array(Array(_))));
+		let value = SqlValue::from(vector);
+		assert!(matches!(value, SqlValue::Array(Array(_))));
 	}
 
 	#[test]
 	fn test_value_from_vec_f32() {
 		let vector: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-		let value = Value::from(vector);
-		assert!(matches!(value, Value::Array(Array(_))));
+		let value = SqlValue::from(vector);
+		assert!(matches!(value, SqlValue::Array(Array(_))));
 	}
 }

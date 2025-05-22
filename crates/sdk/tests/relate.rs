@@ -6,12 +6,14 @@ mod helpers;
 use crate::helpers::Test;
 
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::expr::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn relate_with_parameters() -> Result<(), Error> {
+async fn relate_with_parameters() -> Result<()> {
 	let sql = "
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
@@ -31,7 +33,7 @@ async fn relate_with_parameters() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:test,
@@ -40,14 +42,15 @@ async fn relate_with_parameters() -> Result<(), Error> {
 				brother: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn relate_and_overwrite() -> Result<(), Error> {
+async fn relate_and_overwrite() -> Result<()> {
 	let sql = "
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
@@ -69,7 +72,7 @@ async fn relate_and_overwrite() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:test,
@@ -78,11 +81,12 @@ async fn relate_and_overwrite() -> Result<(), Error> {
 				brother: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:test,
@@ -91,11 +95,12 @@ async fn relate_and_overwrite() -> Result<(), Error> {
 				test: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:test,
@@ -104,14 +109,15 @@ async fn relate_and_overwrite() -> Result<(), Error> {
 				test: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn relate_with_param_or_subquery() -> Result<(), Error> {
+async fn relate_with_param_or_subquery() -> Result<()> {
 	let sql = r#"
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
@@ -143,8 +149,8 @@ async fn relate_with_param_or_subquery() -> Result<(), Error> {
 		let Value::Object(o) = tmp else {
 			panic!("should be object {tmp:?}")
 		};
-		assert_eq!(o.get("in").unwrap(), &Value::parse("person:tobie"));
-		assert_eq!(o.get("out").unwrap(), &Value::parse("person:jaime"));
+		assert_eq!(o.get("in").unwrap(), &SqlValue::parse("person:tobie").into());
+		assert_eq!(o.get("out").unwrap(), &SqlValue::parse("person:jaime").into());
 		let id = o.get("id").unwrap();
 
 		let Value::Thing(t) = id else {
@@ -158,7 +164,7 @@ async fn relate_with_param_or_subquery() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:foo,
@@ -166,11 +172,12 @@ async fn relate_with_param_or_subquery() -> Result<(), Error> {
 				out: person:jaime,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:bar,
@@ -178,14 +185,15 @@ async fn relate_with_param_or_subquery() -> Result<(), Error> {
 				out: person:jaime,
 			}
 		]",
-	);
-	//
+	)
+	.into();
 	assert_eq!(tmp, val);
+	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn relate_with_complex_table() -> Result<(), Error> {
+async fn relate_with_complex_table() -> Result<()> {
 	let sql = "
 		CREATE a:1, a:2;
 		RELATE a:1->`-`:`-`->a:2;
@@ -197,22 +205,22 @@ async fn relate_with_complex_table() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: a:1 }, { id: a:2 }]");
+	let val = SqlValue::parse("[{ id: a:1 }, { id: a:2 }]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: `-`:`-`, in: a:1, out: a:2 }]");
+	let val = SqlValue::parse("[{ id: `-`:`-`, in: a:1, out: a:2 }]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ rel: [`-`:`-`] }]");
+	let val = SqlValue::parse("[{ rel: [`-`:`-`] }]").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn schemafull_relate() -> Result<(), Error> {
+async fn schemafull_relate() -> Result<()> {
 	let sql = r#"
 	INSERT INTO person [
 		{ id: 1 },
@@ -250,16 +258,16 @@ async fn schemafull_relate() -> Result<(), Error> {
 	)?;
 
 	// reason is bool not string
-	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
+	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::FieldCoerce { .. })))?;
 
 	// dog:1 is not a person
-	t.expect_error_func(|e| matches!(e, Error::FieldCheck { .. }))?;
+	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::FieldCoerce { .. })))?;
 
 	Ok(())
 }
 
 #[tokio::test]
-async fn relate_enforced() -> Result<(), Error> {
+async fn relate_enforced() -> Result<()> {
 	let sql = "
 	    DEFINE TABLE edge TYPE RELATION ENFORCED;
 		RELATE a:1->edge:1->a:2;
@@ -272,28 +280,31 @@ async fn relate_enforced() -> Result<(), Error> {
 	//
 	t.skip_ok(1)?;
 	//
-	t.expect_error_func(|e| matches!(e, Error::IdNotFound { .. }))?;
+	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::IdNotFound { .. })))?;
 	//
 	t.expect_val("[{ id: a:1 }, { id: a:2 }]")?;
 	//
 	t.expect_val("[{ id: edge:1, in: a:1, out: a:2 }]")?;
 	//
-	let info = Value::parse(
+	let info = SqlValue::parse(
 		"{
 	accesses: {},
 	analyzers: {},
 	apis: {},
+	buckets: {},
 	configs: {},
 	functions: {},
 	models: {},
 	params: {},
+	sequences: {},
 	tables: {
 		a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE',
 		edge: 'DEFINE TABLE edge TYPE RELATION ENFORCED SCHEMALESS PERMISSIONS NONE'
 	},
 	users: {}
 	}",
-	);
+	)
+	.into();
 	t.expect_value(info)?;
 	Ok(())
 }

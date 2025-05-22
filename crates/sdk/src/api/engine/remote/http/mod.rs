@@ -1,34 +1,36 @@
 //! HTTP engine
+use crate::Value;
+use crate::api::Connect;
+use crate::api::Result;
+use crate::api::Surreal;
 use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
 use crate::api::conn::RequestData;
 use crate::api::conn::RouterRequest;
 use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
-use crate::api::Connect;
-use crate::api::Result;
-use crate::api::Surreal;
 use crate::engine::remote::Response;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
 use crate::headers::NS;
 use crate::opt::IntoEndpoint;
-use crate::Value;
 use futures::TryStreamExt;
 use indexmap::IndexMap;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
+use reqwest::RequestBuilder;
 use reqwest::header::ACCEPT;
 use reqwest::header::CONTENT_TYPE;
-use reqwest::RequestBuilder;
+use reqwest::header::HeaderMap;
+use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{
-	from_value as from_core_value, statements::OutputStatement, Object as CoreObject, Param, Query,
-	Statement, Value as CoreValue,
+use surrealdb_core::expr::{
+	Object as CoreObject, Value as CoreValue, from_value as from_core_value,
 };
+use surrealdb_core::sql::Statement;
+use surrealdb_core::sql::statements::OutputStatement;
+use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue};
 use url::Url;
 
 #[cfg(not(target_family = "wasm"))]
@@ -101,7 +103,6 @@ pub(crate) fn default_headers() -> HeaderMap {
 	headers
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 enum Auth {
 	Basic {
@@ -154,7 +155,7 @@ struct Credentials {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 struct AuthResponse {
 	code: u16,
 	details: String,
@@ -170,7 +171,7 @@ async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		.await?
 		.error_for_status()?
 		.bytes_stream()
-		.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+		.map_err(futures::io::Error::other)
 		.into_async_read()
 		.compat();
 	let mut file =
@@ -328,12 +329,12 @@ async fn router(
 			let out = send_request(req, base_url, client, headers, auth).await?;
 			if let Some(ns) = namespace {
 				let value =
-					HeaderValue::try_from(&ns).map_err(|_| Error::InvalidNsName(ns.to_owned()))?;
+					HeaderValue::try_from(&ns).map_err(|_| Error::InvalidNsName(ns.clone()))?;
 				headers.insert(&NS, value);
 			};
 			if let Some(db) = database {
 				let value =
-					HeaderValue::try_from(&db).map_err(|_| Error::InvalidDbName(db.to_owned()))?;
+					HeaderValue::try_from(&db).map_err(|_| Error::InvalidDbName(db.clone()))?;
 				headers.insert(&DB, value);
 			};
 
@@ -357,23 +358,25 @@ async fn router(
 				.into());
 			};
 
-			if let Ok(Credentials {
-				user,
-				pass,
-				ns,
-				db,
-			}) = from_core_value(credentials.into())
-			{
-				*auth = Some(Auth::Basic {
+			match from_core_value(credentials.into()) {
+				Ok(Credentials {
 					user,
 					pass,
 					ns,
 					db,
-				});
-			} else {
-				*auth = Some(Auth::Bearer {
-					token: value.to_raw_string(),
-				});
+				}) => {
+					*auth = Some(Auth::Basic {
+						user,
+						pass,
+						ns,
+						db,
+					});
+				}
+				_ => {
+					*auth = Some(Auth::Bearer {
+						token: value.to_raw_string(),
+					});
+				}
 			}
 
 			Ok(DbResponse::Other(value))
@@ -402,7 +405,7 @@ async fn router(
 			value,
 		} => {
 			let mut output_stmt = OutputStatement::default();
-			output_stmt.what = CoreValue::Param(Param::from(key.clone()));
+			output_stmt.what = CoreSqlValue::Param(Param::from(key.clone()));
 			let query = Query::from(Statement::Output(output_stmt));
 			let mut variables = CoreObject::default();
 			variables.insert(key.clone(), value);

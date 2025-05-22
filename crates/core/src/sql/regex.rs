@@ -3,8 +3,8 @@ use quick_cache::sync::{Cache, GuardResult};
 use regex::RegexBuilder;
 use revision::revisioned;
 use serde::{
-	de::{self, Visitor},
 	Deserialize, Deserializer, Serialize, Serializer,
+	de::{self, Visitor},
 };
 use std::cmp::Ordering;
 use std::fmt::Debug;
@@ -95,6 +95,18 @@ impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let t = self.0.to_string().replace('/', "\\/");
 		write!(f, "/{}/", &t)
+	}
+}
+
+impl From<Regex> for crate::expr::Regex {
+	fn from(v: Regex) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Regex> for Regex {
+	fn from(v: crate::expr::Regex) -> Self {
+		Self(v.0)
 	}
 }
 

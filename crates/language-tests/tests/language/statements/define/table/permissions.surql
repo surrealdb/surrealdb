@@ -15,10 +15,12 @@ value = """{
 	accesses: {},
 	analyzers: {},
 	apis: {},
+	buckets: {},
 	configs: {},
 	functions: {},
 	models: {},
 	params: {},
+	sequences: {},
 	tables: {
 			default: 'DEFINE TABLE default TYPE ANY SCHEMALESS PERMISSIONS NONE',
 			full: 'DEFINE TABLE full TYPE ANY SCHEMALESS PERMISSIONS FULL',

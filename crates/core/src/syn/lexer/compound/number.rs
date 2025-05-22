@@ -5,20 +5,21 @@ use std::{
 	time::Duration,
 };
 
+use crate::sql::number::decimal::DecimalExt;
 use rust_decimal::Decimal;
 
 use crate::{
 	sql::{
+		Number,
 		duration::{
 			SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
 			SECONDS_PER_YEAR,
 		},
-		Number,
 	},
 	syn::{
-		error::{bail, syntax_error, SyntaxError},
+		error::{SyntaxError, bail, syntax_error},
 		lexer::Lexer,
-		token::{t, Span, Token, TokenKind},
+		token::{Span, Token, TokenKind, t},
 	},
 };
 
@@ -180,7 +181,7 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Number, SyntaxError> {
 					|e| syntax_error!("Failed to parser decimal: {e}", @lexer.current_span()),
 				)?
 			} else {
-				Decimal::from_str(number_str).map_err(
+				Decimal::from_str_normalized(number_str).map_err(
 					|e| syntax_error!("Failed to parser decimal: {e}", @lexer.current_span()),
 				)?
 			};

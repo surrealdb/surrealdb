@@ -1,14 +1,13 @@
-use crate::err::Error;
 use crate::key::change;
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
 use crate::vs::VersionStamp;
+use anyhow::Result;
 use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given timestamp.
-#[allow(unused)]
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
-pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
+pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<()> {
 	// Fetch all namespaces
 	let nss = tx.all_ns().await?;
 	// Loop over each namespace
@@ -24,9 +23,8 @@ pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
 }
 
 // gc_ns deletes all change feed entries in the given namespace that are older than the given watermark.
-#[allow(unused)]
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
-pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
+pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<()> {
 	// Fetch all databases
 	let dbs = tx.all_db(ns).await?;
 	// Loop over each database
@@ -71,7 +69,7 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 
 // gc_db deletes all change feed entries in the given database that are older than the given watermark.
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
-pub async fn gc_range(tx: &Transaction, ns: &str, db: &str, vt: VersionStamp) -> Result<(), Error> {
+pub async fn gc_range(tx: &Transaction, ns: &str, db: &str, vt: VersionStamp) -> Result<()> {
 	// Calculate the range
 	let beg = change::prefix_ts(ns, db, VersionStamp::ZERO)?;
 	let end = change::prefix_ts(ns, db, vt)?;

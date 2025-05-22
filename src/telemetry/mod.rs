@@ -3,21 +3,21 @@ pub mod metrics;
 pub mod traces;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::err::Error;
-use opentelemetry::global;
+use anyhow::Result;
 use opentelemetry::KeyValue;
+use opentelemetry::global;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
-use opentelemetry_sdk::Resource;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::NonBlockingBuilder;
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::ParseError;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::EnvFilter;
 
 pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 	// Set the default otel metadata if available
@@ -59,7 +59,7 @@ impl Default for Builder {
 
 impl Builder {
 	/// Install the tracing dispatcher globally
-	pub fn init(self) -> Result<(WorkerGuard, WorkerGuard), Error> {
+	pub fn init(self) -> Result<(WorkerGuard, WorkerGuard)> {
 		// Setup logs, tracing, and metrics
 		let (registry, stdout, stderr) = self.build()?;
 		// Initialise the registry
@@ -85,7 +85,7 @@ impl Builder {
 	/// Build a tracing dispatcher with the logs and tracer subscriber
 	pub fn build(
 		&self,
-	) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, WorkerGuard, WorkerGuard), Error> {
+	) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, WorkerGuard, WorkerGuard)> {
 		// Create a non-blocking stdout log destination
 		let (stdout, stdout_guard) = NonBlockingBuilder::default()
 			.lossy(true)
@@ -115,17 +115,15 @@ impl Builder {
 	}
 }
 
-pub fn shutdown() -> Result<(), Error> {
+pub fn shutdown() {
 	// Output information to logs
 	trace!("Shutting down telemetry service");
 	// Flush all telemetry data and block until done
 	opentelemetry::global::shutdown_tracer_provider();
-	// Everything ok
-	Ok(())
 }
 
 /// Create an EnvFilter from the given value. If the value is not a valid log level, it will be treated as EnvFilter directives.
-pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
+pub fn filter_from_value(v: &str) -> std::result::Result<EnvFilter, ParseError> {
 	match v {
 		// Don't show any logs at all
 		"none" => Ok(EnvFilter::default()),
@@ -136,17 +134,14 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 		// Otherwise, let's show info and above
 		"info" => Ok(EnvFilter::default().add_directive(Level::INFO.into())),
 		// Otherwise, let's show debugs and above
-		"debug" => EnvFilter::builder().parse(
-			"warn,surreal=debug,surrealdb=debug,surrealcs=warn,surrealdb::core::kvs::tr=debug",
-		),
+		"debug" => EnvFilter::builder()
+			.parse("warn,surreal=debug,surrealdb=debug,surrealdb::core::kvs::tr=debug"),
 		// Specify the log level for each code area
-		"trace" => EnvFilter::builder().parse(
-			"warn,surreal=trace,surrealdb=trace,surrealcs=warn,surrealdb::core::kvs::tr=debug",
-		),
+		"trace" => EnvFilter::builder()
+			.parse("warn,surreal=trace,surrealdb=trace,surrealdb::core::kvs::tr=debug"),
 		// Check if we should show all surreal logs
-		"full" => EnvFilter::builder().parse(
-			"debug,surreal=trace,surrealdb=trace,surrealcs=debug,surrealdb::core::kvs::tr=trace",
-		),
+		"full" => EnvFilter::builder()
+			.parse("debug,surreal=trace,surrealdb=trace,surrealdb::core::kvs::tr=trace"),
 		// Check if we should show all module logs
 		"all" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
 		// Let's try to parse the custom log level
@@ -159,7 +154,7 @@ mod tests {
 	use std::{ffi::OsString, sync::Mutex};
 
 	use opentelemetry::global::shutdown_tracer_provider;
-	use tracing::{span, Level};
+	use tracing::{Level, span};
 	use tracing_subscriber::util::SubscriberInitExt;
 
 	use crate::telemetry;
@@ -179,9 +174,11 @@ mod tests {
 		for (k, v) in vars {
 			restore.push((k.as_ref().to_string(), std::env::var_os(k.as_ref())));
 			if let Some(x) = v {
-				std::env::set_var(k.as_ref(), x.as_ref());
+				// TODO: Audit that the environment access only happens in single-threaded code.
+				unsafe { std::env::set_var(k.as_ref(), x.as_ref()) };
 			} else {
-				std::env::remove_var(k.as_ref());
+				// TODO: Audit that the environment access only happens in single-threaded code.
+				unsafe { std::env::remove_var(k.as_ref()) };
 			}
 		}
 
@@ -190,9 +187,11 @@ mod tests {
 			fn drop(&mut self) {
 				for (k, v) in self.0.drain(..) {
 					if let Some(v) = v {
-						std::env::set_var(k, v);
+						// TODO: Audit that the environment access only happens in single-threaded code.
+						unsafe { std::env::set_var(k, v) };
 					} else {
-						std::env::remove_var(k);
+						// TODO: Audit that the environment access only happens in single-threaded code.
+						unsafe { std::env::remove_var(k) };
 					}
 				}
 			}

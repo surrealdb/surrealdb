@@ -1,39 +1,38 @@
-use super::{HandleResult, PendingRequest, ReplayMethod, RequestEffect, PATH};
+use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
+use crate::api::ExtraFeatures;
+use crate::api::Surreal;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
-use crate::api::conn::{Command, Connection, RequestData};
+use crate::api::conn::{self, Command, RequestData};
+use crate::api::engine::remote::Response;
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::PING_INTERVAL;
-use crate::api::engine::remote::Response;
 use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::engine::remote::Data;
 use crate::engine::IntervalStream;
+use crate::engine::remote::Data;
 use crate::opt::WaitFor;
-use crate::{Action, Notification};
+use anyhow::Result;
 use async_channel::{Receiver, Sender};
-use futures::stream::{SplitSink, SplitStream};
 use futures::FutureExt;
 use futures::SinkExt;
 use futures::StreamExt;
+use futures::stream::{SplitSink, SplitStream};
 use pharos::Channel;
 use pharos::Events;
 use pharos::Observable;
 use pharos::ObserveConfig;
 use revision::revisioned;
 use serde::Deserialize;
-use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
 use std::time::Duration;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -48,8 +47,7 @@ type MessageSink = SplitSink<WsStream, Message>;
 type RouterState = super::RouterState<MessageSink, MessageStream>;
 
 impl crate::api::Connection for Client {}
-
-impl Connection for Client {
+impl conn::Sealed for Client {
 	fn connect(
 		mut address: Endpoint,
 		capacity: usize,
@@ -222,7 +220,7 @@ async fn router_handle_response(
 				match response.id {
 					// If `id` is set this is a normal response
 					Some(id) => {
-						if let Ok(id) = id.coerce_to_i64() {
+						if let Ok(id) = id.coerce_to() {
 							// We can only route responses with IDs
 							if let Some(pending) = state.pending_requests.remove(&id) {
 								match pending.effect {
@@ -269,7 +267,9 @@ async fn router_handle_response(
 									.send(DbResponse::from_server_result(response.result))
 									.await;
 							} else {
-								warn!("got response for request with id '{id}', which was not in pending requests")
+								warn!(
+									"got response for request with id '{id}', which was not in pending requests"
+								)
 							}
 						}
 					}
@@ -280,12 +280,6 @@ async fn router_handle_response(
 							// Check if this live query is registered
 							if let Some(sender) = state.live_queries.get(&live_query_id) {
 								// Send the notification back to the caller or kill live query if the receiver is already dropped
-								let notification = Notification {
-									query_id: notification.id.0,
-									action: Action::from_core(notification.action),
-									data: notification.result,
-								};
-
 								if sender.send(notification).await.is_err() {
 									state.live_queries.remove(&live_query_id);
 									let kill = {
@@ -325,11 +319,13 @@ async fn router_handle_response(
 				}) = deserialize(&mut &binary[..], true)
 				{
 					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(CoreValue::coerce_to_i64) {
+					if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
 						if let Some(req) = state.pending_requests.remove(&id) {
 							let _res = req.response_channel.send(Err(error)).await;
 						} else {
-							warn!("got response for request with id '{id}', which was not in pending requests")
+							warn!(
+								"got response for request with id '{id}', which was not in pending requests"
+							)
 						}
 					}
 				} else {

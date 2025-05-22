@@ -235,9 +235,13 @@ async fn permissions_checks_info_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"],
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -312,16 +316,23 @@ async fn permissions_checks_info_table() {
 #[tokio::test]
 async fn permissions_checks_info_user_root() {
 	let scenario = HashMap::from([
-        ("prepare", "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
-        ("test", "INFO FOR USER user ON ROOT"),
-        ("check", "INFO FOR USER user ON ROOT"),
-    ]);
+		(
+			"prepare",
+			"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h",
+		),
+		("test", "INFO FOR USER user ON ROOT"),
+		("check", "INFO FOR USER user ON ROOT"),
+	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-        vec!["\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-    ];
+		vec![
+			"\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+		vec![
+			"\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -354,16 +365,23 @@ async fn permissions_checks_info_user_root() {
 #[tokio::test]
 async fn permissions_checks_info_user_ns() {
 	let scenario = HashMap::from([
-        ("prepare", "DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
-        ("test", "INFO FOR USER user ON NS"),
-        ("check", "INFO FOR USER user ON NS"),
-    ]);
+		(
+			"prepare",
+			"DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h",
+		),
+		("test", "INFO FOR USER user ON NS"),
+		("check", "INFO FOR USER user ON NS"),
+	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-        vec!["\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-    ];
+		vec![
+			"\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+		vec![
+			"\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -396,16 +414,23 @@ async fn permissions_checks_info_user_ns() {
 #[tokio::test]
 async fn permissions_checks_info_user_db() {
 	let scenario = HashMap::from([
-        ("prepare", "DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
-        ("test", "INFO FOR USER user ON DB"),
-        ("check", "INFO FOR USER user ON DB"),
-    ]);
+		(
+			"prepare",
+			"DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h",
+		),
+		("test", "INFO FOR USER user ON DB"),
+		("check", "INFO FOR USER user ON DB"),
+	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-        vec!["\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""],
-    ];
+		vec![
+			"\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+		vec![
+			"\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"",
+		],
+	];
 
 	let test_cases = [
 		// Root level
@@ -505,7 +530,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-            r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"#.to_string();
+            r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -530,7 +555,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -609,7 +634,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-            r#"{ accesses: [{ base: 'DATABASE', duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], analyzers: [], apis: [], configs: [], functions: [], models: [], params: [], tables: [], users: [] }"#.to_string();
+            r#"{ accesses: [{ base: 'DATABASE', duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], analyzers: [], apis: [], buckets: [], configs: [], functions: [], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -634,7 +659,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ base: 'DATABASE', duration: { grant: 1w, session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD', refresh: true }, name: 'access' }], analyzers: [], apis: [], configs: [], functions: [], models: [], params: [], tables: [], users: [] }"#.to_string();
+			r#"{ accesses: [{ base: 'DATABASE', duration: { grant: 1w, session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD', refresh: true }, name: 'access' }], analyzers: [], apis: [], buckets: [], configs: [], functions: [], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_string();
 		assert_eq!(
 			out_str, out_expected,
@@ -659,7 +684,7 @@ async fn function_info_structure() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let out_expected =
-        r#"{ accesses: [], analyzers: [], apis: [], configs: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!'; }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], tables: [], users: [] }"#.to_string();
+        r#"{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!'; }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
 	let out_str = out.unwrap().to_string();
 	assert_eq!(
 		out_str, out_expected,

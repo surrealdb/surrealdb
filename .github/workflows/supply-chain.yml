@@ -45,21 +45,28 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  
+env:
+  RUST_VERSION: 1.86.0
+
 jobs:
   cargo-deny:
     name: Check dependencies for known issues
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny@0.15.1
+        run: cargo install --debug --locked cargo-deny@0.18.2
 
       - name: Check dependencies for known issues
         run: cargo deny check
@@ -74,12 +81,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install cargo-vet
         run: cargo install --debug --locked cargo-vet
@@ -97,18 +105,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install cargo-acl
         run: |
           cargo install --debug --locked cargo-acl
           sudo apt-get install -y bubblewrap
-      
+
       # See https://etbe.coker.com.au/2024/04/24/ubuntu-24-04-bubblewrap/
       - name: Configure bubblewrap
         run: |
@@ -127,8 +136,6 @@ jobs:
           sudo systemctl reload apparmor
 
       - name: Check dependencies for unauthorized access
-        env:
-          RUSTFLAGS: "--cfg surrealdb_unstable"
         run: cargo acl -n
 
       - name: Dependency check failure

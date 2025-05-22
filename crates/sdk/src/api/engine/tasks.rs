@@ -20,7 +20,7 @@ type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Se
 #[cfg(target_family = "wasm")]
 type Task = Pin<Box<()>>;
 
-pub struct Tasks(#[allow(dead_code)] Vec<Task>);
+pub struct Tasks(#[cfg_attr(target_family = "wasm", expect(dead_code))] Vec<Task>);
 
 impl Tasks {
 	#[cfg(target_family = "wasm")]

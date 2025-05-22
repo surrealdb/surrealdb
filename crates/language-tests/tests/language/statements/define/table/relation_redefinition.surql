@@ -14,7 +14,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-match = "$error = /Found thing:[a-zA-Z0-9]* for field `out`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person>/"
+match = "$error = /Couldn't coerce value for field `out` of `likes:[0-9a-z]+`: Expected `record<person>` but found `thing:[0-9a-z]+`/"
 error = true
 
 [[test.results]]
@@ -24,11 +24,11 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: likes:dxkha0qcosudw16pgszg, in: person:qn7qdiuw7er59ygnow8m, out: thing:c9ptwxoc3pppmwzkuk8y }]"
+value = "[{ id: likes:loxurikpwrb2o242gsgu, in: person:euupzy7py15hmh1rbant, out: thing:adr45xnyi8cdakbctq7p }]"
 skip-record-id-key = true
 
 [[test.results]]
-match = "$error = /Found other:[a-zA-Z0-9]* for field `out`, with record `likes:[a-zA-Z0-9]*`, but expected a record<person | thing>/"
+match = "$error = <regex> 'Couldn\\'t coerce value for field `out` of `likes:[0-9a-z]+`: Expected `record<person|thing>` but found `other:[0-9a-z]+`'"
 error = true
 
 [[test.results]]
@@ -38,7 +38,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: likes:wax0na23c4ueso3ymp9d, in: person:qn7qdiuw7er59ygnow8m, out: other:s5dt338gm6thhtpy8h26 }]"
+value = "[{ id: likes:ae4n1ktf3mv23xfyzmn9, in: person:euupzy7py15hmh1rbant, out: other:jzrul8flc9jqe175lg76 }]"
 skip-record-id-key = true
 
 */

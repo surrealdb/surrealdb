@@ -1,18 +1,24 @@
 use crate::{
 	cli::{Backend, ColorMode, ResultsMode},
+	format::Progress,
 	runner::Schedular,
-	tests::{testset::TestId, TestSet},
+	tests::{
+		TestSet,
+		report::{TestGrade, TestReport, TestTaskResult},
+		set::TestId,
+	},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
-use std::{any::Any, io, mem, str, thread, time::Duration};
+use semver::Version;
+use std::{io, mem, str, thread, time::Duration};
 use surrealdb_core::{
-	dbs::{capabilities::ExperimentalTarget, Response, Session},
-	err::Error as CoreError,
+	dbs::{Session, capabilities::ExperimentalTarget},
+	env::VERSION,
 	kvs::Datastore,
-	syn::{self, error::RenderedError},
+	syn,
 };
 use tokio::{
 	select,
@@ -20,25 +26,10 @@ use tokio::{
 	time,
 };
 
-mod cmp;
-mod progress;
 mod provisioner;
-mod report;
 mod util;
 
-use progress::Progress;
-use report::{TestGrade, TestReport};
 use util::core_capabilities_from_test_config;
-
-#[derive(Debug)]
-pub enum TestTaskResult {
-	ParserError(RenderedError),
-	RunningError(CoreError),
-	Import(String, String),
-	Timeout,
-	Results(Vec<Response>),
-	Paniced(Box<dyn Any + Send + 'static>),
-}
 
 pub struct TestTaskContext {
 	pub id: TestId,
@@ -49,29 +40,47 @@ pub struct TestTaskContext {
 
 fn try_collect_reports<W: io::Write>(
 	reports: &mut Vec<TestReport>,
-	testset: &TestSet,
 	channel: &mut UnboundedReceiver<TestReport>,
-	progress: &mut Progress<W>,
+	progress: &mut Progress<TestId, W>,
 ) {
 	while let Ok(x) = channel.try_recv() {
 		let grade = x.grade();
-		let name = testset[x.test_id()].path.as_str();
-		progress.finish_item(name, grade).unwrap();
+		progress.finish_item(x.test_id(), grade).unwrap();
 		reports.push(x);
+	}
+}
+
+fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> TestSet {
+	let subset = if let Some(x) = matches.get_one::<String>("filter") {
+		testset.filter_map(|name, _| name.contains(x))
+	} else {
+		testset
+	};
+
+	let subset = if matches.get_flag("no-wip") {
+		subset.filter_map(|_, set| !set.config.is_wip())
+	} else {
+		subset
+	};
+
+	if matches.get_flag("no-results") {
+		subset.filter_map(|_, set| {
+			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
+		})
+	} else {
+		subset
 	}
 }
 
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
-	let (testset, load_errors) = TestSet::collect_directory(&path).await?;
+	let (testset, load_errors) = TestSet::collect_directory(path).await?;
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
 
 	// Check if the backend is supported by the enabled features.
 	match backend {
-		#[cfg(feature = "backend-mem")]
+		// backend memory is always enabled as we needs it to run match expressions.
 		Backend::Memory => {}
-		#[cfg(not(feature = "backend-mem"))]
-		Backend::Memory => bail!("Memory backed feature is not enabled"),
 		#[cfg(feature = "backend-rocksdb")]
 		Backend::RocksDb => {}
 		#[cfg(not(feature = "backend-rocksdb"))]
@@ -86,25 +95,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
-	let subset = if let Some(x) = matches.get_one::<String>("filter") {
-		testset.filter_map(|name, _| name.contains(x))
-	} else {
-		testset
-	};
-
-	let subset = if matches.get_flag("no-wip") {
-		subset.filter_map(|_, set| !set.config.is_wip())
-	} else {
-		subset
-	};
-
-	let subset = if matches.get_flag("no-results") {
-		subset.filter_map(|_, set| {
-			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
-		})
-	} else {
-		subset
-	};
+	let subset = filter_testset_from_arguments(testset, matches);
 
 	// check for unused keys in tests
 	for t in subset.iter() {
@@ -119,6 +110,51 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.unwrap_or_else(|| thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(8));
 
 	let failure_mode = matches.get_one::<ResultsMode>("results").unwrap();
+
+	let core_version = Version::parse(VERSION).unwrap();
+
+	// filter tasks.
+	let tasks: Vec<_> = subset
+		.iter_ids()
+		.filter_map(|(id, test)| {
+			if test.contains_error {
+				return None;
+			}
+
+			let config = test.config.clone();
+
+			// Ensure this test can run on this version.
+			if let Some(version_req) = config.test.as_ref().map(|x| &x.version) {
+				if !version_req.matches(&core_version) {
+					return None;
+				}
+			}
+
+			// Ensure this test imports can run on this version as specified by the test itself.
+			if let Some(version_req) = config.test.as_ref().map(|x| &x.importing_version) {
+				if !version_req.matches(&core_version) {
+					return None;
+				}
+			}
+
+			// Ensure this test imports can run on this version as specified by the imports.
+			for import in test.imports.iter() {
+				if let Some(version_req) =
+					subset[import.id].config.test.as_ref().map(|x| &x.version)
+				{
+					if !version_req.matches(&core_version) {
+						return None;
+					}
+				}
+			}
+
+			if !config.should_run() {
+				return None;
+			}
+
+			Some(id)
+		})
+		.collect();
 
 	println!(" Running with {num_jobs} jobs");
 	let mut schedular = Schedular::new(num_jobs);
@@ -136,18 +172,12 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	tokio::spawn(grade_task(subset.clone(), res_recv, report_send));
 
 	let mut reports = Vec::new();
-	let mut progress = progress::Progress::from_stderr(subset.len(), color);
+	let mut progress = Progress::from_stderr(tasks.len(), color);
 
 	// spawn all tests.
-	for (id, test) in subset.iter_ids() {
-		let config = test.config.clone();
-
-		progress.start_item(test.path.as_str()).unwrap();
-
-		if !config.should_run() {
-			progress.finish_item(subset[id].path.as_str(), TestGrade::Success).unwrap();
-			continue;
-		}
+	for id in tasks {
+		let config = subset[id].config.as_ref();
+		progress.start_item(id, subset[id].path.as_str()).unwrap();
 
 		let ds = if config.can_use_reusable_ds() {
 			provisioner.obtain().await
@@ -177,7 +207,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		}
 
 		// Try to collect reports to give quick feedback on test completion.
-		try_collect_reports(&mut reports, &subset, &mut report_recv, &mut progress);
+		try_collect_reports(&mut reports, &mut report_recv, &mut progress);
 	}
 
 	// all test are running.
@@ -188,8 +218,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	// meaning the test tasks have all quit.
 	while let Some(x) = report_recv.recv().await {
 		let grade = x.grade();
-		let name = subset[x.test_id()].path.as_str();
-		progress.finish_item(name, grade).unwrap();
+		progress.finish_item(x.test_id(), grade).unwrap();
 		reports.push(x);
 	}
 
@@ -232,7 +261,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 
 	if reports.iter().any(|x| x.grade() == TestGrade::Failed) {
-		bail!("Not all tests where successfull")
+		bail!("Not all tests were successful")
 	}
 
 	if !load_errors.is_empty() {
@@ -256,7 +285,7 @@ pub async fn grade_task(
 			break;
 		};
 
-		let report = TestReport::from_test_result(id, &set, res, &ds).await;
+		let report = TestReport::from_test_result(id, &set, res, &ds, None).await;
 		sender.send(report).expect("report channel quit early");
 	}
 }
@@ -271,10 +300,16 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
 
+	let strict = config.env.as_ref().map(|x| x.strict).unwrap_or(false);
+
 	let res = context
 		.ds
 		.with(
-			move |ds| ds.with_capabilities(capabilities).with_query_timeout(Some(timeout_duration)),
+			move |ds| {
+				ds.with_capabilities(capabilities)
+					.with_query_timeout(Some(timeout_duration))
+					.with_strict_mode(strict)
+			},
 			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
 		)
 		.await;
@@ -317,14 +352,14 @@ async fn run_test_with_dbs(
 		let Some(test) = set.find_all(import) else {
 			return Ok(TestTaskResult::Import(
 				import.to_string(),
-				format!("Could not find import."),
+				"Could not find import.".to_string(),
 			));
 		};
 
 		let Ok(source) = str::from_utf8(&set[test].source) else {
 			return Ok(TestTaskResult::Import(
 				import.to_string(),
-				format!("Import file was not valid utf-8."),
+				"Import file was not valid utf-8.".to_string(),
 			));
 		};
 
@@ -347,6 +382,7 @@ async fn run_test_with_dbs(
 		define_api_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::DefineApi),
+		files_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 		..Default::default()
 	};
 
@@ -416,7 +452,10 @@ async fn run_test_with_dbs(
 	}
 
 	match result {
-		Ok(x) => Ok(TestTaskResult::Results(x)),
-		Err(e) => Ok(TestTaskResult::RunningError(e)),
+		Ok(x) => {
+			let x = x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect();
+			Ok(TestTaskResult::Results(x))
+		}
+		Err(e) => Ok(TestTaskResult::RunningError(anyhow::anyhow!(e))),
 	}
 }

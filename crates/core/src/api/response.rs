@@ -1,11 +1,15 @@
 use http::{
-	header::{ACCEPT, CONTENT_TYPE},
 	HeaderMap, StatusCode,
+	header::{ACCEPT, CONTENT_TYPE},
 };
 
-use crate::{err::Error, rpc::format::Format, sql::Value};
+use crate::{
+	err::Error,
+	expr::{Object, Value},
+	rpc::format::Format,
+};
 
-use super::{err::ApiError, invocation::ApiInvocation};
+use super::{convert, err::ApiError, invocation::ApiInvocation};
 
 #[derive(Debug)]
 pub struct ApiResponse {
@@ -19,12 +23,12 @@ impl TryFrom<Value> for ApiResponse {
 	type Error = Error;
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		if let Value::Object(mut opts) = value {
-			let raw = opts.remove("raw").map(|v| v.convert_to_bool()).transpose()?;
+			let raw = opts.remove("raw").map(|v| v.cast_to()).transpose()?;
 			let status = opts
 				.remove("status")
 				.map(|v| -> Result<StatusCode, Error> {
 					// Convert to int
-					let v: i64 = v.coerce_to_int()?.as_int();
+					let v: i64 = v.coerce_to()?;
 
 					// Convert to u16
 					let v: u16 = v
@@ -42,7 +46,7 @@ impl TryFrom<Value> for ApiResponse {
 
 			let headers = opts
 				.remove("headers")
-				.map(|v| v.coerce_to_object()?.try_into())
+				.map(|v| v.coerce_to::<Object>()?.try_into())
 				.transpose()?
 				.unwrap_or_default();
 
@@ -65,13 +69,13 @@ impl TryFrom<Value> for ApiResponse {
 }
 
 impl TryInto<Value> for ApiResponse {
-	type Error = Error;
-	fn try_into(self) -> Result<Value, Error> {
+	type Error = anyhow::Error;
+	fn try_into(self) -> Result<Value, Self::Error> {
 		Ok(Value::Object(
 			map! {
 				"raw" => Value::from(self.raw.unwrap_or(false)),
 				"status" => Value::from(self.status.as_u16() as i64),
-				"headers" => Value::Object(self.headers.try_into()?),
+				"headers" => Value::Object(convert::headermap_to_object(self.headers)?),
 				"body", if let Some(body) = self.body => body,
 			}
 			.into(),
@@ -96,7 +100,6 @@ impl ResponseInstruction {
 		let format = match mime {
 			Some("application/json") => Format::Json,
 			Some("application/cbor") => Format::Cbor,
-			Some("application/pack") => Format::Msgpack,
 			Some("application/surrealdb") => Format::Revision,
 			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
 			_ => return Err(Error::ApiError(ApiError::MissingFormat)),

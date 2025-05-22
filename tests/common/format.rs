@@ -4,7 +4,6 @@ use std::{fmt, string::ToString};
 pub enum Format {
 	Json,
 	Cbor,
-	Pack,
 }
 
 impl fmt::Display for Format {
@@ -12,7 +11,6 @@ impl fmt::Display for Format {
 		match self {
 			Self::Json => "json".fmt(f),
 			Self::Cbor => "cbor".fmt(f),
-			Self::Pack => "msgpack".fmt(f),
 		}
 	}
 }

@@ -1,9 +1,10 @@
 use crate::err::Error;
+use crate::sql::SqlValue;
 use crate::sql::datetime::Datetime;
-use crate::sql::statements::info::InfoStructure;
+
 use crate::sql::strand::Strand;
-use crate::sql::Value;
 use crate::syn;
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -13,7 +14,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::time;
 
-use super::value::{TryAdd, TrySub};
+use super::value::TryAdd;
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
@@ -33,6 +34,10 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 #[non_exhaustive]
 pub struct Duration(pub time::Duration);
 
+impl Duration {
+	pub const MAX: Duration = Duration(time::Duration::MAX);
+}
+
 impl From<time::Duration> for Duration {
 	fn from(v: time::Duration) -> Self {
 		Self(v)
@@ -45,7 +50,7 @@ impl From<Duration> for time::Duration {
 	}
 }
 
-impl From<time::Duration> for Value {
+impl From<time::Duration> for SqlValue {
 	fn from(value: time::Duration) -> Self {
 		Self::Duration(value.into())
 	}
@@ -79,6 +84,18 @@ impl TryFrom<&str> for Duration {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
+	}
+}
+
+impl From<Duration> for crate::expr::Duration {
+	fn from(v: Duration) -> Self {
+		crate::expr::Duration(v.0)
+	}
+}
+
+impl From<crate::expr::Duration> for Duration {
+	fn from(v: crate::expr::Duration) -> Self {
+		Self(v.0)
 	}
 }
 
@@ -242,10 +259,11 @@ impl ops::Add for Duration {
 
 impl TryAdd for Duration {
 	type Output = Self;
-	fn try_add(self, other: Self) -> Result<Self, Error> {
+	fn try_add(self, other: Self) -> Result<Self> {
 		self.0
 			.checked_add(other.0)
 			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} + {other}")))
+			.map_err(anyhow::Error::new)
 			.map(Duration::from)
 	}
 }
@@ -262,10 +280,11 @@ impl<'b> ops::Add<&'b Duration> for &Duration {
 
 impl<'b> TryAdd<&'b Duration> for &Duration {
 	type Output = Duration;
-	fn try_add(self, other: &'b Duration) -> Result<Duration, Error> {
+	fn try_add(self, other: &'b Duration) -> Result<Duration> {
 		self.0
 			.checked_add(other.0)
 			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} + {other}")))
+			.map_err(anyhow::Error::new)
 			.map(Duration::from)
 	}
 }
@@ -280,16 +299,6 @@ impl ops::Sub for Duration {
 	}
 }
 
-impl TrySub for Duration {
-	type Output = Self;
-	fn try_sub(self, other: Self) -> Result<Self, Error> {
-		self.0
-			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
-			.map(Duration::from)
-	}
-}
-
 impl<'b> ops::Sub<&'b Duration> for &Duration {
 	type Output = Duration;
 	fn sub(self, other: &'b Duration) -> Duration {
@@ -297,16 +306,6 @@ impl<'b> ops::Sub<&'b Duration> for &Duration {
 			Some(v) => Duration::from(v),
 			None => Duration::default(),
 		}
-	}
-}
-
-impl<'b> TrySub<&'b Duration> for &Duration {
-	type Output = Duration;
-	fn try_sub(self, other: &'b Duration) -> Result<Duration, Error> {
-		self.0
-			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
-			.map(Duration::from)
 	}
 }
 
@@ -325,13 +324,17 @@ impl ops::Add<Datetime> for Duration {
 
 impl TryAdd<Datetime> for Duration {
 	type Output = Datetime;
-	fn try_add(self, other: Datetime) -> Result<Datetime, Error> {
+	fn try_add(self, other: Datetime) -> Result<Datetime> {
 		match chrono::Duration::from_std(self.0) {
 			Ok(d) => match other.0.checked_add_signed(d) {
 				Some(v) => Ok(Datetime::from(v)),
-				None => Err(Error::ArithmeticOverflow(format!("{self} + {other}"))),
+				None => {
+					Err(anyhow::Error::new(Error::ArithmeticOverflow(format!("{self} + {other}"))))
+				}
 			},
-			Err(_) => Err(Error::ArithmeticOverflow(format!("{self} + {other}"))),
+			Err(_) => {
+				Err(anyhow::Error::new(Error::ArithmeticOverflow(format!("{self} + {other}"))))
+			}
 		}
 	}
 }
@@ -345,19 +348,6 @@ impl ops::Sub<Datetime> for Duration {
 				None => Datetime::default(),
 			},
 			Err(_) => Datetime::default(),
-		}
-	}
-}
-
-impl TrySub<Datetime> for Duration {
-	type Output = Datetime;
-	fn try_sub(self, other: Datetime) -> Result<Datetime, Error> {
-		match chrono::Duration::from_std(self.0) {
-			Ok(d) => match other.0.checked_sub_signed(d) {
-				Some(v) => Ok(Datetime::from(v)),
-				None => Err(Error::ArithmeticNegativeOverflow(format!("{self} - {other}"))),
-			},
-			Err(_) => Err(Error::ArithmeticNegativeOverflow(format!("{self} - {other}"))),
 		}
 	}
 }
@@ -377,11 +367,5 @@ impl<'a> Sum<&'a Self> for Duration {
 		I: Iterator<Item = &'a Self>,
 	{
 		iter.fold(Duration::default(), |a, b| &a + b)
-	}
-}
-
-impl InfoStructure for Duration {
-	fn structure(self) -> Value {
-		self.to_string().into()
 	}
 }

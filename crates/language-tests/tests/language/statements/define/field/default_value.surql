@@ -18,17 +18,18 @@ value = "NONE"
 
 [[test.results]]
 value = "{ events: {  }, fields: { primary: 'DEFINE FIELD primary ON product TYPE number VALUE 123.456f PERMISSIONS FULL', quaternary: 'DEFINE FIELD quaternary ON product TYPE bool VALUE array::all([1, 2]) PERMISSIONS FULL', secondary: 'DEFINE FIELD secondary ON product TYPE bool DEFAULT true VALUE $value PERMISSIONS FULL', tertiary: \"DEFINE FIELD tertiary ON product TYPE string DEFAULT 'hello' VALUE 'tester' PERMISSIONS FULL\" }, indexes: {  }, lives: {  }, tables: {  } }"
+
 [[test.results]]
 value = "{ events: [], fields: [ { flex: false, kind: 'number', name: 'primary', permissions: { create: true, delete: true, select: true, update: true }, readonly: false, value: '123.456f', what: 'product' }, { flex: false, kind: 'bool', name: 'quaternary', permissions: { create: true, delete: true, select: true, update: true }, readonly: false, value: 'array::all([1, 2])', what: 'product' }, { default: 'true', default_always: false, flex: false, kind: 'bool', name: 'secondary', permissions: { create: true, delete: true, select: true, update: true }, readonly: false, value: '$value', what: 'product' }, { default: \"'hello'\", default_always: false, flex: false, kind: 'string', name: 'tertiary', permissions: { create: true, delete: true, select: true, update: true }, readonly: false, value: \"'tester'\", what: 'product' } ], indexes: [ ], lives: [ ], tables: [ ] }"
 
 [[test.results]]
-error = "Found NULL for field `primary`, with record `product:test`, but expected a number"
+error = "Couldn't coerce value for field `primary` of `product:test`: Expected `number` but found `NULL`"
 
 [[test.results]]
-error = "Found 'oops' for field `secondary`, with record `product:test`, but expected a bool"
+error = "Couldn't coerce value for field `secondary` of `product:test`: Expected `bool` but found `'oops'`"
 
 [[test.results]]
-error = "Found 123 for field `tertiary`, with record `product:test`, but expected a string"
+error = "Couldn't coerce value for field `tertiary` of `product:test`: Expected `string` but found `123`"
 
 [[test.results]]
 value = "[{ id: product:test, primary: 123.456f, quaternary: true, secondary: true, tertiary: 'tester' }]"

@@ -21,6 +21,12 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: 1.86.0
+
 jobs:
   # ----------------------------------------
   # Server build
@@ -40,13 +46,15 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -54,7 +62,7 @@ jobs:
         run: cargo build --target ${{ matrix.target }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
         with:
           name: surreal-${{ matrix.name }}
           path: target/${{ matrix.target }}/debug/surreal
@@ -68,15 +76,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -91,15 +100,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -117,13 +127,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -140,19 +152,19 @@ jobs:
     name: Check workspace MSRV
     runs-on: ubuntu-latest
     env:
-      msrv: "1.84" # This should be updated if the MSRV is updated.
+      msrv: "1.85" # This should be updated if the MSRV is updated.
 
     steps:
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.msrv }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -170,13 +182,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/fuzz
@@ -185,7 +199,7 @@ jobs:
         run: cargo build --manifest-path crates/fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
-        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
+        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@cafd7a0eb8ecb4e007c56897996a9b65c49c972f # (Actions must be pinned by commit hash) master
         with:
           oss-fuzz-project-name: surrealdb
           language: rust
@@ -197,15 +211,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -220,16 +235,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install revision-lock
         run: cargo install revision-lock
 
       - name: Check revision.lock
         run: revision-lock --check
+
+  check-binaries:
+    name: Cross-compile binaries
+    needs: [format, check, check-wasm]
+    uses: ./.github/workflows/build.yml
+    with:
+      name: ci
+      release-branch: ${{ github.head_ref || github.ref_name }}
+      # Only upload if not a pull request.
+      upload: ${{ github.event_name != 'pull_request' }}
+      # Only compile with --release when not a pull request.
+      release: ${{ github.event_name != 'pull_request' }}
+    secrets: inherit
 
   # ----------------------------------------
   # Integration tests
@@ -240,13 +270,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -261,13 +293,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -282,13 +316,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -303,13 +339,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -324,13 +362,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -349,13 +389,15 @@ jobs:
     runs-on: [runner-arm64-2xlarge]
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -363,7 +405,7 @@ jobs:
         run: sudo apt-get -y update
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -372,7 +414,7 @@ jobs:
         run: cargo make ci-workspace-coverage
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
         timeout-minutes: 1
         continue-on-error: true
         with:
@@ -389,13 +431,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -412,13 +456,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -441,13 +487,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -470,13 +518,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -499,13 +549,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -528,13 +580,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -557,13 +611,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -586,13 +642,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -615,13 +673,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -651,13 +711,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -665,7 +727,7 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
         with:
           version: "7.1.61"
 
@@ -685,13 +747,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -699,7 +763,7 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
         with:
           version: "7.3.47"
 
@@ -723,13 +787,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -748,13 +814,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/language-tests
@@ -767,7 +835,38 @@ jobs:
       - name: Run SurrealQL test suite
         run: |
           cd crates/language-tests
-          ./target/debug/surrealql-test --color always run
+          ./target/debug/surrealql-test --color always run -j 3
+
+  upgrade-tests:
+    name: Run SurrealQL upgrade tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: |
+            crates/language-tests
+            ./
+          cache-directories: crates/language-tests/.binary-cache
+
+      - name: Build SurrealQL test tool
+        run: |
+          cd crates/language-tests
+          cargo build --features upgrade
+
+      - name: Run SurrealQL test suite
+        run: |
+          cd crates/language-tests
+          ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
   # Other SDK tests
@@ -785,12 +884,12 @@ jobs:
           - latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
         with:
           repository: "surrealdb/surrealdb.js"
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -810,12 +909,14 @@ jobs:
         run: bun test
         env:
           SURREAL_PROTOCOL: http
+          SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
       - name: Run JavaScript tests (WebSocket)
         run: bun test
         env:
           SURREAL_PROTOCOL: ws
+          SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
   sdk-golang:
@@ -830,12 +931,12 @@ jobs:
           - 1.23
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
         with:
           repository: "surrealdb/surrealdb.go"
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -878,12 +979,12 @@ jobs:
           - 3.13
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
         with:
           repository: "surrealdb/surrealdb.py"
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -910,12 +1011,14 @@ jobs:
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
+          SURREALDB_VERSION: ${{ matrix.version }}
 
       - name: Run Python tests (WebSocket)
         run: python -m unittest discover -s tests
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
+          SURREALDB_VERSION: ${{ matrix.version }}
 
   sdk-php:
     name: PHP SDK tests (${{ matrix.version }})
@@ -929,12 +1032,12 @@ jobs:
           - 8.2
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
         with:
           repository: "surrealdb/surrealdb.php"
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -943,12 +1046,12 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@cf4cade2721270509d5b1c766ab3549210a39a2a # (Actions must be pinned by commit hash) v2
         with:
           php-version: ${{ matrix.version }}
 
       - name: Setup Composer
-        uses: php-actions/composer@v6
+        uses: php-actions/composer@8a65f0d3c6a1d17ca4800491a40b5756a4c164f3 # (Actions must be pinned by commit hash) v6.1.2
         with:
           php_version: ${{ matrix.version }}
 
@@ -973,12 +1076,12 @@ jobs:
           - 9.0.x
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
         with:
           repository: "surrealdb/surrealdb.net"
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -987,7 +1090,7 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup dotnet
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # (Actions must be pinned by commit hash) v4.3.1
         with:
           dotnet-version: ${{ matrix.version }}
 

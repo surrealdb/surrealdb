@@ -1,3 +1,5 @@
+use crate::buc::store::ObjectStore;
+use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -5,23 +7,25 @@ use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
+use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache::ds::DatastoreCache;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
+use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
-use crate::sql::value::Value;
+use anyhow::{Result, bail};
 use async_channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use trice::Instant;
 #[cfg(feature = "http")]
@@ -54,6 +58,8 @@ pub struct MutableContext {
 	// The index concurrent builders
 	#[cfg(not(target_family = "wasm"))]
 	index_builder: Option<IndexBuilder>,
+	// The sequences
+	sequences: Option<Sequences>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 	#[cfg(storage)]
@@ -63,6 +69,8 @@ pub struct MutableContext {
 	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
 	isolated: bool,
+	// A map of bucket connections
+	buckets: Option<Arc<BucketConnections>>,
 }
 
 impl Default for MutableContext {
@@ -107,10 +115,12 @@ impl MutableContext {
 			cache: None,
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: None,
+			sequences: None,
 			#[cfg(storage)]
 			temporary_directory: None,
 			transaction: None,
 			isolated: false,
+			buckets: None,
 		}
 	}
 
@@ -129,11 +139,13 @@ impl MutableContext {
 			cache: parent.cache.clone(),
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
+			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: false,
 			parent: Some(parent.clone()),
+			buckets: parent.buckets.clone(),
 		}
 	}
 
@@ -154,11 +166,13 @@ impl MutableContext {
 			cache: parent.cache.clone(),
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
+			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: true,
 			parent: Some(parent.clone()),
+			buckets: parent.buckets.clone(),
 		}
 	}
 
@@ -179,23 +193,28 @@ impl MutableContext {
 			index_stores: from.index_stores.clone(),
 			cache: from.cache.clone(),
 			index_builder: from.index_builder.clone(),
+			sequences: from.sequences.clone(),
 			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
 			transaction: None,
 			isolated: false,
 			parent: None,
+			buckets: from.buckets.clone(),
 		}
 	}
 
 	/// Creates a new context from a configured datastore.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
 		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
-		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
+		sequences: Sequences,
+		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
-	) -> Result<MutableContext, Error> {
+		buckets: Arc<BucketConnections>,
+	) -> Result<MutableContext> {
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
@@ -210,10 +229,12 @@ impl MutableContext {
 			cache: Some(cache),
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: Some(index_builder),
+			sequences: Some(sequences),
 			#[cfg(storage)]
 			temporary_directory,
 			transaction: None,
 			isolated: false,
+			buckets: Some(buckets),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -227,9 +248,11 @@ impl MutableContext {
 	}
 
 	/// Unfreezes this context, allowing it to be edited and configured.
-	pub(crate) fn unfreeze(ctx: Context) -> Result<MutableContext, Error> {
-		Arc::into_inner(ctx)
-			.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))
+	pub(crate) fn unfreeze(ctx: Context) -> Result<MutableContext> {
+		let Some(x) = Arc::into_inner(ctx) else {
+			fail!("Tried to unfreeze a Context with multiple references")
+		};
+		Ok(x)
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -346,6 +369,11 @@ impl MutableContext {
 		self.index_builder.as_ref()
 	}
 
+	/// Return the sequences manager
+	pub(crate) fn get_sequences(&self) -> Option<&Sequences> {
+		self.sequences.as_ref()
+	}
+
 	// Get the current datastore cache
 	pub(crate) fn get_cache(&self) -> Option<Arc<DatastoreCache>> {
 		self.cache.clone()
@@ -359,7 +387,7 @@ impl MutableContext {
 	/// We may not want to check for the deadline on every call.
 	/// An iteration loop may want to check it every 10 or 100 calls.
 	/// Eg.: ctx.done(count % 100 == 0)
-	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>, Error> {
+	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>> {
 		match self.deadline {
 			Some(deadline) if deep_check && deadline <= Instant::now() => {
 				Ok(Some(Reason::Timedout))
@@ -367,7 +395,7 @@ impl MutableContext {
 			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
 			_ => {
 				if deep_check && ALLOC.is_beyond_threshold() {
-					return Err(Error::QueryBeyondMemoryThreshold);
+					bail!(Error::QueryBeyondMemoryThreshold);
 				}
 				match &self.parent {
 					Some(ctx) => ctx.done(deep_check),
@@ -378,7 +406,10 @@ impl MutableContext {
 	}
 
 	/// Check if the context is ok to continue.
-	pub(crate) fn is_ok(&self, deep_check: bool) -> Result<bool, Error> {
+	pub(crate) async fn is_ok(&self, deep_check: bool) -> Result<bool> {
+		if deep_check {
+			yield_now!();
+		}
 		Ok(self.done(deep_check)?.is_none())
 	}
 
@@ -386,12 +417,16 @@ impl MutableContext {
 	///
 	/// Returns true when the query is canceled or if check_deadline is true when the query
 	/// deadline is met.
-	pub(crate) fn is_done(&self, deep_check: bool) -> Result<bool, Error> {
+	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool> {
+		if deep_check {
+			yield_now!();
+		}
 		Ok(self.done(deep_check)?.is_some())
 	}
 
 	/// Check if the context is not ok to continue, because it timed out.
-	pub(crate) fn is_timedout(&self) -> Result<bool, Error> {
+	pub(crate) async fn is_timedout(&self) -> Result<bool> {
+		yield_now!();
 		Ok(matches!(self.done(true)?, Some(Reason::Timedout)))
 	}
 
@@ -435,27 +470,26 @@ impl MutableContext {
 	}
 
 	/// Get the capabilities for this context
-	#[allow(dead_code)]
 	pub(crate) fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.capabilities.clone()
 	}
 
 	/// Check if scripting is allowed
-	#[allow(dead_code)]
-	pub(crate) fn check_allowed_scripting(&self) -> Result<(), Error> {
+	#[cfg_attr(not(feature = "scripting"), expect(dead_code))]
+	pub(crate) fn check_allowed_scripting(&self) -> Result<()> {
 		if !self.capabilities.allows_scripting() {
 			warn!("Capabilities denied scripting attempt");
-			return Err(Error::ScriptingNotAllowed);
+			bail!(Error::ScriptingNotAllowed);
 		}
 		trace!("Capabilities allowed scripting");
 		Ok(())
 	}
 
 	/// Check if a function is allowed
-	pub(crate) fn check_allowed_function(&self, target: &str) -> Result<(), Error> {
+	pub(crate) fn check_allowed_function(&self, target: &str) -> Result<()> {
 		if !self.capabilities.allows_function_name(target) {
 			warn!("Capabilities denied function execution attempt, target: '{target}'");
-			return Err(Error::FunctionNotAllowed(target.to_string()));
+			bail!(Error::FunctionNotAllowed(target.to_string()));
 		}
 		trace!("Capabilities allowed function execution, target: '{target}'");
 		Ok(())
@@ -463,7 +497,7 @@ impl MutableContext {
 
 	/// Check if a network target is allowed
 	#[cfg(feature = "http")]
-	pub(crate) fn check_allowed_net(&self, url: &Url) -> Result<(), Error> {
+	pub(crate) fn check_allowed_net(&self, url: &Url) -> Result<()> {
 		match url.host() {
 			Some(host) => {
 				let target = &NetTarget::Host(host.to_owned(), url.port_or_known_default());
@@ -471,12 +505,50 @@ impl MutableContext {
 					warn!(
 						"Capabilities denied outgoing network connection attempt, target: '{target}'"
 					);
-					return Err(Error::NetTargetNotAllowed(target.to_string()));
+					bail!(Error::NetTargetNotAllowed(target.to_string()));
 				}
 				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 				Ok(())
 			}
-			_ => Err(Error::InvalidUrl(url.to_string())),
+			_ => bail!(Error::InvalidUrl(url.to_string())),
+		}
+	}
+
+	pub(crate) fn get_buckets(&self) -> Option<Arc<BucketConnections>> {
+		self.buckets.clone()
+	}
+
+	/// Obtain the connection for a bucket
+	pub(crate) async fn get_bucket_store(
+		&self,
+		ns: &str,
+		db: &str,
+		bu: &str,
+	) -> Result<Arc<dyn ObjectStore>> {
+		// Do we have a buckets context?
+		if let Some(buckets) = &self.buckets {
+			// Attempt to obtain an existing bucket connection
+			let key = BucketConnectionKey::new(ns, db, bu);
+			if let Some(bucket_ref) = buckets.get(&key) {
+				Ok((*bucket_ref).clone())
+			} else {
+				// Obtain the bucket definition
+				let tx = self.tx();
+				let bd = tx.get_db_bucket(ns, db, bu).await?;
+
+				// Connect to the bucket
+				let store = if let Some(ref backend) = bd.backend {
+					buc::connect(backend, false, bd.readonly).await?
+				} else {
+					buc::connect_global(ns, db, bu).await?
+				};
+
+				// Persist the bucket connection
+				buckets.insert(key, store.clone());
+				Ok(store)
+			}
+		} else {
+			bail!(Error::BucketUnavailable(bu.into()))
 		}
 	}
 }

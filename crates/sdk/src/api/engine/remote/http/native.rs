@@ -1,33 +1,32 @@
 use super::Client;
-use crate::api::conn::Connection;
+use crate::api::ExtraFeatures;
+use crate::api::Result;
+use crate::api::Surreal;
+use crate::api::conn;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
 use crate::opt::WaitFor;
 use async_channel::Receiver;
 use indexmap::IndexMap;
-use reqwest::header::HeaderMap;
 use reqwest::ClientBuilder;
+use reqwest::header::HeaderMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use tokio::sync::watch;
 use url::Url;
 
 impl crate::api::Connection for Client {}
-
-impl Connection for Client {
+impl conn::Sealed for Client {
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let headers = super::default_headers();
 			let config = address.config.clone();
 
-			#[allow(unused_mut)]
+			#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_mut))]
 			let mut builder = ClientBuilder::new().default_headers(headers);
 
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]

@@ -1,25 +1,26 @@
 use crate::ctx::Context;
 use crate::ctx::{Canceller, MutableContext};
+use crate::dbs::Options;
+use crate::dbs::Statement;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::doc::Document;
+use crate::doc::{Document, IgnoreError};
 use crate::err::Error;
+use crate::expr::array::Array;
+use crate::expr::edges::Edges;
+use crate::expr::mock::Mock;
+use crate::expr::object::Object;
+use crate::expr::table::Table;
+use crate::expr::thing::Thing;
+use crate::expr::value::Value;
+use crate::expr::{Fields, Id, IdRange};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::sql::array::Array;
-use crate::sql::edges::Edges;
-use crate::sql::mock::Mock;
-use crate::sql::object::Object;
-use crate::sql::table::Table;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
-use crate::sql::{Fields, Id, IdRange};
+use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::mem;
 use std::sync::Arc;
@@ -105,8 +106,6 @@ pub(crate) struct Processed {
 pub(crate) struct Iterator {
 	/// Iterator status
 	run: Canceller,
-	/// Total documents processed
-	count: u64,
 	/// Iterator limit value
 	limit: Option<u32>,
 	/// Iterator start value
@@ -114,7 +113,7 @@ pub(crate) struct Iterator {
 	/// Counter of remaining documents that can be skipped processing
 	start_skip: Option<usize>,
 	/// Iterator runtime error
-	error: Option<Error>,
+	error: Option<anyhow::Error>,
 	/// Iterator output results
 	results: Results,
 	/// Iterator input values
@@ -129,7 +128,6 @@ impl Clone for Iterator {
 	fn clone(&self) -> Self {
 		Self {
 			run: self.run.clone(),
-			count: 0,
 			limit: self.limit,
 			start: self.start,
 			start_skip: self.start_skip.map(|_| self.start.unwrap_or(0) as usize),
@@ -160,7 +158,7 @@ impl Iterator {
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
 		val: Value,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Match the values
 		match val {
 			Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
@@ -171,7 +169,7 @@ impl Iterator {
 			Value::Thing(v) => self.prepare_thing(planner, ctx, v).await?,
 			v if ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
-				return Err(Error::InvalidStatementTarget {
+				bail!(Error::InvalidStatementTarget {
 					value: v.to_string(),
 				})
 			}
@@ -187,7 +185,7 @@ impl Iterator {
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
 		v: Table,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// We add the iterable only if we have a permission
 		let p = planner.check_table_permission(ctx, &v).await?;
 		if matches!(p, GrantedPermission::None) {
@@ -214,7 +212,7 @@ impl Iterator {
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
 		v: Thing,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if v.is_range() {
 			return self.prepare_range(planner, ctx, v).await;
 		}
@@ -232,10 +230,8 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_mock(&mut self, stm: &Statement<'_>, v: Mock) -> Result<(), Error> {
-		if stm.is_only() && !self.is_limit_one_or_zero() {
-			return Err(Error::SingleOnlyOutput);
-		}
+	pub(crate) fn prepare_mock(&mut self, stm: &Statement<'_>, v: Mock) -> Result<()> {
+		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Add the records to the iterator
 		for v in v {
 			match stm.is_deferable() {
@@ -248,16 +244,15 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_edges(&mut self, stm: &Statement<'_>, v: Edges) -> Result<(), Error> {
-		if stm.is_only() && !self.is_limit_one_or_zero() {
-			return Err(Error::SingleOnlyOutput);
-		}
+	pub(crate) fn prepare_edges(&mut self, stm: &Statement<'_>, v: Edges) -> Result<()> {
+		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Check if this is a create statement
-		if stm.is_create() {
-			return Err(Error::InvalidStatementTarget {
+		ensure!(
+			!stm.is_create(),
+			Error::InvalidStatementTarget {
 				value: v.to_string(),
-			});
-		}
+			}
+		);
 		// Add the record to the iterator
 		self.ingest(Iterable::Edges(v));
 		// All ingested ok
@@ -270,18 +265,19 @@ impl Iterator {
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
 		v: Thing,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// We add the iterable only if we have a permission
 		let p = planner.check_table_permission(ctx, &v.tb).await?;
 		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Check if this is a create statement
-		if ctx.stm.is_create() {
-			return Err(Error::InvalidStatementTarget {
+		ensure!(
+			!ctx.stm.is_create(),
+			Error::InvalidStatementTarget {
 				value: v.to_string(),
-			});
-		}
+			}
+		);
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
 		let rs = ctx.check_record_strategy(false, p)?;
 		let sc = ctx.check_scan_direction();
@@ -294,7 +290,7 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_object(&mut self, stm: &Statement<'_>, v: Object) -> Result<(), Error> {
+	pub(crate) fn prepare_object(&mut self, stm: &Statement<'_>, v: Object) -> Result<()> {
 		// Add the record to the iterator
 		match v.rid() {
 			// This object has an 'id' field
@@ -304,7 +300,7 @@ impl Iterator {
 			},
 			// This object has no 'id' field
 			None => {
-				return Err(Error::InvalidStatementTarget {
+				bail!(Error::InvalidStatementTarget {
 					value: v.to_string(),
 				});
 			}
@@ -320,10 +316,8 @@ impl Iterator {
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
 		v: Array,
-	) -> Result<(), Error> {
-		if ctx.stm.is_only() && !self.is_limit_one_or_zero() {
-			return Err(Error::SingleOnlyOutput);
-		}
+	) -> Result<()> {
+		ensure!(!ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Add the records to the iterator
 		for v in v {
 			match v {
@@ -334,7 +328,7 @@ impl Iterator {
 				Value::Thing(v) => self.prepare_thing(planner, ctx, v).await?,
 				_ if ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 				_ => {
-					return Err(Error::InvalidStatementTarget {
+					bail!(Error::InvalidStatementTarget {
 						value: v.to_string(),
 					})
 				}
@@ -352,7 +346,7 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		// Log the statement
 		trace!(target: TARGET, statement = %stm, "Iterating statement");
 		// Enable context override
@@ -453,7 +447,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if self.limit.is_none() {
 			if let Some(v) = stm.limit() {
 				self.limit = Some(v.process(stk, ctx, opt, None).await?);
@@ -474,7 +468,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if let Some(v) = stm.start() {
 			self.start = Some(v.process(stk, ctx, opt, None).await?);
 		}
@@ -548,7 +542,7 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if let Some(splits) = stm.split() {
 			// Loop over each split clause
 			for split in splits.iter() {
@@ -591,7 +585,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Process any GROUP clause
 		if let Results::Groups(g) = &mut self.results {
 			self.results = Results::Memory(g.output(stk, ctx, opt, stm).await?);
@@ -606,7 +600,7 @@ impl Iterator {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if let Some(fetchs) = stm.fetch() {
 			let mut idioms = Vec::with_capacity(fetchs.0.len());
 			for fetch in fetchs.iter() {
@@ -633,7 +627,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 		is_specific_permission: bool,
 		exp: Option<&mut Explanation>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Compute iteration limits
 		self.compute_start_limit(ctx, stm, is_specific_permission);
 		if let Some(e) = exp {
@@ -661,7 +655,7 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let rs = pro.rs;
 		// Extract the value
 		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
@@ -677,7 +671,7 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
-	) -> Result<Value, Error> {
+	) -> Result<Value, IgnoreError> {
 		// Check if this is a count all
 		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
 		if count_all {
@@ -700,20 +694,16 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
-		res: Result<Value, Error>,
+		res: Result<Value, IgnoreError>,
 	) {
-		// Count the result
-		self.count += 1;
-		// Periodically yield
-		if self.count % 100 == 0 {
-			yield_now!();
-		}
+		// yield
+		yield_now!();
 		// Process the result
 		match res {
-			Err(Error::Ignore) => {
+			Err(IgnoreError::Ignore) => {
 				return;
 			}
-			Err(e) => {
+			Err(IgnoreError::Error(e)) => {
 				self.error = Some(e);
 				self.run.cancel();
 				return;

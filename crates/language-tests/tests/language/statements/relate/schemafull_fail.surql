@@ -15,10 +15,10 @@ value = "NONE"
 value = "[{ id: likes:1, in: person:1, out: person:2, reason: 'nice smile' }]"
 
 [[test.results]]
-error = "Found true for field `reason`, with record `likes:2`, but expected a string"
+error = "Couldn't coerce value for field `reason` of `likes:2`: Expected `string` but found `true`"
 
 [[test.results]]
-error = "Found dog:1 for field `in`, with record `likes:3`, but expected a record<person>"
+error = "Couldn't coerce value for field `in` of `likes:3`: Expected `record<person>` but found `dog:1`"
 */
 
 INSERT INTO person [

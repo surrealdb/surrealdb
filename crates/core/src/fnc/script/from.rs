@@ -1,20 +1,20 @@
 use super::classes;
-use crate::sql::array::Array;
-use crate::sql::datetime::Datetime;
-use crate::sql::object::Object;
-use crate::sql::value::Value;
-use crate::sql::Bytes;
-use crate::sql::Geometry;
-use crate::sql::Id;
-use crate::sql::Strand;
+use crate::expr::Bytes;
+use crate::expr::Geometry;
+use crate::expr::Id;
+use crate::expr::Strand;
+use crate::expr::array::Array;
+use crate::expr::datetime::Datetime;
+use crate::expr::object::Object;
+use crate::expr::value::Value;
 use chrono::{TimeZone, Utc};
-use js::prelude::This;
 use js::Coerced;
 use js::Ctx;
 use js::Error;
 use js::Exception;
 use js::FromAtom;
 use js::FromJs;
+use js::prelude::This;
 use rust_decimal::Decimal;
 
 fn check_nul(s: &str) -> Result<(), Error> {
@@ -143,6 +143,12 @@ impl<'js> FromJs<'js> for Value {
 						Some(v) => Ok((*v).into()),
 						None => Ok(Value::None),
 					};
+				}
+				// Check to see if this object is a file
+				if let Some(v) = v.as_class::<classes::file::File>() {
+					let borrow = v.borrow();
+					let v: &classes::file::File = &borrow;
+					return Ok(v.value.clone().into());
 				}
 
 				if let Some(v) = v.as_typed_array::<u8>() {

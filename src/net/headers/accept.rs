@@ -9,7 +9,6 @@ pub enum Accept {
 	TextPlain,
 	ApplicationJson,
 	ApplicationCbor,
-	ApplicationPack,
 	ApplicationOctetStream,
 	Surrealdb,
 }
@@ -20,7 +19,6 @@ impl std::fmt::Display for Accept {
 			Accept::TextPlain => write!(f, "text/plain"),
 			Accept::ApplicationJson => write!(f, "application/json"),
 			Accept::ApplicationCbor => write!(f, "application/cbor"),
-			Accept::ApplicationPack => write!(f, "application/pack"),
 			Accept::ApplicationOctetStream => write!(f, "application/octet-stream"),
 			Accept::Surrealdb => write!(f, "application/surrealdb"),
 		}
@@ -44,7 +42,6 @@ impl Header for Accept {
 			"text/plain" => Ok(Accept::TextPlain),
 			"application/json" => Ok(Accept::ApplicationJson),
 			"application/cbor" => Ok(Accept::ApplicationCbor),
-			"application/pack" => Ok(Accept::ApplicationPack),
 			"application/octet-stream" => Ok(Accept::ApplicationOctetStream),
 			"application/surrealdb" => Ok(Accept::Surrealdb),
 			// TODO: Support more (all?) mime-types
@@ -66,6 +63,7 @@ impl From<Accept> for HeaderValue {
 	}
 }
 
+#[expect(clippy::fallible_impl_from)]
 impl From<&Accept> for HeaderValue {
 	fn from(value: &Accept) -> Self {
 		HeaderValue::from_str(value.to_string().as_str()).unwrap()

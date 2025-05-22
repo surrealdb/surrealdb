@@ -19,7 +19,7 @@ pub struct FuncTarget(pub String, pub Option<String>);
 impl fmt::Display for FuncTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self.1 {
-			Some(name) => write!(f, "{}:{}", self.0, name),
+			Some(name) => write!(f, "{}:{name}", self.0),
 			None => write!(f, "{}::*", self.0),
 		}
 	}
@@ -115,6 +115,7 @@ pub enum ExperimentalTarget {
 	GraphQL,
 	BearerAccess,
 	DefineApi,
+	Files,
 }
 
 impl fmt::Display for ExperimentalTarget {
@@ -124,6 +125,7 @@ impl fmt::Display for ExperimentalTarget {
 			Self::GraphQL => write!(f, "graphql"),
 			Self::BearerAccess => write!(f, "bearer_access"),
 			Self::DefineApi => write!(f, "define_api"),
+			Self::Files => write!(f, "files"),
 		}
 	}
 }
@@ -141,6 +143,7 @@ impl Target<str> for ExperimentalTarget {
 			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
 			Self::BearerAccess => elem.eq_ignore_ascii_case("bearer_access"),
 			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
+			Self::Files => elem.eq_ignore_ascii_case("files"),
 		}
 	}
 }
@@ -165,13 +168,14 @@ impl std::str::FromStr for ExperimentalTarget {
 	type Err = ParseExperimentalTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match_insensitive!(s.trim(), {
+		match s.trim().to_ascii_lowercase().as_str() {
 			"record_references" => Ok(ExperimentalTarget::RecordReferences),
 			"graphql" => Ok(ExperimentalTarget::GraphQL),
 			"bearer_access" => Ok(ExperimentalTarget::BearerAccess),
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
+			"files" => Ok(ExperimentalTarget::Files),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
-		})
+		}
 	}
 }
 
@@ -186,9 +190,9 @@ pub enum NetTarget {
 impl fmt::Display for NetTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::Host(host, Some(port)) => write!(f, "{}:{}", host, port),
-			Self::Host(host, None) => write!(f, "{}", host),
-			Self::IPNet(ipnet) => write!(f, "{}", ipnet),
+			Self::Host(host, Some(port)) => write!(f, "{host}:{port}"),
+			Self::Host(host, None) => write!(f, "{host}"),
+			Self::IPNet(ipnet) => write!(f, "{ipnet}"),
 		}
 	}
 }
@@ -450,12 +454,12 @@ impl std::str::FromStr for ArbitraryQueryTarget {
 	type Err = ParseArbitraryQueryTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match_insensitive!(s.trim(), {
+		match s.trim().to_ascii_lowercase().as_str() {
 			"guest" => Ok(ArbitraryQueryTarget::Guest),
 			"record" => Ok(ArbitraryQueryTarget::Record),
 			"system" => Ok(ArbitraryQueryTarget::System),
 			_ => Err(ParseArbitraryQueryTargetError::InvalidName),
-		})
+		}
 	}
 }
 
@@ -494,11 +498,11 @@ impl<T: Target + Hash + Eq + PartialEq + fmt::Display> fmt::Display for Targets<
 		match self {
 			Self::None => write!(f, "none"),
 			Self::All => write!(f, "all"),
-			Self::Some(targets) => {
-				let targets =
-					targets.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ");
-				write!(f, "{}", targets)
-			}
+			Self::Some(targets) => write!(
+				f,
+				"{}",
+				targets.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ")
+			),
 		}
 	}
 }
@@ -527,10 +531,24 @@ pub struct Capabilities {
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
-            f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental, self.allow_arbitrary_query, self.deny_arbitrary_query,
-        )
+			f,
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
+			self.scripting,
+			self.guest_access,
+			self.live_query_notifications,
+			self.allow_funcs,
+			self.deny_funcs,
+			self.allow_net,
+			self.deny_net,
+			self.allow_rpc,
+			self.deny_rpc,
+			self.allow_http,
+			self.deny_http,
+			self.allow_experimental,
+			self.deny_experimental,
+			self.allow_arbitrary_query,
+			self.deny_arbitrary_query,
+		)
 	}
 }
 
@@ -733,10 +751,6 @@ impl Capabilities {
 		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
 	}
 
-	pub fn allows_query_name(&self, target: &str) -> bool {
-		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
-	}
-
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
 	}
@@ -782,58 +796,90 @@ mod tests {
 	#[test]
 	fn test_net_target() {
 		// IPNet IPv4
-		assert!(NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("10.0.1.0/24").unwrap()));
-		assert!(NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("10.0.1.2").unwrap()));
-		assert!(!NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("20.0.1.0/24").unwrap()));
-		assert!(!NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("20.0.1.0").unwrap()));
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("10.0.1.0/24").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("10.0.1.2").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("20.0.1.0/24").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("20.0.1.0").unwrap())
+		);
 
 		// IPNet IPv6
-		assert!(NetTarget::from_str("2001:db8::1")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db8::1").unwrap()));
-		assert!(NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db8::1").unwrap()));
-		assert!(NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db8:abcd:12::/64").unwrap()));
-		assert!(!NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db9::1").unwrap()));
-		assert!(!NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db9:abcd:12::1/64").unwrap()));
+		assert!(
+			NetTarget::from_str("2001:db8::1")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8::1").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8::1").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8:abcd:12::/64").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db9::1").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db9:abcd:12::1/64").unwrap())
+		);
 
 		// Host domain with and without port
-		assert!(NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com:80").unwrap()));
-		assert!(!NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("www.example.com").unwrap()));
-		assert!(!NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("www.example.com:80").unwrap()));
-		assert!(NetTarget::from_str("example.com:80")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com:80").unwrap()));
-		assert!(!NetTarget::from_str("example.com:80")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com:443").unwrap()));
-		assert!(!NetTarget::from_str("example.com:80")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com").unwrap()));
+		assert!(
+			NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:80").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("www.example.com").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("www.example.com:80").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:80").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:443").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
 
 		// Host IPv4 with and without port
 		assert!(
@@ -927,18 +973,26 @@ mod tests {
 
 	#[test]
 	fn test_method_target() {
-		assert!(MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("query").unwrap()));
-		assert!(MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("Query").unwrap()));
-		assert!(MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("QUERY").unwrap()));
-		assert!(!MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("ping").unwrap()));
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("query").unwrap())
+		);
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("Query").unwrap())
+		);
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("QUERY").unwrap())
+		);
+		assert!(
+			!MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("ping").unwrap())
+		);
 	}
 
 	#[test]
@@ -947,14 +1001,22 @@ mod tests {
 		assert!(Targets::<FuncTarget>::All.matches("http::get"));
 		assert!(!Targets::<NetTarget>::None.matches(&NetTarget::from_str("example.com").unwrap()));
 		assert!(!Targets::<FuncTarget>::None.matches("http::get"));
-		assert!(Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
-			.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(!Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
-			.matches(&NetTarget::from_str("www.example.com").unwrap()));
-		assert!(Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches("http::get"));
-		assert!(!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches("http::post"));
+		assert!(
+			Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
+		assert!(
+			!Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
+				.matches(&NetTarget::from_str("www.example.com").unwrap())
+		);
+		assert!(
+			Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
+				.matches("http::get")
+		);
+		assert!(
+			!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
+				.matches("http::post")
+		);
 	}
 
 	#[test]
@@ -1079,6 +1141,14 @@ mod tests {
 			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
 		}
 
+		// When all RPC methods are denied
+		{
+			let caps = Capabilities::default().without_rpc_methods(Targets::<MethodTarget>::All);
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+		}
+
 		// When some RPC methods are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
@@ -1129,7 +1199,15 @@ mod tests {
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
 		}
 
-		// When some HTTP rotues are allowed and some are denied, deny overrides the allow rules
+		// When all HTTP routes are denied at the same time
+		{
+			let caps = Capabilities::default().without_http_routes(Targets::<RouteTarget>::All);
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+		}
+
+		// When some HTTP routes are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
 				.with_http_routes(Targets::<RouteTarget>::Some(
@@ -1154,6 +1232,58 @@ mod tests {
 			assert!(caps.allows_http_route(&RouteTarget::from_str("key").unwrap()));
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("rpc").unwrap()));
+		}
+
+		// When all arbitrary query targets are allowed
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::All)
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::None);
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When all arbitrary query targets are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::All)
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::All);
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When all arbitrary query targets are denied
+		{
+			let caps = Capabilities::default()
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::All);
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When some arbitrary query targets are allowed and some are denied, deny overrides the allow rules
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::Some(
+					[
+						ArbitraryQueryTarget::from_str("guest").unwrap(),
+						ArbitraryQueryTarget::from_str("record").unwrap(),
+					]
+					.into(),
+				))
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::Some(
+					[
+						ArbitraryQueryTarget::from_str("record").unwrap(),
+						ArbitraryQueryTarget::from_str("system").unwrap(),
+					]
+					.into(),
+				));
+
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
 		}
 	}
 }

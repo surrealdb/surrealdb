@@ -1,22 +1,13 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::fnc;
-use crate::iam::Action;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
+use crate::sql::operator::BindingPower;
 use crate::sql::script::Script;
-use crate::sql::value::Value;
-use crate::sql::Permission;
-use futures::future::try_join_all;
-use reblessive::tree::Stk;
+use crate::sql::value::SqlValue;
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
-
-use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
@@ -26,17 +17,18 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Function {
-	Normal(String, Vec<Value>),
-	Custom(String, Vec<Value>),
-	Script(Script, Vec<Value>),
+	Normal(String, Vec<SqlValue>),
+	Custom(String, Vec<SqlValue>),
+	Script(Script, Vec<SqlValue>),
 	#[revision(
 		end = 2,
 		convert_fn = "convert_anonymous_arg_computation",
 		fields_name = "OldAnonymousFields"
 	)]
-	Anonymous(Value, Vec<Value>),
+	Anonymous(SqlValue, Vec<SqlValue>),
+	/// Fields are: the function object itself, it's arguments and whether the arguments are calculated.
 	#[revision(start = 2)]
-	Anonymous(Value, Vec<Value>, bool),
+	Anonymous(SqlValue, Vec<SqlValue>, bool),
 	// Add new variants here
 }
 
@@ -49,16 +41,38 @@ impl Function {
 	}
 }
 
-pub(crate) enum OptimisedAggregate {
-	None,
-	Count,
-	CountFunction,
-	MathMax,
-	MathMin,
-	MathSum,
-	MathMean,
-	TimeMax,
-	TimeMin,
+impl From<Function> for crate::expr::Function {
+	fn from(v: Function) -> Self {
+		match v {
+			Function::Normal(s, e) => Self::Normal(s, e.into_iter().map(Into::into).collect()),
+			Function::Custom(s, e) => Self::Custom(s, e.into_iter().map(Into::into).collect()),
+			Function::Script(s, e) => {
+				Self::Script(s.into(), e.into_iter().map(Into::into).collect())
+			}
+			Function::Anonymous(p, e, b) => {
+				Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b)
+			}
+		}
+	}
+}
+
+impl From<crate::expr::Function> for Function {
+	fn from(v: crate::expr::Function) -> Self {
+		match v {
+			crate::expr::Function::Normal(s, e) => {
+				Self::Normal(s, e.into_iter().map(Into::into).collect())
+			}
+			crate::expr::Function::Custom(s, e) => {
+				Self::Custom(s, e.into_iter().map(Into::into).collect())
+			}
+			crate::expr::Function::Script(s, e) => {
+				Self::Script(s.into(), e.into_iter().map(Into::into).collect())
+			}
+			crate::expr::Function::Anonymous(p, e, b) => {
+				Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b)
+			}
+		}
+	}
 }
 
 impl PartialOrd for Function {
@@ -78,7 +92,7 @@ impl Function {
 		}
 	}
 	/// Get function arguments if applicable
-	pub fn args(&self) -> &[Value] {
+	pub fn args(&self) -> &[SqlValue] {
 		match self {
 			Self::Normal(_, a) => a,
 			Self::Custom(_, a) => a,
@@ -94,17 +108,8 @@ impl Function {
 			Self::Custom(f, _) => format!("fn::{f}").into(),
 		}
 	}
-	/// Checks if this function invocation is writable
-	pub fn writeable(&self) -> bool {
-		match self {
-			Self::Custom(_, _) => true,
-			Self::Script(_, _) => true,
-			Self::Normal(f, _) if f == "api::invoke" => true,
-			_ => self.args().iter().any(Value::writeable),
-		}
-	}
 	/// Convert this function to an aggregate
-	pub fn aggregate(&self, val: Value) -> Result<Self, Error> {
+	pub fn aggregate(&self, val: SqlValue) -> Result<Self> {
 		match self {
 			Self::Normal(n, a) => {
 				let mut a = a.to_owned();
@@ -117,7 +122,7 @@ impl Function {
 				}
 				Ok(Self::Normal(n.to_owned(), a))
 			}
-			_ => Err(fail!("Encountered a non-aggregate function: {self:?}")),
+			_ => fail!("Encountered a non-aggregate function: {self:?}"),
 		}
 	}
 	/// Check if this function is a custom function
@@ -133,7 +138,7 @@ impl Function {
 	/// Check if all arguments are static values
 	pub fn is_static(&self) -> bool {
 		match self {
-			Self::Normal(_, a) => a.iter().all(Value::is_static),
+			Self::Normal(_, a) => a.iter().all(SqlValue::is_static),
 			_ => false,
 		}
 	}
@@ -187,197 +192,6 @@ impl Function {
 			_ => false,
 		}
 	}
-	pub(crate) fn get_optimised_aggregate(&self) -> OptimisedAggregate {
-		match self {
-			Self::Normal(f, v) if f == "count" => {
-				if v.is_empty() {
-					OptimisedAggregate::Count
-				} else {
-					OptimisedAggregate::CountFunction
-				}
-			}
-			Self::Normal(f, _) if f == "math::max" => OptimisedAggregate::MathMax,
-			Self::Normal(f, _) if f == "math::mean" => OptimisedAggregate::MathMean,
-			Self::Normal(f, _) if f == "math::min" => OptimisedAggregate::MathMin,
-			Self::Normal(f, _) if f == "math::sum" => OptimisedAggregate::MathSum,
-			Self::Normal(f, _) if f == "time::max" => OptimisedAggregate::TimeMax,
-			Self::Normal(f, _) if f == "time::min" => OptimisedAggregate::TimeMin,
-			_ => OptimisedAggregate::None,
-		}
-	}
-
-	pub(crate) fn is_count_all(&self) -> bool {
-		matches!(self, Self::Normal(f, p) if f == "count" && p.is_empty() )
-	}
-}
-
-impl Function {
-	/// Process this type returning a computed simple Value
-	///
-	/// Was marked recursive
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Ensure futures are run
-		let opt = &opt.new_with_futures(true);
-		// Process the function type
-		match self {
-			Self::Normal(s, x) => {
-				// Check this function is allowed
-				ctx.check_allowed_function(s)?;
-				// Compute the function arguments
-				let a = stk
-					.scope(|scope| {
-						try_join_all(
-							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-						)
-					})
-					.await?;
-				// Run the normal function
-				Ok(fnc::run(stk, ctx, opt, doc, s, a).await?)
-			}
-			Self::Anonymous(v, x, args_computed) => {
-				let val = match v {
-					c @ Value::Closure(_) => c.clone(),
-					Value::Param(p) => ctx.value(p).cloned().unwrap_or(Value::None),
-					Value::Block(_) | Value::Subquery(_) | Value::Idiom(_) | Value::Function(_) => {
-						stk.run(|stk| v.compute(stk, ctx, opt, doc)).await?
-					}
-					_ => Value::None,
-				};
-
-				match val {
-					Value::Closure(closure) => {
-						// Compute the function arguments
-						let a =
-							match args_computed {
-								true => x.clone(),
-								false => {
-									stk.scope(|scope| {
-										try_join_all(x.iter().map(|v| {
-											scope.run(|stk| v.compute(stk, ctx, opt, doc))
-										}))
-									})
-									.await?
-								}
-							};
-
-						Ok(stk.run(|stk| closure.compute(stk, ctx, opt, doc, a)).await?)
-					}
-					v => Err(ControlFlow::from(Error::InvalidFunction {
-						name: "ANONYMOUS".to_string(),
-						message: format!("'{}' is not a function", v.kindof()),
-					})),
-				}
-			}
-			Self::Custom(s, x) => {
-				// Get the full name of this function
-				let name = format!("fn::{s}");
-				// Check this function is allowed
-				ctx.check_allowed_function(name.as_str())?;
-				// Get the function definition
-				let (ns, db) = opt.ns_db()?;
-				let val = ctx.tx().get_db_function(ns, db, s).await?;
-				// Check permissions
-				if opt.check_perms(Action::View)? {
-					match &val.permissions {
-						Permission::Full => (),
-						Permission::None => {
-							return Err(ControlFlow::from(Error::FunctionPermissions {
-								name: s.to_owned(),
-							}))
-						}
-						Permission::Specific(e) => {
-							// Disable permissions
-							let opt = &opt.new_with_perms(false);
-							// Process the PERMISSION clause
-							if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
-								return Err(ControlFlow::from(Error::FunctionPermissions {
-									name: s.to_owned(),
-								}));
-							}
-						}
-					}
-				}
-				// Get the number of function arguments
-				let max_args_len = val.args.len();
-				// Track the number of required arguments
-				let mut min_args_len = 0;
-				// Check for any final optional arguments
-				val.args.iter().rev().for_each(|(_, kind)| match kind {
-					Kind::Option(_) if min_args_len == 0 => {}
-					Kind::Any if min_args_len == 0 => {}
-					_ => min_args_len += 1,
-				});
-				// Check the necessary arguments are passed
-				if x.len() < min_args_len || max_args_len < x.len() {
-					return Err(ControlFlow::from(Error::InvalidArguments {
-						name: format!("fn::{}", val.name),
-						message: match (min_args_len, max_args_len) {
-							(1, 1) => String::from("The function expects 1 argument."),
-							(r, t) if r == t => format!("The function expects {r} arguments."),
-							(r, t) => format!("The function expects {r} to {t} arguments."),
-						},
-					}));
-				}
-				// Compute the function arguments
-				let a = stk
-					.scope(|scope| {
-						try_join_all(
-							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-						)
-					})
-					.await?;
-				// Duplicate context
-				let mut ctx = MutableContext::new_isolated(ctx);
-				// Process the function arguments
-				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
-					ctx.add_value(name.to_raw(), val.coerce_to(kind)?.into());
-				}
-				let ctx = ctx.freeze();
-				// Run the custom function
-				let result =
-					stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await.catch_return()?;
-
-				if let Some(ref returns) = val.returns {
-					result
-						.coerce_to(returns)
-						.map_err(|e| e.function_check_from_coerce(val.name.to_string()))
-						.map_err(ControlFlow::from)
-				} else {
-					Ok(result)
-				}
-			}
-			#[allow(unused_variables)]
-			Self::Script(s, x) => {
-				#[cfg(feature = "scripting")]
-				{
-					// Check if scripting is allowed
-					ctx.check_allowed_scripting()?;
-					// Compute the function arguments
-					let a = stk
-						.scope(|scope| {
-							try_join_all(
-								x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-							)
-						})
-						.await?;
-					// Run the script function
-					Ok(fnc::script::run(ctx, opt, doc, s, a).await?)
-				}
-				#[cfg(not(feature = "scripting"))]
-				{
-					Err(ControlFlow::Err(Box::new(Error::InvalidScript {
-						message: String::from("Embedded functions are not enabled."),
-					})))
-				}
-			}
-		}
-	}
 }
 
 impl fmt::Display for Function {
@@ -386,7 +200,14 @@ impl fmt::Display for Function {
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
-			Self::Anonymous(p, e, _) => write!(f, "{p}({})", Fmt::comma_separated(e)),
+			Self::Anonymous(p, e, _) => {
+				if BindingPower::for_value(p) < BindingPower::Postfix {
+					write!(f, "({p})")?;
+				} else {
+					write!(f, "{p}")?;
+				}
+				write!(f, "({})", Fmt::comma_separated(e))
+			}
 		}
 	}
 }

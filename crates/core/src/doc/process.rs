@@ -5,23 +5,24 @@ use crate::dbs::Workable;
 use crate::dbs::{Options, Processed};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
+use super::IgnoreError;
+
 impl Document {
-	#[allow(dead_code)]
 	pub(crate) async fn process(
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
-	) -> Result<Value, Error> {
+	) -> Result<Value, IgnoreError> {
 		// Check current context
-		if ctx.is_done(true)? {
+		if ctx.is_done(true).await? {
 			// Don't process the document
-			return Err(Error::Ignore);
+			return Err(IgnoreError::Ignore);
 		}
 		// Setup a new workable
 		let ins = match pro.val {
@@ -35,15 +36,20 @@ impl Document {
 		// Generate a new document id if necessary
 		doc.generate_record_id(stk, ctx, opt, stm).await?;
 		// Process the statement
-		match stm {
-			Statement::Select(_) => doc.select(stk, ctx, opt, stm).await,
-			Statement::Create(_) => doc.create(stk, ctx, opt, stm).await,
-			Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await,
-			Statement::Update(_) => doc.update(stk, ctx, opt, stm).await,
-			Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await,
-			Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
-			Statement::Insert(stm) => doc.insert(stk, ctx, opt, stm).await,
-			stm => Err(fail!("Unexpected statement type: {stm:?}")),
-		}
+		let res = match stm {
+			Statement::Select(_) => doc.select(stk, ctx, opt, stm).await?,
+			Statement::Create(_) => doc.create(stk, ctx, opt, stm).await?,
+			Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await?,
+			Statement::Update(_) => doc.update(stk, ctx, opt, stm).await?,
+			Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await?,
+			Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await?,
+			Statement::Insert(stm) => doc.insert(stk, ctx, opt, stm).await?,
+			stm => {
+				return Err(IgnoreError::from(anyhow::Error::new(Error::unreachable(
+					format_args!("Unexpected statement type: {stm:?}"),
+				))));
+			}
+		};
+		Ok(res)
 	}
 }

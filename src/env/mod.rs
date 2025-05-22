@@ -1,5 +1,5 @@
 use crate::cnf::PKG_VERSION;
-use crate::err::Error;
+use anyhow::Result;
 use std::sync::LazyLock;
 use surrealdb::env::{arch, os};
 
@@ -7,7 +7,7 @@ use surrealdb::env::{arch, os};
 pub static RELEASE: LazyLock<String> =
 	LazyLock::new(|| format!("{} for {} on {}", *PKG_VERSION, os(), arch()));
 
-pub async fn init() -> Result<(), Error> {
+pub fn init() -> Result<()> {
 	// Log version
 	info!("Running {}", *RELEASE);
 	// All ok

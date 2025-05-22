@@ -2,24 +2,24 @@
 
 use crate::fnc::script::{
 	fetch::{
+		RequestError,
 		body::{Body, BodyData, BodyKind},
 		classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
-		RequestError,
 	},
 	modules::surrealdb::query::QueryContext,
 };
 use futures::TryStreamExt;
-use js::{function::Opt, Class, Ctx, Exception, Result, Value};
+use js::{Class, Ctx, Exception, Result, Value, function::Opt};
 use reqwest::{
-	header::{HeaderValue, CONTENT_TYPE},
-	redirect, Body as ReqBody,
+	Body as ReqBody,
+	header::{CONTENT_TYPE, HeaderValue},
+	redirect,
 };
 use std::sync::Arc;
 
 use super::classes::Headers;
 
 #[js::function]
-#[allow(unused_variables)]
 pub async fn fetch<'js>(
 	ctx: Ctx<'js>,
 	input: Value<'js>,
@@ -34,7 +34,9 @@ pub async fn fetch<'js>(
 	let query_ctx = if let Some(query_ctx) = ctx.userdata::<QueryContext<'js>>() {
 		query_ctx.context.clone()
 	} else {
-		panic!("Trying to fetch a URL but no QueryContext is present. QueryContext is required for checking if the URL is allowed to be fetched.")
+		panic!(
+			"Trying to fetch a URL but no QueryContext is present. QueryContext is required for checking if the URL is allowed to be fetched."
+		)
 	};
 
 	query_ctx

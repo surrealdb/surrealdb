@@ -1,32 +1,19 @@
 use crate::err::Error;
+use crate::expr::{Array, Idiom, Object, Value};
 use crate::idx::ft::offsets::{Offset, Position};
-use crate::sql::{Array, Idiom, Object, Value};
-use std::collections::btree_map::Entry as BEntry;
-use std::collections::hash_map::Entry as HEntry;
+use anyhow::{Result, ensure};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::btree_map::Entry as BEntry;
+use std::collections::hash_map::Entry as HEntry;
+use std::convert::Infallible;
+use std::result;
 
 pub(crate) struct HighlightParams {
-	prefix: Value,
-	suffix: Value,
-	match_ref: Value,
-	partial: bool,
-}
-
-impl TryFrom<(Value, Value, Value, Option<Value>)> for HighlightParams {
-	type Error = Error;
-
-	fn try_from(
-		(prefix, suffix, match_ref, partial): (Value, Value, Value, Option<Value>),
-	) -> Result<Self, Error> {
-		let partial = partial.map(|p| p.convert_to_bool()).unwrap_or(Ok(false))?;
-		Ok(Self {
-			prefix,
-			suffix,
-			match_ref,
-			partial,
-		})
-	}
+	pub(crate) prefix: Value,
+	pub(crate) suffix: Value,
+	pub(crate) match_ref: Value,
+	pub(crate) partial: bool,
 }
 
 impl HighlightParams {
@@ -81,9 +68,9 @@ impl Highlighter {
 }
 
 impl TryFrom<Highlighter> for Value {
-	type Error = Error;
+	type Error = anyhow::Error;
 
-	fn try_from(hl: Highlighter) -> Result<Self, Error> {
+	fn try_from(hl: Highlighter) -> Result<Self> {
 		if hl.fields.is_empty() {
 			return Ok(Self::None);
 		}
@@ -99,13 +86,12 @@ impl TryFrom<Highlighter> for Value {
 				let mut d = 0;
 
 				// We use a closure to append the prefix and the suffix
-				let mut append = |s: u32, ix: &Vec<char>| -> Result<(), Error> {
+				let mut append = |s: u32, ix: &Vec<char>| -> Result<()> {
 					let p = (s as usize) + d;
-					if p > l {
-						return Err(Error::HighlightError(format!(
-							"position overflow: {s} - len: {l}"
-						)));
-					}
+					ensure!(
+						p <= l,
+						Error::HighlightError(format!("position overflow: {s} - len: {l}"))
+					);
 					v.splice(p..p, ix.clone());
 					let xl = ix.len();
 					d += xl;
@@ -174,9 +160,9 @@ impl Offseter {
 }
 
 impl TryFrom<Offseter> for Value {
-	type Error = Error;
+	type Error = Infallible;
 
-	fn try_from(or: Offseter) -> Result<Self, Error> {
+	fn try_from(or: Offseter) -> result::Result<Self, Infallible> {
 		if or.offsets.is_empty() {
 			return Ok(Self::None);
 		}
@@ -189,9 +175,10 @@ impl TryFrom<Offseter> for Value {
 			}
 			res.insert(idx.to_string(), Value::Array(Array::from(r)));
 		}
-		Ok(match res.len() {
-			0 => Value::None,
-			_ => Value::from(Object::from(res)),
-		})
+		if res.is_empty() {
+			Ok(Value::None)
+		} else {
+			Ok(Value::from(Object::from(res)))
+		}
 	}
 }

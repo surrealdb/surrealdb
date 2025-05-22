@@ -20,7 +20,6 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 		v if v.starts_with("rocksdb:") => Ok(v.to_string()),
 		v if v.starts_with("surrealkv:") => Ok(v.to_string()),
 		v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
-		v if v.starts_with("surrealcs:") => Ok(v.to_string()),
 		v if v.starts_with("tikv:") => Ok(v.to_string()),
 		v if v.starts_with("fdb:") => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database path parameter")),
@@ -74,7 +73,6 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 		| "surrealkv"
 		| "surrealkv+versioned"
 		| "file"
-		| "surrealcs"
 		| "tikv" => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
@@ -266,6 +264,38 @@ mod tests {
 			route_targets("key,sql").unwrap(),
 			Targets::<RouteTarget>::Some(
 				vec!["key".parse().unwrap(), "sql".parse().unwrap()].into_iter().collect()
+			)
+		);
+	}
+
+	#[test]
+	fn test_arbitrary_query_targets() {
+		assert_eq!(query_arbitrary_targets("*").unwrap(), Targets::<ArbitraryQueryTarget>::All);
+		assert_eq!(query_arbitrary_targets("").unwrap(), Targets::<ArbitraryQueryTarget>::All);
+		assert_eq!(
+			query_arbitrary_targets("guest").unwrap(),
+			Targets::<ArbitraryQueryTarget>::Some(
+				vec![ArbitraryQueryTarget::Guest].into_iter().collect()
+			)
+		);
+		assert_eq!(
+			query_arbitrary_targets("guest,system").unwrap(),
+			Targets::<ArbitraryQueryTarget>::Some(
+				vec![ArbitraryQueryTarget::Guest, ArbitraryQueryTarget::System]
+					.into_iter()
+					.collect()
+			)
+		);
+		assert_eq!(
+			query_arbitrary_targets("guest,record,system").unwrap(),
+			Targets::<ArbitraryQueryTarget>::Some(
+				vec![
+					ArbitraryQueryTarget::Guest,
+					ArbitraryQueryTarget::Record,
+					ArbitraryQueryTarget::System
+				]
+				.into_iter()
+				.collect()
 			)
 		);
 	}

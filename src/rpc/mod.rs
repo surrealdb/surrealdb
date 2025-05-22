@@ -67,7 +67,7 @@ pub(crate) async fn notifications(
 					let id = notification.id.as_ref();
 					// Get the WebSocket for this notification
 					let websocket = {
-						state.live_queries.read().await.get(id).cloned()
+						state.live_queries.read().await.get(id).copied()
 					};
 					// Ensure the specified WebSocket exists
 					if let Some(id) = websocket.as_ref() {

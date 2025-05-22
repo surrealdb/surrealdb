@@ -8,11 +8,16 @@ use crate::sql::order::{OldOrders, Order, OrderList, Ordering};
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::table::Tables;
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
+use std::ops::Deref;
 
-#[revisioned(revision = 3)]
+use super::fmt::Fmt;
+use super::{IdRange, Table};
+
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -22,7 +27,10 @@ pub struct Graph {
 	pub old_expr: Fields,
 	#[revision(start = 3)]
 	pub expr: Option<Fields>,
-	pub what: Tables,
+	#[revision(end = 4, convert_fn = "convert_old_what")]
+	pub _what: Tables,
+	#[revision(start = 4)]
+	pub what: GraphSubjects,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
@@ -63,6 +71,11 @@ impl Graph {
 
 		self.order = Some(Ordering::Order(OrderList(new_ord)));
 
+		Ok(())
+	}
+
+	fn convert_old_what(&mut self, _rev: u16, old: Tables) -> Result<(), revision::Error> {
+		self.what = old.into();
 		Ok(())
 	}
 
@@ -122,6 +135,124 @@ impl Display for Graph {
 				write!(f, " AS {v}")?
 			}
 			f.write_char(')')
+		}
+	}
+}
+
+impl From<Graph> for crate::expr::Graph {
+	fn from(v: Graph) -> Self {
+		Self {
+			dir: v.dir.into(),
+			expr: v.expr.map(Into::into),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			alias: v.alias.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::Graph> for Graph {
+	fn from(v: crate::expr::Graph) -> Self {
+		Graph {
+			dir: v.dir.into(),
+			expr: v.expr.map(Into::into),
+			what: v.what.into(),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			alias: v.alias.map(Into::into),
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub struct GraphSubjects(pub Vec<GraphSubject>);
+
+impl From<Tables> for GraphSubjects {
+	fn from(tbs: Tables) -> Self {
+		Self(tbs.0.into_iter().map(GraphSubject::from).collect())
+	}
+}
+
+impl From<Table> for GraphSubjects {
+	fn from(v: Table) -> Self {
+		GraphSubjects(vec![GraphSubject::Table(v)])
+	}
+}
+
+impl From<GraphSubjects> for crate::expr::graph::GraphSubjects {
+	fn from(v: GraphSubjects) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+impl From<crate::expr::graph::GraphSubjects> for GraphSubjects {
+	fn from(v: crate::expr::graph::GraphSubjects) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl Deref for GraphSubjects {
+	type Target = Vec<GraphSubject>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl Display for GraphSubjects {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&Fmt::comma_separated(&self.0), f)
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum GraphSubject {
+	Table(Table),
+	Range(Table, IdRange),
+}
+
+impl From<Table> for GraphSubject {
+	fn from(x: Table) -> Self {
+		GraphSubject::Table(x)
+	}
+}
+
+impl Display for GraphSubject {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			Self::Table(tb) => Display::fmt(&tb, f),
+			Self::Range(tb, rng) => write!(f, "{tb}:{rng}"),
+		}
+	}
+}
+
+impl From<GraphSubject> for crate::expr::graph::GraphSubject {
+	fn from(v: GraphSubject) -> Self {
+		match v {
+			GraphSubject::Table(tb) => Self::Table(tb.into()),
+			GraphSubject::Range(tb, rng) => Self::Range(tb.into(), rng.into()),
+		}
+	}
+}
+
+impl From<crate::expr::graph::GraphSubject> for GraphSubject {
+	fn from(v: crate::expr::graph::GraphSubject) -> Self {
+		match v {
+			crate::expr::graph::GraphSubject::Table(tb) => Self::Table(tb.into()),
+			crate::expr::graph::GraphSubject::Range(tb, rng) => Self::Range(tb.into(), rng.into()),
 		}
 	}
 }

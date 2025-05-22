@@ -1,16 +1,16 @@
 use super::Content;
-use crate::err::Error;
 use crate::sql;
 use crate::sql::Object;
-use crate::sql::Value;
-use serde::de::IntoDeserializer;
+use crate::sql::SqlValue;
+use anyhow::Result;
 use serde::Deserialize;
+use serde::de::IntoDeserializer;
 use serde_content::Data;
 use serde_content::Expected;
 use serde_content::Unexpected;
 use std::collections::BTreeMap;
 
-pub(super) fn to_value(content: Content) -> Result<Value, Error> {
+pub(super) fn to_value(content: Content) -> Result<SqlValue> {
 	match content {
 		Content::Enum(v) => match v.name.as_ref() {
 			sql::expression::TOKEN => {
@@ -45,7 +45,7 @@ pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 					.map_err(Into::into)
 			}
 			sql::value::TOKEN => {
-				sql::Value::deserialize(Content::Enum(v).into_deserializer()).map_err(Into::into)
+				sql::SqlValue::deserialize(Content::Enum(v).into_deserializer()).map_err(Into::into)
 			}
 			_ => match v.data {
 				Data::Unit => Ok(v.variant.into_owned().into()),
@@ -61,7 +61,7 @@ pub(super) fn to_value(content: Content) -> Result<Value, Error> {
 					let mut map = BTreeMap::new();
 					let value = fields.try_into()?;
 					map.insert(v.variant.into_owned(), value);
-					Ok(Value::Object(Object(map)))
+					Ok(SqlValue::Object(Object(map)))
 				}
 			},
 		},

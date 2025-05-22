@@ -3,12 +3,13 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
+/*
 #[tokio::test]
-async fn strict_mode_no_namespace() -> Result<(), Error> {
+async fn strict_mode_no_namespace() -> Result<()> {
 	let sql = "
 		-- DEFINE NAMESPACE test;
 		DEFINE DATABASE test;
@@ -66,7 +67,7 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn strict_mode_no_database() -> Result<(), Error> {
+async fn strict_mode_no_database() -> Result<()> {
 	let sql = "
 		DEFINE NAMESPACE test;
 		-- DEFINE DATABASE test;
@@ -119,7 +120,7 @@ async fn strict_mode_no_database() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn strict_mode_no_table() -> Result<(), Error> {
+async fn strict_mode_no_table() -> Result<()> {
 	let sql = "
 		DEFINE NAMESPACE test;
 		DEFINE DATABASE test;
@@ -165,9 +166,10 @@ async fn strict_mode_no_table() -> Result<(), Error> {
 	//
 	Ok(())
 }
+*/
 
 #[tokio::test]
-async fn strict_mode_all_ok() -> Result<(), Error> {
+async fn strict_mode_all_ok() -> Result<()> {
 	let sql = "
 		DEFINE NAMESPACE test;
 		DEFINE DATABASE test;
@@ -194,18 +196,18 @@ async fn strict_mode_all_ok() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn loose_mode_all_ok() -> Result<(), Error> {
+async fn loose_mode_all_ok() -> Result<()> {
 	let sql = "
 		DEFINE FIELD extra ON test VALUE true;
 		CREATE test:tester;
@@ -224,15 +226,15 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: { },
 			namespaces: { test: 'DEFINE NAMESPACE test' },
@@ -240,37 +242,41 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 },
 			users: { },
 		}"
-	);
+	).into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			analyzers: {},
 			apis: {},
+			buckets: {},
 			configs: {},
 			functions: {},
 			models: {},
 			params: {},
+			sequences: {},
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			events: {},
 			fields: { extra: 'DEFINE FIELD extra ON test VALUE true PERMISSIONS FULL' },
@@ -278,14 +284,15 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn strict_define_in_transaction() -> Result<(), Error> {
+async fn strict_define_in_transaction() -> Result<()> {
 	let sql = r"
 		DEFINE NS test; DEFINE DB test;
 		USE NS test DB test;

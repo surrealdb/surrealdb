@@ -6,15 +6,16 @@ on:
     types: [opened, edited]
 
 permissions:
-  issues: write
   contents: read
-  pull-requests: write
 
 jobs:
   triage:
+    permissions:
+      issues: write
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
-      - uses: github/issue-labeler@v3.3 #May not be the latest version
+      - uses: github/issue-labeler@6bea9ed491bb74fce38775b3d863e64a59dbd9eb # (Actions must be pinned by commit hash) v3.3
         with:
           configuration-path: .github/labeler.yml
           enable-versioned-regex: 0

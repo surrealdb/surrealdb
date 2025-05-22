@@ -2,9 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
-use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
 use reblessive::tree::Stk;
+
+use super::IgnoreError;
 
 impl Document {
 	pub(super) async fn delete(
@@ -13,13 +14,13 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Value, Error> {
+	) -> Result<Value, IgnoreError> {
 		self.check_record_exists(ctx, opt, stm).await?;
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_where_condition(stk, ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.cleanup_table_references(stk, ctx, opt).await?;
-		self.clear_record_data(ctx, opt, stm).await?;
+		self.clear_record_data();
 		self.store_index_data(stk, ctx, opt, stm).await?;
 		self.purge(stk, ctx, opt, stm).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;

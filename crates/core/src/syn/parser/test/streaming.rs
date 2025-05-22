@@ -1,17 +1,20 @@
 use crate::{
 	sql::{
+		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
+		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
+		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
+		Permission, Permissions, Regex, Scoring, Script, Split, Splits, SqlValue, SqlValues, Start,
+		Statement, Strand, Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Version, With,
 		access::AccessDuration,
 		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
 		block::Entry,
 		changefeed::ChangeFeed,
 		filter::Filter,
+		graph::{GraphSubject, GraphSubjects},
 		index::{Distance, MTreeParams, SearchParams, VectorType},
 		language::Language,
 		order::{OrderList, Ordering},
 		statements::{
-			analyze::AnalyzeStatement,
-			show::{ShowSince, ShowStatement},
-			sleep::SleepStatement,
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
 			CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
 			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
@@ -21,21 +24,19 @@ use crate::{
 			OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
 			RemoveStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
 			UpsertStatement,
+			analyze::AnalyzeStatement,
+			show::{ShowSince, ShowStatement},
+			sleep::SleepStatement,
 		},
 		tokenizer::Tokenizer,
-		Algorithm, Array, Base, Block, Cond, Data, Datetime, Dir, Duration, Edges, Explain,
-		Expression, Fetch, Fetchs, Field, Fields, Future, Graph, Group, Groups, Id, Ident, Idiom,
-		Idioms, Index, Kind, Limit, Number, Object, Operator, Order, Output, Param, Part,
-		Permission, Permissions, Regex, Scoring, Script, Split, Splits, Start, Statement, Strand,
-		Subquery, Table, TableType, Tables, Thing, Timeout, Uuid, Value, Values, Version, With,
 	},
 	syn::parser::StatementStream,
 };
 use bytes::BytesMut;
-use chrono::{offset::TimeZone, NaiveDate, Offset, Utc};
+use chrono::{NaiveDate, Offset, Utc, offset::TimeZone};
 
-fn ident_field(name: &str) -> Value {
-	Value::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))
+fn ident_field(name: &str) -> SqlValue {
+	SqlValue::Idiom(Idiom(vec![Part::Field(Ident(name.to_string()))]))
 }
 
 static SOURCE: &str = r#"
@@ -141,22 +142,22 @@ fn statements() -> Vec<Statement> {
 		Statement::Continue(ContinueStatement),
 		Statement::Create(CreateStatement {
 			only: true,
-			what: Values(vec![Value::Table(Table("foo".to_owned()))]),
+			what: SqlValues(vec![SqlValue::Table(Table("foo".to_owned()))]),
 			data: Some(Data::SetExpression(vec![
 				(
 					Idiom(vec![Part::Field(Ident("bar".to_owned()))]),
 					Operator::Equal,
-					Value::Number(Number::Int(3)),
+					SqlValue::Number(Number::Int(3)),
 				),
 				(
 					Idiom(vec![Part::Field(Ident("foo".to_owned()))]),
 					Operator::Ext,
-					Value::Number(Number::Int(4)),
+					SqlValue::Number(Number::Int(4)),
 				),
 			])),
 			output: Some(Output::Fields(Fields(
 				vec![Field::Single {
-					expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
+					expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 					alias: Some(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
 				}],
 				true,
@@ -242,16 +243,16 @@ fn statements() -> Vec<Statement> {
 		})),
 		Statement::Define(DefineStatement::Param(DefineParamStatement {
 			name: Ident("a".to_string()),
-			value: Value::Object(Object(
+			value: SqlValue::Object(Object(
 				[
-					("a".to_string(), Value::Number(Number::Int(1))),
-					("b".to_string(), Value::Number(Number::Int(3))),
+					("a".to_string(), SqlValue::Number(Number::Int(1))),
+					("b".to_string(), SqlValue::Number(Number::Int(3))),
 				]
 				.into_iter()
 				.collect(),
 			)),
 			comment: None,
-			permissions: Permission::Specific(Value::Null),
+			permissions: Permission::Specific(SqlValue::Null),
 			if_not_exists: false,
 			overwrite: false,
 		})),
@@ -263,7 +264,7 @@ fn statements() -> Vec<Statement> {
 			view: Some(crate::sql::View {
 				expr: Fields(
 					vec![Field::Single {
-						expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
+						expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 						alias: None,
 					}],
 					false,
@@ -273,11 +274,11 @@ fn statements() -> Vec<Statement> {
 				group: Some(Groups(vec![Group(Idiom(vec![Part::Field(Ident("foo".to_owned()))]))])),
 			}),
 			permissions: Permissions {
-				select: Permission::Specific(Value::Expression(Box::new(
+				select: Permission::Specific(SqlValue::Expression(Box::new(
 					crate::sql::Expression::Binary {
-						l: Value::Idiom(Idiom(vec![Part::Field(Ident("a".to_owned()))])),
+						l: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("a".to_owned()))])),
 						o: Operator::Equal,
-						r: Value::Number(Number::Int(1)),
+						r: SqlValue::Number(Number::Int(1)),
 					},
 				))),
 				create: Permission::None,
@@ -300,8 +301,8 @@ fn statements() -> Vec<Statement> {
 		Statement::Define(DefineStatement::Event(DefineEventStatement {
 			name: Ident("event".to_owned()),
 			what: Ident("table".to_owned()),
-			when: Value::Null,
-			then: Values(vec![Value::Null, Value::None]),
+			when: SqlValue::Null,
+			then: SqlValues(vec![SqlValue::Null, SqlValue::None]),
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
@@ -320,13 +321,13 @@ fn statements() -> Vec<Statement> {
 				Kind::Array(Box::new(Kind::Record(vec![Table("foo".to_owned())])), Some(10)),
 			])))),
 			readonly: false,
-			value: Some(Value::Null),
-			assert: Some(Value::Bool(true)),
-			default: Some(Value::Bool(false)),
+			value: Some(SqlValue::Null),
+			assert: Some(SqlValue::Bool(true)),
+			default: Some(SqlValue::Bool(false)),
 			permissions: Permissions {
 				delete: Permission::Full,
 				update: Permission::None,
-				create: Permission::Specific(Value::Bool(true)),
+				create: Permission::Specific(SqlValue::Bool(true)),
 				select: Permission::Full,
 			},
 			comment: None,
@@ -414,9 +415,13 @@ fn statements() -> Vec<Statement> {
 		})),
 		Statement::Delete(DeleteStatement {
 			only: true,
-			what: Values(vec![Value::Mock(crate::sql::Mock::Range("foo".to_string(), 32, 64))]),
+			what: SqlValues(vec![SqlValue::Mock(crate::sql::Mock::Range(
+				"foo".to_string(),
+				32,
+				64,
+			))]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
-			cond: Some(Cond(Value::Number(Number::Int(2)))),
+			cond: Some(Cond(SqlValue::Number(Number::Int(2)))),
 			output: Some(Output::After),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
 			parallel: true,
@@ -424,20 +429,20 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Delete(DeleteStatement {
 			only: true,
-			what: Values(vec![Value::Idiom(Idiom(vec![
-				Part::Start(Value::Edges(Box::new(Edges {
+			what: SqlValues(vec![SqlValue::Idiom(Idiom(vec![
+				Part::Start(SqlValue::Edges(Box::new(Edges {
 					dir: Dir::Out,
 					from: Thing {
 						tb: "a".to_owned(),
 						id: Id::from("b"),
 					},
-					what: Tables::default(),
+					what: GraphSubjects::default(),
 				}))),
 				Part::Last,
-				Part::Where(Value::Bool(true)),
+				Part::Where(SqlValue::Bool(true)),
 			]))]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
-			cond: Some(Cond(Value::Null)),
+			cond: Some(Cond(SqlValue::Null)),
 			output: Some(Output::Null),
 			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
 			parallel: true,
@@ -445,20 +450,22 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Foreach(ForeachStatement {
 			param: Param(Ident("foo".to_owned())),
-			range: Value::Expression(Box::new(Expression::Binary {
-				l: Value::Subquery(Box::new(Subquery::Select(SelectStatement {
+			range: SqlValue::Expression(Box::new(Expression::Binary {
+				l: SqlValue::Subquery(Box::new(Subquery::Select(SelectStatement {
 					expr: Fields(
 						vec![Field::Single {
-							expr: Value::Idiom(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
+							expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident(
+								"foo".to_owned(),
+							))])),
 							alias: None,
 						}],
 						false,
 					),
-					what: Values(vec![Value::Table(Table("bar".to_owned()))]),
+					what: SqlValues(vec![SqlValue::Table(Table("bar".to_owned()))]),
 					..Default::default()
 				}))),
 				o: Operator::Mul,
-				r: Value::Number(Number::Int(2)),
+				r: SqlValue::Number(Number::Int(2)),
 			})),
 			block: Block(vec![Entry::Break(BreakStatement)]),
 		}),
@@ -473,14 +480,14 @@ fn statements() -> Vec<Statement> {
 			exprs: vec![
 				(
 					ident_field("foo"),
-					Value::Block(Box::new(Block(vec![Entry::Value(ident_field("bar"))]))),
+					SqlValue::Block(Box::new(Block(vec![Entry::Value(ident_field("bar"))]))),
 				),
 				(
 					ident_field("faz"),
-					Value::Block(Box::new(Block(vec![Entry::Value(ident_field("baz"))]))),
+					SqlValue::Block(Box::new(Block(vec![Entry::Value(ident_field("baz"))]))),
 				),
 			],
-			close: Some(Value::Block(Box::new(Block(vec![Entry::Value(ident_field("baq"))])))),
+			close: Some(SqlValue::Block(Box::new(Block(vec![Entry::Value(ident_field("baq"))])))),
 		}),
 		Statement::Info(InfoStatement::Root(false)),
 		Statement::Info(InfoStatement::Ns(false)),
@@ -489,18 +496,18 @@ fn statements() -> Vec<Statement> {
 			expr: Fields(
 				vec![
 					Field::Single {
-						expr: Value::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
+						expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
 						alias: Some(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 					},
 					Field::Single {
-						expr: Value::Array(Array(vec![
-							Value::Number(Number::Int(1)),
-							Value::Number(Number::Int(2)),
+						expr: SqlValue::Array(Array(vec![
+							SqlValue::Number(Number::Int(1)),
+							SqlValue::Number(Number::Int(2)),
 						])),
 						alias: None,
 					},
 					Field::Single {
-						expr: Value::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
+						expr: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
 						alias: None,
 					},
 				],
@@ -508,9 +515,12 @@ fn statements() -> Vec<Statement> {
 			),
 			omit: Some(Idioms(vec![Idiom(vec![Part::Field(Ident("bar".to_owned()))])])),
 			only: true,
-			what: Values(vec![Value::Table(Table("a".to_owned())), Value::Number(Number::Int(1))]),
+			what: SqlValues(vec![
+				SqlValue::Table(Table("a".to_owned())),
+				SqlValue::Number(Number::Int(1)),
+			]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
-			cond: Some(Cond(Value::Bool(true))),
+			cond: Some(Cond(SqlValue::Bool(true))),
 			split: Some(Splits(vec![
 				Split(Idiom(vec![Part::Field(Ident("foo".to_owned()))])),
 				Split(Idiom(vec![Part::Field(Ident("bar".to_owned()))])),
@@ -525,17 +535,17 @@ fn statements() -> Vec<Statement> {
 				numeric: true,
 				direction: true,
 			}]))),
-			limit: Some(Limit(Value::Thing(Thing {
+			limit: Some(Limit(SqlValue::Thing(Thing {
 				tb: "a".to_owned(),
 				id: Id::from("b"),
 			}))),
-			start: Some(Start(Value::Object(Object(
-				[("a".to_owned(), Value::Bool(true))].into_iter().collect(),
+			start: Some(Start(SqlValue::Object(Object(
+				[("a".to_owned(), SqlValue::Bool(true))].into_iter().collect(),
 			)))),
-			fetch: Some(Fetchs(vec![Fetch(Value::Idiom(Idiom(vec![Part::Field(Ident(
+			fetch: Some(Fetchs(vec![Fetch(SqlValue::Idiom(Idiom(vec![Part::Field(Ident(
 				"foo".to_owned(),
 			))])))])),
-			version: Some(Version(Value::Datetime(Datetime(expected_datetime)))),
+			version: Some(Version(SqlValue::Datetime(Datetime(expected_datetime)))),
 			timeout: None,
 			parallel: false,
 			tempfiles: false,
@@ -543,7 +553,7 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Set(SetStatement {
 			name: "param".to_owned(),
-			what: Value::Number(Number::Int(1)),
+			what: SqlValue::Number(Number::Int(1)),
 			kind: None,
 		}),
 		Statement::Show(ShowStatement {
@@ -560,37 +570,37 @@ fn statements() -> Vec<Statement> {
 			duration: Duration(std::time::Duration::from_secs(1)),
 		}),
 		Statement::Throw(ThrowStatement {
-			error: Value::Duration(Duration(std::time::Duration::from_secs(1))),
+			error: SqlValue::Duration(Duration(std::time::Duration::from_secs(1))),
 		}),
 		Statement::Insert(InsertStatement {
-			into: Some(Value::Param(Param(Ident("foo".to_owned())))),
+			into: Some(SqlValue::Param(Param(Ident("foo".to_owned())))),
 			data: Data::ValuesExpression(vec![
 				vec![
 					(
 						Idiom(vec![Part::Field(Ident("a".to_owned()))]),
-						Value::Number(Number::Int(1)),
+						SqlValue::Number(Number::Int(1)),
 					),
 					(
 						Idiom(vec![Part::Field(Ident("b".to_owned()))]),
-						Value::Number(Number::Int(2)),
+						SqlValue::Number(Number::Int(2)),
 					),
 					(
 						Idiom(vec![Part::Field(Ident("c".to_owned()))]),
-						Value::Number(Number::Int(3)),
+						SqlValue::Number(Number::Int(3)),
 					),
 				],
 				vec![
 					(
 						Idiom(vec![Part::Field(Ident("a".to_owned()))]),
-						Value::Number(Number::Int(4)),
+						SqlValue::Number(Number::Int(4)),
 					),
 					(
 						Idiom(vec![Part::Field(Ident("b".to_owned()))]),
-						Value::Number(Number::Int(5)),
+						SqlValue::Number(Number::Int(5)),
 					),
 					(
 						Idiom(vec![Part::Field(Ident("c".to_owned()))]),
-						Value::Number(Number::Int(6)),
+						SqlValue::Number(Number::Int(6)),
 					),
 				],
 			]),
@@ -602,7 +612,7 @@ fn statements() -> Vec<Statement> {
 						Part::Field(Ident("b".to_owned())),
 					]),
 					Operator::Ext,
-					Value::Null,
+					SqlValue::Null,
 				),
 				(
 					Idiom(vec![
@@ -610,7 +620,7 @@ fn statements() -> Vec<Statement> {
 						Part::Field(Ident("d".to_owned())),
 					]),
 					Operator::Inc,
-					Value::None,
+					SqlValue::None,
 				),
 			])),
 			output: Some(Output::After),
@@ -620,7 +630,7 @@ fn statements() -> Vec<Statement> {
 			relation: false,
 		}),
 		Statement::Kill(KillStatement {
-			id: Value::Uuid(Uuid(uuid::uuid!("e72bee20-f49b-11ec-b939-0242ac120002"))),
+			id: SqlValue::Uuid(Uuid(uuid::uuid!("e72bee20-f49b-11ec-b939-0242ac120002"))),
 		}),
 		Statement::Output(OutputStatement {
 			what: ident_field("RETRUN"),
@@ -628,17 +638,17 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Relate(RelateStatement {
 			only: true,
-			kind: Value::Thing(Thing {
+			kind: SqlValue::Thing(Thing {
 				tb: "a".to_owned(),
 				id: Id::from("b"),
 			}),
-			from: Value::Array(Array(vec![
-				Value::Number(Number::Int(1)),
-				Value::Number(Number::Int(2)),
+			from: SqlValue::Array(Array(vec![
+				SqlValue::Number(Number::Int(1)),
+				SqlValue::Number(Number::Int(2)),
 			])),
-			with: Value::Subquery(Box::new(Subquery::Create(CreateStatement {
+			with: SqlValue::Subquery(Box::new(Subquery::Create(CreateStatement {
 				only: false,
-				what: Values(vec![Value::Table(Table("foo".to_owned()))]),
+				what: SqlValues(vec![SqlValue::Table(Table("foo".to_owned()))]),
 				data: None,
 				output: None,
 				timeout: None,
@@ -649,7 +659,7 @@ fn statements() -> Vec<Statement> {
 			data: Some(Data::SetExpression(vec![(
 				Idiom(vec![Part::Field(Ident("a".to_owned()))]),
 				Operator::Inc,
-				Value::Number(Number::Int(1)),
+				SqlValue::Number(Number::Int(1)),
 			)])),
 			output: Some(Output::None),
 			timeout: None,
@@ -670,28 +680,28 @@ fn statements() -> Vec<Statement> {
 		})),
 		Statement::Update(UpdateStatement {
 			only: true,
-			what: Values(vec![
-				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(
-					"text".to_string(),
-				)))])))),
-				Value::Idiom(Idiom(vec![
+			what: SqlValues(vec![
+				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
+					Strand("text".to_string()),
+				))])))),
+				SqlValue::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
 						dir: Dir::Out,
-						what: Tables(vec![Table("b".to_string())]),
+						what: GraphSubjects(vec![GraphSubject::Table(Table("b".to_string()))]),
 						..Default::default()
 					}),
 				])),
 			]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
-			cond: Some(Cond(Value::Bool(true))),
+			cond: Some(Cond(SqlValue::Bool(true))),
 			data: Some(Data::UnsetExpression(vec![
 				Idiom(vec![Part::Field(Ident("foo".to_string())), Part::Flatten]),
 				Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
 						dir: Dir::Out,
-						what: Tables(vec![Table("b".to_string())]),
+						what: GraphSubjects(vec![GraphSubject::Table(Table("b".to_string()))]),
 						..Default::default()
 					}),
 				]),
@@ -704,28 +714,28 @@ fn statements() -> Vec<Statement> {
 		}),
 		Statement::Upsert(UpsertStatement {
 			only: true,
-			what: Values(vec![
-				Value::Future(Box::new(Future(Block(vec![Entry::Value(Value::Strand(Strand(
-					"text".to_string(),
-				)))])))),
-				Value::Idiom(Idiom(vec![
+			what: SqlValues(vec![
+				SqlValue::Future(Box::new(Future(Block(vec![Entry::Value(SqlValue::Strand(
+					Strand("text".to_string()),
+				))])))),
+				SqlValue::Idiom(Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
 						dir: Dir::Out,
-						what: Tables(vec![Table("b".to_string())]),
+						what: GraphSubjects(vec![GraphSubject::Table(Table("b".to_string()))]),
 						..Default::default()
 					}),
 				])),
 			]),
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
-			cond: Some(Cond(Value::Bool(true))),
+			cond: Some(Cond(SqlValue::Bool(true))),
 			data: Some(Data::UnsetExpression(vec![
 				Idiom(vec![Part::Field(Ident("foo".to_string())), Part::Flatten]),
 				Idiom(vec![
 					Part::Field(Ident("a".to_string())),
 					Part::Graph(Graph {
 						dir: Dir::Out,
-						what: Tables(vec![Table("b".to_string())]),
+						what: GraphSubjects(vec![GraphSubject::Table(Table("b".to_string()))]),
 						..Default::default()
 					}),
 				]),
@@ -736,22 +746,22 @@ fn statements() -> Vec<Statement> {
 			parallel: true,
 			explain: Some(Explain(true)),
 		}),
-		Statement::Value(Value::Function(Box::new(crate::sql::Function::Script(
+		Statement::Value(SqlValue::Function(Box::new(crate::sql::Function::Script(
 			Script(" ((1 + 1)) ".to_owned()),
 			Vec::new(),
 		)))),
-		Statement::Value(Value::Strand(Strand("a b c d e f g h".to_owned()))),
-		Statement::Value(Value::Uuid(Uuid(uuid::Uuid::from_u128(
+		Statement::Value(SqlValue::Strand(Strand("a b c d e f g h".to_owned()))),
+		Statement::Value(SqlValue::Uuid(Uuid(uuid::Uuid::from_u128(
 			0xffffffff_ffff_ffff_ffff_ffffffffffff,
 		)))),
-		Statement::Value(Value::Thing(Thing {
+		Statement::Value(SqlValue::Thing(Thing {
 			tb: "a".to_string(),
 			id: Id::Array(Array(
-				[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].iter().copied().map(Value::from).collect(),
+				[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].iter().copied().map(SqlValue::from).collect(),
 			)),
 		})),
-		Statement::Value(Value::Regex(Regex("a b c d e f".try_into().unwrap()))),
-		Statement::Value(Value::from(-123.456e10)),
+		Statement::Value(SqlValue::Regex(Regex("a b c d e f".try_into().unwrap()))),
+		Statement::Value(SqlValue::from(-123.456e10)),
 	]
 }
 

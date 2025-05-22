@@ -1,10 +1,10 @@
-use crate::err::Error;
 use crate::idx::docids::DocId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore, Payload};
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType};
+use anyhow::Result;
 
 pub(super) type DocLength = u64;
 
@@ -21,7 +21,7 @@ impl DocLengths {
 		default_btree_order: u32,
 		tt: TransactionType,
 		cache_size: u32,
-	) -> Result<Self, Error> {
+	) -> Result<Self> {
 		let state_key: Key = ikb.new_bl_key(None)?;
 		let state: BState = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
@@ -48,7 +48,7 @@ impl DocLengths {
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
-	) -> Result<Option<DocLength>, Error> {
+	) -> Result<Option<DocLength>> {
 		self.btree.search(tx, &self.store, &doc_id.to_be_bytes().to_vec()).await
 	}
 
@@ -56,7 +56,7 @@ impl DocLengths {
 		&mut self,
 		tx: &Transaction,
 		doc_id: DocId,
-	) -> Result<Option<DocLength>, Error> {
+	) -> Result<Option<DocLength>> {
 		self.btree.search_mut(tx, &mut self.store, &doc_id.to_be_bytes().to_vec()).await
 	}
 
@@ -65,7 +65,7 @@ impl DocLengths {
 		tx: &Transaction,
 		doc_id: DocId,
 		doc_length: DocLength,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		self.btree.insert(tx, &mut self.store, doc_id.to_be_bytes().to_vec(), doc_length).await?;
 		Ok(())
 	}
@@ -74,15 +74,15 @@ impl DocLengths {
 		&mut self,
 		tx: &Transaction,
 		doc_id: DocId,
-	) -> Result<Option<Payload>, Error> {
+	) -> Result<Option<Payload>> {
 		self.btree.delete(tx, &mut self.store, doc_id.to_be_bytes().to_vec()).await
 	}
 
-	pub(super) async fn statistics(&self, tx: &Transaction) -> Result<BStatistics, Error> {
+	pub(super) async fn statistics(&self, tx: &Transaction) -> Result<BStatistics> {
 		self.btree.statistics(tx, &self.store).await
 	}
 
-	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<(), Error> {
+	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
 			tx.set(self.state_key.clone(), VersionedStore::try_into(state)?, None).await?;
@@ -94,8 +94,8 @@ impl DocLengths {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::doclength::DocLengths;
 	use crate::idx::IndexKeyBase;
+	use crate::idx::ft::doclength::DocLengths;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 
 	async fn doc_length(

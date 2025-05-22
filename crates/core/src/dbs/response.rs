@@ -1,18 +1,22 @@
-use crate::err::Error;
-use crate::sql::Value as CoreValue;
-use revision::revisioned;
+use crate::expr::Value as CoreValue;
+use crate::sql::statement::Statement;
+use anyhow::Result;
 use revision::Revisioned;
-use serde::ser::SerializeStruct;
+use revision::revisioned;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::ser::SerializeStruct;
 use std::time::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
-#[derive(Debug)]
+#[revisioned(revision = 1)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum QueryType {
 	// Any kind of query
+	#[default]
 	Other,
 	// Indicates that the response live query id must be tracked
 	Live,
@@ -20,12 +24,28 @@ pub enum QueryType {
 	Kill,
 }
 
+impl QueryType {
+	fn is_other(&self) -> bool {
+		matches!(self, Self::Other)
+	}
+}
+
+impl From<&Statement> for QueryType {
+	fn from(stmt: &Statement) -> Self {
+		match stmt {
+			Statement::Live(_) => QueryType::Live,
+			Statement::Kill(_) => QueryType::Kill,
+			_ => QueryType::Other,
+		}
+	}
+}
+
 /// The return value when running a query set on the database.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Response {
 	pub time: Duration,
-	pub result: Result<CoreValue, Error>,
+	pub result: Result<CoreValue>,
 	// Record the query type in case processing the response is necessary (such as tracking live queries).
 	pub query_type: QueryType,
 }
@@ -37,7 +57,7 @@ impl Response {
 	}
 
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<CoreValue, Error> {
+	pub fn output(self) -> Result<CoreValue> {
 		self.result
 	}
 }
@@ -56,8 +76,21 @@ impl Serialize for Response {
 	where
 		S: serde::Serializer,
 	{
-		let mut val = serializer.serialize_struct(TOKEN, 3)?;
+		let includes_type = !self.query_type.is_other();
+		let mut val = serializer.serialize_struct(
+			TOKEN,
+			if includes_type {
+				3
+			} else {
+				4
+			},
+		)?;
+
 		val.serialize_field("time", self.speed().as_str())?;
+		if includes_type {
+			val.serialize_field("type", &self.query_type)?;
+		}
+
 		match &self.result {
 			Ok(v) => {
 				val.serialize_field("status", &Status::Ok)?;
@@ -101,14 +134,12 @@ impl Revisioned for Response {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
-	) -> std::result::Result<(), revision::Error> {
+	) -> Result<(), revision::Error> {
 		QueryMethodResponse::from(self).serialize_revisioned(writer)
 	}
 
 	#[inline]
-	fn deserialize_revisioned<R: std::io::Read>(
-		_reader: &mut R,
-	) -> std::result::Result<Self, revision::Error> {
+	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
 		unreachable!("deserialising `Response` directly is not supported")
 	}
 

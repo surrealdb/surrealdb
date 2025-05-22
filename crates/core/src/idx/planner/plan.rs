@@ -1,12 +1,12 @@
-use crate::err::Error;
+use crate::expr::with::With;
+use crate::expr::{Array, Expression, Idiom, Number, Object};
+use crate::expr::{Operator, Value};
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
-use crate::sql::with::With;
-use crate::sql::{Array, Expression, Idiom, Number, Object};
-use crate::sql::{Operator, Value};
+use anyhow::Result;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
@@ -37,11 +37,10 @@ pub(super) struct PlanBuilderParameters {
 }
 
 impl PlanBuilder {
-	#[allow(clippy::mutable_key_type)]
 	pub(super) async fn build(
 		ctx: &StatementContext<'_>,
 		p: PlanBuilderParameters,
-	) -> Result<Plan, Error> {
+	) -> Result<Plan> {
 		let mut b = PlanBuilder {
 			has_indexes: false,
 			non_range_indexes: Default::default(),
@@ -78,7 +77,8 @@ impl PlanBuilder {
 			}
 			if let Some((_, io)) = compound_index {
 				// Evaluate if we can use keys only
-				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+				let record_strategy =
+					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
@@ -87,23 +87,31 @@ impl PlanBuilder {
 			if let Some((_, group)) = b.groups.into_iter().next() {
 				if let Some((ir, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
-					let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+					let record_strategy =
+						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+					let is_order = if let Some(io) = p.order_limit {
+						io.ixr == ir
+					} else {
+						false
+					};
 					// Return the plan
-					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy));
+					return Ok(Plan::SingleIndexRange(ir, rq, record_strategy, is_order));
 				}
 			}
 
 			// Otherwise, we try to find the most interesting (todo: TBD) single index option
 			if let Some((e, i)) = b.non_range_indexes.pop() {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+				let record_strategy =
+					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
 			}
 			// If there is an order option
 			if let Some(o) = p.order_limit {
 				// Evaluate the record strategy
-				let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+				let record_strategy =
+					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Check it is compatible with the reverse scan capability
 				if Self::check_order_scan(p.reverse_scan, o.op()) {
 					// Return the plan
@@ -122,7 +130,7 @@ impl PlanBuilder {
 				}
 			}
 			// Evaluate the record strategy
-			let record_strategy = ctx.check_record_strategy(true, p.gp)?;
+			let record_strategy = ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
@@ -133,7 +141,7 @@ impl PlanBuilder {
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
 		granted_permission: GrantedPermission,
-	) -> Result<Plan, Error> {
+	) -> Result<Plan> {
 		// Evaluate the record strategy
 		let rs = ctx.check_record_strategy(false, granted_permission)?;
 		// Evaluate the scan direction
@@ -298,7 +306,8 @@ pub(super) enum Plan {
 	/// 1. The reference to index
 	/// 2. The index range
 	/// 3. A record strategy
-	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy),
+	/// 4. True if it matches an order option
+	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, bool),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
@@ -345,6 +354,10 @@ impl IndexOption {
 		matches!(self.op.as_ref(), IndexOperator::Union(_))
 	}
 
+	pub(super) fn is_order(&self) -> bool {
+		matches!(self.op.as_ref(), IndexOperator::Order(_))
+	}
+
 	pub(super) fn ix_ref(&self) -> &IndexReference {
 		&self.ixr
 	}
@@ -372,7 +385,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		e.insert("index", Value::from(self.ix_ref().name.0.to_owned()));
+		e.insert("index", Value::from(self.ix_ref().name.0.clone()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(Operator::Equal.to_string()));
@@ -491,7 +504,7 @@ impl RangeValue {
 impl From<&RangeValue> for Value {
 	fn from(rv: &RangeValue) -> Self {
 		Value::from(Object::from(HashMap::from([
-			("value", rv.value.to_owned()),
+			("value", rv.value.clone()),
 			("inclusive", Value::from(rv.inclusive)),
 		])))
 	}
@@ -575,27 +588,28 @@ impl UnionRangeQueryBuilder {
 
 #[cfg(test)]
 mod tests {
+	use crate::expr::{Array, Idiom, Value};
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-	use crate::sql::{Array, Idiom, Value};
+	use crate::sql::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
-	#[allow(clippy::mutable_key_type)]
+	#[expect(clippy::mutable_key_type)]
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::parse("test").into()),
+			Some(Idiom::from(SqlIdiom::parse("test")).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::parse("test").into()),
+			Some(Idiom::from(SqlIdiom::parse("test")).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
