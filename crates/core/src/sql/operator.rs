@@ -8,7 +8,7 @@ use std::fmt::Write;
 use super::SqlValue;
 
 /// Binary operators.
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -37,10 +37,14 @@ pub enum Operator {
 	AllEqual, // *=
 	AnyEqual, // ?=
 	//
-	Like,                      // ~
-	NotLike,                   // !~
-	AllLike,                   // *~
-	AnyLike,                   // ?~
+	#[revision(end = 3, convert_fn = "like_convert")]
+	Like, // ~
+	#[revision(end = 3, convert_fn = "like_convert")]
+	NotLike, // !~
+	#[revision(end = 3, convert_fn = "like_convert")]
+	AllLike, // *~
+	#[revision(end = 3, convert_fn = "like_convert")]
+	AnyLike, // ?~
 	Matches(Option<MatchRef>), // @{ref}@
 	//
 	LessThan,        // <
@@ -67,6 +71,14 @@ pub enum Operator {
 	Ann(u32, u32), // <|{k},{ef}|>
 	//
 	Rem, // %
+}
+
+impl Operator {
+	fn like_convert<T>(_: T, _revision: u16) -> Result<Self, revision::Error> {
+		return Err(revision::Error::Conversion(
+			"Like operators are no longer supported".to_owned(),
+		));
+	}
 }
 
 impl Default for Operator {
@@ -98,10 +110,6 @@ impl fmt::Display for Operator {
 			Self::NotEqual => f.write_str("!="),
 			Self::AllEqual => f.write_str("*="),
 			Self::AnyEqual => f.write_str("?="),
-			Self::Like => f.write_char('~'),
-			Self::NotLike => f.write_str("!~"),
-			Self::AllLike => f.write_str("*~"),
-			Self::AnyLike => f.write_str("?~"),
 			Self::LessThan => f.write_char('<'),
 			Self::LessThanOrEqual => f.write_str("<="),
 			Self::MoreThan => f.write_char('>'),
@@ -162,10 +170,6 @@ impl From<Operator> for crate::expr::Operator {
 			Operator::NotEqual => crate::expr::Operator::NotEqual,
 			Operator::AllEqual => crate::expr::Operator::AllEqual,
 			Operator::AnyEqual => crate::expr::Operator::AnyEqual,
-			Operator::Like => crate::expr::Operator::Like,
-			Operator::NotLike => crate::expr::Operator::NotLike,
-			Operator::AllLike => crate::expr::Operator::AllLike,
-			Operator::AnyLike => crate::expr::Operator::AnyLike,
 			Operator::Matches(r) => crate::expr::Operator::Matches(r),
 			Operator::LessThan => crate::expr::Operator::LessThan,
 			Operator::LessThanOrEqual => crate::expr::Operator::LessThanOrEqual,
@@ -212,10 +216,6 @@ impl From<crate::expr::Operator> for Operator {
 			crate::expr::Operator::NotEqual => Self::NotEqual,
 			crate::expr::Operator::AllEqual => Self::AllEqual,
 			crate::expr::Operator::AnyEqual => Self::AnyEqual,
-			crate::expr::Operator::Like => Self::Like,
-			crate::expr::Operator::NotLike => Self::NotLike,
-			crate::expr::Operator::AllLike => Self::AllLike,
-			crate::expr::Operator::AnyLike => Self::AnyLike,
 			crate::expr::Operator::Matches(r) => Self::Matches(r),
 			crate::expr::Operator::LessThan => Self::LessThan,
 			crate::expr::Operator::LessThanOrEqual => Self::LessThanOrEqual,
@@ -279,11 +279,7 @@ impl BindingPower {
 			| Operator::Exact
 			| Operator::NotEqual
 			| Operator::AllEqual
-			| Operator::AnyEqual
-			| Operator::Like
-			| Operator::NotLike
-			| Operator::AllLike
-			| Operator::AnyLike => BindingPower::Equality,
+			| Operator::AnyEqual => BindingPower::Equality,
 
 			Operator::LessThan
 			| Operator::LessThanOrEqual
