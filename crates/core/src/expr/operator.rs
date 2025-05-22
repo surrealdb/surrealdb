@@ -75,9 +75,7 @@ pub enum Operator {
 
 impl Operator {
 	fn like_convert<T>(_: T, _revision: u16) -> Result<Self, revision::Error> {
-		return Err(revision::Error::Conversion(
-			"Like operators are no longer supported".to_owned(),
-		));
+		Err(revision::Error::Conversion("Like operators are no longer supported".to_owned()))
 	}
 }
 
