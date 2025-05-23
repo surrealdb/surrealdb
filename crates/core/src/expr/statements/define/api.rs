@@ -47,7 +47,7 @@ impl DefineApiStatement {
 		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::ApAlreadyExists {
 					value: self.path.to_string(),
 				});

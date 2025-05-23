@@ -44,7 +44,7 @@ impl DefineDatabaseStatement {
 		if txn.get_db(ns, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::DbAlreadyExists {
 					name: self.name.to_string(),
 				});

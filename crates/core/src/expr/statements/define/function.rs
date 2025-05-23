@@ -47,7 +47,7 @@ impl DefineFunctionStatement {
 		if txn.get_db_function(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::FcAlreadyExists {
 					name: self.name.to_string(),
 				});
