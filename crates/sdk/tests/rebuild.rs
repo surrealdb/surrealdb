@@ -6,7 +6,7 @@ use helpers::*;
 
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn rebuild_index_statement() -> Result<()> {
@@ -36,7 +36,7 @@ async fn rebuild_index_statement() -> Result<()> {
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 				events: {},
 				fields: {},
@@ -54,7 +54,7 @@ async fn rebuild_index_statement() -> Result<()> {
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 				events: {},
 				fields: {},
@@ -70,7 +70,7 @@ async fn rebuild_index_statement() -> Result<()> {
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	// Check record is found
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					author: 'Maxwell Flitton',

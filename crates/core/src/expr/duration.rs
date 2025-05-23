@@ -81,7 +81,7 @@ impl TryFrom<&str> for Duration {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match syn::duration(v) {
-			Ok(v) => Ok(v),
+			Ok(v) => Ok(v.into()),
 			_ => Err(()),
 		}
 	}

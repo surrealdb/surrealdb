@@ -13,7 +13,6 @@ use serde_content::Serializer;
 use serde_content::Unexpected;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::fmt::Display;
 
 type Content = serde_content::Value<'static>;
 
@@ -167,29 +166,14 @@ impl TryFrom<(Cow<'static, str>, Content)> for Value {
 	}
 }
 
-impl serde::ser::Error for Error {
-	fn custom<T>(msg: T) -> Self
-	where
-		T: Display,
-	{
-		Self::Serialization(msg.to_string())
-	}
-}
-
-impl From<serde_content::Error> for Error {
-	fn from(error: serde_content::Error) -> Self {
-		Self::Serialization(error.to_string())
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::expr;
 	use crate::expr::Number;
 	use crate::expr::block::Entry;
 	use crate::expr::statements::CreateStatement;
 	use crate::expr::*;
+	use crate::sql;
 	use ::serde::Serialize;
 	use graph::{GraphSubject, GraphSubjects};
 	use std::ops::Bound;
@@ -355,7 +339,7 @@ mod tests {
 
 	#[test]
 	fn thing() {
-		let record_id = expr::thing("foo:bar").unwrap();
+		let record_id: Thing = sql::thing("foo:bar").unwrap().into();
 		let value = to_value(record_id.clone()).unwrap();
 		let expected = Value::Thing(record_id);
 		assert_eq!(value, expected);
@@ -405,7 +389,7 @@ mod tests {
 	fn edges() {
 		let edges = Box::new(Edges {
 			dir: Dir::In,
-			from: expr::thing("foo:bar").unwrap(),
+			from: sql::thing("foo:bar").unwrap().into(),
 			what: GraphSubjects(vec![GraphSubject::Table(Table("foo".into()))]),
 		});
 		let value = to_value(edges.clone()).unwrap();
@@ -449,7 +433,7 @@ mod tests {
 
 	#[test]
 	fn query() {
-		let query = expr::parse("SELECT * FROM foo").unwrap();
+		let query: Query = sql::parse("SELECT * FROM foo").unwrap().into();
 		let value = to_value(query.clone()).unwrap();
 		let expected = Value::Query(query);
 		assert_eq!(value, expected);

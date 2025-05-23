@@ -8,7 +8,7 @@ use crate::expr::{self, Table};
 use crate::expr::{Cond, Fields};
 use crate::expr::{Expression, Value as SqlValue};
 use crate::expr::{Idiom, Kind};
-use crate::expr::{Statement, Thing};
+use crate::expr::{LogicalPlan, Thing};
 use crate::gql::ext::TryAsExt;
 use crate::gql::schema::{kind_to_type, unwrap_type};
 use crate::kvs::{Datastore, Transaction};
@@ -188,7 +188,7 @@ pub async fn process_tbs(
                     trace!("parsed filter: {cond:?}");
 
                     // SELECT VALUE id FROM ...
-                    let ast = Statement::Select({
+                    let ast = LogicalPlan::Select({
                         SelectStatement {
                             what: vec![SqlValue::Table(tb_name.intox())].into(),
                             expr: Fields(

@@ -5,7 +5,8 @@ use crate::helpers::{Test, skip_ok};
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Value;
+use surrealdb::expr::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn select_where_matches_using_index() -> Result<()> {
@@ -24,7 +25,7 @@ async fn select_where_matches_using_index() -> Result<()> {
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 					{
 						detail: {
@@ -47,7 +48,7 @@ async fn select_where_matches_using_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: blog:1,
@@ -77,7 +78,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<()> {
 	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -108,7 +109,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: blog:1,
@@ -143,7 +144,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 					{
 						detail: {
@@ -167,7 +168,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: blog:1,
@@ -215,7 +216,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: blog:1,
@@ -227,7 +228,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: blog:1,
@@ -239,7 +240,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 					{
 						content: {
@@ -258,7 +259,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 					{
 						content: {
@@ -300,7 +301,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 	//
 	for i in 0..3 {
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: blog:1,
@@ -312,7 +313,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: blog:1,
@@ -324,7 +325,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 					{
 						content: {
@@ -343,7 +344,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 					{
 						content: {
@@ -385,7 +386,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 					{
 						detail: {
@@ -409,7 +410,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: blog:1,
@@ -453,7 +454,7 @@ async fn select_where_matches_using_index_offsets() -> Result<()> {
 	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: blog:1,
@@ -490,7 +491,7 @@ async fn select_where_matches_using_index_and_score() -> Result<()> {
 	skip_ok(res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: blog:3,
@@ -527,7 +528,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 	skip_ok(res, 7)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: blog:3,
@@ -539,7 +540,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 
 	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val: Value = SqlValue::parse("[]").into();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -577,7 +578,7 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 	skip_ok(res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val_docs = Value::parse(
+	let val_docs = SqlValue::parse(
 		"[
 				{
 					id: page:1,
@@ -594,7 +595,7 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				detail: {
@@ -666,7 +667,7 @@ async fn select_where_matches_mixing_indexes() -> Result<()> {
 	skip_ok(res, 5)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					detail: {
@@ -701,7 +702,7 @@ async fn select_where_matches_mixing_indexes() -> Result<()> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 				{
 					id: person:1,

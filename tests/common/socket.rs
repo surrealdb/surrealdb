@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::result::Result as StdResult;
 use std::time::Duration;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 use tokio::net::TcpStream;
 use tokio::sync::{
 	mpsc::{self, Receiver, Sender},
@@ -184,7 +184,7 @@ impl Socket {
 						// First of all we deserialize the CBOR data.
 						let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
 						// Then we convert it to a SurrealQL Value.
-						let msg: Value = Cbor(msg).try_into()?;
+						let msg: SqlValue = Cbor(msg).try_into()?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json();
 						// Then output the response.

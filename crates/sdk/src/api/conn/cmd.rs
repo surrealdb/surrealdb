@@ -8,8 +8,15 @@ use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
 use surrealdb_core::dbs::Notification;
-use surrealdb_core::expr::{Array as CoreArray, Object as CoreObject, Query, Value as CoreValue};
+#[allow(unused_imports)]
+use surrealdb_core::expr::{
+	Array as CoreArray, Object as CoreObject, Query as CoreQuery, Value as CoreValue,
+};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
+#[allow(unused_imports)]
+use surrealdb_core::sql::{
+	Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
+};
 use uuid::Uuid;
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
@@ -70,7 +77,7 @@ pub(crate) enum Command {
 		what: Resource,
 	},
 	Query {
-		query: Query,
+		query: CoreSqlQuery,
 		variables: CoreObject,
 	},
 	RawQuery {
@@ -125,8 +132,8 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		use crate::api::engine::resource_to_values;
-		use surrealdb_core::expr::{
+		use crate::api::engine::resource_to_sql_values;
+		use surrealdb_core::sql::{
 			Data, Output,
 			statements::{UpdateStatement, UpsertStatement},
 		};
@@ -263,20 +270,21 @@ impl Command {
 			} => {
 				let query = if upsert {
 					let mut stmt = UpsertStatement::default();
-					stmt.what = resource_to_values(what);
-					stmt.data = data.map(Data::PatchExpression);
+					stmt.what = resource_to_sql_values(what);
+					stmt.data = data.map(|d| Data::PatchExpression(d.into()));
 					stmt.output = Some(Output::After);
-					Query::from(stmt)
+					CoreSqlQuery::from(stmt)
 				} else {
 					let mut stmt = UpdateStatement::default();
-					stmt.what = resource_to_values(what);
-					stmt.data = data.map(Data::PatchExpression);
+					stmt.what = resource_to_sql_values(what);
+					stmt.data = data.map(|d| Data::PatchExpression(d.into()));
 					stmt.output = Some(Output::After);
-					Query::from(stmt)
+					CoreSqlQuery::from(stmt)
 				};
 
-				let variables = CoreObject::default();
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				let variables = CoreSqlObject::default();
+				let params: Vec<CoreValue> =
+					vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
 
 				RouterRequest {
 					id,
@@ -292,20 +300,21 @@ impl Command {
 			} => {
 				let query = if upsert {
 					let mut stmt = UpsertStatement::default();
-					stmt.what = resource_to_values(what);
-					stmt.data = data.map(Data::MergeExpression);
+					stmt.what = resource_to_sql_values(what);
+					stmt.data = data.map(|d| Data::MergeExpression(d.into()));
 					stmt.output = Some(Output::After);
-					Query::from(stmt)
+					CoreSqlQuery::from(stmt)
 				} else {
 					let mut stmt = UpdateStatement::default();
-					stmt.what = resource_to_values(what);
-					stmt.data = data.map(Data::MergeExpression);
+					stmt.what = resource_to_sql_values(what);
+					stmt.data = data.map(|d| Data::MergeExpression(d.into()));
 					stmt.output = Some(Output::After);
-					Query::from(stmt)
+					CoreSqlQuery::from(stmt)
 				};
 
-				let variables = CoreObject::default();
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				let variables = CoreSqlObject::default();
+				let params: Vec<CoreValue> =
+					vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
 
 				RouterRequest {
 					id,
@@ -333,7 +342,7 @@ impl Command {
 				query,
 				variables,
 			} => {
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				let params: Vec<CoreValue> = vec![CoreQuery::from(query).into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",

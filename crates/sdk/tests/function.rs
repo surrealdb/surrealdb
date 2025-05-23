@@ -1,12 +1,13 @@
 mod parse;
 use parse::Parse;
+use surrealdb::expr::{Number, Value};
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::{self, Number, Value};
+use surrealdb::sql::{self, SqlValue};
 
 async fn test_queries(sql: &str, desired_responses: &[&str]) -> Result<()> {
 	Test::new(sql).await?.expect_vals(desired_responses)?;
@@ -39,7 +40,7 @@ macro_rules! assert_delta {
 async fn error_on_invalid_function() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut query = sql::Query::default();
-	query.0.0 = vec![sql::Statement::Value(Value::Function(Box::new(sql::Function::Normal(
+	query.0.0 = vec![sql::Statement::Value(SqlValue::Function(Box::new(sql::Function::Normal(
 		"this is an invalid function name".to_string(),
 		Vec::new(),
 	))))];
@@ -115,7 +116,7 @@ async fn function_rand_ulid_from_datetime() -> Result<()> {
 	assert!(tmp.is_object());
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::parse("[2, 3]"));
+	assert_eq!(tmp, SqlValue::parse("[2, 3]").into());
 	//
 	Ok(())
 }
@@ -161,7 +162,7 @@ async fn function_rand_uuid_from_datetime() -> Result<()> {
 	assert!(tmp.is_object());
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::parse("[2, 3]"));
+	assert_eq!(tmp, SqlValue::parse("[2, 3]").into());
 	//
 	Ok(())
 }
@@ -220,7 +221,7 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 	assert!(tmp.is_object());
 	//
 	let tmp = test.next()?.result?;
-	assert_eq!(tmp, Value::parse("[2, 3]"));
+	assert_eq!(tmp, SqlValue::parse("[2, 3]").into());
 	//
 	Ok(())
 }
@@ -433,7 +434,7 @@ async fn function_search_analyzer() -> Result<()> {
 	}
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['This', 'is', 'a', 'sample', 'of', 'HTML']");
+	let val: Value = SqlValue::parse("['This', 'is', 'a', 'sample', 'of', 'HTML']").into();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -1606,31 +1607,31 @@ async fn function_string_slice() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'the quick brown fox jumps over the lazy dog.'");
+	let val = SqlValue::parse("'the quick brown fox jumps over the lazy dog.'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'fox jumps over the lazy dog.'");
+	let val = SqlValue::parse("'fox jumps over the lazy dog.'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'the quick brown fox jumps over the lazy dog.'");
+	let val = SqlValue::parse("'the quick brown fox jumps over the lazy dog.'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'the quick brown fox jumps over the lazy dog'");
+	let val = SqlValue::parse("'the quick brown fox jumps over the lazy dog'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'fox jumps over the lazy dog'");
+	let val = SqlValue::parse("'fox jumps over the lazy dog'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'lazy dog'");
+	let val = SqlValue::parse("'lazy dog'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("''");
+	let val = SqlValue::parse("''").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1670,15 +1671,15 @@ async fn function_string_split() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['', '']");
+	let val = SqlValue::parse("['', '']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['this', 'is', 'a', 'list']");
+	let val = SqlValue::parse("['this', 'is', 'a', 'list']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['this', 'is', 'another', 'test']");
+	let val = SqlValue::parse("['this', 'is', 'another', 'test']").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1766,15 +1767,15 @@ async fn function_string_words() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['test']");
+	let val = SqlValue::parse("['test']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("['this', 'is', 'a', 'test']");
+	let val = SqlValue::parse("['this', 'is', 'a', 'test']").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1794,15 +1795,15 @@ async fn function_time_ceil() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-25T00:00:00Z'");
+	let val = SqlValue::parse("d'1987-06-25T00:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-12-28T00:00:00Z'");
+	let val = SqlValue::parse("d'1987-12-28T00:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2023-05-11T03:09:00Z'");
+	let val = SqlValue::parse("d'2023-05-11T03:09:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1836,15 +1837,15 @@ async fn function_time_floor() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-18T00:00:00Z'");
+	let val = SqlValue::parse("d'1987-06-18T00:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1986-12-28T00:00:00Z'");
+	let val = SqlValue::parse("d'1986-12-28T00:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2023-05-11T03:09:00Z'");
+	let val = SqlValue::parse("d'2023-05-11T03:09:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1859,11 +1860,11 @@ async fn function_time_format() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'1987-06-22'");
+	let val = SqlValue::parse("'1987-06-22'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("'08:30:45'");
+	let val = SqlValue::parse("'08:30:45'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1878,11 +1879,11 @@ async fn function_time_group() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-22T08:00:00Z'");
+	let val = SqlValue::parse("d'1987-06-22T08:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-01T00:00:00Z'");
+	let val = SqlValue::parse("d'1987-06-01T00:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1942,7 +1943,7 @@ async fn function_time_min() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-22T08:30:45Z'");
+	let val = SqlValue::parse("d'1987-06-22T08:30:45Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1956,7 +1957,7 @@ async fn function_time_max() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1988-06-22T08:30:45Z'");
+	let val = SqlValue::parse("d'1988-06-22T08:30:45Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2074,11 +2075,11 @@ async fn function_time_round() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-25T00:00:00Z'");
+	let val = SqlValue::parse("d'1987-06-25T00:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1986-12-28T00:00:00Z'");
+	let val = SqlValue::parse("d'1986-12-28T00:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2201,11 +2202,11 @@ async fn function_time_from_nanos() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-03T17:49:30.384840Z'");
+	let val = SqlValue::parse("d'1982-03-03T17:49:30.384840Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-01-02T08:28:24.384440Z'");
+	let val = SqlValue::parse("d'2060-01-02T08:28:24.384440Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2220,11 +2221,11 @@ async fn function_time_from_micros() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-03T17:49:30.384840Z'");
+	let val = SqlValue::parse("d'1982-03-03T17:49:30.384840Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-01-02T08:28:24.384440Z'");
+	let val = SqlValue::parse("d'2060-01-02T08:28:24.384440Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2239,11 +2240,11 @@ async fn function_time_from_millis() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-03T17:49:33.840Z'");
+	let val = SqlValue::parse("d'1982-03-03T17:49:33.840Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-01-02T08:28:24.440Z'");
+	let val = SqlValue::parse("d'2060-01-02T08:28:24.440Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2258,11 +2259,11 @@ async fn function_time_from_secs() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-04T01:37:20Z'");
+	let val = SqlValue::parse("d'1982-03-04T01:37:20Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-03-05T09:27:20Z'");
+	let val = SqlValue::parse("d'2060-03-05T09:27:20Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2276,7 +2277,7 @@ async fn function_time_from_ulid() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2024-09-23T19:55:34.933Z'");
+	let val = SqlValue::parse("d'2024-09-23T19:55:34.933Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2291,11 +2292,11 @@ async fn function_time_from_unix() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1982-03-04T01:37:20Z'");
+	let val = SqlValue::parse("d'1982-03-04T01:37:20Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2060-03-05T09:27:20Z'");
+	let val = SqlValue::parse("d'2060-03-05T09:27:20Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2334,7 +2335,7 @@ async fn function_time_from_uuid() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2024-09-23T19:55:34.933Z'");
+	let val = SqlValue::parse("d'2024-09-23T19:55:34.933Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2372,11 +2373,11 @@ async fn function_type_datetime() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'1987-06-22T00:00:00Z'");
+	let val = SqlValue::parse("d'1987-06-22T00:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("d'2022-08-01T00:00:00Z'");
+	let val = SqlValue::parse("d'2022-08-01T00:00:00Z'").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2417,11 +2418,11 @@ async fn function_type_duration() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("1h30m");
+	let val = SqlValue::parse("1h30m").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("1h30m30s50ms");
+	let val = SqlValue::parse("1h30m30s50ms").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3005,11 +3006,11 @@ async fn function_type_number() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("194719.1947104740");
+	let val = SqlValue::parse("194719.1947104740").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("1457105732053058.3957394823281756381849375");
+	let val = SqlValue::parse("1457105732053058.3957394823281756381849375").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3024,7 +3025,7 @@ async fn function_type_point() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			type: 'Point',
 			coordinates: [
@@ -3032,11 +3033,12 @@ async fn function_type_point() -> Result<()> {
 				6.789
 			]
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			type: 'Point',
 			coordinates: [
@@ -3044,7 +3046,8 @@ async fn function_type_point() -> Result<()> {
 				51.509865
 			]
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3120,53 +3123,58 @@ async fn function_type_thing() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:1434619,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:john,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: city:⟨8e60244d-95f6-4f95-9e30-09a98977efb0⟩,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: temperature:['London', '2022-09-30T20:25:01.406828Z'],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3182,15 +3190,15 @@ async fn function_type_range() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("..");
+	let val = SqlValue::parse("..").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("1..2");
+	let val = SqlValue::parse("1..2").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("1..2");
+	let val = SqlValue::parse("1..2").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3208,7 +3216,7 @@ async fn function_value_diff() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"
 		[
 			{
@@ -3222,7 +3230,8 @@ async fn function_value_diff() -> Result<()> {
 			}
 		]
 	"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3246,7 +3255,7 @@ async fn function_value_patch() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::parse("{ b: 2, c: 3 }");
+	let val = SqlValue::parse("{ b: 2, c: 3 }").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
