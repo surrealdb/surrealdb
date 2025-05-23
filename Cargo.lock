@@ -6029,7 +6029,6 @@ dependencies = [
  "semver",
  "serde",
  "serde-content",
- "serde_bytes",
  "serde_json",
  "serial_test",
  "sha1",
