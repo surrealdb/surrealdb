@@ -34,6 +34,6 @@ async fn main() -> Result<()> {
 		#[cfg(feature = "upgrade")]
 		"upgrade" => cmd::upgrade::run(color, args).await,
 		"list" => cmd::list::run(args).await,
-		_ => panic!(),
+		_ => unreachable!(),
 	}
 }

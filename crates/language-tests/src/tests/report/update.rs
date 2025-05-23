@@ -20,7 +20,9 @@ impl TestReport {
 
 		match values {
 			TestOutputs::Values(values) => apply_results(&mut doc, values),
-			TestOutputs::ParsingError(error) => apply_error(&mut doc, error),
+			TestOutputs::ParsingError(error) => apply_error(&mut doc, "parsing-error", error),
+			TestOutputs::SigninError(error) => apply_error(&mut doc, "signin-error", error),
+			TestOutputs::SignupError(error) => apply_error(&mut doc, "signup-error", error),
 		}
 
 		let mut existing = set[self.id].source.clone();
@@ -88,9 +90,9 @@ pub fn insert_slice(bytes: &mut Vec<u8>, at: Range<usize>, src: &[u8]) {
 	}
 }
 
-pub fn apply_error(doc: &mut DocumentMut, error: &str) {
+pub fn apply_error(doc: &mut DocumentMut, error_field: &str, error: &str) {
 	let mut table = Table::new();
-	table.insert("parsing-error", error.into());
+	table.insert(error_field, error.into());
 
 	*doc.entry("test")
 		.or_insert_with(toml_edit::table)
