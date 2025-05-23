@@ -4,16 +4,17 @@ use parse::Parse;
 
 mod helpers;
 use helpers::*;
+use surrealdb_core::expr::Value;
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::expr::{Idiom, Part};
 use surrealdb::iam::Role;
 use surrealdb::kvs::{LockType, TransactionType};
-use surrealdb::sql::Idiom;
-use surrealdb::sql::{Part, Value};
+use surrealdb::sql::SqlValue;
 use test_log::test;
 use tracing::info;
 
@@ -32,7 +33,7 @@ async fn define_statement_namespace() -> Result<()> {
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			namespaces: { test: 'DEFINE NAMESPACE test' },
@@ -52,7 +53,8 @@ async fn define_statement_namespace() -> Result<()> {
 			},
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -73,13 +75,14 @@ async fn define_statement_database() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -385,7 +388,7 @@ async fn define_statement_search_index() -> Result<()> {
 	}
 
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			events: {},
 			fields: {},

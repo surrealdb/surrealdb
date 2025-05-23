@@ -86,7 +86,7 @@ mod tests {
 		//
 		let id1 = "foo:['test']";
 		let thing = syn::thing(id1).expect("Failed to parse the ID");
-		let id1 = thing.id;
+		let id1 = thing.id.into();
 		let val = Thing::new("testns", "testdb", "testtb", id1);
 		let enc = Thing::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x03\0\0\0\x04test\0\x01");
@@ -96,7 +96,7 @@ mod tests {
 		println!("---");
 		let id2 = "foo:[u'f8e238f2-e734-47b8-9a16-476b291bd78a']";
 		let thing = syn::thing(id2).expect("Failed to parse the ID");
-		let id2 = thing.id;
+		let id2 = thing.id.into();
 		let val = Thing::new("testns", "testdb", "testtb", id2);
 		let enc = Thing::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x03\0\0\0\x07\0\0\0\0\0\0\0\x10\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x01");

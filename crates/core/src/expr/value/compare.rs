@@ -92,112 +92,118 @@ mod tests {
 
 	use super::*;
 	use crate::expr::idiom::Idiom;
+	use crate::sql::SqlValue;
+	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 
 	#[test]
 	fn compare_none() {
-		let idi = Idiom::default();
-		let one = Value::parse("{ test: { other: null, something: 456 } }");
-		let two = Value::parse("{ test: { other: null, something: 123 } }");
+		let idi: Idiom = SqlIdiom::default().into();
+		let one: Value = SqlValue::parse("{ test: { other: null, something: 456 } }").into();
+		let two: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
 	#[test]
 	fn compare_basic() {
-		let idi = Idiom::parse("test.something");
-		let one = Value::parse("{ test: { other: null, something: 456 } }");
-		let two = Value::parse("{ test: { other: null, something: 123 } }");
+		let idi: Idiom = SqlIdiom::parse("test.something").into();
+		let one: Value = SqlValue::parse("{ test: { other: null, something: 456 } }").into();
+		let two: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
 	#[test]
 	fn compare_basic_missing_left() {
-		let idi = Idiom::parse("test.something");
-		let one = Value::parse("{ test: { other: null } }");
-		let two = Value::parse("{ test: { other: null, something: 123 } }");
+		let idi: Idiom = SqlIdiom::parse("test.something").into();
+		let one: Value = SqlValue::parse("{ test: { other: null } }").into();
+		let two: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
 
 	#[test]
 	fn compare_basic_missing_right() {
-		let idi = Idiom::parse("test.something");
-		let one = Value::parse("{ test: { other: null, something: 456 } }");
-		let two = Value::parse("{ test: { other: null } }");
+		let idi: Idiom = SqlIdiom::parse("test.something").into();
+		let one: Value = SqlValue::parse("{ test: { other: null, something: 456 } }").into();
+		let two: Value = SqlValue::parse("{ test: { other: null } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
 	#[test]
 	fn compare_array() {
-		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [4, 5, 6] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something.*").into();
+		let one: Value = SqlValue::parse("{ test: { other: null, something: [4, 5, 6] } }").into();
+		let two: Value = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
 	#[test]
 	fn compare_array_longer_left() {
-		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something.*").into();
+		let one: Value =
+			SqlValue::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }").into();
+		let two: Value = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
 	#[test]
 	fn compare_array_longer_right() {
-		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something.*").into();
+		let one: Value = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }").into();
+		let two: Value =
+			SqlValue::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
 
 	#[test]
 	fn compare_array_missing_left() {
-		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: null } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something.*").into();
+		let one: Value = SqlValue::parse("{ test: { other: null, something: null } }").into();
+		let two: Value = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
 
 	#[test]
 	fn compare_array_missing_right() {
-		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [4, 5, 6] } }");
-		let two = Value::parse("{ test: { other: null, something: null } }");
+		let idi: Idiom = SqlIdiom::parse("test.something.*").into();
+		let one: Value = SqlValue::parse("{ test: { other: null, something: [4, 5, 6] } }").into();
+		let two: Value = SqlValue::parse("{ test: { other: null, something: null } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
 	#[test]
 	fn compare_array_missing_value_left() {
-		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [1, null, 3] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something.*").into();
+		let one: Value =
+			SqlValue::parse("{ test: { other: null, something: [1, null, 3] } }").into();
+		let two: Value = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
 
 	#[test]
 	fn compare_array_missing_value_right() {
-		let idi = Idiom::parse("test.something.*");
-		let one = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
-		let two = Value::parse("{ test: { other: null, something: [1, null, 3] } }");
+		let idi: Idiom = SqlIdiom::parse("test.something.*").into();
+		let one: Value = SqlValue::parse("{ test: { other: null, something: [1, 2, 3] } }").into();
+		let two: Value =
+			SqlValue::parse("{ test: { other: null, something: [1, null, 3] } }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
 	#[test]
 	fn compare_last() {
-		let idi = Idiom::parse("test[$]");
-		let one = Value::parse("{ test: [1,5] }");
-		let two = Value::parse("{ test: [2,4] }");
+		let idi: Idiom = SqlIdiom::parse("test[$]").into();
+		let one: Value = SqlValue::parse("{ test: [1,5] }").into();
+		let two: Value = SqlValue::parse("{ test: [2,4] }").into();
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater))
 	}

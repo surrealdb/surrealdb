@@ -36,14 +36,16 @@ mod tests {
 	use super::*;
 	use crate::dbs::test::mock;
 	use crate::expr::idiom::Idiom;
+	use crate::sql::SqlValue;
+	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn extend_array_value() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test");
-		let mut val = Value::parse("{ test: [100, 200, 300] }");
-		let res = Value::parse("{ test: [100, 200, 300] }");
+		let idi: Idiom = SqlIdiom::parse("test").into();
+		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
+		let res: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.extend(stk, &ctx, &opt, &idi, Value::from(200)))
@@ -56,12 +58,14 @@ mod tests {
 	#[tokio::test]
 	async fn extend_array_array() {
 		let (ctx, opt) = mock().await;
-		let idi = Idiom::parse("test");
-		let mut val = Value::parse("{ test: [100, 200, 300] }");
-		let res = Value::parse("{ test: [100, 200, 300, 400, 500] }");
+		let idi: Idiom = SqlIdiom::parse("test").into();
+		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
+		let res: Value = SqlValue::parse("{ test: [100, 200, 300, 400, 500] }").into();
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.extend(stk, &ctx, &opt, &idi, Value::parse("[100, 300, 400, 500]")))
+			.enter(|stk| {
+				val.extend(stk, &ctx, &opt, &idi, SqlValue::parse("[100, 300, 400, 500]").into())
+			})
 			.finish()
 			.await
 			.unwrap();

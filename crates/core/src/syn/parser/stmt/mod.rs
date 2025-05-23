@@ -1,23 +1,23 @@
 use reblessive::Stk;
 
-use crate::expr::block::Entry;
-use crate::expr::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
-use crate::expr::statements::show::{ShowSince, ShowStatement};
-use crate::expr::statements::sleep::SleepStatement;
-use crate::expr::statements::{
+use crate::sql::block::Entry;
+use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
+use crate::sql::statements::show::{ShowSince, ShowStatement};
+use crate::sql::statements::sleep::SleepStatement;
+use crate::sql::statements::{
 	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 	access::{
 		AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 		AccessStatementShow, Subject,
 	},
 };
-use crate::expr::{Duration, Fields, Ident, Param};
+use crate::sql::{Duration, Fields, Ident, Param};
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
 use crate::syn::token::{Glued, TokenKind, t};
 use crate::{
-	expr::{
-		Expression, Operator, Statement, Statements, Value,
+	sql::{
+		Expression, Operator, SqlValue, Statement, Statements,
 		statements::{
 			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
 			ForeachStatement, InfoStatement, OutputStatement, UseStatement,
@@ -316,43 +316,43 @@ impl Parser<'_> {
 	}
 
 	/// Turns [Param] `=` [Value] into a set statment.
-	fn refine_stmt_value(value: Value) -> Statement {
+	fn refine_stmt_value(value: SqlValue) -> Statement {
 		match value {
-			Value::Expression(x) => {
+			SqlValue::Expression(x) => {
 				if let Expression::Binary {
-					l: Value::Param(x),
+					l: SqlValue::Param(x),
 					o: Operator::Equal,
 					r,
 				} = *x
 				{
-					return Statement::Set(crate::expr::statements::SetStatement {
+					return Statement::Set(crate::sql::statements::SetStatement {
 						name: x.0.0,
 						what: r,
 						kind: None,
 					});
 				}
-				Statement::Value(Value::Expression(x))
+				Statement::Value(SqlValue::Expression(x))
 			}
 			_ => Statement::Value(value),
 		}
 	}
 
-	fn refine_entry_value(value: Value) -> Entry {
+	fn refine_entry_value(value: SqlValue) -> Entry {
 		match value {
-			Value::Expression(x) => {
+			SqlValue::Expression(x) => {
 				if let Expression::Binary {
-					l: Value::Param(x),
+					l: SqlValue::Param(x),
 					o: Operator::Equal,
 					r,
 				} = *x
 				{
-					return Entry::Set(crate::expr::statements::SetStatement {
+					return Entry::Set(crate::sql::statements::SetStatement {
 						name: x.0.0,
 						what: r,
 						kind: None,
 					});
 				}
-				Entry::Value(Value::Expression(x))
+				Entry::Value(SqlValue::Expression(x))
 			}
 			_ => Entry::Value(value),
 		}
@@ -631,9 +631,9 @@ impl Parser<'_> {
 		let peek = self.peek();
 		let id = match peek.kind {
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
-				self.next_token_value().map(Value::Uuid)?
+				self.next_token_value().map(SqlValue::Uuid)?
 			}
-			t!("$param") => self.next_token_value().map(Value::Param)?,
+			t!("$param") => self.next_token_value().map(SqlValue::Param)?,
 			_ => unexpected!(self, peek, "a UUID or a parameter"),
 		};
 		Ok(KillStatement {
@@ -657,8 +657,8 @@ impl Parser<'_> {
 		};
 		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
-			t!("$param") => Value::Param(self.next_token_value()?),
-			_ => Value::Table(self.next_token_value()?),
+			t!("$param") => SqlValue::Param(self.next_token_value()?),
+			_ => SqlValue::Table(self.next_token_value()?),
 		};
 		let cond = self.try_parse_condition(stk).await?;
 		let fetch = self.try_parse_fetch(stk).await?;

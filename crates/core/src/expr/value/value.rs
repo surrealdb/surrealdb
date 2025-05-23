@@ -1440,7 +1440,7 @@ mod tests {
 	use chrono::TimeZone;
 
 	use super::*;
-	use crate::syn::Parse;
+	use crate::{sql::SqlValue, syn::Parse};
 
 	#[test]
 	fn check_none() {
@@ -1542,20 +1542,25 @@ mod tests {
 		assert_eq!(3, enc.len());
 		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
 		assert_eq!(8, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::parse("{ hello: 'world' }")).unwrap();
+		let enc: Vec<u8> =
+			revision::to_vec(&Value::from(SqlValue::parse("{ hello: 'world' }"))).unwrap();
 		assert_eq!(19, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::parse("{ compact: true, schema: 0 }")).unwrap();
+		let enc: Vec<u8> =
+			revision::to_vec(&Value::from(SqlValue::parse("{ compact: true, schema: 0 }")))
+				.unwrap();
 		assert_eq!(27, enc.len());
 	}
 
 	#[test]
 	fn serialize_deserialize() {
-		let val = Value::parse(
+		let val: Value = SqlValue::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
-		);
-		let res = Value::parse(
+		)
+		.into();
+		let res: Value = SqlValue::parse(
 			"{ test: { something: [1, 'two', null, test:tobie, { trueee: false, noneee: nulll }] } }",
-		);
+		)
+		.into();
 		let enc: Vec<u8> = revision::to_vec(&val).unwrap();
 		let dec: Value = revision::from_slice(&enc).unwrap();
 		assert_eq!(res, dec);

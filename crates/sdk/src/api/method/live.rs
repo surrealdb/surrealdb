@@ -24,9 +24,11 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
-use surrealdb_core::expr::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, Statement, Table,
-	Value as CoreValue, statements::LiveStatement,
+use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::sql::Statement;
+use surrealdb_core::sql::{
+	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, SqlValue as CoreSqlValue, Table,
+	Thing as SqlThing, statements::LiveStatement,
 };
 use uuid::Uuid;
 
@@ -63,7 +65,7 @@ where
 				stmt.what = core_table.into()
 			}
 			Resource::RecordId(record) => {
-				let record = record.into_inner();
+				let record: SqlThing = record.into_inner().into();
 				table.0.clone_from(&record.tb);
 				stmt.what = table.into();
 				let mut ident = Ident::default();
@@ -71,7 +73,7 @@ where
 				let mut idiom = Idiom::default();
 				idiom.0 = vec![Part::from(ident)];
 				let mut cond = Cond::default();
-				cond.0 = surrealdb_core::expr::Value::Expression(Box::new(Expression::new(
+				cond.0 = CoreSqlValue::Expression(Box::new(Expression::new(
 					idiom.into(),
 					Operator::Equal,
 					record.into(),
@@ -85,7 +87,7 @@ where
 				let range = range.into_inner();
 				table.0.clone_from(&range.tb);
 				stmt.what = table.into();
-				stmt.cond = range.to_cond();
+				stmt.cond = range.to_cond().map(Into::into);
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
