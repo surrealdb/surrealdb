@@ -342,7 +342,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Specify the query parameters
 		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.query_inner(SqlValue::Query(sql), var).await?;
+		let mut res = self.query_inner(sql, var).await?;
 		// Extract the first query result
 		Ok(res.remove(0).result?.into())
 	}
@@ -378,7 +378,7 @@ pub trait RpcProtocolV2: RpcContext {
 		}
 		.into();
 		// Execute the query on the database
-		let mut res = self.query_inner(SqlValue::Query(sql), var).await?;
+		let mut res = self.query_inner(sql, var).await?;
 		// Extract the first query result
 		Ok(res.remove(0).result?.into())
 	}
@@ -765,9 +765,11 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Check the query input type
-		if !(query.is_query() || query.is_strand()) {
-			return Err(RpcError::InvalidParams);
-		}
+		let query = match query {
+			SqlValue::Query(q) => q,
+			SqlValue::Strand(surql) => self.kvs().parse_query(&surql).await?,
+			_ => return Err(RpcError::InvalidParams),
+		};
 		// Specify the query variables
 		let vars = match vars {
 			SqlValue::Object(v) => {
@@ -957,7 +959,7 @@ pub trait RpcProtocolV2: RpcContext {
 
 	async fn query_inner(
 		&self,
-		query: SqlValue,
+		query: Query,
 		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>, RpcError> {
 		// If no live query handler force realtime off
@@ -965,23 +967,15 @@ pub trait RpcProtocolV2: RpcContext {
 			return Err(RpcError::BadLQConfig);
 		}
 		// Execute the query on the database
-		let res = match query {
-			SqlValue::Query(sql) => self.kvs().process(sql, &self.session(), vars).await?,
-			SqlValue::Strand(sql) => self.kvs().execute(&sql, &self.session(), vars).await?,
-			_ => {
-				return Err(RpcError::from(anyhow::Error::new(Error::unreachable(
-					"Unexpected query type: {query:?}",
-				))));
-			}
-		};
+		let responses = self.kvs().process(query, &self.session(), vars).await?;
 
 		// Post-process hooks for web layer
-		for response in &res {
+		for response in &responses {
 			// This error should be unreachable because we shouldn't proceed if there's no handler
 			self.handle_live_query_results(response).await;
 		}
 		// Return the result to the client
-		Ok(res)
+		Ok(responses)
 	}
 
 	async fn handle_live_query_results(&self, res: &Response) {
