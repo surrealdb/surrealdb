@@ -32,6 +32,13 @@ pub struct Thing {
 }
 
 impl Thing {
+	pub fn new(tb: impl Into<String>, id: impl Into<Id>) -> Self {
+		Self {
+			tb: tb.into(),
+			id: id.into(),
+		}
+	}
+
 	/// Convert `Thing` to `Cond`
 	pub fn to_cond(self) -> Option<Cond> {
 		match &self.id {
