@@ -45,8 +45,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -75,8 +74,7 @@ jobs:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
@@ -89,8 +87,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Check format
         run: cargo make ci-format
@@ -99,8 +97,7 @@ jobs:
     name: Check clippy
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: clippy
@@ -113,8 +110,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Run clippy
         run: cargo make ci-clippy
@@ -126,8 +123,7 @@ jobs:
     name: Check workspace
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -139,8 +135,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Check workspace
         run: cargo make ci-check
@@ -168,8 +164,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo +${{ env.msrv }} install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo +${{ env.msrv }} install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Check workspace on MSRV
         run: cargo +${{ env.msrv }} make ci-check
@@ -181,8 +177,7 @@ jobs:
     name: Check fuzzing
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -210,8 +205,7 @@ jobs:
     name: Check Wasm
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
@@ -224,8 +218,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Check wasm
         run: cargo make ci-check-wasm
@@ -237,8 +231,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -269,10 +262,11 @@ jobs:
     name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+            toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -281,9 +275,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
@@ -292,10 +283,11 @@ jobs:
     name: HTTP integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -305,8 +297,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
@@ -315,8 +307,7 @@ jobs:
     name: WebSocket integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -328,8 +319,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        run: cargo install --debug --locked 197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Run WebSocket integration tests
         run: cargo make ci-ws-integration
@@ -338,10 +329,11 @@ jobs:
     name: ML integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -350,9 +342,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
@@ -361,10 +350,11 @@ jobs:
     name: GraphQL integration
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -373,9 +363,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Run GraphQL integration tests
         run: cargo make ci-graphql-integration
@@ -388,10 +375,16 @@ jobs:
     name: Test workspace
     runs-on: [runner-arm64-2xlarge]
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Update system dependencies
+        run: sudo apt-get -y update
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
+          components: llvm-tools-preview
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+      - uses: taiki-e/install-action@cargo-llvm-cov
+        
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -400,15 +393,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        run: sudo apt-get -y update
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -430,8 +414,7 @@ jobs:
     name: Test SDK build
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -455,10 +438,12 @@ jobs:
     name: Rust SDK - Any engine
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -467,9 +452,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test Any engine
         run: cargo make ci-api-integration-any
@@ -486,10 +468,11 @@ jobs:
     name: Rust SDK - WebSocket engine
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -498,9 +481,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test WS engine
         run: cargo make ci-api-integration-ws
@@ -517,10 +497,11 @@ jobs:
     name: Rust SDK - HTTP engine
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -529,9 +510,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test HTTP engine
         run: cargo make ci-api-integration-http
@@ -548,10 +526,11 @@ jobs:
     name: Rust SDK - Memory engine
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -560,9 +539,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test Memory engine
         run: cargo make ci-api-integration-mem
@@ -579,10 +555,11 @@ jobs:
     name: Rust SDK - File engine
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -591,9 +568,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test File engine
         run: cargo make ci-api-integration-file
@@ -610,10 +584,11 @@ jobs:
     name: Rust SDK - RocksDB engine
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -622,9 +597,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test RocksDB engine
         run: cargo make ci-api-integration-rocksdb
@@ -641,10 +613,11 @@ jobs:
     name: Rust SDK - SurrealKV engine
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -653,9 +626,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test SurrealKV engine
         run: cargo make ci-api-integration-surrealkv
@@ -672,10 +642,11 @@ jobs:
     name: Rust SDK - TiKV engine
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -692,9 +663,6 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
           done
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
       - name: Test TiKV engine
         run: cargo make ci-api-integration-tikv
 
@@ -710,10 +678,11 @@ jobs:
     name: Rust SDK - FoundationDB engine 7.1
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -722,9 +691,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
@@ -746,10 +712,11 @@ jobs:
     name: Rust SDK - FoundationDB engine 7.3
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -758,9 +725,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Setup FoundationDB
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
@@ -786,10 +750,12 @@ jobs:
     name: Database Upgrade from previous versions
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+            toolchain: ${{ env.RUST_VERSION }}
+      - uses: taiki-e/install-action@3bd61e71ce023f70aa683526167f4cb1ec176865 # (Actions must be pinned by commit hash) cargo-nextest
+      - uses: taiki-e/install-action@197277daaab29dee00d926466ee65190b036a2b8 # (Actions must be pinned by commit hash) cargo-make
+        
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -798,9 +764,6 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test upgrade
         run: cargo make ci-database-upgrade
@@ -813,8 +776,7 @@ jobs:
     name: Run SurrealQL language tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -841,8 +803,7 @@ jobs:
     name: Run SurrealQL upgrade tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
