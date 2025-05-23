@@ -1,3 +1,5 @@
+use bytes::Bytes;
+
 use crate::expr::Value;
 use crate::rpc::RpcError;
 use crate::rpc::request::Request;
@@ -5,14 +7,16 @@ use crate::syn;
 
 use super::ResTrait;
 
-pub fn parse_value(val: &[u8]) -> Result<Value, RpcError> {
+pub fn parse_value(val: &Bytes) -> Result<Value, RpcError> {
 	syn::value_legacy_strand(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)
 		.or(Err(RpcError::ParseError))
 		.map(Into::into)
 }
 
-pub fn req(val: &[u8]) -> Result<Request, RpcError> {
-	parse_value(val)?.try_into()
+pub fn req(val: &Bytes) -> Result<Request, RpcError> {
+	let request: Request = serde_json::from_slice(val).map_err(|_| RpcError::ParseError)?;
+
+	Ok(request)
 }
 
 pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {

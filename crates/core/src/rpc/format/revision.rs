@@ -1,15 +1,20 @@
+use std::io::Cursor;
+
+use crate::expr::Value;
 use crate::rpc::RpcError;
 use crate::rpc::format::ResTrait;
 use crate::rpc::request::Request;
-use crate::expr::Value;
+use bytes::Bytes;
 use revision::Revisioned;
 
-pub fn parse_value(val: Vec<u8>) -> Result<Value, RpcError> {
-	Value::deserialize_revisioned(&mut val.as_slice()).map_err(|_| RpcError::ParseError)
+pub fn parse_value(val: &Bytes) -> Result<Value, RpcError> {
+	let mut cursor = Cursor::new(val);
+	Value::deserialize_revisioned(&mut cursor).map_err(|_| RpcError::ParseError)
 }
 
-pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
-	parse_value(val)?.try_into()
+pub fn req(val: &Bytes) -> Result<Request, RpcError> {
+	let mut cursor = Cursor::new(val);
+	Request::deserialize_revisioned(&mut cursor).map_err(|_| RpcError::ParseError)
 }
 
 pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {

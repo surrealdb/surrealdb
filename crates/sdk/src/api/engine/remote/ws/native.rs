@@ -635,13 +635,13 @@ impl Response {
 mod tests {
 	use super::serialize;
 	use bincode::Options;
+	use ciborium::Value as CborValue;
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
 	use std::io::Write;
 	use std::time::SystemTime;
 	use surrealdb_core::expr::{Array, Value};
-	use surrealdb_core::rpc::format::cbor::Cbor;
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {
@@ -763,14 +763,14 @@ mod tests {
 			));
 		}
 		//
-		const CBOR: &str = "CBor Vec<Value>";
-		const COMPRESSED_CBOR: &str = "Compressed CBor Vec<Value>";
+		const CBOR: &str = "CBOR Vec<Value>";
+		const COMPRESSED_CBOR: &str = "Compressed CBOR Vec<Value>";
 		{
-			// CBor
+			// CBOR
 			let (duration, payload) = timed(&|| {
-				let cbor: Cbor = vector.clone().try_into().unwrap();
+				let cbor: CborValue = vector.clone().try_into().unwrap();
 				let mut res = Vec::new();
-				ciborium::into_writer(&cbor.0, &mut res).unwrap();
+				ciborium::into_writer(&cbor, &mut res).unwrap();
 				res
 			});
 			results.push((payload.len(), CBOR, duration, payload.len() as f32 / ref_payload));

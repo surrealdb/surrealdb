@@ -12,7 +12,6 @@ use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
 use crate::rpc::statement_options::StatementOptions;
 use crate::sql::Uuid;
-use crate::syn;
 use crate::{
 	dbs::{QueryType, Response, capabilities::MethodTarget},
 	expr::Value,
@@ -768,10 +767,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Check the query input type
 		let query = match query {
 			SqlValue::Query(q) => q,
-			SqlValue::Strand(surql) => {
-				let query = self.kvs().parse_query(&surql).await?;
-				query
-			},
+			SqlValue::Strand(surql) => self.kvs().parse_query(&surql).await?,
 			_ => return Err(RpcError::InvalidParams),
 		};
 		// Specify the query variables

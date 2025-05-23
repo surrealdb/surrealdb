@@ -1,75 +1,74 @@
 use crate::rpc::Method;
-use crate::rpc::RpcError;
-use crate::rpc::format::cbor::Cbor;
-use crate::expr::Array;
-use crate::expr::Number;
-use crate::expr::Value;
+use crate::sql::Array;
+use crate::sql::Part;
+use crate::sql::SqlValue;
+use anyhow::{Context, anyhow};
+use ciborium::Value as CborValue;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
-use crate::expr::Part;
 
 pub static ID: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("id")]);
 pub static METHOD: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("method")]);
 pub static PARAMS: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("params")]);
 pub static VERSION: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("version")]);
 
-#[derive(Debug)]
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Request {
-	pub id: Option<Value>,
+	pub id: Option<String>,
 	pub version: Option<u8>,
 	pub method: Method,
 	pub params: Array,
 }
 
-impl TryFrom<Cbor> for Request {
-	type Error = RpcError;
-	fn try_from(val: Cbor) -> Result<Self, RpcError> {
-		Value::try_from(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
-	}
-}
+impl TryFrom<CborValue> for Request {
+	type Error = anyhow::Error;
 
-impl TryFrom<Value> for Request {
-	type Error = RpcError;
-	fn try_from(val: Value) -> Result<Self, RpcError> {
-		// Fetch the 'id' argument
-		let id = match val.pick(&*ID) {
-			v if v.is_none() => None,
-			v if v.is_null() => Some(v),
-			v if v.is_uuid() => Some(v),
-			v if v.is_number() => Some(v),
-			v if v.is_strand() => Some(v),
-			v if v.is_datetime() => Some(v),
-			_ => return Err(RpcError::InvalidRequest),
-		};
+	fn try_from(val: CborValue) -> Result<Self, Self::Error> {
+		let map = val.into_map().map_err(|_| anyhow!("Invalid CBOR map"))?;
 
-		// Fetch the 'version' argument
-		let version = match val.pick(&*VERSION) {
-			v if v.is_none() => None,
-			v if v.is_null() => None,
-			Value::Number(v) => match v {
-				Number::Int(1) => Some(1),
-				Number::Int(2) => Some(2),
-				_ => return Err(RpcError::InvalidRequest),
-			},
-			_ => return Err(RpcError::InvalidRequest),
-		};
-		// Fetch the 'method' argument
-		let method = match val.pick(&*METHOD) {
-			Value::Strand(v) => v.to_raw(),
-			_ => return Err(RpcError::InvalidRequest),
-		};
-		// Fetch the 'params' argument
-		let params = match val.pick(&*PARAMS) {
-			Value::Array(v) => v,
-			_ => Array::new(),
-		};
-		// Parse the specified method
-		let method = Method::parse_case_sensitive(method);
-		// Return the parsed request
-		Ok(Request {
+		let mut id = None;
+		let mut version = None;
+		let mut method = None;
+		let mut params = None;
+		for (key, value) in map {
+			let key = key.into_text().map_err(|_| anyhow!("Invalid key format"))?;
+			match key.as_str() {
+				"id" => {
+					id = Some(value.into_text().map_err(|_| anyhow!("Invalid id format"))?);
+				}
+				"version" => {
+					let int =
+						value.into_integer().map_err(|_| anyhow!("Invalid version format"))?;
+					version = Some(u8::try_from(int).context("Failed to convert version to u8")?);
+				}
+				"method" => {
+					let method_str =
+						value.into_text().map_err(|_| anyhow!("Invalid method format"))?;
+					method = Some(Method::parse_case_insensitive(method_str));
+				}
+				"params" => {
+					let params_cbor =
+						value.into_array().map_err(|_| anyhow!("Invalid params format"))?;
+					let params_expr_array = params_cbor
+						.into_iter()
+						.map(|cv| SqlValue::try_from(cv).context("Failed to convert CBOR to Value"))
+						.collect::<anyhow::Result<Vec<_>>>()?;
+					params = Some(Array(params_expr_array));
+				}
+				_ => return Err(anyhow!("Unknown key in request: {}", key)),
+			}
+		}
+
+		let method = method.context("Missing method")?;
+		let params = params.context("Missing params")?;
+
+		Ok(Self {
 			id,
+			version,
 			method,
 			params,
-			version,
 		})
 	}
 }

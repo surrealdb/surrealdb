@@ -10,6 +10,7 @@ use std::error::Error;
 use std::result::Result as StdResult;
 use std::time::Duration;
 use surrealdb::sql::SqlValue;
+use surrealdb_core::expr::Value;
 use tokio::net::TcpStream;
 use tokio::sync::{
 	mpsc::{self, Receiver, Sender},
@@ -142,7 +143,7 @@ impl Socket {
 		match format {
 			Format::Json => Ok(Message::Text(serde_json::to_string(message)?)),
 			Format::Cbor => {
-				use surrealdb::rpc::format::cbor::Cbor;
+				use ciborium::Value as CborValue;
 				// For tests we need to convert the serde_json::Value
 				// to a SurrealQL value, so that record ids, uuids,
 				// datetimes, and durations are stored properly.
@@ -151,10 +152,10 @@ impl Socket {
 				// Then we parse the JSON in to SurrealQL.
 				let surrealql = surrealdb::syn::value_legacy_strand(&json)?;
 				// Then we convert the SurrealQL in to CBOR.
-				let cbor = Cbor::try_from(surrealql)?;
+				let cbor = CborValue::try_from(surrealql)?;
 				// Then serialize the CBOR as binary data.
 				let mut output = Vec::new();
-				ciborium::into_writer(&cbor.0, &mut output).unwrap();
+				ciborium::into_writer(&cbor, &mut output).unwrap();
 				// THen output the message.
 				Ok(Message::Binary(output))
 			}
@@ -178,13 +179,13 @@ impl Socket {
 				debug!("Response {msg:?}");
 				match format {
 					Format::Cbor => {
-						use surrealdb::rpc::format::cbor::Cbor;
+						use surrealdb::rpc::format::cbor::CborValue;
 						// For tests we need to convert the binary data to
 						// a serde_json::Value so that test assertions work.
 						// First of all we deserialize the CBOR data.
-						let msg: ciborium::Value = ciborium::from_reader(&mut msg.as_slice())?;
+						let msg: CborValue = ciborium::from_reader(&mut msg.as_slice())?;
 						// Then we convert it to a SurrealQL Value.
-						let msg: SqlValue = Cbor(msg).try_into()?;
+						let msg: Value = msg.try_into()?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json();
 						// Then output the response.
