@@ -49,8 +49,6 @@ pub enum ConfigInner {
 	Api(ApiConfig),
 }
 
-impl DefineConfigStatement {}
-
 impl ConfigInner {
 	pub fn name(&self) -> String {
 		ConfigKind::from(self).to_string()
