@@ -11,6 +11,7 @@ pub mod bp;
 pub mod bs;
 pub mod bt;
 pub mod bu;
+pub mod dl;
 pub mod hd;
 pub mod he;
 pub mod hi;
@@ -19,6 +20,7 @@ pub mod hs;
 pub mod hv;
 pub mod ia;
 pub mod ip;
+pub mod td;
 pub mod vm;
 
 use crate::expr::array::Array;
