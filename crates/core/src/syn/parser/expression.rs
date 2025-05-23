@@ -293,10 +293,6 @@ impl Parser<'_> {
 				| Operator::NotEqual
 				| Operator::AllEqual
 				| Operator::AnyEqual
-				| Operator::NotLike
-				| Operator::AllLike
-				| Operator::AnyLike
-				| Operator::Like
 				| Operator::Contain
 				| Operator::NotContain
 				| Operator::NotInside
@@ -332,10 +328,10 @@ impl Parser<'_> {
 			t!("*=") => Operator::AllEqual,
 			t!("?=") => Operator::AnyEqual,
 			t!("=") => Operator::Equal,
-			t!("!~") => Operator::NotLike,
-			t!("*~") => Operator::AllLike,
-			t!("?~") => Operator::AnyLike,
-			t!("~") => Operator::Like,
+			t!("!~") | t!("*~") | t!("?~") | t!("~") => {
+				bail!("Invalid operator '{}'",token.kind,
+					@token.span => "The like operators have been removed. Please use the similarity functions, like string::similarity::smithwaterman, instead.")
+			}
 			t!("@") => {
 				let reference = (!self.eat(t!("@")))
 					.then(|| {

@@ -3280,8 +3280,3 @@ fn parse_access_purge() {
 		);
 	}
 }
-
-#[test]
-fn parse_like_operator() {
-	test_parse!(parse_stmt, r#"SELECT * FROM "a" ~ "b"; "#).unwrap();
-}
