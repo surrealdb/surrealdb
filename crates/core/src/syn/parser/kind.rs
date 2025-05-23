@@ -172,6 +172,9 @@ impl Parser<'_> {
 
 				Ok(Kind::References(table, path))
 			}
+			t!("NONE") => {
+				unexpected!(self, next, "a kind name.", => "to define a field that can be NONE, use option<type_name> instead.")
+			}
 			t!("FILE") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
