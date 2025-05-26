@@ -133,7 +133,7 @@ pub use self::number::Number;
 pub use self::object::Object;
 pub use self::operation::Operation;
 pub use self::operator::Operator;
-pub use self::order::{Ordering, OrderList, Order, OldOrders, OldOrder};
+pub use self::order::{OldOrder, OldOrders, Order, OrderList, Ordering};
 pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;
