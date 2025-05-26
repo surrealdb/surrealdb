@@ -42,39 +42,29 @@ pub mod base64 {
 pub mod cbor {
 	use crate::err::Error;
 	use crate::expr::{Bytes, Value};
-	use crate::rpc::format::cbor::Cbor;
+	use crate::rpc::format::cbor::decode::Decoder;
+	use crate::rpc::format::cbor::encode::Encode;
+	use crate::rpc::format::cbor::writer::Writer;
+	use crate::sql::SqlValue;
 	use anyhow::Result;
-	use ciborium::Value as Data;
 
 	pub fn encode((arg,): (Value,)) -> Result<Value> {
-		let val: Cbor = arg.try_into().map_err(|_| Error::InvalidArguments {
+		let mut writer = Writer::default();
+		let val = SqlValue::from(arg);
+		val.encode(&mut writer).map_err(|e| Error::InvalidArguments {
 			name: "encoding::cbor::encode".to_owned(),
-			message: "Value could not be encoded into CBOR".to_owned(),
+			message: format!("Failed to encode into CBOR: {e}"),
 		})?;
 
-		// Create a new vector for encoding output
-		let mut res = Vec::new();
-		// Serialize the value into CBOR binary data
-		ciborium::into_writer(&val.0, &mut res).map_err(|_| Error::InvalidArguments {
-			name: "encoding::cbor::encode".to_owned(),
-			message: "Value could not be encoded into CBOR".to_owned(),
-		})?;
-
-		Ok(Value::Bytes(Bytes(res)))
+		Ok(Value::Bytes(Bytes(writer.into_inner())))
 	}
 
 	pub fn decode((arg,): (Bytes,)) -> Result<Value> {
-		let cbor = ciborium::from_reader::<Data, _>(&mut arg.as_slice())
-			.map_err(|_| Error::InvalidArguments {
+		let mut dec = Decoder::new_from_slice(arg.as_slice());
+		dec.decode()
+			.map_err(|e| Error::InvalidArguments {
 				name: "encoding::cbor::decode".to_owned(),
-				message: "invalid cbor".to_owned(),
-			})
-			.map(Cbor)?;
-
-		Value::try_from(cbor)
-			.map_err(|v: &str| Error::InvalidArguments {
-				name: "encoding::cbor::decode".to_owned(),
-				message: v.to_owned(),
+				message: format!("Failed to decode from CBOR: {e}"),
 			})
 			.map_err(anyhow::Error::new)
 	}

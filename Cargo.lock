@@ -2321,9 +2321,9 @@ dependencies = [
 
 [[package]]
 name = "half"
-version = "2.5.0"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7db2ff139bba50379da6aa0766b52fdcb62cb5b263009b09ed58ba604e14bbd1"
+checksum = "459196ed295495a68f7d7fe1d84f6c4b7ff0e21fe3017b2f283c6fac3ad803c9"
 dependencies = [
  "cfg-if",
  "crunchy",
@@ -5986,6 +5986,7 @@ dependencies = [
  "geo",
  "geo-types",
  "getrandom 0.3.2",
+ "half",
  "hex",
  "http 1.3.1",
  "indxdb",
