@@ -11,8 +11,8 @@ use crate::{
 };
 
 use super::{
-	MatchValueType, MatcherMismatch, Mismatch, MismatchKind, TestError, TestGrade, TestOutputs,
-	TestReport, TestValueExpectation, TypeMismatchReport, ValueMismatchKind,
+	MatchValueType, MatcherMismatch, Mismatch, MismatchKind, ResultTypeMismatchReport, TestError,
+	TestGrade, TestOutputs, TestReport, TestValueExpectation, ValueMismatchKind,
 };
 use similar::{Algorithm, TextDiff};
 use surrealdb_core::expr::Value as SurValue;
@@ -59,6 +59,30 @@ impl TestReport {
 					f.indent(|f| writeln!(f, "- Parsing error: {expected}"))?;
 					writeln!(f, "= Got:")?;
 					f.indent(|f| writeln!(f, "- Parsing error: {got}"))
+				})
+			}
+			super::TestReportKind::MismatchedSignin {
+				ref got,
+				ref expected,
+			} => {
+				writeln!(f, "> Test returned invalid signin error")?;
+				f.indent(|f| {
+					writeln!(f, "= Expected:")?;
+					f.indent(|f| writeln!(f, "- Signin error: {expected}"))?;
+					writeln!(f, "= Got:")?;
+					f.indent(|f| writeln!(f, "- Signin error: {got}"))
+				})
+			}
+			super::TestReportKind::MismatchedSignup {
+				ref got,
+				ref expected,
+			} => {
+				writeln!(f, "> Test returned invalid signup error")?;
+				f.indent(|f| {
+					writeln!(f, "= Expected:")?;
+					f.indent(|f| writeln!(f, "- Signup error: {expected}"))?;
+					writeln!(f, "= Got:")?;
+					f.indent(|f| writeln!(f, "- Signup error: {got}"))
 				})
 			}
 			super::TestReportKind::MismatchedValues(ref v) => {
@@ -198,45 +222,46 @@ impl TestReport {
 				TestOutputs::ParsingError(res) => {
 					writeln!(f, "- Parsing error: {res}")
 				}
+				TestOutputs::SignupError(res) => {
+					writeln!(f, "- Signup error: {res}")
+				}
+				TestOutputs::SigninError(res) => {
+					writeln!(f, "- Signin error: {res}")
+				}
 			})
 		})
 	}
 
-	fn display_type_mismatch(mismatch: &TypeMismatchReport, f: &mut Fmt) -> fmt::Result {
-		match mismatch {
-			TypeMismatchReport::ExpectedParsingError {
-				got,
-				expected,
-			} => {
-				writeln!(f, "> Test returned a value when a parsing error was expected")?;
-				f.indent(|f| {
-					writeln!(f, "= Expected:")?;
-					f.indent(|f| match expected {
-						Some(x) => writeln!(f, "- Error: {x}"),
-						None => writeln!(f, "- Any parsing error"),
-					})?;
-					writeln!(f, "= Got:")?;
-					f.indent(|f| Self::display_value_list(got, f))
-				})
-			}
-			TypeMismatchReport::ExpectedValues {
-				got,
-				expected,
-			} => {
-				writeln!(f, "> Test returned a parsing error when normal values were expected")?;
-				f.indent(|f| {
-					writeln!(f, "= Expected:")?;
-					match expected {
-						None => f.indent(|f| writeln!(f, "- Any non parsing error result"))?,
-						Some(expected) => {
-							f.indent(|f| Self::display_expectation_list(expected, f))?
-						}
-					}
-					writeln!(f, "= Got:")?;
-					f.indent(|f| writeln!(f, "- Parsing error: {got}"))
-				})
-			}
-		}
+	fn display_type_mismatch(mismatch: &ResultTypeMismatchReport, f: &mut Fmt) -> fmt::Result {
+		writeln!(f, "> Test returned a different result type then was expected")?;
+		f.indent(|f| {
+			writeln!(f, "= Expected:")?;
+			f.indent(|f| match &mismatch.expected {
+				super::TestExpectation::Parsing(e) => match e {
+					Some(x) => writeln!(f, "- Parsing Error: {x}"),
+					None => writeln!(f, "- Any parsing error"),
+				},
+				super::TestExpectation::Values(e) => match e {
+					Some(e) => Self::display_expectation_list(&e, f),
+					None => writeln!(f, "- Any list of query result values"),
+				},
+				super::TestExpectation::Signin(e) => match e {
+					Some(x) => writeln!(f, "- Signin Error: {x}"),
+					None => writeln!(f, "- Any signin error"),
+				},
+				super::TestExpectation::Signup(e) => match e {
+					Some(x) => writeln!(f, "- Signup Error: {x}"),
+					None => writeln!(f, "- Any signup error"),
+				},
+			})?;
+			writeln!(f, "= Got:")?;
+			f.indent(|f| match &mismatch.got {
+				TestOutputs::Values(values) => Self::display_value_list(values, f),
+				TestOutputs::ParsingError(e) => writeln!(f, "- Parsing error: {e}"),
+				TestOutputs::SigninError(e) => writeln!(f, "- Signin error: {e}"),
+				TestOutputs::SignupError(e) => writeln!(f, "- Signup error: {e}"),
+			})
+		})
 	}
 
 	fn display_mismatched_values(values: &[Mismatch], use_color: bool, f: &mut Fmt) -> fmt::Result {
