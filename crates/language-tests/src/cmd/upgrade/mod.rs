@@ -3,7 +3,7 @@ mod process;
 mod protocol;
 
 use std::{
-	collections::HashMap,
+	collections::{HashMap, VecDeque},
 	net::{Ipv4Addr, SocketAddr},
 	path::Path,
 	sync::Arc,
@@ -242,8 +242,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.expect("failed to create datastore for running matching expressions");
 
 	// Port distribution variables.
-	let mut start_port = 9000u16;
-	let mut reuse_port = Vec::<u16>::new();
+	let mut start_port = 8999u16;
+	let mut reuse_port = VecDeque::<u16>::new();
 
 	// The join set to spawn futures into and await.
 	let mut join_set = JoinSet::new();
@@ -254,19 +254,27 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			match task_iter.next() {
 				Some(mut task) => {
 					// find a port.
-					let port = reuse_port.pop().or_else(|| {
-						while let Some(x) = start_port.checked_add(1) {
-							start_port = x;
-							if is_port_available(x) {
-								return Some(x);
+					let mut pending_pop = reuse_port.len();
+					let port = loop {
+						if pending_pop > 0 {
+							pending_pop -= 1;
+							if let Some(x) = reuse_port.pop_front() {
+								if is_port_available(x).await {
+									break x;
+								}
 							}
+							continue;
 						}
-						None
-					});
 
-					let Some(port) = port else {
-						// wait for some more ports to be available.
-						break;
+						let Some(port) = start_port.checked_add(1) else {
+							bail!("Couldn't find a port for surrealdb to bind")
+						};
+
+						start_port = port;
+
+						if is_port_available(port).await {
+							break port;
+						}
 					};
 
 					task.port = port;
@@ -287,7 +295,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		};
 
 		let (task, result) = res.unwrap();
-		reuse_port.push(task.port);
+		reuse_port.push_back(task.port);
 
 		let extra_name = format!("{} => {}", task.from, task.to);
 		let report =
@@ -343,8 +351,20 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	Ok(())
 }
 
-fn is_port_available(port: u16) -> bool {
-	std::net::TcpListener::bind(SocketAddr::new(Ipv4Addr::new(127, 0, 0, 1).into(), port)).is_ok()
+async fn is_port_available(port: u16) -> bool {
+	let addr = SocketAddr::new(Ipv4Addr::new(127, 0, 0, 1).into(), port);
+	match tokio::net::TcpListener::bind(addr).await {
+		Ok(x) => {
+			// Do a blocking drop so we ensure that the port is available after dropping the
+			// socket.
+			let _ = tokio::task::spawn_blocking(move || {
+				std::mem::drop(x.into_std().unwrap());
+			})
+			.await;
+			true
+		}
+		_ => false,
+	}
 }
 
 async fn run_imports(
