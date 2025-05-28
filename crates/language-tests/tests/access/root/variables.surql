@@ -1,6 +1,7 @@
 /**
 [env]
 imports = ["access/root/variables_import.surql"]
+clean = true # Requires clean as we define data on the global root.
 
 signin = """{
 	user: "root",
@@ -28,3 +29,4 @@ $token.{ ID, iss };
 $access;
 // Omit undeterministic results
 $session.{ ac, db, exp, id, ip, ns, or, rd, tk.{ ID, iss }};
+
