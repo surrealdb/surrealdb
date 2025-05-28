@@ -165,13 +165,6 @@ impl SqlValue {
 			})),
 		}))
 	}
-
-	pub(crate) fn get_field_value(&self, name: &str) -> SqlValue {
-		match self {
-			SqlValue::Object(v) => v.get(name).cloned().unwrap_or(SqlValue::None),
-			_ => SqlValue::None,
-		}
-	}
 }
 
 impl Eq for SqlValue {}

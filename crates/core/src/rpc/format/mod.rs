@@ -4,10 +4,11 @@ pub mod json;
 pub mod revision;
 
 use ::revision::Revisioned;
+use bytes::Bytes;
 use serde::Serialize;
 
 use super::{RpcError, request::Request};
-use crate::{expr::Value, sql::SqlValue};
+use crate::expr::Value;
 
 pub const PROTOCOLS: [&str; 4] = [
 	"json",     // For basic JSON serialisation
@@ -44,13 +45,12 @@ impl From<&str> for Format {
 
 impl Format {
 	/// Process a request using the specified format
-	pub fn req(&self, val: impl Into<Vec<u8>>) -> Result<Request, RpcError> {
-		let val = val.into();
+	pub fn req(&self, val: Bytes) -> Result<Request, RpcError> {
 		match self {
 			Self::Json => json::req(&val),
-			Self::Cbor => cbor::req(val),
+			Self::Cbor => cbor::parse_request(&val),
 			Self::Bincode => bincode::req(&val),
-			Self::Revision => revision::req(val),
+			Self::Revision => revision::req(&val),
 			Self::Unsupported => Err(RpcError::InvalidRequest),
 		}
 	}
@@ -67,13 +67,12 @@ impl Format {
 	}
 
 	/// Process a request using the specified format
-	pub fn parse_value(&self, val: impl Into<Vec<u8>>) -> Result<SqlValue, RpcError> {
-		let val = val.into();
+	pub fn parse_value(&self, val: Bytes) -> Result<Value, RpcError> {
 		match self {
 			Self::Json => json::parse_value(&val),
-			Self::Cbor => cbor::parse_value(val),
+			Self::Cbor => cbor::parse_value(&val),
 			Self::Bincode => bincode::parse_value(&val),
-			Self::Revision => revision::parse_value(val),
+			Self::Revision => revision::parse_value(&val),
 			Self::Unsupported => Err(RpcError::InvalidRequest),
 		}
 	}

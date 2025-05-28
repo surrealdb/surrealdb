@@ -56,7 +56,7 @@ pub trait WsFormat {
 impl WsFormat for Format {
 	/// Process a WebSocket RPC request
 	fn req_ws(&self, msg: Message) -> Result<Request, Failure> {
-		let val = msg.into_data();
+		let val = Bytes::from(msg.into_data());
 		self.req(val).map_err(Into::into)
 	}
 	/// Process a WebSocket RPC response

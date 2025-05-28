@@ -3,6 +3,7 @@ use std::fmt::Display;
 
 #[cfg(not(target_family = "wasm"))]
 use bytes::Bytes;
+use bytes::BytesMut;
 #[cfg(not(target_family = "wasm"))]
 use futures::Stream;
 #[cfg(not(target_family = "wasm"))]
@@ -49,13 +50,13 @@ impl ApiBody {
 
 	// The `max` variable is unused in WASM only
 	#[cfg_attr(target_family = "wasm", expect(unused_variables))]
-	pub async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
+	pub async fn stream(self, max: Option<Bytesize>) -> Result<Bytes, Error> {
 		match self {
 			#[cfg(not(target_family = "wasm"))]
 			Self::Stream(mut stream) => {
 				let max = max.unwrap_or(Bytesize::MAX);
 				let mut size: u64 = 0;
-				let mut bytes: Vec<u8> = Vec::new();
+				let mut bytes = BytesMut::new();
 
 				while let Some(chunk) = stream.next().await {
 					yield_now!();
@@ -68,7 +69,7 @@ impl ApiBody {
 					bytes.extend_from_slice(&chunk);
 				}
 
-				Ok(bytes)
+				Ok(bytes.freeze())
 			}
 			_ => Err(Error::Unreachable(
 				"Encountered a native body whilst trying to stream one".into(),
@@ -102,19 +103,19 @@ impl ApiBody {
 			let bytes = self.stream(ctx.request_body_max).await?;
 
 			if ctx.request_body_raw {
-				Ok(Value::Bytes(crate::expr::Bytes(bytes)))
+				Ok(Value::Bytes(crate::expr::Bytes(bytes.into())))
 			} else {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
 
 				let parsed = match content_type {
 					Some("application/json") => json::parse_value(&bytes),
-					Some("application/cbor") => cbor::parse_value(bytes),
-					Some("application/surrealdb") => revision::parse_value(bytes),
-					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
+					Some("application/cbor") => cbor::parse_value(&bytes),
+					Some("application/surrealdb") => revision::parse_value(&bytes),
+					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes.into()))),
 				};
 
-				parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
+				parsed.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
 			}
 		}
 	}
