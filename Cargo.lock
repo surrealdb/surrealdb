@@ -6065,9 +6065,8 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-tikv-client"
-version = "0.3.0-surreal.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9e204e84239374e8ba2dfabb88f5ac20f69baa09599eee225958445fb7e0a14"
+version = "0.3.0-surreal.3"
+source = "git+https://github.com/surrealdb/tikv-client.git?branch=emmanuel%2Fenable-max-grpc-config-size#b5fbee75a05d6f25fc9c5f2b22d8dba154db3c1f"
 dependencies = [
  "async-recursion 0.3.2",
  "async-trait",
@@ -6085,8 +6084,6 @@ dependencies = [
  "semver",
  "serde",
  "serde_derive",
- "serde_json",
- "take_mut",
  "thiserror 1.0.69",
  "tokio",
  "tonic 0.10.2",
@@ -6215,12 +6212,6 @@ dependencies = [
  "rayon",
  "windows",
 ]
-
-[[package]]
-name = "take_mut"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f764005d11ee5f36500a149ace24e00e3da98b0158b3e2d53a7495660d3f4d60"
 
 [[package]]
 name = "tap"
@@ -6614,6 +6605,7 @@ dependencies = [
  "axum 0.6.20",
  "base64 0.21.7",
  "bytes",
+ "flate2",
  "h2 0.3.26",
  "http 0.2.12",
  "http-body 0.4.6",
