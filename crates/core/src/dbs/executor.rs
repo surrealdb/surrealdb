@@ -712,7 +712,7 @@ mod tests {
 			// Database level
 			(
 				Session::for_level(
-					Level::Database("NS".to_string(), "Database".to_string()),
+					Level::Database("NS".to_string(), "DB".to_string()),
 					Role::Owner,
 				)
 				.with_ns("NS")
@@ -722,7 +722,7 @@ mod tests {
 			),
 			(
 				Session::for_level(
-					Level::Database("NS".to_string(), "Database".to_string()),
+					Level::Database("NS".to_string(), "DB".to_string()),
 					Role::Owner,
 				)
 				.with_ns("NS")
@@ -732,7 +732,7 @@ mod tests {
 			),
 			(
 				Session::for_level(
-					Level::Database("NS".to_string(), "Database".to_string()),
+					Level::Database("NS".to_string(), "DB".to_string()),
 					Role::Owner,
 				)
 				.with_ns("OTHER_NS")
@@ -742,7 +742,7 @@ mod tests {
 			),
 			(
 				Session::for_level(
-					Level::Database("NS".to_string(), "Database".to_string()),
+					Level::Database("NS".to_string(), "DB".to_string()),
 					Role::Editor,
 				)
 				.with_ns("NS")
@@ -752,7 +752,7 @@ mod tests {
 			),
 			(
 				Session::for_level(
-					Level::Database("NS".to_string(), "Database".to_string()),
+					Level::Database("NS".to_string(), "DB".to_string()),
 					Role::Editor,
 				)
 				.with_ns("NS")
@@ -762,7 +762,7 @@ mod tests {
 			),
 			(
 				Session::for_level(
-					Level::Database("NS".to_string(), "Database".to_string()),
+					Level::Database("NS".to_string(), "DB".to_string()),
 					Role::Editor,
 				)
 				.with_ns("OTHER_NS")
@@ -772,7 +772,7 @@ mod tests {
 			),
 			(
 				Session::for_level(
-					Level::Database("NS".to_string(), "Database".to_string()),
+					Level::Database("NS".to_string(), "DB".to_string()),
 					Role::Viewer,
 				)
 				.with_ns("NS")

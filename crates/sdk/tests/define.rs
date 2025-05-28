@@ -689,8 +689,7 @@ async fn permissions_checks_define_db() {
 		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
-	assert!(res.is_ok(), "{}", res.unwrap_err());
+	iam_check_cases(test_cases.iter(), &scenario, check_results).await.unwrap();
 }
 
 #[tokio::test]

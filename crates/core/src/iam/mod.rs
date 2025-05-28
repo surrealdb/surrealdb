@@ -34,7 +34,7 @@ pub enum Error {
 	},
 }
 
-pub fn is_allowed2(actor: &Actor, action: &Action, resource: &Resource) -> bool {
+pub fn is_allowed_check(actor: &Actor, action: &Action, resource: &Resource) -> bool {
 	match action {
 		Action::View => resource.level().sublevel_of(actor.level()),
 		Action::Edit => {
@@ -55,7 +55,7 @@ pub fn is_allowed2(actor: &Actor, action: &Action, resource: &Resource) -> bool 
 						| ResourceKind::Event
 						| ResourceKind::Field
 						| ResourceKind::Index
-				)
+				) && resource.level().sublevel_of(actor.level())
 			} else {
 				false
 			}
@@ -64,7 +64,7 @@ pub fn is_allowed2(actor: &Actor, action: &Action, resource: &Resource) -> bool 
 }
 
 pub fn is_allowed(actor: &Actor, action: &Action, resource: &Resource) -> Result<(), Error> {
-	if !is_allowed2(actor, action, resource) {
+	if !is_allowed_check(actor, action, resource) {
 		let err = Error::NotAllowed {
 			actor: actor.to_string(),
 			action: action.to_string(),
