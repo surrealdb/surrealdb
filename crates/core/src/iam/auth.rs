@@ -89,7 +89,7 @@ impl Auth {
 		Self::new(Actor::new(
 			rid.to_string(),
 			vec![],
-			Level::Record(ns.to_owned(), db.to_owned(), ac.to_owned()).into(),
+			Level::Record(ns.to_owned(), db.to_owned(), ac.to_owned()),
 		))
 	}
 
