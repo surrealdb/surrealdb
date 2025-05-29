@@ -77,6 +77,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
         with:
           ref: ${{ inputs.git-ref }}
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       - name: Set outputs
         id: outputs
@@ -506,6 +507,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }} 
 
       - name: Delete ${{ needs.prepare-vars.outputs.release-branch }}
         run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }} || true
