@@ -65,16 +65,16 @@ impl Datastore {
 	pub(crate) async fn new(path: &str) -> Result<Datastore> {
 		// Configure the client and keyspace
 		let config = match *cnf::TIKV_API_VERSION {
-			// match *cnf::TIKV_KEYSPACE {
-			// 	Some(ref keyspace) => {
-			// 		info!(target: TARGET, "Connecting to keyspace with cluster API V2: {keyspace}");
-			// 		Config::default().with_keyspace(keyspace)
-			// 	}
-			// 	None => {
-			// 		info!(target: TARGET, "Connecting to default keyspace with cluster API V2");
-			// 		Config::default().with_default_keyspace()
-			// 	}
-			// },
+			2 => match *cnf::TIKV_KEYSPACE {
+				Some(ref keyspace) => {
+					info!(target: TARGET, "Connecting to keyspace with cluster API V2: {keyspace}");
+					Config::default().with_keyspace(keyspace)
+				}
+				None => {
+					info!(target: TARGET, "Connecting to default keyspace with cluster API V2");
+					Config::default().with_default_keyspace()
+				}
+			},
 			1 => {
 				info!(target: TARGET, "Connecting with cluster API V1");
 				Config::default()
