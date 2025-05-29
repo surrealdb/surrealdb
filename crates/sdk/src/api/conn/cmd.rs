@@ -551,6 +551,7 @@ impl Serialize for RouterRequest {
 		struct InnerNumberVariant(i64);
 		struct InnerNumber(i64);
 		struct InnerMethod(&'static str);
+		struct InnerTransaction<'a>(&'a Uuid);
 		struct InnerStrand(&'static str);
 		struct InnerObject<'a>(&'a RouterRequest);
 
@@ -581,6 +582,15 @@ impl Serialize for RouterRequest {
 			}
 		}
 
+		impl Serialize for InnerTransaction<'_> {
+			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+			where
+				S: serde::Serializer,
+			{
+				serializer.serialize_newtype_struct("$surrealdb::private::sql::Uuid", self.0)
+			}
+		}
+
 		impl Serialize for InnerStrand {
 			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
 			where
@@ -603,6 +613,9 @@ impl Serialize for RouterRequest {
 				map.serialize_entry("method", &InnerMethod(self.0.method))?;
 				if let Some(params) = self.0.params.as_ref() {
 					map.serialize_entry("params", params)?;
+				}
+				if let Some(txn) = self.0.transaction.as_ref() {
+					map.serialize_entry("transaction", &InnerTransaction(txn))?;
 				}
 				map.end()
 			}
@@ -628,7 +641,7 @@ impl Serialize for RouterRequest {
 
 impl Revisioned for RouterRequest {
 	fn revision() -> u16 {
-		1
+		2
 	}
 
 	fn serialize_revisioned<W: std::io::Write>(
@@ -636,13 +649,16 @@ impl Revisioned for RouterRequest {
 		w: &mut W,
 	) -> std::result::Result<(), revision::Error> {
 		// version
-		Revisioned::serialize_revisioned(&1u32, w)?;
+		Revisioned::serialize_revisioned(&2u32, w)?;
 		// object variant
 		Revisioned::serialize_revisioned(&9u32, w)?;
 		// object wrapper version
 		Revisioned::serialize_revisioned(&1u32, w)?;
 
-		let size = 1 + self.id.is_some() as usize + self.params.is_some() as usize;
+		let size = 1
+			+ self.id.is_some() as usize
+			+ self.params.is_some() as usize
+			+ self.transaction.is_some() as usize;
 		size.serialize_revisioned(w)?;
 
 		let serializer = bincode::options()
@@ -657,7 +673,7 @@ impl Revisioned for RouterRequest {
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 			// the Value version
-			1u16.serialize_revisioned(w)?;
+			2u16.serialize_revisioned(w)?;
 
 			// the Value::Number variant
 			3u16.serialize_revisioned(w)?;
@@ -676,7 +692,7 @@ impl Revisioned for RouterRequest {
 			.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 		// the Value version
-		1u16.serialize_revisioned(w)?;
+		2u16.serialize_revisioned(w)?;
 
 		// the Value::Strand variant
 		4u16.serialize_revisioned(w)?;
@@ -692,6 +708,23 @@ impl Revisioned for RouterRequest {
 			serializer
 				.serialize_into(&mut *w, "params")
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
+
+			x.serialize_revisioned(w)?;
+		}
+
+		if let Some(x) = self.transaction.as_ref() {
+			serializer
+				.serialize_into(&mut *w, "transaction")
+				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
+
+			// the Value version
+			2u16.serialize_revisioned(w)?;
+
+			// the Value::Uuid variant
+			7u16.serialize_revisioned(w)?;
+
+			// the Uuid version
+			1u16.serialize_revisioned(w)?;
 
 			x.serialize_revisioned(w)?;
 		}
@@ -713,6 +746,7 @@ mod test {
 
 	use revision::Revisioned;
 	use surrealdb_core::expr::{Number, Value};
+	use uuid::Uuid;
 
 	use super::RouterRequest;
 
@@ -748,7 +782,7 @@ mod test {
 			id: Some(1234),
 			method: "request",
 			params: Some(vec![Value::from(1234i64), Value::from("request")].into()),
-			transaction: None,
+			transaction: Some(Uuid::new_v4()),
 		};
 
 		println!("test convert bincode");
