@@ -40,47 +40,58 @@ pub(crate) enum Command {
 	},
 	Invalidate,
 	Create {
+		txn: Option<Uuid>,
 		what: Resource,
 		data: Option<CoreValue>,
 	},
 	Upsert {
+		txn: Option<Uuid>,
 		what: Resource,
 		data: Option<CoreValue>,
 	},
 	Update {
+		txn: Option<Uuid>,
 		what: Resource,
 		data: Option<CoreValue>,
 	},
 	Insert {
+		txn: Option<Uuid>,
 		// inserts can only be on a table.
 		what: Option<String>,
 		data: CoreValue,
 	},
 	InsertRelation {
+		txn: Option<Uuid>,
 		what: Option<String>,
 		data: CoreValue,
 	},
 	Patch {
+		txn: Option<Uuid>,
 		what: Resource,
 		data: Option<CoreValue>,
 		upsert: bool,
 	},
 	Merge {
+		txn: Option<Uuid>,
 		what: Resource,
 		data: Option<CoreValue>,
 		upsert: bool,
 	},
 	Select {
+		txn: Option<Uuid>,
 		what: Resource,
 	},
 	Delete {
+		txn: Option<Uuid>,
 		what: Resource,
 	},
 	Query {
+		txn: Option<Uuid>,
 		query: CoreSqlQuery,
 		variables: CoreObject,
 	},
 	RawQuery {
+		txn: Option<Uuid>,
 		query: Cow<'static, str>,
 		variables: CoreObject,
 	},
@@ -146,6 +157,7 @@ impl Command {
 				id,
 				method: "use",
 				params: Some(vec![CoreValue::from(namespace), CoreValue::from(database)].into()),
+				transaction: None,
 			},
 			Command::Signup {
 				credentials,
@@ -153,6 +165,7 @@ impl Command {
 				id,
 				method: "signup",
 				params: Some(vec![CoreValue::from(credentials)].into()),
+				transaction: None,
 			},
 			Command::Signin {
 				credentials,
@@ -160,6 +173,7 @@ impl Command {
 				id,
 				method: "signin",
 				params: Some(vec![CoreValue::from(credentials)].into()),
+				transaction: None,
 			},
 			Command::Authenticate {
 				token,
@@ -167,13 +181,16 @@ impl Command {
 				id,
 				method: "authenticate",
 				params: Some(vec![CoreValue::from(token)].into()),
+				transaction: None,
 			},
 			Command::Invalidate => RouterRequest {
 				id,
 				method: "invalidate",
 				params: None,
+				transaction: None,
 			},
 			Command::Create {
+				txn,
 				what,
 				data,
 			} => {
@@ -186,9 +203,11 @@ impl Command {
 					id,
 					method: "create",
 					params: Some(params.into()),
+					transaction: txn,
 				}
 			}
 			Command::Upsert {
+				txn,
 				what,
 				data,
 				..
@@ -202,9 +221,11 @@ impl Command {
 					id,
 					method: "upsert",
 					params: Some(params.into()),
+					transaction: txn,
 				}
 			}
 			Command::Update {
+				txn,
 				what,
 				data,
 				..
@@ -219,9 +240,11 @@ impl Command {
 					id,
 					method: "update",
 					params: Some(params.into()),
+					transaction: txn,
 				}
 			}
 			Command::Insert {
+				txn,
 				what,
 				data,
 			} => {
@@ -240,9 +263,11 @@ impl Command {
 					id,
 					method: "insert",
 					params: Some(params.into()),
+					transaction: txn,
 				}
 			}
 			Command::InsertRelation {
+				txn,
 				what,
 				data,
 			} => {
@@ -260,9 +285,11 @@ impl Command {
 					id,
 					method: "insert_relation",
 					params: Some(params.into()),
+					transaction: txn,
 				}
 			}
 			Command::Patch {
+				txn,
 				what,
 				data,
 				upsert,
@@ -290,9 +317,11 @@ impl Command {
 					id,
 					method: "query",
 					params: Some(params.into()),
+					transaction: txn,
 				}
 			}
 			Command::Merge {
+				txn,
 				what,
 				data,
 				upsert,
@@ -320,25 +349,31 @@ impl Command {
 					id,
 					method: "query",
 					params: Some(params.into()),
+					transaction: txn,
 				}
 			}
 			Command::Select {
+				txn,
 				what,
 				..
 			} => RouterRequest {
 				id,
 				method: "select",
 				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
+				transaction: txn,
 			},
 			Command::Delete {
+				txn,
 				what,
 				..
 			} => RouterRequest {
 				id,
 				method: "delete",
 				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
+				transaction: txn,
 			},
 			Command::Query {
+				txn,
 				query,
 				variables,
 			} => {
@@ -347,9 +382,11 @@ impl Command {
 					id,
 					method: "query",
 					params: Some(params.into()),
+					transaction: txn,
 				}
 			}
 			Command::RawQuery {
+				txn,
 				query,
 				variables,
 			} => {
@@ -358,6 +395,7 @@ impl Command {
 					id,
 					method: "query",
 					params: Some(params.into()),
+					transaction: txn,
 				}
 			}
 			Command::ExportFile {
@@ -382,11 +420,13 @@ impl Command {
 				id,
 				method: "ping",
 				params: None,
+				transaction: None,
 			},
 			Command::Version => RouterRequest {
 				id,
 				method: "version",
 				params: None,
+				transaction: None,
 			},
 			Command::Set {
 				key,
@@ -395,6 +435,7 @@ impl Command {
 				id,
 				method: "let",
 				params: Some(CoreValue::from(vec![CoreValue::from(key), value])),
+				transaction: None,
 			},
 			Command::Unset {
 				key,
@@ -402,6 +443,7 @@ impl Command {
 				id,
 				method: "unset",
 				params: Some(CoreValue::from(vec![CoreValue::from(key)])),
+				transaction: None,
 			},
 			Command::SubscribeLive {
 				..
@@ -412,6 +454,7 @@ impl Command {
 				id,
 				method: "kill",
 				params: Some(CoreValue::from(vec![CoreValue::from(uuid)])),
+				transaction: None,
 			},
 			Command::Run {
 				name,
@@ -424,6 +467,7 @@ impl Command {
 					vec![CoreValue::from(name), CoreValue::from(version), CoreValue::Array(args)]
 						.into(),
 				),
+				transaction: None,
 			},
 		};
 		Some(res)
@@ -450,9 +494,11 @@ impl Command {
 			}
 			| Command::Select {
 				what,
+				..
 			}
 			| Command::Delete {
 				what,
+				..
 			} => matches!(what, Resource::RecordId(_)),
 			Command::Insert {
 				data,
@@ -471,6 +517,8 @@ pub(crate) struct RouterRequest {
 	id: Option<i64>,
 	method: &'static str,
 	params: Option<CoreValue>,
+	#[allow(dead_code)]
+	transaction: Option<Uuid>,
 }
 
 #[cfg(feature = "protocol-ws")]
@@ -700,6 +748,7 @@ mod test {
 			id: Some(1234),
 			method: "request",
 			params: Some(vec![Value::from(1234i64), Value::from("request")].into()),
+			transaction: None,
 		};
 
 		println!("test convert bincode");

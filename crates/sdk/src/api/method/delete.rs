@@ -46,6 +46,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Delete {
+						txn: None,
 						what: resource?,
 					})
 					.await

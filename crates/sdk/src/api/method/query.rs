@@ -113,6 +113,7 @@ where
 				} => {
 					router
 						.execute_query(Command::RawQuery {
+							txn: None,
 							query,
 							variables: bindings,
 						})
@@ -157,6 +158,7 @@ where
 
 					let mut response = router
 						.execute_query(Command::Query {
+							txn: None,
 							query,
 							variables: bindings,
 						})
