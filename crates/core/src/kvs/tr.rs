@@ -743,7 +743,7 @@ impl Transactor {
 		let ts = if self.inner.supports_reverse_scan() {
 			self.scanr(start..end, 1, None).await?.pop().map(|x| x.1)
 		} else {
-			// Batch keys to avoid having increasing memory too much when the amount of stored
+			// Batch keys to avoid large memory usage when the amount of stored
 			// version stamps get's too big.
 			let mut batch = self.batch_keys(start..end, 1024, None).await?;
 			let mut last = batch.result.pop();
