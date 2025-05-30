@@ -6,8 +6,9 @@ use reblessive::Stk;
 
 use super::mac::{expected_whitespace, unexpected};
 use crate::sql::operator::BindingPower;
-use crate::sql::{Cast, Expression, Number, Operator, SqlValue, value::TryNeg};
-use crate::sql::{Function, Range};
+use crate::sql::{
+	Cast, Expression, Function, Number, Operator, Part, Range, SqlValue, value::TryNeg,
+};
 use crate::syn::error::bail;
 use crate::syn::token::{self, Token};
 use crate::syn::{
@@ -180,7 +181,14 @@ impl Parser<'_> {
 					self.lexer.backup_before(p.span);
 					self.token_buffer.clear();
 					self.token_buffer.push(token);
-					return self.next_token_value::<Number>().map(SqlValue::Number);
+					let number = self.next_token_value::<Number>().map(SqlValue::Number)?;
+					if self.peek_continues_idiom() {
+						return self
+							.parse_remaining_value_idiom(ctx, vec![Part::Start(number)])
+							.await;
+					} else {
+						return Ok(number);
+					}
 				}
 				self.pop_peek();
 
@@ -201,7 +209,14 @@ impl Parser<'_> {
 					self.lexer.backup_before(p.span);
 					self.token_buffer.clear();
 					self.token_buffer.push(token);
-					return self.next_token_value::<Number>().map(SqlValue::Number);
+					let number = self.next_token_value::<Number>().map(SqlValue::Number)?;
+					if self.peek_continues_idiom() {
+						return self
+							.parse_remaining_value_idiom(ctx, vec![Part::Start(number)])
+							.await;
+					} else {
+						return Ok(number);
+					}
 				}
 
 				self.pop_peek();
