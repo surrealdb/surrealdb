@@ -740,10 +740,25 @@ impl Transactor {
 		let start = crate::key::database::ts::prefix(ns, db)?;
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1).encode_owned()?;
 		let end = ts_key.encode_owned()?;
-		let ts_pairs = self.getr(start..end, None).await?;
-		let latest_ts_pair = ts_pairs.last();
-		if let Some((_, v)) = latest_ts_pair {
-			return Ok(Some(VersionStamp::from_slice(v)?));
+		let ts = if self.inner.supports_reverse_scan() {
+			self.scanr(start..end, 1, None).await?.pop().map(|x| x.1)
+		} else {
+			// Batch keys to avoid large memory usage when the amount of stored
+			// version stamps get's too big.
+			let mut batch = self.batch_keys(start..end, 1024, None).await?;
+			let mut last = batch.result.pop();
+			while let Some(next) = batch.next {
+				batch = self.batch_keys(next, 1024, None).await?;
+				last = batch.result.pop();
+			}
+			if let Some(last) = last {
+				self.get(last, None).await?
+			} else {
+				None
+			}
+		};
+		if let Some(v) = ts {
+			return Ok(Some(VersionStamp::from_slice(&v)?));
 		}
 		Ok(None)
 	}

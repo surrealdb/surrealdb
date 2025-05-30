@@ -60,13 +60,13 @@ pub struct Transaction {
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, reverse_scan: bool, tx: Transactor) -> Transaction {
+	pub fn new(local: bool, tx: Transactor) -> Transaction {
 		Transaction {
 			local,
+			reverse_scan: tx.inner.supports_reverse_scan(),
 			tx: Mutex::new(tx),
 			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
-			reverse_scan,
 		}
 	}
 

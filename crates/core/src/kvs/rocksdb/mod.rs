@@ -312,6 +312,10 @@ impl super::api::Transaction for Transaction {
 		"rocksdb"
 	}
 
+	fn supports_reverse_scan(&self) -> bool {
+		true
+	}
+
 	/// Behaviour if unclosed
 	fn check_level(&mut self, check: Check) {
 		self.check = check;
