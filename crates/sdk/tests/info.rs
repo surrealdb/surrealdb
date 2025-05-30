@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::{Capabilities, Session};
 use surrealdb::iam::Role;
+use surrealdb_core::iam::Level;
 
 #[tokio::test]
 async fn info_for_root() {
@@ -152,6 +153,16 @@ async fn info_for_user() {
 // Permissions
 //
 
+fn level_root() -> Level {
+	Level::Root
+}
+fn level_ns() -> Level {
+	Level::Namespace("NS".to_owned())
+}
+fn level_db() -> Level {
+	Level::Database("NS".to_owned(), "DB".to_owned())
+}
+
 #[tokio::test]
 async fn permissions_checks_info_root() {
 	let scenario =
@@ -163,26 +174,26 @@ async fn permissions_checks_info_root() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), true),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), true),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), false),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -202,26 +213,26 @@ async fn permissions_checks_info_ns() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), true),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), true),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), true),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -245,26 +256,26 @@ async fn permissions_checks_info_db() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), true),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), true),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), true),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), true),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -287,26 +298,26 @@ async fn permissions_checks_info_table() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), true),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), true),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), true),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), true),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -336,26 +347,26 @@ async fn permissions_checks_info_user_root() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), true),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), true),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), false),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -385,26 +396,26 @@ async fn permissions_checks_info_user_ns() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), true),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), true),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), true),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -434,26 +445,26 @@ async fn permissions_checks_info_user_db() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), true),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), true),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), true),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), true),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;

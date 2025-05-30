@@ -1,6 +1,5 @@
 use crate::expr::Ident;
 use crate::iam::Error;
-use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -42,28 +41,5 @@ impl FromStr for Role {
 impl std::convert::From<Role> for Ident {
 	fn from(role: Role) -> Self {
 		role.to_string().into()
-	}
-}
-
-#[expect(clippy::fallible_impl_from)]
-impl std::convert::From<&Role> for EntityUid {
-	fn from(role: &Role) -> Self {
-		EntityUid::from_type_name_and_id(
-			EntityTypeName::from_str("Role").unwrap(),
-			format!("{}", role).parse().unwrap(),
-		)
-	}
-}
-
-impl std::convert::From<&Role> for Entity {
-	fn from(role: &Role) -> Self {
-		Entity::new(role.into(), Default::default(), Default::default())
-	}
-}
-
-#[expect(clippy::fallible_impl_from)]
-impl std::convert::From<&Role> for RestrictedExpression {
-	fn from(role: &Role) -> Self {
-		format!("{}", EntityUid::from(role)).parse().unwrap()
 	}
 }

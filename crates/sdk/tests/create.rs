@@ -1,5 +1,6 @@
 mod parse;
 use parse::Parse;
+use surrealdb_core::iam::Level;
 mod helpers;
 use crate::helpers::skip_ok;
 use helpers::new_ds;
@@ -74,111 +75,111 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
 		(
-			(().into(), Role::Owner),
+			(Level::Root, Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at root level should be able to create a new record",
 		),
 		(
-			(().into(), Role::Editor),
+			(Level::Root, Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at root level should be able to create a new record",
 		),
 		(
-			(().into(), Role::Viewer),
+			(Level::Root, Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at root level should not be able to create a new record",
 		),
 		// Namespace level
 		(
-			(("NS",).into(), Role::Owner),
+			(Level::Namespace("NS".to_string()), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at namespace level should be able to create a new record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Owner),
+			(Level::Namespace("NS".to_string()), Role::Owner),
 			("OTHER_NS", "DB"),
 			false,
 			"owner at namespace level should not be able to create a new record on another namespace",
 		),
 		(
-			(("NS",).into(), Role::Editor),
+			(Level::Namespace("NS".to_string()), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at namespace level should be able to create a new record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Editor),
+			(Level::Namespace("NS".to_string()), Role::Editor),
 			("OTHER_NS", "DB"),
 			false,
 			"editor at namespace level should not be able to create a new record on another namespace",
 		),
 		(
-			(("NS",).into(), Role::Viewer),
+			(Level::Namespace("NS".to_string()), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at namespace level should not be able to create a new record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Viewer),
+			(Level::Namespace("NS".to_string()), Role::Viewer),
 			("OTHER_NS", "DB"),
 			false,
 			"viewer at namespace level should not be able to create a new record on another namespace",
 		),
 		// Database level
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(Level::Database("NS".to_string(), "DB".to_string()), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at database level should be able to create a new record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(Level::Database("NS".to_string(), "DB".to_string()), Role::Owner),
 			("NS", "OTHER_DB"),
 			false,
 			"owner at database level should not be able to create a new record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(Level::Database("NS".to_string(), "DB".to_string()), Role::Owner),
 			("OTHER_NS", "DB"),
 			false,
 			"owner at database level should not be able to create a new record on another namespace even if the database name matches",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(Level::Database("NS".to_string(), "DB".to_string()), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at database level should be able to create a new record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(Level::Database("NS".to_string(), "DB".to_string()), Role::Editor),
 			("NS", "OTHER_DB"),
 			false,
 			"editor at database level should not be able to create a new record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(Level::Database("NS".to_string(), "DB".to_string()), Role::Editor),
 			("OTHER_NS", "DB"),
 			false,
 			"editor at database level should not be able to create a new record on another namespace even if the database name matches",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(Level::Database("NS".to_string(), "DB".to_string()), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at database level should not be able to create a new record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(Level::Database("NS".to_string(), "DB".to_string()), Role::Viewer),
 			("NS", "OTHER_DB"),
 			false,
 			"viewer at database level should not be able to create a new record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(Level::Database("NS".to_string(), "DB".to_string()), Role::Viewer),
 			("OTHER_NS", "DB"),
 			false,
 			"viewer at database level should not be able to create a new record on another namespace even if the database name matches",
