@@ -740,7 +740,7 @@ impl Transactor {
 		let start = crate::key::database::ts::prefix(ns, db)?;
 		let ts_key = crate::key::database::ts::new(ns, db, ts + 1).encode_owned()?;
 		let end = ts_key.encode_owned()?;
-		let ts_pairs = self.getr(start..end, None).await?;
+		let ts_pairs = self.scanr(start..end, 1, None).await?;
 		let latest_ts_pair = ts_pairs.last();
 		if let Some((_, v)) = latest_ts_pair {
 			return Ok(Some(VersionStamp::from_slice(v)?));
