@@ -552,6 +552,7 @@ impl Serialize for RouterRequest {
 		struct InnerNumber(i64);
 		struct InnerMethod(&'static str);
 		struct InnerTransaction<'a>(&'a Uuid);
+		struct InnerUuid<'a>(&'a Uuid);
 		struct InnerStrand(&'static str);
 		struct InnerObject<'a>(&'a RouterRequest);
 
