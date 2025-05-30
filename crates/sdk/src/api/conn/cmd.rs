@@ -588,10 +588,10 @@ impl Serialize for RouterRequest {
 			where
 				S: serde::Serializer,
 			{
-				serializer.serialize_newtype_variant("Value",7,"Uuid", &InnerUuid(self.0))
+				serializer.serialize_newtype_variant("Value", 7, "Uuid", &InnerUuid(self.0))
 			}
 		}
-		
+
 		impl Serialize for InnerUuid<'_> {
 			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
 			where
