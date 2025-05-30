@@ -1,5 +1,6 @@
 mod parse;
 use parse::Parse;
+use surrealdb_core::iam::Level;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
@@ -460,115 +461,125 @@ async fn update_records_and_arrays_with_json_patch() -> Result<()> {
 // Permissions
 //
 
+fn level_root() -> Level {
+	Level::Root
+}
+fn level_ns() -> Level {
+	Level::Namespace("NS".to_owned())
+}
+fn level_db() -> Level {
+	Level::Database("NS".to_owned(), "DB".to_owned())
+}
+
 async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
 		(
-			(().into(), Role::Owner),
+			(level_root(), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at root level should be able to update a record",
 		),
 		(
-			(().into(), Role::Editor),
+			(level_root(), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at root level should be able to update a record",
 		),
 		(
-			(().into(), Role::Viewer),
+			(level_root(), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at root level should not be able to update a record",
 		),
 		// Namespace level
 		(
-			(("NS",).into(), Role::Owner),
+			(level_ns(), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at namespace level should be able to update a record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Owner),
+			(level_ns(), Role::Owner),
 			("OTHER_NS", "DB"),
 			false,
 			"owner at namespace level should not be able to update a record on another namespace",
 		),
 		(
-			(("NS",).into(), Role::Editor),
+			(level_ns(), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at namespace level should be able to update a record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Editor),
+			(level_ns(), Role::Editor),
 			("OTHER_NS", "DB"),
 			false,
 			"editor at namespace level should not be able to update a record on another namespace",
 		),
 		(
-			(("NS",).into(), Role::Viewer),
+			(level_ns(), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at namespace level should not be able to update a record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Viewer),
+			(level_ns(), Role::Viewer),
 			("OTHER_NS", "DB"),
 			false,
 			"viewer at namespace level should not be able to update a record on another namespace",
 		),
 		// Database level
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(level_db(), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at database level should be able to update a record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(level_db(), Role::Owner),
 			("NS", "OTHER_DB"),
 			false,
 			"owner at database level should not be able to update a record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(level_db(), Role::Owner),
 			("OTHER_NS", "DB"),
 			false,
 			"owner at database level should not be able to update a record on another namespace even if the database name matches",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(level_db(), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at database level should be able to update a record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(level_db(), Role::Editor),
 			("NS", "OTHER_DB"),
 			false,
 			"editor at database level should not be able to update a record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(level_db(), Role::Editor),
 			("OTHER_NS", "DB"),
 			false,
 			"editor at database level should not be able to update a record on another namespace even if the database name matches",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(level_db(), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at database level should not be able to update a record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(level_db(), Role::Viewer),
 			("NS", "OTHER_DB"),
 			false,
 			"viewer at database level should not be able to update a record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(level_db(), Role::Viewer),
 			("OTHER_NS", "DB"),
 			false,
 			"viewer at database level should not be able to update a record on another namespace even if the database name matches",

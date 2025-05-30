@@ -11,6 +11,7 @@ use crate::{
 		capabilities::{NetTarget, Targets},
 	},
 	kvs::Datastore,
+	syn,
 };
 
 #[tokio::test]
@@ -35,9 +36,9 @@ async fn test_fetch_get() {
                 headers: {{
                     "some-header": "some-value",
                 }}
-            }});        
+            }});
             let body = await res.text();
-    
+
             return {{ status: res.status, body: body }};
         }}
     "#,
@@ -82,9 +83,9 @@ async fn test_fetch_put() {
                     "some-header": "some-value",
                 }},
                 body: "some text",
-            }});        
+            }});
             let body = await res.text();
-    
+
             return {{ status: res.status, body: body }};
         }}
     "#,
@@ -132,9 +133,9 @@ async fn test_fetch_error() {
                     "some-header": "some-value",
                 }},
                 body: "some text",
-            }});        
-            let body = await res.text();
-    
+            }});
+            let body = await res.json();
+
             return {{ status: res.status, body: body }};
         }}
     "#,
@@ -147,8 +148,8 @@ async fn test_fetch_error() {
 	server.verify().await;
 
 	assert_eq!(
-		res.to_string(),
-		"{ body: '{\"foo\":\"bar\",\"baz\":2}', status: 500f }",
+		res,
+		syn::value("{ body: {baz:2, foo:\"bar\"}, status: 500f }").unwrap().into(),
 		"Unexpected result: {:?}",
 		res
 	);
@@ -180,7 +181,7 @@ async fn test_fetch_denied() {
                 headers: {{
                     "some-header": "some-value",
                 }}
-            }});        
+            }});
             let body = await res.text();
 
             return {{ status: res.status, body: body }};

@@ -1,12 +1,7 @@
 use revision::revisioned;
-use std::{
-	collections::{HashMap, HashSet},
-	str::FromStr,
-};
 
 use super::Level;
 
-use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 5)]
@@ -98,15 +93,11 @@ impl ResourceKind {
 	}
 
 	pub fn on_ns(self, ns: &str) -> Resource {
-		self.on_level((ns,).into())
+		self.on_level(Level::Namespace(ns.to_owned()))
 	}
 
 	pub fn on_db(self, ns: &str, db: &str) -> Resource {
-		self.on_level((ns, db).into())
-	}
-
-	pub fn on_record(self, ns: &str, db: &str, rid: &str) -> Resource {
-		self.on_level((ns, db, rid).into())
+		self.on_level(Level::Database(ns.to_owned(), db.to_owned()))
 	}
 }
 
@@ -114,79 +105,36 @@ impl ResourceKind {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Resource(String, ResourceKind, Level);
+pub struct Resource {
+	id: String,
+	kind: ResourceKind,
+	level: Level,
+}
 
 impl std::fmt::Display for Resource {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let Resource(id, kind, level) = self;
-		write!(f, "{}{}:\"{}\"", level, kind, id)
+		write!(f, "{}{}:\"{}\"", self.level, self.kind, self.id)
 	}
 }
 
 impl Resource {
-	pub fn new(id: String, kind: ResourceKind, level: Level) -> Self {
-		Self(id, kind, level)
+	pub(crate) fn new(id: String, kind: ResourceKind, level: Level) -> Self {
+		Self {
+			id,
+			kind,
+			level,
+		}
 	}
 
-	pub fn id(&self) -> &str {
-		&self.0
+	pub(crate) fn id(&self) -> &str {
+		&self.id
 	}
 
-	pub fn kind(&self) -> &ResourceKind {
-		&self.1
+	pub(crate) fn kind(&self) -> &ResourceKind {
+		&self.kind
 	}
 
-	pub fn level(&self) -> &Level {
-		&self.2
-	}
-
-	// Cedar policy helpers
-	pub fn cedar_attrs(&self) -> HashMap<String, RestrictedExpression> {
-		[("type", self.kind().into()), ("level", self.level().into())]
-			.into_iter()
-			.map(|(x, v)| (x.into(), v))
-			.collect()
-	}
-
-	pub fn cedar_parents(&self) -> HashSet<EntityUid> {
-		HashSet::from([self.level().into()])
-	}
-
-	pub fn cedar_entities(&self) -> Vec<Entity> {
-		let mut entities = Vec::new();
-
-		entities.push(self.into());
-		entities.extend(self.level().cedar_entities());
-
-		entities
-	}
-}
-
-#[expect(clippy::fallible_impl_from)]
-impl std::convert::From<&Resource> for EntityUid {
-	fn from(res: &Resource) -> Self {
-		EntityUid::from_type_name_and_id(
-			EntityTypeName::from_str(&res.kind().to_string()).unwrap(),
-			EntityId::from_str(res.id()).unwrap(),
-		)
-	}
-}
-
-impl std::convert::From<&Resource> for Entity {
-	fn from(res: &Resource) -> Self {
-		Entity::new(res.into(), res.cedar_attrs(), res.cedar_parents())
-	}
-}
-
-#[expect(clippy::fallible_impl_from)]
-impl std::convert::From<&Resource> for RestrictedExpression {
-	fn from(res: &Resource) -> Self {
-		format!("{}", EntityUid::from(res)).parse().unwrap()
-	}
-}
-
-impl std::convert::From<&ResourceKind> for RestrictedExpression {
-	fn from(kind: &ResourceKind) -> Self {
-		RestrictedExpression::new_string(kind.to_string())
+	pub(crate) fn level(&self) -> &Level {
+		&self.level
 	}
 }
