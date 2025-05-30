@@ -54,6 +54,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Update {
+						txn: None,
 						what: resource?,
 						data: None,
 					})
@@ -143,6 +144,7 @@ where
 			};
 
 			Ok(Command::Update {
+				txn: None,
 				what,
 				data,
 			})

@@ -64,6 +64,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Merge {
 					upsert,
+					txn: None,
 					what: resource?,
 					data: content,
 				};

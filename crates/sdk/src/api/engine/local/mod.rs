@@ -647,6 +647,7 @@ async fn router(
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Create {
+			txn: _,
 			what,
 			data,
 		} => {
@@ -663,6 +664,7 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Upsert {
+			txn: _,
 			what,
 			data,
 		} => {
@@ -681,6 +683,7 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Update {
+			txn: _,
 			what,
 			data,
 		} => {
@@ -699,6 +702,7 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Insert {
+			txn: _,
 			what,
 			data,
 		} => {
@@ -717,6 +721,7 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::InsertRelation {
+			txn: _,
 			what,
 			data,
 		} => {
@@ -737,6 +742,7 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Patch {
+			txn: _,
 			what,
 			data,
 			upsert,
@@ -760,6 +766,7 @@ async fn router(
 			Ok(DbResponse::Query(response))
 		}
 		Command::Merge {
+			txn: _,
 			what,
 			data,
 			upsert,
@@ -783,6 +790,7 @@ async fn router(
 			Ok(DbResponse::Query(response))
 		}
 		Command::Select {
+			txn: _,
 			what,
 		} => {
 			let one = what.is_single_recordid();
@@ -799,6 +807,7 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Delete {
+			txn: _,
 			what,
 		} => {
 			let one = what.is_single_recordid();
@@ -815,6 +824,7 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Command::Query {
+			txn: _,
 			query,
 			mut variables,
 		} => {
@@ -825,6 +835,7 @@ async fn router(
 			Ok(DbResponse::Query(response))
 		}
 		Command::RawQuery {
+			txn: _,
 			query,
 			mut variables,
 		} => {

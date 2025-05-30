@@ -48,6 +48,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Select {
+						txn: None,
 						what: resource?,
 					})
 					.await
