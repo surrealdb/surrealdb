@@ -613,21 +613,6 @@ pub enum FunctionVersion {
 	Patch(u32, u32, u32),
 }
 
-impl FunctionVersion {
-	pub(crate) fn is_patch(&self) -> bool {
-		matches!(self, Self::Patch(_, _, _))
-	}
-
-	pub(crate) fn kind(&self) -> &str {
-		match self {
-			Self::Latest => "latest",
-			Self::Major(_) => "major",
-			Self::Minor(_, _) => "minor",
-			Self::Patch(_, _, _) => "patch",
-		}
-	}
-}
-
 impl fmt::Display for FunctionVersion {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {

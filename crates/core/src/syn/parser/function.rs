@@ -1,8 +1,8 @@
 use reblessive::Stk;
 
 use crate::{
-	expr::{
-		Function, Ident, Model, Value,
+	sql::{
+		Function, Ident, Model, SqlValue,
 		function::{CustomFunctionName, FunctionVersion},
 	},
 	syn::{
@@ -103,7 +103,10 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(super) async fn parse_function_args(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Value>> {
+	pub(super) async fn parse_function_args(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<Vec<SqlValue>> {
 		let start = self.last_span();
 		let mut args = Vec::new();
 		loop {
@@ -221,7 +224,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod test {
 	use crate::{
-		expr::{Script, Value},
+		sql::{Script, SqlValue},
 		syn::{self, Parse},
 	};
 
@@ -230,65 +233,68 @@ mod test {
 	#[test]
 	fn function_single() {
 		let sql = "count()";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("count()", format!("{}", out));
-		assert_eq!(out, Value::from(Function::Normal(String::from("count"), vec![])));
+		assert_eq!(out, SqlValue::from(Function::Normal(String::from("count"), vec![])));
 	}
 
 	#[test]
 	fn function_single_not() {
 		let sql = "not(10)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("not(10)", format!("{}", out));
-		assert_eq!(out, Value::from(Function::Normal("not".to_owned(), vec![10.into()])));
+		assert_eq!(out, SqlValue::from(Function::Normal("not".to_owned(), vec![10.into()])));
 	}
 
 	#[test]
 	fn function_module() {
 		let sql = "rand::uuid()";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("rand::uuid()", format!("{}", out));
-		assert_eq!(out, Value::from(Function::Normal(String::from("rand::uuid"), vec![])));
+		assert_eq!(out, SqlValue::from(Function::Normal(String::from("rand::uuid"), vec![])));
 	}
 
 	#[test]
 	fn function_arguments() {
 		let sql = "string::is::numeric(null)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("string::is::numeric(NULL)", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Function::Normal(String::from("string::is::numeric"), vec![Value::Null]))
+			SqlValue::from(Function::Normal(
+				String::from("string::is::numeric"),
+				vec![SqlValue::Null]
+			))
 		);
 	}
 
 	#[test]
 	fn function_simple_together() {
 		let sql = "function() { return 'test'; }";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("function() { return 'test'; }", format!("{}", out));
-		assert_eq!(out, Value::from(Function::Script(Script::from(" return 'test'; "), vec![])));
+		assert_eq!(out, SqlValue::from(Function::Script(Script::from(" return 'test'; "), vec![])));
 	}
 
 	#[test]
 	fn function_simple_whitespace() {
 		let sql = "function () { return 'test'; }";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("function() { return 'test'; }", format!("{}", out));
-		assert_eq!(out, Value::from(Function::Script(Script::from(" return 'test'; "), vec![])));
+		assert_eq!(out, SqlValue::from(Function::Script(Script::from(" return 'test'; "), vec![])));
 	}
 
 	#[test]
 	fn function_script_expression() {
 		let sql = "function() { return this.tags.filter(t => { return t.length > 3; }); }";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			"function() { return this.tags.filter(t => { return t.length > 3; }); }",
 			format!("{}", out)
 		);
 		assert_eq!(
 			out,
-			Value::from(Function::Script(
+			SqlValue::from(Function::Script(
 				Script::from(" return this.tags.filter(t => { return t.length > 3; }); "),
 				vec![]
 			))
@@ -303,7 +309,7 @@ mod test {
 			purchased_before: true
 		})
 		"#;
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			"ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",
 			out.to_string()
@@ -332,29 +338,29 @@ mod test {
 	#[test]
 	fn ml_model_with_mutiple_arguments() {
 		let sql = "ml::insurance::prediction<1.0.0>(1,2,3,4,)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("ml::insurance::prediction<1.0.0>(1,2,3,4)", out.to_string());
 	}
 
 	#[test]
 	fn script_basic() {
 		let sql = "function(){return true;}";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("function() {return true;}", format!("{}", out));
-		assert_eq!(out, Value::from(Function::Script(Script::from("return true;"), Vec::new())));
+		assert_eq!(out, SqlValue::from(Function::Script(Script::from("return true;"), Vec::new())));
 	}
 
 	#[test]
 	fn script_object() {
 		let sql = "function(){return { test: true, something: { other: true } };}";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			"function() {return { test: true, something: { other: true } };}",
 			format!("{}", out)
 		);
 		assert_eq!(
 			out,
-			Value::from(Function::Script(
+			SqlValue::from(Function::Script(
 				Script::from("return { test: true, something: { other: true } };"),
 				Vec::new()
 			))
@@ -364,14 +370,14 @@ mod test {
 	#[test]
 	fn script_closure() {
 		let sql = "function(){return this.values.map(v => `This value is ${Number(v * 3)}`);}";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			"function() {return this.values.map(v => `This value is ${Number(v * 3)}`);}",
 			format!("{}", out)
 		);
 		assert_eq!(
 			out,
-			Value::from(Function::Script(
+			SqlValue::from(Function::Script(
 				Script::from("return this.values.map(v => `This value is ${Number(v * 3)}`);"),
 				Vec::new()
 			))
@@ -381,14 +387,14 @@ mod test {
 	#[test]
 	fn script_complex() {
 		let sql = r#"function(){return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };}"#;
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			r#"function() {return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };}"#,
 			format!("{}", out)
 		);
 		assert_eq!(
 			out,
-			Value::from(Function::Script(
+			SqlValue::from(Function::Script(
 				Script::from(
 					r#"return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };"#
 				),
@@ -421,8 +427,8 @@ mod test {
 			let x = /* something */ 45 + 2;
 			"#;
 		let sql = "function() {".to_owned() + body + "}";
-		let out = Value::parse(&sql);
+		let out = SqlValue::parse(&sql);
 		assert_eq!(sql, format!("{}", out));
-		assert_eq!(out, Value::from(Function::Script(Script::from(body), Vec::new())));
+		assert_eq!(out, SqlValue::from(Function::Script(Script::from(body), Vec::new())));
 	}
 }

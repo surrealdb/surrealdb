@@ -1,0 +1,36 @@
+# Please see the documentation for all configuration options:
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+# This workflow configures dependabot to automatically raise PRs for outdated packages. 
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 0 #Security Updates only
+    groups:
+      actions:
+        applies-to: security-updates
+        patterns:
+          - "*"
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 0 #Security Updates only 
+    groups:
+      rust:
+        applies-to: security-updates
+        patterns:
+          - "*"
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 0 # Security updates only
+    groups:
+      actions:
+        applies-to: security-updates
+        patterns:
+          - "*"

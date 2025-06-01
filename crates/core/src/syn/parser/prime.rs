@@ -3,9 +3,9 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser, mac::pop_glued};
 use crate::{
-	expr::{
+	sql::{
 		Array, Closure, Dir, Duration, Function, Geometry, Ident, Idiom, Kind, Mock, Number, Param,
-		Part, Script, Strand, Subquery, Table, Value,
+		Part, Script, SqlValue, Strand, Subquery, Table,
 	},
 	syn::{
 		error::bail,
@@ -22,53 +22,53 @@ impl Parser<'_> {
 	/// Parse a what primary.
 	///
 	/// What's are values which are more restricted in what expressions they can contain.
-	pub(super) async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub(super) async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		let token = self.peek();
 		match token.kind {
 			t!("r\"") => {
 				self.pop_peek();
-				Ok(Value::Thing(self.parse_record_string(ctx, true).await?))
+				Ok(SqlValue::Thing(self.parse_record_string(ctx, true).await?))
 			}
 			t!("r'") => {
 				self.pop_peek();
-				Ok(Value::Thing(self.parse_record_string(ctx, false).await?))
+				Ok(SqlValue::Thing(self.parse_record_string(ctx, false).await?))
 			}
 			t!("d\"") | t!("d'") | TokenKind::Glued(Glued::Datetime) => {
-				Ok(Value::Datetime(self.next_token_value()?))
+				Ok(SqlValue::Datetime(self.next_token_value()?))
 			}
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
-				Ok(Value::Uuid(self.next_token_value()?))
+				Ok(SqlValue::Uuid(self.next_token_value()?))
 			}
 			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
 				}
 
-				Ok(Value::File(self.next_token_value()?))
+				Ok(SqlValue::File(self.next_token_value()?))
 			}
 			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
-				Ok(Value::Bytes(self.next_token_value()?))
+				Ok(SqlValue::Bytes(self.next_token_value()?))
 			}
 			t!("$param") => {
-				let value = Value::Param(self.next_token_value()?);
+				let value = SqlValue::Param(self.next_token_value()?);
 				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("FUNCTION") => {
 				self.pop_peek();
 				let func = self.parse_script(ctx).await?;
-				let value = Value::Function(Box::new(func));
+				let value = SqlValue::Function(Box::new(func));
 				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("IF") => {
 				let stmt = ctx.run(|ctx| self.parse_if_stmt(ctx)).await?;
-				Ok(Value::Subquery(Box::new(Subquery::Ifelse(stmt))))
+				Ok(SqlValue::Subquery(Box::new(Subquery::Ifelse(stmt))))
 			}
 			t!("(") => {
 				let token = self.pop_peek();
 				let value = self
 					.parse_inner_subquery(ctx, Some(token.span))
 					.await
-					.map(|x| Value::Subquery(Box::new(x)))?;
+					.map(|x| SqlValue::Subquery(Box::new(x)))?;
 				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("<") => {
@@ -77,14 +77,14 @@ impl Parser<'_> {
 				expected!(self, t!(">"));
 				let start = expected!(self, t!("{")).span;
 				let block = self.parse_block(ctx, start).await?;
-				Ok(Value::Future(Box::new(super::expr::Future(block))))
+				Ok(SqlValue::Future(Box::new(super::sql::Future(block))))
 			}
 			t!("|") => {
 				let start = self.pop_peek().span;
 				self.parse_closure_or_mock(ctx, start).await
 			}
 			t!("||") => self.parse_closure_after_args(ctx, Vec::new()).await,
-			t!("/") => self.next_token_value().map(Value::Regex),
+			t!("/") => self.next_token_value().map(SqlValue::Regex),
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
@@ -96,22 +96,26 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE")
 			| t!("REBUILD")
-			| t!("INFO") => self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x))),
+			| t!("INFO") => {
+				self.parse_inner_subquery(ctx, None).await.map(|x| SqlValue::Subquery(Box::new(x)))
+			}
 			t!("fn") => {
 				self.pop_peek();
-				let value =
-					self.parse_custom_function(ctx).await.map(|x| Value::Function(Box::new(x)))?;
+				let value = self
+					.parse_custom_function(ctx)
+					.await
+					.map(|x| SqlValue::Function(Box::new(x)))?;
 				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("ml") => {
 				self.pop_peek();
-				let value = self.parse_model(ctx).await.map(|x| Value::Model(Box::new(x)))?;
+				let value = self.parse_model(ctx).await.map(|x| SqlValue::Model(Box::new(x)))?;
 				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("silo") => {
 				self.pop_peek();
 				let value =
-					self.parse_silo_function(ctx).await.map(|x| Value::Function(Box::new(x)))?;
+					self.parse_silo_function(ctx).await.map(|x| SqlValue::Function(Box::new(x)))?;
 				self.continue_parse_inline_call(ctx, value).await
 			}
 			x if Self::kind_is_identifier(x) => {
@@ -123,9 +127,9 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						self.parse_thing_or_range(ctx, str).await.map(Value::Thing)
+						self.parse_thing_or_range(ctx, str).await.map(SqlValue::Thing)
 					}
-					_ => Ok(Value::Table(self.next_token_value()?)),
+					_ => Ok(SqlValue::Table(self.next_token_value()?)),
 				}
 			}
 			_ => unexpected!(self, token, "an expression"),
@@ -135,8 +139,8 @@ impl Parser<'_> {
 	pub(super) async fn continue_parse_inline_call(
 		&mut self,
 		ctx: &mut Stk,
-		lhs: Value,
-	) -> ParseResult<Value> {
+		lhs: SqlValue,
+	) -> ParseResult<SqlValue> {
 		// TODO: Figure out why this is whitespace sensitive.
 		if self.eat_whitespace(t!("(")) {
 			let start = self.last_span();
@@ -155,30 +159,30 @@ impl Parser<'_> {
 				}
 			}
 
-			let value = Value::Function(Box::new(Function::Anonymous(lhs, args, false)));
+			let value = SqlValue::Function(Box::new(Function::Anonymous(lhs, args, false)));
 			ctx.run(|ctx| self.continue_parse_inline_call(ctx, value)).await
 		} else {
 			Ok(lhs)
 		}
 	}
 
-	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Value> {
+	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<SqlValue> {
 		let token = self.peek();
 		match token.kind {
 			TokenKind::Glued(Glued::Duration) => {
 				let duration = pop_glued!(self, Duration);
-				Ok(Value::Duration(duration))
+				Ok(SqlValue::Duration(duration))
 			}
 			TokenKind::Glued(Glued::Number) => {
 				let v = self.next_token_value()?;
-				Ok(Value::Number(v))
+				Ok(SqlValue::Number(v))
 			}
 			_ => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::numeric)?;
 				let v = match value.value {
-					compound::Numeric::Number(x) => Value::Number(x),
-					compound::Numeric::Duration(x) => Value::Duration(Duration(x)),
+					compound::Numeric::Number(x) => SqlValue::Number(x),
+					compound::Numeric::Duration(x) => SqlValue::Duration(Duration(x)),
 				};
 				Ok(v)
 			}
@@ -186,7 +190,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse an expressions
-	pub(super) async fn parse_idiom_expression(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub(super) async fn parse_idiom_expression(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		let token = self.peek();
 		let value = match token.kind {
 			t!("@") => {
@@ -196,23 +200,23 @@ impl Parser<'_> {
 					res.push(self.parse_dot_part(ctx).await?);
 				}
 
-				Value::Idiom(Idiom(res))
+				SqlValue::Idiom(Idiom(res))
 			}
 			t!("NONE") => {
 				self.pop_peek();
-				Value::None
+				SqlValue::None
 			}
 			t!("NULL") => {
 				self.pop_peek();
-				Value::Null
+				SqlValue::Null
 			}
 			t!("true") => {
 				self.pop_peek();
-				Value::Bool(true)
+				SqlValue::Bool(true)
 			}
 			t!("false") => {
 				self.pop_peek();
-				Value::Bool(false)
+				SqlValue::Bool(false)
 			}
 			t!("<") => {
 				self.pop_peek();
@@ -220,44 +224,44 @@ impl Parser<'_> {
 				if peek.kind == t!("-") {
 					self.pop_peek();
 					let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
-					Value::Idiom(Idiom(vec![Part::Graph(graph)]))
+					SqlValue::Idiom(Idiom(vec![Part::Graph(graph)]))
 				} else if peek.kind == t!("->") {
 					self.pop_peek();
 					let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
-					Value::Idiom(Idiom(vec![Part::Graph(graph)]))
+					SqlValue::Idiom(Idiom(vec![Part::Graph(graph)]))
 				} else if self.eat(t!("FUTURE")) {
 					// Casting should already have been parsed.
 					self.expect_closing_delimiter(t!(">"), token.span)?;
 					let next = expected!(self, t!("{")).span;
 					let block = self.parse_block(ctx, next).await?;
-					Value::Future(Box::new(super::expr::Future(block)))
+					SqlValue::Future(Box::new(super::sql::Future(block)))
 				} else {
 					unexpected!(self, token, "expected either a `<-` or a future")
 				}
 			}
 			t!("r\"") => {
 				self.pop_peek();
-				Value::Thing(self.parse_record_string(ctx, true).await?)
+				SqlValue::Thing(self.parse_record_string(ctx, true).await?)
 			}
 			t!("r'") => {
 				self.pop_peek();
-				Value::Thing(self.parse_record_string(ctx, false).await?)
+				SqlValue::Thing(self.parse_record_string(ctx, false).await?)
 			}
 			t!("d\"") | t!("d'") | TokenKind::Glued(Glued::Datetime) => {
-				Value::Datetime(self.next_token_value()?)
+				SqlValue::Datetime(self.next_token_value()?)
 			}
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
-				Value::Uuid(self.next_token_value()?)
+				SqlValue::Uuid(self.next_token_value()?)
 			}
 			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
-				Value::Bytes(self.next_token_value()?)
+				SqlValue::Bytes(self.next_token_value()?)
 			}
 			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
 				}
 
-				Value::File(self.next_token_value()?)
+				SqlValue::File(self.next_token_value()?)
 			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
@@ -266,7 +270,7 @@ impl Parser<'_> {
 						return Ok(x);
 					}
 				}
-				Value::Strand(s)
+				SqlValue::Strand(s)
 			}
 			t!("+")
 			| t!("-")
@@ -274,25 +278,25 @@ impl Parser<'_> {
 			| TokenKind::Glued(Glued::Number | Glued::Duration) => self.parse_number_like_prime()?,
 			TokenKind::NaN => {
 				self.pop_peek();
-				Value::Number(Number::Float(f64::NAN))
+				SqlValue::Number(Number::Float(f64::NAN))
 			}
 			t!("$param") => {
-				let value = Value::Param(self.next_token_value()?);
+				let value = SqlValue::Param(self.next_token_value()?);
 				self.continue_parse_inline_call(ctx, value).await?
 			}
 			t!("FUNCTION") => {
 				self.pop_peek();
 				let script = self.parse_script(ctx).await?;
-				Value::Function(Box::new(script))
+				SqlValue::Function(Box::new(script))
 			}
 			t!("->") => {
 				self.pop_peek();
 				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
-				Value::Idiom(Idiom(vec![Part::Graph(graph)]))
+				SqlValue::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_array(ctx, token.span).await.map(Value::Array)?
+				self.parse_array(ctx, token.span).await.map(SqlValue::Array)?
 			}
 			t!("{") => {
 				self.pop_peek();
@@ -311,7 +315,7 @@ impl Parser<'_> {
 				enter_query_recursion!(this = self => {
 					this.pop_peek();
 					let stmt = ctx.run(|ctx| this.parse_if_stmt(ctx)).await?;
-					Value::Subquery(Box::new(Subquery::Ifelse(stmt)))
+					SqlValue::Subquery(Box::new(Subquery::Ifelse(stmt)))
 				})
 			}
 			t!("(") => {
@@ -319,7 +323,7 @@ impl Parser<'_> {
 				let value = self.parse_inner_subquery_or_coordinate(ctx, token.span).await?;
 				self.continue_parse_inline_call(ctx, value).await?
 			}
-			t!("/") => self.next_token_value().map(Value::Regex)?,
+			t!("/") => self.next_token_value().map(SqlValue::Regex)?,
 			t!("RETURN")
 			| t!("SELECT")
 			| t!("CREATE")
@@ -331,20 +335,21 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE")
 			| t!("REBUILD")
-			| t!("INFO") => {
-				self.parse_inner_subquery(ctx, None).await.map(|x| Value::Subquery(Box::new(x)))?
-			}
+			| t!("INFO") => self
+				.parse_inner_subquery(ctx, None)
+				.await
+				.map(|x| SqlValue::Subquery(Box::new(x)))?,
 			t!("fn") => {
 				self.pop_peek();
-				self.parse_custom_function(ctx).await.map(|x| Value::Function(Box::new(x)))?
+				self.parse_custom_function(ctx).await.map(|x| SqlValue::Function(Box::new(x)))?
 			}
 			t!("ml") => {
 				self.pop_peek();
-				self.parse_model(ctx).await.map(|x| Value::Model(Box::new(x)))?
+				self.parse_model(ctx).await.map(|x| SqlValue::Model(Box::new(x)))?
 			}
 			t!("silo") => {
 				self.pop_peek();
-				self.parse_silo_function(ctx).await.map(|x| Value::Function(Box::new(x)))?
+				self.parse_silo_function(ctx).await.map(|x| SqlValue::Function(Box::new(x)))?
 			}
 			x if Self::kind_is_identifier(x) => {
 				let peek = self.peek1();
@@ -355,13 +360,13 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						self.parse_thing_or_range(ctx, str).await.map(Value::Thing)?
+						self.parse_thing_or_range(ctx, str).await.map(SqlValue::Thing)?
 					}
 					_ => {
 						if self.table_as_field {
-							Value::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
+							SqlValue::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
 						} else {
-							Value::Table(self.next_token_value()?)
+							SqlValue::Table(self.next_token_value()?)
 						}
 					}
 				}
@@ -374,8 +379,8 @@ impl Parser<'_> {
 		// Parse the rest of the idiom if it is being continued.
 		if self.peek_continues_idiom() {
 			let value = match value {
-				Value::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(ctx, x).await,
-				Value::Table(Table(x)) => {
+				SqlValue::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(ctx, x).await,
+				SqlValue::Table(Table(x)) => {
 					self.parse_remaining_value_idiom(ctx, vec![Part::Field(Ident(x))]).await
 				}
 				x => self.parse_remaining_value_idiom(ctx, vec![Part::Start(x)]).await,
@@ -432,14 +437,18 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		start: Span,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		match self.peek_kind() {
 			t!("$param") => ctx.run(|ctx| self.parse_closure(ctx, start)).await,
-			_ => self.parse_mock(start).map(Value::Mock),
+			_ => self.parse_mock(start).map(SqlValue::Mock),
 		}
 	}
 
-	pub(super) async fn parse_closure(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Value> {
+	pub(super) async fn parse_closure(
+		&mut self,
+		ctx: &mut Stk,
+		start: Span,
+	) -> ParseResult<SqlValue> {
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!("|")) {
@@ -473,18 +482,19 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		args: Vec<(Ident, Kind)>,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		let (returns, body) = if self.eat(t!("->")) {
 			let returns = Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?);
 			let start = expected!(self, t!("{")).span;
-			let body = Value::Block(Box::new(ctx.run(|ctx| self.parse_block(ctx, start)).await?));
+			let body =
+				SqlValue::Block(Box::new(ctx.run(|ctx| self.parse_block(ctx, start)).await?));
 			(returns, body)
 		} else {
 			let body = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 			(None, body)
 		};
 
-		Ok(Value::Closure(Box::new(Closure {
+		Ok(SqlValue::Closure(Box::new(Closure {
 			args,
 			returns,
 			body,
@@ -513,7 +523,7 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		start: Span,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		enter_query_recursion!(this = self => {
 			this.parse_inner_subquery_or_coordinate_inner(ctx,start).await
 		})
@@ -523,68 +533,68 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		start: Span,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		let peek = self.peek();
 		let res = match peek.kind {
 			t!("RETURN") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_return_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Output(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Output(stmt)))
 			}
 			t!("SELECT") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_select_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Select(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Select(stmt)))
 			}
 			t!("CREATE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Create(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Create(stmt)))
 			}
 			t!("INSERT") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_insert_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Insert(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Insert(stmt)))
 			}
 			t!("UPSERT") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Upsert(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Upsert(stmt)))
 			}
 			t!("UPDATE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_update_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Update(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Update(stmt)))
 			}
 			t!("DELETE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_delete_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Delete(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Delete(stmt)))
 			}
 			t!("RELATE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_relate_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Relate(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Relate(stmt)))
 			}
 			t!("DEFINE") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_define_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Define(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Define(stmt)))
 			}
 			t!("REMOVE") => {
 				self.pop_peek();
 				let stmt = self.parse_remove_stmt(ctx).await?;
-				Value::Subquery(Box::new(Subquery::Remove(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Remove(stmt)))
 			}
 			t!("REBUILD") => {
 				self.pop_peek();
 				let stmt = self.parse_rebuild_stmt()?;
-				Value::Subquery(Box::new(Subquery::Rebuild(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Rebuild(stmt)))
 			}
 			t!("INFO") => {
 				self.pop_peek();
 				let stmt = ctx.run(|ctx| self.parse_info_stmt(ctx)).await?;
-				Value::Subquery(Box::new(Subquery::Info(stmt)))
+				SqlValue::Subquery(Box::new(Subquery::Info(stmt)))
 			}
 			TokenKind::Digits | TokenKind::Glued(Glued::Number) | t!("+") | t!("-") => {
 				if self.glue_and_peek1()?.kind == t!(",") {
@@ -603,7 +613,7 @@ impl Parser<'_> {
 					let x = number.as_float();
 					let y = self.next_token_value::<f64>()?;
 					self.expect_closing_delimiter(t!(")"), start)?;
-					return Ok(Value::Geometry(Geometry::Point(Point::from((x, y)))));
+					return Ok(SqlValue::Geometry(Geometry::Point(Point::from((x, y)))));
 				} else {
 					ctx.run(|ctx| self.parse_value_inherit(ctx)).await?
 				}
@@ -612,7 +622,7 @@ impl Parser<'_> {
 		};
 		let token = self.peek();
 		if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
-			if let Value::Idiom(Idiom(ref idiom)) = res {
+			if let SqlValue::Idiom(Idiom(ref idiom)) = res {
 				if idiom.len() == 1 {
 					bail!("Unexpected token `{}` expected `)`",peek.kind,
 						@token.span,
@@ -709,7 +719,7 @@ impl Parser<'_> {
 		if let Some(start) = start {
 			let token = self.peek();
 			if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
-				if let Subquery::Value(Value::Idiom(Idiom(ref idiom))) = res {
+				if let Subquery::Value(SqlValue::Idiom(Idiom(ref idiom))) = res {
 					if idiom.len() == 1 {
 						// we parsed a single idiom and the next token was a dissallowed statement so
 						// it is likely that the used meant to use an invalid statement.
@@ -731,15 +741,15 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		text: &str,
-	) -> Option<Value> {
+	) -> Option<SqlValue> {
 		if let Ok(x) = Parser::new(text.as_bytes()).parse_thing(ctx).await {
-			return Some(Value::Thing(x));
+			return Some(SqlValue::Thing(x));
 		}
 		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
-			return Some(Value::Datetime(x));
+			return Some(SqlValue::Datetime(x));
 		}
 		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
-			return Some(Value::Uuid(x));
+			return Some(SqlValue::Uuid(x));
 		}
 		None
 	}
@@ -778,28 +788,28 @@ mod tests {
 	#[test]
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("1 + 2 + 3", format!("{}", out))
 	}
 
 	#[test]
 	fn subquery_ifelse_statement() {
 		let sql = "IF true THEN false END";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("IF true THEN false END", format!("{}", out))
 	}
 
 	#[test]
 	fn subquery_select_statement() {
 		let sql = "(SELECT * FROM test)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("(SELECT * FROM test)", format!("{}", out))
 	}
 
 	#[test]
 	fn subquery_define_statement() {
 		let sql = "(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			"(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))",
 			format!("{}", out)
@@ -809,39 +819,39 @@ mod tests {
 	#[test]
 	fn subquery_remove_statement() {
 		let sql = "(REMOVE EVENT foo_event ON foo)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("(REMOVE EVENT foo_event ON foo)", format!("{}", out))
 	}
 
 	#[test]
 	fn subquery_insert_statment() {
 		let sql = "(INSERT INTO test [])";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("(INSERT INTO test [])", format!("{}", out))
 	}
 
 	#[test]
 	fn mock_count() {
 		let sql = "|test:1000|";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("|test:1000|", format!("{}", out));
-		assert_eq!(out, Value::from(Mock::Count(String::from("test"), 1000)));
+		assert_eq!(out, SqlValue::from(Mock::Count(String::from("test"), 1000)));
 	}
 
 	#[test]
 	fn mock_range() {
 		let sql = "|test:1..1000|";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("|test:1..1000|", format!("{}", out));
-		assert_eq!(out, Value::from(Mock::Range(String::from("test"), 1, 1000)));
+		assert_eq!(out, SqlValue::from(Mock::Range(String::from("test"), 1, 1000)));
 	}
 
 	#[test]
 	fn regex_simple() {
 		let sql = "/test/";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("/test/", format!("{}", out));
-		let Value::Regex(regex) = out else {
+		let SqlValue::Regex(regex) = out else {
 			panic!()
 		};
 		assert_eq!(regex, "test".parse().unwrap());
@@ -850,9 +860,9 @@ mod tests {
 	#[test]
 	fn regex_complex() {
 		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/", format!("{}", out));
-		let Value::Regex(regex) = out else {
+		let SqlValue::Regex(regex) = out else {
 			panic!()
 		};
 		assert_eq!(regex, r"(?i)test/[a-z]+/\s\d\w{1}.*".parse().unwrap());
@@ -861,26 +871,26 @@ mod tests {
 	#[test]
 	fn plain_string() {
 		let sql = r#""hello""#;
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(r#"'hello'"#, format!("{}", out));
 
 		let sql = r#"s"hello""#;
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(r#"'hello'"#, format!("{}", out));
 
 		let sql = r#"s'hello'"#;
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(r#"'hello'"#, format!("{}", out));
 	}
 
 	#[test]
 	fn params() {
 		let sql = "$hello";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("$hello", format!("{}", out));
 
 		let sql = "$__hello";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("$__hello", format!("{}", out));
 	}
 }

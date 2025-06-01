@@ -26,9 +26,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
-	Object as CoreObject, Param, Query, Statement, Value as CoreValue,
-	from_value as from_core_value, statements::OutputStatement,
+	Object as CoreObject, Value as CoreValue, from_value as from_core_value,
 };
+use surrealdb_core::sql::Statement;
+use surrealdb_core::sql::statements::OutputStatement;
+use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue};
 use url::Url;
 
 #[cfg(not(target_family = "wasm"))]
@@ -403,7 +405,7 @@ async fn router(
 			value,
 		} => {
 			let mut output_stmt = OutputStatement::default();
-			output_stmt.what = CoreValue::Param(Param::from(key.clone()));
+			output_stmt.what = CoreSqlValue::Param(Param::from(key.clone()));
 			let query = Query::from(Statement::Output(output_stmt));
 			let mut variables = CoreObject::default();
 			variables.insert(key.clone(), value);

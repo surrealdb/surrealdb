@@ -7,7 +7,7 @@ use crate::err::Error;
 use crate::expr;
 use crate::expr::FlowResultExt;
 use crate::expr::Function;
-use crate::expr::Statement;
+use crate::expr::LogicalPlan;
 use crate::expr::function::CustomFunctionName;
 use crate::expr::part::Part;
 use crate::expr::{Thing, Value as SqlValue};
@@ -109,7 +109,7 @@ impl GQLTx {
 			.map_err(Into::into)
 	}
 
-	pub async fn process_stmt(&self, stmt: Statement) -> Result<SqlValue, GqlError> {
+	pub async fn process_stmt(&self, stmt: LogicalPlan) -> Result<SqlValue, GqlError> {
 		let mut stack = TreeStack::new();
 
 		let res = stack

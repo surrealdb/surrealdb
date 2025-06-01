@@ -179,6 +179,7 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a MultiPolygon if the array matches to a MultiPolygon.
+	#[allow(dead_code)]
 	pub(crate) fn array_to_multipolygon(v: &Value) -> Option<MultiPolygon<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -191,6 +192,7 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a MultiLine if the array matches to a MultiLine.
+	#[allow(dead_code)]
 	pub(crate) fn array_to_multiline(v: &Value) -> Option<MultiLineString<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -203,6 +205,7 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a MultiPoint if the array matches to a MultiPoint.
+	#[allow(dead_code)]
 	pub(crate) fn array_to_multipoint(v: &Value) -> Option<MultiPoint<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -215,6 +218,7 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a Polygon if the array matches to a Polygon.
+	#[allow(dead_code)]
 	pub(crate) fn array_to_polygon(v: &Value) -> Option<Polygon<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -231,6 +235,7 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a LineString if the array matches to a LineString.
+	#[allow(dead_code)]
 	pub(crate) fn array_to_line(v: &Value) -> Option<LineString<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -243,6 +248,7 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a Point if the array matches to a point.
+	#[allow(dead_code)]
 	pub(crate) fn array_to_point(v: &Value) -> Option<Point<f64>> {
 		let Value::Array(v) = v else {
 			return None;

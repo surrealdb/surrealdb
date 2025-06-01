@@ -1,5 +1,5 @@
 use crate::{
-	expr::{Algorithm, language::Language},
+	sql::{Algorithm, language::Language},
 	syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind},
 };
 use phf::{phf_map, phf_set};

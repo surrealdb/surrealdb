@@ -402,27 +402,6 @@ pub(crate) trait InfoStructure {
 	fn structure(self) -> Value;
 }
 
-impl InfoStatement {
-	pub(crate) fn structurize(self) -> Self {
-		match self {
-			InfoStatement::Root(_) => InfoStatement::Root(true),
-			InfoStatement::Ns(_) => InfoStatement::Ns(true),
-			InfoStatement::Db(_, v) => InfoStatement::Db(true, v),
-			InfoStatement::Tb(t, _, v) => InfoStatement::Tb(t, true, v),
-			InfoStatement::User(u, b, _) => InfoStatement::User(u, b, true),
-			InfoStatement::Index(i, t, _) => InfoStatement::Index(i, t, true),
-		}
-	}
-
-	pub(crate) fn versionize(self, v: Version) -> Self {
-		match self {
-			InfoStatement::Db(s, _) => InfoStatement::Db(s, Some(v)),
-			InfoStatement::Tb(t, s, _) => InfoStatement::Tb(t, s, Some(v)),
-			_ => self,
-		}
-	}
-}
-
 fn process<T>(a: Arc<[T]>) -> Value
 where
 	T: InfoStructure + Clone,

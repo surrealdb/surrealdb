@@ -19,7 +19,7 @@ use protocol::Test;
 use semver::Version;
 use std::ops::Bound;
 use std::sync::LazyLock;
-use surrealdb_core::expr::statements::{BeginStatement, CommitStatement};
+use surrealdb_core::sql::statements::{BeginStatement, CommitStatement};
 use types::USER;
 use types::User;
 
