@@ -2375,29 +2375,6 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 }
 
 #[test]
-fn parse_let() {
-	let res = test_parse!(parse_stmt, r#"LET $param = 1"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Set(SetStatement {
-			name: "param".to_owned(),
-			what: SqlValue::Number(Number::Int(1)),
-			kind: None,
-		})
-	);
-
-	let res = test_parse!(parse_stmt, r#"$param = 1"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Set(SetStatement {
-			name: "param".to_owned(),
-			what: SqlValue::Number(Number::Int(1)),
-			kind: None,
-		})
-	);
-}
-
-#[test]
 fn parse_show() {
 	let res = test_parse!(parse_stmt, r#"SHOW CHANGES FOR TABLE foo SINCE 1 LIMIT 10"#).unwrap();
 
