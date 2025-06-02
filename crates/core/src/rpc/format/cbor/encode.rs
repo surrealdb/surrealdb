@@ -117,6 +117,22 @@ impl Encode for Bytes {
 	}
 }
 
+impl Encode for bytes::Bytes {
+	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
+		writer.write_major(2, self.len() as u64);
+		writer.write_bytes(&self);
+		Ok(())
+	}
+}
+
+impl Encode for uuid::Bytes {
+	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
+		writer.write_major(2, self.len() as u64);
+		writer.write_bytes(&self.as_slice());
+		Ok(())
+	}
+}
+
 impl Encode for Array {
 	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
 		self.0.encode(writer)
@@ -154,7 +170,7 @@ impl Encode for i64 {
 		if *self >= 0 {
 			writer.write_major(0, *self as u64)
 		} else {
-			writer.write_major(1, -(self + 1) as u64)
+			writer.write_major(1, -self as u64)
 		}
 
 		Ok(())
@@ -238,8 +254,7 @@ impl Encode for Number {
 impl Encode for uuid::Uuid {
 	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
 		writer.write_tag(Tag::SPEC_UUID);
-		writer.write_bytes(self.as_bytes());
-		Ok(())
+		self.as_bytes().encode(writer)
 	}
 }
 
