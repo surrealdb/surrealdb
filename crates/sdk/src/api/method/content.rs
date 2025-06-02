@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use uuid::Uuid;
 
 /// A content future
 ///
@@ -16,6 +17,7 @@ use std::marker::PhantomData;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Content<'r, C: Connection, R> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) command: Result<Command>,
 	pub(super) response_type: PhantomData<R>,
@@ -25,11 +27,12 @@ impl<'r, C, R> Content<'r, C, R>
 where
 	C: Connection,
 {
-	pub(crate) fn from_closure<F>(client: Cow<'r, Surreal<C>>, f: F) -> Self
+	pub(crate) fn from_closure<F>(client: Cow<'r, Surreal<C>>, txn: Option<Uuid>, f: F) -> Self
 	where
 		F: FnOnce() -> Result<Command>,
 	{
 		Content {
+			txn,
 			client,
 			command: f(),
 			response_type: PhantomData,

@@ -1,3 +1,4 @@
+use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::Value;
 use crate::api::Connection;
@@ -11,14 +12,26 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use uuid::Uuid;
 
 /// A record delete future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Delete<'r, C: Connection, R> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) response_type: PhantomData<R>,
+}
+
+impl<C, R> WithTransaction for Delete<'_, C, R>
+where
+	C: Connection,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 impl<C, R> Delete<'_, C, R>
@@ -38,6 +51,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Delete {
+				txn,
 				client,
 				resource,
 				..
@@ -46,7 +60,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Delete {
-						txn: None,
+						txn,
 						what: resource?,
 					})
 					.await

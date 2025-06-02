@@ -1,3 +1,4 @@
+use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::Value;
 use crate::api::Connection;
@@ -12,6 +13,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+use uuid::Uuid;
 
 use super::Content;
 use super::validate_data;
@@ -20,11 +22,21 @@ use super::validate_data;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Create<'r, C: Connection, R> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) response_type: PhantomData<R>,
 }
 
+impl<C, R> WithTransaction for Create<'_, C, R>
+where
+	C: Connection,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
+}
 impl<C, R> Create<'_, C, R>
 where
 	C: Connection,
@@ -42,6 +54,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Create {
+				txn,
 				client,
 				resource,
 				..
@@ -49,7 +62,7 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Create {
-					txn: None,
+					txn,
 					what: resource?,
 					data: None,
 				};
@@ -89,7 +102,7 @@ where
 	where
 		D: Serialize + 'static,
 	{
-		Content::from_closure(self.client, || {
+		Content::from_closure(self.client, self.txn, || {
 			let content = to_core_value(data)?;
 
 			validate_data(
@@ -103,7 +116,7 @@ where
 			};
 
 			Ok(Command::Create {
-				txn: None,
+				txn: self.txn,
 				what: self.resource?,
 				data,
 			})
@@ -120,7 +133,7 @@ where
 	where
 		D: Serialize + 'static,
 	{
-		Content::from_closure(self.client, || {
+		Content::from_closure(self.client, self.txn, || {
 			let content = to_core_value(data)?;
 
 			validate_data(
@@ -134,7 +147,7 @@ where
 			};
 
 			Ok(Command::Create {
-				txn: None,
+				txn: self.txn,
 				what: self.resource?,
 				data,
 			})

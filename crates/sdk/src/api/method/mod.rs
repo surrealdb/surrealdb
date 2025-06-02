@@ -36,7 +36,6 @@ mod export;
 mod health;
 mod import;
 mod insert;
-mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;
@@ -45,6 +44,7 @@ mod select;
 mod set;
 mod signin;
 mod signup;
+mod transaction;
 mod unset;
 mod update;
 mod upsert;
@@ -56,17 +56,8 @@ mod version;
 mod tests;
 
 pub use authenticate::Authenticate;
-/// Not supported yet
-#[doc(hidden)]
 pub use begin::Begin;
-/// Not supported yet
-#[doc(hidden)]
-pub use begin::Transaction;
-/// Not supported yet
-#[doc(hidden)]
 pub use cancel::Cancel;
-/// Not supported yet
-#[doc(hidden)]
 pub use commit::Commit;
 pub use content::Content;
 pub use create::Create;
@@ -90,6 +81,7 @@ pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
 use tokio::sync::watch;
+pub use transaction::Transaction;
 pub use unset::Unset;
 pub use update::Update;
 pub use upsert::Upsert;
@@ -119,6 +111,9 @@ pub struct ExportConfig;
 
 /// Live query marker type
 pub struct Live;
+
+/// Relation marker type
+pub struct Relation;
 
 /// Responses returned with statistics
 #[derive(Debug)]
@@ -255,6 +250,12 @@ where
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
+		}
+	}
+
+	pub fn transaction(&self) -> Begin<C> {
+		Begin {
+			client: self.clone(),
 		}
 	}
 
@@ -649,6 +650,7 @@ where
 			None => Ok(query.into_query()),
 		};
 		Query {
+			txn: None,
 			inner: result.map(|x| x.0),
 			client: Cow::Borrowed(self),
 		}
@@ -695,6 +697,7 @@ where
 	/// ```
 	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
 		Select {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -750,6 +753,7 @@ where
 	/// ```
 	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
 		Create {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -895,9 +899,12 @@ where
 	/// ```
 	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
 		Insert {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
+			relation_cmd: None,
 			response_type: PhantomData,
+			insertion_type: PhantomData,
 		}
 	}
 
@@ -1053,6 +1060,7 @@ where
 	/// ```
 	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
 		Upsert {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -1211,6 +1219,7 @@ where
 	/// ```
 	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
 		Update {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -1243,6 +1252,7 @@ where
 	/// ```
 	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
 		Delete {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
