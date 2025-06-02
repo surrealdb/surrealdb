@@ -34,7 +34,7 @@ pub async fn read(
 				Some(vs) => change::prefix_ts(ns, db, vs)?,
 				None => {
 					bail!(Error::Internal(
-						"no versionstamp associated to this timestamp exists yet".to_string(),
+						"No versionstamp found associated to this timestamp. Hint: SINCE 0 can be used to show all changes for a changefeed".to_string(),
 					))
 				}
 			}
