@@ -56,6 +56,9 @@ mod requirements {
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 pub trait Transaction: requirements::TransactionRequirements {
+	/// Returns if the transaction supports scanning in reverse.
+	fn supports_reverse_scan(&self) -> bool;
+
 	/// Get the name of the transaction type.
 	fn kind(&self) -> &'static str;
 
