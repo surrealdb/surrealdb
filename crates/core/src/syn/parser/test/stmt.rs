@@ -28,8 +28,8 @@ use crate::{
 			RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
 			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
 			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
-			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-			UpsertStatement, UseStatement,
+			RemoveUserStatement, SelectStatement, ThrowStatement, UpdateStatement, UpsertStatement,
+			UseStatement,
 			access::{
 				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 				AccessStatementShow,
