@@ -298,7 +298,6 @@ impl Datastore {
 }
 
 impl super::api::Transaction for Transaction {
-
 	fn supports_reverse_scan(&self) -> bool {
 		true
 	}

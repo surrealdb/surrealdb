@@ -79,10 +79,9 @@ impl Datastore {
 }
 
 impl super::api::Transaction for Transaction {
-
-    fn supports_reverse_scan(&self) -> bool {
-        false
-    }
+	fn supports_reverse_scan(&self) -> bool {
+		false
+	}
 
 	/// Behaviour if unclosed
 	fn check_level(&mut self, check: Check) {
