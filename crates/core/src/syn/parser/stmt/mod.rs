@@ -218,19 +218,16 @@ impl Parser<'_> {
 			_ => {
 				// TODO: Provide information about keywords.
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-				match &value {
-					SqlValue::Expression(x) => {
-						if let Expression::Binary {
-							l: SqlValue::Param(ref x),
-							o: Operator::Equal,
-							..
-						} = **x
-						{
-							let span = token.span.covers(self.recent_span());
-							bail!("Variable declaration without `let` is deprecated", @span => "replace with `let {x} = ..`")
-						}
+				if let SqlValue::Expression(x) = &value {
+					if let Expression::Binary {
+						l: SqlValue::Param(ref x),
+						o: Operator::Equal,
+						..
+					} = **x
+					{
+						let span = token.span.covers(self.recent_span());
+						bail!("Variable declaration without `let` is deprecated", @span => "replace with `let {x} = ..`")
 					}
-					_ => {}
 				}
 				Ok(Statement::Value(value))
 			}
