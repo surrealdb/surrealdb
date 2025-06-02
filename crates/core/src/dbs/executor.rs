@@ -846,5 +846,8 @@ mod tests {
 			ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await.unwrap();
 		let as_string = res.remove(0).result.unwrap().to_string();
 		assert_eq!(as_string, "person:`6586756757564567457647564567`".to_string());
+		unsafe {
+			std::env::set_var("SURREAL_ACCESSIBLE_OUTPUT", "false");
+		}
 	}
 }
