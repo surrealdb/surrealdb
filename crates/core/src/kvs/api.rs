@@ -11,6 +11,9 @@ use std::ops::Range;
 
 #[allow(dead_code)] // not used when non of the storage backends are enabled.
 pub trait Transaction {
+	/// Returns if the transaction supports scanning in reverse.
+	fn supports_reverse_scan(&self) -> bool;
+
 	/// Specify how we should handle unclosed transactions.
 	///
 	/// If a transaction is not cancelled or rolled back then
