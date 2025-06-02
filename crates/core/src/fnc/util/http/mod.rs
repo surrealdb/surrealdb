@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::{Bytes, Object, Strand, Value};
+use crate::fnc::http::resolver;
 use crate::syn;
 
 use anyhow::{Context as _, Result, bail};
@@ -75,15 +76,19 @@ async fn request(
 	let builder = {
 		let count = *crate::cnf::MAX_HTTP_REDIRECTS;
 		let ctx_clone = ctx.clone();
-		builder.redirect(Policy::custom(move |attempt| {
-			if let Err(e) = ctx_clone.check_allowed_net(attempt.url()) {
-				return attempt.error(e);
-			}
-			if attempt.previous().len() >= count {
-				return attempt.stop();
-			}
-			attempt.follow()
-		}))
+		builder
+			.redirect(Policy::custom(move |attempt| {
+				if let Err(e) = ctx_clone.check_allowed_net(attempt.url()) {
+					return attempt.error(e);
+				}
+				if attempt.previous().len() >= count {
+					return attempt.stop();
+				}
+				attempt.follow()
+			}))
+			.dns_resolver(std::sync::Arc::new(resolver::FilteringResolver::from_capabilities(
+				ctx.get_capabilities(),
+			)))
 	};
 
 	let cli = builder.build()?;

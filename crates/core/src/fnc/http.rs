@@ -125,3 +125,44 @@ pub async fn delete(
 	let opts = try_as_opts("http::delete", "The second argument should be an object.", opts)?;
 	crate::fnc::util::http::delete(ctx, uri, opts).await
 }
+
+#[cfg(not(target_family = "wasm"))]
+pub mod resolver {
+	use crate::dbs::{Capabilities, capabilities::NetTarget};
+	use ipnet::IpNet;
+	use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+	use std::{error::Error, net::ToSocketAddrs, sync::Arc};
+
+	pub struct FilteringResolver {
+		pub cap: Arc<Capabilities>,
+	}
+
+	impl FilteringResolver {
+		pub fn from_capabilities(cap: Arc<Capabilities>) -> Self {
+			FilteringResolver {
+				cap,
+			}
+		}
+	}
+
+	impl Resolve for FilteringResolver {
+		fn resolve(&self, name: Name) -> Resolving {
+			let ctx = self.cap.clone();
+			let blocking = tokio::task::spawn_blocking(
+				move || -> Result<Addrs, Box<dyn Error + Send + Sync>> {
+					let addrs = (name.as_str(), 0)
+						.to_socket_addrs()
+						.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
+					let iterator = Box::new(addrs.filter(move |addr| {
+						let target = IpNet::new_assert(addr.ip(), 0);
+						ctx.allows_network_target(&NetTarget::IPNet(target))
+					}));
+					Ok(iterator as Addrs)
+				},
+			);
+			Box::pin(async {
+				blocking.await.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?
+			}) as Resolving
+		}
+	}
+}
