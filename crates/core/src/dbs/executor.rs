@@ -824,4 +824,27 @@ mod tests {
 			);
 		}
 	}
+
+	#[tokio::test]
+	async fn check_standard_output() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let stmt = "CREATE ONLY person:6586756757564567457647564567 RETURN VALUE id";
+		let mut res =
+			ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await.unwrap();
+		let as_string = res.remove(0).result.unwrap().to_string();
+		assert_eq!(as_string, "person:⟨6586756757564567457647564567⟩".to_string());
+	}
+
+	#[tokio::test]
+	async fn check_accessible_output() {
+		unsafe {
+			std::env::set_var("SURREAL_ACCESSIBLE_OUTPUT", "true");
+		}
+		let ds = Datastore::new("memory").await.unwrap();
+		let stmt = "CREATE ONLY person:6586756757564567457647564567 RETURN VALUE id";
+		let mut res =
+			ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await.unwrap();
+		let as_string = res.remove(0).result.unwrap().to_string();
+		assert_eq!(as_string, "person:`6586756757564567457647564567`".to_string());
+	}
 }
