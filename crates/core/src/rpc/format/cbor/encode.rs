@@ -112,7 +112,7 @@ impl Encode for Strand {
 impl Encode for Bytes {
 	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
 		writer.write_major(2, self.len() as u64);
-		writer.write_bytes(&self);
+		writer.write_bytes(self);
 		Ok(())
 	}
 }
@@ -120,7 +120,7 @@ impl Encode for Bytes {
 impl Encode for bytes::Bytes {
 	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
 		writer.write_major(2, self.len() as u64);
-		writer.write_bytes(&self);
+		writer.write_bytes(self);
 		Ok(())
 	}
 }
@@ -128,7 +128,7 @@ impl Encode for bytes::Bytes {
 impl Encode for uuid::Bytes {
 	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
 		writer.write_major(2, self.len() as u64);
-		writer.write_bytes(&self.as_slice());
+		writer.write_bytes(self.as_slice());
 		Ok(())
 	}
 }

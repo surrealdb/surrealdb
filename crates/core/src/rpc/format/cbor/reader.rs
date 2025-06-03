@@ -20,7 +20,7 @@ impl<'a> Reader<'a> {
 	}
 
 	pub fn pop_peek(&mut self) -> Result<(), Error> {
-		if !self.0.get(self.1).is_some() {
+		if self.0.get(self.1).is_none() {
 			return Err(Error::OutOfBounds {
 				byte: self.1,
 				len: self.0.len(),

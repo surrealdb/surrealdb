@@ -275,9 +275,12 @@ impl TryDecode for Datetime {
 			Major::Tagged(Tag::SPEC_DATETIME) => Datetime::try_from(dec.decode::<String>()?)
 				.map(Some)
 				.map_err(|_| Error::InvalidDatetime),
-			Major::Tagged(Tag::CUSTOM_DATETIME) => Datetime::try_from(dec.decode::<(i64, u32)>()?)
-				.map(Some)
-				.map_err(|_| Error::InvalidDatetime),
+			Major::Tagged(Tag::CUSTOM_DATETIME) => {
+				let (s, ns) = dec.decode::<(Option<i64>, Option<u32>)>()?;
+				Datetime::try_from((s.unwrap_or(0), ns.unwrap_or(0)))
+					.map(Some)
+					.map_err(|_| Error::InvalidDatetime)
+			}
 			_ => Err(Error::ExpectedValue("a uuid".into())),
 		}
 	}
@@ -305,9 +308,13 @@ impl TryDecode for Id {
 impl TryDecode for IdRange {
 	fn try_decode(dec: &mut Decoder, major: &Major) -> Result<Option<Self>, Error> {
 		if let Major::Tagged(Tag::RANGE) = major {
-			let (beg, end) = dec.decode::<(Bound<Id>, Bound<Id>)>()?;
+			let (beg, end) = dec.decode::<(Option<Bound<Id>>, Option<Bound<Id>>)>()?;
 			// If the try_from fails, we encountered a normal range instead of an ID range. Error to be thrown elsewhere
-			Ok(IdRange::try_from((beg, end)).ok())
+			Ok(IdRange::try_from((
+				beg.unwrap_or(Bound::Unbounded),
+				end.unwrap_or(Bound::Unbounded),
+			))
+			.ok())
 		} else {
 			Ok(None)
 		}
@@ -364,8 +371,8 @@ impl TryDecode for Duration {
 				.map(Some)
 				.map_err(|_| Error::InvalidDuration),
 			Major::Tagged(Tag::CUSTOM_DATETIME) => {
-				let (s, ns) = dec.decode::<(u64, u32)>()?;
-				Ok(Some(Duration::new(s, ns)))
+				let (s, ns) = dec.decode::<(Option<u64>, Option<u32>)>()?;
+				Ok(Some(Duration::new(s.unwrap_or(0), ns.unwrap_or(0))))
 			}
 			_ => Err(Error::ExpectedValue("a duration".into())),
 		}
@@ -381,7 +388,7 @@ impl TryDecode for Future {
 				.map(|x| Some(Future(x)))
 				.map_err(|_| Error::InvalidFuture)
 		} else {
-			return Ok(None);
+			Ok(None)
 		}
 	}
 }
@@ -389,8 +396,8 @@ impl TryDecode for Future {
 impl TryDecode for Range {
 	fn try_decode(dec: &mut Decoder, major: &Major) -> Result<Option<Self>, Error> {
 		if let Major::Tagged(Tag::RANGE) = major {
-			let (beg, end) = dec.decode::<(Bound<SqlValue>, Bound<SqlValue>)>()?;
-			Ok(Some(Range::new(beg, end)))
+			let (beg, end) = dec.decode::<(Option<Bound<SqlValue>>, Option<Bound<SqlValue>>)>()?;
+			Ok(Some(Range::new(beg.unwrap_or(Bound::Unbounded), end.unwrap_or(Bound::Unbounded))))
 		} else {
 			Ok(None)
 		}
@@ -580,5 +587,23 @@ where
 {
 	fn type_name() -> String {
 		format!("an array of [{}, {}]", A::type_name(), B::type_name())
+	}
+}
+
+impl<A> TryDecode for Option<A>
+where
+	A: TryDecode + TypeName,
+{
+	fn try_decode(dec: &mut Decoder, major: &Major) -> Result<Option<Self>, Error> {
+		dec.try_decode::<A>(major).map(Some)
+	}
+}
+
+impl<A> TypeName for Option<A>
+where
+	A: TypeName,
+{
+	fn type_name() -> String {
+		format!("option<{}>", A::type_name())
 	}
 }

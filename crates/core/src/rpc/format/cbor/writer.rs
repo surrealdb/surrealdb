@@ -66,7 +66,7 @@ impl Writer {
 		let base = major << 5;
 		match len {
 			0..=23 => self.write_u8(base + len as u8),
-			0..=0xFF => {
+			24..=0xFF => {
 				self.write_u8(base + 24);
 				self.write_u8(len as u8);
 			}
