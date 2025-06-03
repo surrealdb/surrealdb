@@ -506,6 +506,10 @@ impl super::api::Transaction for Transaction {
 		// Return result
 		Ok(response.values)
 	}
+
+	fn supports_reverse_scan(&self) -> bool {
+		false
+	}
 }
 
 impl SavePointImpl for Transaction {
