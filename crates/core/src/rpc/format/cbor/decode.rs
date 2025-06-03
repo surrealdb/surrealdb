@@ -258,7 +258,7 @@ impl TryDecode for uuid::Uuid {
 				let text: String = dec.decode()?;
 				uuid::Uuid::parse_str(&text).map(Some).map_err(|_| Error::InvalidUuid)
 			}
-			_ => Err(Error::ExpectedValue("a uuid".into())),
+			_ => Ok(None),
 		}
 	}
 }
@@ -281,7 +281,7 @@ impl TryDecode for Datetime {
 					.map(Some)
 					.map_err(|_| Error::InvalidDatetime)
 			}
-			_ => Err(Error::ExpectedValue("a uuid".into())),
+			_ => Ok(None),
 		}
 	}
 }
@@ -336,9 +336,7 @@ impl TryDecode for Thing {
 		if let Major::Tagged(Tag::RECORDID) = major {
 			let major = dec.0.read_major()?;
 			if let Some(text) = String::try_decode(dec, &major)? {
-				Thing::try_from(text)
-					.map(Some)
-					.map_err(|_| Error::ExpectedValue("a record id".to_string()))
+				Thing::try_from(text).map(Some).map_err(|_| Error::InvalidRecordIdf)
 			} else {
 				let (tb, id) = dec.decode_with_major::<(Either<String, Table>, Id)>(major)?;
 				let tb = match tb {
@@ -374,7 +372,7 @@ impl TryDecode for Duration {
 				let (s, ns) = dec.decode::<(Option<u64>, Option<u32>)>()?;
 				Ok(Some(Duration::new(s.unwrap_or(0), ns.unwrap_or(0))))
 			}
-			_ => Err(Error::ExpectedValue("a duration".into())),
+			_ => Ok(None),
 		}
 	}
 }

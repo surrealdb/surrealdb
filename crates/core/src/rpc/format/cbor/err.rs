@@ -45,6 +45,9 @@ pub enum Error {
 	#[error("Found an invalid Future value")]
 	InvalidFuture,
 
+	#[error("Found an invalid Record ID value")]
+	InvalidRecordId,
+
 	#[error("Found an invalid Range bound")]
 	InvalidBound,
 
