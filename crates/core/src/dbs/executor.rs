@@ -560,7 +560,7 @@ impl Executor {
 		qry: Query,
 	) -> Result<Vec<Response>> {
 		let stream = futures::stream::iter(qry.into_iter().map(Ok));
-		Self::execute_stream(kvs, ctx, opt, stream).await
+		Self::execute_stream(kvs, ctx, opt, false, stream).await
 	}
 
 	pub async fn execute_plan(
@@ -592,6 +592,7 @@ impl Executor {
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
+		skip_success_results: bool,
 		stream: S,
 	) -> Result<Vec<Response>>
 	where
@@ -634,11 +635,13 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, stmt).await;
-					this.results.push(Response {
-						time: now.elapsed(),
-						result,
-						query_type,
-					});
+					if !skip_success_results || result.is_err() {
+						this.results.push(Response {
+							time: now.elapsed(),
+							result,
+							query_type,
+						});
+					}
 				}
 			}
 		}
