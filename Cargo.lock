@@ -6066,7 +6066,7 @@ dependencies = [
 [[package]]
 name = "surrealdb-tikv-client"
 version = "0.3.0-surreal.3"
-source = "git+https://github.com/surrealdb/tikv-client.git?branch=emmanuel%2Fenable-max-grpc-config-size#08c589f40dd893be58529600ce5801bcd9991940"
+source = "git+https://github.com/surrealdb/tikv-client.git?branch=0.3-surreal.x#878d48934b25f10fe4dce1b1dfcad34023342331"
 dependencies = [
  "async-recursion 0.3.2",
  "async-trait",

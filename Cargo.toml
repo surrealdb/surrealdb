@@ -52,8 +52,8 @@ foundationdb = { version = "0.9.0", default-features = false, features = [
 ] }
 rocksdb = { version = "0.23.0", features = ["lz4", "snappy"] }
 # Managed by surreal but mostly external code
-#tikv = { version = "0.3.0-surreal.2", default-features = false, package = "surrealdb-tikv-client" }
-tikv = { git = "https://github.com/surrealdb/tikv-client.git", branch = "emmanuel/enable-max-grpc-config-size", default-features = false, package = "surrealdb-tikv-client" }
+#tikv = { version = "0.3.0-surreal.3", default-features = false, package = "surrealdb-tikv-client" }
+tikv = { git = "https://github.com/surrealdb/tikv-client.git", branch = "0.3-surreal.x", default-features = false, package = "surrealdb-tikv-client" }
 
 # Other crates
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
