@@ -4,6 +4,7 @@ pub mod encode;
 pub mod err;
 pub mod major;
 pub mod reader;
+pub mod serde;
 pub mod simple;
 pub mod tags;
 pub mod types;

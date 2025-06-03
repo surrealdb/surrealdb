@@ -287,17 +287,6 @@ criteria = "safe-to-deploy"
 version = "0.4.40"
 criteria = "safe-to-deploy"
 
-[[exemptions.ciborium]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.ciborium-io]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.ciborium-ll]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
 
 [[exemptions.clang-sys]]
 version = "1.8.1"

@@ -10,6 +10,8 @@ mod http_integration {
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
 	use surrealdb::sql;
+	use surrealdb_core::rpc::format::cbor::decode::Decoder;
+	use surrealdb_core::sql::SqlValue;
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -901,7 +903,8 @@ mod http_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let res = res.bytes().await?.to_vec();
-			let _: ciborium::Value = ciborium::from_reader(res.as_slice()).unwrap();
+			let mut dec = Decoder::new_from_slice(res.as_slice());
+			let _: SqlValue = dec.decode().unwrap();
 		}
 
 		// Creating a record with Accept Surrealdb encoding is allowed

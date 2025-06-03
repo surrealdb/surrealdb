@@ -125,7 +125,6 @@ bytes.workspace = true
 castaway.workspace = true
 cedar-policy.workspace = true
 chrono = { workspace = true, features = ["serde"] }
-ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
 fst.workspace = true

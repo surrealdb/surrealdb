@@ -99,7 +99,7 @@ impl Encode for bool {
 	}
 }
 
-impl Encode for String {
+impl Encode for &str {
 	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
 		let bytes = self.as_bytes();
 		writer.write_major(3, bytes.len() as u64);
@@ -108,9 +108,23 @@ impl Encode for String {
 	}
 }
 
+impl Encode for String {
+	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
+		self.as_str().encode(writer)
+	}
+}
+
 impl Encode for Strand {
 	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
-		self.0.encode(writer)
+		self.as_str().encode(writer)
+	}
+}
+
+impl Encode for &[u8] {
+	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
+		writer.write_major(2, self.len() as u64);
+		writer.write_bytes(self);
+		Ok(())
 	}
 }
 

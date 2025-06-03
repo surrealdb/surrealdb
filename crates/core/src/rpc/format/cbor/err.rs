@@ -71,6 +71,15 @@ pub enum Error {
 
 	#[error("Encountered a value which cannot be encoded")]
 	UnsupportedEncodingValue,
+
+	#[error("An error occured: {0}")]
+	Thrown(String),
+}
+
+impl serde::ser::Error for Error {
+	fn custom<T: std::fmt::Display>(msg: T) -> Self {
+		Error::Thrown(msg.to_string())
+	}
 }
 
 pub trait ExpectDecoded<T> {

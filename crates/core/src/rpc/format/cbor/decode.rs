@@ -336,7 +336,7 @@ impl TryDecode for Thing {
 		if let Major::Tagged(Tag::RECORDID) = major {
 			let major = dec.0.read_major()?;
 			if let Some(text) = String::try_decode(dec, &major)? {
-				Thing::try_from(text).map(Some).map_err(|_| Error::InvalidRecordIdf)
+				Thing::try_from(text).map(Some).map_err(|_| Error::InvalidRecordId)
 			} else {
 				let (tb, id) = dec.decode_with_major::<(Either<String, Table>, Id)>(major)?;
 				let tb = match tb {

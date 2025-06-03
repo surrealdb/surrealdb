@@ -6,6 +6,7 @@ use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
 use serde_json::Value as Json;
 use surrealdb::expr;
+use surrealdb_core::rpc::format::cbor::writer::Writer;
 
 pub enum Output {
 	None,
@@ -30,9 +31,9 @@ impl Output {
 	where
 		T: Serialize,
 	{
-		let mut out = Vec::new();
-		match ciborium::into_writer(&val, &mut out) {
-			Ok(_) => Output::Cbor(out),
+		let mut writer = Writer::default();
+		match val.serialize(&mut writer) {
+			Ok(_) => Output::Cbor(writer.into_inner()),
 			Err(_) => Output::Fail,
 		}
 	}
