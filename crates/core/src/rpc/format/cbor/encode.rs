@@ -58,7 +58,12 @@ impl Encode for SqlValue {
 	fn encode(&self, writer: &mut Writer) -> Result<(), Error> {
 		match self {
 			// Simple values
-			SqlValue::None => writer.write_u8(0xF7),
+			SqlValue::None => {
+				// We use the custom `NONE` tag here, as some cbor decoders decode CBOR's null and undefined into the same value,
+				// while we view them as separate values
+				writer.write_tag(Tag::NONE);
+				SqlValue::Null.encode(writer)?;
+			}
 			SqlValue::Null => writer.write_u8(0xF6),
 			SqlValue::Bool(x) => x.encode(writer)?,
 			SqlValue::Strand(x) => x.encode(writer)?,
