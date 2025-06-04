@@ -13,3 +13,14 @@ impl fmt::Display for BeginStatement {
 		f.write_str("BEGIN TRANSACTION")
 	}
 }
+
+impl From<BeginStatement> for crate::expr::statements::begin::BeginStatement {
+	fn from(_: BeginStatement) -> Self {
+		Self
+	}
+}
+impl From<crate::expr::statements::begin::BeginStatement> for BeginStatement {
+	fn from(_: crate::expr::statements::begin::BeginStatement) -> Self {
+		Self
+	}
+}

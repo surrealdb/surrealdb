@@ -8,7 +8,7 @@
 ///
 /// This macro attaches the span from the token as an error span to the error.
 macro_rules! unexpected {
-	($parser:expr, $found:expr, $expected:expr $(, @$span:expr)? $(, $($t:tt)* )?) => {{
+	($parser:expr_2021, $found:expr_2021, $expected:expr_2021 $(, @$span:expr_2021)? $(, $($t:tt)* )?) => {{
 		let __found: $crate::syn::token::Token = $found;
 		match __found.kind{
 			$crate::syn::token::TokenKind::Invalid => {
@@ -32,7 +32,7 @@ macro_rules! unexpected {
 /// A macro for asserting that the next token should be of the given type, returns the token if
 /// this is the case otherwise it returns an error.
 macro_rules! expected {
-	($parser:expr, $($kind:tt)*) => {{
+	($parser:expr_2021, $($kind:tt)*) => {{
 		let token: crate::syn::token::Token = $parser.next();
 		if let $($kind)* = token.kind{
 			token
@@ -46,7 +46,7 @@ macro_rules! expected {
 /// This will panic if the token was not correct or the value was already eat, both of which the
 /// parser should make sure to uphold.
 macro_rules! pop_glued {
-	($parser:expr, $variant:ident) => {{
+	($parser:expr_2021, $variant:ident) => {{
 		let token = $parser.pop_peek();
 		debug_assert!(matches!(
 			token.kind,
@@ -63,7 +63,7 @@ macro_rules! pop_glued {
 
 /// A macro for indicating that the parser encountered an token which it didn't expect.
 macro_rules! expected_whitespace {
-	($parser:expr, $($kind:tt)*) => {{
+	($parser:expr_2021, $($kind:tt)*) => {{
 		let token: crate::syn::token::Token = $parser.next_whitespace();
 		if let $($kind)* = token.kind{
 			token
@@ -75,7 +75,7 @@ macro_rules! expected_whitespace {
 
 #[cfg(test)]
 macro_rules! test_parse {
-	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:expr) => {{
+	($func:ident$( ( $($e:expr_2021),* $(,)? ))? , $t:expr_2021) => {{
 		let mut parser = $crate::syn::parser::Parser::new($t.as_bytes());
 		let mut stack = reblessive::Stack::new();
 		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
@@ -84,7 +84,7 @@ macro_rules! test_parse {
 
 #[cfg(test)]
 macro_rules! test_parse_with_settings {
-	($func:ident$( ( $($e:expr),* $(,)? ))? , $t:expr, $s:expr) => {{
+	($func:ident$( ( $($e:expr_2021),* $(,)? ))? , $t:expr_2021, $s:expr_2021) => {{
 		let mut parser = $crate::syn::parser::Parser::new_with_settings(
 			$t.as_bytes(),
 			$s,
@@ -95,7 +95,7 @@ macro_rules! test_parse_with_settings {
 }
 
 macro_rules! enter_object_recursion {
-	($name:ident = $this:expr => { $($t:tt)* }) => {{
+	($name:ident = $this:expr_2021 => { $($t:tt)* }) => {{
 		if $this.settings.object_recursion_limit == 0 {
 			return Err($crate::syn::parser::SyntaxError::new("Exceeded query recursion depth limit")
 				.with_span($this.last_span(), $crate::syn::error::MessageKind::Error))
@@ -129,7 +129,7 @@ macro_rules! enter_object_recursion {
 }
 
 macro_rules! enter_query_recursion {
-	($name:ident = $this:expr => { $($t:tt)* }) => {{
+	($name:ident = $this:expr_2021 => { $($t:tt)* }) => {{
 		if $this.settings.query_recursion_limit == 0 {
 			return Err($crate::syn::parser::SyntaxError::new("Exceeded query recursion depth limit")
 				.with_span($this.last_span(), $crate::syn::error::MessageKind::Error))
@@ -164,7 +164,7 @@ macro_rules! enter_query_recursion {
 
 // This macro is used to parse an option in the format `+option`.
 macro_rules! parse_option {
-	($parser: ident, $what: expr, $( $string: expr => $result: expr, )+ _ => $fallback: expr) => {
+	($parser: ident, $what: expr_2021, $( $string: expr_2021 => $result: expr_2021, )+ _ => $fallback: expr_2021) => {
 		if $parser.eat(t!("+")) {
 			let what = $what;
 			let kind = $parser.next_token_value::<Ident>()?;

@@ -9,19 +9,22 @@ use crate::kvs::Datastore;
 
 use super::{error::GqlError, schema::generate_schema};
 
+#[async_trait::async_trait]
 pub trait Invalidator: Debug + Clone + Send + Sync + 'static {
 	type MetaData: Debug + Clone + Send + Sync + Hash;
 
 	fn is_valid(datastore: &Datastore, session: &Session, meta: &Self::MetaData) -> bool;
 
-	fn generate(
+	async fn generate(
 		datastore: &Arc<Datastore>,
 		session: &Session,
-	) -> impl std::future::Future<Output = Result<(Schema, Self::MetaData), GqlError>> + std::marker::Send;
+	) -> Result<(Schema, Self::MetaData), GqlError>;
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Pessimistic;
+
+#[async_trait::async_trait]
 impl Invalidator for Pessimistic {
 	type MetaData = ();
 
@@ -40,6 +43,8 @@ impl Invalidator for Pessimistic {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Optimistic;
+
+#[async_trait::async_trait]
 impl Invalidator for Optimistic {
 	type MetaData = ();
 

@@ -2,14 +2,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{
-	ctx::Context,
-	dbs::{capabilities::ExperimentalTarget, Options},
-	doc::CursorDoc,
-	err::Error,
-};
-
-use super::{array::Uniq, statements::info::InfoStructure, Array, Idiom, Table, Thing, Value};
+use super::{Idiom, SqlValue, Table};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -26,12 +19,18 @@ impl fmt::Display for Reference {
 	}
 }
 
-impl InfoStructure for Reference {
-	fn structure(self) -> Value {
-		map! {
-			"on_delete" => self.on_delete.structure(),
+impl From<Reference> for crate::expr::reference::Reference {
+	fn from(v: Reference) -> Self {
+		Self {
+			on_delete: v.on_delete.into(),
 		}
-		.into()
+	}
+}
+impl From<crate::expr::reference::Reference> for Reference {
+	fn from(v: crate::expr::reference::Reference) -> Self {
+		Self {
+			on_delete: v.on_delete.into(),
+		}
 	}
 }
 
@@ -45,7 +44,7 @@ pub enum ReferenceDeleteStrategy {
 	Ignore,
 	Cascade,
 	Unset,
-	Custom(Value),
+	Custom(SqlValue),
 }
 
 impl fmt::Display for ReferenceDeleteStrategy {
@@ -60,9 +59,47 @@ impl fmt::Display for ReferenceDeleteStrategy {
 	}
 }
 
-impl InfoStructure for ReferenceDeleteStrategy {
-	fn structure(self) -> Value {
-		self.to_string().into()
+impl From<ReferenceDeleteStrategy> for crate::expr::reference::ReferenceDeleteStrategy {
+	fn from(v: ReferenceDeleteStrategy) -> Self {
+		match v {
+			ReferenceDeleteStrategy::Reject => {
+				crate::expr::reference::ReferenceDeleteStrategy::Reject
+			}
+			ReferenceDeleteStrategy::Ignore => {
+				crate::expr::reference::ReferenceDeleteStrategy::Ignore
+			}
+			ReferenceDeleteStrategy::Cascade => {
+				crate::expr::reference::ReferenceDeleteStrategy::Cascade
+			}
+			ReferenceDeleteStrategy::Unset => {
+				crate::expr::reference::ReferenceDeleteStrategy::Unset
+			}
+			ReferenceDeleteStrategy::Custom(v) => {
+				crate::expr::reference::ReferenceDeleteStrategy::Custom(v.into())
+			}
+		}
+	}
+}
+
+impl From<crate::expr::reference::ReferenceDeleteStrategy> for ReferenceDeleteStrategy {
+	fn from(v: crate::expr::reference::ReferenceDeleteStrategy) -> Self {
+		match v {
+			crate::expr::reference::ReferenceDeleteStrategy::Reject => {
+				ReferenceDeleteStrategy::Reject
+			}
+			crate::expr::reference::ReferenceDeleteStrategy::Ignore => {
+				ReferenceDeleteStrategy::Ignore
+			}
+			crate::expr::reference::ReferenceDeleteStrategy::Cascade => {
+				ReferenceDeleteStrategy::Cascade
+			}
+			crate::expr::reference::ReferenceDeleteStrategy::Unset => {
+				ReferenceDeleteStrategy::Unset
+			}
+			crate::expr::reference::ReferenceDeleteStrategy::Custom(v) => {
+				ReferenceDeleteStrategy::Custom(v.into())
+			}
+		}
 	}
 }
 
@@ -73,50 +110,20 @@ impl InfoStructure for ReferenceDeleteStrategy {
 #[non_exhaustive]
 pub struct Refs(pub Vec<(Option<Table>, Option<Idiom>)>);
 
-impl Refs {
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(Value::Array(Default::default()));
-		}
-
-		// Collect an array of references
-		let arr: Array = match doc {
-			// Check if the current document has specified an ID
-			Some(doc) => {
-				// Obtain a record id from the document
-				let rid = match &doc.rid {
-					Some(id) => id.as_ref().to_owned(),
-					None => match &doc.doc.rid() {
-						Value::Thing(id) => id.to_owned(),
-						_ => return Err(Error::InvalidRefsContext),
-					},
-				};
-
-				let mut ids: Vec<Thing> = Vec::new();
-
-				// Map over all input pairs
-				for (ft, ff) in self.0.iter() {
-					// Collect the references
-					ids.append(&mut rid.refs(ctx, opt, ft.as_ref(), ff.as_ref()).await?);
-				}
-
-				// Convert the references into values
-				ids.into_iter().map(Value::Thing).collect()
-			}
-			None => return Err(Error::InvalidRefsContext),
-		};
-
-		Ok(Value::Array(arr.uniq()))
-	}
-}
-
 impl fmt::Display for Refs {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "[]")
+	}
+}
+
+impl From<Refs> for crate::expr::reference::Refs {
+	fn from(v: Refs) -> Self {
+		Self(v.0.into_iter().map(|(t, i)| (t.map(Into::into), i.map(Into::into))).collect())
+	}
+}
+
+impl From<crate::expr::reference::Refs> for Refs {
+	fn from(v: crate::expr::reference::Refs) -> Self {
+		Self(v.0.into_iter().map(|(t, i)| (t.map(Into::into), i.map(Into::into))).collect())
 	}
 }

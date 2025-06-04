@@ -3,19 +3,19 @@ use crate::{
 	format::Progress,
 	runner::Schedular,
 	tests::{
+		TestSet,
 		report::{TestGrade, TestReport, TestTaskResult},
 		set::TestId,
-		TestSet,
 	},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
 use std::{io, mem, str, thread, time::Duration};
 use surrealdb_core::{
-	dbs::{capabilities::ExperimentalTarget, Session},
+	dbs::{Session, capabilities::ExperimentalTarget},
 	env::VERSION,
 	kvs::Datastore,
 	syn,
@@ -300,10 +300,16 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
 
+	let strict = config.env.as_ref().map(|x| x.strict).unwrap_or(false);
+
 	let res = context
 		.ds
 		.with(
-			move |ds| ds.with_capabilities(capabilities).with_query_timeout(Some(timeout_duration)),
+			move |ds| {
+				ds.with_capabilities(capabilities)
+					.with_query_timeout(Some(timeout_duration))
+					.with_strict_mode(strict)
+			},
 			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
 		)
 		.await;
@@ -326,7 +332,7 @@ async fn run_test_with_dbs(
 ) -> Result<TestTaskResult> {
 	let config = &set[id].config;
 
-	let session = util::session_from_test_config(config);
+	let mut session = util::session_from_test_config(config);
 
 	let timeout_duration = config
 		.env
@@ -362,6 +368,24 @@ async fn run_test_with_dbs(
 				import.to_string(),
 				format!("Failed to run import: `{e}`"),
 			));
+		}
+	}
+
+	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref()) {
+		if let Err(e) =
+			surrealdb_core::iam::signup::signup(dbs, &mut session, signup_vars.0.clone().into())
+				.await
+		{
+			return Ok(TestTaskResult::SignupError(e));
+		}
+	}
+
+	if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref()) {
+		if let Err(e) =
+			surrealdb_core::iam::signin::signin(dbs, &mut session, signin_vars.0.clone().into())
+				.await
+		{
+			return Ok(TestTaskResult::SigninError(e));
 		}
 	}
 

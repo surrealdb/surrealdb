@@ -3,7 +3,7 @@ mod key;
 mod lookup;
 mod weight;
 
-use crate::err::Error;
+use anyhow::Result;
 pub(crate) use entry::Entry;
 pub(crate) use lookup::Lookup;
 use uuid::Uuid;
@@ -49,7 +49,7 @@ impl DatastoreCache {
 		self.cache.clear();
 	}
 
-	pub fn get_live_queries_version(&self, ns: &str, db: &str, tb: &str) -> Result<Uuid, Error> {
+	pub fn get_live_queries_version(&self, ns: &str, db: &str, tb: &str) -> Result<Uuid> {
 		// Get the live-queries cache version
 		let key = Lookup::Lvv(ns, db, tb);
 		let version = match self.get(&key) {

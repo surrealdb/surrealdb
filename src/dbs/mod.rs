@@ -1,15 +1,15 @@
 use crate::cli::CF;
-use crate::err::Error;
+use anyhow::Result;
 use clap::Args;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
-use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 
@@ -499,7 +499,7 @@ pub async fn init(
 		temporary_directory,
 		import_file,
 	}: StartCommandDbsOptions,
-) -> Result<Datastore, Error> {
+) -> Result<Datastore> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Log specified strict mode
@@ -514,11 +514,15 @@ pub async fn init(
 	}
 	// Log whether authentication is disabled
 	if unauthenticated {
-		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
+		warn!(
+			"❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌"
+		);
 	}
 	// Warn about the impact of denying all capabilities
 	if capabilities.get_deny_all() {
-		warn!("You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied.");
+		warn!(
+			"You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied."
+		);
 	}
 	// Convert the capabilities
 	let capabilities = capabilities.into();
@@ -552,7 +556,7 @@ pub async fn init(
 	Ok(dbs)
 }
 
-pub async fn fix(path: String) -> Result<(), Error> {
+pub async fn fix(path: String) -> Result<()> {
 	// Parse and setup the desired kv datastore
 	let dbs = Arc::new(Datastore::new(&path).await?);
 	// Ensure the storage version is up-to-date to prevent corruption
@@ -560,7 +564,9 @@ pub async fn fix(path: String) -> Result<(), Error> {
 	// Apply fixes
 	version.fix(dbs).await?;
 	// Log success
-	println!("Database storage version was updated successfully. Please carefully read back logs to see if any manual changes need to be applied");
+	println!(
+		"Database storage version was updated successfully. Please carefully read back logs to see if any manual changes need to be applied"
+	);
 	// All ok
 	Ok(())
 }
@@ -573,7 +579,7 @@ mod tests {
 	use surrealdb::kvs::{LockType::*, TransactionType::*};
 	use test_log::test;
 	use wiremock::matchers::path;
-	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+	use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
 	use super::*;
 	use surrealdb::opt::auth::Root;
@@ -768,7 +774,7 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.with_experimental(ExperimentalTarget::RecordReferences.into())
+						.with_experimental(ExperimentalTarget::RecordReferences.into()),
 				),
 				Session::owner().with_ns("test").with_db("test"),
 				"DEFINE FIELD a ON allow_record TYPE record REFERENCE".to_string(),
@@ -779,7 +785,7 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.without_experimental(ExperimentalTarget::RecordReferences.into())
+						.without_experimental(ExperimentalTarget::RecordReferences.into()),
 				),
 				Session::owner().with_ns("test").with_db("test"),
 				"DEFINE FIELD a ON deny_record TYPE record REFERENCE".to_string(),
@@ -903,8 +909,7 @@ mod tests {
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server3.address().to_string()).unwrap()
-							].into(),
+							[NetTarget::from_str(&server3.address().to_string()).unwrap()].into(),
 						))
 						.without_network_targets(Targets::<NetTarget>::Some(
 							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
@@ -913,8 +918,11 @@ mod tests {
 				Session::owner(),
 				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
-				format!("here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",server3.uri()),
-			)
+				format!(
+					"here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
+					server3.uri()
+				),
+			),
 		];
 
 		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {

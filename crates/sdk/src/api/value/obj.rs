@@ -3,7 +3,7 @@ use std::{
 	collections::btree_map::{IntoIter as BIntoIter, Iter as BIter, IterMut as BIterMut},
 	iter::FusedIterator,
 };
-use surrealdb_core::sql::{Object as CoreObject, Value as CoreValue};
+use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue};
 
 use super::Value;
 
@@ -127,7 +127,7 @@ impl IntoIterator for Object {
 
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {
-			iter: self.0 .0.into_iter(),
+			iter: self.0.0.into_iter(),
 		}
 	}
 }

@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::iam::file::is_path_allowed;
 use crate::idx::ft::analyzer::filter::{FilterResult, Term};
+use anyhow::{Result, bail, ensure};
 #[cfg(target_family = "wasm")]
 use std::fs::File;
 #[cfg(target_family = "wasm")]
@@ -12,8 +13,8 @@ use std::sync::Arc;
 use tokio::fs::File;
 #[cfg(not(target_family = "wasm"))]
 use tokio::io::{AsyncBufReadExt, BufReader};
-use vart::art::Tree;
 use vart::VariableSizeKey;
+use vart::art::Tree;
 
 #[derive(Clone, Default)]
 pub(in crate::idx) struct Mapper {
@@ -21,7 +22,7 @@ pub(in crate::idx) struct Mapper {
 }
 
 impl Mapper {
-	pub(in crate::idx) async fn new(path: &Path) -> Result<Self, Error> {
+	pub(in crate::idx) async fn new(path: &Path) -> Result<Self> {
 		let mut terms = Tree::new();
 		let path = is_path_allowed(path)?;
 		Self::iterate_file(&mut terms, &path).await?;
@@ -34,20 +35,22 @@ impl Mapper {
 		terms: &mut Tree<VariableSizeKey, String>,
 		line: String,
 		line_number: usize,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let Some((word, rest)) = line.split_once('\t') else {
-			return Err(Error::AnalyzerError(format!(
+			bail!(Error::AnalyzerError(format!(
 				"Expected two terms separated by a tab line {line_number}: {}",
 				line
 			)));
 		};
 
-		if rest.contains('\t') {
-			return Err(Error::AnalyzerError(format!(
+		ensure!(
+			!rest.contains('\t'),
+			Error::AnalyzerError(format!(
 				"Expected two terms to not contain more then one tab {line_number}: {}\t{}",
 				word, rest
-			)));
-		}
+			))
+		);
+
 		let key = VariableSizeKey::from_str(rest.trim())
 			.map_err(|_| Error::AnalyzerError(format!("Can't create key from {word}")))?;
 		terms
@@ -58,10 +61,7 @@ impl Mapper {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	async fn iterate_file(
-		terms: &mut Tree<VariableSizeKey, String>,
-		path: &Path,
-	) -> Result<(), Error> {
+	async fn iterate_file(terms: &mut Tree<VariableSizeKey, String>, path: &Path) -> Result<()> {
 		let file = File::open(path).await?;
 		let reader = BufReader::new(file);
 		let mut lines = reader.lines();
@@ -75,10 +75,7 @@ impl Mapper {
 	}
 
 	#[cfg(target_family = "wasm")]
-	async fn iterate_file(
-		terms: &mut Tree<VariableSizeKey, String>,
-		path: &Path,
-	) -> Result<(), Error> {
+	async fn iterate_file(terms: &mut Tree<VariableSizeKey, String>, path: &Path) -> Result<()> {
 		let file = File::open(path)?;
 		let reader = BufReader::new(file);
 		let mut line_number = 0;

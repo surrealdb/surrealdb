@@ -10,7 +10,7 @@ mod database_upgrade {
 	use super::common::docker::DockerContainer;
 	use std::net::Ipv4Addr;
 	use std::time::Duration;
-	use surrealdb::engine::any::{connect, Any};
+	use surrealdb::engine::any::{Any, connect};
 	use surrealdb::opt::auth::Root;
 	use surrealdb::{Connection, Surreal, Value};
 	use test_log::test;
@@ -207,13 +207,15 @@ mod database_upgrade {
 		"DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4",
 	];
 
-	const CHECK_MTREE_DB: [Check; 1] = [
-		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <|2|> [2,3,4,5]",
-		Some("[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"))];
+	const CHECK_MTREE_DB: [Check; 1] = [(
+		"SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <|2|> [2,3,4,5]",
+		Some("[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"),
+	)];
 
-	const CHECK_KNN_BRUTEFORCE: [Check; 1] = [
-		("SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> [2,3,4,5]",
-		 Some("[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"))];
+	const CHECK_KNN_BRUTEFORCE: [Check; 1] = [(
+		"SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <|2,EUCLIDEAN|> [2,3,4,5]",
+		Some("[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"),
+	)];
 
 	type Check = (&'static str, Option<&'static str>);
 

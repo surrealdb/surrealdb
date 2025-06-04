@@ -2,9 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::doc::Document;
+use crate::err;
 use crate::err::Error;
-use crate::sql::statements::InsertStatement;
-use crate::sql::value::Value;
+use crate::expr::statements::InsertStatement;
+use crate::expr::value::Value;
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
@@ -29,7 +31,6 @@ impl Document {
 		// is this retryable?
 		// it is retryable when some data is present on the insert statement to update.
 		let retryable = stm.update.is_some();
-
 		// it is retryable so generate a save point we can roll back to.
 		// always create a save point even if not retryable, as we have to rollback to original state.
 		ctx.tx().lock().await.new_save_point().await;
@@ -44,10 +45,10 @@ impl Document {
 			// ignore the error, and attempt to update the
 			// record using the ON DUPLICATE KEY UPDATE
 			// clause with the ID received in the error
-			Err(IgnoreError::Error(e)) => match *e {
-				Error::IndexExists {
+			Err(IgnoreError::Error(e)) => match e.downcast_ref::<err::Error>() {
+				Some(Error::IndexExists {
 					..
-				} => {
+				}) => {
 					// if not retryable return the error.
 					//
 					// or if the statement contained a specific record id, we
@@ -63,10 +64,10 @@ impl Document {
 
 						return Err(IgnoreError::Error(e));
 					}
-					let Error::IndexExists {
+					let Ok(Error::IndexExists {
 						thing,
 						..
-					} = *e
+					}) = e.downcast()
 					else {
 						// Checked above
 						unreachable!()
@@ -77,9 +78,9 @@ impl Document {
 				// and this ID already exists in the database,
 				// so we need to update the record instead using
 				// the ON DUPLICATE KEY UPDATE statement clause
-				Error::RecordExists {
+				Some(Error::RecordExists {
 					..
-				} => {
+				}) => {
 					// if not retryable return the error.
 					if !retryable {
 						ctx.tx().lock().await.rollback_to_save_point().await?;
@@ -91,10 +92,10 @@ impl Document {
 						}
 						return Err(IgnoreError::Error(e));
 					}
-					let Error::RecordExists {
+					let Ok(Error::RecordExists {
 						thing,
 						..
-					} = *e
+					}) = e.downcast()
 					else {
 						// Checked above
 						unreachable!()
@@ -111,14 +112,12 @@ impl Document {
 			},
 			Err(IgnoreError::Ignore) => {
 				// if the error is ignored, we can release the save point.
-				ctx.tx().lock().await.release_last_save_point().await?;
-
+				ctx.tx().lock().await.release_last_save_point()?;
 				return Err(IgnoreError::Ignore);
 			}
 			Ok(x) => {
 				// if the transaction is successful, we can release the save point.
-				ctx.tx().lock().await.release_last_save_point().await?;
-
+				ctx.tx().lock().await.release_last_save_point()?;
 				return Ok(x);
 			}
 		};

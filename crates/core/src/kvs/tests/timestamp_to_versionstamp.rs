@@ -4,11 +4,11 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-	dbs::{node::Timestamp, Session},
+	dbs::{Session, node::Timestamp},
 	kvs::{
-		clock::{FakeClock, SizedClock},
 		LockType::*,
 		TransactionType::*,
+		clock::{FakeClock, SizedClock},
 	},
 };
 

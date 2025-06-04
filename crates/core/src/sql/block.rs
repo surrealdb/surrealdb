@@ -1,8 +1,5 @@
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::statements::info::InfoStructure;
+use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+
 use crate::sql::statements::rebuild::RebuildStatement;
 use crate::sql::statements::{
 	AlterStatement, BreakStatement, ContinueStatement, CreateStatement, DefineStatement,
@@ -10,8 +7,7 @@ use crate::sql::statements::{
 	RelateStatement, RemoveStatement, SelectStatement, SetStatement, ThrowStatement,
 	UpdateStatement, UpsertStatement,
 };
-use crate::sql::value::Value;
-use reblessive::tree::Stk;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -19,7 +15,6 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use super::statements::InfoStatement;
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
@@ -37,106 +32,20 @@ impl Deref for Block {
 	}
 }
 
-impl From<Value> for Block {
-	fn from(v: Value) -> Self {
+impl From<SqlValue> for Block {
+	fn from(v: SqlValue) -> Self {
 		Block(vec![Entry::Value(v)])
 	}
 }
 
-impl Block {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.iter().any(Entry::writeable)
+impl From<Block> for crate::expr::Block {
+	fn from(v: Block) -> Self {
+		crate::expr::Block(v.0.into_iter().map(Into::into).collect())
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Duplicate context
-		let mut ctx = MutableContext::new(ctx).freeze();
-		// Loop over the statements
-		for (i, v) in self.iter().enumerate() {
-			match v {
-				Entry::Set(v) => {
-					let val = v.compute(stk, &ctx, opt, doc).await?;
-					let mut c = MutableContext::unfreeze(ctx)?;
-					c.add_value(v.name.clone(), val.into());
-					ctx = c.freeze();
-				}
-				Entry::Throw(v) => {
-					// Always errors immediately
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Break(v) => {
-					// Always errors immediately
-					v.compute(&ctx, opt, doc).await?;
-				}
-				Entry::Continue(v) => {
-					// Always errors immediately
-					v.compute(&ctx, opt, doc).await?;
-				}
-				Entry::Foreach(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Ifelse(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Select(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Create(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Upsert(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Update(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Delete(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Relate(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Insert(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Define(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Rebuild(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Remove(v) => {
-					v.compute(&ctx, opt, doc).await?;
-				}
-				Entry::Output(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Alter(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Info(v) => {
-					v.compute(stk, &ctx, opt, doc).await?;
-				}
-				Entry::Value(v) => {
-					if i == self.len() - 1 {
-						// If the last entry then return the value
-						return v.compute(stk, &ctx, opt, doc).await;
-					} else {
-						// Otherwise just process the value
-						v.compute(stk, &ctx, opt, doc).await?;
-					}
-				}
-			}
-		}
-		// Return nothing
-		Ok(Value::None)
+}
+impl From<crate::expr::Block> for Block {
+	fn from(v: crate::expr::Block) -> Self {
+		Block(v.0.into_iter().map(Into::into).collect())
 	}
 }
 
@@ -185,18 +94,12 @@ impl Display for Block {
 	}
 }
 
-impl InfoStructure for Block {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
-
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Entry {
-	Value(Value),
+	Value(SqlValue),
 	Set(SetStatement),
 	Ifelse(IfelseStatement),
 	Select(SelectStatement),
@@ -229,34 +132,6 @@ impl PartialOrd for Entry {
 	}
 }
 
-impl Entry {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		match self {
-			Self::Set(v) => v.writeable(),
-			Self::Value(v) => v.writeable(),
-			Self::Ifelse(v) => v.writeable(),
-			Self::Select(v) => v.writeable(),
-			Self::Create(v) => v.writeable(),
-			Self::Upsert(v) => v.writeable(),
-			Self::Update(v) => v.writeable(),
-			Self::Delete(v) => v.writeable(),
-			Self::Relate(v) => v.writeable(),
-			Self::Insert(v) => v.writeable(),
-			Self::Output(v) => v.writeable(),
-			Self::Define(v) => v.writeable(),
-			Self::Rebuild(v) => v.writeable(),
-			Self::Remove(v) => v.writeable(),
-			Self::Throw(v) => v.writeable(),
-			Self::Break(v) => v.writeable(),
-			Self::Continue(v) => v.writeable(),
-			Self::Foreach(v) => v.writeable(),
-			Self::Alter(v) => v.writeable(),
-			Self::Info(v) => v.writeable(),
-		}
-	}
-}
-
 impl Display for Entry {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
@@ -280,6 +155,60 @@ impl Display for Entry {
 			Self::Foreach(v) => write!(f, "{v}"),
 			Self::Alter(v) => write!(f, "{v}"),
 			Self::Info(v) => write!(f, "{v}"),
+		}
+	}
+}
+
+impl From<Entry> for crate::expr::Entry {
+	fn from(v: Entry) -> Self {
+		match v {
+			Entry::Value(v) => Self::Value(v.into()),
+			Entry::Set(v) => Self::Set(v.into()),
+			Entry::Ifelse(v) => Self::Ifelse(v.into()),
+			Entry::Select(v) => Self::Select(v.into()),
+			Entry::Create(v) => Self::Create(v.into()),
+			Entry::Update(v) => Self::Update(v.into()),
+			Entry::Delete(v) => Self::Delete(v.into()),
+			Entry::Relate(v) => Self::Relate(v.into()),
+			Entry::Insert(v) => Self::Insert(v.into()),
+			Entry::Output(v) => Self::Output(v.into()),
+			Entry::Define(v) => Self::Define(v.into()),
+			Entry::Remove(v) => Self::Remove(v.into()),
+			Entry::Throw(v) => Self::Throw(v.into()),
+			Entry::Break(v) => Self::Break(v.into()),
+			Entry::Continue(v) => Self::Continue(v.into()),
+			Entry::Foreach(v) => Self::Foreach(v.into()),
+			Entry::Rebuild(v) => Self::Rebuild(v.into()),
+			Entry::Upsert(v) => Self::Upsert(v.into()),
+			Entry::Alter(v) => Self::Alter(v.into()),
+			Entry::Info(v) => Self::Info(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Entry> for Entry {
+	fn from(v: crate::expr::Entry) -> Self {
+		match v {
+			crate::expr::Entry::Value(v) => Self::Value(v.into()),
+			crate::expr::Entry::Set(v) => Self::Set(v.into()),
+			crate::expr::Entry::Ifelse(v) => Self::Ifelse(v.into()),
+			crate::expr::Entry::Select(v) => Self::Select(v.into()),
+			crate::expr::Entry::Create(v) => Self::Create(v.into()),
+			crate::expr::Entry::Update(v) => Self::Update(v.into()),
+			crate::expr::Entry::Delete(v) => Self::Delete(v.into()),
+			crate::expr::Entry::Relate(v) => Self::Relate(v.into()),
+			crate::expr::Entry::Insert(v) => Self::Insert(v.into()),
+			crate::expr::Entry::Output(v) => Self::Output(v.into()),
+			crate::expr::Entry::Define(v) => Self::Define(v.into()),
+			crate::expr::Entry::Remove(v) => Self::Remove(v.into()),
+			crate::expr::Entry::Throw(v) => Self::Throw(v.into()),
+			crate::expr::Entry::Break(v) => Self::Break(v.into()),
+			crate::expr::Entry::Continue(v) => Self::Continue(v.into()),
+			crate::expr::Entry::Foreach(v) => Self::Foreach(v.into()),
+			crate::expr::Entry::Rebuild(v) => Self::Rebuild(v.into()),
+			crate::expr::Entry::Upsert(v) => Self::Upsert(v.into()),
+			crate::expr::Entry::Alter(v) => Self::Alter(v.into()),
+			crate::expr::Entry::Info(v) => Self::Info(v.into()),
 		}
 	}
 }

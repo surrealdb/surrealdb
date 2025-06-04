@@ -3,9 +3,9 @@
 use std::str::FromStr;
 
 use js::{
+	Array, Ctx, Exception, JsLifetime, Result, Value,
 	class::Trace,
 	prelude::{Coerced, List},
-	Array, Ctx, Exception, JsLifetime, Result, Value,
 };
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
@@ -60,12 +60,12 @@ impl Headers {
 
 		for (k, v) in self.inner.iter() {
 			let k = k.as_str();
-			if Some(k) == res.last().map(|x| x.0 .0.as_str()) {
+			if Some(k) == res.last().map(|x| x.0.0.as_str()) {
 				let ent = res.last_mut().unwrap();
-				ent.0 .1.push_str(", ");
+				ent.0.1.push_str(", ");
 				// Header value came from a string, so it should also be able to be cast back
 				// to a string
-				ent.0 .1.push_str(v.to_str().unwrap());
+				ent.0.1.push_str(v.to_str().unwrap());
 			} else {
 				res.push(List((k.to_owned(), v.to_str().unwrap().to_owned())));
 			}
@@ -238,7 +238,7 @@ impl Headers {
 				return Err(Exception::throw_type(
 					ctx,
 					&format!("invalid header name `{key}`: {e}"),
-				))
+				));
 			}
 		};
 		let val = match HeaderValue::from_bytes(val.as_bytes()) {
@@ -247,7 +247,7 @@ impl Headers {
 				return Err(Exception::throw_type(
 					ctx,
 					&format!("invalid header value `{val}`: {e}"),
-				))
+				));
 			}
 		};
 

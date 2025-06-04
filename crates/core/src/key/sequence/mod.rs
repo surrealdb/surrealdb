@@ -2,8 +2,8 @@
 pub mod ba;
 pub mod st;
 
-use crate::err::Error;
-use crate::kvs::{impl_key, KeyEncode};
+use crate::kvs::{KeyEncode, impl_key};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -45,7 +45,7 @@ impl<'a> Prefix<'a> {
 		ns: &'a str,
 		db: &'a str,
 		sq: &'a str,
-	) -> Result<(Vec<u8>, Vec<u8>), Error> {
+	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let mut beg = Self::new(ns, db, sq, b'b', b'a').encode()?;
 		let mut end = Self::new(ns, db, sq, b'b', b'a').encode()?;
 		beg.extend_from_slice(&[0x00; 9]);
@@ -57,7 +57,7 @@ impl<'a> Prefix<'a> {
 		ns: &'a str,
 		db: &'a str,
 		sq: &'a str,
-	) -> Result<(Vec<u8>, Vec<u8>), Error> {
+	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let mut beg = Self::new(ns, db, sq, b's', b't').encode()?;
 		let mut end = Self::new(ns, db, sq, b's', b't').encode()?;
 		beg.extend_from_slice(&[0x00; 9]);

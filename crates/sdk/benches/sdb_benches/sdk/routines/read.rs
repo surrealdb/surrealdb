@@ -1,4 +1,4 @@
-use surrealdb::{engine::any::Any, sql::Id, Surreal};
+use surrealdb::{Surreal, engine::any::Any, sql::Id};
 use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::sdb_benches::sdk::Record;

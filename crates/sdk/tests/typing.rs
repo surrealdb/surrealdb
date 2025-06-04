@@ -3,12 +3,12 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn strict_typing_inline() -> Result<(), Error> {
+async fn strict_typing_inline() -> Result<()> {
 	let sql = "
 		UPSERT person:test SET age = <int> NONE;
 		UPSERT person:test SET age = <int> '18';
@@ -29,21 +29,22 @@ async fn strict_typing_inline() -> Result<(), Error> {
 	assert_eq!(tmp.unwrap_err().to_string(), "Expected `int` but found a `NONE`");
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				age: 18,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	assert_eq!(tmp.unwrap_err().to_string(), "Expected `bool | int` but found a `NONE`");
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -51,11 +52,12 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				enabled: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -64,11 +66,12 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				name: 'Tobie Morgan Hitchcock',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -78,11 +81,12 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -92,11 +96,12 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				scores: [1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -106,7 +111,8 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -119,7 +125,7 @@ async fn strict_typing_inline() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn strict_typing_defined() -> Result<(), Error> {
+async fn strict_typing_defined() -> Result<()> {
 	let sql = "
 		DEFINE FIELD age ON person TYPE int;
 		DEFINE FIELD enabled ON person TYPE bool | int;
@@ -167,7 +173,7 @@ async fn strict_typing_defined() -> Result<(), Error> {
 	);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -177,14 +183,15 @@ async fn strict_typing_defined() -> Result<(), Error> {
 				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn strict_typing_none_null() -> Result<(), Error> {
+async fn strict_typing_none_null() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD name ON TABLE person TYPE option<string>;
@@ -278,7 +285,7 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn literal_typing() -> Result<(), Error> {
+async fn literal_typing() -> Result<()> {
 	let sql = "
 		DEFINE TABLE test SCHEMAFULL;
 		DEFINE FIELD obj ON test TYPE {
@@ -313,7 +320,7 @@ async fn literal_typing() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn strict_typing_optional_object() -> Result<(), Error> {
+async fn strict_typing_optional_object() -> Result<()> {
 	let sql = "
         DEFINE TABLE test SCHEMAFULL;
         DEFINE FIELD obj ON test TYPE option<object>;

@@ -1,4 +1,4 @@
-use crate::sql::number::Number;
+use crate::expr::number::Number;
 use std::collections::BTreeMap;
 
 pub trait Mode {

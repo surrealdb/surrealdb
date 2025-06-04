@@ -271,18 +271,6 @@ criteria = "safe-to-deploy"
 version = "1.2.17"
 criteria = "safe-to-deploy"
 
-[[exemptions.cedar-policy]]
-version = "2.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.cedar-policy-core]]
-version = "2.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.cedar-policy-validator]]
-version = "2.4.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.chrono]]
 version = "0.4.40"
 criteria = "safe-to-deploy"
@@ -465,6 +453,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fixedbitset]]
 version = "0.4.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.flate2]]
+version = "1.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.float_next_after]]
@@ -1117,6 +1109,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rust-stemmers]]
 version = "1.2.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.rust_decimal]]
+version = "1.37.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustc_lexer]]

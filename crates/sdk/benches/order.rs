@@ -1,8 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::time::Duration;
 use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
-use surrealdb_core::sql::Value;
+use surrealdb_core::expr::Value;
 use tokio::runtime::{Builder, Runtime};
 
 fn bench_order(c: &mut Criterion) {
@@ -71,10 +71,13 @@ async fn run(i: &Input, q: &str, expected: usize) {
 	let mut r = i.dbs.execute(black_box(q), &i.ses, None).await.unwrap();
 	if cfg!(debug_assertions) {
 		assert_eq!(r.len(), 1);
-		if let Value::Array(a) = r.remove(0).result.unwrap() {
-			assert_eq!(a.len(), expected);
-		} else {
-			panic!("Fail");
+		match r.remove(0).result.unwrap() {
+			Value::Array(a) => {
+				assert_eq!(a.len(), expected);
+			}
+			_ => {
+				panic!("Fail");
+			}
 		}
 	}
 	black_box(r);

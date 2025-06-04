@@ -1,42 +1,41 @@
 use reblessive::Stk;
 
 use crate::api::method::Method;
-use crate::api::middleware::RequestMiddleware;
+use crate::sql::SqlValue;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
-use crate::sql::statements::define::config::api::ApiConfig;
-use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
+use crate::sql::statements::DefineApiStatement;
 use crate::sql::statements::define::config::ConfigInner;
+use crate::sql::statements::define::config::api::{ApiConfig, RequestMiddleware};
+use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::{
 	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement,
 };
-use crate::sql::statements::DefineApiStatement;
-use crate::sql::Value;
 use crate::syn::error::bail;
 use crate::syn::token::Token;
 use crate::{
 	sql::{
-		access_type,
+		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, SqlValues, Strand,
+		TableType, access_type,
 		base::Base,
 		filter::Filter,
 		index::{Distance, VectorType},
 		statements::{
-			define::config::graphql, DefineAccessStatement, DefineAnalyzerStatement,
-			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
+			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
+			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+			DefineTableStatement, DefineUserStatement, define::config::graphql,
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		user, AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand,
-		TableType, Values,
+		user,
 	},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
 			ParseResult, Parser,
+			mac::{expected, unexpected},
 		},
-		token::{t, Keyword, TokenKind},
+		token::{Keyword, TokenKind, t},
 	},
 };
 
@@ -856,7 +855,9 @@ impl Parser<'_> {
 							t!("PUT") => Method::Put,
 							t!("TRACE") => Method::Trace,
 							found => {
-								bail!("Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}");
+								bail!(
+									"Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}"
+								);
 							}
 						};
 
@@ -914,7 +915,7 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			name,
 			what,
-			when: Value::Bool(true),
+			when: SqlValue::Bool(true),
 			if_not_exists,
 			overwrite,
 			..Default::default()
@@ -928,7 +929,7 @@ impl Parser<'_> {
 				}
 				t!("THEN") => {
 					self.pop_peek();
-					res.then = Values(vec![ctx.run(|ctx| self.parse_value_field(ctx)).await?]);
+					res.then = SqlValues(vec![ctx.run(|ctx| self.parse_value_field(ctx)).await?]);
 					while self.eat(t!(",")) {
 						res.then.0.push(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 					}
@@ -1530,7 +1531,7 @@ impl Parser<'_> {
 				t!("MIDDLEWARE") => {
 					self.pop_peek();
 
-					let mut middleware: Vec<(String, Vec<Value>)> = Vec::new();
+					let mut middleware: Vec<(String, Vec<SqlValue>)> = Vec::new();
 					// let mut parsed_custom = false;
 
 					loop {

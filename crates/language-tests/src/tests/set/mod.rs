@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::{
 	borrow::Cow,
-	collections::{hash_map::Values, HashMap},
+	collections::{HashMap, hash_map::Values},
 	fmt::Write,
 	hash::Hash,
 	io::{self, IsTerminal as _},
@@ -14,7 +14,7 @@ use tokio::fs;
 
 use crate::{
 	cli::ColorMode,
-	format::{ansi, IndentFormatter},
+	format::{IndentFormatter, ansi},
 };
 
 use super::{ResolvedImport, TestCase};
@@ -98,7 +98,7 @@ impl TestSet {
 		let map = self
 			.map
 			.iter()
-			.filter(|x| f(x.0.as_str(), &self.all[x.1 .0]))
+			.filter(|x| f(x.0.as_str(), &self.all[x.1.0]))
 			.map(|(a, b)| (a.clone(), *b))
 			.collect();
 
@@ -182,10 +182,10 @@ impl TestSet {
 					errors.push(TestLoadError {
 						path: all[test_index].path.clone(),
 						error: anyhow::anyhow!(
-								"Importing test `{}` for test `{}` which contains imports itself is not supported.",
-								import.path,
-								all[test_index].path
-							),
+							"Importing test `{}` for test `{}` which contains imports itself is not supported.",
+							import.path,
+							all[test_index].path
+						),
 					});
 				}
 			}
