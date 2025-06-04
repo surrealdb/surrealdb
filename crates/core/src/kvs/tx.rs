@@ -769,9 +769,10 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineFunctionStatement]>> {
+		// Collect all normal functions
 		let qey = cache::tx::Lookup::Fcs(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_fcs(),
+		let normal = match self.cache.get(&qey) {
+			Some(val) => val.try_into_fcs()?,
 			None => {
 				let beg = crate::key::database::fc::prefix(ns, db)?;
 				let end = crate::key::database::fc::suffix(ns, db)?;
@@ -779,21 +780,14 @@ impl Transaction {
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
 				let entry = cache::tx::Entry::Fcs(val.clone());
 				self.cache.insert(qey, entry);
-				Ok(val)
+				val
 			}
-		}
-	}
+		};
 
-	/// Retrieve all silo function definitions for a specific database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_silo_functions(
-		&self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineFunctionStatement]>> {
+		// Collect all silo functions
 		let qey = cache::tx::Lookup::Sis(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_sis(),
+		let silo = match self.cache.get(&qey) {
+			Some(val) => val.try_into_sis()?,
 			None => {
 				let beg = crate::key::database::si::prefix(ns, db)?;
 				let end = crate::key::database::si::suffix(ns, db)?;
@@ -801,20 +795,10 @@ impl Transaction {
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
 				let entry = cache::tx::Entry::Sis(val.clone());
 				self.cache.insert(qey, entry);
-				Ok(val)
+				val
 			}
-		}
-	}
+		};
 
-	/// Retrieve all function definitions for a specific database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn combined_db_functions(
-		&self,
-		ns: &str,
-		db: &str,
-	) -> Result<Arc<[DefineFunctionStatement]>> {
-		let normal = self.all_db_functions(ns, db).await?;
-		let silo = self.all_silo_functions(ns, db).await?;
 		let mut combined: Vec<DefineFunctionStatement> =
 			Vec::with_capacity(normal.len() + silo.len());
 
