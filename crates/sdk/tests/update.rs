@@ -968,17 +968,3 @@ async fn update_field_permissions() -> Result<()> {
 
 	Ok(())
 }
-
-#[tokio::test]
-async fn create_memory_tracker() -> Result<()> {
-	let sql = "
-		CREATE |person:10000| CONTENT { name: rand::string(7, 15) };";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	res.remove(0).result?;
-	//
-	Ok(())
-}

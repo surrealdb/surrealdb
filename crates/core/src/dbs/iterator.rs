@@ -651,7 +651,7 @@ impl Iterator {
 		for v in mem::take(&mut self.entries) {
 			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
-			// we need to be make we are giving space for cancellations
+			// we need to make space for possible cancellations
 			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
