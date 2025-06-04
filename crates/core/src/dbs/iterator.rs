@@ -644,7 +644,6 @@ impl Iterator {
 		// If any iterator requires distinct, we need to create a global distinct instance
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
-		println!("ENTRIES: {}", self.entries.len());
 		for (count, v) in mem::take(&mut self.entries).into_iter().enumerate() {
 			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
