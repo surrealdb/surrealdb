@@ -33,7 +33,7 @@ impl Document {
 		let retryable = stm.update.is_some();
 		// it is retryable so generate a save point we can roll back to.
 		// always create a save point even if not retryable, as we have to rollback to original state.
-		ctx.tx().lock().await.new_save_point().await;
+		ctx.tx().lock().await.new_save_point();
 
 		// First try to create the value and if that is not possible due to an existing value fall
 		// back to update instead.
@@ -127,7 +127,7 @@ impl Document {
 			ctx.tx().lock().await.rollback_to_save_point().await?;
 		} else {
 			// Release the save point.
-			ctx.tx().lock().await.release_last_save_point().await?;
+			ctx.tx().lock().await.release_last_save_point()?;
 		}
 
 		if ctx.is_done(true).await? {
