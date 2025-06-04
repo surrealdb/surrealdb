@@ -66,7 +66,7 @@ value = "true"
 [[test.results]]
 value = "false"
 
-# string::is::ip_v4 results
+# string::is::ipv4 results
 
 [[test.results]]
 value = "true"
@@ -74,7 +74,7 @@ value = "true"
 [[test.results]]
 value = "false"
 
-# string::is::ip_v6 results
+# string::is::ipv6 results
 
 [[test.results]]
 value = "true"
