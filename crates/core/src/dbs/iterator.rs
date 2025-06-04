@@ -161,7 +161,7 @@ impl Iterator {
 	) -> Result<()> {
 		// Match the values
 		match val {
-			Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
+			Value::Mock(v) => self.prepare_mock(ctx, v).await?,
 			Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
 			Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
 			Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
@@ -230,13 +230,17 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_mock(&mut self, stm: &Statement<'_>, v: Mock) -> Result<()> {
-		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+	pub(crate) async fn prepare_mock(&mut self, ctx: &StatementContext<'_>, v: Mock) -> Result<()> {
+		ensure!(!ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Add the records to the iterator
-		for v in v {
-			match stm.is_deferable() {
+		for (count, v) in v.into_iter().enumerate() {
+			match ctx.stm.is_deferable() {
 				true => self.ingest(Iterable::Defer(v)),
 				false => self.ingest(Iterable::Thing(v)),
+			}
+			// Check if the context is finished
+			if ctx.ctx.is_done(count % 100 == 0).await? {
+				break;
 			}
 		}
 		// All ingested ok
@@ -321,7 +325,7 @@ impl Iterator {
 		// Add the records to the iterator
 		for v in v {
 			match v {
-				Value::Mock(v) => self.prepare_mock(ctx.stm, v)?,
+				Value::Mock(v) => self.prepare_mock(ctx, v).await?,
 				Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
 				Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
 				Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
@@ -640,8 +644,14 @@ impl Iterator {
 		// If any iterator requires distinct, we need to create a global distinct instance
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
-		for v in mem::take(&mut self.entries) {
+		println!("ENTRIES: {}", self.entries.len());
+		for (count, v) in mem::take(&mut self.entries).into_iter().enumerate() {
 			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
+			// MOCK can create a large collection of iterators,
+			// we need to make space for possible cancellations
+			if ctx.is_done(count % 100 == 0).await? {
+				break;
+			}
 		}
 		// Everything processed ok
 		Ok(())
