@@ -194,7 +194,7 @@ async fn define_statement_index_concurrently_building_status(
 	let mut appended_count = 0;
 	// While the concurrent indexing is running, we update and delete records
 	info!("Loop");
-	let time_out = Duration::from_secs(120);
+	let time_out = Duration::from_secs(240);
 	loop {
 		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&time_out) {
 			panic!("Time-out {time_out:?}");

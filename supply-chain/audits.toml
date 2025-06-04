@@ -103,7 +103,7 @@ end = "2025-08-31"
 
 [[trusted.bytes]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-03-06"
 end = "2025-09-03"
 
@@ -169,7 +169,7 @@ end = "2025-08-06"
 
 [[trusted.http-body]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-04-04"
 end = "2025-09-03"
 
@@ -229,7 +229,7 @@ end = "2025-11-14"
 
 [[trusted.loom]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-08-08"
 end = "2025-09-03"
 
@@ -253,7 +253,7 @@ end = "2025-08-06"
 
 [[trusted.mio]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-05-15"
 end = "2025-09-03"
 
@@ -469,7 +469,7 @@ end = "2025-08-06"
 
 [[trusted.tokio]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-03-02"
 end = "2025-09-03"
 
@@ -481,7 +481,7 @@ end = "2025-09-03"
 
 [[trusted.tokio-macros]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-04-24"
 end = "2025-09-03"
 
@@ -493,7 +493,7 @@ end = "2025-09-03"
 
 [[trusted.tokio-util]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-11-26"
 end = "2025-09-03"
 
@@ -505,13 +505,13 @@ end = "2025-09-03"
 
 [[trusted.tower]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-04-27"
 end = "2025-09-03"
 
 [[trusted.tower-layer]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-04-27"
 end = "2025-09-03"
 

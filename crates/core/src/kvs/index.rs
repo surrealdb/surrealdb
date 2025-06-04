@@ -1,3 +1,4 @@
+use super::KeyDecode;
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -10,6 +11,7 @@ use crate::key::thing;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::mem::ALLOC;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Object, Thing, Value};
 use dashmap::mapref::entry::Entry;
@@ -23,8 +25,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task;
 use tokio::task::JoinHandle;
-
-use super::KeyDecode;
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -299,7 +299,7 @@ impl Building {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
 			tf,
-			tb: ix.what.to_string(),
+			tb: ix.what.to_raw(),
 			ix,
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
@@ -375,7 +375,7 @@ impl Building {
 	}
 
 	async fn run(&self) -> Result<(), Error> {
-		// First iteration, we index every keys
+		// First iteration, we index every key
 		let (ns, db) = self.opt.ns_db()?;
 		let beg = thing::prefix(ns, db, &self.tb)?;
 		let end = thing::suffix(ns, db, &self.tb)?;
@@ -392,6 +392,7 @@ impl Building {
 			if self.is_aborted().await {
 				return Ok(());
 			}
+			self.is_beyond_threshold(None)?;
 			// Get the next batch of records
 			let batch = {
 				let tx = self.new_read_tx().await?;
@@ -404,7 +405,7 @@ impl Building {
 				// If not, we are with the initial indexing
 				break;
 			}
-			// Create a new context with a write transaction
+			// Create a new context with a "write" transaction
 			{
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
@@ -429,6 +430,7 @@ impl Building {
 			if self.is_aborted().await {
 				return Ok(());
 			}
+			self.is_beyond_threshold(None)?;
 			let range = {
 				let mut queue = self.queue.write().await;
 				if let Some(ni) = next_to_index {
@@ -481,6 +483,7 @@ impl Building {
 			if self.is_aborted().await {
 				return Ok(());
 			}
+			self.is_beyond_threshold(Some(*count))?;
 			let key = thing::Thing::decode(&k)?;
 			// Parse the value
 			let val: Value = revision::from_slice(&v)?;
@@ -539,6 +542,7 @@ impl Building {
 			if self.is_aborted().await {
 				return Ok(());
 			}
+			self.is_beyond_threshold(Some(*count))?;
 			let ia = self.new_ia_key(i)?;
 			if let Some(v) = tx.get(ia.clone(), None).await? {
 				tx.del(ia).await?;
@@ -580,6 +584,19 @@ impl Building {
 			true
 		} else {
 			false
+		}
+	}
+
+	fn is_beyond_threshold(&self, count: Option<usize>) -> Result<(), Error> {
+		if let Some(count) = count {
+			if count % 100 != 0 {
+				return Ok(());
+			}
+		}
+		if ALLOC.is_beyond_threshold() {
+			Err(Error::QueryBeyondMemoryThreshold)
+		} else {
+			Ok(())
 		}
 	}
 }
