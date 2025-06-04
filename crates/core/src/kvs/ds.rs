@@ -913,8 +913,14 @@ impl Datastore {
 			}
 		});
 
-		Executor::execute_stream(self, Arc::new(ctx), opt, cnf::SKIP_IMPORT_SUCCESS_RESULTS, stream)
-			.await
+		Executor::execute_stream(
+			self,
+			Arc::new(ctx),
+			opt,
+			*cnf::SKIP_IMPORT_SUCCESS_RESULTS,
+			stream,
+		)
+		.await
 	}
 
 	/// Execute a pre-parsed SQL query
