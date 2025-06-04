@@ -48,6 +48,9 @@ defaults:
   run:
     shell: bash
 
+permissions: 
+  contents: read
+
 jobs:
   docker-builder:
     name: Prepare docker builder
