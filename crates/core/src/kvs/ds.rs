@@ -2,7 +2,6 @@ use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
-use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -27,6 +26,7 @@ use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
 use crate::syn::parser::{Parser, PartialResult};
+use crate::{cf, cnf};
 use async_channel::{Receiver, Sender};
 use bytes::Bytes;
 use futures::{Future, Stream};
@@ -893,7 +893,14 @@ impl Datastore {
 			}
 		});
 
-		Executor::execute_stream(self, Arc::new(ctx), opt, stream).await
+		Executor::execute_stream(
+			self,
+			Arc::new(ctx),
+			opt,
+			*cnf::SKIP_IMPORT_SUCCESS_RESULTS,
+			stream,
+		)
+		.await
 	}
 
 	/// Execute a pre-parsed SQL query
