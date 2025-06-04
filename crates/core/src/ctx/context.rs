@@ -357,8 +357,8 @@ impl MutableContext {
 	/// Checking Instant::now() takes tens to hundreds of nanoseconds
 	/// Checking an AtomicBool takes a single-digit nanoseconds.
 	/// We may not want to check for the deadline on every call.
-	/// An iteration loop may want to check it every 10 or 100 calls.
-	/// Eg.: ctx.done(count % 100 == 0)
+	/// An iteration loop may want to check it every 10 or 100 calls. Eg.:
+	/// ctx.done(count % 100 == 0)
 	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>, Error> {
 		match self.deadline {
 			Some(deadline) if deep_check && deadline <= Instant::now() => {
