@@ -232,9 +232,8 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_mock(&mut self, ctx: &StatementContext<'_>, v: Mock) -> Result<()> {
 		ensure!(!ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
-		let mut count = 0;
 		// Add the records to the iterator
-		for v in v {
+		for (count, v) in v.into_iter().enumerate() {
 			match ctx.stm.is_deferable() {
 				true => self.ingest(Iterable::Defer(v)),
 				false => self.ingest(Iterable::Thing(v)),
@@ -243,7 +242,6 @@ impl Iterator {
 			if ctx.ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
-			count += 1;
 		}
 		// All ingested ok
 		Ok(())
@@ -647,15 +645,13 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		println!("ENTRIES: {}", self.entries.len());
-		let mut count = 0;
-		for v in mem::take(&mut self.entries) {
+		for (count, v) in mem::take(&mut self.entries).into_iter().enumerate() {
 			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
 			// we need to make space for possible cancellations
 			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
-			count += 1;
 		}
 		// Everything processed ok
 		Ok(())
