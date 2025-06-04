@@ -16,7 +16,7 @@ async fn throw_basic() -> Result<()> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"An error occurred: there was an error"#
+		Some(e) if e.to_string() == r#"Execution halted with output: `there was an error`"#
 	));
 	//
 	Ok(())
@@ -39,7 +39,7 @@ async fn throw_param() -> Result<()> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"An error occurred: there was an error"#
+		Some(e) if e.to_string() == r#"Execution halted with output: `there was an error`"#
 	));
 	//
 	Ok(())
@@ -64,7 +64,7 @@ async fn throw_value() -> Result<()> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"An error occurred: found unexpected value: { test: true }"#
+		Some(e) if e.to_string() == r#"Execution halted with output: `found unexpected value: { test: true }`"#
 	));
 
 	Ok(())

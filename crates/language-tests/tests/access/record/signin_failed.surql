@@ -13,7 +13,7 @@ signup = """{
 [test]
 
 [test.results]
-signup-error = "An error occurred: Email field is not a valid email"
+signup-error = "Execution halted with output: `Email field is not a valid email`"
 
 */
 

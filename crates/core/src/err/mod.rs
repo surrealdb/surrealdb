@@ -40,7 +40,7 @@ pub enum Error {
 	Deprecated(String),
 
 	/// A custom error has been thrown
-	#[error("An error occurred: {0}")]
+	#[error("Execution halted with output: `{0}`")]
 	Thrown(String),
 
 	/// There was a problem with the underlying datastore

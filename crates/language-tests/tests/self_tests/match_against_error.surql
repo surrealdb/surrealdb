@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-match = "$error == 'An error occurred: foo'"
+match = "$error == 'Execution halted with output: `foo`'"
 error = true
 */
 
