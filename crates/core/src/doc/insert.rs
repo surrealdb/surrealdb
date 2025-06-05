@@ -123,12 +123,10 @@ impl Document {
 		};
 
 		// Insertion failed so instead do an update.
-		if !retryable {
-			ctx.tx().lock().await.rollback_to_save_point().await?;
-		} else {
-			// Release the save point.
-			ctx.tx().lock().await.release_last_save_point()?;
-		}
+		// Always rollback to save point here, regardless of retryable flag.
+		// This ensures we can properly handle ON DUPLICATE KEY UPDATE by
+		// rolling back to the state before the failed insert attempt.
+		ctx.tx().lock().await.rollback_to_save_point().await?;
 
 		if ctx.is_done(true).await? {
 			// Don't process the document
