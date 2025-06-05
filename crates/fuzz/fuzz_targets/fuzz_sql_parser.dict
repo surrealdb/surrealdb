@@ -262,6 +262,7 @@
 "meta::"
 "meta::id("
 "meta::tb("
+"number::format("
 "object::entries("
 "object::extend("
 "object::from_entries("
