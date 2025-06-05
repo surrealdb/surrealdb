@@ -220,27 +220,7 @@ impl Id {
 			Self::Range(v) => v.to_string(),
 		}
 	}
-}
 
-impl Display for Id {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Number(v) => Display::fmt(v, f),
-			Self::String(v) => EscapeRid(v).fmt(f),
-			Self::Uuid(v) => Display::fmt(v, f),
-			Self::Array(v) => Display::fmt(v, f),
-			Self::Object(v) => Display::fmt(v, f),
-			Self::Generate(v) => match v {
-				Gen::Rand => Display::fmt("rand()", f),
-				Gen::Ulid => Display::fmt("ulid()", f),
-				Gen::Uuid => Display::fmt("uuid()", f),
-			},
-			Self::Range(v) => Display::fmt(v, f),
-		}
-	}
-}
-
-impl Id {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -267,6 +247,24 @@ impl Id {
 				Gen::Uuid => Ok(Self::uuid()),
 			},
 			Id::Range(v) => Ok(Id::Range(Box::new(v.compute(stk, ctx, opt, doc).await?))),
+		}
+	}
+}
+
+impl Display for Id {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			Self::Number(v) => Display::fmt(v, f),
+			Self::String(v) => EscapeRid(v).fmt(f),
+			Self::Uuid(v) => Display::fmt(v, f),
+			Self::Array(v) => Display::fmt(v, f),
+			Self::Object(v) => Display::fmt(v, f),
+			Self::Generate(v) => match v {
+				Gen::Rand => Display::fmt("rand()", f),
+				Gen::Ulid => Display::fmt("ulid()", f),
+				Gen::Uuid => Display::fmt("uuid()", f),
+			},
+			Self::Range(v) => Display::fmt(v, f),
 		}
 	}
 }

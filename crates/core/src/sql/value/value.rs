@@ -172,17 +172,7 @@ impl SqlValue {
 			_ => SqlValue::None,
 		}
 	}
-}
 
-impl Eq for SqlValue {}
-
-impl Ord for SqlValue {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.partial_cmp(other).unwrap_or(Ordering::Equal)
-	}
-}
-
-impl SqlValue {
 	// -----------------------------------
 	// Initial record value
 	// -----------------------------------
@@ -886,6 +876,14 @@ impl SqlValue {
 			Range(r) => r.validate_computed(),
 			_ => Err(anyhow::Error::new(Error::NonComputed)),
 		}
+	}
+}
+
+impl Eq for SqlValue {}
+
+impl Ord for SqlValue {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.partial_cmp(other).unwrap_or(Ordering::Equal)
 	}
 }
 

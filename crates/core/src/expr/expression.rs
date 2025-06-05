@@ -54,9 +54,7 @@ impl Expression {
 			r,
 		}
 	}
-}
 
-impl Expression {
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Unary {
