@@ -243,6 +243,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("TIMEOUT") => TokenKind::Keyword(Keyword::Timeout),
 	UniCase::ascii("TO") => TokenKind::Keyword(Keyword::To),
 	UniCase::ascii("TOKENIZERS") => TokenKind::Keyword(Keyword::Tokenizers),
+	UniCase::ascii("TOKEN") => TokenKind::Keyword(Keyword::Token),
 	UniCase::ascii("TRANSACTION") => TokenKind::Keyword(Keyword::Transaction),
 	UniCase::ascii("true") => TokenKind::Keyword(Keyword::True),
 	UniCase::ascii("TYPE") => TokenKind::Keyword(Keyword::Type),
