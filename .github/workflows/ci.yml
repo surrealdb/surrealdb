@@ -1111,14 +1111,14 @@ jobs:
 
       - name: Run .NET tests
         run: >
-          dotnet test
+          dotnet test --verbosity d
           ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
           --no-restore
           --no-build
 
       - name: Run .NET tests (Live Query)
         run: >
-          dotnet test
+          dotnet test --verbosity d
           ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
           --no-restore
           --no-build
