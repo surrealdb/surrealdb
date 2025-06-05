@@ -45,7 +45,7 @@ async fn post_handler(
 	let fmt = content_type.deref();
 	let fmt: Format = fmt.into();
 	let val = fmt.parse_value(body)?;
-	let cfg = export::Config::from_value(&val.into()).map_err(ResponseError)?;
+	let cfg = export::Config::from_value(&val).map_err(ResponseError)?;
 	handle_inner(state, session, cfg).await
 }
 
