@@ -5,7 +5,7 @@ use super::err::Error;
 use super::writer::Writer;
 use serde::ser::{self, Serialize, Serializer};
 
-impl<'a> Serializer for &'a mut Writer {
+impl Serializer for &mut Writer {
 	type Ok = ();
 	type Error = Error;
 
@@ -187,7 +187,7 @@ impl<'a> Serializer for &'a mut Writer {
 	}
 }
 
-impl<'a> ser::SerializeSeq for &'a mut Writer {
+impl ser::SerializeSeq for &mut Writer {
 	type Ok = ();
 	type Error = Error;
 
@@ -203,7 +203,7 @@ impl<'a> ser::SerializeSeq for &'a mut Writer {
 	}
 }
 
-impl<'a> ser::SerializeTuple for &'a mut Writer {
+impl ser::SerializeTuple for &mut Writer {
 	type Ok = ();
 	type Error = Error;
 
@@ -219,7 +219,7 @@ impl<'a> ser::SerializeTuple for &'a mut Writer {
 	}
 }
 
-impl<'a> ser::SerializeTupleStruct for &'a mut Writer {
+impl ser::SerializeTupleStruct for &mut Writer {
 	type Ok = ();
 	type Error = Error;
 
@@ -235,7 +235,7 @@ impl<'a> ser::SerializeTupleStruct for &'a mut Writer {
 	}
 }
 
-impl<'a> ser::SerializeTupleVariant for &'a mut Writer {
+impl ser::SerializeTupleVariant for &mut Writer {
 	type Ok = ();
 	type Error = Error;
 
@@ -251,7 +251,7 @@ impl<'a> ser::SerializeTupleVariant for &'a mut Writer {
 	}
 }
 
-impl<'a> ser::SerializeMap for &'a mut Writer {
+impl ser::SerializeMap for &mut Writer {
 	type Ok = ();
 	type Error = Error;
 
@@ -274,7 +274,7 @@ impl<'a> ser::SerializeMap for &'a mut Writer {
 	}
 }
 
-impl<'a> ser::SerializeStruct for &'a mut Writer {
+impl ser::SerializeStruct for &mut Writer {
 	type Ok = ();
 	type Error = Error;
 
@@ -282,7 +282,7 @@ impl<'a> ser::SerializeStruct for &'a mut Writer {
 	where
 		T: ?Sized + Serialize,
 	{
-		key.encode(&mut **self)?;
+		key.encode(self)?;
 		value.serialize(&mut **self)
 	}
 
@@ -291,7 +291,7 @@ impl<'a> ser::SerializeStruct for &'a mut Writer {
 	}
 }
 
-impl<'a> ser::SerializeStructVariant for &'a mut Writer {
+impl ser::SerializeStructVariant for &mut Writer {
 	type Ok = ();
 	type Error = Error;
 
@@ -299,7 +299,7 @@ impl<'a> ser::SerializeStructVariant for &'a mut Writer {
 	where
 		T: ?Sized + Serialize,
 	{
-		key.encode(&mut **self)?;
+		key.encode(self)?;
 		value.serialize(&mut **self)
 	}
 
