@@ -591,6 +591,7 @@ mod tests {
 	use crate::expr::{Array, Idiom, Value};
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
+	use crate::sql::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 	use std::sync::Arc;
@@ -601,14 +602,14 @@ mod tests {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::parse("test").into()),
+			Some(Idiom::from(SqlIdiom::parse("test")).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::parse("test").into()),
+			Some(Idiom::from(SqlIdiom::parse("test")).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);

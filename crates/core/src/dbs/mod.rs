@@ -29,7 +29,7 @@ pub use self::options::*;
 pub use self::response::*;
 pub use self::session::*;
 pub(crate) use self::statement::*;
-pub(crate) use self::variables::*;
+pub use self::variables::*;
 
 #[cfg(storage)]
 mod file;

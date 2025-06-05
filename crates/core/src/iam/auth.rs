@@ -74,15 +74,23 @@ impl Auth {
 	}
 
 	pub fn for_ns(role: Role, ns: &str) -> Self {
-		Self::new(Actor::new("system_auth".into(), vec![role], (ns,).into()))
+		Self::new(Actor::new("system_auth".into(), vec![role], Level::Namespace(ns.to_owned())))
 	}
 
 	pub fn for_db(role: Role, ns: &str, db: &str) -> Self {
-		Self::new(Actor::new("system_auth".into(), vec![role], (ns, db).into()))
+		Self::new(Actor::new(
+			"system_auth".into(),
+			vec![role],
+			Level::Database(ns.to_owned(), db.to_owned()),
+		))
 	}
 
 	pub fn for_record(rid: String, ns: &str, db: &str, ac: &str) -> Self {
-		Self::new(Actor::new(rid.to_string(), vec![], (ns, db, ac).into()))
+		Self::new(Actor::new(
+			rid.to_string(),
+			vec![],
+			Level::Record(ns.to_owned(), db.to_owned(), ac.to_owned()),
+		))
 	}
 
 	//
@@ -91,7 +99,7 @@ impl Auth {
 
 	/// Checks if the current auth is allowed to perform an action on a given resource
 	pub fn is_allowed(&self, action: Action, res: &Resource) -> Result<()> {
-		is_allowed(&self.actor, &action, res, None)
+		is_allowed(&self.actor, &action, res)
 			.map_err(crate::err::Error::from)
 			.map_err(anyhow::Error::new)
 	}

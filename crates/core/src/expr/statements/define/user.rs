@@ -3,9 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{
-	Base, Duration, Ident, Strand, Value, escape::QuoteStr, fmt::Fmt, user::UserDuration,
-};
+use crate::expr::{Base, Ident, Strand, Value, escape::QuoteStr, fmt::Fmt, user::UserDuration};
 use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail};
 use argon2::{
@@ -62,45 +60,6 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 }
 
 impl DefineUserStatement {
-	pub(crate) fn from_parsed_values(
-		name: Ident,
-		base: Base,
-		roles: Vec<Ident>,
-		duration: UserDuration,
-	) -> Self {
-		DefineUserStatement {
-			name,
-			base,
-			roles,
-			duration,
-			code: rand::thread_rng()
-				.sample_iter(&Alphanumeric)
-				.take(128)
-				.map(char::from)
-				.collect::<String>(),
-			..Default::default()
-		}
-	}
-
-	pub(crate) fn set_password(&mut self, password: &str) {
-		self.hash = Argon2::default()
-			.hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
-			.unwrap()
-			.to_string()
-	}
-
-	pub(crate) fn set_passhash(&mut self, passhash: String) {
-		self.hash = passhash;
-	}
-
-	pub(crate) fn set_token_duration(&mut self, duration: Option<Duration>) {
-		self.duration.token = duration;
-	}
-
-	pub(crate) fn set_session_duration(&mut self, duration: Option<Duration>) {
-		self.duration.session = duration;
-	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

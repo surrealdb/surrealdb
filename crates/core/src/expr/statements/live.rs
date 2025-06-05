@@ -58,24 +58,6 @@ impl LiveStatement {
 		}
 	}
 
-	/// Creates a live statement from parts that can be set during a query.
-	pub(crate) fn from_source_parts(
-		expr: Fields,
-		what: Value,
-		cond: Option<Cond>,
-		fetch: Option<Fetchs>,
-	) -> Self {
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			expr,
-			what,
-			cond,
-			fetch,
-			..Default::default()
-		}
-	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -177,6 +159,7 @@ mod tests {
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
+	use crate::sql::SqlValue;
 	use crate::syn::Parse;
 	use anyhow::Result;
 
@@ -220,12 +203,13 @@ mod tests {
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record = Value::parse(&format!(
+		let expected_record: Value = SqlValue::parse(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
 			}}]"
-		));
+		))
+		.into();
 
 		let tmp = create_response.remove(0).result.unwrap();
 		assert_eq!(tmp, expected_record);
@@ -246,12 +230,13 @@ mod tests {
 				live_id,
 				Action::Create,
 				Value::Thing(Thing::from((tb, "test_true"))),
-				Value::parse(&format!(
+				SqlValue::parse(&format!(
 					"{{
 						id: {tb}:test_true,
 						condition: true,
 					}}"
-				),),
+				))
+				.into(),
 			)
 		);
 	}

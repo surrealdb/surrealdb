@@ -31,7 +31,7 @@ dmp = "0.2.3"
 indxdb = "0.6.0"
 ipnet = "2.9.0"
 surrealkv = { version = "0.9.1" }
-surrealml = { version = "0.1.7", package = "surrealml-core", features = [
+surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }
 ## Somewhat a surreal crate as it is maintained by @Delskayn.
@@ -73,7 +73,6 @@ bincode = "1.3.3"
 blake3 = "1.5.3"
 bytes = "1.5.0"
 castaway = "0.2.3"
-cedar-policy = "2.4.2"
 chrono = "0.4.38"
 ciborium = "0.2.1"
 dashmap = "5.5.3"

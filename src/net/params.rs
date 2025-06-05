@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::str::FromStr;
-use surrealdb::sql::Value;
+use surrealdb::expr::Value;
 
 use super::error::ResponseError;
 
@@ -53,8 +53,10 @@ impl From<Params> for BTreeMap<String, Value> {
 		v.inner
 			.into_iter()
 			.map(|(k, v)| {
-				let value = surrealdb::syn::json_legacy_strand(&v);
-				(k, value.unwrap_or_else(|_| Value::from(v)))
+				let value = surrealdb::syn::json_legacy_strand(&v)
+					.map(Into::into)
+					.unwrap_or_else(|_| Value::from(v));
+				(k, value)
 			})
 			.collect::<BTreeMap<_, _>>()
 	}

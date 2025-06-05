@@ -4,7 +4,8 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Value;
+use surrealdb::expr::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn query_basic() -> Result<()> {
@@ -24,15 +25,15 @@ async fn query_basic() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Tobie']");
+	let val = SqlValue::parse("['Tobie']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie");
+	let val = SqlValue::from("Tobie").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie");
+	let val = SqlValue::from("Tobie").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -56,7 +57,7 @@ async fn query_basic_with_modification() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[45062]");
+	let val = SqlValue::parse("[45062]").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -117,29 +118,31 @@ async fn query_root_record() -> Result<()> {
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:tobie,
 				name: 'Tobie'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:jaime,
 				name: 'Jaime'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: knows:test,
@@ -148,15 +151,16 @@ async fn query_root_record() -> Result<()> {
 				brother: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Jaime']");
+	let val = SqlValue::parse("['Jaime']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['Jaime']");
+	let val = SqlValue::parse("['Jaime']").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

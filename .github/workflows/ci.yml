@@ -8,6 +8,11 @@ on:
     branches:
       - main
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
   merge_group:
 
 concurrency:
@@ -249,12 +254,16 @@ jobs:
         run: revision-lock --check
 
   check-binaries:
-    name: Release binaries
-    needs: [format, check, check-wasm]
+    name: Cross-compile binaries
+    needs: [ format, check, check-wasm ]
     uses: ./.github/workflows/build.yml
     with:
       name: ci
       release-branch: ${{ github.head_ref || github.ref_name }}
+      # Only upload if not a pull request.
+      upload: ${{ github.event_name != 'pull_request' }}
+      # Only compile with --release when not a pull request.
+      release: ${{ github.event_name != 'pull_request' }}
     secrets: inherit
 
   # ----------------------------------------
@@ -382,7 +391,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [runner-arm64-2xlarge]
+    runs-on: [ runner-arm64-2xlarge ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
@@ -831,7 +840,7 @@ jobs:
       - name: Run SurrealQL test suite
         run: |
           cd crates/language-tests
-          ./target/debug/surrealql-test --color always run -j 3
+          ./target/debug/surrealql-test --color always run --no-wip -j 3
 
   upgrade-tests:
     name: Run SurrealQL upgrade tests

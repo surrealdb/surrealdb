@@ -526,12 +526,13 @@ mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::SearchParams;
-	use crate::expr::statements::{DefineAnalyzerStatement, DefineStatement};
-	use crate::expr::{Array, Statement, Thing, Value};
+	use crate::expr::statements::DefineAnalyzerStatement;
+	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
+	use crate::sql::{Statement, statements::DefineStatement};
 	use crate::syn;
 	use reblessive::tree::Stk;
 	use std::collections::HashMap;
@@ -627,7 +628,7 @@ mod tests {
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
-		let az = Arc::new(az);
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		let mut stack = reblessive::TreeStack::new();
 
 		let btree_order = 5;
@@ -766,7 +767,7 @@ mod tests {
 			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 				panic!()
 			};
-			let az = Arc::new(az);
+			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 			let mut stack = reblessive::TreeStack::new();
 
 			let doc1: Thing = ("t", "doc1").into();
@@ -946,7 +947,7 @@ mod tests {
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
-		let az = Arc::new(az);
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		concurrent_task(ds.clone(), az.clone()).await;
 		let task1 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
 		let task2 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
@@ -975,7 +976,7 @@ mod tests {
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
-		let az = Arc::new(az);
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		let doc: Thing = ("t", "doc1").into();
 		let content = Value::from(Array::from(vec![
 			"Enter a search term",
