@@ -32,33 +32,31 @@ impl From<Uuid> for uuid::Uuid {
 }
 
 impl FromStr for Uuid {
-	type Err = ();
+	type Err = anyhow::Error;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		Self::try_from(s)
 	}
 }
 
 impl TryFrom<String> for Uuid {
-	type Error = ();
+	type Error = anyhow::Error;
 	fn try_from(v: String) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
 }
 
 impl TryFrom<Strand> for Uuid {
-	type Error = ();
+	type Error = anyhow::Error;
 	fn try_from(v: Strand) -> Result<Self, Self::Error> {
 		Self::try_from(v.as_str())
 	}
 }
 
 impl TryFrom<&str> for Uuid {
-	type Error = ();
+	type Error = anyhow::Error;
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match uuid::Uuid::try_parse(v) {
-			Ok(v) => Ok(Self(v)),
-			Err(_) => Err(()),
-		}
+		use anyhow::Context;
+		Ok(Self(uuid::Uuid::try_parse(v).context("Invalid UUID format")?))
 	}
 }
 

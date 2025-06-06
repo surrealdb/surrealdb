@@ -1,0 +1,1754 @@
+
+syntax = "proto3";
+
+package surrealdb.ast;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+message SqlValue {
+    oneof inner {
+        Null null = 1;
+        bool bool = 2;
+        Number number = 3;
+        string strand = 4;
+        google.protobuf.Duration duration = 5;
+        google.protobuf.Timestamp datetime = 6;
+        string uuid = 7;
+        Array array = 8;
+        Object object = 9;
+        Geometry geometry = 10;
+        bytes bytes = 11;
+        Thing thing = 12;
+        Ident param = 13;
+        Idiom idiom = 14;
+        Table table = 15;
+        Mock mock = 16;
+        Regex regex = 17;
+        Cast cast = 18;
+        Block block = 19;
+        SqlValueRange range = 20;
+        Edges edges = 21;
+        Block future = 22;
+        Constant constant = 23;
+        Function function = 24;
+        Subquery subquery = 25;
+        Expression expression = 26;
+        Statements query = 27;
+        Model model = 28;
+        Closure closure = 29;
+        Refs refs = 30;
+        File file = 31;
+    }
+}
+
+message Expression {
+    message Unary {
+        Operator operator = 1;
+        SqlValue value = 2;
+    }
+
+    message Binary {
+        SqlValue left = 1;
+        Operator operator = 2;
+        SqlValue right = 3;
+    }
+
+    oneof inner {
+        Unary unary = 1;
+        Binary binary = 2;
+    }
+}
+
+message SqlValueRange {
+    message Bound {
+        oneof inner {
+            SqlValue included = 1;
+            SqlValue excluded = 2;
+            EmptyMessage unbounded = 3;
+        }
+    }
+
+    Bound beg = 1;
+    Bound end = 2;
+}
+
+message Operator {
+    message KnnOperator {
+        uint32 k = 1;
+        Distance dist = 2;
+    }
+
+    message AnnOperator {
+        uint32 k = 1;
+        uint32 ef = 2;
+    }
+
+    oneof inner {
+        EmptyMessage NEG = 1;
+        EmptyMessage NOT = 2;
+        EmptyMessage OR = 3;
+        EmptyMessage AND = 4;
+        EmptyMessage TCO = 5;
+        EmptyMessage NCO = 6;
+        EmptyMessage ADD = 7;
+        EmptyMessage SUB = 8;
+        EmptyMessage MUL = 9;
+        EmptyMessage DIV = 10;
+        EmptyMessage POW = 11;
+        EmptyMessage INC = 12;
+        EmptyMessage DEC = 13;
+        EmptyMessage EXT = 14;
+        EmptyMessage EQUAL = 15;
+        EmptyMessage EXACT = 16;
+        EmptyMessage NOT_EQUAL = 17;
+        EmptyMessage ALL_EQUAL = 18;
+        EmptyMessage ANY_EQUAL = 19;
+        EmptyMessage LIKE = 20;
+        EmptyMessage NOT_LIKE = 21;
+        EmptyMessage ALL_LIKE = 22;
+        EmptyMessage ANY_LIKE = 23;
+        MatchRef matches = 24;
+        EmptyMessage LESS_THAN = 25;
+        EmptyMessage LESS_THAN_OR_EQUAL = 26;
+        EmptyMessage MORE_THAN = 27;
+        EmptyMessage MORE_THAN_OR_EQUAL = 28;
+        EmptyMessage CONTAIN = 29;
+        EmptyMessage NOT_CONTAIN = 30;
+        EmptyMessage CONTAIN_ALL = 31;
+        EmptyMessage CONTAIN_ANY = 32;
+        EmptyMessage CONTAIN_NONE = 33;
+        EmptyMessage INSIDE = 34;
+        EmptyMessage NOT_INSIDE = 35;
+        EmptyMessage ALL_INSIDE = 36;
+        EmptyMessage ANY_INSIDE = 37;
+        EmptyMessage NONE_INSIDE = 38;
+        EmptyMessage OUTSIDE = 39;
+        EmptyMessage INTERSECTS = 40;
+        KnnOperator knn = 41;
+        AnnOperator ann = 42;
+        EmptyMessage REM = 43;
+    }
+}
+
+message MatchRef {
+
+    uint32 ref = 1;
+}
+
+message EmptyMessage {}
+
+message Null {}
+
+message Number {
+    oneof inner {
+        int64 int = 1;
+        double float = 2;
+        string decimal = 3;
+    }
+}
+
+// message google.protobuf.Duration {
+//     uint64 seconds = 1;
+//     uint32 nanos = 2;
+// }
+
+// message google.protobuf.Timestamp {
+//     uint64 seconds = 1;
+//     uint32 nanos = 2;
+// }
+
+message Array {
+    repeated SqlValue values = 1;
+}
+
+message Object {
+    map<string, SqlValue> values = 1;
+}
+
+message Geometry {
+    oneof inner {
+        Point point = 1;
+        LineString line = 2;
+        Polygon polygon = 3;
+        MultiPoint multi_point = 4;
+        MultiLineString multi_line = 5;
+        MultiPolygon multi_polygon = 6;
+        GeometryCollection collection = 7;
+    }
+}
+
+message Point {
+    double x = 1;
+    double y = 2;
+}
+
+message LineString {
+    repeated Point points = 1;
+}
+
+message Polygon {
+    LineString exterior = 1;
+    repeated LineString interiors = 2;
+}
+
+message MultiPoint {
+    repeated Point points = 1;
+}
+
+message MultiLineString {
+    repeated LineString lines = 1;
+}
+
+message MultiPolygon {
+    repeated Polygon polygons = 1;
+}
+
+message GeometryCollection {
+    repeated Geometry geometries = 1;
+}
+
+message Thing {
+    string table = 1;
+    Id id = 2;
+}
+
+message Id {
+    oneof inner {
+        int64 number = 1;
+        string string = 2;
+        string uuid = 3;
+        Array array = 4;
+        Object object = 5;
+        Gen generate = 6;
+        IdRange range = 7;
+    }
+}
+
+enum Gen {
+    GEN_RAND = 0;
+    GEN_ULID = 1;
+    GEN_UUID = 2;
+}
+
+message IdRange {
+    IdBound beg = 1;
+    IdBound end = 2;
+}
+
+message IdBound {
+    oneof inner {
+        Id included = 1;
+        Id excluded = 2;
+        Null unbounded = 3;
+    }
+}
+
+message Ident {
+    string value = 1;
+}
+
+message Idents {
+    repeated Ident idents = 1;
+}
+
+message Idiom {
+    repeated Part parts = 1;
+}
+
+message Idioms {
+    repeated Idiom idioms = 1;
+}
+
+message Part {
+    message Method {
+        string name = 1;
+        repeated SqlValue args = 2;
+    }
+
+    message DestructurePart {
+        message DestructureParts {
+            repeated DestructurePart parts = 2;
+        }
+
+        Ident ident = 1;
+
+        oneof inner {
+            EmptyMessage all = 2;
+            EmptyMessage field = 3;
+            Idiom aliased = 4;
+            DestructureParts destructure = 5;
+        }
+    }
+
+    message DestructureParts {
+        repeated DestructurePart parts = 1;
+    }
+
+    message RecursePart {
+
+    }
+
+    oneof inner {
+        Null all = 1;
+        Null flatten = 2;
+        Null last = 3;
+        Null first = 4;
+        Ident field = 5;
+        Number index = 6;
+        SqlValue where = 7;
+        Graph graph = 8;
+        SqlValue value = 9;
+        SqlValue start = 10;
+        Method method = 11;
+        DestructureParts destructure = 12;
+        Null optional = 13;
+        RecursePart recurse = 14;
+        Null doc = 15;
+        Null RepeatRecurse = 16;
+    }
+}
+
+message Graph {
+    Dir dir = 1;
+    Fields expr = 2;
+    GraphSubjects what = 3;
+    Cond cond = 4;
+    Splits split = 5;
+    Groups group = 6;
+    Ordering order = 7;
+    SqlValue limit = 8;
+    SqlValue start = 9;
+    Idiom alias = 10;
+}
+
+message Cond {
+    SqlValue value = 1;
+}
+
+enum Dir {
+    DIR_IN = 0;
+    DIR_OUT = 1;
+    DIR_BOTH = 2;
+}
+
+message Fields {
+    bool single = 1;
+    repeated Field fields = 2;
+}
+
+message Field {
+    message Single {
+        SqlValue expr = 1;
+        Idiom alias = 2;
+    }
+    oneof inner {
+        Null all = 1;
+        Single single = 2;
+    }
+}
+
+message GraphSubjects {
+    repeated GraphSubject subjects = 1;
+}
+
+message GraphSubject {
+
+    message TableRange {
+        string table = 1;
+        IdRange range = 2;
+    }
+
+    oneof inner {
+        Table table = 1;
+        TableRange range = 2;
+    }
+}
+
+message Recurse {
+    message Range {
+        uint32 start = 1;
+        uint32 end = 2;
+    }
+    oneof inner {
+        uint32 fixed = 1;
+        Range range = 2;
+    }
+}
+
+message Table {
+    string name = 1;
+}
+
+message TableType {
+    oneof inner {
+        EmptyMessage any = 1;
+        EmptyMessage normal = 2;
+        Relation relation = 3;
+    }
+}
+
+message Relation {
+    Kind from = 1;
+    Kind to = 2;
+    bool enforced = 3;
+}
+
+message Reference {
+
+    message ReferenceDeleteStrategy {
+        oneof inner {
+            EmptyMessage reject = 1;
+            EmptyMessage ignore = 2;
+            EmptyMessage cascade = 3;
+            EmptyMessage unset = 4;
+            SqlValue custom = 5;
+        }
+    }
+
+    ReferenceDeleteStrategy on_delete = 1;
+
+}
+
+message Regex {
+    string regex = 1;
+}
+
+message Cast {
+    Kind kind = 1;
+    SqlValue value = 2;
+}
+
+message Kind {
+    message Record {
+        repeated Table tables = 1;
+    }
+
+    message Geometry {
+        repeated string types = 1;
+    }
+    message Either {
+        repeated Kind kinds = 1;
+    }
+    message Set {
+        Kind kind = 1;
+        uint64 size = 2;
+    }
+    message Array {
+        Kind kind = 1;
+        uint64 size = 2;
+    }
+    message Function {
+        repeated Kind args = 1;
+        Kind ret = 2;
+    }
+    message Literal {
+        string value = 1;
+    }
+    message References {
+        Table table = 1;
+        Idiom idiom = 2;
+    }
+    message File {
+        repeated Ident bucket = 1;
+    }
+
+    oneof inner {
+        EmptyMessage ANY = 1;
+        EmptyMessage NULL = 2;
+        EmptyMessage BOOL = 3;
+        EmptyMessage BYTES = 4;
+        EmptyMessage DATETIME = 5;
+        EmptyMessage DECIMAL = 6;
+        EmptyMessage DURATION = 7;
+        EmptyMessage FLOAT = 8;
+        EmptyMessage INT = 9;
+        EmptyMessage NUMBER = 10;
+        EmptyMessage OBJECT = 11;
+        EmptyMessage POINT = 12;
+        EmptyMessage STRING = 13;
+        EmptyMessage UUID = 14;
+        EmptyMessage REGEX = 15;
+        Record record = 16;
+        Geometry geometry = 17;
+        Kind option = 18;
+        Either either = 19;
+        Set set = 20;
+        Array array = 21;
+        Function function = 22;
+        EmptyMessage range = 23;
+        Literal literal = 24;
+        References references = 25;
+        File file = 26;
+    }
+}
+
+message Literal {
+    message ObjectLiteral {
+        map<string, Kind> values = 1;
+    }
+
+    message DiscriminatedObject {
+        string type = 1;
+        repeated ObjectLiteral values = 2;
+    }
+
+    oneof inner {
+        string strand = 1;
+        Number number = 2;
+        google.protobuf.Duration duration = 3;
+        Array array = 4;
+        ObjectLiteral object = 5;
+        DiscriminatedObject discriminated_object = 6;
+        bool bool = 7;
+    }
+}
+
+message Mock {
+    message Count {
+        string table_name = 1;
+        uint64 count = 2;
+    }
+
+    message Range {
+        string table_name = 1;
+        uint64 start = 2;
+        uint64 end = 3;
+    }
+
+    oneof inner {
+        Count count = 1;
+        Range range = 2;
+    }
+}
+
+message Block {
+
+    message Entry {
+        oneof inner {
+            SqlValue value = 1;
+            SetStatement set = 2;
+            IfelseStatement ifelse = 3;
+            SelectStatement select = 4;
+            CreateStatement create = 5;
+            UpdateStatement update = 6;
+            DeleteStatement delete = 7;
+            RelateStatement relate = 8;
+            InsertStatement insert = 9;
+            OutputStatement output = 10;
+            DefineStatement define = 11;
+            RemoveStatement remove = 12;
+            ThrowStatement throw = 13;
+            BreakStatement break_statement = 14;
+            ContinueStatement continue_statement = 15;
+            ForeachStatement foreach = 16;
+            RebuildStatement rebuild = 17;
+            UpsertStatement upsert = 18;
+            AlterStatement alter = 19;
+            InfoStatement info = 20;
+        }
+    }
+
+    repeated Entry entries = 1;
+}
+
+message SetStatement {
+    string name = 1;
+    SqlValue what = 2;
+    Kind kind = 3;
+}
+
+message IfelseStatement {
+    repeated IfElseExpr exprs = 1;
+    SqlValue close = 2;
+}
+message IfElseExpr {
+    SqlValue condition = 1;
+    SqlValue body = 2;
+}
+
+message SelectStatement {
+    Fields expr = 1;
+    Idioms omit = 2;
+    bool only = 3;
+    SqlValues what = 4;
+    With with = 5;
+    Cond cond = 6;
+    Splits split = 7;
+    Groups group = 8;
+    Ordering order = 9;
+    SqlValue limit = 10;
+    SqlValue start = 11;
+    Fetchs fetch = 12;
+    SqlValue version = 13;
+    google.protobuf.Duration timeout = 14;
+    bool parallel = 15;
+    bool explain = 16;
+    bool tempfiles = 17;
+}
+
+message SqlValues {
+    repeated SqlValue values = 1;
+}
+
+message With {
+    message Indexes {
+        repeated string indexes = 1;
+    }
+
+    oneof inner {
+        EmptyMessage no_index = 1;
+        Indexes index = 2;
+    }
+}
+
+message Splits {
+    repeated Split splits = 1;
+}
+
+message Split {
+    Idiom idiom = 1;
+}
+
+message Groups {
+    repeated Group groups = 1;
+}
+
+message Group {
+    Idiom idiom = 1;
+}
+
+message Order {
+    Idiom value = 1;
+    bool collate = 2;
+    bool numeric = 3;
+    bool ascending = 4;
+}
+
+message Ordering {
+    message OrderList {
+        repeated Order orders = 1;
+    }
+
+    oneof inner {
+        EmptyMessage random = 1;
+        OrderList order = 2;
+    }
+}
+
+message Fetchs {
+    repeated SqlValue fetches = 1;
+}
+
+message Edges {
+    Dir dir = 1;
+    Thing from = 2;
+    GraphSubjects what = 3;
+}
+
+enum Constant {
+    MATH_E = 0;
+    MATH_FRAC_1_PI = 1;
+    MATH_FRAC_1_SQRT2 = 2;
+    MATH_FRAC_2_PI = 3;
+    MATH_FRAC_2_SQRT_PI = 4;
+    MATH_FRAC_PI_2 = 5;
+    MATH_FRAC_PI_3 = 6;
+    MATH_FRAC_PI_4 = 7;
+    MATH_FRAC_PI_6 = 8;
+    MATH_FRAC_PI_8 = 9;
+    MATH_INF = 10;
+    MATH_LN_10 = 11;
+    MATH_LN_2 = 12;
+    MATH_LOG_10_2 = 13;
+    MATH_LOG_10_E = 14;
+    MATH_LOG_2_10 = 15;
+    MATH_LOG_2_E = 16;
+    MATH_NEG_INF = 17;
+    MATH_PI = 18;
+    MATH_SQRT2 = 19;
+    MATH_TAU = 20;
+    TIME_EPOCH = 21;
+    TIME_MIN = 22;
+    TIME_MAX = 23;
+    DURATION_MAX = 24;
+}
+
+message Function {
+    message FunctionCall {
+        string name = 1;
+        repeated SqlValue args = 2;
+    }
+
+    message AnonymousFunctionCall {
+        SqlValue function = 1;
+        repeated SqlValue values = 2;
+        bool arguments_are_calculated = 3;
+    }
+
+    oneof inner {
+        FunctionCall normal = 1;
+        FunctionCall custom = 2;
+        FunctionCall script = 3;
+        AnonymousFunctionCall anonymous = 4;
+    }
+}
+
+message Subquery {
+    oneof inner {
+        SqlValue value = 1;
+        IfelseStatement ifelse = 2;
+        OutputStatement output = 3;
+        SelectStatement select = 4;
+        CreateStatement create = 5;
+        UpdateStatement update = 6;
+        DeleteStatement delete = 7;
+        RelateStatement relate = 8;
+        InsertStatement insert = 9;
+        DefineStatement define = 10;
+        RemoveStatement remove = 11;
+        RebuildStatement rebuild = 12;
+        UpsertStatement upsert = 13;
+        AlterStatement alter = 14;
+        InfoStatement info = 15;
+    }
+}
+
+message Statements {
+    repeated Statement statements = 1;
+}
+
+message Statement {
+    oneof inner {
+        SqlValue value = 1;
+        AnalyzeStatement analyze = 2;
+        EmptyMessage begin = 3;
+        EmptyMessage break = 4;
+        EmptyMessage continue = 5;
+        EmptyMessage cancel = 6;
+        EmptyMessage commit = 7;
+        CreateStatement create = 8;
+        DefineStatement define = 9;
+        DeleteStatement delete = 10;
+        ForeachStatement foreach = 11;
+        IfelseStatement ifelse = 12;
+        InfoStatement info = 13;
+        InsertStatement insert = 14;
+        KillStatement kill = 15;
+        LiveStatement live = 16;
+        OptionStatement option = 17;
+        OutputStatement output = 18;
+        RelateStatement relate = 19;
+        RemoveStatement remove = 20;
+        SelectStatement select = 21;
+        SetStatement set = 22;
+        ShowStatement show = 23;
+        SleepStatement sleep = 24;
+        UpdateStatement update = 25;
+        ThrowStatement throw = 26;
+        UseStatement use = 27;
+        RebuildStatement rebuild = 28;
+        UpsertStatement upsert = 29;
+        AlterStatement alter = 30;
+    }
+}
+
+message AnalyzeStatement {
+    message Index {
+        Ident table = 1;
+        Ident index = 2;
+    }
+    oneof inner {
+        Index index = 1;
+    }
+}
+
+message CreateStatement {
+    bool only = 1;
+    SqlValues what = 2;
+    Data data = 3;
+    Output output = 4;
+    google.protobuf.Duration timeout = 5;
+    bool parallel = 6;
+    SqlValue version = 7;
+}
+
+message UpdateStatement {
+    bool only = 1;
+    SqlValues what = 2;
+    With with = 3;
+    Data data = 4;
+    Cond cond = 5;
+    Output output = 6;
+    google.protobuf.Duration timeout = 7;
+    bool parallel = 8;
+    bool explain = 9;
+}
+
+message DeleteStatement {
+    bool only = 1;
+    SqlValues what = 2;
+    With with = 3;
+    Cond cond = 4;
+    Output output = 5;
+    google.protobuf.Duration timeout = 6;
+    bool parallel = 7;
+    bool explain = 8;
+}
+
+message ForeachStatement {
+    Ident param = 1;
+    SqlValue range = 2;
+    Block block = 3;
+}
+
+message RelateStatement {
+    bool only = 1;
+    SqlValue kind = 2;
+    SqlValue from = 3;
+    SqlValue with = 4;
+    bool uniq = 5;
+    Data data = 6;
+    Output output = 7;
+    google.protobuf.Duration timeout = 8;
+    bool parallel = 9;
+}
+
+message InsertStatement {
+    SqlValue into = 1;
+    Data data = 2;
+    bool ignore = 3;
+    Data update = 4;
+    Output output = 5;
+    google.protobuf.Duration timeout = 6;
+    bool parallel = 7;
+    bool relation = 8;
+    SqlValue version = 9;
+}
+
+message KillStatement {
+    SqlValue id = 1;
+}
+
+message LiveStatement {
+    // The live statement ID as a UUID.
+    string id = 1;
+    // The node ID as a UUID.
+    string node = 2;
+    Fields expr = 3;
+    SqlValue what = 4;
+    Cond cond = 5;
+    Fetchs fetch = 6;
+    Auth auth = 7;
+    SqlValue session = 8;
+}
+
+message OptionStatement {
+    Ident name = 1;
+    bool what = 2;
+}
+
+message OutputStatement {
+    SqlValue what = 1;
+    Fetchs fetch = 2;
+}
+
+message ShowStatement {
+    Table table = 1;
+    ShowSince since = 2;
+    uint32 limit = 3;
+}
+
+message ShowSince {
+    oneof inner {
+        google.protobuf.Timestamp timestamp = 1;
+        uint64 versionstamp = 2;
+    }
+}
+
+message SleepStatement {
+    google.protobuf.Duration duration = 1;
+}
+
+message UseStatement {
+    optional string ns = 1;
+    optional string db = 2;
+}
+
+message Auth {
+    Actor actor = 1;
+}
+
+message Actor {
+    Resource res = 1;
+    repeated Role roles = 2;
+}
+
+message Resource {
+
+    enum ResourceKind {
+        RESOURCE_ANY = 0;
+        NAMESPACE = 1;
+        DATABASE = 2;
+        RECORD = 3;
+        TABLE = 4;
+        DOCUMENT = 5;
+        OPTION = 6;
+        FUNCTION = 7;
+        ANALYZER = 8;
+        PARAMETER = 9;
+        MODEL = 10;
+        EVENT = 11;
+        FIELD = 12;
+        INDEX = 13;
+        ACCESS = 14;
+        CONFIG_GRAPHQL = 15;
+        CONFIG_API = 16;
+        API = 17;
+        BUCKET = 18;
+        SEQUENCE = 19;
+        ACTOR = 20;
+    }
+
+    message Level {
+        message NamespaceLevel {
+            string ns = 1;
+        }
+
+        message DatabaseLevel {
+            string ns = 1;
+            string db = 2;
+        }
+
+        message RecordLevel {
+            string ns = 1;
+            string db = 2;
+            string id = 3;
+        }
+
+        oneof inner {
+            EmptyMessage no = 1;
+            string root = 2;
+            NamespaceLevel namespace = 3;
+            DatabaseLevel database = 4;
+            RecordLevel record = 5;
+        }
+    }
+
+    string name = 1;
+    ResourceKind kind = 2;
+    Level level = 3;
+}
+
+enum Role {
+    ROLE_VIEWER = 0;
+    ROLE_EDITOR = 1;
+    ROLE_OWNER = 2;
+}
+
+message DefineStatement {
+    oneof inner {
+        DefineNamespaceStatement namespace = 1;
+        DefineDatabaseStatement database = 2;
+        DefineFunctionStatement function = 3;
+        DefineAnalyzerStatement analyzer = 4;
+        DefineParamStatement param = 5;
+        DefineTableStatement table = 6;
+        DefineEventStatement event = 7;
+        DefineFieldStatement field = 8;
+        DefineIndexStatement index = 9;
+        DefineUserStatement user = 10;
+        DefineModelStatement model = 11;
+        DefineAccessStatement access = 12;
+        DefineConfigStatement config = 13;
+        DefineApiStatement api = 14;
+        DefineBucketStatement bucket = 15;
+        DefineSequenceStatement sequence = 16;
+    }
+}
+
+message ChangeFeed {
+    google.protobuf.Duration expiry = 1;
+    bool store_diff = 2;
+}
+
+message Permission {
+    oneof inner {
+        EmptyMessage none = 1;
+        EmptyMessage full = 2;
+        SqlValue specific = 3;
+    }
+}
+
+message Permissions {
+    Permission select = 1;
+    Permission create = 2;
+    Permission update = 3;
+    Permission delete = 4;
+}
+
+message Tables {
+    repeated Table tables = 1;
+}
+
+enum Tokenizer {
+    TOKENIZER_BLANK = 0;
+    TOKENIZER_CAMEL = 1;
+    TOKENIZER_CLASS = 2;
+    TOKENIZER_PUNCT = 3;
+}
+
+enum Language {
+    LANGUAGE_ARABIC = 0;
+    LANGUAGE_DANISH = 1;
+    LANGUAGE_DUTCH = 2;
+    LANGUAGE_ENGLISH = 3;
+    LANGUAGE_FINNISH = 4;
+    LANGUAGE_FRENCH = 5;
+    LANGUAGE_GERMAN = 6;
+    LANGUAGE_GREEK = 7;
+    LANGUAGE_HUNGARIAN = 8;
+    LANGUAGE_ITALIAN = 9;
+    LANGUAGE_NORWEGIAN = 10;
+    LANGUAGE_PORTUGUESE = 11;
+    LANGUAGE_ROMANIAN = 12;
+    LANGUAGE_RUSSIAN = 13;
+    LANGUAGE_SPANISH = 14;
+    LANGUAGE_SWEDISH = 15;
+    LANGUAGE_TAMIL = 16;
+    LANGUAGE_TURKISH = 17;
+}
+
+message Filter {
+    message Ngram {
+        uint32 min_length = 1;
+        uint32 max_length = 2;
+    }
+
+    oneof inner {
+        EmptyMessage ascii = 1;
+        Ngram edge_ngram = 2;
+        EmptyMessage lowercase = 3;
+        Ngram ngram = 4;
+        Language snowball = 5;
+        EmptyMessage uppercase = 6;
+        string mapper = 7;
+    }
+}
+
+message View {
+    Fields expr = 1;
+    Tables what = 2;
+    Cond cond = 3;
+    Groups group = 4;
+}
+
+message DefineNamespaceStatement {
+    uint32 id = 1;
+    Ident name = 2;
+    string comment = 3;
+    bool if_not_exists = 4;
+    bool overwrite = 5;
+}
+
+message DefineDatabaseStatement {
+    uint32 id = 1;
+    Ident name = 2;
+    string comment = 3;
+    ChangeFeed changefeed = 4;
+    bool if_not_exists = 5;
+    bool overwrite = 6;
+}
+
+message DefineFunctionStatement {
+    Ident name = 1;
+    repeated Arg args = 2;
+    Block block = 3;
+    string comment = 4;
+    Permission permissions = 5;
+    bool if_not_exists = 6;
+    bool overwrite = 7;
+    Kind returns = 8;
+}
+
+message DefineAnalyzerStatement {
+    Ident name = 1;
+    Ident function = 2;
+    repeated Tokenizer tokenizers = 3;
+    repeated Filter filters = 4;
+    string comment = 5;
+    bool if_not_exists = 6;
+    bool overwrite = 7;
+}
+
+message DefineParamStatement {
+    Ident name = 1;
+    SqlValue value = 2;
+    string comment = 3;
+    Permission permissions = 4;
+    bool if_not_exists = 5;
+    bool overwrite = 6;
+}
+
+message DefineTableStatement {
+    uint32 id = 1;
+    Ident name = 2;
+    bool drop = 3;
+    bool full = 4;
+    View view = 5;
+    Permissions permissions = 6;
+    ChangeFeed changefeed = 7;
+    string comment = 8;
+    bool if_not_exists = 9;
+    TableType kind = 10;
+    bool overwrite = 11;
+    // Uuid
+    string cache_fields_ts = 12;
+    // Uuid
+    string cache_events_ts = 13;
+    // Uuid
+    string cache_tables_ts = 14;
+    // Uuid
+    string cache_indexes_ts = 15;
+    // Uuid
+    string cache_lives_ts = 16;
+}
+
+message DefineEventStatement {
+    Ident name = 1;
+    Ident what = 2;
+    SqlValue when = 3;
+    SqlValues then = 4;
+    string comment = 5;
+    bool if_not_exists = 6;
+    bool overwrite = 7;
+}
+
+message DefineFieldStatement {
+    Idiom name = 1;
+    Ident what = 2;
+    bool flex = 3;
+    Kind kind = 4;
+    bool readonly = 5;
+    SqlValue value = 6;
+    SqlValue assert = 7;
+    SqlValue default_value = 8;
+    Permissions permissions = 9;
+    string comment = 10;
+    bool if_not_exists = 11;
+    bool overwrite = 12;
+    Reference reference = 13;
+    bool default_always = 14;
+}
+
+message Scoring {
+    message Bm {
+        float k1 = 1;
+        float b = 2;
+    }
+
+    oneof inner {
+        Bm bm = 1;
+        EmptyMessage vs = 2;
+    }
+}
+
+enum VectorType {
+    VECTOR_TYPE_F64 = 0;
+    VECTOR_TYPE_F32 = 1;
+    VECTOR_TYPE_I64 = 2;
+    VECTOR_TYPE_I32 = 3;
+    VECTOR_TYPE_I16 = 4;
+}
+
+message Index {
+    enum IndexKind {
+        IDX = 0;
+        UNIQ = 1;
+        SEARCH = 2;
+        MTREE = 3;
+        HNSW = 4;
+    }
+
+    message SearchParams {
+        Ident az = 1;
+        bool hl = 2;
+        Scoring sc = 3;
+        uint32 doc_ids_order = 4;
+        uint32 doc_lengths_order = 5;
+        uint32 postings_order = 6;
+        uint32 terms_order = 7;
+        uint32 doc_ids_cache = 8;
+        uint32 doc_lengths_cache = 9;
+        uint32 postings_cache = 10;
+        uint32 terms_cache = 11;
+    }
+
+    message MTreeParams {
+        uint32 dimension = 1;
+        Distance distance = 2;
+        VectorType vector_type = 3;
+        uint32 capacity = 4;
+        uint32 doc_ids_order = 5;
+        uint32 doc_ids_cache = 6;
+        uint32 mtree_cache = 7;
+    }
+
+    message HnswParams {
+        uint32 dimension = 1;
+        Distance distance = 2;
+        VectorType vector_type = 3;
+        uint32 m = 4;
+        uint32 m0 = 5;
+        uint32 ef_construction = 6;
+        bool extend_candidates = 7;
+        bool keep_pruned_connections = 8;
+        Number ml = 9;
+    }
+
+    IndexKind kind = 1;
+    oneof params {
+        SearchParams search_params = 2;
+        MTreeParams m_tree_params = 3;
+        HnswParams hnsw_params = 4;
+    }
+}
+
+message UserDuration {
+    google.protobuf.Duration token = 1;
+    google.protobuf.Duration session = 2;
+}
+
+enum Algorithm {
+    ALGORITHM_EDDSA = 0;
+    ALGORITHM_ES256 = 1;
+    ALGORITHM_ES384 = 2;
+    ALGORITHM_ES512 = 3;
+    ALGORITHM_HS256 = 4;
+    ALGORITHM_HS384 = 5;
+    ALGORITHM_HS512 = 6;
+    ALGORITHM_PS256 = 7;
+    ALGORITHM_PS384 = 8;
+    ALGORITHM_PS512 = 9;
+    ALGORITHM_RS256 = 10;
+    ALGORITHM_RS384 = 11;
+    ALGORITHM_RS512 = 12;
+}
+
+message AccessType {
+    message JwtAccessVerifyKey {
+        Algorithm alg = 1;
+        string key = 2;
+    }
+
+    message JwtAccessVerifyJwks {
+        string url = 1;
+    }
+
+    message JwtAccessIssue {
+        Algorithm alg = 1;
+        string key = 2;
+    }
+
+    message JwtAccessVerify {
+        oneof inner {
+            JwtAccessVerifyKey key = 1;
+            JwtAccessVerifyJwks jwks = 2;
+        }
+    }
+
+    message JwtAccess {
+        JwtAccessVerify verify = 1;
+        JwtAccessIssue issue = 2;
+    }
+
+    message RecordAccess {
+        SqlValue signup = 1;
+        SqlValue signin = 2;
+        JwtAccess jwt = 3;
+        SqlValue authenticate = 4;
+        BearerAccess bearer = 5;
+    }
+
+    message BearerAccess {
+        Permissions permissions = 1;
+        UserDuration duration = 2;
+    }
+
+    oneof inner {
+        RecordAccess record = 1;
+        JwtAccess jwt = 2;
+        BearerAccess bearer = 3;
+    }
+}
+
+message DefineIndexStatement {
+    Ident name = 1;
+    Ident what = 2;
+    Idioms cols = 3;
+    Index index = 4;
+    string comment = 5;
+    bool if_not_exists = 6;
+    bool overwrite = 7;
+    bool concurrently = 8;
+}
+
+message DefineUserStatement {
+    Ident name = 1;
+    Base base = 2;
+    string hash = 3;
+    string code = 4;
+    repeated Ident roles = 5;
+    UserDuration duration = 6;
+    string comment = 7;
+    bool if_not_exists = 8;
+    bool overwrite = 9;
+}
+
+message DefineModelStatement {
+    string hash = 1;
+    Ident name = 2;
+    string version = 3;
+    string comment = 4;
+    Permission permissions = 5;
+    bool if_not_exists = 6;
+    bool overwrite = 7;
+}
+
+message DefineAccessStatement {
+    Ident name = 1;
+    Base base = 2;
+    AccessType kind = 3;
+    SqlValue authenticate = 4;
+    AccessDuration duration = 5;
+    string comment = 6;
+    bool if_not_exists = 7;
+    bool overwrite = 8;
+}
+
+message AccessDuration {
+    google.protobuf.Duration grant = 1;
+    google.protobuf.Duration token = 2;
+    google.protobuf.Duration session = 3;
+}
+
+message DefineConfigStatement {
+    bool if_not_exists = 1;
+    bool overwrite = 2;
+    oneof inner {
+        GraphQlConfig graphql = 3;
+        ApiConfig api = 4;
+    }
+}
+
+message GraphQlConfig {
+    TablesConfig tables = 1;
+    oneof functions {
+        EmptyMessage none = 2;
+        EmptyMessage auto = 3;
+        Idents include = 4;
+        Idents exclude = 5;
+    }
+}
+
+message TablesConfig {
+    oneof inner {
+        EmptyMessage none = 1;
+        EmptyMessage auto = 2;
+        TablesConfigs include = 3;
+        TablesConfigs exclude = 4;
+    }
+}
+
+message TablesConfigs {
+    repeated TablesConfig configs = 1;
+}
+
+message ApiConfig {
+    RequestMiddleware middleware = 1;
+    Permission permissions = 2;
+}
+
+message RequestMiddleware {
+    message Middleware {
+        string name = 1;
+        repeated SqlValue args = 2;
+    }
+
+    repeated Middleware middlewares = 1;
+}
+
+enum Method {
+    METHOD_DELETE = 0;
+    METHOD_GET = 1;
+    METHOD_PATCH = 2;
+    METHOD_POST = 3;
+    METHOD_PUT = 4;
+    METHOD_TRACE = 5;
+}
+
+message ApiAction {
+    repeated Method methods = 1;
+    SqlValue action = 2;
+    ApiConfig config = 3;
+}
+
+message DefineApiStatement {
+    bool if_not_exists = 1;
+    bool overwrite = 2;
+    SqlValue path = 3;
+    repeated ApiAction actions = 4;
+    SqlValue fallback = 5;
+    ApiConfig config = 6;
+    string comment = 7;
+}
+
+message DefineBucketStatement {
+    bool if_not_exists = 1;
+    bool overwrite = 2;
+    Ident name = 3;
+    SqlValue backend = 4;
+    Permission permissions = 5;
+    bool readonly = 6;
+    string comment = 7;
+}
+
+message DefineSequenceStatement {
+    Ident name = 1;
+    bool if_not_exists = 2;
+    bool overwrite = 3;
+    uint32 batch = 4;
+    int64 start = 5;
+    google.protobuf.Duration timeout = 6;
+}
+
+message RemoveStatement {
+    oneof inner {
+        RemoveNamespaceStatement namespace = 1;
+        RemoveDatabaseStatement database = 2;
+        RemoveFunctionStatement function = 3;
+        RemoveAnalyzerStatement analyzer = 4;
+        RemoveAccessStatement access = 5;
+        RemoveParamStatement param = 6;
+        RemoveTableStatement table = 7;
+        RemoveEventStatement event = 8;
+        RemoveFieldStatement field = 9;
+        RemoveIndexStatement index = 10;
+        RemoveUserStatement user = 11;
+        RemoveModelStatement model = 12;
+        RemoveBucketStatement bucket = 13;
+        RemoveSequenceStatement sequence = 14;
+    }
+}
+
+message RemoveNamespaceStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+    bool expunge = 3;
+}
+
+message RemoveDatabaseStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+    bool expunge = 3;
+}
+
+message RemoveFunctionStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+}
+
+message RemoveAnalyzerStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+}
+
+message RemoveAccessStatement {
+    Ident name = 1;
+    Base base = 2;
+    bool if_exists = 3;
+}
+
+message RemoveParamStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+}
+
+message RemoveTableStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+    bool expunge = 3;
+}
+
+message RemoveEventStatement {
+    Ident name = 1;
+    Ident what = 2;
+    bool if_exists = 3;
+}
+
+message RemoveFieldStatement {
+    Idiom name = 1;
+    Ident what = 2;
+    bool if_exists = 3;
+}
+
+message RemoveIndexStatement {
+    Ident name = 1;
+    Ident what = 2;
+    bool if_exists = 3;
+}
+
+message RemoveUserStatement {
+    Ident name = 1;
+    Base base = 2;
+    bool if_exists = 3;
+}
+
+message RemoveModelStatement {
+    Ident name = 1;
+    string version = 2;
+    bool if_exists = 3;
+}
+
+message RemoveBucketStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+}
+
+message RemoveSequenceStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+}
+
+message ThrowStatement {
+    SqlValue error = 1;
+}
+
+message BreakStatement {}
+
+message ContinueStatement {}
+
+message RebuildStatement {
+
+    message RebuildIndexStatement {
+        Ident name = 1;
+        Ident what = 2;
+        bool if_exists = 3;
+    }
+    oneof inner {
+        RebuildIndexStatement index = 1;
+    }
+}
+
+message UpsertStatement {
+    bool only = 1;
+    SqlValues what = 2;
+    With with = 3;
+    Data data = 4;
+    Cond cond = 5;
+    Output output = 6;
+    google.protobuf.Duration timeout = 7;
+    bool parallel = 8;
+    bool explain = 9;
+}
+
+message AlterStatement {
+    oneof inner {
+        AlterTableStatement table = 1;
+        AlterSequenceStatement sequence = 2;
+        AlterFieldStatement field = 3;
+    }
+}
+
+message AlterTableStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+    bool drop = 3;
+    bool full = 4;
+    Permissions permissions = 5;
+    ChangeFeed changefeed = 6;
+    string comment = 7;
+    TableType kind = 8;
+}
+
+message AlterSequenceStatement {
+    Ident name = 1;
+    bool if_exists = 2;
+    google.protobuf.Duration timeout = 3;
+}
+
+message AlterFieldStatement {
+    Idiom name = 1;
+    Ident what = 2;
+    bool if_exists = 3;
+    bool flex = 4;
+    Kind kind = 5;
+    bool readonly = 6;
+    SqlValue value = 7;
+    SqlValue assert = 8;
+    SqlValue default_value = 9;
+    Permissions permissions = 10;
+    string comment = 11;
+    Reference reference = 12;
+    bool default_always = 13;
+}
+
+message InfoStatement {
+    message RootInfo {
+        bool structured = 1;
+    }
+
+    message NsInfo {
+        bool structured = 1;
+    }
+
+    message DbInfo {
+        bool structured = 1;
+        SqlValue version = 2;
+    }
+    message TbInfo {
+        Ident name = 1;
+        bool structured = 2;
+        SqlValue version = 3;
+    }
+    message UserInfo {
+        Ident name = 1;
+        Base base = 2;
+        bool structured = 3;
+    }
+    message IndexInfo {
+        Ident name = 1;
+        Ident what = 2;
+        bool structured = 3;
+    }
+
+    oneof inner {
+        RootInfo root = 1;
+        NsInfo ns = 2;
+        DbInfo db = 3;
+        TbInfo tb = 4;
+        UserInfo user = 5;
+        IndexInfo index = 6;
+    }
+}
+
+message Base {
+    oneof inner {
+        EmptyMessage root = 1;
+        EmptyMessage ns = 2;
+        EmptyMessage db = 3;
+        Ident sc = 4;
+    }
+}
+
+message Output {
+    oneof inner {
+        EmptyMessage none = 1;
+        EmptyMessage null_value = 2;
+        EmptyMessage diff = 3;
+        EmptyMessage after = 4;
+        EmptyMessage before = 5;
+        Fields fields = 6;
+    }
+}
+
+message Data {
+    message SetField {
+        Idiom idiom = 1;
+        Operator operator = 2;
+        SqlValue value = 3;
+    }
+
+    message SetExpression {
+        repeated SetField fields = 1;
+    }
+
+    message UnsetExpression {
+        repeated Idiom idioms = 1;
+    }
+
+    message PatchExpression {
+        SqlValue value = 1;
+    }
+
+    message MergeExpression {
+        SqlValue value = 1;
+    }
+
+    message ReplaceExpression {
+        SqlValue value = 1;
+    }
+
+    message ContentExpression {
+        SqlValue value = 1;
+    }
+
+    message SingleExpression {
+        SqlValue value = 1;
+    }
+
+    message SqlValuesExpression {
+        repeated SqlValues values = 1;
+    }
+
+    message UpdateExpression {
+        repeated SetField fields = 1;
+    }
+
+    oneof inner {
+        EmptyMessage empty_expression = 1;
+        SetExpression set_expression = 2;
+        UnsetExpression unset_expression = 3;
+        PatchExpression patch_expression = 4;
+        MergeExpression merge_expression = 5;
+        ReplaceExpression replace_expression = 6;
+        ContentExpression content_expression = 7;
+        SingleExpression single_expression = 8;
+        SqlValuesExpression values_expression = 9;
+        UpdateExpression update_expression = 10;
+    }
+}
+
+message Model {
+    string name = 1;
+    string version = 2;
+    repeated SqlValue args = 3;
+}
+
+message Arg {
+    Ident ident = 1;
+    Kind kind = 2;
+}
+
+message Closure {
+    repeated Arg args = 1;
+    Kind returns = 2;
+    SqlValue body = 3;
+}
+
+message Ref {
+    Table table = 1;
+    Idiom idiom = 2;
+}
+
+message Refs {
+    repeated Ref refs = 1;
+}
+
+message File {
+    string bucket = 1;
+    string key = 2;
+}
+
+message Distance {
+    oneof inner {
+        EmptyMessage chebyshev = 1;
+        EmptyMessage cosine = 2;
+        EmptyMessage euclidean = 3;
+        EmptyMessage hamming = 4;
+        EmptyMessage jaccard = 5;
+        EmptyMessage manhattan = 6;
+        Number minkowski = 7;
+        EmptyMessage pearson = 8;
+    }
+}

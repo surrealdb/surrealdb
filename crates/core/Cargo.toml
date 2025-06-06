@@ -74,6 +74,7 @@ surrealml = { workspace = true, optional = true }
 affinitypool = { workspace = true, optional = true }
 #derive.workspace = true
 dmp.workspace = true
+prost.workspace = true
 indxdb = { workspace = true, optional = true }
 js = { workspace = true, features = [
     "array-buffer",
@@ -186,11 +187,15 @@ reqwest = { workspace = true, default-features = false, features = [
 ], optional = true }
 tempfile = { workspace = true, optional = true }
 
+[build-dependencies]
+prost-build.workspace = true
+
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
+prost-build.workspace = true
 rstest.workspace = true
 serial_test.workspace = true
 temp-dir.workspace = true
