@@ -1,13 +1,13 @@
 //! Methods to use when interacting with a SurrealDB instance
-use crate::api::opt;
-use crate::api::opt::auth;
-use crate::api::opt::auth::Credentials;
-use crate::api::opt::auth::Jwt;
-use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::OnceLockExt;
 use crate::api::Surreal;
+use crate::api::opt;
+use crate::api::opt::IntoEndpoint;
+use crate::api::opt::auth;
+use crate::api::opt::auth::Credentials;
+use crate::api::opt::auth::Jwt;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use serde::Serialize;
@@ -18,8 +18,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use surrealdb_core::expr::to_value as to_core_value;
 use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::to_value as to_core_value;
 use surrealdb_core::syn;
 
 pub(crate) mod live;
