@@ -8,6 +8,11 @@ on:
     branches:
       - main
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
   merge_group:
 
 concurrency:
@@ -250,7 +255,7 @@ jobs:
 
   check-binaries:
     name: Cross-compile binaries
-    needs: [format, check, check-wasm]
+    needs: [ format, check, check-wasm ]
     uses: ./.github/workflows/build.yml
     with:
       name: ci
@@ -386,7 +391,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [runner-arm64-2xlarge]
+    runs-on: [ runner-arm64-2xlarge ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
