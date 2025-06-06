@@ -28,8 +28,8 @@ use crate::{
 			RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
 			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
 			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
-			RemoveUserStatement, SelectStatement, SetStatement, ThrowStatement, UpdateStatement,
-			UpsertStatement, UseStatement,
+			RemoveUserStatement, SelectStatement, ThrowStatement, UpdateStatement, UpsertStatement,
+			UseStatement,
 			access::{
 				self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 				AccessStatementShow,
@@ -2371,29 +2371,6 @@ SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
 			tempfiles: false,
 			explain: Some(Explain(true)),
 		}),
-	);
-}
-
-#[test]
-fn parse_let() {
-	let res = test_parse!(parse_stmt, r#"LET $param = 1"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Set(SetStatement {
-			name: "param".to_owned(),
-			what: SqlValue::Number(Number::Int(1)),
-			kind: None,
-		})
-	);
-
-	let res = test_parse!(parse_stmt, r#"$param = 1"#).unwrap();
-	assert_eq!(
-		res,
-		Statement::Set(SetStatement {
-			name: "param".to_owned(),
-			what: SqlValue::Number(Number::Int(1)),
-			kind: None,
-		})
 	);
 }
 
