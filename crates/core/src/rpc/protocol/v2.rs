@@ -18,6 +18,7 @@ use crate::{
 	rpc::args::Take,
 	sql::{
 		Array, Fields, Function, Model, Output, Query, SqlValue, Strand,
+		function::CustomFunctionName,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
@@ -818,7 +819,16 @@ pub trait RpcProtocolV2: RpcContext {
 		};
 		// Specify the function to run
 		let func: Query = match &name[0..4] {
-			"fn::" => Function::Custom(name.chars().skip(4).collect(), args).into(),
+			"fn::" => Function::Custom(
+				CustomFunctionName {
+					name: name.chars().skip(4).collect::<String>().into(),
+					// TODO(kearfy): support version and submodule specification here
+					version: None,
+					submodule: None,
+				},
+				args,
+			)
+			.into(),
 			"ml::" => Model {
 				name: name.chars().skip(4).collect(),
 				version: version.ok_or(RpcError::InvalidParams)?,

@@ -273,6 +273,7 @@ keyword! {
 
 	FN => "fn",
 	ML => "ml",
+	SILO => "silo",
 
 	Get => "GET",
 	Post => "POST",

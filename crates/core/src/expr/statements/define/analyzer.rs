@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::function::CustomFunctionName;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Array, Base, Ident, Strand, Value, filter::Filter, tokenizer::Tokenizer};
 use crate::iam::{Action, ResourceKind};
@@ -11,14 +12,16 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineAnalyzerStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
-	pub function: Option<Ident>,
+	#[revision(start = 2, end = 5, convert_fn = "convert_function_add_mod")]
+	pub _function: Option<Ident>,
+	#[revision(start = 5)]
+	pub function: Option<CustomFunctionName>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
@@ -29,6 +32,19 @@ pub struct DefineAnalyzerStatement {
 }
 
 impl DefineAnalyzerStatement {
+	fn convert_function_add_mod(
+		&mut self,
+		_revision: u16,
+		old: Option<Ident>,
+	) -> Result<(), revision::Error> {
+		self.function = old.map(|name| CustomFunctionName {
+			name,
+			version: None,
+			submodule: None,
+		});
+		Ok(())
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context,
@@ -79,8 +95,8 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {}", self.name)?;
-		if let Some(ref i) = self.function {
-			write!(f, " FUNCTION fn::{i}")?
+		if let Some(ref name) = self.function {
+			write!(f, " FUNCTION fn::{name}")?;
 		}
 		if let Some(v) = &self.tokenizers {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
