@@ -359,6 +359,9 @@ impl QueryExecutor {
 			Index::Search {
 				..
 			} => self.new_search_index_iterator(irf, io.clone()).await,
+			Index::Search2 {
+				..
+			} => self.new_search2_index_iterator(irf, io.clone()).await,
 			Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(irf)),
 			Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(irf)),
 		}
@@ -919,6 +922,14 @@ impl QueryExecutor {
 		Ok(None)
 	}
 
+	async fn new_search2_index_iterator(
+		&self,
+		_ir: IteratorRef,
+		_io: IndexOption,
+	) -> Result<Option<ThingIterator>> {
+		todo!("new_search2_index_iterator")
+	}
+
 	fn new_mtree_index_knn_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
 			if let Some(mte) = self.0.mt_entries.get(exp) {
@@ -1143,7 +1154,6 @@ impl FtEntry {
 				ft.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let tx = ctx.tx();
 			let terms_docs = Arc::new(ft.get_terms_docs(&tx, &terms_list).await?);
-			drop(tx);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
 				doc_ids: ft.doc_ids(),
