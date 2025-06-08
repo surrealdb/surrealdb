@@ -17,14 +17,14 @@ pub(crate) mod validator;
 mod version;
 mod version_client;
 
-use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
+use crate::cli::validator::parser::tracing::CustomFilter;
+use crate::cli::validator::parser::tracing::CustomFilterParser;
 use crate::cli::version_client::VersionClient;
 #[cfg(debug_assertions)]
 use crate::cnf::DEBUG_BUILD_WARNING;
 use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 pub use config::CF;
 use export::ExportCommandArguments;
 use fix::FixCommandArguments;
@@ -59,14 +59,47 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 #[command(version = RELEASE.as_str(), about = INFO, before_help = LOGO)]
 #[command(disable_version_flag = false, arg_required_else_help = true)]
 struct Cli {
+	//
+	// Commands
+	//
 	#[command(subcommand)]
 	command: Commands,
-	#[arg(help = "The logging level for the command-line tool")]
+	//
+	// Logging
+	//
+	#[arg(help = "The logging level for the command-line tool", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG", short = 'l', long = "log")]
 	#[arg(global = true)]
 	#[arg(default_value = "info")]
-	#[arg(value_parser = CustomEnvFilterParser::new())]
-	log: CustomEnvFilter,
+	#[arg(value_parser = CustomFilterParser::new())]
+	log: CustomFilter,
+	//
+	// Log file
+	//
+	#[arg(help = "Whether to enable log file output", help_heading = "Logging")]
+	#[arg(env = "SURREAL_LOG_FILE_ENABLED", long = "log-file-enabled")]
+	#[arg(global = true)]
+	#[arg(default_value_t = false)]
+	pub log_file_enabled: bool,
+	#[arg(help = "The directory where log files will be stored", help_heading = "Logging")]
+	#[arg(env = "SURREAL_LOG_FILE_PATH", long = "log-file-path")]
+	#[arg(global = true)]
+	#[arg(default_value = "logs")]
+	pub log_file_path: String,
+	#[arg(help = "The name of the log file", help_heading = "Logging")]
+	#[arg(env = "SURREAL_LOG_FILE_NAME", long = "log-file-name")]
+	#[arg(global = true)]
+	#[arg(default_value = "surrealdb.log")]
+	pub log_file_name: String,
+	#[arg(help = "The log file rotation interval", help_heading = "Logging")]
+	#[arg(env = "SURREAL_LOG_FILE_ROTATION", long = "log-file-rotation")]
+	#[arg(global = true)]
+	#[arg(default_value = "daily")]
+	#[arg(value_enum)]
+	pub log_file_rotation: LogFileRotation,
+	//
+	// Version check
+	//
 	#[arg(help = "Whether to allow web check for client version upgrades at start")]
 	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
 	#[arg(default_value_t = true)]
@@ -105,6 +138,23 @@ enum Commands {
 	Fix(FixCommandArguments),
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum LogFileRotation {
+	Daily,
+	Hourly,
+	Never,
+}
+
+impl LogFileRotation {
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			LogFileRotation::Daily => "daily",
+			LogFileRotation::Hourly => "hourly",
+			LogFileRotation::Never => "never",
+		}
+	}
+}
+
 pub async fn init() -> ExitCode {
 	// Enables ANSI code support on Windows
 	#[cfg(windows)]
@@ -140,9 +190,15 @@ pub async fn init() -> ExitCode {
 	// Check if we are running the server
 	let server = matches!(args.command, Commands::Start(_));
 	// Initialize opentelemetry and logging
-	let telemetry = crate::telemetry::builder().with_log_level("info").with_filter(args.log);
+	let telemetry = crate::telemetry::builder()
+		.with_log_level("info")
+		.with_filter(args.log)
+		.with_log_file_enabled(args.log_file_enabled)
+		.with_log_file_path(Some(args.log_file_path.clone()))
+		.with_log_file_name(Some(args.log_file_name.clone()))
+		.with_log_file_rotation(Some(args.log_file_rotation.as_str().to_string()));
 	// Extract the telemetry log guards
-	let (outg, errg) = telemetry.init().expect("Unable to configure logs");
+	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
 		Commands::Start(args) => start::init(args).await,
@@ -177,8 +233,9 @@ pub async fn init() -> ExitCode {
 		// Output any error
 		error!("{}", e);
 		// Drop the log guards
-		drop(outg);
-		drop(errg);
+		for guard in guards {
+			drop(guard);
+		}
 		// Final message
 		if server {
 			println!("Goodbye!");
@@ -187,8 +244,9 @@ pub async fn init() -> ExitCode {
 		ExitCode::FAILURE
 	} else {
 		// Drop the log guards
-		drop(outg);
-		drop(errg);
+		for guard in guards {
+			drop(guard);
+		}
 		// Final message
 		if server {
 			println!("Goodbye!");

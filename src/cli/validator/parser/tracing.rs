@@ -4,25 +4,25 @@ use clap::error::{ContextKind, ContextValue, ErrorKind};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug)]
-pub struct CustomEnvFilter(pub EnvFilter);
+pub struct CustomFilter(pub EnvFilter);
 
-impl Clone for CustomEnvFilter {
+impl Clone for CustomFilter {
 	fn clone(&self) -> Self {
 		Self(EnvFilter::builder().parse(self.0.to_string()).unwrap())
 	}
 }
 
 #[derive(Clone)]
-pub struct CustomEnvFilterParser;
+pub struct CustomFilterParser;
 
-impl CustomEnvFilterParser {
-	pub fn new() -> CustomEnvFilterParser {
+impl CustomFilterParser {
+	pub fn new() -> CustomFilterParser {
 		Self
 	}
 }
 
-impl TypedValueParser for CustomEnvFilterParser {
-	type Value = CustomEnvFilter;
+impl TypedValueParser for CustomFilterParser {
+	type Value = CustomFilter;
 
 	fn parse_ref(
 		&self,
@@ -30,13 +30,15 @@ impl TypedValueParser for CustomEnvFilterParser {
 		arg: Option<&clap::Arg>,
 		value: &std::ffi::OsStr,
 	) -> Result<Self::Value, clap::Error> {
-		if let Ok(dirs) = std::env::var("RUST_LOG") {
-			return Ok(CustomEnvFilter(EnvFilter::builder().parse_lossy(dirs)));
-		}
-
-		let inner = NonEmptyStringValueParser::new();
-		let v = inner.parse_ref(cmd, arg, value)?;
-		let filter = filter_from_value(v.as_str()).map_err(|e| {
+		// Fetch the log filter input
+		let input = if let Ok(input) = std::env::var("RUST_LOG") {
+			input
+		} else {
+			let inner = NonEmptyStringValueParser::new();
+			inner.parse_ref(cmd, arg, value)?
+		};
+		// Parse the log filter input
+		let filter = filter_from_value(input.as_str()).map_err(|e| {
 			let mut err = clap::Error::new(ErrorKind::ValueValidation).with_cmd(cmd);
 			err.insert(ContextKind::Custom, ContextValue::String(e.to_string()));
 			err.insert(
@@ -45,7 +47,8 @@ impl TypedValueParser for CustomEnvFilterParser {
 			);
 			err
 		})?;
-		Ok(CustomEnvFilter(filter))
+		// Return the custom targets
+		Ok(CustomFilter(filter))
 	}
 
 	fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
