@@ -70,7 +70,7 @@ pub(super) static ROCKSDB_WRITE_BUFFER_SIZE: LazyLock<usize> =
 			None => system.total_memory(),
 		};
 		// Dynamically set the number of write buffers
-		if memory < 1 * 1024 * 1024 * 1024 {
+		if memory < 1024 * 1024 * 1024 {
 			32 * 1024 * 1024 // For systems with < 1 GiB, use 32 MiB
 		} else if memory < 16 * 1024 * 1024 * 1024 {
 			64 * 1024 * 1024 // For systems with < 16 GiB, use 64 MiB
