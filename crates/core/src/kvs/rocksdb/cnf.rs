@@ -33,7 +33,7 @@ pub(super) static ROCKSDB_BLOCK_SIZE: LazyLock<usize> =
 pub(super) static ROCKSDB_WAL_SIZE_LIMIT: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_WAL_SIZE_LIMIT", u64, 0);
 
-/// The maximum number of write buffers which can be used (default: 2)
+/// The maximum number of write buffers which can be used (default: dynamic from 2 to 32)
 pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<i32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER", i32, || {
 		// Load the system attributes
@@ -57,7 +57,7 @@ pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<i32> =
 		}
 	});
 
-/// The amount of data each write buffer can build up in memory (default: 64 MiB)
+/// The amount of data each write buffer can build up in memory (default: dynamic from 32 MiB to 128 MiB)
 pub(super) static ROCKSDB_WRITE_BUFFER_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_WRITE_BUFFER_SIZE", usize, || {
 		// Load the system attributes
@@ -95,7 +95,7 @@ pub(super) static ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE: LazyLock<i32> =
 pub(super) static ROCKSDB_FILE_COMPACTION_TRIGGER: LazyLock<i32> =
 	lazy_env_parse!("SURREAL_ROCKSDB_FILE_COMPACTION_TRIGGER", i32, 4);
 
-/// The readahead buffer size used during compaction (default: 8 MiB)
+/// The readahead buffer size used during compaction (default: dynamic from 4 MiB to 16 MiB)
 pub(super) static ROCKSDB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_COMPACTION_READAHEAD_SIZE", usize, || {
 		// Load the system attributes
