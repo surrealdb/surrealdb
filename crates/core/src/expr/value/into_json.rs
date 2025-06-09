@@ -417,12 +417,9 @@ mod tests {
 			point! { x: 1., y: 2. },
 		]))),
 		json!({ "type": "MultiPoint", "coordinates": [[0., 0.], [1., 2.]]}),
-		Value::Object(expr::Object(BTreeMap::from([
-			("type".to_string(), Value::Strand("MultiPoint".into())),
-			("coordinates".to_string(), Value::Array(expr::Array(vec![
-				Value::Array(expr::Array(vec![Value::Number(expr::Number::Float(0.)), Value::Number(expr::Number::Float(0.))])),
-				Value::Array(expr::Array(vec![Value::Number(expr::Number::Float(1.)), Value::Number(expr::Number::Float(2.))])),
-			]))),
+		Value::Geometry(expr::Geometry::MultiPoint(MultiPoint::new(vec![
+			point! { x: 0., y: 0. },
+			point! { x: 1., y: 2. },
 		]))),
 	)]
 	#[case::geometry_multi_line(
