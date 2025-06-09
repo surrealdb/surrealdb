@@ -81,10 +81,15 @@ pub(super) static ROCKSDB_MIN_BLOB_SIZE: LazyLock<u64> =
 pub(super) static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOCK_CACHE_SIZE", usize, || {
 		// Load the system attributes
-		let system = System::new_all();
-		// Get the total system memory
-		let memory = system.total_memory();
-		// Divide the total system memory by 2
+		let mut system = System::new_all();
+		// Refresh the system memory
+		system.refresh_memory();
+		// Get the available memory
+		let memory = match system.cgroup_limits() {
+			Some(limits) => limits.total_memory,
+			None => system.total_memory(),
+		};
+		// Divide the total memory by 2
 		let memory = memory.saturating_div(2);
 		// Subtract 1 GiB from the memory size
 		let memory = memory.saturating_sub(1024 * 1024 * 1024);

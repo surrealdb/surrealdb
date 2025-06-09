@@ -17,9 +17,14 @@ pub(super) static SURREALKV_MAX_SEGMENT_SIZE: LazyLock<u64> =
 pub(super) static SURREALKV_MAX_VALUE_CACHE_SIZE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_SURREALKV_MAX_VALUE_CACHE_SIZE", u64, || {
 		// Load the system attributes
-		let system = System::new_all();
-		// Get the total system memory
-		let memory = system.total_memory();
+		let mut system = System::new_all();
+		// Refresh the system memory
+		system.refresh_memory();
+		// Get the available memory
+		let memory = match system.cgroup_limits() {
+			Some(limits) => limits.total_memory,
+			None => system.total_memory(),
+		};
 		// Divide the total system memory by 2
 		let memory = memory.saturating_div(2);
 		// Subtract 1 GiB from the memory size
