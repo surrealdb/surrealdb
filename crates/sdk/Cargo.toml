@@ -217,3 +217,7 @@ harness = false
 [[bench]]
 name = "allocator"
 harness = false
+
+[[bench]]
+name = "other_uniq_implementations"
+harness = false
