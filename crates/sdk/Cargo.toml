@@ -219,5 +219,5 @@ name = "allocator"
 harness = false
 
 [[bench]]
-name = "other_uniq_implementations"
+name = "array_uniq"
 harness = false
