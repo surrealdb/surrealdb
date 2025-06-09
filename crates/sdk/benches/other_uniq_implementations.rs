@@ -5,6 +5,7 @@ use std::{
 };
 use surrealdb_core::expr::{Array, Number, Value};
 
+// Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
 fn current_uniq(mut array: Array) -> Array {
 	let mut set: HashSet<&Value> = HashSet::new();
 	let mut to_remove: Vec<usize> = Vec::new();
