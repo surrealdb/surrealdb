@@ -35,11 +35,49 @@ pub(super) static ROCKSDB_WAL_SIZE_LIMIT: LazyLock<u64> =
 
 /// The maximum number of write buffers which can be used (default: 2)
 pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<i32> =
-	lazy_env_parse!("SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER", i32, 2);
+	lazy_env_parse!("SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER", i32, || {
+		// Load the system attributes
+		let mut system = System::new_all();
+		// Refresh the system memory
+		system.refresh_memory();
+		// Get the available memory
+		let memory = match system.cgroup_limits() {
+			Some(limits) => limits.total_memory,
+			None => system.total_memory(),
+		};
+		// Dynamically set the number of write buffers
+		if memory < 4 * 1024 * 1024 * 1024 {
+			2 // For systems with < 4 GiB, use 2 buffers
+		} else if memory < 16 * 1024 * 1024 * 1024 {
+			4 // For systems with < 16 GiB, use 4 buffers
+		} else if memory < 64 * 1024 * 1024 * 1024 {
+			8 // For systems with < 64 GiB, use 8 buffers
+		} else {
+			32 // For systems with > 64 GiB, use 32 buffers
+		}
+	});
 
 /// The amount of data each write buffer can build up in memory (default: 64 MiB)
 pub(super) static ROCKSDB_WRITE_BUFFER_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_WRITE_BUFFER_SIZE", usize, 64 * 1024 * 1024);
+	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_WRITE_BUFFER_SIZE", usize, || {
+		// Load the system attributes
+		let mut system = System::new_all();
+		// Refresh the system memory
+		system.refresh_memory();
+		// Get the available memory
+		let memory = match system.cgroup_limits() {
+			Some(limits) => limits.total_memory,
+			None => system.total_memory(),
+		};
+		// Dynamically set the number of write buffers
+		if memory < 1 * 1024 * 1024 * 1024 {
+			32 * 1024 * 1024 // For systems with < 1 GiB, use 32 MiB
+		} else if memory < 16 * 1024 * 1024 * 1024 {
+			64 * 1024 * 1024 // For systems with < 16 GiB, use 64 MiB
+		} else {
+			128 * 1024 * 1024 // For all other systems, use 128 MiB
+		}
+	});
 
 /// The target file size for compaction in bytes (default: 64 MiB)
 pub(super) static ROCKSDB_TARGET_FILE_SIZE_BASE: LazyLock<u64> =
@@ -59,7 +97,25 @@ pub(super) static ROCKSDB_FILE_COMPACTION_TRIGGER: LazyLock<i32> =
 
 /// The readahead buffer size used during compaction (default: 8 MiB)
 pub(super) static ROCKSDB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_COMPACTION_READAHEAD_SIZE", usize, 8 * 1024 * 1024);
+	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_COMPACTION_READAHEAD_SIZE", usize, || {
+		// Load the system attributes
+		let mut system = System::new_all();
+		// Refresh the system memory
+		system.refresh_memory();
+		// Get the available memory
+		let memory = match system.cgroup_limits() {
+			Some(limits) => limits.total_memory,
+			None => system.total_memory(),
+		};
+		// Dynamically set the compaction readahead size
+		if memory < 4 * 1024 * 1024 * 1024 {
+			4 * 1024 * 1024 // For systems with < 4 GiB, use 4 MiB
+		} else if memory < 16 * 1024 * 1024 * 1024 {
+			8 * 1024 * 1024 // For systems with < 16 GiB, use 8 MiB
+		} else {
+			16 * 1024 * 1024 // For all other systems, use 16 MiB
+		}
+	});
 
 /// The maximum number threads which will perform compactions (default: 4)
 pub(super) static ROCKSDB_MAX_CONCURRENT_SUBCOMPACTIONS: LazyLock<u32> =
