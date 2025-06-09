@@ -77,7 +77,7 @@ pub(super) static ROCKSDB_ENABLE_BLOB_FILES: LazyLock<bool> =
 pub(super) static ROCKSDB_MIN_BLOB_SIZE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_MIN_BLOB_SIZE", u64, 4 * 1024);
 
-/// The size of the least-recently-used block cache (default: 32 MiB)
+/// The size of the least-recently-used block cache (default: 16 MiB)
 pub(super) static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOCK_CACHE_SIZE", usize, || {
 		// Load the system attributes
@@ -88,8 +88,8 @@ pub(super) static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
 		let memory = memory.saturating_div(2);
 		// Subtract 1 GiB from the memory size
 		let memory = memory.saturating_sub(1024 * 1024 * 1024);
-		// Take the larger of 32MiB or available memory
-		max(memory as usize, 32 * 1024 * 1024)
+		// Take the larger of 16MiB or available memory
+		max(memory as usize, 16 * 1024 * 1024)
 	});
 
 /// Whether to enable memory-mapped reads (default: false)
