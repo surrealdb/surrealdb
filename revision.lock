@@ -369,7 +369,7 @@ RemoveUserStatement:2(crates/core/src/expr/statements/remove/user.rs)(3508461376
 RemoveUserStatement:2(crates/core/src/sql/statements/remove/user.rs)(3508461376)
 RequestMiddleware:1(crates/core/src/api/middleware/mod.rs)(701088194)
 RequestMiddleware:1(crates/core/src/sql/statements/define/config/api.rs)(4129427391)
-Resource:1(crates/core/src/iam/entities/resources/resource.rs)(2807765604)
+Resource:1(crates/core/src/iam/entities/resources/resource.rs)(2653566989)
 ResourceKind:5(crates/core/src/iam/entities/resources/resource.rs)(3211051844)
 Response:1(crates/language-tests/src/cmd/upgrade/process.rs)(2791491448)
 Response:1(crates/sdk/src/api/engine/remote/mod.rs)(3387553411)

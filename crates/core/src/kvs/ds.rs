@@ -129,42 +129,41 @@ impl TransactionFactory {
 			Optimistic => false,
 		};
 		// Create a new transaction on the datastore
-		let (inner, local, reverse_scan) = match self.flavor.as_ref() {
+		let (inner, local) = match self.flavor.as_ref() {
 			#[cfg(feature = "kv-mem")]
 			DatastoreFlavor::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(tx, true, false)
+				(tx, true)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(tx, true, true)
+				(tx, true)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			DatastoreFlavor::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(tx, true, false)
+				(tx, true)
 			}
 			#[cfg(feature = "kv-tikv")]
 			DatastoreFlavor::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(tx, false, true)
+				(tx, false)
 			}
 			#[cfg(feature = "kv-fdb")]
 			DatastoreFlavor::FoundationDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(tx, false, false)
+				(tx, false)
 			}
 			#[cfg(feature = "kv-surrealkv")]
 			DatastoreFlavor::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				(tx, true, false)
+				(tx, true)
 			}
 			_ => unreachable!(),
 		};
 		Ok(Transaction::new(
 			local,
-			reverse_scan,
 			Transactor {
 				inner,
 				stash: super::stash::Stash::default(),
@@ -893,7 +892,7 @@ impl Datastore {
 			}
 		});
 
-		Executor::execute_stream(self, Arc::new(ctx), opt, stream).await
+		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
 	}
 
 	/// Execute a pre-parsed SQL query
