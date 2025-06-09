@@ -7,10 +7,7 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
-pub fn file<S>(
-	filter: CustomFilter,
-	file: NonBlocking,
-) -> Result<Box<dyn Layer<S> + Send + Sync>>
+pub fn file<S>(filter: CustomFilter, file: NonBlocking) -> Result<Box<dyn Layer<S> + Send + Sync>>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
