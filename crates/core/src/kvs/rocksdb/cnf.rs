@@ -29,9 +29,9 @@ pub(super) static ROCKSDB_MAX_OPEN_FILES: LazyLock<i32> =
 pub(super) static ROCKSDB_BLOCK_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOCK_SIZE", usize, 64 * 1024);
 
-/// The write-ahead-log size limit in MiB (default: 64 MiB)
+/// The write-ahead-log size limit in MiB (default: 0)
 pub(super) static ROCKSDB_WAL_SIZE_LIMIT: LazyLock<u64> =
-	lazy_env_parse!("SURREAL_ROCKSDB_WAL_SIZE_LIMIT", u64, 64);
+	lazy_env_parse!("SURREAL_ROCKSDB_WAL_SIZE_LIMIT", u64, 0);
 
 /// The maximum number of write buffers which can be used (default: 2)
 pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<i32> =
