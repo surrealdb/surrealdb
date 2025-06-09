@@ -50,7 +50,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 		array.push(Value::Number(Number::Int(i)));
 		array.push(i.to_string().into());
 	}
-	for i in 100000..0 {
+	for i in (0..100000).rev() {
 		array.push(Value::Number(Number::Int(i)));
 		array.push(i.to_string().into());
 	}
