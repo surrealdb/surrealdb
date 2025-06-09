@@ -6,6 +6,7 @@ use std::{
 use surrealdb_core::expr::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
+#[allow(clippy::mutable_key_type)]
 fn current_uniq(mut array: Array) -> Array {
 	let mut set: HashSet<&Value> = HashSet::new();
 	let mut to_remove: Vec<usize> = Vec::new();
@@ -21,8 +22,9 @@ fn current_uniq(mut array: Array) -> Array {
 }
 
 // About 30% faster than current_uniq
+#[allow(clippy::mutable_key_type)]
 fn uniq_hashset(array: Array) -> Array {
-	let mut set: HashSet<&Value> = HashSet::with_capacity(array.len());
+	let mut set = HashSet::with_capacity(array.len());
 	let mut to_return = Array::with_capacity(array.len());
 	for i in array.iter() {
 		if set.insert(i) {
@@ -33,8 +35,9 @@ fn uniq_hashset(array: Array) -> Array {
 }
 
 // Much slower, only included to compare
+#[allow(clippy::mutable_key_type)]
 fn uniq_btreeset(array: Array) -> Array {
-	let mut set: BTreeSet<&Value> = BTreeSet::new();
+	let mut set = BTreeSet::new();
 	let mut to_return = Array::with_capacity(array.len());
 	for i in array.iter() {
 		if set.insert(i) {
