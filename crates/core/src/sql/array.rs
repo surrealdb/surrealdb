@@ -5,7 +5,7 @@ use crate::sql::{
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
@@ -175,10 +175,10 @@ pub(crate) trait Uniq<T> {
 impl Uniq<Array> for Array {
 	fn uniq(self) -> Array {
 		#[expect(clippy::mutable_key_type)]
-		let mut map: HashMap<&SqlValue, ()> = HashMap::with_capacity(self.len());
+		let mut set = HashSet::with_capacity(self.len());
 		let mut to_return = Array::with_capacity(self.len());
 		for i in self.iter() {
-			if map.insert(i, ()).is_some() {
+			if set.insert(i) {
 				to_return.push(i.clone());
 			}
 		}

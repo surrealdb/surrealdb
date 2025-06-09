@@ -1,6 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::{
-	collections::{BTreeMap, HashMap, HashSet},
+	collections::{BTreeSet, HashSet},
 	hint::black_box,
 };
 use surrealdb_core::expr::{Array, Number, Value};
@@ -20,11 +20,11 @@ fn current_uniq(mut array: Array) -> Array {
 }
 
 // About 30% faster than current_uniq
-fn uniq_hashmap(array: Array) -> Array {
-	let mut map: HashMap<&Value, ()> = HashMap::with_capacity(array.len());
+fn uniq_hashset(array: Array) -> Array {
+	let mut set: HashSet<&Value> = HashSet::with_capacity(array.len());
 	let mut to_return = Array::with_capacity(array.len());
 	for i in array.iter() {
-		if map.insert(i, ()).is_some() {
+		if set.insert(i) {
 			to_return.push(i.clone());
 		}
 	}
@@ -32,11 +32,11 @@ fn uniq_hashmap(array: Array) -> Array {
 }
 
 // Much slower, only included to compare
-fn uniq_btreemap(array: Array) -> Array {
-	let mut map: BTreeMap<&Value, ()> = BTreeMap::new();
+fn uniq_btreeset(array: Array) -> Array {
+	let mut set: BTreeSet<&Value> = BTreeSet::new();
 	let mut to_return = Array::with_capacity(array.len());
 	for i in array.iter() {
-		if map.insert(i, ()).is_some() {
+		if set.insert(i) {
 			to_return.push(i.clone());
 		}
 	}
@@ -54,8 +54,8 @@ fn criterion_benchmark(c: &mut Criterion) {
 		array.push(i.to_string().into());
 	}
 	c.bench_function("current_uniq", |b| b.iter(|| current_uniq(black_box(array.clone()))));
-	c.bench_function("uniq_hashmap", |b| b.iter(|| uniq_hashmap(black_box(array.clone()))));
-	c.bench_function("uniq_btreemap", |b| b.iter(|| uniq_btreemap(black_box(array.clone()))));
+	c.bench_function("uniq_hashset", |b| b.iter(|| uniq_hashset(black_box(array.clone()))));
+	c.bench_function("uniq_btreeset", |b| b.iter(|| uniq_btreeset(black_box(array.clone()))));
 }
 
 criterion_group!(benches, criterion_benchmark);
