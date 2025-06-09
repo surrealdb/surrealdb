@@ -1,8 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::{
-	collections::HashSet,
-	hint::black_box,
-};
+use std::{collections::HashSet, hint::black_box};
 use surrealdb_core::expr::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
