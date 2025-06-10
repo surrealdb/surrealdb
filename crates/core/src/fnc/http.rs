@@ -126,7 +126,7 @@ pub async fn delete(
 	crate::fnc::util::http::delete(ctx, uri, opts).await
 }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(not(target_family = "wasm"), feature = "http"))]
 pub mod resolver {
 	use crate::dbs::{Capabilities, capabilities::NetTarget};
 	use ipnet::IpNet;
