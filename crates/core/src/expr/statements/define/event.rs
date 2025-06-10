@@ -47,7 +47,7 @@ impl DefineEventStatement {
 		if txn.get_tb_event(ns, db, &self.what, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::EvAlreadyExists {
 					name: self.name.to_string(),
 				});
