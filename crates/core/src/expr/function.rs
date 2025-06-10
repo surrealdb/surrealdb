@@ -150,6 +150,7 @@ impl Function {
 	pub fn is_rolling(&self) -> bool {
 		match self {
 			Self::Normal(f, _) if f == "count" => true,
+			Self::Normal(f, _) if f == "count_all" => true,
 			Self::Normal(f, _) if f == "math::max" => true,
 			Self::Normal(f, _) if f == "math::mean" => true,
 			Self::Normal(f, _) if f == "math::min" => true,
@@ -168,6 +169,7 @@ impl Function {
 			Self::Normal(f, _) if f == "array::group" => true,
 			Self::Normal(f, _) if f == "array::last" => true,
 			Self::Normal(f, _) if f == "count" => true,
+			Self::Normal(f, _) if f == "count_all" => true,
 			Self::Normal(f, _) if f == "math::bottom" => true,
 			Self::Normal(f, _) if f == "math::interquartile" => true,
 			Self::Normal(f, _) if f == "math::max" => true,
@@ -192,7 +194,7 @@ impl Function {
 	}
 	pub(crate) fn get_optimised_aggregate(&self) -> OptimisedAggregate {
 		match self {
-			Self::Normal(f, v) if f == "count" => {
+			Self::Normal(f, v) if f == "count" && f == "count_all" => {
 				if v.is_empty() {
 					OptimisedAggregate::Count
 				} else {
