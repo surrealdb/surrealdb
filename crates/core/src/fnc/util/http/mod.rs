@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::{Bytes, Object, Strand, Value};
-use crate::fnc::http::resolver;
 use crate::syn;
 
 use anyhow::{Context as _, Result, bail};
@@ -86,9 +85,11 @@ async fn request(
 				}
 				attempt.follow()
 			}))
-			.dns_resolver(std::sync::Arc::new(resolver::FilteringResolver::from_capabilities(
-				ctx.get_capabilities(),
-			)))
+			.dns_resolver(std::sync::Arc::new(
+				crate::fnc::http::resolver::FilteringResolver::from_capabilities(
+					ctx.get_capabilities(),
+				),
+			))
 	};
 
 	let cli = builder.build()?;
