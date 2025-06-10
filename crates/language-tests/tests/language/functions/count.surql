@@ -4,7 +4,7 @@
 # count results
 
 [[test.results]]
-value = "0"
+value = "1"
 
 [[test.results]]
 value = "1"
@@ -39,7 +39,7 @@ value = "1"
 # count_value results
 
 [[test.results]]
-value = "0"
+value = "1"
 
 [[test.results]]
 value = "1"

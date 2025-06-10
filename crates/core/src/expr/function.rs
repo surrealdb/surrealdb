@@ -194,7 +194,7 @@ impl Function {
 	}
 	pub(crate) fn get_optimised_aggregate(&self) -> OptimisedAggregate {
 		match self {
-			Self::Normal(f, v) if f == "count" && f == "count_value" => {
+			Self::Normal(f, v) if f == "count" || f == "count_value" => {
 				if v.is_empty() {
 					OptimisedAggregate::Count
 				} else {
@@ -212,7 +212,7 @@ impl Function {
 	}
 
 	pub(crate) fn is_count_all(&self) -> bool {
-		matches!(self, Self::Normal(f, p) if f == "count" && p.is_empty() )
+		matches!(self, Self::Normal(f, p) if (f == "count" || f == "count_value") && p.is_empty() )
 	}
 }
 
