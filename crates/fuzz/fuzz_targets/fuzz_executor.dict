@@ -212,6 +212,7 @@
 "array::transpose("
 "array::union("
 "count("
+"count_all("
 "crypto"
 "crypto::"
 "crypto::blake3("

@@ -87,6 +87,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("bytes::len") => PathKind::Function,
 		//
 		UniCase::ascii("count") => PathKind::Function,
+		UniCase::ascii("count_all") => PathKind::Function,
 		//
 		UniCase::ascii("crypto::blake3") => PathKind::Function,
 		UniCase::ascii("crypto::md5") => PathKind::Function,
