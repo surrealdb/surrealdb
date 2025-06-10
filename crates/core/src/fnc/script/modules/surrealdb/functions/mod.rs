@@ -41,7 +41,7 @@ impl_module_def!(
 	"array" => (array::Package),
 	"bytes" => (bytes::Package),
 	"count" => run,
-	"count_all" => run,
+	"count_value" => run,
 	"crypto" => (crypto::Package),
 	"duration" => (duration::Package),
 	"encoding" => (encoding::Package),

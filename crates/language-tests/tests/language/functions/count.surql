@@ -85,7 +85,7 @@ count({a: 1, b: 2});
 count(1d);
 
 
-count_all();
+count_value();
 count_all(true);
 count_all(false);
 count_all(15 > 10);

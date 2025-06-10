@@ -2,6 +2,7 @@ use super::args::Optional;
 use crate::expr::value::Value;
 use anyhow::Result;
 
+// Counts all truthy values
 pub fn count((Optional(arg),): (Optional<Value>,)) -> Result<Value> {
 	Ok(arg
 		.map(|val| match val {
@@ -11,7 +12,8 @@ pub fn count((Optional(arg),): (Optional<Value>,)) -> Result<Value> {
 		.unwrap_or_else(|| 0.into()))
 }
 
-pub fn count_all((Optional(arg),): (Optional<Value>,)) -> Result<Value> {
+// Counts all values, even if they are not truthy
+pub fn count_value((Optional(arg),): (Optional<Value>,)) -> Result<Value> {
 	Ok(arg
 		.map(|val| match val {
 			Value::Array(v) => v.iter().count().into(),

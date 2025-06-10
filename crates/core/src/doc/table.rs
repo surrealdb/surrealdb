@@ -401,7 +401,7 @@ impl Document {
 				// Process the field projection
 				match expr {
 					Value::Function(f) if f.is_rolling() => match f.name() {
-						Some("count" | "count_all") => {
+						Some("count" | "count_value") => {
 							let val =
 								f.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
