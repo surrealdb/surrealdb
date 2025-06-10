@@ -25,8 +25,10 @@ use trice::Instant;
 
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
+/*
 #[cfg(feature = "http")]
 use std::net::SocketAddr;
+*/
 #[cfg(feature = "http")]
 use url::Url;
 
@@ -519,6 +521,7 @@ impl MutableContext {
 		}
 	}
 
+	/*
 	#[cfg(feature = "http")]
 	pub(crate) fn is_allowed_net_addr(&self, url: &SocketAddr) -> bool {
 		use ipnet::IpNet;
@@ -528,6 +531,7 @@ impl MutableContext {
 		let target = IpNet::new_assert(url.ip(), 0);
 		self.capabilities.allows_network_target(&NetTarget::IPNet(target))
 	}
+	*/
 
 	pub(crate) fn get_buckets(&self) -> Option<Arc<BucketConnections>> {
 		self.buckets.clone()
