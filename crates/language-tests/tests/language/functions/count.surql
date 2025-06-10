@@ -36,7 +36,7 @@ value = "1"
 [[test.results]]
 value = "1"
 
-# count_all results
+# count_value results
 
 [[test.results]]
 value = "0"
@@ -86,13 +86,13 @@ count(1d);
 
 
 count_value();
-count_all(true);
-count_all(false);
-count_all(15 > 10);
-count_all(15 < 10);
-count_all([1]);
-count_all([1,2]);
-count_all(0..2);
-count_all(|test:0..2|);
-count_all({a: 1, b: 2});
-count_all(1d);
+count_value(true);
+count_value(false);
+count_value(15 > 10);
+count_value(15 < 10);
+count_value([1]);
+count_value([1,2]);
+count_value(0..2);
+count_value(|test:0..2|);
+count_value({a: 1, b: 2});
+count_value(1d);
