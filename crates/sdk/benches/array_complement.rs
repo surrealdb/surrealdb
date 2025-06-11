@@ -4,19 +4,6 @@ use surrealdb_core::expr::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
 // crates/core/src/expr/array.rs
-#[allow(clippy::mutable_key_type)]
-fn array_complement_old(first: Array, other: Array) -> Array {
-	let mut out = Array::new();
-	for v in first.into_iter() {
-		if !other.contains(&v) {
-			out.push(v)
-		}
-	}
-	out
-}
-
-// Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
-// crates/core/src/expr/array.rs
 fn array_complement(first: Array, other: Array) -> Array {
 	let mut out = Array::with_capacity(first.len());
 	let mut set = BTreeSet::new();
@@ -42,9 +29,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 		second.push(Value::Number(Number::Int(i)));
 		second.push(i.to_string().into());
 	}
-	c.bench_function("array_complement_old", |b| {
-		b.iter(|| array_complement_old(black_box(first.clone()), black_box(second.clone())))
-	});
 	c.bench_function("array_complement", |b| {
 		b.iter(|| array_complement(black_box(first.clone()), black_box(second.clone())))
 	});
