@@ -19,6 +19,7 @@ defaults:
 
 env:
   RUST_VERSION: 1.86.0
+  BRANCH_NAME: "${{ github.head_ref || github.ref_name }}"
 
 #
 # The bench jobs will:
@@ -191,10 +192,10 @@ jobs:
 
       - name: Copy results from AWS S3 bucket
         run: |
-          BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')
+          CLEAN_BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g')
 
           aws s3 sync s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/main/latest bench-results-main || true
-          aws s3 sync s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/latest bench-results-previous || true
+          aws s3 sync s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$CLEAN_BRANCH_NAME/latest bench-results-previous || true
 
       - name: Compare current benchmark results vs baseline
         run: |
@@ -216,10 +217,10 @@ jobs:
         env:
           BENCH_FEATURES: "${{ matrix.features }}"
         run: |
-          BRANCH_NAME=$(echo ${{ github.head_ref || github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')
+          CLEAN_BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g')
 
           cargo make bench-${{ matrix.target }} -- --load-baseline current --save-baseline previous
           critcmp --export previous > bench-results/${{ matrix.target }}.json
 
-          aws s3 sync bench-results s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/${{ github.run_id }}
-          aws s3 sync bench-results s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$BRANCH_NAME/latest
+          aws s3 sync bench-results s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$CLEAN_BRANCH_NAME/${{ github.run_id }}
+          aws s3 sync bench-results s3://${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}/bench-results/${{ github.job }}/$CLEAN_BRANCH_NAME/latest

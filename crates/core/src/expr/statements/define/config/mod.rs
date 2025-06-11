@@ -57,7 +57,7 @@ impl DefineConfigStatement {
 		if txn.get_db_config(ns, db, cg).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::CgAlreadyExists {
 					name: cg.to_string(),
 				});
