@@ -2,19 +2,6 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use std::{collections::VecDeque, hint::black_box};
 use surrealdb_core::expr::{Array, Number, Value};
 
-fn old_array_difference(first: Array, mut other: Array) -> Array {
-	let mut out = Array::new();
-	for v in first.into_iter() {
-		if let Some(pos) = other.iter().position(|w| v == *w) {
-			other.remove(pos);
-		} else {
-			out.push(v);
-		}
-	}
-	out.append(&mut other);
-	out
-}
-
 fn array_difference(first: Array, other: Array) -> Array {
 	let mut out = Array::with_capacity(first.len() + other.len());
 	let mut other = VecDeque::from(other.0);
@@ -40,9 +27,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 		second.push(Value::Number(Number::Int(i)));
 		second.push(i.to_string().into());
 	}
-	c.bench_function("old_array_difference", |b| {
-		b.iter(|| old_array_difference(black_box(first.clone()), black_box(second.clone())))
-	});
 	c.bench_function("array_difference", |b| {
 		b.iter(|| array_difference(black_box(first.clone()), black_box(second.clone())))
 	});
