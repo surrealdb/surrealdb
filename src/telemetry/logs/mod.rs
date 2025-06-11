@@ -24,7 +24,8 @@ where
 		.with_thread_names(false)
 		.with_span_events(FmtSpan::NONE)
 		.with_writer(writer)
-		.with_filter(filter.0)
+		.with_filter(filter.env())
+		.with_filter(filter.span_filter::<S>())
 		.boxed())
 }
 
@@ -51,7 +52,8 @@ where
 			.with_thread_names(false)
 			.with_span_events(FmtSpan::NONE)
 			.with_writer(writer)
-			.with_filter(filter.0)
+			.with_filter(filter.env())
+			.with_filter(filter.span_filter::<S>())
 			.boxed())
 	}
 	// Configure the log tracer for development
@@ -67,7 +69,8 @@ where
 			.with_thread_names(false)
 			.with_span_events(FmtSpan::NONE)
 			.with_writer(writer)
-			.with_filter(filter.0)
+			.with_filter(filter.env())
+			.with_filter(filter.span_filter::<S>())
 			.boxed())
 	}
 }

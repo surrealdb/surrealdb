@@ -460,3 +460,4 @@ inherits = "dev"
 debug = true
 inherits = "release"
 strip = false
+

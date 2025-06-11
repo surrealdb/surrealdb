@@ -16,7 +16,7 @@ use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::NonBlockingBuilder;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::filter::ParseError;
+use tracing_subscriber::filter::{LevelFilter, ParseError};
 use tracing_subscriber::prelude::*;
 
 pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
@@ -56,7 +56,10 @@ pub fn builder() -> Builder {
 impl Default for Builder {
 	fn default() -> Self {
 		Self {
-			filter: CustomFilter(EnvFilter::default()),
+			filter: CustomFilter {
+				env: EnvFilter::default(),
+				spans: std::collections::HashMap::new(),
+			},
 			log_file_enabled: false,
 			log_file_path: Some("logs".to_string()),
 			log_file_name: Some("surrealdb.log".to_string()),
@@ -85,7 +88,10 @@ impl Builder {
 	/// Set the log level on the builder
 	pub fn with_log_level(mut self, log_level: &str) -> Self {
 		if let Ok(filter) = filter_from_value(log_level) {
-			self.filter = CustomFilter(filter);
+			self.filter = CustomFilter {
+				env: filter,
+				spans: std::collections::HashMap::new(),
+			};
 		}
 		self
 	}
@@ -218,6 +224,27 @@ pub fn filter_from_value(v: &str) -> std::result::Result<EnvFilter, ParseError> 
 		// Let's try to parse the custom log level
 		_ => EnvFilter::builder().parse(v),
 	}
+}
+
+/// Parse span level directives from the given value.
+pub fn span_filters_from_value(v: &str) -> Vec<(String, LevelFilter)> {
+	v.split(',')
+		.filter_map(|d| {
+			let d = d.trim();
+			if !d.starts_with('[') {
+				return None;
+			}
+			let close = d.find(']')?;
+			let name = &d[1..close];
+			let level = d[close + 1..].trim();
+			let level = if level.starts_with('=') {
+				level[1..].parse().ok()?
+			} else {
+				LevelFilter::TRACE
+			};
+			Some((name.to_string(), level))
+		})
+		.collect()
 }
 
 #[cfg(test)]
