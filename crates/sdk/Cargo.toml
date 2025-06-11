@@ -229,3 +229,7 @@ harness = false
 [[bench]]
 name = "array_difference"
 harness = false
+
+[[bench]]
+name = "array_intersect"
+harness = false
