@@ -10,7 +10,7 @@ use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
@@ -255,10 +255,15 @@ pub(crate) trait Complement<T> {
 }
 
 impl Complement<Array> for Array {
+	#[expect(clippy::mutable_key_type)]
 	fn complement(self, other: Self) -> Array {
-		let mut out = Array::new();
+		let mut out = Array::with_capacity(self.len());
+		let mut set = BTreeSet::new();
+		for i in other.iter() {
+			set.insert(i);
+		}
 		for v in self.into_iter() {
-			if !other.contains(&v) {
+			if !set.contains(&v) {
 				out.push(v)
 			}
 		}

@@ -221,3 +221,7 @@ harness = false
 [[bench]]
 name = "array_uniq"
 harness = false
+
+[[bench]]
+name = "array_complement"
+harness = false
