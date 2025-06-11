@@ -843,6 +843,7 @@ jobs:
           ./target/debug/surrealql-test --color always run --no-wip -j 3
 
   upgrade-tests:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     name: Run SurrealQL upgrade tests
     runs-on: ubuntu-latest
     steps:
