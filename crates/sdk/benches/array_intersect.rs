@@ -2,17 +2,6 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use std::{collections::VecDeque, hint::black_box};
 use surrealdb_core::expr::{Array, Number, Value};
 
-fn old_array_intersect(first: Array, mut other: Array) -> Array {
-	let mut out = Array::new();
-	for v in first.0.into_iter() {
-		if let Some(pos) = other.iter().position(|w| v == *w) {
-			other.remove(pos);
-			out.push(v);
-		}
-	}
-	out
-}
-
 fn array_intersect(first: Array, other: Array) -> Array {
 	let len = match (first.len(), other.len()) {
 		(first_len, other_len) if first_len > other_len => first_len,
@@ -41,9 +30,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 		second.push(Value::Number(Number::Int(i)));
 		second.push(i.to_string().into());
 	}
-	c.bench_function("old_array_intersect", |b| {
-		b.iter(|| old_array_intersect(black_box(first.clone()), black_box(second.clone())))
-	});
 	c.bench_function("array_intersect", |b| {
 		b.iter(|| array_intersect(black_box(first.clone()), black_box(second.clone())))
 	});
