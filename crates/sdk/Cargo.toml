@@ -225,3 +225,7 @@ harness = false
 [[bench]]
 name = "array_complement"
 harness = false
+
+[[bench]]
+name = "array_difference"
+harness = false

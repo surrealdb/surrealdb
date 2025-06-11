@@ -10,7 +10,7 @@ use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
@@ -278,8 +278,9 @@ pub(crate) trait Difference<T> {
 }
 
 impl Difference<Array> for Array {
-	fn difference(self, mut other: Array) -> Array {
-		let mut out = Array::new();
+	fn difference(self, other: Array) -> Array {
+		let mut out = Array::with_capacity(self.len() + other.len());
+		let mut other = VecDeque::from(other.0);
 		for v in self.into_iter() {
 			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
@@ -287,7 +288,7 @@ impl Difference<Array> for Array {
 				out.push(v);
 			}
 		}
-		out.append(&mut other);
+		out.append(&mut Vec::from(other));
 		out
 	}
 }
