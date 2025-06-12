@@ -289,6 +289,7 @@ impl InfoStatement {
 						"indexes".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_indexes(ns, db, tb).await?.iter() {
+								println!("{v}");
 								out.insert(v.name.to_raw(), v.to_string().into());
 							}
 							out.into()

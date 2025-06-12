@@ -26,7 +26,7 @@ pub enum Index {
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities supporting multiple writers
 	#[revision(start = 3)]
-	Search2(Search2Params),
+	FullText(FullTextParams),
 }
 
 impl From<Index> for crate::expr::index::Index {
@@ -37,7 +37,7 @@ impl From<Index> for crate::expr::index::Index {
 			Index::Search(p) => Self::Search(p.into()),
 			Index::MTree(p) => Self::MTree(p.into()),
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
-			Index::Search2(p) => Self::Search2(p.into()),
+			Index::FullText(p) => Self::FullText(p.into()),
 		}
 	}
 }
@@ -50,7 +50,7 @@ impl From<crate::expr::index::Index> for Index {
 			crate::expr::index::Index::Search(p) => Self::Search(p.into()),
 			crate::expr::index::Index::MTree(p) => Self::MTree(p.into()),
 			crate::expr::index::Index::Hnsw(p) => Self::Hnsw(p.into()),
-			crate::expr::index::Index::Search2(p) => Self::Search2(p.into()),
+			crate::expr::index::Index::FullText(p) => Self::FullText(p.into()),
 		}
 	}
 }
@@ -116,23 +116,23 @@ impl From<crate::expr::index::SearchParams> for SearchParams {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Search2Params {
+pub struct FullTextParams {
 	pub az: Ident,
 	pub hl: bool,
 	pub sc: Scoring,
 }
 
-impl From<Search2Params> for crate::expr::index::Search2Params {
-	fn from(v: Search2Params) -> Self {
-		crate::expr::index::Search2Params {
+impl From<FullTextParams> for crate::expr::index::FullTextParams {
+	fn from(v: FullTextParams) -> Self {
+		crate::expr::index::FullTextParams {
 			az: v.az.into(),
 			hl: v.hl,
 			sc: v.sc.into(),
 		}
 	}
 }
-impl From<crate::expr::index::Search2Params> for Search2Params {
-	fn from(v: crate::expr::index::Search2Params) -> Self {
+impl From<crate::expr::index::FullTextParams> for FullTextParams {
+	fn from(v: crate::expr::index::FullTextParams) -> Self {
 		Self {
 			az: v.az.into(),
 			hl: v.hl,
@@ -424,7 +424,7 @@ impl Display for Index {
 				}
 				Ok(())
 			}
-			Self::Search2(p) => {
+			Self::FullText(p) => {
 				write!(f, "SEARCH ANALYZER {} {}", p.az, p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?

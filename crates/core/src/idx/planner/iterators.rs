@@ -3,8 +3,8 @@ use crate::dbs::Options;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Array, Ident, Number, Thing, Value};
 use crate::idx::docids::DocId;
+use crate::idx::ft::search::{HitsIterator, SearchIndex};
 use crate::idx::ft::termdocs::TermsDocs;
-use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
@@ -1351,7 +1351,7 @@ pub(crate) struct MatchesThingIterator {
 impl MatchesThingIterator {
 	pub(super) async fn new(
 		irf: IteratorRef,
-		fti: &FtIndex,
+		fti: &SearchIndex,
 		terms_docs: TermsDocs,
 	) -> Result<Self> {
 		let hits = fti.new_hits_iterator(terms_docs)?;

@@ -31,7 +31,7 @@ pub enum Index {
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities supporting multiple writers
 	#[revision(start = 3)]
-	Search2(Search2Params),
+	FullText(FullTextParams),
 }
 
 #[revisioned(revision = 2)]
@@ -60,7 +60,7 @@ pub struct SearchParams {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Search2Params {
+pub struct FullTextParams {
 	pub az: Ident,
 	pub hl: bool,
 	pub sc: Scoring,
@@ -274,7 +274,7 @@ impl Display for Index {
 				}
 				Ok(())
 			}
-			Self::Search2(p) => {
+			Self::FullText(p) => {
 				write!(f, "SEARCH ANALYZER {} {}", p.az, p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?

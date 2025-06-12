@@ -4,12 +4,12 @@ use crate::dbs::{Force, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::array::Array;
-use crate::expr::index::{HnswParams, Index, MTreeParams, Search2Params, SearchParams};
+use crate::expr::index::{FullTextParams, HnswParams, Index, MTreeParams, SearchParams};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{FlowResultExt as _, Part, Thing, Value};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::FtIndex;
-use crate::idx::ft::search::Search2;
+use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 #[cfg(not(target_family = "wasm"))]
@@ -94,7 +94,7 @@ impl Document {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
 			Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
-			Index::Search2(p) => ic.index_full_text_multiwriter(stk, ctx, p).await?,
+			Index::FullText(p) => ic.index_full_text_multiwriter(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 		}
@@ -398,7 +398,7 @@ impl<'a> IndexOperation<'a> {
 		let (ns, db) = self.opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 
-		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
+		let mut ft = SearchIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(stk, ctx, self.opt, self.rid, n).await?;
@@ -412,10 +412,10 @@ impl<'a> IndexOperation<'a> {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
-		p: &Search2Params,
+		p: &FullTextParams,
 	) -> Result<()> {
-		// Build a Search2 instance
-		let s = Search2::new(ctx, self.opt, p).await?;
+		// Build a FullText instance
+		let s = FullTextIndex::new(ctx, self.opt, p).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			s.remove_document(stk, ctx, self.opt, self.ix, self.rid, o).await?;

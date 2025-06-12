@@ -1156,7 +1156,7 @@ impl Parser<'_> {
 						terms_cache,
 					});
 				}
-				t!("SEARCH2") => {
+				t!("FULLTEXT") => {
 					self.pop_peek();
 					let mut analyzer: Option<Ident> = None;
 					let mut scoring = None;
@@ -1191,7 +1191,7 @@ impl Parser<'_> {
 							_ => break,
 						}
 					}
-					res.index = Index::Search2(crate::sql::index::Search2Params {
+					res.index = Index::FullText(crate::sql::index::FullTextParams {
 						az: analyzer.unwrap_or_else(|| Ident::from("like")),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
