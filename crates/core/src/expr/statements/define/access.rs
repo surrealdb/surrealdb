@@ -77,7 +77,7 @@ impl DefineAccessStatement {
 				if txn.get_root_access(&self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else if !self.overwrite {
+					} else if !self.overwrite && !opt.import {
 						bail!(Error::AccessRootAlreadyExists {
 							ac: self.name.to_string(),
 						});
@@ -108,7 +108,7 @@ impl DefineAccessStatement {
 				if txn.get_ns_access(opt.ns()?, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else if !self.overwrite {
+					} else if !self.overwrite && !opt.import {
 						bail!(Error::AccessNsAlreadyExists {
 							ac: self.name.to_string(),
 							ns: opt.ns()?.into(),
@@ -142,7 +142,7 @@ impl DefineAccessStatement {
 				if txn.get_db_access(ns, db, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
-					} else if !self.overwrite {
+					} else if !self.overwrite && !opt.import {
 						bail!(Error::AccessDbAlreadyExists {
 							ac: self.name.to_string(),
 							ns: ns.into(),
