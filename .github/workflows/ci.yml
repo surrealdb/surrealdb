@@ -40,7 +40,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -68,7 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
         with:
           components: rustfmt
 
@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
         with:
           components: clippy
 
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -141,7 +141,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -165,7 +165,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -192,7 +192,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
         with:
           targets: wasm32-unknown-unknown
 
@@ -218,7 +218,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Install revision-lock
         run: cargo install revision-lock
@@ -235,7 +235,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -256,7 +256,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -277,7 +277,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -298,7 +298,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -319,7 +319,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -344,7 +344,7 @@ jobs:
     runs-on: [ runner-arm64-2xlarge ]
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -409,7 +409,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -438,7 +438,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -467,7 +467,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -496,7 +496,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -525,7 +525,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -554,7 +554,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -583,7 +583,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -612,7 +612,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -648,7 +648,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -682,7 +682,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -720,7 +720,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -745,7 +745,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@1.85.0
+        uses: dtolnay/rust-toolchain@1.86.0
 
       - name: Checkout sources
         uses: actions/checkout@v4
