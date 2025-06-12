@@ -14,7 +14,7 @@ value = "NONE"
 value = "[{ id: person:1, test: 1 }, { id: person:4, test: 4 }, { id: person:6, test: 6 }]"
 
 [[test.results]]
-error = "An error occurred: This is an error"
+error = "Execution halted with output: `This is an error`"
 
 [[test.results]]
 value = "[{ id: person:1, test: 1 }, { id: person:4, test: 4 }, { id: person:6, test: 6 }]"

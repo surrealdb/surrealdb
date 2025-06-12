@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-match = "$result == 'foo' || $error == 'An error occurred: foo'"
+match = "$result == 'foo' || $error == 'Execution halted with output: `foo`'"
 */
 
 IF rand::bool() {
