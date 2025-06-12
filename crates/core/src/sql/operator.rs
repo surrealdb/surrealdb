@@ -1,4 +1,4 @@
-use crate::idx::ft::MatchRef;
+use crate::idx::ft::search::MatchRef;
 use crate::sql::index::Distance;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

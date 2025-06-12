@@ -18,9 +18,9 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-mod filter;
+pub(in crate::idx::ft) mod filter;
 pub(in crate::idx) mod mapper;
-mod tokenizer;
+pub(in crate::idx::ft) mod tokenizer;
 
 #[derive(Clone)]
 pub(crate) struct Analyzer {
@@ -119,32 +119,18 @@ impl Analyzer {
 				}
 			}
 		}
-		drop(tx);
 		Ok(TermsSet {
 			set,
 			has_unknown_terms,
 		})
 	}
 
-	/// This method is used for indexing.
-	/// It will create new term ids for non already existing terms.
-	pub(super) async fn extract_terms_with_frequencies(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		terms: &mut Terms,
-		field_content: Vec<Value>,
-	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>)> {
+	pub(in crate::idx::ft) fn extract_frequencies(
+		inputs: &[Tokens],
+	) -> Result<(DocLength, HashMap<&str, TermFrequency>)> {
 		let mut dl = 0;
-		// Let's first collect all the inputs, and collect the tokens.
-		// We need to store them because everything after is zero-copy
-		let mut inputs = vec![];
-		self.analyze_content(stk, ctx, opt, field_content, FilteringStage::Indexing, &mut inputs)
-			.await?;
-		// We then collect every unique terms and count the frequency
 		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
-		for tks in &inputs {
+		for tks in inputs {
 			for tk in tks.list() {
 				dl += 1;
 				let s = tks.get_token_string(tk)?;
@@ -158,32 +144,38 @@ impl Analyzer {
 				}
 			}
 		}
+		Ok((dl, tf))
+	}
+
+	/// This method is used for indexing.
+	/// It will create new term ids for non already existing terms.
+	pub(super) async fn extract_terms_with_frequencies(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		terms: &mut Terms,
+		field_content: Vec<Value>,
+	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>)> {
+		// Let's first collect all the inputs, and collect the tokens.
+		// We need to store them because everything after is zero-copy
+		let inputs =
+			self.analyze_content(stk, ctx, opt, field_content, FilteringStage::Indexing).await?;
+		// We then collect every unique term and count the frequency
+		let (dl, tf) = Self::extract_frequencies(&inputs)?;
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tf.len());
 		let tx = ctx.tx();
 		for (t, f) in tf {
 			tfid.push((terms.resolve_term_id(&tx, t).await?, f));
 		}
-		drop(tx);
 		Ok((dl, tfid))
 	}
 
-	/// This method is used for indexing.
-	/// It will create new term ids for non already existing terms.
-	pub(super) async fn extract_terms_with_frequencies_with_offsets(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		terms: &mut Terms,
-		content: Vec<Value>,
-	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>)> {
+	pub(in crate::idx::ft) fn extract_offsets(
+		inputs: &[Tokens],
+	) -> Result<(DocLength, HashMap<&str, Vec<Offset>>)> {
 		let mut dl = 0;
-		// Let's first collect all the inputs, and collect the tokens.
-		// We need to store them because everything after is zero-copy
-		let mut inputs = Vec::with_capacity(content.len());
-		self.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing, &mut inputs).await?;
-		// We then collect every unique terms and count the frequency and extract the offsets
 		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
 		for (i, tks) in inputs.iter().enumerate() {
 			for tk in tks.list() {
@@ -198,7 +190,24 @@ impl Analyzer {
 				}
 			}
 		}
+		Ok((dl, tfos))
+	}
 
+	/// This method is used for indexing.
+	/// It will create new term ids for non already existing terms.
+	pub(super) async fn extract_terms_with_frequencies_with_offsets(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		terms: &mut Terms,
+		content: Vec<Value>,
+	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>)> {
+		// Let's first collect all the inputs, and collect the tokens.
+		// We need to store them because everything after is zero-copy
+		let inputs = self.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
+		// We then collect every unique term and count the frequency and extract the offsets
+		let (dl, tfos) = Self::extract_offsets(&inputs)?;
 		// Now we can resolve the term ids
 		let mut tfid = Vec::with_capacity(tfos.len());
 		let mut osid = Vec::with_capacity(tfos.len());
@@ -208,24 +217,23 @@ impl Analyzer {
 			tfid.push((id, o.len() as TermFrequency));
 			osid.push((id, OffsetRecords(o)));
 		}
-		drop(tx);
 		Ok((dl, tfid, osid))
 	}
 
 	/// Was marked recursive
-	async fn analyze_content(
+	pub(in crate::idx::ft) async fn analyze_content(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		content: Vec<Value>,
 		stage: FilteringStage,
-		tks: &mut Vec<Tokens>,
-	) -> Result<()> {
+	) -> Result<Vec<Tokens>> {
+		let mut tks = Vec::with_capacity(content.len());
 		for v in content {
-			self.analyze_value(stk, ctx, opt, v, stage, tks).await?;
+			self.analyze_value(stk, ctx, opt, v, stage, &mut tks).await?;
 		}
-		Ok(())
+		Ok(tks)
 	}
 
 	/// Was marked recursive
