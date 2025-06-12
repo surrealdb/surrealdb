@@ -14,3 +14,8 @@ $ SURREAL_TELEMETRY_PROVIDER=otlp OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:
 Now you can use the SurrealDB server and see the telemetry data opening this URL in the browser: http://localhost:3000
 
 To login into Grafana, use the default user `admin` and password `admin`.
+
+To adjust the verbosity of OpenTelemetry traces separately from standard logs,
+use the `--log-otel-level` command-line option (or `SURREAL_LOG_OTEL_LEVEL`
+environment variable). File logging can likewise be tuned with
+`--log-file-level` / `SURREAL_LOG_FILE_LEVEL`.
