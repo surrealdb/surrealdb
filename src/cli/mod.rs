@@ -73,6 +73,16 @@ struct Cli {
 	#[arg(default_value = "info")]
 	#[arg(value_parser = CustomFilterParser::new())]
 	log: CustomFilter,
+	#[arg(help = "Override the logging level for file output", help_heading = "Logging")]
+	#[arg(env = "SURREAL_LOG_FILE_LEVEL", long = "log-file-level")]
+	#[arg(global = true)]
+	#[arg(value_parser = CustomFilterParser::new())]
+	log_file_level: Option<CustomFilter>,
+	#[arg(help = "Override the logging level for OpenTelemetry", help_heading = "Logging")]
+	#[arg(env = "SURREAL_LOG_OTEL_LEVEL", long = "log-otel-level")]
+	#[arg(global = true)]
+	#[arg(value_parser = CustomFilterParser::new())]
+	log_otel_level: Option<CustomFilter>,
 	//
 	// Log file
 	//
@@ -192,7 +202,9 @@ pub async fn init() -> ExitCode {
 	// Initialize opentelemetry and logging
 	let telemetry = crate::telemetry::builder()
 		.with_log_level("info")
-		.with_filter(args.log)
+		.with_filter(args.log.clone())
+		.with_file_filter(args.log_file_level.clone())
+		.with_otel_filter(args.log_otel_level.clone())
 		.with_log_file_enabled(args.log_file_enabled)
 		.with_log_file_path(Some(args.log_file_path.clone()))
 		.with_log_file_name(Some(args.log_file_name.clone()))

@@ -43,6 +43,8 @@ pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 #[derive(Debug, Clone)]
 pub struct Builder {
 	filter: CustomFilter,
+	file_filter: Option<CustomFilter>,
+	otel_filter: Option<CustomFilter>,
 	log_file_enabled: bool,
 	log_file_path: Option<String>,
 	log_file_name: Option<String>,
@@ -60,6 +62,8 @@ impl Default for Builder {
 				env: EnvFilter::default(),
 				spans: std::collections::HashMap::new(),
 			},
+			file_filter: None,
+			otel_filter: None,
 			log_file_enabled: false,
 			log_file_path: Some("logs".to_string()),
 			log_file_name: Some("surrealdb.log".to_string()),
@@ -93,6 +97,18 @@ impl Builder {
 				spans: std::collections::HashMap::new(),
 			};
 		}
+		self
+	}
+
+	/// Set a custom log filter for file output
+	pub fn with_file_filter(mut self, filter: Option<CustomFilter>) -> Self {
+		self.file_filter = filter;
+		self
+	}
+
+	/// Set a custom log filter for otel output
+	pub fn with_otel_filter(mut self, filter: Option<CustomFilter>) -> Self {
+		self.otel_filter = filter;
 		self
 	}
 
@@ -139,7 +155,8 @@ impl Builder {
 		// Create the display destination layer
 		let output_layer = logs::output(self.filter.clone(), stdout, stderr)?;
 		// Create the trace destination layer
-		let telemetry_layer = traces::new(self.filter.clone())?;
+		let telemetry_filter = self.otel_filter.clone().unwrap_or_else(|| self.filter.clone());
+		let telemetry_layer = traces::new(telemetry_filter)?;
 		// Setup a registry for composing layers
 		let registry = tracing_subscriber::registry();
 		// Setup output layer
@@ -168,7 +185,8 @@ impl Builder {
 				.finish(file_appender);
 			// Setup tracing layer
 			// Create the file destination layer
-			let file_layer = logs::file(self.filter.clone(), file)?;
+			let file_filter = self.file_filter.clone().unwrap_or_else(|| self.filter.clone());
+			let file_layer = logs::file(file_filter, file)?;
 			// Setup logging layer
 			let registry = registry.with(file_layer);
 			// Return the registry
