@@ -262,6 +262,8 @@ jobs:
   create-snapshot:
     name: Prepare local CI branch
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       snapshot-branch: ${{ steps.snapshot.outputs.branch }}
     steps:
