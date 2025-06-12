@@ -1,4 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
+use rand::Rng;
 use std::{collections::VecDeque, hint::black_box};
 use surrealdb_core::expr::{Array, Number, Value};
 
@@ -21,14 +22,15 @@ fn array_difference(first: Array, other: Array) -> Array {
 
 fn criterion_benchmark(c: &mut Criterion) {
 	let mut first = Array::new();
-	for i in 0..5000 {
-		first.push(Value::Number(Number::Int(i)));
-		first.push(i.to_string().into());
+	let mut rng = rand::thread_rng();
+	for _ in 0..5000 {
+		first.push(Value::Number(Number::Int(rng.gen_range(0..=5000))));
+		first.push(char::from_u32(rng.gen_range(0..=5000)).unwrap().to_string().into());
 	}
 	let mut second = Array::new();
-	for i in 0..2500 {
-		second.push(Value::Number(Number::Int(i)));
-		second.push(i.to_string().into());
+	for _ in 0..5000 {
+		second.push(Value::Number(Number::Int(rng.gen_range(0..=5000))));
+		second.push(char::from_u32(rng.gen_range(0..=5000)).unwrap().to_string().into());
 	}
 	c.bench_function("array_difference", |b| {
 		b.iter(|| array_difference(black_box(first.clone()), black_box(second.clone())))
