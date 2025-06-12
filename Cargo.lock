@@ -5790,9 +5790,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-tikv-client"
-version = "0.3.0-surreal.1"
+version = "0.3.0-surreal.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9e204e84239374e8ba2dfabb88f5ac20f69baa09599eee225958445fb7e0a14"
+checksum = "837540ac73615ce69a3697a55841a5891f983532024e8296c8e00c03a69b6b78"
 dependencies = [
  "async-recursion 0.3.2",
  "async-trait",
