@@ -230,9 +230,7 @@ impl Object {
 			})),
 		}
 	}
-}
 
-impl Object {
 	/// Checks whether all object values are static values
 	pub(crate) fn is_static(&self) -> bool {
 		self.values().all(SqlValue::is_static)
