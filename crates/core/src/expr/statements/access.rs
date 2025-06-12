@@ -322,12 +322,6 @@ pub async fn create_grant(
 			let (ns, db) = opt.ns_db()?;
 			txn.get_db_access(ns, db, &stmt.ac).await?
 		}
-		_ => {
-			bail!(Error::Unimplemented(
-				"Managing access methods outside of root, namespace and database levels"
-					.to_string(),
-			))
-		}
 	};
 	// Verify the access type.
 	match &ac.kind {
@@ -427,9 +421,6 @@ pub async fn create_grant(
 							let (ns, db) = opt.ns_db()?;
 							txn.get_db_user(ns, db, user).await?
 						}
-						_ => bail!(Error::Unimplemented(
-							"Managing access methods outside of root, namespace and database levels".to_string(),
-						)),
 					};
 				}
 				Subject::Record(_) => {
@@ -484,10 +475,6 @@ pub async fn create_grant(
 					txn.get_or_add_db(ns, db, opt.strict).await?;
 					txn.put(key, revision::to_vec(&gr_store)?, None).await
 				}
-				_ => bail!(Error::Unimplemented(
-					"Managing access methods outside of root, namespace and database levels"
-						.to_string(),
-				)),
 			};
 
 			// Check if a collision was found in order to log a specific error on the server.
@@ -555,12 +542,6 @@ async fn compute_show(
 			let (ns, db) = opt.ns_db()?;
 			txn.get_db_access(ns, db, &stmt.ac).await?
 		}
-		_ => {
-			bail!(Error::Unimplemented(
-				"Managing access methods outside of root, namespace and database levels"
-					.to_string(),
-			))
-		}
 	};
 
 	// Get the grants to show.
@@ -573,10 +554,6 @@ async fn compute_show(
 					let (ns, db) = opt.ns_db()?;
 					(*txn.get_db_access_grant(ns, db, &stmt.ac, gr).await?).clone()
 				}
-				_ => bail!(Error::Unimplemented(
-					"Managing access methods outside of root, namespace and database levels"
-						.to_string(),
-				)),
 			};
 
 			Ok(Value::Object(grant.redacted().into()))
@@ -590,10 +567,6 @@ async fn compute_show(
 					let (ns, db) = opt.ns_db()?;
 					txn.all_db_access_grants(ns, db, &stmt.ac).await?
 				}
-				_ => bail!(Error::Unimplemented(
-					"Managing access methods outside of root, namespace and database levels"
-						.to_string(),
-				)),
 			};
 
 			let mut show = Vec::new();
@@ -655,12 +628,6 @@ pub async fn revoke_grant(
 			let (ns, db) = opt.ns_db()?;
 			txn.get_db_access(ns, db, &stmt.ac).await?
 		}
-		_ => {
-			bail!(Error::Unimplemented(
-				"Managing access methods outside of root, namespace and database levels"
-					.to_string(),
-			))
-		}
 	};
 
 	// Get the grants to revoke.
@@ -674,10 +641,6 @@ pub async fn revoke_grant(
 					let (ns, db) = opt.ns_db()?;
 					(*txn.get_db_access_grant(ns, db, &stmt.ac, gr).await?).clone()
 				}
-				_ => bail!(Error::Unimplemented(
-					"Managing access methods outside of root, namespace and database levels"
-						.to_string(),
-				)),
 			};
 			ensure!(revoke.revocation.is_none(), Error::AccessGrantRevoked);
 			revoke.revocation = Some(Datetime::default());
@@ -699,12 +662,6 @@ pub async fn revoke_grant(
 					txn.get_or_add_ns(ns, opt.strict).await?;
 					txn.get_or_add_db(ns, db, opt.strict).await?;
 					txn.set(key, revision::to_vec(&revoke)?, None).await?;
-				}
-				_ => {
-					bail!(Error::Unimplemented(
-						"Managing access methods outside of root, namespace and database levels"
-							.to_string(),
-					))
 				}
 			};
 
@@ -728,10 +685,6 @@ pub async fn revoke_grant(
 					let (ns, db) = opt.ns_db()?;
 					txn.all_db_access_grants(ns, db, &stmt.ac).await?
 				}
-				_ => bail!(Error::Unimplemented(
-					"Managing access methods outside of root, namespace and database levels"
-						.to_string(),
-				)),
 			};
 
 			for gr in grs.iter() {
@@ -786,10 +739,6 @@ pub async fn revoke_grant(
 						txn.get_or_add_db(ns, db, opt.strict).await?;
 						txn.set(key, revision::to_vec(&gr)?, None).await?;
 					}
-					_ => bail!(Error::Unimplemented(
-						"Managing access methods outside of root, namespace and database levels"
-							.to_string(),
-					)),
 				};
 
 				info!(
@@ -846,12 +795,6 @@ async fn compute_purge(
 			let (ns, db) = opt.ns_db()?;
 			txn.get_db_access(ns, db, &stmt.ac).await?
 		}
-		_ => {
-			bail!(Error::Unimplemented(
-				"Managing access methods outside of root, namespace and database levels"
-					.to_string(),
-			))
-		}
 	};
 	// Get all grants to purge.
 	let mut purged = Array::default();
@@ -861,12 +804,6 @@ async fn compute_purge(
 		Base::Db => {
 			let (ns, db) = opt.ns_db()?;
 			txn.all_db_access_grants(ns, db, &stmt.ac).await?
-		}
-		_ => {
-			bail!(Error::Unimplemented(
-				"Managing access methods outside of root, namespace and database levels"
-					.to_string(),
-			))
 		}
 	};
 	for gr in grs.iter() {
@@ -897,12 +834,6 @@ async fn compute_purge(
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
 					txn.del(crate::key::database::access::gr::new(ns, db, &stmt.ac, &gr.id)).await?
-				}
-				_ => {
-					bail!(Error::Unimplemented(
-						"Managing access methods outside of root, namespace and database levels"
-							.to_string(),
-					))
 				}
 			};
 

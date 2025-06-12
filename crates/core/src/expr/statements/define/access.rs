@@ -170,8 +170,6 @@ impl DefineAccessStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
-			// Other levels are not supported
-			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
 		}
 	}
 }

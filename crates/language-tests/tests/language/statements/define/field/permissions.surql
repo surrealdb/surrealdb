@@ -15,5 +15,5 @@ value = """
 }"""
 
 */
-DEFINE FIELD test ON user PERMISSIONS FOR select, create, update, delete WHERE true;
+DEFINE FIELD test ON user PERMISSIONS FOR select, create, update WHERE true;
 INFO FOR TABLE user;

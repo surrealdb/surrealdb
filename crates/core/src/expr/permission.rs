@@ -127,8 +127,6 @@ impl InfoStructure for Permissions {
 			"select".to_string() => self.select.structure(),
 			"create".to_string() => self.create.structure(),
 			"update".to_string() => self.update.structure(),
-			// TODO(gguillemas): Do not show this value for fields in 3.0.0.
-			"delete".to_string() => self.delete.structure(),
 		})
 	}
 }
