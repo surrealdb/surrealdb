@@ -2,7 +2,6 @@ use uuid::Uuid;
 
 use crate::rpc::Method;
 use crate::rpc::RpcError;
-use crate::rpc::format::cbor::Cbor;
 use crate::sql::Array;
 use crate::sql::Number;
 use crate::sql::SqlValue;
@@ -20,13 +19,6 @@ pub struct Request {
 	pub txn: Option<Uuid>,
 	pub method: Method,
 	pub params: Array,
-}
-
-impl TryFrom<Cbor> for Request {
-	type Error = RpcError;
-	fn try_from(val: Cbor) -> Result<Self, RpcError> {
-		SqlValue::try_from(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
-	}
 }
 
 impl TryFrom<SqlValue> for Request {
