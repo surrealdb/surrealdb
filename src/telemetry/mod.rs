@@ -255,8 +255,8 @@ pub fn span_filters_from_value(v: &str) -> Vec<(String, LevelFilter)> {
 			let close = d.find(']')?;
 			let name = &d[1..close];
 			let level = d[close + 1..].trim();
-			let level = if level.starts_with('=') {
-				level[1..].parse().ok()?
+			let level = if let Some(stripped) = level.strip_prefix('=') {
+				stripped.parse().ok()?
 			} else {
 				LevelFilter::TRACE
 			};
