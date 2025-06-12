@@ -1,87 +1,39 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
+mod array;
+mod number;
+mod object;
+pub use array::Array;
+pub use number::Number;
+pub use object::Object;
+
 use crate::err::Error;
 use crate::expr::id::range::IdRange;
-use crate::expr::range::OldRange;
 use crate::expr::reference::Refs;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{
-	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
-	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
-	Strand, Subquery, Table, Tables, Thing, Uuid,
-	fmt::{Fmt, Pretty},
+	Bytes, Datetime, Duration, File, Geometry, Idiom, Number, Operation, Part, Range, Regex,
+	Strand, Thing, Uuid,
+	fmt::Pretty,
 	id::{Gen, Id},
 	model::Model,
 };
-use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::expr::{Closure, FlowResult, Ident, Kind};
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
 use geo::Point;
-use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as Json;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::{self, Write};
 use std::ops::{Bound, Deref};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Values(pub Vec<Value>);
-
-impl<V> From<V> for Values
-where
-	V: Into<Vec<Value>>,
-{
-	fn from(value: V) -> Self {
-		Self(value.into())
-	}
-}
-
-impl Deref for Values {
-	type Target = Vec<Value>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl IntoIterator for Values {
-	type Item = Value;
-	type IntoIter = std::vec::IntoIter<Self::Item>;
-	fn into_iter(self) -> Self::IntoIter {
-		self.0.into_iter()
-	}
-}
-
-impl Display for Values {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&Fmt::comma_separated(&self.0), f)
-	}
-}
-
-impl InfoStructure for Values {
-	fn structure(self) -> Value {
-		self.into_iter().map(Value::structure).collect::<Vec<_>>().into()
-	}
-}
-
-impl From<&Tables> for Values {
-	fn from(tables: &Tables) -> Self {
-		Self(tables.0.iter().map(|t| Value::Table(t.clone())).collect())
-	}
-}
 
 /// Marker type for value conversions from Value::None
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
@@ -97,13 +49,6 @@ pub struct Null;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Value {
-	// These value types are simple values which
-	// can be used in query responses sent to
-	// the client. They typically do not need to
-	// be computed, unless an un-computed value
-	// is present inside an Array or Object type.
-	// These types can also be used within indexes
-	// and sort according to their order below.
 	#[default]
 	None,
 	Null,
@@ -118,51 +63,9 @@ pub enum Value {
 	Geometry(Geometry),
 	Bytes(Bytes),
 	Thing(Thing),
-	// These Value types are un-computed values
-	// and are not used in query responses sent
-	// to the client. These types need to be
-	// computed, in order to convert them into
-	// one of the simple types listed above.
-	// These types are first computed into a
-	// simple type before being used in indexes.
-	Param(Param),
-	Idiom(Idiom),
-	Table(Table),
-	Mock(Mock),
 	Regex(Regex),
-	Cast(Box<Cast>),
-	Block(Box<Block>),
-	#[revision(end = 2, convert_fn = "convert_old_range", fields_name = "OldValueRangeFields")]
-	Range(OldRange),
-	#[revision(start = 2)]
-	Range(Box<Range>),
-	Edges(Box<Edges>),
-	Future(Box<Future>),
-	Constant(Constant),
-	Function(Box<Function>),
-	Subquery(Box<Subquery>),
-	Expression(Box<Expression>),
-	Query(Query),
-	Model(Box<Model>),
-	Closure(Box<Closure>),
-	Refs(Refs),
 	File(File),
-	// Add new variants here
-}
-
-impl Value {
-	fn convert_old_range(
-		fields: OldValueRangeFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(Value::Thing(Thing {
-			tb: fields.0.tb,
-			id: Id::Range(Box::new(IdRange {
-				beg: fields.0.beg,
-				end: fields.0.end,
-			})),
-		}))
-	}
+	Closure(Box<Closure>),
 }
 
 impl Eq for Value {}
@@ -179,25 +82,8 @@ impl Value {
 	// -----------------------------------
 
 	/// Create an empty Object Value
-	pub fn base() -> Self {
+	pub fn empty_object() -> Self {
 		Value::Object(Object::default())
-	}
-
-	// -----------------------------------
-	// Builtin types
-	// -----------------------------------
-
-	/// Convert this Value to a Result
-	pub fn ok(self) -> Result<Value> {
-		Ok(self)
-	}
-
-	/// Convert this Value to an Option
-	pub fn some(self) -> Option<Value> {
-		match self {
-			Value::None => None,
-			val => Some(val),
-		}
 	}
 
 	// -----------------------------------
@@ -205,7 +91,7 @@ impl Value {
 	// -----------------------------------
 
 	/// Check if this Value is NONE or NULL
-	pub fn is_none_or_null(&self) -> bool {
+	pub fn is_nullish(&self) -> bool {
 		matches!(self, Value::None | Value::Null)
 	}
 
@@ -216,11 +102,6 @@ impl Value {
 		} else {
 			false
 		}
-	}
-
-	/// Check if this Value not NONE or NULL
-	pub fn is_some(&self) -> bool {
-		!self.is_none() && !self.is_null()
 	}
 
 	/// Check if this Value is TRUE or 'true'
@@ -402,40 +283,6 @@ impl Value {
 		}
 	}
 
-	/// Converts this Value into a field name
-	pub fn to_idiom(&self) -> Idiom {
-		match self {
-			Value::Idiom(v) => v.simplify(),
-			Value::Param(v) => v.to_raw().into(),
-			Value::Strand(v) => v.0.to_string().into(),
-			Value::Datetime(v) => v.0.to_string().into(),
-			Value::Future(_) => "future".to_string().into(),
-			Value::Function(v) => v.to_idiom(),
-			_ => self.to_string().into(),
-		}
-	}
-
-	/// Returns if this value can be the start of a idiom production.
-	pub fn can_start_idiom(&self) -> bool {
-		match self {
-			Value::Function(x) => !x.is_script(),
-			Value::Model(_)
-			| Value::Subquery(_)
-			| Value::Constant(_)
-			| Value::Datetime(_)
-			| Value::Duration(_)
-			| Value::Uuid(_)
-			| Value::Number(_)
-			| Value::Object(_)
-			| Value::Array(_)
-			| Value::Param(_)
-			| Value::Edges(_)
-			| Value::Thing(_)
-			| Value::Table(_) => true,
-			_ => false,
-		}
-	}
-
 	/// Try to convert this Value into a set of JSONPatch operations
 	pub fn to_operations(&self) -> Result<Vec<Operation>> {
 		match self {
@@ -454,6 +301,7 @@ impl Value {
 		}
 	}
 
+	/*
 	/// Converts a `surrealdb::sq::Value` into a `serde_json::Value`
 	///
 	/// This converts certain types like `Thing` into their simpler formats
@@ -461,6 +309,7 @@ impl Value {
 	pub fn into_json(self) -> Json {
 		self.into()
 	}
+	*/
 
 	// -----------------------------------
 	// Simple conversion of values
@@ -496,21 +345,6 @@ impl Value {
 			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
 			Value::Bytes(_) => Some(Kind::Bytes),
 			Value::Thing(thing) => Some(Kind::Record(vec![thing.tb.clone().into()])),
-			Value::Param(_) => None,
-			Value::Idiom(_) => None,
-			Value::Table(_) => None,
-			Value::Mock(_) => None,
-			Value::Regex(_) => None,
-			Value::Cast(_) => None,
-			Value::Block(_) => None,
-			Value::Range(_) => None,
-			Value::Edges(_) => None,
-			Value::Future(_) => None,
-			Value::Constant(_) => None,
-			Value::Function(_) => None,
-			Value::Subquery(_) => None,
-			Value::Query(_) => None,
-			Value::Model(_) => None,
 			Value::Closure(closure) => {
 				let args_kinds =
 					closure.args.iter().map(|(_, kind)| kind.clone()).collect::<Vec<_>>();
@@ -519,7 +353,6 @@ impl Value {
 				Some(Kind::Function(Some(args_kinds), returns_kind))
 			}
 			Value::Refs(_) => None,
-			Value::Expression(_) => None,
 			Value::File(file) => Some(Kind::File(vec![Ident::from(file.bucket.as_str())])),
 		}
 	}
@@ -555,7 +388,6 @@ impl Value {
 			Self::Geometry(Geometry::Collection(_)) => "geometry<collection>",
 			Self::Bytes(_) => "bytes",
 			Self::Range(_) => "range",
-			_ => "incorrect type",
 		}
 	}
 
@@ -596,34 +428,6 @@ impl Value {
 			.map(Part::from)
 			.collect::<Vec<Part>>()
 			.into()
-	}
-
-	// -----------------------------------
-	// JSON Path conversion
-	// -----------------------------------
-
-	/// Checks whether this value is a static value
-	pub(crate) fn is_static(&self) -> bool {
-		match self {
-			Value::None => true,
-			Value::Null => true,
-			Value::Bool(_) => true,
-			Value::Bytes(_) => true,
-			Value::Uuid(_) => true,
-			Value::Thing(_) => true,
-			Value::Number(_) => true,
-			Value::Strand(_) => true,
-			Value::Duration(_) => true,
-			Value::Datetime(_) => true,
-			Value::Geometry(_) => true,
-			Value::Array(v) => v.is_static(),
-			Value::Object(v) => v.is_static(),
-			Value::Expression(v) => v.is_static(),
-			Value::Function(v) => v.is_static(),
-			Value::Cast(v) => v.is_static(),
-			Value::Constant(_) => true,
-			_ => false,
-		}
 	}
 
 	// -----------------------------------
@@ -865,68 +669,6 @@ impl Value {
 			_ => self.partial_cmp(other),
 		}
 	}
-
-	/// Validate that a Value is computed or contains only computed Values
-	pub fn validate_computed(&self) -> Result<()> {
-		use Value::*;
-		match self {
-			None | Null | Bool(_) | Number(_) | Strand(_) | Duration(_) | Datetime(_) | Uuid(_)
-			| Geometry(_) | Bytes(_) | Thing(_) => Ok(()),
-			Array(a) => a.validate_computed(),
-			Object(o) => o.validate_computed(),
-			Range(r) => r.validate_computed(),
-			_ => Err(anyhow::Error::new(Error::NonComputed)),
-		}
-	}
-
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		match self {
-			Value::Cast(v) => v.writeable(),
-			Value::Block(v) => v.writeable(),
-			Value::Idiom(v) => v.writeable(),
-			Value::Array(v) => v.iter().any(Value::writeable),
-			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
-			Value::Function(v) => v.writeable(),
-			Value::Model(m) => m.args.iter().any(Value::writeable),
-			Value::Subquery(v) => v.writeable(),
-			Value::Expression(v) => v.writeable(),
-			_ => false,
-		}
-	}
-	/// Process this type returning a computed simple Value.
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Prevent infinite recursion due to casting, expressions, etc.
-		let opt = &opt.dive(1).map_err(anyhow::Error::new)?;
-
-		let res = match self {
-			Value::Cast(v) => return v.compute(stk, ctx, opt, doc).await,
-			Value::Thing(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Block(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Range(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Param(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Idiom(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Array(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Object(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Future(v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Constant(v) => v.compute(),
-			Value::Function(v) => return v.compute(stk, ctx, opt, doc).await,
-			Value::Model(v) => return v.compute(stk, ctx, opt, doc).await,
-			Value::Subquery(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Expression(v) => return stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
-			Value::Refs(v) => v.compute(ctx, opt, doc).await,
-			Value::Edges(v) => v.compute(stk, ctx, opt, doc).await,
-			_ => Ok(self.to_owned()),
-		};
-
-		res.map_err(ControlFlow::from)
-	}
 }
 
 impl fmt::Display for Value {
@@ -936,30 +678,16 @@ impl fmt::Display for Value {
 			Value::None => write!(f, "NONE"),
 			Value::Null => write!(f, "NULL"),
 			Value::Array(v) => write!(f, "{v}"),
-			Value::Block(v) => write!(f, "{v}"),
 			Value::Bool(v) => write!(f, "{v}"),
 			Value::Bytes(v) => write!(f, "{v}"),
-			Value::Cast(v) => write!(f, "{v}"),
-			Value::Constant(v) => write!(f, "{v}"),
 			Value::Datetime(v) => write!(f, "{v}"),
 			Value::Duration(v) => write!(f, "{v}"),
-			Value::Edges(v) => write!(f, "{v}"),
-			Value::Expression(v) => write!(f, "{v}"),
-			Value::Function(v) => write!(f, "{v}"),
-			Value::Model(v) => write!(f, "{v}"),
-			Value::Future(v) => write!(f, "{v}"),
 			Value::Geometry(v) => write!(f, "{v}"),
-			Value::Idiom(v) => write!(f, "{v}"),
-			Value::Mock(v) => write!(f, "{v}"),
 			Value::Number(v) => write!(f, "{v}"),
 			Value::Object(v) => write!(f, "{v}"),
-			Value::Param(v) => write!(f, "{v}"),
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
 			Value::Strand(v) => write!(f, "{v}"),
-			Value::Query(v) => write!(f, "{v}"),
-			Value::Subquery(v) => write!(f, "{v}"),
-			Value::Table(v) => write!(f, "{v}"),
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
@@ -1234,21 +962,8 @@ subtypes! {
 	Geometry(Geometry) => (is_geometry,as_geometry,into_geometry),
 	Bytes(Bytes) => (is_bytes,as_bytes,into_bytes),
 	Thing(Thing) => (is_thing,as_thing,into_thing),
-	Param(Param) => (is_param,as_param,into_param),
-	Idiom(Idiom) => (is_idiom,as_idiom,into_idiom),
-	Table(Table) => (is_table,as_table,into_table),
-	Mock(Mock) => (is_mock,as_mock,into_mock),
 	Regex(Regex) => (is_regex,as_regex,into_regex),
-	Cast(Box<Cast>) => (is_cast,as_cast,into_cast),
-	Block(Box<Block>) => (is_bock,as_block,into_block),
 	Range(Box<Range>) => (is_range,as_range,into_range),
-	Edges(Box<Edges>) => (is_edges,as_edges,into_edges),
-	Future(Box<Future>) => (is_future,as_future,into_future),
-	Constant(Constant) => (is_constant,as_constant,into_constant),
-	Function(Box<Function>) => (is_function,as_function,into_function),
-	Subquery(Box<Subquery>) => (is_subquery,as_subquery,into_subquery),
-	Expression(Box<Expression>) => (is_expression,as_expression,into_expression),
-	Query(Query) => (is_query,as_query,into_query),
 	Model(Box<Model>) => (is_model,as_model,into_model),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
 	Refs(Refs) => (is_refs,as_refs,into_refs),

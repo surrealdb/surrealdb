@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::expr::paths::ID;
 use crate::expr::thing::Thing;
 use crate::expr::value::Value;
-use crate::expr::{Array, FlowResultExt as _, Idiom, Kind, Literal, Part, Table};
+use crate::expr::{Array, FlowResultExt as _, Idiom, Kind, LiteralKind, Part, Table};
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
@@ -89,7 +89,7 @@ async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom)
 	let is_contained = if let Some(kind) = &fd.kind {
 		matches!(
 			kind.get_optional_inner_kind(),
-			Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_))
+			Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(LiteralKind::Array(_))
 		)
 	} else {
 		false

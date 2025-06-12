@@ -1,8 +1,8 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
-use crate::expr::array::Array;
 use crate::expr::fmt::Fmt;
 use crate::expr::value::Value;
+use crate::value::Array;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, LinesIter, Point, Polygon};

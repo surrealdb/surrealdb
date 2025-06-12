@@ -1,5 +1,5 @@
-use super::{FlowResultExt, Ident, Kind};
 use crate::ctx::MutableContext;
+use crate::expr::{Expr, FlowResultExt, Ident, Kind};
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, expr::value::Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -17,7 +17,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Closure";
 pub struct Closure {
 	pub args: Vec<(Ident, Kind)>,
 	pub returns: Option<Kind>,
-	pub body: Value,
+	pub body: Expr,
 }
 
 impl Closure {

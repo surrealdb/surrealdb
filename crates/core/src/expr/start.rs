@@ -2,8 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::number::Number;
-use crate::expr::value::Value;
+use crate::expr::Expr;
+use crate::val::{Number, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -16,7 +16,7 @@ use super::FlowResultExt as _;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Start(pub Value);
+pub struct Start(pub Expr);
 
 impl Start {
 	pub(crate) async fn process(

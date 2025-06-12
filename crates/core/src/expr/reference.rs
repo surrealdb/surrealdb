@@ -10,7 +10,7 @@ use crate::{
 	err::Error,
 };
 
-use super::{Array, Idiom, Table, Thing, Value, array::Uniq, statements::info::InfoStructure};
+use super::{Idiom, Table, Value, statements::info::InfoStructure};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -46,7 +46,7 @@ pub enum ReferenceDeleteStrategy {
 	Ignore,
 	Cascade,
 	Unset,
-	Custom(Value),
+	Custom(Expr),
 }
 
 impl fmt::Display for ReferenceDeleteStrategy {

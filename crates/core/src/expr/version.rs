@@ -1,4 +1,5 @@
 use super::FlowResultExt;
+use crate::expr::Expr;
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, expr::datetime::Datetime};
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -8,14 +9,11 @@ use std::fmt;
 
 use super::Value;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Version(
-	#[revision(end = 2, convert_fn = "convert_version_datetime")] pub Datetime,
-	#[revision(start = 2)] pub Value,
-);
+pub struct Version(pub Expr);
 
 impl Version {
 	fn convert_version_datetime(

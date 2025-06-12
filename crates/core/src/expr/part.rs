@@ -6,8 +6,7 @@ use crate::{
 	err::Error,
 	exe::try_join_all_buffered,
 	expr::{
-		FlowResultExt as _, Graph, Ident, Idiom, Number, Thing, Value, fmt::Fmt,
-		strand::no_nul_bytes,
+		Expr, FlowResultExt as _, Graph, Ident, Idiom, Thing, Value, fmt::Fmt, strand::no_nul_bytes,
 	},
 };
 use anyhow::Result;
@@ -23,7 +22,7 @@ use super::{
 	value::idiom_recursion::{Recursion, clean_iteration, compute_idiom_recursion, is_final},
 };
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -33,27 +32,15 @@ pub enum Part {
 	Last,
 	First,
 	Field(Ident),
-	Index(Number),
-	Where(Value),
+	Where(Expr),
 	Graph(Graph),
-	Value(Value),
-	Start(Value),
-	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
-	#[revision(start = 2)]
+	Value(Expr),
+	Start(Expr),
+	Method(#[serde(with = "no_nul_bytes")] String, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
-	#[revision(
-		start = 3,
-		end = 4,
-		convert_fn = "convert_recurse_add_instruction",
-		fields_name = "OldRecurseFields"
-	)]
-	Recurse(Recurse, Option<Idiom>),
-	#[revision(start = 4)]
 	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
-	#[revision(start = 3)]
 	Doc,
-	#[revision(start = 3)]
 	RepeatRecurse,
 }
 

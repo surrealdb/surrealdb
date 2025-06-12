@@ -2,12 +2,8 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Permission;
 use crate::expr::fmt::Fmt;
-use crate::expr::idiom::Idiom;
-use crate::expr::operator::BindingPower;
-use crate::expr::script::Script;
-use crate::expr::value::Value;
+use crate::expr::{Expr, Idiom, Permission, Script, Value, operator::BindingPower};
 use crate::fnc;
 use crate::iam::Action;
 use anyhow::Result;
@@ -28,9 +24,9 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Function {
-	Normal(String, Vec<Value>),
-	Custom(String, Vec<Value>),
-	Script(Script, Vec<Value>),
+	Normal(String, Vec<Expr>),
+	Custom(String, Vec<Expr>),
+	Script(Script, Vec<Expr>),
 	#[revision(
 		end = 2,
 		convert_fn = "convert_anonymous_arg_computation",

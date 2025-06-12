@@ -11,7 +11,7 @@ use crate::expr::ControlFlow;
 use crate::expr::FlowResult;
 use crate::expr::paths::DB;
 use crate::expr::paths::NS;
-use crate::expr::statement::LogicalPlan;
+use crate::expr::plan::LogicalPlan;
 use crate::expr::value::Value;
 use crate::iam::Action;
 use crate::iam::ResourceKind;

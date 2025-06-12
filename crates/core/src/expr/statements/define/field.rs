@@ -8,7 +8,7 @@ use crate::expr::reference::Reference;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
-use crate::expr::{Literal, Part};
+use crate::expr::{LiteralKind, Part};
 use crate::expr::{Relation, TableType};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
@@ -317,7 +317,7 @@ impl DefineFieldStatement {
 						kind => &vec![kind.to_owned()],
 					},
 					Kind::Literal(lit) => match lit {
-						Literal::Array(kinds) => kinds,
+						LiteralKind::Array(kinds) => kinds,
 						lit => &vec![Kind::Literal(lit.to_owned())],
 					},
 					kind => &vec![kind.to_owned()],

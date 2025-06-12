@@ -1,16 +1,18 @@
 //! The full type definitions for the SurrealQL query language
 
+use crate::err::Error;
+use crate::val::Value;
+use anyhow::Result;
+
 pub(crate) mod access;
 pub(crate) mod access_type;
 pub(crate) mod algorithm;
 #[cfg(feature = "arbitrary")]
 pub(crate) mod arbitrary;
-pub(crate) mod array;
 pub(crate) mod base;
 pub(crate) mod block;
 pub(crate) mod bytes;
 pub(crate) mod bytesize;
-pub(crate) mod cast;
 pub(crate) mod change_feed_include;
 pub(crate) mod changefeed;
 pub(crate) mod closure;
@@ -40,11 +42,9 @@ pub(crate) mod idiom;
 pub(crate) mod kind;
 pub(crate) mod language;
 pub(crate) mod limit;
+pub(crate) mod literal;
 pub(crate) mod mock;
 pub(crate) mod model;
-pub(crate) mod number;
-pub(crate) mod object;
-pub(crate) mod operation;
 pub(crate) mod operator;
 pub(crate) mod order;
 pub(crate) mod output;
@@ -52,20 +52,16 @@ pub(crate) mod param;
 pub(crate) mod part;
 pub(crate) mod paths;
 pub(crate) mod permission;
-pub(crate) mod query;
-pub(crate) mod range;
+pub(crate) mod plan;
 pub(crate) mod reference;
 pub(crate) mod regex;
 pub(crate) mod scoring;
 pub(crate) mod script;
 pub(crate) mod split;
 pub(crate) mod start;
-pub(crate) mod statement;
 pub(crate) mod strand;
-pub(crate) mod subquery;
 pub(crate) mod table;
 pub(crate) mod table_type;
-pub(crate) mod thing;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
 pub(crate) mod user;
@@ -76,24 +72,17 @@ pub(crate) mod view;
 pub(crate) mod with;
 
 pub mod index;
-
 pub mod serde;
 pub mod statements;
-
-use crate::err::Error;
-use anyhow::Result;
 
 pub use self::access::Access;
 pub use self::access::Accesses;
 pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub use self::algorithm::Algorithm;
-pub use self::array::Array;
 pub use self::base::Base;
 pub use self::block::Block;
-pub use self::block::Entry;
 pub use self::bytes::Bytes;
 pub use self::bytesize::Bytesize;
-pub use self::cast::Cast;
 pub use self::changefeed::ChangeFeed;
 pub use self::closure::Closure;
 pub use self::cond::Cond;
@@ -104,7 +93,7 @@ pub use self::dir::Dir;
 pub use self::duration::Duration;
 pub use self::edges::Edges;
 pub use self::explain::Explain;
-pub use self::expression::Expression;
+pub use self::expression::Expr;
 pub use self::fetch::Fetch;
 pub use self::fetch::Fetchs;
 pub use self::field::Field;
@@ -124,41 +113,31 @@ pub use self::idiom::Idiom;
 pub use self::idiom::Idioms;
 pub use self::index::Index;
 pub use self::kind::Kind;
-pub use self::kind::Literal;
 pub use self::limit::Limit;
+pub use self::literal::Literal;
 pub use self::mock::Mock;
 pub use self::model::Model;
-pub use self::number::DecimalExt;
-pub use self::number::Number;
-pub use self::object::Object;
-pub use self::operation::Operation;
-pub use self::operator::Operator;
+pub use self::operator::{AssignOperator, BinaryOperator, UnaryOperator};
 pub use self::order::Order;
 pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;
 pub use self::permission::Permission;
 pub use self::permission::Permissions;
-pub use self::query::Query;
-pub use self::range::Range;
+pub use self::plan::LogicalPlan;
 pub use self::regex::Regex;
 pub use self::scoring::Scoring;
 pub use self::script::Script;
 pub use self::split::Split;
 pub use self::split::Splits;
 pub use self::start::Start;
-pub use self::statement::LogicalPlan;
-pub use self::statement::LogicalPlans;
 pub use self::strand::Strand;
-pub use self::subquery::Subquery;
 pub use self::table::Table;
 pub use self::table::Tables;
 pub use self::table_type::{Relation, TableType};
-pub use self::thing::Thing;
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::uuid::Uuid;
-pub use self::value::Value;
 pub use self::value::Values;
 pub use self::value::serde::from_value;
 pub use self::value::serde::to_value;
@@ -206,33 +185,4 @@ impl FlowResultExt for FlowResult<Value> {
 			Ok(x) => Ok(x),
 		}
 	}
-}
-
-pub fn idiom(input: &str) -> Result<Idiom> {
-	let idiom = crate::sql::idiom(input)?;
-	Ok(idiom.into())
-}
-
-pub fn json(input: &str) -> Result<Value> {
-	let value = crate::sql::json(input)?;
-	Ok(value.into())
-}
-
-pub fn parse(input: &str) -> Result<Query> {
-	let query = crate::sql::parse(input)?;
-	Ok(query.into())
-}
-
-pub fn subquery(input: &str) -> Result<Subquery> {
-	let query = crate::sql::subquery(input)?;
-	Ok(query.into())
-}
-
-pub fn thing(input: &str) -> Result<Thing> {
-	let thing = crate::sql::thing(input)?;
-	Ok(thing.into())
-}
-pub fn value(input: &str) -> Result<Value> {
-	let value = crate::sql::value(input)?;
-	Ok(value.into())
 }

@@ -1,11 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::fmt::Fmt;
-use crate::expr::idiom::Idiom;
-use crate::expr::operator::Operator;
-use crate::expr::part::Part;
 use crate::expr::paths::ID;
-use crate::expr::value::Value;
+use crate::expr::{AssignOperator, Expr, Idiom, Part, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -15,20 +12,29 @@ use std::fmt::{self, Display, Formatter};
 use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Data {
 	EmptyExpression,
-	SetExpression(Vec<(Idiom, Operator, Value)>),
+	SetExpression(Vec<Assignment>),
 	UnsetExpression(Vec<Idiom>),
-	PatchExpression(Value),
-	MergeExpression(Value),
-	ReplaceExpression(Value),
-	ContentExpression(Value),
-	SingleExpression(Value),
+	PatchExpression(Expr),
+	MergeExpression(Expr),
+	ReplaceExpression(Expr),
+	ContentExpression(Expr),
+	SingleExpression(Expr),
 	ValuesExpression(Vec<Vec<(Idiom, Value)>>),
-	UpdateExpression(Vec<(Idiom, Operator, Value)>),
+	UpdateExpression(Vec<Assignment>),
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct Assignment {
+	place: Idiom,
+	operator: AssignOperator,
+	value: Expr,
 }
 
 impl Default for Data {

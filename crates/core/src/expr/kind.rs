@@ -58,6 +58,7 @@ pub enum Kind {
 	Record(Vec<Table>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or `"polygon"`.
+	/// TODO(3.0): Change to use an enum
 	Geometry(Vec<String>),
 	/// An optional type.
 	Option(Box<Kind>),
@@ -77,7 +78,7 @@ pub enum Kind {
 	/// The literal type is used to represent a type that can only be a single value.
 	/// For example, `"a"` is a literal type which can only ever be `"a"`.
 	/// This can be used in the `Kind::Either` type to represent an enum.
-	Literal(Literal),
+	Literal(KindLiteral),
 	/// A references type representing a link to another table or field.
 	References(Option<Table>, Option<Idiom>),
 	/// A file type.
@@ -132,7 +133,7 @@ impl Kind {
 
 	/// Returns true if this type is a set or array.
 	pub(crate) fn is_array_like(&self) -> bool {
-		matches!(self, Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_)))
+		matches!(self, Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(KindLiteral::Array(_)))
 	}
 
 	// Return the kind of the contained value.
@@ -433,7 +434,7 @@ impl InfoStructure for Kind {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub enum Literal {
+pub enum KindLiteral {
 	String(Strand),
 	Number(Number),
 	Duration(Duration),
@@ -443,7 +444,7 @@ pub enum Literal {
 	Bool(bool),
 }
 
-impl Literal {
+impl KindLiteral {
 	pub fn to_kind(&self) -> Kind {
 		match self {
 			Self::String(_) => Kind::String,
@@ -569,7 +570,7 @@ impl Literal {
 		}
 
 		match self {
-			Literal::Array(x) => match path.first() {
+			KindLiteral::Array(x) => match path.first() {
 				Some(Part::All) => x.iter().all(|y| y.allows_nested_kind(&path[1..], kind)),
 				Some(Part::Index(i)) => {
 					if let Some(y) = x.get(i.as_usize()) {
@@ -580,7 +581,7 @@ impl Literal {
 				}
 				_ => false,
 			},
-			Literal::Object(x) => match path.first() {
+			KindLiteral::Object(x) => match path.first() {
 				Some(Part::All) => x.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind)),
 				Some(Part::Field(k)) => {
 					if let Some(y) = x.get(&k.0) {
@@ -591,7 +592,7 @@ impl Literal {
 				}
 				_ => false,
 			},
-			Literal::DiscriminatedObject(_, discriminants) => match path.first() {
+			KindLiteral::DiscriminatedObject(_, discriminants) => match path.first() {
 				Some(Part::All) => discriminants
 					.iter()
 					.all(|o| o.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind))),
@@ -609,14 +610,14 @@ impl Literal {
 	}
 }
 
-impl Display for Literal {
+impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Literal::String(s) => write!(f, "{}", s),
-			Literal::Number(n) => write!(f, "{}", n),
-			Literal::Duration(d) => write!(f, "{}", d),
-			Literal::Bool(b) => write!(f, "{}", b),
-			Literal::Array(a) => {
+			KindLiteral::String(s) => write!(f, "{}", s),
+			KindLiteral::Number(n) => write!(f, "{}", n),
+			KindLiteral::Duration(d) => write!(f, "{}", d),
+			KindLiteral::Bool(b) => write!(f, "{}", b),
+			KindLiteral::Array(a) => {
 				let mut f = Pretty::from(f);
 				f.write_char('[')?;
 				if !a.is_empty() {
@@ -626,7 +627,7 @@ impl Display for Literal {
 				}
 				f.write_char(']')
 			}
-			Literal::Object(o) => {
+			KindLiteral::Object(o) => {
 				let mut f = Pretty::from(f);
 				if is_pretty() {
 					f.write_char('{')?;
@@ -651,7 +652,7 @@ impl Display for Literal {
 					f.write_str(" }")
 				}
 			}
-			Literal::DiscriminatedObject(_, discriminants) => {
+			KindLiteral::DiscriminatedObject(_, discriminants) => {
 				let mut f = Pretty::from(f);
 
 				for (i, o) in discriminants.iter().enumerate() {
@@ -713,7 +714,7 @@ mod tests {
 	#[case::regex(Kind::Regex, false)]
 	#[case::function(Kind::Function(None, None), false)]
 	#[case::function(Kind::Function(Some(vec![]), None), false)]
-	#[case::function(Kind::Function(Some(vec![Kind::Literal(Literal::String("a".into()))]), None), false)]
+	#[case::function(Kind::Function(Some(vec![Kind::Literal(KindLiteral::String("a".into()))]), None), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Any)), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Null)), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Bool)), false)]
@@ -726,25 +727,25 @@ mod tests {
 	#[case::option(Kind::Option(Box::new(Kind::Number)), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Object)), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Point)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Literal(Literal::Bool(true)))), false)]
-	#[case::literal(Kind::Literal(Literal::String("a".into())), false)]
-	#[case::literal(Kind::Literal(Literal::Number(1.into())), false)]
-	#[case::literal(Kind::Literal(Literal::Duration(Duration::new(1, 0))), false)]
-	#[case::literal(Kind::Literal(Literal::Bool(true)), false)]
-	#[case::literal(Kind::Literal(Literal::Array(vec![])), true)]
+	#[case::option(Kind::Option(Box::new(Kind::Literal(KindLiteral::Bool(true)))), false)]
+	#[case::literal(Kind::Literal(KindLiteral::String("a".into())), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Number(1.into())), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Duration(Duration::new(1, 0))), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Bool(true)), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Array(vec![])), true)]
 	#[case::array(Kind::Array(Box::new(Kind::Bool), None), true)]
-	#[case::array(Kind::Array(Box::new(Kind::Literal(Literal::String("a".into()))), None), true)]
+	#[case::array(Kind::Array(Box::new(Kind::Literal(KindLiteral::String("a".into()))), None), true)]
 	#[case::object(Kind::Object, false)]
 	#[case::geometry(Kind::Geometry(vec![]), false)]
 	#[case::geometry(Kind::Geometry(vec!["point".to_string()]), false)]
 	#[case::set(Kind::Set(Box::new(Kind::Bool), None), true)]
-	#[case::set(Kind::Set(Box::new(Kind::Literal(Literal::String("a".into()))), None), true)]
+	#[case::set(Kind::Set(Box::new(Kind::Literal(KindLiteral::String("a".into()))), None), true)]
 	#[case::either(Kind::Either(vec![]), false)]
 	#[case::either(Kind::Either(vec![Kind::Bool]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::String("a".into()))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Number(1.into()))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Duration(Duration::new(1, 0)))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Bool(true))]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::String("a".into()))]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Number(1.into()))]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Duration(Duration::new(1, 0)))]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Bool(true))]), false)]
 	#[case::range(Kind::Range, false)]
 	#[case::references(Kind::References(None, None), false)]
 	#[case::references(Kind::References(Some(Table("table".to_string())), None), false)]

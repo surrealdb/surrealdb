@@ -41,7 +41,8 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
 pub struct Model {
 	pub name: String,
 	pub version: String,
-	pub args: Vec<Value>,
+	/// TODO(3.0) factor calling out of the model.
+	pub args: Vec<Expr>,
 }
 
 impl fmt::Display for Model {

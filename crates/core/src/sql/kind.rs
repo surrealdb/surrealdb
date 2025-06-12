@@ -669,7 +669,7 @@ impl Display for Literal {
 	}
 }
 
-impl From<Literal> for crate::expr::Literal {
+impl From<Literal> for crate::expr::LiteralKind {
 	fn from(v: Literal) -> Self {
 		match v {
 			Literal::String(s) => Self::String(s.into()),
@@ -688,23 +688,25 @@ impl From<Literal> for crate::expr::Literal {
 	}
 }
 
-impl From<crate::expr::Literal> for Literal {
-	fn from(v: crate::expr::Literal) -> Self {
+impl From<crate::expr::LiteralKind> for Literal {
+	fn from(v: crate::expr::LiteralKind) -> Self {
 		match v {
-			crate::expr::Literal::String(s) => Self::String(s.into()),
-			crate::expr::Literal::Number(n) => Self::Number(n.into()),
-			crate::expr::Literal::Duration(d) => Self::Duration(d.into()),
-			crate::expr::Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
-			crate::expr::Literal::Object(o) => {
+			crate::expr::LiteralKind::String(s) => Self::String(s.into()),
+			crate::expr::LiteralKind::Number(n) => Self::Number(n.into()),
+			crate::expr::LiteralKind::Duration(d) => Self::Duration(d.into()),
+			crate::expr::LiteralKind::Array(a) => {
+				Self::Array(a.into_iter().map(Into::into).collect())
+			}
+			crate::expr::LiteralKind::Object(o) => {
 				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
 			}
-			crate::expr::Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
+			crate::expr::LiteralKind::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
 				k,
 				o.into_iter()
 					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
 					.collect(),
 			),
-			crate::expr::Literal::Bool(b) => Self::Bool(b),
+			crate::expr::LiteralKind::Bool(b) => Self::Bool(b),
 		}
 	}
 }
