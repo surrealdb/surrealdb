@@ -44,6 +44,8 @@ pub mod options;
 #[doc(hidden)]
 pub mod rpc;
 #[doc(hidden)]
+pub mod str;
+#[doc(hidden)]
 pub mod syn;
 #[doc(hidden)]
 pub mod sys;
