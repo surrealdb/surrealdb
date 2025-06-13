@@ -9,34 +9,23 @@ use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::table::Tables;
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use super::fmt::Fmt;
 use super::{IdRange, Table};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Graph {
 	pub dir: Dir,
-	#[revision(end = 3, convert_fn = "convert_old_expr")]
 	pub old_expr: Fields,
-	#[revision(start = 3)]
 	pub expr: Option<Fields>,
-	#[revision(end = 4, convert_fn = "convert_old_what")]
 	pub _what: Tables,
-	#[revision(start = 4)]
 	pub what: GraphSubjects,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
-	#[revision(end = 2, convert_fn = "convert_old_orders")]
 	pub old_order: Option<OldOrders>,
-	#[revision(start = 2)]
 	pub order: Option<Ordering>,
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,

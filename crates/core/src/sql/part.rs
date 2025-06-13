@@ -1,109 +1,29 @@
-use crate::{
-	cnf::IDIOM_RECURSION_LIMIT,
-	err::Error,
-	sql::{Graph, Ident, Idiom, Number, SqlValue, fmt::Fmt, strand::no_nul_bytes},
-};
+use crate::sql::{Expr, Graph, Ident, Idiom, fmt::Fmt, strand::no_nul_bytes};
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 use std::str;
 
 use super::fmt::{is_pretty, pretty_indent};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Part {
 	All,
 	Flatten,
 	Last,
 	First,
 	Field(Ident),
-	Index(Number),
-	Where(SqlValue),
+	Where(Expr),
 	Graph(Graph),
-	Value(SqlValue),
-	Start(SqlValue),
-	Method(#[serde(with = "no_nul_bytes")] String, Vec<SqlValue>),
-	#[revision(start = 2)]
+	Value(Expr),
+	Start(Expr),
+	Method(#[serde(with = "no_nul_bytes")] String, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
-	#[revision(
-		start = 3,
-		end = 4,
-		convert_fn = "convert_recurse_add_instruction",
-		fields_name = "OldRecurseFields"
-	)]
-	Recurse(Recurse, Option<Idiom>),
-	#[revision(start = 4)]
 	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
-	#[revision(start = 3)]
 	Doc,
-	#[revision(start = 3)]
 	RepeatRecurse,
-}
-
-impl Part {
-	fn convert_recurse_add_instruction(
-		fields: OldRecurseFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(Part::Recurse(fields.0, fields.1, None))
-	}
-}
-
-impl From<i32> for Part {
-	fn from(v: i32) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<isize> for Part {
-	fn from(v: isize) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<usize> for Part {
-	fn from(v: usize) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<String> for Part {
-	fn from(v: String) -> Self {
-		Self::Field(v.into())
-	}
-}
-
-impl From<Number> for Part {
-	fn from(v: Number) -> Self {
-		Self::Index(v)
-	}
-}
-
-impl From<Ident> for Part {
-	fn from(v: Ident) -> Self {
-		Self::Field(v)
-	}
-}
-
-impl From<Graph> for Part {
-	fn from(v: Graph) -> Self {
-		Self::Graph(v)
-	}
-}
-
-impl From<&str> for Part {
-	fn from(v: &str) -> Self {
-		match v.parse::<isize>() {
-			Ok(v) => Self::from(v),
-			_ => Self::from(v.to_owned()),
-		}
-	}
 }
 
 impl From<Part> for crate::expr::Part {
@@ -114,7 +34,6 @@ impl From<Part> for crate::expr::Part {
 			Part::Last => Self::Last,
 			Part::First => Self::First,
 			Part::Field(ident) => Self::Field(ident.into()),
-			Part::Index(number) => Self::Index(number.into()),
 			Part::Where(value) => Self::Where(value.into()),
 			Part::Graph(graph) => Self::Graph(graph.into()),
 			Part::Value(value) => Self::Value(value.into()),
@@ -235,10 +154,8 @@ impl<'a> Next<'a> for &'a [Part] {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum DestructurePart {
 	All(Ident),
 	Field(Ident),
@@ -316,41 +233,11 @@ impl From<crate::expr::part::DestructurePart> for DestructurePart {
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Recurse {
 	Fixed(u32),
 	Range(Option<u32>, Option<u32>),
-}
-
-impl TryInto<(u32, Option<u32>)> for Recurse {
-	type Error = anyhow::Error;
-
-	fn try_into(self) -> Result<(u32, Option<u32>)> {
-		let v = match self {
-			Recurse::Fixed(v) => (v, Some(v)),
-			Recurse::Range(min, max) => {
-				let min = min.unwrap_or(1);
-				(min, max)
-			}
-		};
-
-		match v {
-			(min, _) if min < 1 => Err(anyhow::Error::new(Error::InvalidBound {
-				found: min.to_string(),
-				expected: "at least 1".into(),
-			})),
-			(_, Some(max)) if max > (*IDIOM_RECURSION_LIMIT as u32) => {
-				Err(anyhow::Error::new(Error::InvalidBound {
-					found: max.to_string(),
-					expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
-				}))
-			}
-			v => Ok(v),
-		}
-	}
 }
 
 impl fmt::Display for Recurse {
@@ -386,10 +273,8 @@ impl From<crate::expr::part::Recurse> for Recurse {
 }
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?
@@ -401,7 +286,7 @@ pub enum RecurseInstruction {
 	},
 	Shortest {
 		// What ending node are we looking for?
-		expects: SqlValue,
+		expects: Expr,
 		// Do we include the starting point in the collection?
 		inclusive: bool,
 	},

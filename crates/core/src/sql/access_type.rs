@@ -1,26 +1,20 @@
-use super::SqlValue;
 use crate::err::Error;
 use crate::sql::statements::DefineAccessStatement;
 
 use crate::sql::{Algorithm, escape::QuoteStr};
 use anyhow::Result;
 use revision::Error as RevisionError;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 
 /// The type of access methods available
-#[revisioned(revision = 2)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
 	// TODO(gguillemas): Document once bearer access is no longer experimental.
-	#[revision(start = 2)]
 	Bearer(BearerAccess),
 }
 

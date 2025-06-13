@@ -1,8 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::statements::AccessStatement;
 use crate::expr::statements::rebuild::RebuildStatement;
 use crate::expr::{
 	Expr, Value,
@@ -10,8 +8,6 @@ use crate::expr::{
 };
 
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::{
 	fmt::{self, Display, Formatter, Write},
 	ops::Deref,

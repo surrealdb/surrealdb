@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
-use crate::expr::{FlowResult, Value};
+use crate::expr::{Expr, FlowResult, Value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -15,9 +15,9 @@ use std::fmt::{self, Display, Write};
 #[non_exhaustive]
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of else if's
-	pub exprs: Vec<(Value, Value)>,
+	pub exprs: Vec<(Expr, Expr)>,
 	/// the final else body, if there is one
-	pub close: Option<Value>,
+	pub close: Option<Expr>,
 }
 
 impl IfelseStatement {

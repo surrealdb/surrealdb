@@ -1,8 +1,8 @@
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::ControlFlow;
+use crate::expr::Expr;
 use crate::expr::fetch::Fetchs;
-use crate::expr::value::Value;
 use crate::{ctx::Context, expr::FlowResult};
 
 use reblessive::tree::Stk;
@@ -15,7 +15,7 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct OutputStatement {
-	pub what: Value,
+	pub what: Expr,
 	pub fetch: Option<Fetchs>,
 }
 

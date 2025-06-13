@@ -1,12 +1,9 @@
 use crate::expr::{Kind, index::Distance};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use crate::expr::Expr;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum UnaryOperator {
 	/// `!`
@@ -29,8 +26,7 @@ impl fmt::Display for UnaryOperator {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum BinaryOperator {
 	/// `-`

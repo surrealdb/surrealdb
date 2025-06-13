@@ -8,7 +8,7 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::sql::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Kind, Literal, Number,
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Kind, KindLiteral, Number,
 	Object, Range, Regex, SqlValue, Strand, Table, Thing, Uuid, array::Uniq, kind::HasKind,
 	value::Null,
 };
@@ -509,7 +509,7 @@ impl SqlValue {
 		self.is_geometry_type(val)
 	}
 
-	fn can_coerce_to_literal(&self, val: &Literal) -> bool {
+	fn can_coerce_to_literal(&self, val: &KindLiteral) -> bool {
 		val.validate_value(self)
 	}
 
@@ -597,7 +597,7 @@ impl SqlValue {
 	}
 
 	/// Try to coerce this value to a Literal, returns a `Value` with the coerced value
-	pub(crate) fn coerce_to_literal(self, literal: &Literal) -> Result<SqlValue, CoerceError> {
+	pub(crate) fn coerce_to_literal(self, literal: &KindLiteral) -> Result<SqlValue, CoerceError> {
 		if literal.validate_value(&self) {
 			Ok(self)
 		} else {

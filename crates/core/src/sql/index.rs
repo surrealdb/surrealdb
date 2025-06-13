@@ -8,13 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub enum Index {
 	/// (Basic) non unique
-	#[default]
 	Idx,
 	/// Unique index
 	Uniq,
@@ -23,7 +19,6 @@ pub enum Index {
 	/// M-Tree index for distance based metrics
 	MTree(MTreeParams),
 	/// HNSW index for distance based metrics
-	#[revision(start = 2)]
 	Hnsw(HnswParams),
 }
 

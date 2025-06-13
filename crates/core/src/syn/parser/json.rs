@@ -3,39 +3,40 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Array, Duration, Ident, Object, SqlValue, Strand},
+	sql::{Duration, Ident, Strand},
 	syn::{
 		lexer::compound::{self, Numeric},
 		parser::mac::{expected, pop_glued},
 		token::{Glued, Span, TokenKind, t},
 	},
+	val::{Array, Object, Value},
 };
 
 use super::{ParseResult, Parser};
 
 impl Parser<'_> {
-	pub async fn parse_json(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
+	pub async fn parse_json(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		match token.kind {
 			t!("NULL") => {
 				self.pop_peek();
-				Ok(SqlValue::Null)
+				Ok(Value::Null)
 			}
 			t!("true") => {
 				self.pop_peek();
-				Ok(SqlValue::Bool(true))
+				Ok(Value::Bool(true))
 			}
 			t!("false") => {
 				self.pop_peek();
-				Ok(SqlValue::Bool(false))
+				Ok(Value::Bool(false))
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_json_object(ctx, token.span).await.map(SqlValue::Object)
+				self.parse_json_object(ctx, token.span).await.map(Value::Object)
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_json_array(ctx, token.span).await.map(SqlValue::Array)
+				self.parse_json_array(ctx, token.span).await.map(Value::Array)
 			}
 			t!("\"") | t!("'") => {
 				let strand: Strand = self.next_token_value()?;
@@ -44,27 +45,27 @@ impl Parser<'_> {
 						return Ok(x);
 					}
 				}
-				Ok(SqlValue::Strand(strand))
+				Ok(Value::Strand(strand))
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
-					Numeric::Duration(x) => Ok(SqlValue::Duration(Duration(x))),
-					Numeric::Number(x) => Ok(SqlValue::Number(x)),
+					Numeric::Duration(x) => Ok(Value::Duration(Duration(x))),
+					Numeric::Number(x) => Ok(Value::Number(x)),
 				}
 			}
 			TokenKind::Glued(Glued::Strand) => {
 				let glued = pop_glued!(self, Strand);
-				Ok(SqlValue::Strand(glued))
+				Ok(Value::Strand(glued))
 			}
 			TokenKind::Glued(Glued::Duration) => {
 				let glued = pop_glued!(self, Duration);
-				Ok(SqlValue::Duration(glued))
+				Ok(Value::Duration(glued))
 			}
 			_ => {
 				let ident = self.next_token_value::<Ident>()?.0;
-				self.parse_thing_from_ident(ctx, ident).await.map(SqlValue::Thing)
+				self.parse_thing_from_ident(ctx, ident).await.map(Value::Thing)
 			}
 		}
 	}

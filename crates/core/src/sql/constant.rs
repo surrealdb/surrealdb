@@ -8,13 +8,8 @@ use std::fmt;
 
 use super::Duration;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Constant")]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,
@@ -52,6 +47,7 @@ pub(crate) enum ConstantValue {
 }
 
 impl Constant {
+	/*
 	pub(crate) fn value(&self) -> ConstantValue {
 		use std::f64::consts as f64c;
 		match self {
@@ -82,6 +78,7 @@ impl Constant {
 			Self::DurationMax => ConstantValue::Duration(Duration::MAX),
 		}
 	}
+	*/
 }
 
 impl fmt::Display for Constant {

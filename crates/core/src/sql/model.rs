@@ -1,20 +1,14 @@
-use crate::sql::value::SqlValue;
-
+use crate::sql::Expr;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Model")]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Model {
 	pub name: String,
 	pub version: String,
-	pub args: Vec<SqlValue>,
+	pub args: Vec<Expr>,
 }
 
 impl fmt::Display for Model {

@@ -3,8 +3,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::str;
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 // Durations representing the expiration of different elements of user authentication
 // In this context, the None variant represents that the element does not expire
@@ -15,6 +14,7 @@ pub struct UserDuration {
 	pub session: Option<Duration>,
 }
 
+/*
 impl Default for UserDuration {
 	fn default() -> Self {
 		Self {
@@ -25,6 +25,7 @@ impl Default for UserDuration {
 		}
 	}
 }
+*/
 
 impl From<UserDuration> for crate::expr::user::UserDuration {
 	fn from(v: UserDuration) -> Self {

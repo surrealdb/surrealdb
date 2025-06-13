@@ -4,7 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
-use crate::expr::{Data, FlowResultExt as _, Id, Output, Table, Thing, Timeout, Value, Version};
+use crate::expr::{
+	Data, Expr, FlowResultExt as _, Id, Output, Table, Thing, Timeout, Value, Version,
+};
 use crate::idx::planner::RecordStrategy;
 use anyhow::{Result, bail, ensure};
 
@@ -13,12 +15,11 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct InsertStatement {
-	pub into: Option<Value>,
+	pub into: Option<Expr>,
 	pub data: Data,
 	/// Does the statement have the ignore clause.
 	pub ignore: bool,
@@ -26,9 +27,7 @@ pub struct InsertStatement {
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	#[revision(start = 2)]
 	pub relation: bool,
-	#[revision(start = 3)]
 	pub version: Option<Version>,
 }
 

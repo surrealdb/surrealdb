@@ -16,10 +16,6 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
@@ -52,7 +48,6 @@ pub enum Kind {
 	/// UUID type.
 	Uuid,
 	/// Regular expression type.
-	#[revision(start = 2)]
 	Regex,
 	/// A record type.
 	Record(Vec<Table>),
@@ -77,7 +72,7 @@ pub enum Kind {
 	/// The literal type is used to represent a type that can only be a single value.
 	/// For example, `"a"` is a literal type which can only ever be `"a"`.
 	/// This can be used in the `Kind::Either` type to represent an enum.
-	Literal(Literal),
+	Literal(KindLiteral),
 	/// A references type representing a link to another table or field.
 	References(Option<Table>, Option<Idiom>),
 	/// A file type.
@@ -123,7 +118,7 @@ impl Kind {
 				if let Some(nested) = nested
 					.iter()
 					.map(|k| match k {
-						Kind::Literal(Literal::Object(o)) => Some(o),
+						Kind::Literal(KindLiteral::Object(o)) => Some(o),
 						_ => None,
 					})
 					.collect::<Option<Vec<&BTreeMap<String, Kind>>>>()
@@ -162,7 +157,7 @@ impl Kind {
 						}
 
 						if let Some(key) = key {
-							return Some(Kind::Literal(Literal::DiscriminatedObject(
+							return Some(Kind::Literal(KindLiteral::DiscriminatedObject(
 								key.clone(),
 								nested.into_iter().map(|o| o.to_owned()).collect(),
 							)));
@@ -464,11 +459,7 @@ impl Display for Kind {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum Literal {
+pub enum KindLiteral {
 	String(Strand),
 	Number(Number),
 	Duration(Duration),
@@ -478,92 +469,68 @@ pub enum Literal {
 	Bool(bool),
 }
 
-impl Literal {
-	pub fn to_kind(&self) -> Kind {
-		match self {
-			Self::String(_) => Kind::String,
-			Self::Number(_) => Kind::Number,
-			Self::Duration(_) => Kind::Duration,
-			Self::Array(a) => {
-				if let Some(inner) = a.first() {
-					if a.iter().all(|x| x == inner) {
-						return Kind::Array(Box::new(inner.to_owned()), Some(a.len() as u64));
+impl KindLiteral {
+	/*
+		pub fn to_kind(&self) -> Kind {
+			match self {
+				Self::String(_) => Kind::String,
+				Self::Number(_) => Kind::Number,
+				Self::Duration(_) => Kind::Duration,
+				Self::Array(a) => {
+					if let Some(inner) = a.first() {
+						if a.iter().all(|x| x == inner) {
+							return Kind::Array(Box::new(inner.to_owned()), Some(a.len() as u64));
+						}
 					}
-				}
 
-				Kind::Array(Box::new(Kind::Any), None)
+					Kind::Array(Box::new(Kind::Any), None)
+				}
+				Self::Object(_) => Kind::Object,
+				Self::DiscriminatedObject(_, _) => Kind::Object,
+				Self::Bool(_) => Kind::Bool,
 			}
-			Self::Object(_) => Kind::Object,
-			Self::DiscriminatedObject(_, _) => Kind::Object,
-			Self::Bool(_) => Kind::Bool,
 		}
-	}
 
-	pub fn validate_value(&self, value: &SqlValue) -> bool {
-		match self {
-			Self::String(v) => match value {
-				SqlValue::Strand(s) => s == v,
-				_ => false,
-			},
-			Self::Number(v) => match value {
-				SqlValue::Number(n) => n == v,
-				_ => false,
-			},
-			Self::Duration(v) => match value {
-				SqlValue::Duration(n) => n == v,
-				_ => false,
-			},
-			Self::Bool(v) => match value {
-				SqlValue::Bool(b) => b == v,
-				_ => false,
-			},
-			Self::Array(a) => match value {
-				SqlValue::Array(x) => {
-					if a.len() != x.len() {
-						return false;
-					}
-
-					for (i, inner) in a.iter().enumerate() {
-						if let Some(value) = x.get(i) {
-							if value.to_owned().coerce_to_kind(inner).is_err() {
-								return false;
-							}
-						} else {
+		pub fn validate_value(&self, value: &SqlValue) -> bool {
+			match self {
+				Self::String(v) => match value {
+					SqlValue::Strand(s) => s == v,
+					_ => false,
+				},
+				Self::Number(v) => match value {
+					SqlValue::Number(n) => n == v,
+					_ => false,
+				},
+				Self::Duration(v) => match value {
+					SqlValue::Duration(n) => n == v,
+					_ => false,
+				},
+				Self::Bool(v) => match value {
+					SqlValue::Bool(b) => b == v,
+					_ => false,
+				},
+				Self::Array(a) => match value {
+					SqlValue::Array(x) => {
+						if a.len() != x.len() {
 							return false;
 						}
-					}
 
-					true
-				}
-				_ => false,
-			},
-			Self::Object(o) => match value {
-				SqlValue::Object(x) => {
-					if o.len() < x.len() {
-						return false;
-					}
-
-					for (k, v) in o.iter() {
-						if let Some(value) = x.get(k) {
-							if value.to_owned().coerce_to_kind(v).is_err() {
+						for (i, inner) in a.iter().enumerate() {
+							if let Some(value) = x.get(i) {
+								if value.to_owned().coerce_to_kind(inner).is_err() {
+									return false;
+								}
+							} else {
 								return false;
 							}
-						} else if !v.can_be_none() {
-							return false;
 						}
-					}
 
-					true
-				}
-				_ => false,
-			},
-			Self::DiscriminatedObject(key, discriminants) => match value {
-				SqlValue::Object(x) => {
-					let value = x.get(key).unwrap_or(&SqlValue::None);
-					if let Some(o) = discriminants
-						.iter()
-						.find(|o| value.to_owned().coerce_to_kind(&o[key]).is_ok())
-					{
+						true
+					}
+					_ => false,
+				},
+				Self::Object(o) => match value {
+					SqlValue::Object(x) => {
 						if o.len() < x.len() {
 							return false;
 						}
@@ -579,24 +546,50 @@ impl Literal {
 						}
 
 						true
-					} else {
-						false
 					}
-				}
-				_ => false,
-			},
+					_ => false,
+				},
+				Self::DiscriminatedObject(key, discriminants) => match value {
+					SqlValue::Object(x) => {
+						let value = x.get(key).unwrap_or(&SqlValue::None);
+						if let Some(o) = discriminants
+							.iter()
+							.find(|o| value.to_owned().coerce_to_kind(&o[key]).is_ok())
+						{
+							if o.len() < x.len() {
+								return false;
+							}
+
+							for (k, v) in o.iter() {
+								if let Some(value) = x.get(k) {
+									if value.to_owned().coerce_to_kind(v).is_err() {
+										return false;
+									}
+								} else if !v.can_be_none() {
+									return false;
+								}
+							}
+
+							true
+						} else {
+							false
+						}
+					}
+					_ => false,
+				},
+			}
 		}
-	}
+	*/
 }
 
-impl Display for Literal {
+impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Literal::String(s) => write!(f, "{}", s),
-			Literal::Number(n) => write!(f, "{}", n),
-			Literal::Duration(d) => write!(f, "{}", d),
-			Literal::Bool(b) => write!(f, "{}", b),
-			Literal::Array(a) => {
+			KindLiteral::String(s) => write!(f, "{}", s),
+			KindLiteral::Number(n) => write!(f, "{}", n),
+			KindLiteral::Duration(d) => write!(f, "{}", d),
+			KindLiteral::Bool(b) => write!(f, "{}", b),
+			KindLiteral::Array(a) => {
 				let mut f = Pretty::from(f);
 				f.write_char('[')?;
 				if !a.is_empty() {
@@ -606,7 +599,7 @@ impl Display for Literal {
 				}
 				f.write_char(']')
 			}
-			Literal::Object(o) => {
+			KindLiteral::Object(o) => {
 				let mut f = Pretty::from(f);
 				if is_pretty() {
 					f.write_char('{')?;
@@ -631,7 +624,7 @@ impl Display for Literal {
 					f.write_str(" }")
 				}
 			}
-			Literal::DiscriminatedObject(_, discriminants) => {
+			KindLiteral::DiscriminatedObject(_, discriminants) => {
 				let mut f = Pretty::from(f);
 
 				for (i, o) in discriminants.iter().enumerate() {
@@ -669,26 +662,28 @@ impl Display for Literal {
 	}
 }
 
-impl From<Literal> for crate::expr::LiteralKind {
-	fn from(v: Literal) -> Self {
+impl From<KindLiteral> for crate::expr::LiteralKind {
+	fn from(v: KindLiteral) -> Self {
 		match v {
-			Literal::String(s) => Self::String(s.into()),
-			Literal::Number(n) => Self::Number(n.into()),
-			Literal::Duration(d) => Self::Duration(d.into()),
-			Literal::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
-			Literal::Object(o) => Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect()),
-			Literal::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
+			KindLiteral::String(s) => Self::String(s.into()),
+			KindLiteral::Number(n) => Self::Number(n.into()),
+			KindLiteral::Duration(d) => Self::Duration(d.into()),
+			KindLiteral::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
+			KindLiteral::Object(o) => {
+				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
+			}
+			KindLiteral::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
 				k,
 				o.into_iter()
 					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
 					.collect(),
 			),
-			Literal::Bool(b) => Self::Bool(b),
+			KindLiteral::Bool(b) => Self::Bool(b),
 		}
 	}
 }
 
-impl From<crate::expr::LiteralKind> for Literal {
+impl From<crate::expr::LiteralKind> for KindLiteral {
 	fn from(v: crate::expr::LiteralKind) -> Self {
 		match v {
 			crate::expr::LiteralKind::String(s) => Self::String(s.into()),

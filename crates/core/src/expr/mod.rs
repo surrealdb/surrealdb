@@ -9,6 +9,7 @@ pub(crate) mod access_type;
 pub(crate) mod algorithm;
 #[cfg(feature = "arbitrary")]
 pub(crate) mod arbitrary;
+pub(crate) mod ast;
 pub(crate) mod base;
 pub(crate) mod block;
 pub(crate) mod bytes;

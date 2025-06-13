@@ -1,5 +1,4 @@
-use super::{Ident, Kind};
-use crate::sql::value::SqlValue;
+use crate::sql::{Expr, Ident, Kind};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -14,7 +13,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Closure";
 pub struct Closure {
 	pub args: Vec<(Ident, Kind)>,
 	pub returns: Option<Kind>,
-	pub body: SqlValue,
+	pub body: Expr,
 }
 
 impl fmt::Display for Closure {

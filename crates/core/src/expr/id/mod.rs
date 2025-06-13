@@ -4,7 +4,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Array, Number, Object, Strand, Thing, Uuid, Value, escape::EscapeRid};
+use crate::expr::{Strand, Thing, Uuid, Value, escape::EscapeRid};
+use crate::val::{Array, Object, Value};
+
 use anyhow::Result;
 use nanoid::nanoid;
 use range::IdRange;
@@ -28,14 +30,13 @@ pub enum Gen {
 	Uuid,
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Id {
 	Number(i64),
 	String(String),
-	#[revision(start = 2)]
 	Uuid(Uuid),
 	Array(Array),
 	Object(Object),

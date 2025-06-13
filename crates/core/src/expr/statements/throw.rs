@@ -1,7 +1,7 @@
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{ControlFlow, Value};
+use crate::expr::{ControlFlow, Expr, Value};
 use crate::{ctx::Context, expr::FlowResult};
 
 use reblessive::tree::Stk;
@@ -14,7 +14,7 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct ThrowStatement {
-	pub error: Value,
+	pub error: Expr,
 }
 
 impl ThrowStatement {

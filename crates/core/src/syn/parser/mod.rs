@@ -382,13 +382,13 @@ impl<'a> Parser<'a> {
 	/// Parse a full query.
 	///
 	/// This is the primary entry point of the parser.
-	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<sql::Query> {
+	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<sql::Ast> {
 		let statements = self.parse_stmt_list(ctx).await?;
 		Ok(sql::Query(statements))
 	}
 
 	/// Parse a single statement.
-	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::Statement> {
+	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
 		self.parse_stmt(ctx).await
 	}
 }
@@ -442,7 +442,7 @@ impl StatementStream {
 	pub fn parse_partial(
 		&mut self,
 		buffer: &mut BytesMut,
-	) -> Result<Option<sql::Statement>, RenderedError> {
+	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
 		let mut slice = &**buffer;
 		if slice.len() > u32::MAX as usize {
 			// limit slice length.
@@ -523,7 +523,7 @@ impl StatementStream {
 	pub fn parse_complete(
 		&mut self,
 		buffer: &mut BytesMut,
-	) -> Result<Option<sql::Statement>, RenderedError> {
+	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
 		let mut slice = &**buffer;
 		if slice.len() > u32::MAX as usize {
 			// limit slice length.

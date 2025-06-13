@@ -1,7 +1,7 @@
 use crate::dbs::{Action, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Value;
+use crate::expr::Expr;
 use crate::kvs::Live;
 use crate::{ctx::Context, expr::FlowResultExt as _, expr::Uuid};
 use anyhow::{Result, bail};
@@ -18,7 +18,7 @@ use std::fmt;
 pub struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query
-	pub id: Value,
+	pub id: Expr,
 }
 
 impl KillStatement {

@@ -4,8 +4,8 @@ use reblessive::Stk;
 use super::{ParseResult, Parser, mac::pop_glued};
 use crate::{
 	sql::{
-		Array, Closure, Dir, Duration, Function, Geometry, Ident, Idiom, Kind, Mock, Number, Param,
-		Part, Script, SqlValue, Strand, Subquery, Table,
+		Closure, Dir, Duration, Expr, Function, Geometry, Ident, Idiom, Kind, Mock, Param, Part,
+		Script, Strand, Table,
 	},
 	syn::{
 		error::bail,
@@ -22,7 +22,7 @@ impl Parser<'_> {
 	/// Parse a what primary.
 	///
 	/// What's are values which are more restricted in what expressions they can contain.
-	pub(super) async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
+	pub(super) async fn parse_what_primary(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
 		let token = self.peek();
 		match token.kind {
 			t!("r\"") => {
@@ -56,7 +56,7 @@ impl Parser<'_> {
 			t!("FUNCTION") => {
 				self.pop_peek();
 				let func = self.parse_script(ctx).await?;
-				let value = SqlValue::Function(Box::new(func));
+				let value = Expr::Function(Box::new(func));
 				self.continue_parse_inline_call(ctx, value).await
 			}
 			t!("IF") => {
@@ -133,8 +133,8 @@ impl Parser<'_> {
 	pub(super) async fn continue_parse_inline_call(
 		&mut self,
 		ctx: &mut Stk,
-		lhs: SqlValue,
-	) -> ParseResult<SqlValue> {
+		lhs: Expr,
+	) -> ParseResult<Expr> {
 		// TODO: Figure out why this is whitespace sensitive.
 		if self.eat_whitespace(t!("(")) {
 			let start = self.last_span();
@@ -144,7 +144,7 @@ impl Parser<'_> {
 					break;
 				}
 
-				let arg = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
+				let arg = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 				args.push(arg);
 
 				if !self.eat(t!(",")) {
@@ -153,14 +153,14 @@ impl Parser<'_> {
 				}
 			}
 
-			let value = SqlValue::Function(Box::new(Function::Anonymous(lhs, args, false)));
+			let value = Expr::Function(Box::new(Function::Anonymous(lhs, args, false)));
 			ctx.run(|ctx| self.continue_parse_inline_call(ctx, value)).await
 		} else {
 			Ok(lhs)
 		}
 	}
 
-	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<SqlValue> {
+	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {
 		let token = self.peek();
 		match token.kind {
 			TokenKind::Glued(Glued::Duration) => {
@@ -621,107 +621,6 @@ impl Parser<'_> {
 			}
 		}
 		self.expect_closing_delimiter(t!(")"), start)?;
-		Ok(res)
-	}
-
-	pub(super) async fn parse_inner_subquery(
-		&mut self,
-		ctx: &mut Stk,
-		start: Option<Span>,
-	) -> ParseResult<Subquery> {
-		enter_query_recursion!(this = self => {
-			this.parse_inner_subquery_inner(ctx,start).await
-		})
-	}
-
-	async fn parse_inner_subquery_inner(
-		&mut self,
-		ctx: &mut Stk,
-		start: Option<Span>,
-	) -> ParseResult<Subquery> {
-		let peek = self.peek();
-		let res = match peek.kind {
-			t!("RETURN") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_return_stmt(ctx)).await?;
-				Subquery::Output(stmt)
-			}
-			t!("SELECT") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_select_stmt(ctx)).await?;
-				Subquery::Select(stmt)
-			}
-			t!("CREATE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
-				Subquery::Create(stmt)
-			}
-			t!("INSERT") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_insert_stmt(ctx)).await?;
-				Subquery::Insert(stmt)
-			}
-			t!("UPSERT") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
-				Subquery::Upsert(stmt)
-			}
-			t!("UPDATE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_update_stmt(ctx)).await?;
-				Subquery::Update(stmt)
-			}
-			t!("DELETE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_delete_stmt(ctx)).await?;
-				Subquery::Delete(stmt)
-			}
-			t!("RELATE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_relate_stmt(ctx)).await?;
-				Subquery::Relate(stmt)
-			}
-			t!("DEFINE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_define_stmt(ctx)).await?;
-				Subquery::Define(stmt)
-			}
-			t!("REMOVE") => {
-				self.pop_peek();
-				let stmt = self.parse_remove_stmt(ctx).await?;
-				Subquery::Remove(stmt)
-			}
-			t!("REBUILD") => {
-				self.pop_peek();
-				let stmt = self.parse_rebuild_stmt()?;
-				Subquery::Rebuild(stmt)
-			}
-			t!("INFO") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_info_stmt(ctx)).await?;
-				Subquery::Info(stmt)
-			}
-			_ => {
-				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-				Subquery::Value(value)
-			}
-		};
-		if let Some(start) = start {
-			let token = self.peek();
-			if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
-				if let Subquery::Value(SqlValue::Idiom(Idiom(ref idiom))) = res {
-					if idiom.len() == 1 {
-						// we parsed a single idiom and the next token was a dissallowed statement so
-						// it is likely that the used meant to use an invalid statement.
-						bail!("Unexpected token `{}` expected `)`",peek.kind,
-							@token.span,
-							@peek.span => "This is a reserved keyword here and can't be an identifier");
-					}
-				}
-			}
-
-			self.expect_closing_delimiter(t!(")"), start)?;
-		}
 		Ok(res)
 	}
 

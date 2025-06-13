@@ -5,8 +5,8 @@ use crate::{
 	expr::Value,
 	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, SqlValue, Start, Timeout, Version},
 	syn::{
-		fetchs_with_capabilities, fields_with_capabilities, output_with_capabilities,
-		value_with_capabilities,
+		expr_with_capabilities, fetchs_with_capabilities, fields_with_capabilities,
+		output_with_capabilities,
 	},
 };
 
@@ -173,7 +173,7 @@ impl StatementOptions {
 			// Process "cond" option
 			if let Some(v) = obj.remove("cond") {
 				if let SqlValue::Strand(v) = v {
-					let v = value_with_capabilities(v.as_str(), capabilities)?;
+					let v = expr_with_capabilities(v.as_str(), capabilities)?;
 					self.cond = Some(Cond(v))
 				} else {
 					return Err(RpcError::InvalidParams);
@@ -184,7 +184,7 @@ impl StatementOptions {
 			if let Some(v) = obj.remove("version") {
 				let v = match v {
 					v @ SqlValue::Datetime(_) => v,
-					SqlValue::Strand(v) => value_with_capabilities(v.as_str(), capabilities)?,
+					SqlValue::Strand(v) => expr_with_capabilities(v.as_str(), capabilities)?,
 					_ => {
 						return Err(RpcError::InvalidParams);
 					}

@@ -1,18 +1,14 @@
-use crate::sql::SqlValue;
+use crate::sql::Expr;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
 use crate::sql::fmt::pretty_sequence_item;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::str;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -168,15 +164,13 @@ impl Display for PermissionKind {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Permission {
 	None,
 	#[default]
 	Full,
-	Specific(SqlValue),
+	Specific(Expr),
 }
 
 impl Permission {

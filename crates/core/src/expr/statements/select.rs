@@ -4,8 +4,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
-	Values, Version, With,
+	Cond, Explain, Expr, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout,
+	Value, Values, Version, With,
 	order::{OldOrders, Order, OrderList, Ordering},
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,17 +25,13 @@ pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
 	pub omit: Option<Idioms>,
-	#[revision(start = 2)]
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
-	pub what: Values,
+	pub what: Vec<Expr>,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
-	#[revision(end = 4, convert_fn = "convert_old_orders")]
-	pub old_order: Option<OldOrders>,
-	#[revision(start = 4)]
 	pub order: Option<Ordering>,
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
@@ -44,7 +40,6 @@ pub struct SelectStatement {
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
-	#[revision(start = 3)]
 	pub tempfiles: bool,
 }
 

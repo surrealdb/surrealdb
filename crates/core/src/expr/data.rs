@@ -24,7 +24,7 @@ pub enum Data {
 	ReplaceExpression(Expr),
 	ContentExpression(Expr),
 	SingleExpression(Expr),
-	ValuesExpression(Vec<Vec<(Idiom, Value)>>),
+	ValuesExpression(Vec<Vec<(Idiom, Expr)>>),
 	UpdateExpression(Vec<Assignment>),
 }
 

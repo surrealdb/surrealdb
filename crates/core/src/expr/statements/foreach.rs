@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::range::TypedRange;
 use crate::expr::{Block, Param, Value, block::Entry};
-use crate::expr::{ControlFlow, FlowResult};
+use crate::expr::{ControlFlow, Expr, FlowResult};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -17,7 +17,7 @@ use std::fmt::{self, Display};
 #[non_exhaustive]
 pub struct ForeachStatement {
 	pub param: Param,
-	pub range: Value,
+	pub range: Expr,
 	pub block: Block,
 }
 

@@ -1,26 +1,28 @@
 use crate::sql::fmt::Fmt;
-use crate::sql::idiom::Idiom;
-use crate::sql::operator::Operator;
-use crate::sql::value::SqlValue;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::{AssignOperator, Expr, Idiom};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Data {
 	EmptyExpression,
-	SetExpression(Vec<(Idiom, Operator, SqlValue)>),
+	SetExpression(Vec<Assignment>),
 	UnsetExpression(Vec<Idiom>),
-	PatchExpression(SqlValue),
-	MergeExpression(SqlValue),
-	ReplaceExpression(SqlValue),
-	ContentExpression(SqlValue),
-	SingleExpression(SqlValue),
-	ValuesExpression(Vec<Vec<(Idiom, SqlValue)>>),
-	UpdateExpression(Vec<(Idiom, Operator, SqlValue)>),
+	PatchExpression(Expr),
+	MergeExpression(Expr),
+	ReplaceExpression(Expr),
+	ContentExpression(Expr),
+	SingleExpression(Expr),
+	ValuesExpression(Vec<Vec<(Idiom, Expr)>>),
+	UpdateExpression(Vec<Assignment>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct Assignment {
+	place: Idiom,
+	operator: AssignOperator,
+	value: Expr,
 }
 
 impl Default for Data {
@@ -75,9 +77,7 @@ impl From<Data> for crate::expr::Data {
 	fn from(v: Data) -> Self {
 		match v {
 			Data::EmptyExpression => Self::EmptyExpression,
-			Data::SetExpression(v) => Self::SetExpression(
-				v.into_iter().map(|(l, o, r)| (l.into(), o.into(), r.into())).collect(),
-			),
+			Data::SetExpression(v) => Self::SetExpression(v.into_iter().map(Into::into).collect()),
 			Data::UnsetExpression(v) => {
 				Self::UnsetExpression(v.into_iter().map(Into::into).collect())
 			}
@@ -87,13 +87,11 @@ impl From<Data> for crate::expr::Data {
 			Data::ContentExpression(v) => Self::ContentExpression(v.into()),
 			Data::SingleExpression(v) => Self::SingleExpression(v.into()),
 			Data::ValuesExpression(v) => Self::ValuesExpression(
-				v.into_iter()
-					.map(|v| v.into_iter().map(|(i, v)| (i.into(), v.into())).collect())
-					.collect(),
+				v.into_iter().map(|v| v.into_iter().map(Into::into).collect()).collect(),
 			),
-			Data::UpdateExpression(v) => Self::UpdateExpression(
-				v.into_iter().map(|(l, o, r)| (l.into(), o.into(), r.into())).collect(),
-			),
+			Data::UpdateExpression(v) => {
+				Self::UpdateExpression(v.into_iter().map(Into::into).collect())
+			}
 		}
 	}
 }
@@ -101,9 +99,9 @@ impl From<crate::expr::Data> for Data {
 	fn from(v: crate::expr::Data) -> Self {
 		match v {
 			crate::expr::Data::EmptyExpression => Self::EmptyExpression,
-			crate::expr::Data::SetExpression(v) => Self::SetExpression(
-				v.into_iter().map(|(l, o, r)| (l.into(), o.into(), r.into())).collect(),
-			),
+			crate::expr::Data::SetExpression(v) => {
+				Self::SetExpression(v.into_iter().map(Into::into).collect())
+			}
 			crate::expr::Data::UnsetExpression(v) => {
 				Self::UnsetExpression(v.into_iter().map(Into::into).collect())
 			}
@@ -113,13 +111,11 @@ impl From<crate::expr::Data> for Data {
 			crate::expr::Data::ContentExpression(v) => Self::ContentExpression(v.into()),
 			crate::expr::Data::SingleExpression(v) => Self::SingleExpression(v.into()),
 			crate::expr::Data::ValuesExpression(v) => Self::ValuesExpression(
-				v.into_iter()
-					.map(|v| v.into_iter().map(|(i, v)| (i.into(), v.into())).collect())
-					.collect(),
+				v.into_iter().map(|v| v.into_iter().map(Into::into).collect()).collect(),
 			),
-			crate::expr::Data::UpdateExpression(v) => Self::UpdateExpression(
-				v.into_iter().map(|(l, o, r)| (l.into(), o.into(), r.into())).collect(),
-			),
+			crate::expr::Data::UpdateExpression(v) => {
+				Self::UpdateExpression(v.into_iter().map(Into::into).collect())
+			}
 		}
 	}
 }

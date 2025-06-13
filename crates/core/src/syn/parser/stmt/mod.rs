@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::fnc::util::math::top::Top;
 use crate::sql::block::Entry;
 use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
@@ -11,19 +12,15 @@ use crate::sql::statements::{
 		AccessStatementShow, Subject,
 	},
 };
-use crate::sql::{Duration, Fields, Ident, Param};
+use crate::sql::{Duration, Fields, Ident, Param, TopLevelExpr};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
 use crate::syn::token::{Glued, TokenKind, t};
 use crate::{
-	sql::{
-		Expression, Operator, SqlValue, Statement, Statements,
-		statements::{
-			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
-			ForeachStatement, InfoStatement, OutputStatement, UseStatement,
-			analyze::AnalyzeStatement,
-		},
+	sql::statements::{
+		BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
+		ForeachStatement, InfoStatement, OutputStatement, UseStatement, analyze::AnalyzeStatement,
 	},
 	syn::parser::mac::unexpected,
 };
@@ -44,7 +41,10 @@ mod update;
 mod upsert;
 
 impl Parser<'_> {
-	pub(super) async fn parse_stmt_list(&mut self, ctx: &mut Stk) -> ParseResult<Statements> {
+	pub(super) async fn parse_stmt_list(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<Vec<TopLevelExpr>> {
 		let mut res = Vec::new();
 		loop {
 			match self.peek_kind() {
@@ -55,7 +55,7 @@ impl Parser<'_> {
 				}
 				t!("eof") => break,
 				_ => {
-					let stmt = ctx.run(|ctx| self.parse_stmt(ctx)).await?;
+					let stmt = ctx.run(|ctx| self.parse_top_level_expr(ctx)).await?;
 					res.push(stmt);
 					if !self.eat(t!(";")) {
 						if self.eat(t!("eof")) {
@@ -75,276 +75,48 @@ impl Parser<'_> {
 				}
 			}
 		}
-		Ok(Statements(res))
+		Ok(res)
 	}
 
-	pub(super) async fn parse_stmt(&mut self, ctx: &mut Stk) -> ParseResult<Statement> {
-		enter_query_recursion!(this = self => {
-			this.parse_stmt_inner(ctx).await
-		})
-	}
-
-	async fn parse_stmt_inner(&mut self, ctx: &mut Stk) -> ParseResult<Statement> {
+	pub(super) async fn parse_top_level_expr(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<TopLevelExpr> {
 		let token = self.peek();
 		match token.kind {
-			t!("ACCESS") => {
-				// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-				if !self.settings.bearer_access_enabled {
-					unexpected!(
-						self,
-						token,
-						"the experimental bearer access feature to be enabled"
-					);
-				}
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_access(ctx)).await.map(Statement::Access)
-			}
-			t!("ALTER") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_alter_stmt(ctx)).await.map(Statement::Alter)
-			}
-			t!("ANALYZE") => {
-				self.pop_peek();
-				self.parse_analyze().map(Statement::Analyze)
-			}
 			t!("BEGIN") => {
 				self.pop_peek();
-				self.parse_begin().map(Statement::Begin)
-			}
-			t!("BREAK") => {
-				self.pop_peek();
-				Ok(Statement::Break(BreakStatement))
+				self.parse_begin()
 			}
 			t!("CANCEL") => {
 				self.pop_peek();
-				self.parse_cancel().map(Statement::Cancel)
+				self.parse_cancel()
 			}
 			t!("COMMIT") => {
 				self.pop_peek();
-				self.parse_commit().map(Statement::Commit)
-			}
-			t!("CONTINUE") => {
-				self.pop_peek();
-				Ok(Statement::Continue(ContinueStatement))
-			}
-			t!("CREATE") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_create_stmt(ctx)).await.map(Statement::Create)
-			}
-			t!("DEFINE") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_define_stmt(ctx)).await.map(Statement::Define)
-			}
-			t!("DELETE") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_delete_stmt(ctx)).await.map(Statement::Delete)
-			}
-			t!("FOR") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_for_stmt(ctx)).await.map(Statement::Foreach)
-			}
-			t!("IF") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_if_stmt(ctx)).await.map(Statement::Ifelse)
-			}
-			t!("INFO") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_info_stmt(ctx)).await.map(Statement::Info)
-			}
-			t!("INSERT") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_insert_stmt(ctx)).await.map(Statement::Insert)
+				self.parse_commit()
 			}
 			t!("KILL") => {
 				self.pop_peek();
-				self.parse_kill_stmt().map(Statement::Kill)
+				self.parse_kill_stmt().map(TopLevelExpr::Kill)
 			}
 			t!("LIVE") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_live_stmt(ctx)).await.map(Statement::Live)
+				self.parse_live_stmt(stk).map(TopLevelExpr::Live)
 			}
 			t!("OPTION") => {
 				self.pop_peek();
-				self.parse_option_stmt().map(Statement::Option)
-			}
-			t!("REBUILD") => {
-				self.pop_peek();
-				self.parse_rebuild_stmt().map(Statement::Rebuild)
-			}
-			t!("RETURN") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_return_stmt(ctx)).await.map(Statement::Output)
-			}
-			t!("RELATE") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_relate_stmt(ctx)).await.map(Statement::Relate)
-			}
-			t!("REMOVE") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_remove_stmt(ctx)).await.map(Statement::Remove)
-			}
-			t!("SELECT") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_select_stmt(ctx)).await.map(Statement::Select)
-			}
-			t!("LET") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_let_stmt(ctx)).await.map(Statement::Set)
-			}
-			t!("SHOW") => {
-				self.pop_peek();
-				self.parse_show_stmt().map(Statement::Show)
-			}
-			t!("SLEEP") => {
-				self.pop_peek();
-				self.parse_sleep_stmt().map(Statement::Sleep)
-			}
-			t!("THROW") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_throw_stmt(ctx)).await.map(Statement::Throw)
-			}
-			t!("UPDATE") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_update_stmt(ctx)).await.map(Statement::Update)
-			}
-			t!("UPSERT") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await.map(Statement::Upsert)
+				self.parse_option_stmt().map(TopLevelExpr::Option)
 			}
 			t!("USE") => {
 				self.pop_peek();
-				self.parse_use_stmt().map(Statement::Use)
-			}
-			_ => {
-				// TODO: Provide information about keywords.
-				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-				if let SqlValue::Expression(x) = &value {
-					if let Expression::Binary {
-						l: SqlValue::Param(ref x),
-						o: Operator::Equal,
-						..
-					} = **x
-					{
-						let span = token.span.covers(self.recent_span());
-						bail!("Variable declaration without `let` is deprecated", @span => "replace with `let {x} = ..`")
-					}
-				}
-				Ok(Statement::Value(value))
-			}
-		}
-	}
-
-	pub(super) async fn parse_entry(&mut self, ctx: &mut Stk) -> ParseResult<Entry> {
-		enter_query_recursion!(this = self => {
-			this.parse_entry_inner(ctx).await
-		})
-	}
-
-	async fn parse_entry_inner(&mut self, ctx: &mut Stk) -> ParseResult<Entry> {
-		let token = self.peek();
-		match token.kind {
-			t!("ALTER") => {
-				self.pop_peek();
-				self.parse_alter_stmt(ctx).await.map(Entry::Alter)
-			}
-			t!("BREAK") => {
-				self.pop_peek();
-				Ok(Entry::Break(BreakStatement))
-			}
-			t!("CONTINUE") => {
-				self.pop_peek();
-				Ok(Entry::Continue(ContinueStatement))
-			}
-			t!("CREATE") => {
-				self.pop_peek();
-				self.parse_create_stmt(ctx).await.map(Entry::Create)
-			}
-			t!("DEFINE") => {
-				self.pop_peek();
-				self.parse_define_stmt(ctx).await.map(Entry::Define)
-			}
-			t!("DELETE") => {
-				self.pop_peek();
-				self.parse_delete_stmt(ctx).await.map(Entry::Delete)
-			}
-			t!("FOR") => {
-				self.pop_peek();
-				self.parse_for_stmt(ctx).await.map(Entry::Foreach)
-			}
-			t!("IF") => {
-				self.pop_peek();
-				self.parse_if_stmt(ctx).await.map(Entry::Ifelse)
-			}
-			t!("INSERT") => {
-				self.pop_peek();
-				self.parse_insert_stmt(ctx).await.map(Entry::Insert)
+				self.parse_use_stmt().map(TopLevelExpr::Use)
 			}
 			t!("REBUILD") => {
 				self.pop_peek();
-				self.parse_rebuild_stmt().map(Entry::Rebuild)
+				self.parse_rebuild_stmt().map(TopLevelExpr::Rebuild)
 			}
-			t!("RETURN") => {
-				self.pop_peek();
-				self.parse_return_stmt(ctx).await.map(Entry::Output)
-			}
-			t!("RELATE") => {
-				self.pop_peek();
-				self.parse_relate_stmt(ctx).await.map(Entry::Relate)
-			}
-			t!("REMOVE") => {
-				self.pop_peek();
-				self.parse_remove_stmt(ctx).await.map(Entry::Remove)
-			}
-			t!("SELECT") => {
-				self.pop_peek();
-				self.parse_select_stmt(ctx).await.map(Entry::Select)
-			}
-			t!("LET") => {
-				self.pop_peek();
-				self.parse_let_stmt(ctx).await.map(Entry::Set)
-			}
-			t!("THROW") => {
-				self.pop_peek();
-				self.parse_throw_stmt(ctx).await.map(Entry::Throw)
-			}
-			t!("UPDATE") => {
-				self.pop_peek();
-				self.parse_update_stmt(ctx).await.map(Entry::Update)
-			}
-			t!("UPSERT") => {
-				self.pop_peek();
-				self.parse_upsert_stmt(ctx).await.map(Entry::Upsert)
-			}
-			t!("INFO") => {
-				self.pop_peek();
-				self.parse_info_stmt(ctx).await.map(Entry::Info)
-			}
-			_ => {
-				// TODO: Provide information about keywords.
-				let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-				Ok(Self::refine_entry_value(v))
-			}
-		}
-	}
-
-	fn refine_entry_value(value: SqlValue) -> Entry {
-		match value {
-			SqlValue::Expression(x) => {
-				if let Expression::Binary {
-					l: SqlValue::Param(x),
-					o: Operator::Equal,
-					r,
-				} = *x
-				{
-					return Entry::Set(crate::sql::statements::SetStatement {
-						name: x.0.0,
-						what: r,
-						kind: None,
-					});
-				}
-				Entry::Value(SqlValue::Expression(x))
-			}
-			_ => Entry::Value(value),
+			_ => self.parse_expr(stk),
 		}
 	}
 
@@ -500,27 +272,27 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `BEGIN` to already be consumed.
-	fn parse_begin(&mut self) -> ParseResult<BeginStatement> {
+	fn parse_begin(&mut self) -> ParseResult<TopLevelExpr> {
 		self.eat(t!("TRANSACTION"));
-		Ok(BeginStatement)
+		Ok(TopLevelExpr::Begin)
 	}
 
 	/// Parsers a cancel statement.
 	///
 	/// # Parser State
 	/// Expects `CANCEL` to already be consumed.
-	fn parse_cancel(&mut self) -> ParseResult<CancelStatement> {
+	fn parse_cancel(&mut self) -> ParseResult<TopLevelExpr> {
 		self.eat(t!("TRANSACTION"));
-		Ok(CancelStatement)
+		Ok(TopLevelExpr::Cancel)
 	}
 
 	/// Parsers a commit statement.
 	///
 	/// # Parser State
 	/// Expects `COMMIT` to already be consumed.
-	fn parse_commit(&mut self) -> ParseResult<CommitStatement> {
+	fn parse_commit(&mut self) -> ParseResult<TopLevelExpr> {
 		self.eat(t!("TRANSACTION"));
-		Ok(CommitStatement)
+		Ok(TopLevelExpr::Commit)
 	}
 
 	/// Parsers a USE statement.
