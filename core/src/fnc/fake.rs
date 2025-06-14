@@ -74,6 +74,28 @@ pub mod currency {
 	}
 }
 
+pub mod date {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+
+	use fake::{Fake, faker::chrono::en::*};
+
+	pub fn date(_: ()) -> Result<Value, Error> {
+		let val: String = Date().fake();
+		Ok(val.into())
+	}
+
+	pub fn datetime(_: ()) -> Result<Value, Error> {
+		let val: String = DateTime().fake();
+		Ok(val.into())
+	}
+
+	pub fn time(_: ()) -> Result<Value, Error> {
+		let val: String = Time().fake();
+		Ok(val.into())
+	}
+}
+
 pub mod file {
 	use crate::err::Error;
 	use crate::sql::value::Value;
@@ -208,6 +230,18 @@ pub mod name {
 
 	pub fn title(_: ()) -> Result<Value, Error> {
 		let val: String = Title().fake();
+		Ok(val.into())
+	}
+}
+
+pub mod phone {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+
+	use fake::{Fake, faker::phone_number::en::*};
+
+	pub fn number(_: ()) -> Result<Value, Error> {
+		let val: String = PhoneNumber().fake();
 		Ok(val.into())
 	}
 }

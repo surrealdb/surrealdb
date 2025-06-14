@@ -200,6 +200,9 @@ pub fn synchronous(
 		"fake::currency::code" => fake::currency::code,
 		"fake::currency::name" => fake::currency::name,
 		"fake::currency::symbol" => fake::currency::symbol,
+		"fake::date::date" => fake::date::date,
+		"fake::date::datetime" => fake::date::datetime,
+		"fake::date::time" => fake::date::time,
 		"fake::file::dir_path" => fake::file::dir_path,
 		"fake::file::extension" => fake::file::extension,
 		"fake::file::name" => fake::file::name,
@@ -222,6 +225,7 @@ pub fn synchronous(
 		"fake::internet::username" => fake::internet::username,
 		"fake::internet::password" => fake::internet::password,
 		"fake::internet::user_agent" => fake::internet::user_agent,
+		"fake::phone::number" => fake::phone::number,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
