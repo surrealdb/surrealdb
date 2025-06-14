@@ -15,6 +15,7 @@ pub mod count;
 pub mod crypto;
 pub mod duration;
 pub mod encoding;
+pub mod fake;
 pub mod geo;
 pub mod http;
 pub mod math;
@@ -187,6 +188,31 @@ pub fn synchronous(
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
+		//
+		"fake::company::name" => fake::company::name,
+		"fake::company::industry" => fake::company::industry,
+		"fake::company::profession" => fake::company::profession,
+		"fake::company::suffix" => fake::company::suffix,
+		"fake::company::tagline" => fake::company::tagline,
+		"fake::currency::code" => fake::currency::code,
+		"fake::currency::name" => fake::currency::name,
+		"fake::currency::symbol" => fake::currency::symbol,
+		"fake::finance::credit_card" => fake::finance::credit_card,
+		"fake::name::first_name" => fake::name::first_name,
+		"fake::name::full_name" => fake::name::full_name,
+		"fake::name::last_name" => fake::name::last_name,
+		"fake::name::suffix" => fake::name::suffix,
+		"fake::name::title" => fake::name::title,
+		"fake::internet::domain_extension" => fake::internet::domain_suffix,
+		"fake::internet::free_email" => fake::internet::free_email,
+		"fake::internet::email" => fake::internet::email,
+		"fake::internet::ipv6" => fake::internet::ipv4,
+		"fake::internet::ipv4" => fake::internet::ipv6,
+		"fake::internet::ip" => fake::internet::ip,
+		"fake::internet::mac_address" => fake::internet::mac_address,
+		"fake::internet::username" => fake::internet::username,
+		"fake::internet::password" => fake::internet::password,
+		"fake::internet::user_agent" => fake::internet::user_agent,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
