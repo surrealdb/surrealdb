@@ -1,3 +1,45 @@
+pub mod address {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+
+	use fake::{Fake, faker::address::en::*};
+
+	pub fn building_number(_: ()) -> Result<Value, Error> {
+		let val: String = BuildingNumber().fake();
+		Ok(val.into())
+	}
+
+	pub fn city(_: ()) -> Result<Value, Error> {
+		let val: String = CityName().fake();
+		Ok(val.into())
+	}
+
+	pub fn country(_: ()) -> Result<Value, Error> {
+		let val: String = CountryName().fake();
+		Ok(val.into())
+	}
+
+	pub fn country_code(_: ()) -> Result<Value, Error> {
+		let val: String = CountryCode().fake();
+		Ok(val.into())
+	}
+
+	pub fn state(_: ()) -> Result<Value, Error> {
+		let val: String = StateName().fake();
+		Ok(val.into())
+	}
+
+	pub fn street(_: ()) -> Result<Value, Error> {
+		let val: String = StreetName().fake();
+		Ok(val.into())
+	}
+
+	pub fn zip(_: ()) -> Result<Value, Error> {
+		let val: String = ZipCode().fake();
+		Ok(val.into())
+	}
+}
+
 pub mod barcode {
 	use crate::err::Error;
 	use crate::sql::value::Value;
@@ -141,6 +183,23 @@ pub mod finance {
 
 	pub fn isin(_: ()) -> Result<Value, Error> {
 		let val: String = Isin().fake();
+		Ok(val.into())
+	}
+}
+
+pub mod geo {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+
+	use fake::{Fake, faker::address::en::*};
+
+	pub fn latitude(_: ()) -> Result<Value, Error> {
+		let val: f64 = Latitude().fake();
+		Ok(val.into())
+	}
+
+	pub fn longitude(_: ()) -> Result<Value, Error> {
+		let val: f64 = Longitude().fake();
 		Ok(val.into())
 	}
 }
