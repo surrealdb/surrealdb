@@ -1,3 +1,25 @@
+pub mod barcode {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+
+	use fake::{Fake, faker::barcode::en::*};
+
+	pub fn isbn(_: ()) -> Result<Value, Error> {
+		let val: String = Isbn().fake();
+		Ok(val.into())
+	}
+
+	pub fn isbn10(_: ()) -> Result<Value, Error> {
+		let val: String = Isbn10().fake();
+		Ok(val.into())
+	}
+
+	pub fn isbn13(_: ()) -> Result<Value, Error> {
+		let val: String = Isbn13().fake();
+		Ok(val.into())
+	}
+}
+
 pub mod company {
 	use crate::err::Error;
 	use crate::sql::value::Value;
@@ -48,6 +70,33 @@ pub mod currency {
 
 	pub fn symbol(_: ()) -> Result<Value, Error> {
 		let val: String = CurrencySymbol().fake();
+		Ok(val.into())
+	}
+}
+
+pub mod file {
+	use crate::err::Error;
+	use crate::sql::value::Value;
+
+	use fake::{Fake, faker::filesystem::en::*};
+
+	pub fn dir_path(_: ()) -> Result<Value, Error> {
+		let val: String = DirPath().fake();
+		Ok(val.into())
+	}
+
+	pub fn extension(_: ()) -> Result<Value, Error> {
+		let val: String = FileExtension().fake();
+		Ok(val.into())
+	}
+
+	pub fn name(_: ()) -> Result<Value, Error> {
+		let val: String = FileName().fake();
+		Ok(val.into())
+	}
+
+	pub fn path(_: ()) -> Result<Value, Error> {
+		let val: String = FilePath().fake();
 		Ok(val.into())
 	}
 }
