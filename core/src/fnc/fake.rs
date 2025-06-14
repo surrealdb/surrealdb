@@ -56,10 +56,20 @@ pub mod finance {
 	use crate::err::Error;
 	use crate::sql::value::Value;
 
-	use fake::{Fake, faker::creditcard::en::*};
+	use fake::{Fake, faker::creditcard::en::*, faker::finance::en::*};
 
 	pub fn credit_card(_: ()) -> Result<Value, Error> {
 		let val: String = CreditCardNumber().fake();
+		Ok(val.into())
+	}
+
+	pub fn bic(_: ()) -> Result<Value, Error> {
+		let val: String = Bic().fake();
+		Ok(val.into())
+	}
+
+	pub fn isin(_: ()) -> Result<Value, Error> {
+		let val: String = Isin().fake();
 		Ok(val.into())
 	}
 }
