@@ -7,6 +7,8 @@ use crate::sql::Kind;
 
 #[derive(Error, Debug)]
 pub enum GqlError {
+	#[error("Auth error: {0}")]
+	AuthError(String),
 	#[error("Database error: {0}")]
 	DbError(crate::err::Error),
 	#[error("Error generating schema: {0}")]
@@ -26,6 +28,10 @@ pub enum GqlError {
 		target: Kind,
 		val: async_graphql::Value,
 	},
+}
+
+pub fn auth_error(msg: impl Into<String>) -> GqlError {
+	GqlError::AuthError(msg.into())
 }
 
 pub fn schema_error(msg: impl Into<String>) -> GqlError {

@@ -480,13 +480,13 @@ pub async fn generate_schema(
 		"https://datatracker.ietf.org/doc/html/rfc4122"
 	);
 
-	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
-	scalar_debug_validated!(schema, "number", Kind::Number);
-	scalar_debug_validated!(schema, "null", Kind::Null);
-	scalar_debug_validated!(schema, "datetime", Kind::Datetime);
-	scalar_debug_validated!(schema, "duration", Kind::Duration);
-	scalar_debug_validated!(schema, "object", Kind::Object);
-	scalar_debug_validated!(schema, "any", Kind::Any);
+	scalar_debug_validated!(schema, "Decimal", Kind::Decimal);
+	scalar_debug_validated!(schema, "Number", Kind::Number);
+	scalar_debug_validated!(schema, "Null", Kind::Null);
+	scalar_debug_validated!(schema, "Datetime", Kind::Datetime);
+	scalar_debug_validated!(schema, "Duration", Kind::Duration);
+	scalar_debug_validated!(schema, "Object", Kind::Object);
+	scalar_debug_validated!(schema, "Any", Kind::Any);
 
 	let id_interface =
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
