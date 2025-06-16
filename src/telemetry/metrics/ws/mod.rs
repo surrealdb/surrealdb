@@ -20,7 +20,7 @@ pub static RPC_SERVER_ACTIVE_CONNECTIONS: LazyLock<UpDownCounter<i64>> = LazyLoc
 
 pub static RPC_SERVER_CONNECTION_COUNT: LazyLock<Counter<u64>> = LazyLock::new(|| {
 	METER
-		.u64_counter("http.server.connection.count")
+		.u64_counter("rpc.server.connection.count")
 		.with_description("The total number of WebSocket connections processed.")
 		.init()
 });
