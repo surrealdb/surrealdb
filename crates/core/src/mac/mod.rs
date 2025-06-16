@@ -15,29 +15,29 @@
 #[macro_export]
 macro_rules! lazy_env_parse {
 	// With no default specified
-	($key:expr_2021, Option<String>) => {
+	($key:expr, Option<String>) => {
 		std::sync::LazyLock::new(|| std::env::var($key).ok())
 	};
 	// With no default specified
-	($key:expr_2021, $t:ty) => {
+	($key:expr, $t:ty) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or_default()
 		})
 	};
 	// With a closure for the default value
-	($key:expr_2021, $t:ty, || $default:expr_2021) => {
+	($key:expr, $t:ty, || $default:expr) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or_else(|| $default)
 		})
 	};
 	// With a static expression for the default value
-	($key:expr_2021, $t:ty, $default:expr_2021) => {
+	($key:expr, $t:ty, $default:expr) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or($default)
 		})
 	};
 	// With a closure for the default value, allowing for byte suffixes
-	(bytes, $key:expr_2021, $t:ty, || $default:expr_2021) => {
+	(bytes, $key:expr, $t:ty, || $default:expr) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key)
 				.ok()
@@ -49,7 +49,7 @@ macro_rules! lazy_env_parse {
 		})
 	};
 	// With a static expression for the default value, allowing for byte suffixes
-	(bytes, $key:expr_2021, $t:ty, $default:expr_2021) => {
+	(bytes, $key:expr, $t:ty, $default:expr) => {
 		std::sync::LazyLock::new(|| {
 			std::env::var($key)
 				.ok()
