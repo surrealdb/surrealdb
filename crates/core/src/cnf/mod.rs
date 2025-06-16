@@ -158,3 +158,7 @@ pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
 		.map(|input| extract_allowed_paths(&input))
 		.unwrap_or_default()
 });
+
+/// Used to limit file access
+pub static SKIP_IMPORT_SUCCESS_RESULTS: LazyLock<bool> =
+	LazyLock::new(|| std::env::var("SURREAL_SKIP_IMPORT_SUCCESS_RESULTS").is_ok());
