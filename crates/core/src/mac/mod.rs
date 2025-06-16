@@ -62,7 +62,6 @@ macro_rules! lazy_env_parse {
 	};
 }
 
-
 /// Throws an unreachable error with location details
 macro_rules! fail {
 	($($arg:tt)+) => {
