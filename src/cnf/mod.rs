@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 use std::time::Duration;
-use surrealdb::{lazy_env_parse, lazy_env_parse_or_else};
+use surrealdb::lazy_env_parse;
 
 pub const LOGO: &str = "
  .d8888b.                                             888 8888888b.  888888b.
@@ -89,13 +89,13 @@ pub static WEBSOCKET_RESPONSE_CHANNEL_SIZE: LazyLock<usize> =
 
 /// The number of runtime worker threads to start (defaults to the number of CPU cores, minimum 4)
 pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
-	lazy_env_parse_or_else!("SURREAL_RUNTIME_WORKER_THREADS", usize, |_| {
+	lazy_env_parse!("SURREAL_RUNTIME_WORKER_THREADS", usize, || {
 		std::cmp::max(4, num_cpus::get())
 	});
 
 /// What is the runtime thread memory stack size (defaults to 10MiB)
 pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
-	lazy_env_parse_or_else!("SURREAL_RUNTIME_STACK_SIZE", usize, |_| {
+	lazy_env_parse!("SURREAL_RUNTIME_STACK_SIZE", usize, || {
 		// Stack frames are generally larger in debug mode.
 		if cfg!(debug_assertions) {
 			20 * 1024 * 1024 // 20MiB in debug mode
