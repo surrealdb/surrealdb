@@ -57,7 +57,7 @@ impl UpsertStatement {
 		// Loop over the upsert targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, opt, doc).await?;
-			i.prepare(&stm, v).map_err(|e| match e {
+			i.prepare(&ctx, &stm, v).map_err(|e| match e {
 				Error::InvalidStatementTarget {
 					value: v,
 				} => Error::UpsertStatement {
