@@ -42,8 +42,7 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
-use tracing::instrument;
-use tracing::trace;
+use tracing::{instrument, trace};
 use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
