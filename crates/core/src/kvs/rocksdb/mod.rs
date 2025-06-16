@@ -201,9 +201,9 @@ impl Datastore {
 		opts.set_compression_per_level(&[
 			DBCompressionType::None,
 			DBCompressionType::None,
-			DBCompressionType::Snappy,
-			DBCompressionType::Snappy,
-			DBCompressionType::Snappy,
+			DBCompressionType::Lz4hc,
+			DBCompressionType::Lz4hc,
+			DBCompressionType::Lz4hc,
 		]);
 		// Set specific storage log level
 		info!(target: TARGET, "Setting storage engine log level: {}", *cnf::ROCKSDB_STORAGE_LOG_LEVEL);
