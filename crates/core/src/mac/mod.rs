@@ -1,3 +1,94 @@
+/// A macro that allows lazily parsing a value from the environment variable,
+/// with a fallback default value if the variable is not set or parsing fails.
+///
+/// # Parameters
+///
+/// - `$key`: An expression representing the name of the environment variable.
+/// - `$t`: The type of the value to be parsed.
+/// - `$default`: The default value to fall back to if the environment variable
+///   is not set or parsing fails.
+///
+/// # Return Value
+///
+/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed value
+/// from the environment variable or the default value.
+#[macro_export]
+macro_rules! lazy_env_parse {
+	// With no default specified
+	($key:expr_2021, Option<String>) => {
+		std::sync::LazyLock::new(|| std::env::var($key).ok())
+	};
+	// With no default specified
+	($key:expr_2021, $t:ty) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or_default()
+		})
+	};
+	// With a closure for the default value
+	($key:expr_2021, $t:ty, || $default:expr_2021) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or_else(|| $default)
+		})
+	};
+	// With a static expression for the default value
+	($key:expr_2021, $t:ty, $default:expr_2021) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or($default)
+		})
+	};
+	// With a closure for the default value, allowing for byte suffixes
+	(bytes, $key:expr_2021, $t:ty, || $default:expr_2021) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key)
+				.ok()
+				.and_then(|s| {
+					use $crate::str::ParseBytes;
+					s.parse_bytes::<$t>().ok()
+				})
+				.unwrap_or_else(|| $default)
+		})
+	};
+	// With a static expression for the default value, allowing for byte suffixes
+	(bytes, $key:expr_2021, $t:ty, $default:expr_2021) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key)
+				.ok()
+				.and_then(|s| {
+					use $crate::str::ParseBytes;
+					s.parse_bytes::<$t>().ok()
+				})
+				.unwrap_or($default)
+		})
+	};
+}
+
+/// Creates a new b-tree map of key-value pairs.
+///
+/// This macro creates a new map, clones the items
+/// from the secondary map, and inserts additional
+/// items to the new map.
+#[macro_export]
+macro_rules! map {
+    ($($k:expr_2021 $(, if let $grant:pat = $check:expr_2021)? $(, if $guard:expr_2021)? => $v:expr_2021),* $(,)? $( => $x:expr_2021 )?) => {{
+        let mut m = ::std::collections::BTreeMap::new();
+    	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
+		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
+        m
+    }};
+}
+
+/// Extends a b-tree map of key-value pairs.
+///
+/// This macro extends the supplied map, by cloning
+/// the items from the secondary map into it.
+#[macro_export]
+macro_rules! mrg {
+	($($m:expr_2021, $x:expr_2021)+) => {{
+		$($m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)+
+		$($m)+
+	}};
+}
+
 /// Throws an unreachable error with location details
 macro_rules! fail {
 	($($arg:tt)+) => {
@@ -7,7 +98,7 @@ macro_rules! fail {
 
 /// Converts some text into a new line byte string
 macro_rules! bytes {
-	($expression:expr) => {
+	($expression:expr_2021) => {
 		format!("{}\n", $expression).into_bytes()
 	};
 }
@@ -21,27 +112,9 @@ macro_rules! yield_now {
 	};
 }
 
-/// Creates a new b-tree map of key-value pairs
-macro_rules! map {
-    ($($k:expr $(, if let $grant:pat = $check:expr)? $(, if $guard:expr)? => $v:expr),* $(,)? $( => $x:expr )?) => {{
-        let mut m = ::std::collections::BTreeMap::new();
-    	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
-		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
-        m
-    }};
-}
-
-/// Extends a b-tree map of key-value pairs
-macro_rules! mrg {
-	($($m:expr, $x:expr)+) => {{
-		$($m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)+
-		$($m)+
-	}};
-}
-
 /// Matches on a specific config environment
 macro_rules! get_cfg {
-	($i:ident : $($s:expr),+) => (
+	($i:ident : $($s:expr_2021),+) => (
 		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};
 	)
 }
@@ -52,7 +125,7 @@ macro_rules! get_cfg {
 /// fail fast and return an error from a function does not leave
 /// a transaction in an uncommitted state without rolling back.
 macro_rules! catch {
-	($txn:ident, $default:expr) => {
+	($txn:ident, $default:expr_2021) => {
 		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;
@@ -70,7 +143,7 @@ macro_rules! catch {
 /// fast and return an error from a function does not leave a
 /// transaction in an uncommitted state without rolling back.
 macro_rules! run {
-	($txn:ident, $default:expr) => {
+	($txn:ident, $default:expr_2021) => {
 		match $default {
 			Err(e) => {
 				let _ = $txn.cancel().await;
@@ -87,208 +160,39 @@ macro_rules! run {
 	};
 }
 
-/// A macro that allows lazily parsing a value from the environment variable,
-/// with a fallback default value if the variable is not set or parsing fails.
-///
-/// # Parameters
-///
-/// - `$key`: An expression representing the name of the environment variable.
-/// - `$t`: The type of the value to be parsed.
-/// - `$default`: The default value to fall back to if the environment variable
-///   is not set or parsing fails.
-///
-/// # Return Value
-///
-/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed value
-/// from the environment variable or the default value.
-#[macro_export]
-macro_rules! lazy_env_parse {
-	($key:expr, $t:ty) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key)
-				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_default()))
-				.unwrap_or_default()
-		})
-	};
-	($key:expr, $t:ty, $default:expr) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key)
-				.and_then(|s| Ok(s.parse::<$t>().unwrap_or($default)))
-				.unwrap_or($default)
-		})
-	};
-}
-
-/// Lazily parses an environment variable into a specified type. If the environment variable is not set or the parsing fails,
-/// it returns a default value.
-///
-/// # Parameters
-///
-/// - `$key`: A string literal representing the name of the environment variable.
-/// - `$t`: The type to parse the environment variable into.
-/// - `$default`: A fallback function or constant value to be returned if the environment variable is not set or the parsing fails.
-///
-/// # Returns
-///
-/// A `Lazy` static variable that stores the parsed value or the default value.
-#[macro_export]
-macro_rules! lazy_env_parse_or_else {
-	($key:expr, $t:ty, $default:expr) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key)
-				.and_then(|s| Ok(s.parse::<$t>().unwrap_or_else($default)))
-				.unwrap_or_else($default)
-		})
-	};
-}
-
-#[cfg(test)]
-macro_rules! async_defer{
-	(let $bind:ident = ($capture:expr) defer { $($d:tt)* } after { $($t:tt)* }) => {
-		async {
-			async_defer!(@captured);
-			async_defer!(@catch_unwind);
-
-			#[allow(unused_mut)]
-			let mut v = Some($capture);
-			#[allow(unused_mut)]
-			let mut $bind = Captured(&mut v);
-			let res = CatchUnwindFuture(async { $($t)* }).await;
-			#[allow(unused_variables,unused_mut)]
-			if let Some(mut $bind) = v.take(){
-				async { $($d)* }.await;
-			}
-			match res{
-				Ok(x) => x,
-				Err(e) => ::std::panic::resume_unwind(e)
-			}
-
-		}
-	};
-
-	(defer { $($d:tt)* } after { $($t:tt)* }) => {
-		async {
-			async_defer!(@catch_unwind);
-
-			let res = CatchUnwindFuture(async { $($t)* }).await;
-			#[allow(unused_variables)]
-			async { $($d)* }.await;
-			match res{
-				Ok(x) => x,
-				Err(e) => ::std::panic::resume_unwind(e)
-			}
-
-		}
-	};
-
-	(@captured) => {
-		// unwraps are save cause the value can only be taken by consuming captured.
-		pub struct Captured<'a,T>(&'a mut Option<T>);
-		impl<T> ::std::ops::Deref for Captured<'_,T>{
-			type Target = T;
-
-			fn deref(&self) -> &T{
-				self.0.as_ref().unwrap()
-			}
-		}
-		impl<T> ::std::ops::DerefMut for Captured<'_,T>{
-			fn deref_mut(&mut self) -> &mut T{
-				self.0.as_mut().unwrap()
-			}
-		}
-		impl<T> Captured<'_,T>{
-			#[allow(dead_code)]
-			pub fn take(self) -> T{
-				self.0.take().unwrap()
-			}
-		}
-	};
-
-	(@catch_unwind) => {
-		struct CatchUnwindFuture<F>(F);
-		impl<F,R> ::std::future::Future for CatchUnwindFuture<F>
-			where F: ::std::future::Future<Output = R>,
-		{
-			type Output = ::std::thread::Result<R>;
-
-			fn poll(self: ::std::pin::Pin<&mut Self>, cx: &mut ::std::task::Context) -> ::std::task::Poll<Self::Output>{
-				let pin = unsafe{ self.map_unchecked_mut(|x| &mut x.0) };
-				match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(||{
-					pin.poll(cx)
-				})) {
-					Ok(x) => x.map(Ok),
-					Err(e) => ::std::task::Poll::Ready(Err(e))
-				}
-			}
-		}
-	};
-}
-
-/// Works like a match statement, but matches &str insensitive
-macro_rules! match_insensitive {
-    ($s:expr, { $($p:literal => $e:expr,)* _ => $fe:expr $(,)? }) => {{
-        let s = $s.to_lowercase();
-        $(if s == $p.to_lowercase() { $e }
-        else)* { $fe }
-    }};
-}
-
 #[cfg(test)]
 mod test {
 	use crate::err::Error;
 
-	#[tokio::test]
-	async fn async_defer_basic() {
-		let mut counter = 0;
-
-		async_defer!(defer {
-			assert_eq!(counter,1);
-		} after {
-			assert_eq!(counter,0);
-			counter += 1;
-		})
-		.await;
-
-		async_defer!(let t = (()) defer {
-			panic!("shouldn't be called");
-		} after {
-			assert_eq!(counter,1);
-			counter += 1;
-			t.take();
-		})
-		.await;
+	fn fail_func() -> Result<(), Error> {
+		Err(fail!("Reached unreachable code"))
 	}
 
-	#[tokio::test]
-	#[should_panic(expected = "this is should be the message of the panic")]
-	async fn async_defer_panic() {
-		let mut counter = 0;
-
-		async_defer!(defer {
-			// This should still execute
-			assert_eq!(counter,1);
-			panic!("this is should be the message of the panic")
-		} after {
-			assert_eq!(counter,0);
-			counter += 1;
-			panic!("this panic should be caught")
-		})
-		.await;
+	fn fail_func_args() -> Result<(), Error> {
+		Err(fail!("Found {} but expected {}", "test", "other"))
 	}
 
 	#[test]
 	fn fail_literal() {
-		let Error::Unreachable(msg) = fail!("Reached unreachable code") else {
+		let Err(Error::Unreachable(msg)) = fail_func() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:281: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:168: Reached unreachable code", msg);
+	}
+
+	#[test]
+	fn fail_call() {
+		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
+			panic!()
+		};
+		assert_eq!("crates/core/src/mac/mod.rs:185: Reached unreachable code", msg);
 	}
 
 	#[test]
 	fn fail_arguments() {
-		let Error::Unreachable(msg) = fail!("Found {} but expected {}", "test", "other") else {
+		let Err(Error::Unreachable(msg)) = fail_func_args() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:289: Found test but expected other", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:172: Found test but expected other", msg);
 	}
 }
