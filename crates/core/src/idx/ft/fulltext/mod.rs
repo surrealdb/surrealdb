@@ -3,6 +3,8 @@ use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Thing, Value};
+use crate::idx::docids::DocId;
+use crate::idx::docids::seqdocids::SeqDocIds;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
@@ -11,7 +13,7 @@ use crate::idx::ft::offsets::Offset;
 use crate::idx::ft::postings::TermFrequency;
 use crate::key::index::dl::Dl;
 use crate::key::index::td::Td;
-use crate::kvs::Transaction;
+use crate::kvs::{Key, Transaction};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -27,6 +29,7 @@ struct TermDocument {
 pub(crate) struct FullTextIndex {
 	analyzer: Analyzer,
 	highlighting: bool,
+	doc_ids: SeqDocIds,
 }
 
 impl FullTextIndex {
@@ -40,6 +43,7 @@ impl FullTextIndex {
 		Ok(Self {
 			analyzer,
 			highlighting: p.hl,
+			doc_ids: SeqDocIds::new(),
 		})
 	}
 
@@ -58,22 +62,27 @@ impl FullTextIndex {
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
 		let mut set = HashSet::new();
 		let tx = ctx.tx();
-		// Delete the terms
-		for tks in &tokens {
-			for t in tks.list() {
-				// Extract the term
-				let s = tks.get_token_string(t)?;
-				// Check if the term has already been deleted
-				if set.insert(s) {
-					// Delete the term
-					let key = Td::new(ns, db, &rid.tb, &ix.name, s, &rid.id);
-					tx.del(key).await?;
+		// Get the doc id (if it exists)
+		let doc_key: Key = revision::to_vec(&rid.id)?;
+		let id = self.doc_ids.get_doc_id(&tx, doc_key).await?;
+		if let Some(id) = id {
+			// Delete the terms
+			for tks in &tokens {
+				for t in tks.list() {
+					// Extract the term
+					let s = tks.get_token_string(t)?;
+					// Check if the term has already been deleted
+					if set.insert(s) {
+						// Delete the term
+						let key = Td::new(ns, db, &rid.tb, &ix.name, s, id);
+						tx.del(key).await?;
+					}
 				}
 			}
+			// Delete the doc length
+			let key = Dl::new(ns, db, &rid.tb, &ix.name, id);
+			tx.del(key).await?;
 		}
-		// Delete the doc length
-		let key = Dl::new(ns, db, &rid.tb, &ix.name, &rid.id);
-		tx.del(key).await?;
 		// We're done
 		Ok(())
 	}
@@ -89,6 +98,9 @@ impl FullTextIndex {
 	) -> Result<()> {
 		let (ns, db) = opt.ns_db()?;
 		let tx = ctx.tx();
+		// Get the doc id (if it exists)
+		let doc_key: Key = revision::to_vec(&rid.id)?;
+		let id = self.doc_ids.resolve_doc_id(&tx, doc_key).await?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
@@ -98,7 +110,7 @@ impl FullTextIndex {
 			Self::index_without_offsets(&tx, ns, db, ix, rid, tokens).await?
 		};
 		// Set the doc length
-		let key = Dl::new(ns, db, &rid.tb, &ix.name, &rid.id);
+		let key = Dl::new(ns, db, &rid.tb, &ix.name, id.doc_id());
 		tx.set(key, revision::to_vec(&dl)?, None).await?;
 		// We're done
 		Ok(())
@@ -109,7 +121,7 @@ impl FullTextIndex {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-		rid: &Thing,
+		id: DocId,
 		tokens: Vec<Tokens>,
 	) -> Result<DocLength> {
 		let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;

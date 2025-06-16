@@ -8,7 +8,7 @@ use crate::expr::{
 	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
 };
 use crate::idx::IndexKeyBase;
-use crate::idx::docids::DocIds;
+use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::ft::scorer::BM25Scorer;
@@ -1132,7 +1132,7 @@ struct FtEntry(Arc<Inner>);
 
 struct Inner {
 	index_option: IndexOption,
-	doc_ids: Arc<RwLock<DocIds>>,
+	doc_ids: Arc<RwLock<BTreeDocIds>>,
 	analyzer: Analyzer,
 	query_terms_set: TermsSet,
 	query_terms_list: TermsList,

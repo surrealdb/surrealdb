@@ -3,7 +3,8 @@ use crate::dbs::Options;
 use crate::expr::index::SearchParams;
 use crate::expr::statements::DefineAnalyzerStatement;
 use crate::expr::{Idiom, Object, Scoring, Thing, Value};
-use crate::idx::docids::{DocId, DocIds};
+use crate::idx::docids::DocId;
+use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
@@ -34,7 +35,7 @@ pub(crate) struct SearchIndex {
 	state: State,
 	bm25: Option<Bm25Params>,
 	highlighting: bool,
-	doc_ids: Arc<RwLock<DocIds>>,
+	doc_ids: Arc<RwLock<BTreeDocIds>>,
 	doc_lengths: Arc<RwLock<DocLengths>>,
 	postings: Arc<RwLock<Postings>>,
 	terms: Arc<RwLock<Terms>>,
@@ -115,7 +116,8 @@ impl SearchIndex {
 			State::default()
 		};
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(txn, tt, index_key_base.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
+			BTreeDocIds::new(txn, tt, index_key_base.clone(), p.doc_ids_order, p.doc_ids_cache)
+				.await?,
 		));
 		let doc_lengths = Arc::new(RwLock::new(
 			DocLengths::new(
@@ -164,7 +166,7 @@ impl SearchIndex {
 		})
 	}
 
-	pub(in crate::idx) fn doc_ids(&self) -> Arc<RwLock<DocIds>> {
+	pub(in crate::idx) fn doc_ids(&self) -> Arc<RwLock<BTreeDocIds>> {
 		self.doc_ids.clone()
 	}
 
@@ -485,12 +487,12 @@ impl SearchIndex {
 }
 
 pub(crate) struct HitsIterator {
-	doc_ids: Arc<RwLock<DocIds>>,
+	doc_ids: Arc<RwLock<BTreeDocIds>>,
 	iter: IntoIter,
 }
 
 impl HitsIterator {
-	fn new(doc_ids: Arc<RwLock<DocIds>>, hits: RoaringTreemap) -> Self {
+	fn new(doc_ids: Arc<RwLock<BTreeDocIds>>, hits: RoaringTreemap) -> Self {
 		Self {
 			doc_ids,
 			iter: hits.into_iter(),

@@ -1,6 +1,6 @@
 //! Stores the term/document frequency and offsets
 
-use crate::expr::Id;
+use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
@@ -22,7 +22,7 @@ pub struct Td<'a> {
 	_f: u8,
 	_g: u8,
 	pub term: &'a str,
-	pub id: Id,
+	pub id: Option<DocId>,
 }
 impl_key!(Td<'a>);
 
@@ -39,7 +39,7 @@ impl<'a> Td<'a> {
 		tb: &'a str,
 		ix: &'a str,
 		term: &'a str,
-		id: &'a Id,
+		id: Option<DocId>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -55,7 +55,7 @@ impl<'a> Td<'a> {
 			_f: b't',
 			_g: b'd',
 			term,
-			id: id.to_owned(),
+			id,
 		}
 	}
 }
@@ -107,8 +107,8 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let id = Id::String("id".to_string());
-		let val = Td::new("testns", "testdb", "testtb", "testix", "term", &id);
+		let id = Some(99);
+		let val = Td::new("testns", "testdb", "testtb", "testix", "term", id);
 		let enc = Td::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0\0\0\0\x01id\0");
 		let dec = Td::decode(&enc).unwrap();

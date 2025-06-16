@@ -93,8 +93,8 @@ impl Document {
 		match &ix.index {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
-			Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
-			Index::FullText(p) => ic.index_full_text_multiwriter(stk, ctx, p).await?,
+			Index::Search(p) => ic.index_search(stk, ctx, p).await?,
+			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 		}
@@ -389,12 +389,7 @@ impl<'a> IndexOperation<'a> {
 		})
 	}
 
-	async fn index_full_text(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		p: &SearchParams,
-	) -> Result<()> {
+	async fn index_search(&mut self, stk: &mut Stk, ctx: &Context, p: &SearchParams) -> Result<()> {
 		let (ns, db) = self.opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 
@@ -408,7 +403,7 @@ impl<'a> IndexOperation<'a> {
 		ft.finish(ctx).await
 	}
 
-	async fn index_full_text_multiwriter(
+	async fn index_fulltext(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,

@@ -16,7 +16,8 @@ use crate::err::Error;
 
 use crate::expr::index::{Distance, MTreeParams, VectorType};
 use crate::expr::{Number, Object, Thing, Value};
-use crate::idx::docids::{DocId, DocIds};
+use crate::idx::docids::DocId;
+use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::planner::checker::MTreeConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::btree::BStatistics;
@@ -32,7 +33,7 @@ pub struct MTreeIndex {
 	dim: usize,
 	vector_type: VectorType,
 	store: MTreeStore,
-	doc_ids: Arc<RwLock<DocIds>>,
+	doc_ids: Arc<RwLock<BTreeDocIds>>,
 	mtree: Arc<RwLock<MTree>>,
 }
 
@@ -51,7 +52,7 @@ impl MTreeIndex {
 		tt: TransactionType,
 	) -> Result<Self> {
 		let doc_ids = Arc::new(RwLock::new(
-			DocIds::new(txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
+			BTreeDocIds::new(txn, tt, ikb.clone(), p.doc_ids_order, p.doc_ids_cache).await?,
 		));
 		let state_key = ikb.new_vm_key(None)?;
 		let state: MState = if let Some(val) = txn.get(state_key.clone(), None).await? {
@@ -202,7 +203,7 @@ impl MTree {
 	async fn knn_search(
 		&self,
 		search: &MTreeSearchContext<'_>,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		stk: &mut Stk,
 		chk: &mut MTreeConditionChecker<'_>,
 	) -> Result<KnnResult> {
@@ -1470,7 +1471,7 @@ mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, VectorType};
 	use crate::idx::IndexKeyBase;
-	use crate::idx::docids::{DocId, DocIds};
+	use crate::idx::docids::{BTreeDocIds, DocId};
 	use crate::idx::planner::checker::MTreeConditionChecker;
 	use crate::idx::trees::knn::tests::TestCollection;
 	use crate::idx::trees::mtree::{MState, MTree, MTreeNode, MTreeSearchContext, MTreeStore};
@@ -1577,7 +1578,7 @@ mod tests {
 	async fn delete_collection(
 		stk: &mut Stk,
 		ds: &Datastore,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
@@ -1634,7 +1635,7 @@ mod tests {
 	async fn find_collection(
 		stk: &mut Stk,
 		ds: &Datastore,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		t: &mut MTree,
 		collection: &TestCollection,
 		cache_size: usize,
@@ -1685,7 +1686,7 @@ mod tests {
 	async fn check_full_knn(
 		stk: &mut Stk,
 		ds: &Datastore,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		t: &mut MTree,
 		map: &HashMap<DocId, SharedVector>,
 		cache_size: usize,
@@ -1751,7 +1752,7 @@ mod tests {
 				let (ctx, _st) = new_operation(&ds, &t, TransactionType::Read, cache_size).await;
 				let tx = ctx.tx();
 				let doc_ids =
-					DocIds::new(&tx, TransactionType::Read, IndexKeyBase::default(), 7, 100)
+					BTreeDocIds::new(&tx, TransactionType::Read, IndexKeyBase::default(), 7, 100)
 						.await
 						.unwrap();
 

@@ -1,5 +1,5 @@
 //! Stores the doc length
-use crate::expr::Id;
+use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
@@ -20,7 +20,7 @@ pub struct Dl<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: Id,
+	pub id: DocId,
 }
 impl_key!(Dl<'a>);
 
@@ -31,7 +31,7 @@ impl Categorise for Dl<'_> {
 }
 
 impl<'a> Dl<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: &'a Id) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: DocId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -45,7 +45,7 @@ impl<'a> Dl<'a> {
 			_e: b'!',
 			_f: b'd',
 			_g: b'l',
-			id: id.to_owned(),
+			id,
 		}
 	}
 }
@@ -58,8 +58,8 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let id = Id::String("id".to_string());
-		let val = Dl::new("testns", "testdb", "testtb", "testix", &id);
+		let id = 99;
+		let val = Dl::new("testns", "testdb", "testtb", "testix", id);
 		let enc = Dl::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dl\0\0\0\x01id\0");
 
