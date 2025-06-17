@@ -3,7 +3,7 @@ use crate::rpc::RpcError;
 use crate::rpc::request::Request;
 use crate::sql::SqlValue;
 use crate::syn;
-use crate::proto::surrealdb::value::Value as ValueProto;
+use crate::protocol::surrealdb::value::Value as ValueProto;
 
 pub fn parse_value(val: &[u8]) -> Result<SqlValue, RpcError> {
 	// syn::value_legacy_strand(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)

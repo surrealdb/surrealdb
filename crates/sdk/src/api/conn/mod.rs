@@ -15,10 +15,10 @@ use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 use surrealdb_core::expr::{Value as CoreValue, from_value as from_core_value};
 
-pub use surrealdb_core::proto::surrealdb::rpc::Response as ResponseProto;
-pub use surrealdb_core::proto::surrealdb::rpc::Request as RequestProto;
-pub use surrealdb_core::proto::surrealdb::value::Value as ValueProto;
-pub use surrealdb_core::proto::surrealdb::rpc::request::Command as CommandProto;
+pub use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
+pub use surrealdb_core::protocol::surrealdb::rpc::Request as RequestProto;
+pub use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
+pub use surrealdb_core::protocol::surrealdb::rpc::request::Command as CommandProto;
 
 mod cmd;
 pub(crate) use cmd::Command;

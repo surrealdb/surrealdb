@@ -2,7 +2,7 @@ use crate::expr::serde::{deserialize, serialize};
 use crate::rpc::RpcError;
 use crate::rpc::request::Request;
 use crate::sql::SqlValue;
-use crate::proto::surrealdb::value::Value as ValueProto;
+use crate::protocol::surrealdb::value::Value as ValueProto;
 use prost::Message;
 
 pub fn parse_value(val: &[u8]) -> Result<SqlValue, RpcError> {

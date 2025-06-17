@@ -12,7 +12,7 @@ pub static VERSION: &str = "version";
 
 
 
-pub use crate::proto::surrealdb::rpc::Request;
+pub use crate::protocol::surrealdb::rpc::Request;
 
 // #[derive(Debug)]
 // pub struct Request {

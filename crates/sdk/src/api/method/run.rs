@@ -15,8 +15,8 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Array;
 use surrealdb_core::expr::to_value;
-use surrealdb_core::proto::surrealdb::rpc::Response as ResponseProto;
-use surrealdb_core::proto::surrealdb::value::Array as ArrayProto;
+use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
+use surrealdb_core::protocol::surrealdb::value::Array as ArrayProto;
 use surrealdb_core::expr::Array as CoreArray;
 
 /// A run future

@@ -1,6 +1,6 @@
 #[cfg(not(target_family = "wasm"))]
 use crate::gql::SchemaCache;
-use crate::proto::surrealdb::rpc::request::Command;
+use crate::protocol::surrealdb::rpc::request::Command;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;

@@ -123,6 +123,7 @@ bcrypt.workspace = true
 bincode.workspace = true
 blake3.workspace = true
 bytes.workspace = true
+capnp.workspace = true
 castaway.workspace = true
 cedar-policy.workspace = true
 chrono = { workspace = true, features = ["serde"] }
@@ -188,6 +189,7 @@ reqwest = { workspace = true, default-features = false, features = [
 tempfile = { workspace = true, optional = true }
 
 [build-dependencies]
+capnpc.workspace = true
 prost-build.workspace = true
 
 [dev-dependencies]

@@ -1,5 +1,5 @@
 
-use crate::proto::surrealdb::ast::{
+use crate::protocol::surrealdb::ast::{
     SqlValue as SqlValueProto,
     Number as NumberProto,
 
@@ -9,7 +9,7 @@ impl TryFrom<SqlValueProto> for crate::sql::SqlValue {
 	type Error = anyhow::Error;
 
 	fn try_from(proto: SqlValueProto) -> Result<Self, Self::Error> {
-        use crate::proto::surrealdb::ast::sql_value;
+        use crate::protocol::surrealdb::ast::sql_value;
 
 		let Some(inner) = proto.inner else {
 			return Ok(crate::sql::SqlValue::None);
@@ -93,7 +93,7 @@ impl TryFrom<NumberProto> for crate::sql::Number {
 	type Error = anyhow::Error;
 
 	fn try_from(proto: NumberProto) -> Result<Self, Self::Error> {
-        use crate::proto::surrealdb::ast::number;
+        use crate::protocol::surrealdb::ast::number;
 		let Some(inner) = proto.inner else {
 			return Err(anyhow::anyhow!("Invalid Number: missing value"));
 		};

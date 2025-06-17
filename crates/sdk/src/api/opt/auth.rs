@@ -2,17 +2,17 @@
 
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb_core::proto::surrealdb::rpc::query_result;
-use surrealdb_core::proto::surrealdb::rpc::QueryResult;
-use surrealdb_core::proto::surrealdb::rpc::Response;
-use surrealdb_core::proto::surrealdb::rpc::SignupParams;
-use surrealdb_core::proto::surrealdb::value::value;
+use surrealdb_core::protocol::surrealdb::rpc::query_result;
+use surrealdb_core::protocol::surrealdb::rpc::QueryResult;
+use surrealdb_core::protocol::surrealdb::rpc::Response;
+use surrealdb_core::protocol::surrealdb::rpc::SignupParams;
+use surrealdb_core::protocol::surrealdb::value::value;
 use std::fmt;
 use std::collections::BTreeMap;
 
-use surrealdb_core::proto::surrealdb::value::Value as ValueProto;
-use surrealdb_core::proto::surrealdb::rpc::Access as AccessProto;
-use surrealdb_core::proto::surrealdb::rpc::access::Inner as AccessInnerProto;
+use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
+use surrealdb_core::protocol::surrealdb::rpc::Access as AccessProto;
+use surrealdb_core::protocol::surrealdb::rpc::access::Inner as AccessInnerProto;
 
 /// A signup action
 #[derive(Debug)]
@@ -41,7 +41,7 @@ pub struct Root<'a> {
 impl IntoCredentials for Root<'_> {
 	fn into_access(self) -> AccessProto {
 		AccessProto {
-			inner: Some(AccessInnerProto::RootUser(surrealdb_core::proto::surrealdb::rpc::RootUserCredentials {
+			inner: Some(AccessInnerProto::RootUser(surrealdb_core::protocol::surrealdb::rpc::RootUserCredentials {
 				username: self.username.to_string(),
 				password: self.password.to_string(),
 			})),
@@ -66,7 +66,7 @@ pub struct Namespace<'a> {
 impl IntoCredentials for Namespace<'_> {
 	fn into_access(self) -> AccessProto {
 		AccessProto {
-			inner: Some(AccessInnerProto::NamespaceUser(surrealdb_core::proto::surrealdb::rpc::NamespaceUserCredentials {
+			inner: Some(AccessInnerProto::NamespaceUser(surrealdb_core::protocol::surrealdb::rpc::NamespaceUserCredentials {
 				namespace: self.namespace.to_string(),
 				username: self.username.to_string(),
 				password: self.password.to_string(),
@@ -95,7 +95,7 @@ pub struct Database<'a> {
 impl IntoCredentials for Database<'_> {
 	fn into_access(self) -> AccessProto {
 		AccessProto {
-			inner: Some(AccessInnerProto::DatabaseUser(surrealdb_core::proto::surrealdb::rpc::DatabaseUserCredentials {
+			inner: Some(AccessInnerProto::DatabaseUser(surrealdb_core::protocol::surrealdb::rpc::DatabaseUserCredentials {
 				namespace: self.namespace.to_string(),
 				database: self.database.to_string(),
 				username: self.username.to_string(),

@@ -21,12 +21,21 @@ fn main() {
 	config.compile_well_known_types();
 
 	if let Err(err) = config.compile_protos(&[
-			"proto/ast.proto",
-			"proto/rpc.proto",
-			"proto/value.proto",
+			"protocol/ast.proto",
+			"protocol/rpc.proto",
+			"protocol/value.proto",
 		],
-                                &["proto/"]) {
+                                &["protocol/"]) {
 		eprintln!("Failed to compile protobufs: {}", err);
 		std::process::exit(1);
 	}
+
+	::capnpc::CompilerCommand::new()
+		.file("protocol/expr.capnp")
+        .file("protocol/rpc.capnp")
+		.import_path("protocol/")
+        .no_standard_import()
+		.default_parent_module(vec!["protocol".into()])
+        .run()
+        .expect("compiling schema");
 }

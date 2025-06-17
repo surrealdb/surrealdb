@@ -14,8 +14,8 @@ use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::proto::surrealdb::rpc::{DatabaseAccessCredentials, DatabaseUserCredentials, NamespaceAccessCredentials, NamespaceUserCredentials, RootUserCredentials};
-use crate::proto::surrealdb::rpc::SigninParams;
+use crate::protocol::surrealdb::rpc::{DatabaseAccessCredentials, DatabaseUserCredentials, NamespaceAccessCredentials, NamespaceUserCredentials, RootUserCredentials};
+use crate::protocol::surrealdb::rpc::SigninParams;
 use anyhow::{Result, bail, ensure};
 use chrono::Utc;
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -49,7 +49,7 @@ impl From<SigninData> for Value {
 }
 
 pub async fn signin(kvs: &Datastore, session: &mut Session, SigninParams { access }: SigninParams) -> Result<SigninData> {
-	use crate::proto::surrealdb::rpc::access::Inner as AccessInnerProto;
+	use crate::protocol::surrealdb::rpc::access::Inner as AccessInnerProto;
 
 	let Some(access) = access else {
 		return Err(anyhow::Error::new(Error::NoSigninTarget));

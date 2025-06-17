@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb_core::proto::surrealdb::value::{value, Value as ValueProto};
+use surrealdb_core::protocol::surrealdb::value::{value, Value as ValueProto};
 
 pub const USER: &str = "user";
 

@@ -7,26 +7,26 @@ use std::sync::Arc;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::proto_variables_to_expr_variables;
 use crate::err::Error;
-use crate::proto::surrealdb::rpc::request::Command;
-use crate::proto::surrealdb::rpc::AuthenticateParams;
-use crate::proto::surrealdb::rpc::CreateParams;
-use crate::proto::surrealdb::rpc::DeleteParams;
+use crate::protocol::surrealdb::rpc::request::Command;
+use crate::protocol::surrealdb::rpc::AuthenticateParams;
+use crate::protocol::surrealdb::rpc::CreateParams;
+use crate::protocol::surrealdb::rpc::DeleteParams;
 #[cfg(not(target_family = "wasm"))]
-use crate::proto::surrealdb::rpc::GraphQlParams;
-use crate::proto::surrealdb::rpc::InsertParams;
-use crate::proto::surrealdb::rpc::KillParams;
-use crate::proto::surrealdb::rpc::LiveParams;
-use crate::proto::surrealdb::rpc::QueryParams;
-use crate::proto::surrealdb::rpc::RelateParams;
-use crate::proto::surrealdb::rpc::RunParams;
-use crate::proto::surrealdb::rpc::SelectParams;
-use crate::proto::surrealdb::rpc::SetParams;
-use crate::proto::surrealdb::rpc::SigninParams;
-use crate::proto::surrealdb::rpc::SignupParams;
-use crate::proto::surrealdb::rpc::UnsetParams;
-use crate::proto::surrealdb::rpc::UpdateParams;
-use crate::proto::surrealdb::rpc::UpsertParams;
-use crate::proto::surrealdb::rpc::VersionParams;
+use crate::protocol::surrealdb::rpc::GraphQlParams;
+use crate::protocol::surrealdb::rpc::InsertParams;
+use crate::protocol::surrealdb::rpc::KillParams;
+use crate::protocol::surrealdb::rpc::LiveParams;
+use crate::protocol::surrealdb::rpc::QueryParams;
+use crate::protocol::surrealdb::rpc::RelateParams;
+use crate::protocol::surrealdb::rpc::RunParams;
+use crate::protocol::surrealdb::rpc::SelectParams;
+use crate::protocol::surrealdb::rpc::SetParams;
+use crate::protocol::surrealdb::rpc::SigninParams;
+use crate::protocol::surrealdb::rpc::SignupParams;
+use crate::protocol::surrealdb::rpc::UnsetParams;
+use crate::protocol::surrealdb::rpc::UpdateParams;
+use crate::protocol::surrealdb::rpc::UpsertParams;
+use crate::protocol::surrealdb::rpc::VersionParams;
 use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
@@ -45,7 +45,7 @@ use crate::{
 		},
 	},
 };
-use crate::proto::surrealdb::rpc::UseParams;
+use crate::protocol::surrealdb::rpc::UseParams;
 use anyhow::Result;
 
 #[expect(async_fn_in_trait)]

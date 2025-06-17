@@ -13,15 +13,15 @@ use surrealdb_core::expr::{
 	Array as CoreArray, Object as CoreObject, Query as CoreQuery, Value as CoreValue,
 };
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::proto::surrealdb::rpc::UseParams;
+use surrealdb_core::protocol::surrealdb::rpc::UseParams;
 #[allow(unused_imports)]
 use surrealdb_core::sql::{
 	Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
 };
 use surrealdb_core::{
 	dbs::Notification,
-	proto::surrealdb::rpc::{SigninParams, SignupParams},
-	proto::surrealdb::value::{Array as ArrayProto, Value as ValueProto},
+	protocol::surrealdb::rpc::{SigninParams, SignupParams},
+	protocol::surrealdb::value::{Array as ArrayProto, Value as ValueProto},
 };
 use uuid::Uuid;
 
@@ -136,7 +136,7 @@ impl Command {
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RequestProto> {
 		use crate::api::engine::resource_to_sql_values;
 		use surrealdb_core::{
-			proto::surrealdb::rpc::{AuthenticateParams, InvalidateParams},
+			protocol::surrealdb::rpc::{AuthenticateParams, InvalidateParams},
 			sql::{
 				Data, Output,
 				statements::{UpdateStatement, UpsertStatement},
@@ -163,7 +163,7 @@ impl Command {
 				what,
 				data,
 			} => {
-				use surrealdb_core::proto::surrealdb::rpc::CreateParams;
+				use surrealdb_core::protocol::surrealdb::rpc::CreateParams;
 
 				CommandProto::Create(CreateParams {})
 				// let mut params = vec![what.into_core_value()];
@@ -192,7 +192,7 @@ impl Command {
 				// 	method: "upsert",
 				// 	params: Some(params.into()),
 				// }
-				use surrealdb_core::proto::surrealdb::rpc::UpsertParams;
+				use surrealdb_core::protocol::surrealdb::rpc::UpsertParams;
 
 				CommandProto::Upsert(UpsertParams {})
 			}
@@ -212,7 +212,7 @@ impl Command {
 				// 	method: "update",
 				// 	params: Some(params.into()),
 				// }
-				use surrealdb_core::proto::surrealdb::rpc::UpdateParams;
+				use surrealdb_core::protocol::surrealdb::rpc::UpdateParams;
 
 				CommandProto::Update(UpdateParams {})
 			}
@@ -237,7 +237,7 @@ impl Command {
 				// 	params: Some(params.into()),
 				// }
 
-				use surrealdb_core::proto::surrealdb::rpc::InsertParams;
+				use surrealdb_core::protocol::surrealdb::rpc::InsertParams;
 
 				CommandProto::Insert(InsertParams {
 				})
@@ -261,7 +261,7 @@ impl Command {
 				// 	method: "insert_relation",
 				// 	params: Some(params.into()),
 				// }
-				use surrealdb_core::proto::surrealdb::rpc::InsertRelationParams;
+				use surrealdb_core::protocol::surrealdb::rpc::InsertRelationParams;
 				CommandProto::InsertRelation(InsertRelationParams {
 				})
 			}
@@ -295,7 +295,7 @@ impl Command {
 				// 	params: Some(params.into()),
 				// }
 
-				use surrealdb_core::proto::surrealdb::rpc::PatchParams;
+				use surrealdb_core::protocol::surrealdb::rpc::PatchParams;
 
 				CommandProto::Patch(PatchParams {
 				})
@@ -329,7 +329,7 @@ impl Command {
 				// 	method: "query",
 				// 	params: Some(params.into()),
 				// }
-				use surrealdb_core::proto::surrealdb::rpc::MergeParams;
+				use surrealdb_core::protocol::surrealdb::rpc::MergeParams;
 				CommandProto::Merge(MergeParams {
 				})
 			}
@@ -343,7 +343,7 @@ impl Command {
 				// 	params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
 				// }
 		
-				use surrealdb_core::proto::surrealdb::rpc::SelectParams;
+				use surrealdb_core::protocol::surrealdb::rpc::SelectParams;
 
 				CommandProto::Select(SelectParams {
 					what: Some(what.try_into()?),

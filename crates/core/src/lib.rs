@@ -48,7 +48,7 @@ pub mod kvs;
 pub mod mem;
 pub mod obs;
 pub mod options;
-pub mod proto;
+pub mod protocol;
 pub mod rpc;
 pub mod sql;
 pub mod str;

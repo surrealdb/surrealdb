@@ -9,8 +9,8 @@ use serde::Serialize;
 
 use super::{RpcError, request::Request};
 use crate::{expr::Value, sql::SqlValue};
-use crate::proto::surrealdb::ast::SqlValue as SqlValueProto;
-use crate::proto::surrealdb::value::Value as ValueProto;
+use crate::protocol::surrealdb::ast::SqlValue as SqlValueProto;
+use crate::protocol::surrealdb::value::Value as ValueProto;
 
 pub const PROTOCOLS: [&str; 3] = [
 	"json",     // For basic JSON serialisation

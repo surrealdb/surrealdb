@@ -40,7 +40,7 @@ impl super::surrealdb::rpc::QueryParams {
 
 impl super::surrealdb::rpc::Request {
     pub fn method(&self) -> &str {
-        use crate::proto::surrealdb::rpc::request::Command;
+        use crate::protocol::surrealdb::rpc::request::Command;
 
         match &self.command {
             Some(Command::Health(_)) => "health",

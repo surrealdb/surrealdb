@@ -1,5 +1,13 @@
 
 
+pub mod expr_capnp {
+    include!(concat!(env!("OUT_DIR"), "/protocol/expr_capnp.rs"));
+}
+
+pub mod rpc_capnp {
+    include!(concat!(env!("OUT_DIR"), "/protocol/rpc_capnp.rs"));
+}
+
 pub mod google {
     pub mod protobuf {
         include!(concat!(env!("OUT_DIR"), "/google.protobuf.rs"));
@@ -7,7 +15,6 @@ pub mod google {
 }
 
 pub mod surrealdb {
-
     pub mod ast {
         include!(concat!(env!("OUT_DIR"), "/surrealdb.ast.rs"));
     }
@@ -24,6 +31,43 @@ pub mod surrealdb {
 mod ast;
 mod rpc;
 mod value;
+mod expr;
+
+/// Traits 
+pub trait ToCapnp {
+    type Builder<'a>;
+
+    fn to_capnp(&self, builder: Self::Builder<'_>);
+}
+
+pub trait FromCapnp {
+    type Reader<'a>;
+
+    fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self>
+    where
+        Self: Sized;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// PROTOBUF STUFF TO DELETE SOON.
 
 #[inline]
 fn proto_timestamp_to_sql_datetime(

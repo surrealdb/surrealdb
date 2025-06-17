@@ -1,7 +1,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::proto::surrealdb::value::{
+use crate::protocol::surrealdb::value::{
     Value as ValueProto,
     Array as ArrayProto,
     Object as ObjectProto,
@@ -23,7 +23,7 @@ impl ValueProto {
         let Some(inner) = &self.inner else {
             return None;
         };
-        if let crate::proto::surrealdb::value::value::Inner::Strand(s) = inner {
+        if let crate::protocol::surrealdb::value::value::Inner::Strand(s) = inner {
             Some(s.as_str())
         } else {
             None
@@ -41,7 +41,7 @@ impl TryFrom<ValueProto> for crate::expr::Value {
 	type Error = anyhow::Error;
 
 	fn try_from(proto: ValueProto) -> Result<Self, Self::Error> {
-        use crate::proto::surrealdb::value::value;
+        use crate::protocol::surrealdb::value::value;
 
 		let Some(inner) = proto.inner else {
 			return Ok(crate::expr::Value::None);
@@ -81,8 +81,8 @@ impl TryFrom<crate::expr::Value> for ValueProto {
 
 	fn try_from(value: crate::expr::Value) -> Result<Self, Self::Error> {
         use crate::expr::{Value, Number};
-		use crate::proto::surrealdb::value as value_proto;
-		use crate::proto::surrealdb::value::value::Inner as ValueInner;
+		use crate::protocol::surrealdb::value as value_proto;
+		use crate::protocol::surrealdb::value::value::Inner as ValueInner;
 
 		let inner = match value {
 			// These value types are simple values which
@@ -145,14 +145,14 @@ impl TryFrom<crate::expr::Value> for ValueProto {
 impl From<String> for ValueProto {
     fn from(value: String) -> Self {
         ValueProto {
-            inner: Some(crate::proto::surrealdb::value::value::Inner::Strand(value)),
+            inner: Some(crate::protocol::surrealdb::value::value::Inner::Strand(value)),
         }
     }
 }
 impl From<&str> for ValueProto {
     fn from(value: &str) -> Self {
         ValueProto {
-            inner: Some(crate::proto::surrealdb::value::value::Inner::Strand(value.to_string())),
+            inner: Some(crate::protocol::surrealdb::value::value::Inner::Strand(value.to_string())),
         }
     }
 }
@@ -248,7 +248,7 @@ impl TryFrom<GeometryProto> for crate::expr::Geometry {
     type Error = anyhow::Error;
 
     fn try_from(proto: GeometryProto) -> Result<Self, Self::Error> {
-        use crate::proto::surrealdb::value::geometry;
+        use crate::protocol::surrealdb::value::geometry;
 
         let Some(inner) = proto.inner else {
             return Err(anyhow::anyhow!("Invalid Geometry: missing value"));
@@ -272,7 +272,7 @@ impl TryFrom<crate::expr::Geometry> for GeometryProto {
     type Error = anyhow::Error;
 
     fn try_from(geometry: crate::expr::Geometry) -> Result<Self, Self::Error> {
-        use crate::proto::surrealdb::value::geometry;
+        use crate::protocol::surrealdb::value::geometry;
 
         let inner = match geometry {
             crate::expr::Geometry::Point(v) => geometry::Inner::Point(v.into()),
@@ -482,7 +482,7 @@ impl TryFrom<IdProto> for crate::expr::Id {
     type Error = anyhow::Error;
 
     fn try_from(proto: IdProto) -> Result<Self, Self::Error> {
-        use crate::proto::surrealdb::value::id;
+        use crate::protocol::surrealdb::value::id;
         let Some(inner) = proto.inner else {
             return Err(anyhow::anyhow!("Invalid Id: missing value"));
         };
@@ -500,7 +500,7 @@ impl TryFrom<crate::expr::Id> for IdProto {
     type Error = anyhow::Error;
 
     fn try_from(id: crate::expr::Id) -> Result<Self, Self::Error> {
-        use crate::proto::surrealdb::value::id;
+        use crate::protocol::surrealdb::value::id;
 
         let inner = match id {
             crate::expr::Id::Number(v) => id::Inner::Number(v),

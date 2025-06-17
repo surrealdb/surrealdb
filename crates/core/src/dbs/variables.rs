@@ -35,7 +35,7 @@ impl Attach for Variables {
 }
 
 pub fn proto_variables_to_expr_variables(
-	variables: &BTreeMap<String, crate::proto::surrealdb::value::Value>,
+	variables: &BTreeMap<String, crate::protocol::surrealdb::value::Value>,
 ) -> anyhow::Result<BTreeMap<String, crate::expr::Value>> {
 	let mut expr_variables = BTreeMap::new();
 	for (key, val) in variables {
