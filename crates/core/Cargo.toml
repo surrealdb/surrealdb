@@ -137,7 +137,7 @@ revision = { version = "0.10.0", features = [
 ] }
 rmpv = "1.0.1"
 roaring = { version = "0.10.6", features = ["serde"] }
-rocksdb = { version = "0.22.0", features = ["lz4", "snappy"], optional = true }
+rocksdb = { version = "0.23.0", features = ["lz4", "snappy"], optional = true}
 rust_decimal = { version = "1.36.0", features = ["maths", "serde-str"] }
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
@@ -174,14 +174,14 @@ serial_test = "2.0.0"
 temp-dir = "0.1.11"
 test-log = { version = "0.2.13", features = ["trace"] }
 time = { version = "0.3.36", features = ["serde"] }
-tokio = { version = "1.41.1", features = ["macros", "sync", "rt-multi-thread"] }
+tokio = { version = "= 1.42.1", features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 wiremock = "0.6.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
 ring = { version = "0.17.7", features = ["wasm32_unknown_unknown_js"] }
-tokio = { version = "1.41.1", default-features = false, features = [
+tokio = { version = "= 1.42.1", default-features = false, features = [
     "rt",
     "sync",
 ] }
@@ -193,7 +193,7 @@ wasmtimer = { version = "0.2.0", default-features = false, features = [
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.41.1", default-features = false, features = [
+tokio = { version = "= 1.42.1", default-features = false, features = [
     "macros",
     "io-util",
     "io-std",

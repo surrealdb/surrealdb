@@ -823,6 +823,10 @@ criteria = "safe-to-deploy"
 version = "0.16.0+8.10.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.librocksdb-sys]]
+version = "0.17.1+9.9.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.libz-sys]]
 version = "1.1.16"
 criteria = "safe-to-deploy"
@@ -1311,6 +1315,10 @@ criteria = "safe-to-deploy"
 version = "0.22.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.rocksdb]]
+version = "0.23.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.rquickjs]]
 version = "0.8.1"
 criteria = "safe-to-deploy"
@@ -1585,6 +1593,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tinytemplate]]
 version = "1.2.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.tokio]]
+version = "1.42.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-io-timeout]]

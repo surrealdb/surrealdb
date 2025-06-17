@@ -179,7 +179,7 @@ impl std::str::FromStr for NetTarget {
 		if let Ok(url) = Url::parse(format!("http://{s}").as_str()) {
 			if let Some(host) = url.host() {
 				// Url::parse will return port=None if the provided port was 80 (given we are using the http scheme). Get the original port from the string.
-				if let Some(Ok(port)) = s.split(':').last().map(|p| p.parse::<u16>()) {
+				if let Some(Ok(port)) = s.split(':').next_back().map(|p| p.parse::<u16>()) {
 					return Ok(NetTarget::Host(host.to_owned(), Some(port)));
 				} else {
 					return Ok(NetTarget::Host(host.to_owned(), None));

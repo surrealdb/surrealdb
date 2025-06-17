@@ -10,7 +10,7 @@ use surrealdb::sql::Value;
 async fn future_function_simple() -> Result<(), Error> {
 	let sql = "
 		UPSERT person:test SET can_drive = <future> { birthday && time::now() > birthday + 18y };
-		UPSERT person:test SET birthday = <datetime> '2007-06-22';
+		UPSERT person:test SET birthday = <datetime> '2023-06-22';
 		UPSERT person:test SET birthday = <datetime> '2001-06-22';
 	";
 	let dbs = new_ds().await?;
@@ -24,7 +24,7 @@ async fn future_function_simple() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val =
-		Value::parse("[{ id: person:test, birthday: d'2007-06-22T00:00:00Z', can_drive: false }]");
+		Value::parse("[{ id: person:test, birthday: d'2023-06-22T00:00:00Z', can_drive: false }]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
