@@ -1,21 +1,19 @@
-use super::{FlowResultExt as _, Range};
+use super::FlowResultExt as _;
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{Strand, Thing, Uuid, Value, escape::EscapeRid};
-use crate::val::{Array, Object, Value};
+use crate::expr::{Uuid, Value, escape::EscapeRid};
+use crate::val::{Array, Number, Object};
 
 use anyhow::Result;
 use nanoid::nanoid;
-use range::IdRange;
+use range::KeyRange;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 use ulid::Ulid;
 
 pub mod range;
@@ -34,153 +32,39 @@ pub enum Gen {
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub enum Id {
+pub enum RecordIdKeyLit {
 	Number(i64),
 	String(String),
 	Uuid(Uuid),
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
-	Range(Box<IdRange>),
+	Range(Box<KeyRange>),
 }
 
-impl From<i64> for Id {
-	fn from(v: i64) -> Self {
-		Self::Number(v)
-	}
-}
-
-impl From<i32> for Id {
-	fn from(v: i32) -> Self {
-		Self::Number(v as i64)
-	}
-}
-
-impl From<u64> for Id {
-	fn from(v: u64) -> Self {
-		Self::Number(v as i64)
-	}
-}
-
-impl From<String> for Id {
-	fn from(v: String) -> Self {
-		Self::String(v)
-	}
-}
-
-impl From<Array> for Id {
-	fn from(v: Array) -> Self {
-		Self::Array(v)
-	}
-}
-
-impl From<Object> for Id {
-	fn from(v: Object) -> Self {
-		Self::Object(v)
-	}
-}
-
-impl From<Uuid> for Id {
-	fn from(v: Uuid) -> Self {
-		Self::Uuid(v)
-	}
-}
-
-impl From<Strand> for Id {
-	fn from(v: Strand) -> Self {
-		Self::String(v.as_string())
-	}
-}
-
-impl From<&str> for Id {
-	fn from(v: &str) -> Self {
-		Self::String(v.to_owned())
-	}
-}
-
-impl From<&String> for Id {
-	fn from(v: &String) -> Self {
-		Self::String(v.to_owned())
-	}
-}
-
-impl From<Vec<&str>> for Id {
-	fn from(v: Vec<&str>) -> Self {
-		Self::Array(v.into())
-	}
-}
-
-impl From<Vec<String>> for Id {
-	fn from(v: Vec<String>) -> Self {
-		Self::Array(v.into())
-	}
-}
-
-impl From<Vec<Value>> for Id {
-	fn from(v: Vec<Value>) -> Self {
-		Self::Array(v.into())
-	}
-}
-
-impl From<BTreeMap<String, Value>> for Id {
-	fn from(v: BTreeMap<String, Value>) -> Self {
-		Self::Object(v.into())
-	}
-}
-
-impl From<Number> for Id {
-	fn from(v: Number) -> Self {
-		match v {
-			Number::Int(v) => v.into(),
-			Number::Float(v) => v.to_string().into(),
-			Number::Decimal(v) => v.to_string().into(),
-		}
-	}
-}
-
-impl From<IdRange> for Id {
-	fn from(v: IdRange) -> Self {
-		Self::Range(Box::new(v))
-	}
-}
-
-impl TryFrom<(Bound<Id>, Bound<Id>)> for Id {
-	type Error = anyhow::Error;
-	fn try_from(v: (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
-		v.try_into().map(|x| Id::Range(Box::new(x)))
-	}
-}
-
-impl TryFrom<Range> for Id {
-	type Error = anyhow::Error;
-	fn try_from(v: Range) -> Result<Self, Self::Error> {
-		v.try_into().map(|x| Id::Range(Box::new(x)))
-	}
-}
-
-impl TryFrom<Value> for Id {
-	type Error = anyhow::Error;
-	fn try_from(v: Value) -> Result<Self, Self::Error> {
+impl RecordIdKeyLit {
+	/// Create a record id key from a value.
+	///
+	/// Returns the original value if the key can't be created from the value.
+	pub fn from_value(v: Value) -> Result<Self, Value> {
 		match v {
 			Value::Number(Number::Int(v)) => Ok(v.into()),
 			Value::Strand(v) => Ok(v.into()),
 			Value::Array(v) => Ok(v.into()),
 			Value::Object(v) => Ok(v.into()),
 			Value::Range(v) => v.deref().to_owned().try_into(),
-			v => Err(anyhow::Error::new(Error::IdInvalid {
-				value: v.kindof().to_string(),
-			})),
+			x => Err(x),
 		}
 	}
 }
 
-impl From<Thing> for Id {
-	fn from(v: Thing) -> Self {
-		v.id
+impl From<KeyRange> for RecordIdKeyLit {
+	fn from(v: KeyRange) -> Self {
+		Self::Range(Box::new(v))
 	}
 }
 
-impl Id {
+impl RecordIdKeyLit {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
 		Self::String(nanoid!(20, &ID_CHARS))
@@ -205,25 +89,9 @@ impl Id {
 			_ => false,
 		}
 	}
-	/// Convert the Id to a raw String
-	pub fn to_raw(&self) -> String {
-		match self {
-			Self::Number(v) => v.to_string(),
-			Self::String(v) => v.to_string(),
-			Self::Uuid(v) => v.to_string(),
-			Self::Array(v) => v.to_string(),
-			Self::Object(v) => v.to_string(),
-			Self::Generate(v) => match v {
-				Gen::Rand => "rand()".to_string(),
-				Gen::Ulid => "ulid()".to_string(),
-				Gen::Uuid => "uuid()".to_string(),
-			},
-			Self::Range(v) => v.to_string(),
-		}
-	}
 }
 
-impl Display for Id {
+impl Display for RecordIdKeyLit {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
@@ -241,7 +109,7 @@ impl Display for Id {
 	}
 }
 
-impl Id {
+impl RecordIdKeyLit {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -249,25 +117,29 @@ impl Id {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Id> {
+	) -> Result<RecordIdKeyLit> {
 		match self {
-			Id::Number(v) => Ok(Id::Number(*v)),
-			Id::String(v) => Ok(Id::String(v.clone())),
-			Id::Uuid(v) => Ok(Id::Uuid(*v)),
-			Id::Array(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-				Value::Array(v) => Ok(Id::Array(v)),
+			RecordIdKeyLit::Number(v) => Ok(RecordIdKeyLit::Number(*v)),
+			RecordIdKeyLit::String(v) => Ok(RecordIdKeyLit::String(v.clone())),
+			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKeyLit::Uuid(*v)),
+			RecordIdKeyLit::Array(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
+				Value::Array(v) => Ok(RecordIdKeyLit::Array(v)),
 				v => fail!("Expected a Value::Array but found {v:?}"),
 			},
-			Id::Object(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-				Value::Object(v) => Ok(Id::Object(v)),
-				v => fail!("Expected a Value::Object but found {v:?}"),
-			},
-			Id::Generate(v) => match v {
+			RecordIdKeyLit::Object(v) => {
+				match v.compute(stk, ctx, opt, doc).await.catch_return()? {
+					Value::Object(v) => Ok(RecordIdKeyLit::Object(v)),
+					v => fail!("Expected a Value::Object but found {v:?}"),
+				}
+			}
+			RecordIdKeyLit::Generate(v) => match v {
 				Gen::Rand => Ok(Self::rand()),
 				Gen::Ulid => Ok(Self::ulid()),
 				Gen::Uuid => Ok(Self::uuid()),
 			},
-			Id::Range(v) => Ok(Id::Range(Box::new(v.compute(stk, ctx, opt, doc).await?))),
+			RecordIdKeyLit::Range(v) => {
+				Ok(RecordIdKeyLit::Range(Box::new(v.compute(stk, ctx, opt, doc).await?)))
+			}
 		}
 	}
 }

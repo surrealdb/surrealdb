@@ -8,7 +8,7 @@ use std::time::Duration;
 use surrealdb::expr::index::Distance;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::expr::index::{HnswParams, VectorType};
-use surrealdb_core::expr::{Array, Id, Number, Thing, Value, value};
+use surrealdb_core::expr::{Array, Number, RecordIdKeyLit, Thing, Value, value};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};
 use surrealdb_core::idx::trees::hnsw::index::HnswIndex;
@@ -174,7 +174,7 @@ fn new_vectors_from_file(path: &str) -> Vec<(Thing, Array)> {
 		let line = line_result.unwrap();
 		let value = value(&line).unwrap();
 		if let Value::Array(a) = value {
-			res.push((Thing::from(("e", Id::from(i as i64))), a));
+			res.push((Thing::from(("e", RecordIdKeyLit::from(i as i64))), a));
 		} else {
 			panic!("Wrong value");
 		}

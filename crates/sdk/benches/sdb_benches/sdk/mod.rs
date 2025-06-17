@@ -2,7 +2,7 @@ use criterion::{Criterion, Throughput};
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 use std::time::Duration;
-use surrealdb::{Surreal, engine::any::Any, sql::Id};
+use surrealdb::{Surreal, engine::any::Any, sql::RecordIdKeyLit};
 
 mod routines;
 
@@ -10,7 +10,7 @@ static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Record {
-	field: Id,
+	field: RecordIdKeyLit,
 }
 
 pub(super) async fn init(target: &str) {

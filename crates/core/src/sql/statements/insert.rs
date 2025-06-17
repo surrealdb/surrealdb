@@ -1,15 +1,14 @@
-use crate::sql::{Data, Output, SqlValue, Timeout, Version};
+use crate::sql::{Data, Expr, Output, Timeout, Version};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct InsertStatement {
-	pub into: Option<SqlValue>,
+	pub into: Option<Expr>,
 	pub data: Data,
 	/// Does the statement have the ignore clause.
 	pub ignore: bool,
@@ -17,9 +16,7 @@ pub struct InsertStatement {
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	#[revision(start = 2)]
 	pub relation: bool,
-	#[revision(start = 3)]
 	pub version: Option<Version>,
 }
 

@@ -9,7 +9,7 @@ pub use table::AlterTableStatement;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::value::Value;
+use crate::val::Value;
 use anyhow::Result;
 
 use reblessive::tree::Stk;
@@ -17,15 +17,18 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
+pub enum AlterKind<T> {
+	Set(T),
+	Drop,
+	None,
+}
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum AlterStatement {
 	Table(AlterTableStatement),
-	#[revision(start = 2)]
 	Sequence(AlterSequenceStatement),
-	#[revision(start = 3)]
 	Field(AlterFieldStatement),
 }
 

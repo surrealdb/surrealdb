@@ -85,7 +85,7 @@ pub async fn db_access(
 
 	// Check the access method type
 	// Currently, only the record access method supports signup
-	let AccessType::Record(ref at) = av.kind else {
+	let AccessType::Record(ref at) = av.access_type else {
 		bail!(Error::AccessMethodMismatch)
 	};
 

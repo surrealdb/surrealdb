@@ -21,21 +21,18 @@ use std::fmt::{self, Display};
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[revisioned(revision = 4)]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineIndexStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub what: Ident,
 	pub cols: Idioms,
 	pub index: Index,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
-	#[revision(start = 4)]
 	pub concurrently: bool,
 }
 
@@ -55,13 +52,17 @@ impl DefineIndexStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_tb_index(ns, db, &self.what, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::IxAlreadyExists {
-					name: self.name.to_string(),
-				});
+		if let Ok(define_index_statement) = txn.get_tb_index(ns, db, &self.what, &self.name).await {
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::IxAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 			// Clear the index store cache
 			#[cfg(not(target_family = "wasm"))]
@@ -100,8 +101,7 @@ impl DefineIndexStatement {
 			key,
 			revision::to_vec(&DefineIndexStatement {
 				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
-				if_not_exists: false,
-				overwrite: false,
+				kind: DefineKind::Default,
 				concurrently: false,
 				..self.clone()
 			})?,

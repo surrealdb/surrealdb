@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Array, Base, Ident, Strand, Value, filter::Filter, tokenizer::Tokenizer};
+use crate::expr::{Base, Ident, Strand, Value, filter::Filter, tokenizer::Tokenizer};
 use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail};
 
@@ -11,21 +11,18 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 4)]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineAnalyzerStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
-	#[revision(start = 2)]
 	pub function: Option<Ident>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
-	#[revision(start = 3)]
-	pub if_not_exists: bool,
-	#[revision(start = 4)]
-	pub overwrite: bool,
 }
 
 impl DefineAnalyzerStatement {
@@ -42,12 +39,16 @@ impl DefineAnalyzerStatement {
 		let (ns, db) = opt.ns_db()?;
 		// Check if the definition exists
 		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::AzAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if opt.import {
+						bail!(Error::AzAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
@@ -56,8 +57,7 @@ impl DefineAnalyzerStatement {
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		let az = DefineAnalyzerStatement {
 			// Don't persist the `IF NOT EXISTS` clause to schema
-			if_not_exists: false,
-			overwrite: false,
+			kind: DefineKind::Default,
 			..self.clone()
 		};
 		ctx.get_index_stores().mappers().load(&az).await?;

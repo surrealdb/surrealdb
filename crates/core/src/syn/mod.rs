@@ -4,7 +4,7 @@ use crate::{
 	cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH},
 	dbs::{Capabilities, capabilities::ExperimentalTarget},
 	err::Error,
-	sql::{Block, Datetime, Duration, Expr, Fetchs, Fields, Idiom, Kind, Output, Thing},
+	sql::{Ast, Block, Datetime, Duration, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit},
 	val::Value,
 };
 
@@ -118,7 +118,7 @@ pub fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Resul
 	);
 	let mut stack = Stack::new();
 	stack
-		.enter(|stk| parser.parse_value_field(stk))
+		.enter(|stk| parser.parse_expr_field(stk))
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
@@ -213,7 +213,7 @@ pub fn duration(input: &str) -> Result<Duration> {
 
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing(input: &str) -> Result<Thing> {
+pub fn thing(input: &str) -> Result<RecordIdLit> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
@@ -228,7 +228,7 @@ pub fn thing(input: &str) -> Result<Thing> {
 	);
 	let mut stack = Stack::new();
 	stack
-		.enter(|stk| parser.parse_thing(stk))
+		.enter(|stk| parser.parse_record_id(stk))
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
@@ -238,7 +238,7 @@ pub fn thing(input: &str) -> Result<Thing> {
 
 /// Parse a record id including ranges.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing_with_range(input: &str) -> Result<Thing> {
+pub fn thing_with_range(input: &str) -> Result<RecordIdLit> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
@@ -405,7 +405,7 @@ pub fn value_legacy_strand(input: &str) -> Result<Expr> {
 	);
 	let mut stack = Stack::new();
 	stack
-		.enter(|stk| parser.parse_value_field(stk))
+		.enter(|stk| parser.parse_expr_field(stk))
 		.finish()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))

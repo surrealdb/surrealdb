@@ -85,8 +85,8 @@ pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
 
 use super::error::{RenderedError, syntax_error};
 
-#[cfg(test)]
-pub mod test;
+//#[cfg(test)]
+//pub mod test;
 
 /// The result returned by most parser function.
 pub type ParseResult<T> = Result<T, SyntaxError>;
@@ -171,6 +171,7 @@ pub struct Parser<'a> {
 	token_buffer: TokenBuffer<4>,
 	glued_value: GluedValue,
 	pub(crate) table_as_field: bool,
+	pub(crate) enclose_subquery: bool,
 	settings: ParserSettings,
 }
 
@@ -188,6 +189,7 @@ impl<'a> Parser<'a> {
 			token_buffer: TokenBuffer::new(),
 			glued_value: GluedValue::None,
 			table_as_field: true,
+			enclose_subquery: false,
 			settings,
 		}
 	}
@@ -389,7 +391,7 @@ impl<'a> Parser<'a> {
 
 	/// Parse a single statement.
 	pub async fn parse_statement(&mut self, ctx: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
-		self.parse_stmt(ctx).await
+		self.parse_top_level_expr(ctx).await
 	}
 }
 

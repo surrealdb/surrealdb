@@ -1,29 +1,33 @@
 use crate::sql::reference::Reference;
-use crate::sql::{Ident, Permissions, SqlValue, Strand};
+use crate::sql::{Expr, Ident, Permissions, Strand};
 use crate::sql::{Idiom, Kind};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::AlterKind;
+
+pub enum AlterDefault {
+	None,
+	Drop,
+	Always(Expr),
+	Set(Expr),
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
 	pub if_exists: bool,
-	pub flex: Option<bool>,
-	pub kind: Option<Option<Kind>>,
-	pub readonly: Option<bool>,
-	pub value: Option<Option<SqlValue>>,
-	pub assert: Option<Option<SqlValue>>,
-	pub default: Option<Option<SqlValue>>,
+	pub flex: AlterKind<()>,
+	pub kind: AlterKind<Kind>,
+	pub readonly: AlterKind<()>,
+	pub value: AlterKind<Expr>,
+	pub assert: AlterKind<Expr>,
+	pub default: AlterDefault,
 	pub permissions: Option<Permissions>,
-	pub comment: Option<Option<Strand>>,
-	pub reference: Option<Option<Reference>>,
-	pub default_always: Option<bool>,
+	pub comment: AlterKind<Strand>,
+	pub reference: AlterKind<Reference>,
 }
 
 impl Display for AlterFieldStatement {
@@ -116,7 +120,6 @@ impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldSta
 			permissions: v.permissions.map(Into::into),
 			comment: v.comment.map(|opt| opt.map(Into::into)),
 			reference: v.reference.map(|opt| opt.map(Into::into)),
-			default_always: v.default_always,
 		}
 	}
 }
@@ -136,7 +139,6 @@ impl From<crate::expr::statements::alter::AlterFieldStatement> for AlterFieldSta
 			permissions: v.permissions.map(Into::into),
 			comment: v.comment.map(|opt| opt.map(Into::into)),
 			reference: v.reference.map(|opt| opt.map(Into::into)),
-			default_always: v.default_always,
 		}
 	}
 }

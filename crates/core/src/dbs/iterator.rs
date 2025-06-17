@@ -7,19 +7,13 @@ use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
 use crate::doc::{Document, IgnoreError};
 use crate::err::Error;
-use crate::expr::array::Array;
-use crate::expr::edges::Edges;
-use crate::expr::mock::Mock;
-use crate::expr::object::Object;
-use crate::expr::table::Table;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
-use crate::expr::{Fields, Id, IdRange};
+use crate::expr::{Fields, KeyRange, RecordIdKeyLit, Table};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
+use crate::val::{Object, RecordId, Value};
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::mem;
@@ -37,7 +31,7 @@ pub(crate) enum Iterable {
 	/// data from storage. This is used in CREATE statements
 	/// where we attempt to write data without first checking
 	/// if the record exists, throwing an error on failure.
-	Defer(Thing),
+	Defer(RecordId),
 	/// An iterable whose Record ID needs to be generated
 	/// before processing. This is used in CREATE statements
 	/// when generating a new id, or generating an id based
@@ -45,7 +39,7 @@ pub(crate) enum Iterable {
 	Yield(Table),
 	/// An iterable which needs to fetch the data of a
 	/// specific record before processing the document.
-	Thing(Thing),
+	Thing(RecordId),
 	/// An iterable which needs to fetch the related edges
 	/// of a record before processing each document.
 	Edges(Edges),
@@ -54,18 +48,18 @@ pub(crate) enum Iterable {
 	Table(Table, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	Range(String, IdRange, RecordStrategy, ScanDirection),
+	Range(String, KeyRange, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
 	/// passed in to the iterable is unique for each record.
-	Mergeable(Thing, Value),
+	Mergeable(RecordId, Value),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in RELATE statements. The optional value
 	/// is used in INSERT RELATION statements, where each value
 	/// passed in to the iterable is unique for each record.
-	Relatable(Thing, Thing, Thing, Option<Value>),
+	Relatable(RecordId, RecordId, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
@@ -77,7 +71,7 @@ pub(crate) enum Iterable {
 pub(crate) enum Operable {
 	Value(Arc<Value>),
 	Insert(Arc<Value>, Arc<Value>),
-	Relate(Thing, Arc<Value>, Thing, Option<Arc<Value>>),
+	Relate(RecordId, Arc<Value>, RecordId, Option<Arc<Value>>),
 	Count(usize),
 }
 
@@ -85,7 +79,7 @@ pub(crate) enum Operable {
 pub(crate) enum Workable {
 	Normal,
 	Insert(Arc<Value>),
-	Relate(Thing, Thing, Option<Arc<Value>>),
+	Relate(RecordId, RecordId, Option<Arc<Value>>),
 }
 
 #[derive(Debug)]
@@ -95,7 +89,7 @@ pub(crate) struct Processed {
 	/// Whether this document needs to have an ID generated
 	pub(crate) generate: Option<Table>,
 	/// The record id for this document that should be processed
-	pub(crate) rid: Option<Arc<Thing>>,
+	pub(crate) rid: Option<Arc<RecordId>>,
 	/// The record data for this document that should be processed
 	pub(crate) val: Operable,
 	/// The record iterator for this document, used in index scans
@@ -211,7 +205,7 @@ impl Iterator {
 		&mut self,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
-		v: Thing,
+		v: RecordId,
 	) -> Result<()> {
 		if v.is_range() {
 			return self.prepare_range(planner, ctx, v).await;
@@ -268,7 +262,7 @@ impl Iterator {
 		&mut self,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
-		v: Thing,
+		v: RecordId,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
 		let p = planner.check_table_permission(ctx, &v.tb).await?;
@@ -286,7 +280,7 @@ impl Iterator {
 		let rs = ctx.check_record_strategy(false, p)?;
 		let sc = ctx.check_scan_direction();
 		// Add the record to the iterator
-		if let (tb, Id::Range(v)) = (v.tb, v.id) {
+		if let (tb, RecordIdKeyLit::Range(v)) = (v.tb, v.id) {
 			self.ingest(Iterable::Range(tb, *v, rs, sc));
 		}
 		// All ingested ok

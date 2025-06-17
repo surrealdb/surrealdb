@@ -2,18 +2,20 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{
-	BinaryOperator, Block, Cast, Constant, FlowResult, Function, Future, Idiom, Literal, Mock,
-	Model, Param, Table, UnaryOperator, Value,
+	BinaryOperator, Block, Closure, Constant, FlowResult, FunctionCall, Future, Idiom, Literal,
+	Mock, Model, Param, PrefixOperator, Table, Value,
 	statements::{
 		AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
 		IfelseStatement, InfoStatement, InsertStatement, RebuildStatement, RelateStatement,
-		RemoveStatement, SelectStatement, UpdateStatement, UpsertStatement,
+		RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
 	},
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use super::PostfixOperator;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Serialize, Deserialize)]
@@ -29,9 +31,13 @@ pub enum Expr {
 	Block(Box<Block>),
 	Future(Box<Future>),
 	Constant(Constant),
-	Unary {
-		op: UnaryOperator,
+	Prefix {
+		op: PrefixOperator,
 		expr: Box<Expr>,
+	},
+	Postfix {
+		expr: Box<Expr>,
+		op: PostfixOperator,
 	},
 	Binary {
 		left: Box<Expr>,
@@ -40,7 +46,9 @@ pub enum Expr {
 	},
 	Model(Box<Model>),
 	// TODO: Factor out the call from the function expression.
-	Function(Box<Function>),
+	FunctionCall(Box<FunctionCall>),
+
+	Closure(Box<Closure>),
 
 	Break,
 	Continue,
@@ -61,12 +69,57 @@ pub enum Expr {
 	Alter(Box<AlterStatement>),
 	Info(Box<InfoStatement>),
 	Forach(Box<ForeachStatement>),
+	Let(Box<SetStatement>),
 }
 
 impl Expr {
 	/// Check if this expression does only reads.
-	pub(crate) fn readonly(&self) -> bool {
-		todo!()
+	pub(crate) fn read_only(&self) -> bool {
+		match self {
+			Expr::Literal(literal)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Constant(constant)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Info(_) => true,
+
+			Expr::Block(block) => block.read_only(),
+			Expr::Future(future) => future.read_only(),
+			Expr::Prefix {
+				expr,
+				..
+			}
+			| Expr::Postfix {
+				expr,
+				..
+			} => expr.read_only(),
+			Expr::Binary {
+				left,
+				right,
+				..
+			} => left.read_only() && right.read_only(),
+			Expr::Model(model) => model.read_only(),
+			Expr::Function(function) => function.read_only(),
+			Expr::Return(expr) => expr.read_only(),
+			Expr::Throw(expr) => expr.read_only(),
+			Expr::IfElse(s) => s.read_only(),
+			Expr::Select(s) => s.read_only(),
+			Expr::Let(s) => s.read_only(),
+			Expr::Forach(s) => s.read_only(),
+			Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Upsert(_)
+			| Expr::Alter(_) => false,
+		}
 	}
 
 	/// Checks whether all expression parts are static values

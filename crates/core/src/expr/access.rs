@@ -1,6 +1,7 @@
 use crate::expr::{
-	Duration, Id, Ident, Thing, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes,
+	Duration, Ident, RecordIdKeyLit, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes,
 };
+use crate::val::RecordId;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -94,10 +95,10 @@ impl Deref for Access {
 }
 
 impl Access {
-	pub fn generate(&self) -> Thing {
-		Thing {
-			tb: self.0.clone(),
-			id: Id::rand(),
+	pub fn generate(&self) -> RecordId {
+		RecordId {
+			table: self.0.clone(),
+			key: RecordIdKeyLit::rand(),
 		}
 	}
 }

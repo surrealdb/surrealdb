@@ -1,11 +1,10 @@
-use crate::sql::strand::no_nul_bytes;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Script(#[serde(with = "no_nul_bytes")] pub String);
+pub struct Script(pub String);
 
 impl From<String> for Script {
 	fn from(s: String) -> Self {

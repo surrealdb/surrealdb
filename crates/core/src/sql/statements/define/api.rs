@@ -1,36 +1,30 @@
 use crate::api::method::Method;
 use crate::api::path::Path;
 use crate::sql::fmt::{Fmt, pretty_indent};
-use crate::sql::{SqlValue, Strand};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::{Expr, Strand};
 use std::fmt::{self, Display};
 
+use super::DefineKind;
 use super::config::api::ApiConfig;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineApiStatement {
-	pub if_not_exists: bool,
-	pub overwrite: bool,
-	pub path: SqlValue,
+	pub kind: DefineKind,
+	pub path: Expr,
 	pub actions: Vec<ApiAction>,
-	pub fallback: Option<SqlValue>,
+	pub fallback: Option<Expr>,
 	pub config: Option<ApiConfig>,
-	#[revision(start = 2)]
 	pub comment: Option<Strand>,
 }
 
 impl Display for DefineApiStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE API")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE"),
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS"),
 		}
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
@@ -66,8 +60,7 @@ impl Display for DefineApiStatement {
 impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
 	fn from(v: DefineApiStatement) -> Self {
 		crate::expr::statements::DefineApiStatement {
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			kind: v.kind.into(),
 			path: v.path.into(),
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
@@ -80,8 +73,7 @@ impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
 impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 	fn from(v: crate::expr::statements::DefineApiStatement) -> Self {
 		DefineApiStatement {
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			kind: v.kind.into(),
 			path: v.path.into(),
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
@@ -91,30 +83,15 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[non_exhaustive]
 pub struct ApiDefinition {
 	pub id: Option<u32>,
 	pub path: Path,
 	pub actions: Vec<ApiAction>,
-	pub fallback: Option<SqlValue>,
+	pub fallback: Option<Expr>,
 	pub config: Option<ApiConfig>,
 	pub comment: Option<Strand>,
-}
-
-impl From<ApiDefinition> for DefineApiStatement {
-	fn from(value: ApiDefinition) -> Self {
-		DefineApiStatement {
-			if_not_exists: false,
-			overwrite: false,
-			path: value.path.to_string().into(),
-			actions: value.actions,
-			fallback: value.fallback,
-			config: value.config,
-			comment: value.comment,
-		}
-	}
 }
 
 impl Display for ApiDefinition {
@@ -124,13 +101,11 @@ impl Display for ApiDefinition {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct ApiAction {
 	pub methods: Vec<Method>,
-	pub action: SqlValue,
+	pub action: Expr,
 	pub config: Option<ApiConfig>,
 }
 

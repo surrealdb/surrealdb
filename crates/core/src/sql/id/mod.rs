@@ -1,260 +1,30 @@
-use super::Range;
-use crate::cnf::ID_CHARS;
-use crate::err::Error;
-use crate::sql::{Array, Number, Object, SqlValue, Strand, Thing, Uuid, escape::EscapeRid};
-use anyhow::Result;
-use nanoid::nanoid;
-use range::IdRange;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use crate::sql::{Expr, Uuid, escape::EscapeRid, literal::ObjectEntry};
 use std::fmt::{self, Display, Formatter};
-use std::ops::{Bound, Deref};
-use ulid::Ulid;
 
 pub mod range;
+pub use range::IdRange;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Gen {
 	Rand,
 	Ulid,
 	Uuid,
 }
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum Id {
+pub enum RecordIdKeyLit {
 	Number(i64),
 	String(String),
-	#[revision(start = 2)]
 	Uuid(Uuid),
-	Array(Array),
-	Object(Object),
+	Array(Vec<Expr>),
+	Object(Vec<ObjectEntry>),
 	Generate(Gen),
 	Range(Box<IdRange>),
 }
 
-impl From<i64> for Id {
-	fn from(v: i64) -> Self {
-		Self::Number(v)
-	}
-}
-
-impl From<i32> for Id {
-	fn from(v: i32) -> Self {
-		Self::Number(v as i64)
-	}
-}
-
-impl From<u64> for Id {
-	fn from(v: u64) -> Self {
-		Self::Number(v as i64)
-	}
-}
-
-impl From<String> for Id {
-	fn from(v: String) -> Self {
-		Self::String(v)
-	}
-}
-
-impl From<Array> for Id {
-	fn from(v: Array) -> Self {
-		Self::Array(v)
-	}
-}
-
-impl From<Object> for Id {
-	fn from(v: Object) -> Self {
-		Self::Object(v)
-	}
-}
-
-impl From<Uuid> for Id {
-	fn from(v: Uuid) -> Self {
-		Self::Uuid(v)
-	}
-}
-
-impl From<Strand> for Id {
-	fn from(v: Strand) -> Self {
-		Self::String(v.as_string())
-	}
-}
-
-impl From<&str> for Id {
-	fn from(v: &str) -> Self {
-		Self::String(v.to_owned())
-	}
-}
-
-impl From<&String> for Id {
-	fn from(v: &String) -> Self {
-		Self::String(v.to_owned())
-	}
-}
-
-impl From<Vec<&str>> for Id {
-	fn from(v: Vec<&str>) -> Self {
-		Self::Array(v.into())
-	}
-}
-
-impl From<Vec<String>> for Id {
-	fn from(v: Vec<String>) -> Self {
-		Self::Array(v.into())
-	}
-}
-
-impl From<Vec<SqlValue>> for Id {
-	fn from(v: Vec<SqlValue>) -> Self {
-		Self::Array(v.into())
-	}
-}
-
-impl From<BTreeMap<String, SqlValue>> for Id {
-	fn from(v: BTreeMap<String, SqlValue>) -> Self {
-		Self::Object(v.into())
-	}
-}
-
-impl From<Number> for Id {
-	fn from(v: Number) -> Self {
-		match v {
-			Number::Int(v) => v.into(),
-			Number::Float(v) => v.to_string().into(),
-			Number::Decimal(v) => v.to_string().into(),
-		}
-	}
-}
-
-impl From<IdRange> for Id {
-	fn from(v: IdRange) -> Self {
-		Self::Range(Box::new(v))
-	}
-}
-
-impl TryFrom<(Bound<Id>, Bound<Id>)> for Id {
-	type Error = anyhow::Error;
-	fn try_from(v: (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
-		v.try_into().map(|x| Id::Range(Box::new(x)))
-	}
-}
-
-impl TryFrom<Range> for Id {
-	type Error = anyhow::Error;
-	fn try_from(v: Range) -> Result<Self, Self::Error> {
-		v.try_into().map(|x| Id::Range(Box::new(x)))
-	}
-}
-
-impl TryFrom<SqlValue> for Id {
-	type Error = anyhow::Error;
-	fn try_from(v: SqlValue) -> Result<Self, Self::Error> {
-		match v {
-			SqlValue::Number(Number::Int(v)) => Ok(v.into()),
-			SqlValue::Strand(v) => Ok(v.into()),
-			SqlValue::Array(v) => Ok(v.into()),
-			SqlValue::Object(v) => Ok(v.into()),
-			SqlValue::Range(v) => v.deref().to_owned().try_into(),
-			v => Err(anyhow::Error::new(Error::IdInvalid {
-				value: v.kindof().to_string(),
-			})),
-		}
-	}
-}
-
-impl From<Thing> for Id {
-	fn from(v: Thing) -> Self {
-		v.id
-	}
-}
-
-impl From<Id> for crate::expr::Id {
-	fn from(v: Id) -> Self {
-		match v {
-			Id::Number(v) => crate::expr::Id::Number(v),
-			Id::String(v) => crate::expr::Id::String(v),
-			Id::Uuid(v) => crate::expr::Id::Uuid(v.into()),
-			Id::Array(v) => crate::expr::Id::Array(v.into()),
-			Id::Object(v) => crate::expr::Id::Object(v.into()),
-			Id::Generate(v) => match v {
-				Gen::Rand => crate::expr::Id::Generate(crate::expr::id::Gen::Rand),
-				Gen::Ulid => crate::expr::Id::Generate(crate::expr::id::Gen::Ulid),
-				Gen::Uuid => crate::expr::Id::Generate(crate::expr::id::Gen::Uuid),
-			},
-			Id::Range(v) => crate::expr::Id::Range(Box::new((*v).into())),
-		}
-	}
-}
-
-impl From<crate::expr::Id> for Id {
-	fn from(v: crate::expr::Id) -> Self {
-		match v {
-			crate::expr::Id::Number(v) => Id::Number(v),
-			crate::expr::Id::String(v) => Id::String(v),
-			crate::expr::Id::Uuid(v) => Id::Uuid(v.into()),
-			crate::expr::Id::Array(v) => Id::Array(v.into()),
-			crate::expr::Id::Object(v) => Id::Object(v.into()),
-			crate::expr::Id::Generate(v) => match v {
-				crate::expr::id::Gen::Rand => Id::Generate(Gen::Rand),
-				crate::expr::id::Gen::Ulid => Id::Generate(Gen::Ulid),
-				crate::expr::id::Gen::Uuid => Id::Generate(Gen::Uuid),
-			},
-			crate::expr::Id::Range(v) => Id::Range(Box::new((*v).into())),
-		}
-	}
-}
-
-impl Id {
-	/// Generate a new random ID
-	pub fn rand() -> Self {
-		Self::String(nanoid!(20, &ID_CHARS))
-	}
-	/// Generate a new random ULID
-	pub fn ulid() -> Self {
-		Self::String(Ulid::new().to_string())
-	}
-	/// Generate a new random UUID
-	pub fn uuid() -> Self {
-		Self::Uuid(Uuid::new_v7())
-	}
-	/// Check if this Id matches a value
-	pub fn is(&self, val: &SqlValue) -> bool {
-		match (self, val) {
-			(Self::Number(i), SqlValue::Number(Number::Int(j))) if *i == *j => true,
-			(Self::String(i), SqlValue::Strand(j)) if *i == j.0 => true,
-			(Self::Uuid(i), SqlValue::Uuid(j)) if i == j => true,
-			(Self::Array(i), SqlValue::Array(j)) if i == j => true,
-			(Self::Object(i), SqlValue::Object(j)) if i == j => true,
-			(i, SqlValue::Thing(t)) if i == &t.id => true,
-			_ => false,
-		}
-	}
-	/// Convert the Id to a raw String
-	pub fn to_raw(&self) -> String {
-		match self {
-			Self::Number(v) => v.to_string(),
-			Self::String(v) => v.to_string(),
-			Self::Uuid(v) => v.to_string(),
-			Self::Array(v) => v.to_string(),
-			Self::Object(v) => v.to_string(),
-			Self::Generate(v) => match v {
-				Gen::Rand => "rand()".to_string(),
-				Gen::Ulid => "ulid()".to_string(),
-				Gen::Uuid => "uuid()".to_string(),
-			},
-			Self::Range(v) => v.to_string(),
-		}
-	}
-}
-
-impl Display for Id {
+impl Display for RecordIdKeyLit {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
@@ -271,5 +41,3 @@ impl Display for Id {
 		}
 	}
 }
-
-impl Id {}

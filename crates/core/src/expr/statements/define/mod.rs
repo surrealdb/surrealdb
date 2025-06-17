@@ -4,7 +4,6 @@ mod api;
 mod bucket;
 pub mod config;
 mod database;
-mod deprecated;
 mod event;
 mod field;
 mod function;
@@ -23,7 +22,7 @@ pub use bucket::DefineBucketStatement;
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
 pub use event::DefineEventStatement;
-pub use field::DefineFieldStatement;
+pub use field::{DefineDefault, DefineFieldStatement};
 pub use function::DefineFunctionStatement;
 pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
@@ -32,9 +31,6 @@ pub use param::DefineParamStatement;
 pub use sequence::DefineSequenceStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
-
-pub use deprecated::scope::DefineScopeStatement;
-pub use deprecated::token::DefineTokenStatement;
 
 pub use api::ApiAction;
 pub use api::ApiDefinition;
@@ -45,7 +41,6 @@ pub use bucket::BucketDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::value::Value;
 use anyhow::Result;
 
 use reblessive::tree::Stk;
@@ -53,27 +48,20 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 5)]
+pub enum DefineKind {
+	Default,
+	Overwrite,
+	IfNotExists,
+}
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
 	Function(DefineFunctionStatement),
 	Analyzer(DefineAnalyzerStatement),
-	#[revision(
-		end = 2,
-		convert_fn = "convert_token_to_access",
-		fields_name = "DefineTokenStatementFields"
-	)]
-	Token(DefineTokenStatement),
-	#[revision(
-		end = 2,
-		convert_fn = "convert_scope_to_access",
-		fields_name = "DefineScopeStatementFields"
-	)]
-	Scope(DefineScopeStatement),
 	Param(DefineParamStatement),
 	Table(DefineTableStatement),
 	Event(DefineEventStatement),
@@ -81,38 +69,17 @@ pub enum DefineStatement {
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
 	Model(DefineModelStatement),
-	#[revision(start = 2)]
 	Access(DefineAccessStatement),
 	Config(DefineConfigStatement),
-	#[revision(start = 3)]
 	Api(DefineApiStatement),
-	#[revision(start = 4)]
 	Bucket(DefineBucketStatement),
-	#[revision(start = 5)]
 	Sequence(DefineSequenceStatement),
-}
-
-// Revision implementations
-impl DefineStatement {
-	fn convert_token_to_access(
-		fields: DefineTokenStatementFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(DefineStatement::Access(fields.0.into()))
-	}
-
-	fn convert_scope_to_access(
-		fields: DefineScopeStatementFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(DefineStatement::Access(fields.0.into()))
-	}
 }
 
 impl DefineStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
+	pub(crate) fn read_only(&self) -> bool {
+		false
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(

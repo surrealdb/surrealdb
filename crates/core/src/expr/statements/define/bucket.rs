@@ -1,7 +1,7 @@
 use crate::buc::{self, BucketConnectionKey};
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, FlowResultExt, Ident, Permission, Strand, Value};
+use crate::expr::{Base, Expr, FlowResultExt, Ident, Permission, Strand, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::{ctx::Context, expr::statements::info::InfoStructure};
 use anyhow::{Result, bail};
@@ -10,17 +10,16 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-use super::CursorDoc;
+use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineBucketStatement {
-	pub if_not_exists: bool,
-	pub overwrite: bool,
+	pub kind: DefineKind,
 	pub name: Ident,
-	pub backend: Option<Value>,
+	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
 	pub comment: Option<Strand>,
@@ -41,12 +40,18 @@ impl DefineBucketStatement {
 		let (ns, db) = (opt.ns()?, opt.db()?);
 		// Check if the definition exists
 		if txn.get_db_bucket(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::BuAlreadyExists {
-					value: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::BuAlreadyExists {
+							value: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
 			}
 		}
 		// Process the backend input

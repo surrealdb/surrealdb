@@ -1,24 +1,18 @@
 use crate::sql::{Ident, Strand, filter::Filter, tokenizer::Tokenizer};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::DefineKind;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineAnalyzerStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
-	#[revision(start = 2)]
 	pub function: Option<Ident>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
-	#[revision(start = 3)]
-	pub if_not_exists: bool,
-	#[revision(start = 4)]
-	pub overwrite: bool,
 }
 
 impl Display for DefineAnalyzerStatement {
@@ -52,13 +46,12 @@ impl Display for DefineAnalyzerStatement {
 impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerStatement {
 	fn from(v: DefineAnalyzerStatement) -> Self {
 		crate::expr::statements::DefineAnalyzerStatement {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			function: v.function.map(Into::into),
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
 			comment: v.comment.map(Into::into),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
 		}
 	}
 }
@@ -66,13 +59,12 @@ impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerSt
 impl From<crate::expr::statements::DefineAnalyzerStatement> for DefineAnalyzerStatement {
 	fn from(v: crate::expr::statements::DefineAnalyzerStatement) -> Self {
 		DefineAnalyzerStatement {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			function: v.function.map(Into::into),
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
 			comment: v.comment.map(Into::into),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
 		}
 	}
 }

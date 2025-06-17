@@ -11,7 +11,7 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::expr::id::Id;
+	use crate::expr::id::RecordIdKeyLit;
 	use crate::expr::thing::Thing;
 	use crate::sql::SqlValue;
 	use crate::syn::Parse;
@@ -29,7 +29,7 @@ mod tests {
 			SqlValue::parse("{ id: test:id, test: { other: null, something: 123 } }").into();
 		let res = Value::Thing(Thing {
 			tb: String::from("test"),
-			id: Id::from("id"),
+			id: RecordIdKeyLit::from("id"),
 		});
 		assert_eq!(res, val.rid());
 	}

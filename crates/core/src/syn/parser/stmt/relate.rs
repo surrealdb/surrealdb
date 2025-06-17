@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{SqlValue, Subquery, statements::RelateStatement},
+	sql::statements::RelateStatement,
 	syn::{
 		parser::{
 			ParseResult, Parser,
@@ -121,13 +121,13 @@ impl Parser<'_> {
 					.map(|x| SqlValue::Subquery(Box::new(x)))?;
 				Ok(res)
 			}
-			_ => self.parse_thing(ctx).await.map(SqlValue::Thing),
+			_ => self.parse_record_id(ctx).await.map(SqlValue::Thing),
 		}
 	}
 
 	pub async fn parse_thing_or_table(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		if self.peek_whitespace1().kind == t!(":") {
-			self.parse_thing(ctx).await.map(SqlValue::Thing)
+			self.parse_record_id(ctx).await.map(SqlValue::Thing)
 		} else {
 			self.next_token_value().map(SqlValue::Table)
 		}

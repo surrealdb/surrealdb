@@ -1,84 +1,21 @@
-use crate::sql::cond::Cond;
-use crate::sql::dir::Dir;
-use crate::sql::field::Fields;
-use crate::sql::group::Groups;
-use crate::sql::idiom::Idiom;
-use crate::sql::limit::Limit;
-use crate::sql::order::{OldOrders, Order, OrderList, Ordering};
-use crate::sql::split::Splits;
-use crate::sql::start::Start;
-use crate::sql::table::Tables;
-use anyhow::Result;
+use crate::sql::order::Ordering;
+use crate::sql::{
+	Cond, Dir, Fields, Groups, IdRange, Idiom, Limit, Splits, Start, Table, fmt::Fmt,
+};
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
-
-use super::fmt::Fmt;
-use super::{IdRange, Table};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Graph {
 	pub dir: Dir,
-	pub old_expr: Fields,
 	pub expr: Option<Fields>,
-	pub _what: Tables,
 	pub what: GraphSubjects,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
-	pub old_order: Option<OldOrders>,
 	pub order: Option<Ordering>,
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub alias: Option<Idiom>,
-}
-
-impl Graph {
-	fn convert_old_orders(
-		&mut self,
-		_rev: u16,
-		old_value: Option<OldOrders>,
-	) -> Result<(), revision::Error> {
-		let Some(x) = old_value else {
-			// nothing to do.
-			return Ok(());
-		};
-
-		if x.0.iter().any(|x| x.random) {
-			self.order = Some(Ordering::Random);
-			return Ok(());
-		}
-
-		let new_ord =
-			x.0.into_iter()
-				.map(|x| Order {
-					value: x.order,
-					collate: x.collate,
-					numeric: x.numeric,
-					direction: x.direction,
-				})
-				.collect();
-
-		self.order = Some(Ordering::Order(OrderList(new_ord)));
-
-		Ok(())
-	}
-
-	fn convert_old_what(&mut self, _rev: u16, old: Tables) -> Result<(), revision::Error> {
-		self.what = old.into();
-		Ok(())
-	}
-
-	fn convert_old_expr(&mut self, _rev: u16, _old_value: Fields) -> Result<(), revision::Error> {
-		// Before this change, users would not have been able to set the value of the `expr` field, it's always `Fields(vec![Field::All], false)`.
-		// None is the new default value, mimmicking that behaviour.
-		self.expr = None;
-		Ok(())
-	}
-
-	/// Convert the graph edge to a raw String
-	pub fn to_raw(&self) -> String {
-		self.to_string()
-	}
 }
 
 impl Display for Graph {
@@ -89,7 +26,7 @@ impl Display for Graph {
 			&& self.expr.is_none()
 		{
 			Display::fmt(&self.dir, f)?;
-			match self.what.len() {
+			match self.what.0.len() {
 				0 => f.write_char('?'),
 				_ => Display::fmt(&self.what, f),
 			}
@@ -98,7 +35,7 @@ impl Display for Graph {
 			if let Some(ref expr) = self.expr {
 				write!(f, "SELECT {} FROM ", expr)?;
 			}
-			match self.what.len() {
+			match self.what.0.len() {
 				0 => f.write_char('?'),
 				_ => Display::fmt(&self.what, f),
 			}?;
@@ -162,23 +99,9 @@ impl From<crate::expr::Graph> for Graph {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct GraphSubjects(pub Vec<GraphSubject>);
-
-impl From<Tables> for GraphSubjects {
-	fn from(tbs: Tables) -> Self {
-		Self(tbs.0.into_iter().map(GraphSubject::from).collect())
-	}
-}
-
-impl From<Table> for GraphSubjects {
-	fn from(v: Table) -> Self {
-		GraphSubjects(vec![GraphSubject::Table(v)])
-	}
-}
 
 impl From<GraphSubjects> for crate::expr::graph::GraphSubjects {
 	fn from(v: GraphSubjects) -> Self {
@@ -191,32 +114,17 @@ impl From<crate::expr::graph::GraphSubjects> for GraphSubjects {
 	}
 }
 
-impl Deref for GraphSubjects {
-	type Target = Vec<GraphSubject>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
 impl Display for GraphSubjects {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum GraphSubject {
 	Table(Table),
 	Range(Table, IdRange),
-}
-
-impl From<Table> for GraphSubject {
-	fn from(x: Table) -> Self {
-		GraphSubject::Table(x)
-	}
 }
 
 impl Display for GraphSubject {

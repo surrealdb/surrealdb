@@ -923,6 +923,24 @@ mod tests {
 					server3.uri()
 				),
 			),
+			(
+				// Ensure resolve to a forbidden ip address fails
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All)
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str("127.0.0.1/0").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
+				"RETURN http::get('http://localhost')".to_string(),
+				false,
+				format!(
+					"here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
+					server3.uri()
+				),
+			),
 		];
 
 		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {

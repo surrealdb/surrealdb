@@ -339,7 +339,7 @@ mod tests {
 
 	#[test]
 	fn thing() {
-		let record_id: Thing = sql::thing("foo:bar").unwrap().into();
+		let record_id: Thing = sql::record_id("foo:bar").unwrap().into();
 		let value = to_value(record_id.clone()).unwrap();
 		let expected = Value::Thing(record_id);
 		assert_eq!(value, expected);
@@ -389,7 +389,7 @@ mod tests {
 	fn edges() {
 		let edges = Box::new(Edges {
 			dir: Dir::In,
-			from: sql::thing("foo:bar").unwrap().into(),
+			from: sql::record_id("foo:bar").unwrap().into(),
 			what: GraphSubjects(vec![GraphSubject::Table(Table("foo".into()))]),
 		});
 		let value = to_value(edges.clone()).unwrap();

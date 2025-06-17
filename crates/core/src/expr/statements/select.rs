@@ -75,20 +75,15 @@ impl SelectStatement {
 	}
 
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		if self.expr.iter().any(|v| match v {
-			Field::All => false,
+	pub(crate) fn read_only(&self) -> bool {
+		self.expr.iter().all(|v| match v {
+			Field::All => true,
 			Field::Single {
 				expr,
 				..
-			} => expr.writeable(),
-		}) {
-			return true;
-		}
-		if self.what.iter().any(|v| v.writeable()) {
-			return true;
-		}
-		self.cond.as_deref().is_some_and(Value::writeable)
+			} => expr.read_only(),
+		}) && self.what.iter().all(|v| v.read_only())
+			&& self.cond.map(|x| x.0.read_only()).unwrap_or(true)
 	}
 
 	/// Process this type returning a computed simple Value
@@ -124,7 +119,7 @@ impl SelectStatement {
 		let mut planner = QueryPlanner::new();
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
 		// Loop over the select targets
-		for w in self.what.0.iter() {
+		for w in self.what.iter() {
 			let v = w.compute(stk, &ctx, &opt, doc).await.catch_return()?;
 			i.prepare(stk, &mut planner, &stm_ctx, v).await?;
 		}
@@ -134,20 +129,15 @@ impl SelectStatement {
 		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There were no results
-				0 => Ok(Value::None),
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
+
+		if self.only {
+			if let Some(array) = res.into_array() {
+				ensure!(array.len() != 1, Error::SingleOnlyOutput);
+				return Ok(array.0.pop().unwrap());
+			}
 		}
+
+		Ok(res)
 	}
 }
 

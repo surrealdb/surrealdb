@@ -1,13 +1,13 @@
 use super::escape::EscapeKey;
-use super::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Part,
-	Range, Regex, Strand, Thing, Uuid,
-};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{
-	Table, Value,
+	Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Part, Regex, Strand, Table,
+	Uuid, Value,
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
+use crate::sql::{Expr, Literal};
+use crate::val::{Array, Number, Object, Range, RecordId};
+
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
@@ -206,9 +206,9 @@ impl Kind {
 				Kind::Array(inner, len) | Kind::Set(inner, len) => {
 					return match path.first() {
 						Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
-						Some(Part::Index(i)) => {
+						Some(Part::Value(Expr::Literal(Literal::Integer(i)))) => {
 							if let Some(len) = len {
-								if i.as_usize() >= *len as usize {
+								if i >= *len as usize {
 									return false;
 								}
 							}
@@ -273,7 +273,7 @@ impl<T: HasKind, const SIZE: usize> HasKind for [T; SIZE] {
 	}
 }
 
-impl HasKind for Thing {
+impl HasKind for RecordId {
 	fn kind() -> Kind {
 		Kind::Record(Vec::new())
 	}
@@ -436,7 +436,9 @@ impl InfoStructure for Kind {
 #[non_exhaustive]
 pub enum KindLiteral {
 	String(Strand),
-	Number(Number),
+	Integer(i64),
+	Float(f64),
+	Decimal(Decimal),
 	Duration(Duration),
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),

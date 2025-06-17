@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::{
-	Data, Expr, FlowResultExt as _, Id, Output, Table, Thing, Timeout, Value, Version,
+	Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Table, Thing, Timeout, Value, Version,
 };
 use crate::idx::planner::RecordStrategy;
 use anyhow::{Result, bail, ensure};
@@ -195,7 +195,7 @@ fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing> {
 		None => match v.rid() {
 			Value::Thing(v) => match v {
 				Thing {
-					id: Id::Generate(_),
+					id: RecordIdKeyLit::Generate(_),
 					..
 				} => Err(anyhow::Error::new(Error::InsertStatementId {
 					value: v.to_string(),

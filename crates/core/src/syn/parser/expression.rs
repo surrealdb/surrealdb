@@ -6,9 +6,7 @@ use reblessive::Stk;
 
 use super::mac::{expected_whitespace, unexpected};
 use crate::sql::operator::{BindingPower, NearestNeighbor};
-use crate::sql::{
-	AssignOperator, BinaryOperator, Expr, Function, Operator, Part, Range, UnaryOperator,
-};
+use crate::sql::{AssignOperator, BinaryOperator, Expr, Function, Part, PrefixOperator};
 use crate::syn::error::bail;
 use crate::syn::token::{self, Token};
 use crate::syn::{
@@ -21,7 +19,7 @@ impl Parser<'_> {
 	///
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two different values
 	/// depending on context: a table or a field the current document. This function parses loose
-	/// idents as a table, see [`parse_value_field`] for parsing loose idents as fields
+	/// idents as a table, see [`parse_expr_field`] for parsing loose idents as fields
 	pub async fn parse_expr_table(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
@@ -188,7 +186,7 @@ impl Parser<'_> {
 				}
 				self.pop_peek();
 
-				UnaryOperator::Positive
+				PrefixOperator::Positive
 			}
 			t!("-") => {
 				// -123 is a single number token, so parse it as such
@@ -217,16 +215,16 @@ impl Parser<'_> {
 
 				self.pop_peek();
 
-				UnaryOperator::Negate
+				PrefixOperator::Negate
 			}
 			t!("!") => {
 				self.pop_peek();
-				UnaryOperator::Not
+				PrefixOperator::Not
 			}
 			t!("<") => {
 				self.pop_peek();
 				let kind = self.parse_kind(ctx, token.span).await?;
-				UnaryOperator::Cast(kind)
+				PrefixOperator::Cast(kind)
 			}
 			t!("..") => return self.parse_prefix_range(ctx).await,
 			// should be unreachable as we previously check if the token was a prefix op.
@@ -235,7 +233,7 @@ impl Parser<'_> {
 
 		let v = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
-		Ok(Expr::Unary {
+		Ok(Expr::Prefix {
 			op: operator,
 			expr: Box::new(v),
 		})
@@ -367,7 +365,9 @@ impl Parser<'_> {
 				BinaryOperator::NotInside
 			}
 			t!("IN") => BinaryOperator::Inside,
-			t!("<|") => self.parse_nearest_neighbor(token)?,
+			t!("<|") => {
+				BinaryOperator::NearestNeighbor(Box::new(self.parse_nearest_neighbor(token)?))
+			}
 
 			t!(">") => {
 				if self.peek_whitespace().kind == t!("..") {
@@ -442,14 +442,14 @@ impl Parser<'_> {
 			*/
 		};
 
-		if expr_is_range(&lhs) && !lhs_prime {
+		if Self::expr_is_range(&lhs) && !lhs_prime {
 			let span = before.covers(self.recent_span());
 			// a..b..c is ambiguous, so throw an error
 			bail!("Chaining range operators has no specified associativity",
 				@span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
-		if expr_is_range(&rhs) && !rhs_covered {
+		if Self::expr_is_range(&rhs) && !rhs_covered {
 			let span = before.covers(self.recent_span());
 			// a..b..c is ambiguous, so throw an error
 			bail!("Chaining range operators has no specified associativity",
@@ -543,7 +543,7 @@ impl Parser<'_> {
 		let (mut lhs, mut lhs_prime) = if let Some(bp) = self.prefix_binding_power(peek.kind) {
 			(self.parse_prefix_op(ctx, bp).await?, false)
 		} else {
-			(self.parse_idiom_expression(ctx).await?, true)
+			(self.parse_prime_expr(ctx).await?, true)
 		};
 
 		loop {

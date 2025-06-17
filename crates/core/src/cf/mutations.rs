@@ -1,9 +1,5 @@
-use crate::expr::Operation;
-use crate::expr::array::Array;
-use crate::expr::object::Object;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
+use crate::expr::{Operation, statements::DefineTableStatement};
+use crate::val::{Array, Object, RecordId, Value};
 use crate::vs::VersionStamp;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,24 +7,22 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 
 // Mutation is a single mutation to a table.
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of Thing,
 	// we do include it in the first field for convenience.
-	Set(Thing, Value),
-	Del(Thing),
+	Set(RecordId, Value),
+	Del(RecordId),
 	Def(DefineTableStatement),
-	#[revision(start = 2)]
 	/// Includes the ID, current value (after change), changes that can be applied to get the original
 	/// value
 	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
 	/// Means that we have already applied the add "/note" operation to achieve the recorded result
-	SetWithDiff(Thing, Value, Vec<Operation>),
-	#[revision(start = 2)]
+	SetWithDiff(RecordId, Value, Vec<Operation>),
 	/// Delete a record where the ID is stored, and the now-deleted value
-	DelWithOriginal(Thing, Value),
+	DelWithOriginal(RecordId, Value),
 }
 
 impl From<DefineTableStatement> for Value {

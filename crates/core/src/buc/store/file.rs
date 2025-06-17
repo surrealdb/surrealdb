@@ -97,7 +97,7 @@ impl FileStore {
 		};
 
 		Ok(Some(FileStoreOptions {
-			root: ObjectKey::from(path.to_string()),
+			root: ObjectKey::new(path),
 			lowercase_paths,
 		}))
 	}

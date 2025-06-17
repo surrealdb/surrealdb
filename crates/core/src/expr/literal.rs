@@ -1,4 +1,4 @@
-use crate::expr::{Closure, Datetime, Duration, Expr, File, Geometry, Regex, Uuid};
+use crate::expr::{Closure, Datetime, Duration, Expr, File, Geometry, RecordIdLit, Regex, Uuid};
 use revision::revisioned;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,7 @@ pub enum Literal {
 	Decimal(Decimal),
 	//TODO: Possibly remove wrapper.
 	Regex(Regex),
+	RecordId(RecordIdLit),
 	Array(Vec<Expr>),
 	Object(Vec<(String, Expr)>),
 	Duration(Duration),

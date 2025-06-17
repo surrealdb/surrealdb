@@ -1,5 +1,5 @@
 //! Stores Things of an HNSW index
-use crate::expr::Id;
+use crate::expr::RecordIdKeyLit;
 use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
@@ -18,12 +18,12 @@ pub struct Hi<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: Id,
+	pub id: RecordIdKeyLit,
 }
 impl_key!(Hi<'a>);
 
 impl<'a> Hi<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: RecordIdKeyLit) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -49,7 +49,13 @@ mod tests {
 	#[test]
 	fn key() {
 		use super::*;
-		let val = Hi::new("testns", "testdb", "testtb", "testix", Id::String("testid".to_string()));
+		let val = Hi::new(
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
+			RecordIdKeyLit::String("testid".to_string()),
+		);
 		let enc = Hi::encode(&val).unwrap();
 		assert_eq!(
 			enc,

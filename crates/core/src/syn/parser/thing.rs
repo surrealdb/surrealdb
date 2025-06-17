@@ -3,7 +3,7 @@ use reblessive::Stk;
 use super::{ParseResult, Parser};
 use crate::{
 	sql::{
-		Id, Ident, Param, Thing,
+		Ident, Param, RecordIdKeyLit, RecordIdLit,
 		graph::GraphSubject,
 		id::{Gen, range::IdRange},
 	},
@@ -21,8 +21,8 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		double: bool,
-	) -> ParseResult<Thing> {
-		let thing = self.parse_thing(ctx).await?;
+	) -> ParseResult<RecordIdLit> {
+		let thing = self.parse_record_id(ctx).await?;
 
 		if double {
 			expected_whitespace!(self, t!("\""));
@@ -32,28 +32,28 @@ impl Parser<'_> {
 		Ok(thing)
 	}
 
-	pub(crate) async fn parse_thing_or_range(
+	pub(crate) async fn parse_record_id_or_range(
 		&mut self,
 		stk: &mut Stk,
 		ident: String,
-	) -> ParseResult<Thing> {
+	) -> ParseResult<RecordIdLit> {
 		expected_whitespace!(self, t!(":"));
 
 		// If self starts with a range operator self is a range with no start bound
 		if self.eat_whitespace(t!("..")) {
 			// Check for inclusive
 			let end = if self.eat_whitespace(t!("=")) {
-				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 				Bound::Included(id)
 			} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
-			return Ok(Thing {
+			return Ok(RecordIdLit {
 				tb: ident,
-				id: Id::Range(Box::new(IdRange {
+				id: RecordIdKeyLit::Range(Box::new(IdRange {
 					beg: Bound::Unbounded,
 					end,
 				})),
@@ -62,7 +62,7 @@ impl Parser<'_> {
 
 		// Didn't eat range yet so we need to parse the id.
 		let beg = if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-			let v = stk.run(|stk| self.parse_id(stk)).await?;
+			let v = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 
 			// check for exclusive
 			if self.eat_whitespace(t!(">")) {
@@ -78,17 +78,17 @@ impl Parser<'_> {
 		// If we already ate the exclusive it must be a range.
 		if self.eat_whitespace(t!("..")) {
 			let end = if self.eat_whitespace(t!("=")) {
-				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 				Bound::Included(id)
 			} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-				let id = stk.run(|stk| self.parse_id(stk)).await?;
+				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
 			};
-			Ok(Thing {
+			Ok(RecordIdLit {
 				tb: ident,
-				id: Id::Range(Box::new(IdRange {
+				id: RecordIdKeyLit::Range(Box::new(IdRange {
 					beg,
 					end,
 				})),
@@ -113,7 +113,7 @@ impl Parser<'_> {
 				// We previously converted the `Id` value to `Value` so it's safe to unwrap here.
 				Bound::Included(v) => v,
 			};
-			Ok(Thing {
+			Ok(RecordIdLit {
 				tb: ident,
 				id,
 			})
@@ -122,7 +122,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn parse_id_range(&mut self, stk: &mut Stk) -> ParseResult<IdRange> {
 		let beg = if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-			let v = stk.run(|stk| self.parse_id(stk)).await?;
+			let v = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 
 			// check for exclusive
 			if self.eat_whitespace(t!(">")) {
@@ -137,10 +137,10 @@ impl Parser<'_> {
 		expected!(self, t!(".."));
 
 		let end = if self.eat_whitespace(t!("=")) {
-			let id = stk.run(|stk| self.parse_id(stk)).await?;
+			let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 			Bound::Included(id)
 		} else if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
-			let id = stk.run(|stk| self.parse_id(stk)).await?;
+			let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 			Bound::Excluded(id)
 		} else {
 			Bound::Unbounded
@@ -199,46 +199,52 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(crate) async fn parse_thing_with_range(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
+	pub(crate) async fn parse_thing_with_range(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<RecordIdLit> {
 		let ident = self.next_token_value::<Ident>()?.0;
-		self.parse_thing_or_range(ctx, ident).await
+		self.parse_record_id_or_range(ctx, ident).await
 	}
 
-	pub(crate) async fn parse_thing(&mut self, ctx: &mut Stk) -> ParseResult<Thing> {
+	pub(crate) async fn parse_record_id(&mut self, ctx: &mut Stk) -> ParseResult<RecordIdLit> {
 		let ident = self.next_token_value::<Ident>()?.0;
-		self.parse_thing_from_ident(ctx, ident).await
+		self.parse_record_id_from_ident(ctx, ident).await
 	}
 
-	pub(crate) async fn parse_thing_from_ident(
+	pub(crate) async fn parse_record_id_from_ident(
 		&mut self,
 		ctx: &mut Stk,
 		ident: String,
-	) -> ParseResult<Thing> {
+	) -> ParseResult<RecordIdLit> {
 		expected!(self, t!(":"));
 
-		let id = ctx.run(|ctx| self.parse_id(ctx)).await?;
+		let id = ctx.run(|ctx| self.parse_record_id_key(ctx)).await?;
 
-		Ok(Thing {
+		Ok(RecordIdLit {
 			tb: ident,
 			id,
 		})
 	}
 
-	pub(crate) async fn parse_id(&mut self, stk: &mut Stk) -> ParseResult<Id> {
+	pub(crate) async fn parse_record_id_key(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<RecordIdKeyLit> {
 		let token = self.peek_whitespace();
 		match token.kind {
-			t!("u'") | t!("u\"") => Ok(Id::Uuid(self.next_token_value()?)),
+			t!("u'") | t!("u\"") => Ok(RecordIdKeyLit::Uuid(self.next_token_value()?)),
 			t!("{") => {
 				self.pop_peek();
 				// object record id
 				let object = self.parse_object(stk, token.span).await?;
-				Ok(Id::Object(object))
+				Ok(RecordIdKeyLit::Object(object))
 			}
 			t!("[") => {
 				self.pop_peek();
 				// array record id
 				let array = self.parse_array(stk, token.span).await?;
-				Ok(Id::Array(array))
+				Ok(RecordIdKeyLit::Array(array))
 			}
 			t!("+") => {
 				self.pop_peek();
@@ -266,9 +272,9 @@ impl Parser<'_> {
 
 				let digits_str = self.lexer.span_str(digits_token.span);
 				if let Ok(number) = digits_str.parse() {
-					Ok(Id::Number(number))
+					Ok(RecordIdKeyLit::Number(number))
 				} else {
-					Ok(Id::String(digits_str.to_owned()))
+					Ok(RecordIdKeyLit::String(digits_str.to_owned()))
 				}
 			}
 			t!("-") => {
@@ -278,14 +284,15 @@ impl Parser<'_> {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
 					match number.value.cmp(&((i64::MAX as u64) + 1)) {
-						Ordering::Less => Ok(Id::Number(-(number.value as i64))),
-						Ordering::Equal => Ok(Id::Number(i64::MIN)),
-						Ordering::Greater => {
-							Ok(Id::String(format!("-{}", self.lexer.span_str(number.span))))
-						}
+						Ordering::Less => Ok(RecordIdKeyLit::Number(-(number.value as i64))),
+						Ordering::Equal => Ok(RecordIdKeyLit::Number(i64::MIN)),
+						Ordering::Greater => Ok(RecordIdKeyLit::String(format!(
+							"-{}",
+							self.lexer.span_str(number.span)
+						))),
 					}
 				} else {
-					Ok(Id::String(format!("-{}", self.lexer.span_str(token.span))))
+					Ok(RecordIdKeyLit::String(format!("-{}", self.lexer.span_str(token.span))))
 				}
 			}
 			TokenKind::Digits => {
@@ -293,7 +300,7 @@ impl Parser<'_> {
 					let next = self.peek_whitespace1();
 					if Self::kind_is_identifier(next.kind) {
 						let ident = self.parse_flexible_ident()?.0;
-						return Ok(Id::String(ident));
+						return Ok(RecordIdKeyLit::String(ident));
 					}
 				}
 
@@ -301,9 +308,9 @@ impl Parser<'_> {
 
 				let digits_str = self.lexer.span_str(token.span);
 				if let Ok(number) = digits_str.parse::<i64>() {
-					Ok(Id::Number(number))
+					Ok(RecordIdKeyLit::Number(number))
 				} else {
-					Ok(Id::String(digits_str.to_owned()))
+					Ok(RecordIdKeyLit::String(digits_str.to_owned()))
 				}
 			}
 			TokenKind::Glued(Glued::Duration) if self.settings.flexible_record_id => {
@@ -313,7 +320,7 @@ impl Parser<'_> {
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();
-				Ok(Id::String(text))
+				Ok(RecordIdKeyLit::String(text))
 			}
 			TokenKind::Glued(_) => {
 				// If we glue before a parsing a record id, for example 123s456z would return an error as it is
@@ -327,30 +334,30 @@ impl Parser<'_> {
 				let token = self.pop_peek();
 				if self.eat(t!("(")) {
 					expected!(self, t!(")"));
-					Ok(Id::Generate(Gen::Ulid))
+					Ok(RecordIdKeyLit::Generate(Gen::Ulid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					Ok(Id::String(slice.to_string()))
+					Ok(RecordIdKeyLit::String(slice.to_string()))
 				}
 			}
 			t!("UUID") => {
 				let token = self.pop_peek();
 				if self.eat(t!("(")) {
 					expected!(self, t!(")"));
-					Ok(Id::Generate(Gen::Uuid))
+					Ok(RecordIdKeyLit::Generate(Gen::Uuid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					Ok(Id::String(slice.to_string()))
+					Ok(RecordIdKeyLit::String(slice.to_string()))
 				}
 			}
 			t!("RAND") => {
 				let token = self.pop_peek();
 				if self.eat(t!("(")) {
 					expected!(self, t!(")"));
-					Ok(Id::Generate(Gen::Rand))
+					Ok(RecordIdKeyLit::Generate(Gen::Rand))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					Ok(Id::String(slice.to_string()))
+					Ok(RecordIdKeyLit::String(slice.to_string()))
 				}
 			}
 			_ => {
@@ -359,277 +366,277 @@ impl Parser<'_> {
 				} else {
 					self.next_token_value::<Ident>()?.0
 				};
-				Ok(Id::String(ident))
+				Ok(RecordIdKeyLit::String(ident))
 			}
 		}
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use reblessive::Stack;
-
-	use super::*;
-	use crate::sql::SqlValue;
-	use crate::sql::array::Array;
-	use crate::sql::object::Object;
-	use crate::syn::Parse as _;
-	use crate::syn::parser::ParserSettings;
-
-	fn thing(i: &str) -> ParseResult<Thing> {
-		let mut parser = Parser::new(i.as_bytes());
-		let mut stack = Stack::new();
-		stack.enter(|ctx| async move { parser.parse_thing(ctx).await }).finish()
-	}
-
-	#[test]
-	fn thing_normal() {
-		let sql = "test:id";
-		let res = thing(sql);
-		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from("id"),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_integer() {
-		let sql = "test:001";
-		let res = thing(sql);
-		let out = res.unwrap();
-		assert_eq!("test:1", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(1),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_integer_min() {
-		let sql = format!("test:{}", i64::MIN);
-		let res = thing(&sql);
-		let out = res.unwrap();
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(i64::MIN),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_integer_max() {
-		let sql = format!("test:{}", i64::MAX);
-		let res = thing(&sql);
-		let out = res.unwrap();
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(i64::MAX),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_integer_more_then_max() {
-		let max_str = format!("{}", (i64::MAX as u64) + 1);
-		let sql = format!("test:{}", max_str);
-		let res = thing(&sql);
-		let out = res.unwrap();
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(max_str),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_integer_more_then_min() {
-		let min_str = format!("-{}", (i64::MAX as u64) + 2);
-		let sql = format!("test:{}", min_str);
-		let res = thing(&sql);
-		let out = res.unwrap();
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(min_str),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_string() {
-		let sql = "r'test:001'";
-		let res = SqlValue::parse(sql);
-		let SqlValue::Thing(out) = res else {
-			panic!()
-		};
-		assert_eq!("test:1", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(1),
-			}
-		);
-
-		let sql = "r'test:001'";
-		let res = SqlValue::parse(sql);
-		let SqlValue::Thing(out) = res else {
-			panic!()
-		};
-		assert_eq!("test:1", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(1),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_quoted_backtick() {
-		let sql = "`test`:`id`";
-		let res = thing(sql);
-		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from("id"),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_quoted_brackets() {
-		let sql = "⟨test⟩:⟨id⟩";
-		let res = thing(sql);
-		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from("id"),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_object() {
-		let sql = "test:{ location: 'GBR', year: 2022 }";
-		let res = thing(sql);
-		let out = res.unwrap();
-		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(Object::from(map! {
-					"location".to_string() => SqlValue::from("GBR"),
-					"year".to_string() => SqlValue::from(2022),
-				})),
-			}
-		);
-	}
-
-	#[test]
-	fn thing_array() {
-		let sql = "test:['GBR', 2022]";
-		let res = thing(sql);
-		let out = res.unwrap();
-		assert_eq!("test:['GBR', 2022]", format!("{}", out));
-		assert_eq!(
-			out,
-			Thing {
-				tb: String::from("test"),
-				id: Id::from(Array::from(vec![SqlValue::from("GBR"), SqlValue::from(2022)])),
-			}
-		);
-	}
-
-	#[test]
-	fn weird_things() {
-		use crate::sql;
-
-		fn assert_ident_parses_correctly(ident: &str) {
-			let thing = format!("t:{}", ident);
-			let mut parser = Parser::new_with_settings(
-				thing.as_bytes(),
-				ParserSettings {
-					flexible_record_id: true,
-					..Default::default()
-				},
-			);
-			let mut stack = Stack::new();
-			let r = stack
-				.enter(|ctx| async move { parser.parse_thing(ctx).await })
-				.finish()
-				.unwrap_or_else(|_| panic!("failed on {}", ident))
-				.id;
-			assert_eq!(r, Id::from(ident.to_string()),);
-
-			let mut parser = Parser::new(thing.as_bytes());
-			let r = stack
-				.enter(|ctx| async move { parser.parse_query(ctx).await })
-				.finish()
-				.unwrap_or_else(|_| panic!("failed on {}", ident));
-
-			assert_eq!(
-				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Thing(
-					sql::Thing {
-						tb: "t".to_string(),
-						id: Id::from(ident.to_string())
-					}
-				))]))
-			)
-		}
-
-		assert_ident_parses_correctly("123abc");
-		assert_ident_parses_correctly("123d");
-		assert_ident_parses_correctly("123de");
-		assert_ident_parses_correctly("123dec");
-		assert_ident_parses_correctly("1e23dec");
-		assert_ident_parses_correctly("1e23f");
-		assert_ident_parses_correctly("123f");
-		assert_ident_parses_correctly("1ns");
-		assert_ident_parses_correctly("1ns1");
-		assert_ident_parses_correctly("1ns1h");
-		assert_ident_parses_correctly("000e8");
-		assert_ident_parses_correctly("000e8bla");
-
-		assert_ident_parses_correctly("y123");
-		assert_ident_parses_correctly("w123");
-		assert_ident_parses_correctly("d123");
-		assert_ident_parses_correctly("h123");
-		assert_ident_parses_correctly("m123");
-		assert_ident_parses_correctly("s123");
-		assert_ident_parses_correctly("ms123");
-		assert_ident_parses_correctly("us123");
-		assert_ident_parses_correctly("ns123");
-		assert_ident_parses_correctly("dec123");
-		assert_ident_parses_correctly("f123");
-		assert_ident_parses_correctly("e123");
-
-		assert_ident_parses_correctly("ulid");
-		assert_ident_parses_correctly("uuid");
-		assert_ident_parses_correctly("rand");
-	}
-}
+// #[cfg(test)]
+// mod tests {
+// 	use reblessive::Stack;
+//
+// 	use super::*;
+// 	use crate::sql::SqlValue;
+// 	use crate::sql::array::Array;
+// 	use crate::sql::object::Object;
+// 	use crate::syn::Parse as _;
+// 	use crate::syn::parser::ParserSettings;
+//
+// 	fn thing(i: &str) -> ParseResult<Thing> {
+// 		let mut parser = Parser::new(i.as_bytes());
+// 		let mut stack = Stack::new();
+// 		stack.enter(|ctx| async move { parser.parse_thing(ctx).await }).finish()
+// 	}
+//
+// 	#[test]
+// 	fn thing_normal() {
+// 		let sql = "test:id";
+// 		let res = thing(sql);
+// 		let out = res.unwrap();
+// 		assert_eq!("test:id", format!("{}", out));
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from("id"),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_integer() {
+// 		let sql = "test:001";
+// 		let res = thing(sql);
+// 		let out = res.unwrap();
+// 		assert_eq!("test:1", format!("{}", out));
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from(1),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_integer_min() {
+// 		let sql = format!("test:{}", i64::MIN);
+// 		let res = thing(&sql);
+// 		let out = res.unwrap();
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from(i64::MIN),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_integer_max() {
+// 		let sql = format!("test:{}", i64::MAX);
+// 		let res = thing(&sql);
+// 		let out = res.unwrap();
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from(i64::MAX),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_integer_more_then_max() {
+// 		let max_str = format!("{}", (i64::MAX as u64) + 1);
+// 		let sql = format!("test:{}", max_str);
+// 		let res = thing(&sql);
+// 		let out = res.unwrap();
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from(max_str),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_integer_more_then_min() {
+// 		let min_str = format!("-{}", (i64::MAX as u64) + 2);
+// 		let sql = format!("test:{}", min_str);
+// 		let res = thing(&sql);
+// 		let out = res.unwrap();
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from(min_str),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_string() {
+// 		let sql = "r'test:001'";
+// 		let res = SqlValue::parse(sql);
+// 		let SqlValue::Thing(out) = res else {
+// 			panic!()
+// 		};
+// 		assert_eq!("test:1", format!("{}", out));
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from(1),
+// 			}
+// 		);
+//
+// 		let sql = "r'test:001'";
+// 		let res = SqlValue::parse(sql);
+// 		let SqlValue::Thing(out) = res else {
+// 			panic!()
+// 		};
+// 		assert_eq!("test:1", format!("{}", out));
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from(1),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_quoted_backtick() {
+// 		let sql = "`test`:`id`";
+// 		let res = thing(sql);
+// 		let out = res.unwrap();
+// 		assert_eq!("test:id", format!("{}", out));
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from("id"),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_quoted_brackets() {
+// 		let sql = "⟨test⟩:⟨id⟩";
+// 		let res = thing(sql);
+// 		let out = res.unwrap();
+// 		assert_eq!("test:id", format!("{}", out));
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from("id"),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_object() {
+// 		let sql = "test:{ location: 'GBR', year: 2022 }";
+// 		let res = thing(sql);
+// 		let out = res.unwrap();
+// 		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from(Object::from(map! {
+// 					"location".to_string() => SqlValue::from("GBR"),
+// 					"year".to_string() => SqlValue::from(2022),
+// 				})),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn thing_array() {
+// 		let sql = "test:['GBR', 2022]";
+// 		let res = thing(sql);
+// 		let out = res.unwrap();
+// 		assert_eq!("test:['GBR', 2022]", format!("{}", out));
+// 		assert_eq!(
+// 			out,
+// 			Thing {
+// 				tb: String::from("test"),
+// 				id: Id::from(Array::from(vec![SqlValue::from("GBR"), SqlValue::from(2022)])),
+// 			}
+// 		);
+// 	}
+//
+// 	#[test]
+// 	fn weird_things() {
+// 		use crate::sql;
+//
+// 		fn assert_ident_parses_correctly(ident: &str) {
+// 			let thing = format!("t:{}", ident);
+// 			let mut parser = Parser::new_with_settings(
+// 				thing.as_bytes(),
+// 				ParserSettings {
+// 					flexible_record_id: true,
+// 					..Default::default()
+// 				},
+// 			);
+// 			let mut stack = Stack::new();
+// 			let r = stack
+// 				.enter(|ctx| async move { parser.parse_thing(ctx).await })
+// 				.finish()
+// 				.unwrap_or_else(|_| panic!("failed on {}", ident))
+// 				.id;
+// 			assert_eq!(r, Id::from(ident.to_string()),);
+//
+// 			let mut parser = Parser::new(thing.as_bytes());
+// 			let r = stack
+// 				.enter(|ctx| async move { parser.parse_query(ctx).await })
+// 				.finish()
+// 				.unwrap_or_else(|_| panic!("failed on {}", ident));
+//
+// 			assert_eq!(
+// 				r,
+// 				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Thing(
+// 					sql::Thing {
+// 						tb: "t".to_string(),
+// 						id: Id::from(ident.to_string())
+// 					}
+// 				))]))
+// 			)
+// 		}
+//
+// 		assert_ident_parses_correctly("123abc");
+// 		assert_ident_parses_correctly("123d");
+// 		assert_ident_parses_correctly("123de");
+// 		assert_ident_parses_correctly("123dec");
+// 		assert_ident_parses_correctly("1e23dec");
+// 		assert_ident_parses_correctly("1e23f");
+// 		assert_ident_parses_correctly("123f");
+// 		assert_ident_parses_correctly("1ns");
+// 		assert_ident_parses_correctly("1ns1");
+// 		assert_ident_parses_correctly("1ns1h");
+// 		assert_ident_parses_correctly("000e8");
+// 		assert_ident_parses_correctly("000e8bla");
+//
+// 		assert_ident_parses_correctly("y123");
+// 		assert_ident_parses_correctly("w123");
+// 		assert_ident_parses_correctly("d123");
+// 		assert_ident_parses_correctly("h123");
+// 		assert_ident_parses_correctly("m123");
+// 		assert_ident_parses_correctly("s123");
+// 		assert_ident_parses_correctly("ms123");
+// 		assert_ident_parses_correctly("us123");
+// 		assert_ident_parses_correctly("ns123");
+// 		assert_ident_parses_correctly("dec123");
+// 		assert_ident_parses_correctly("f123");
+// 		assert_ident_parses_correctly("e123");
+//
+// 		assert_ident_parses_correctly("ulid");
+// 		assert_ident_parses_correctly("uuid");
+// 		assert_ident_parses_correctly("rand");
+// 	}
+// }

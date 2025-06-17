@@ -1,11 +1,9 @@
-use crate::expr::{Closure, Datetime, Duration, Expr, File, Geometry, Regex, Uuid};
-use revision::revisioned;
+use crate::sql::{
+	Bytes, Closure, Datetime, Duration, Expr, File, Geometry, RecordIdLit, Regex, Strand, Uuid,
+};
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename = "$surrealdb::private::sql::Value")]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Literal {
 	None,
@@ -15,19 +13,26 @@ pub enum Literal {
 	Integer(i64),
 	//TODO: Possibly remove wrapper.
 	Decimal(Decimal),
-	//TODO: Possibly remove wrapper.
-	Regex(Regex),
-	Array(Vec<Expr>),
-	Object(Vec<(String, Expr)>),
 	Duration(Duration),
+
+	Strand(Strand),
+	RecordId(RecordIdLit),
 	Datetime(Datetime),
 	Uuid(Uuid),
+	Regex(Regex),
+
+	//TODO: Possibly remove wrapper.
+	Array(Vec<Expr>),
+	Object(Vec<ObjectEntry>),
 	Geometry(Geometry),
 	File(File),
+	Bytes(Bytes),
 	Closure(Box<Closure>),
+
+	Point(f64, f64),
 }
 
 pub struct ObjectEntry {
-	key: String,
-	value: Expr,
+	pub key: String,
+	pub value: Expr,
 }

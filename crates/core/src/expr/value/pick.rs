@@ -53,7 +53,7 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::expr::id::Id;
+	use crate::expr::id::RecordIdKeyLit;
 	use crate::expr::idiom::Idiom;
 	use crate::expr::thing::Thing;
 	use crate::sql::SqlValue;
@@ -85,7 +85,7 @@ mod tests {
 			res,
 			Value::from(Thing {
 				tb: String::from("test"),
-				id: Id::from("tobie")
+				id: RecordIdKeyLit::from("tobie")
 			})
 		);
 	}
@@ -108,7 +108,7 @@ mod tests {
 			res,
 			Value::from(Thing {
 				tb: String::from("test"),
-				id: Id::from("jaime")
+				id: RecordIdKeyLit::from("jaime")
 			})
 		);
 	}

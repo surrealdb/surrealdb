@@ -11,8 +11,8 @@ use std::{
 use surrealdb_core::{
 	dbs::Action as CoreAction,
 	expr::{
-		Array as CoreArray, Datetime as CoreDatetime, Id as CoreId, Number as CoreNumber,
-		Thing as CoreThing, Value as CoreValue,
+		Array as CoreArray, Datetime as CoreDatetime, Number as CoreNumber,
+		RecordIdKeyLit as CoreId, Thing as CoreThing, Value as CoreValue,
 	},
 	sql::SqlValue as CoreSqlValue,
 	syn,

@@ -2,7 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Data, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
+use crate::expr::{
+	Cond, Data, Explain, Expr, FlowResultExt as _, Output, Timeout, Value, Values, With,
+};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use anyhow::{Result, ensure};
 
@@ -28,10 +30,6 @@ pub struct UpdateStatement {
 }
 
 impl UpdateStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

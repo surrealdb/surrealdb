@@ -22,7 +22,7 @@ pub mod ip;
 pub mod vm;
 
 use crate::expr::array::Array;
-use crate::expr::id::Id;
+use crate::expr::id::RecordIdKeyLit;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::{KeyEncode, impl_key};
@@ -110,7 +110,7 @@ pub struct Index<'a> {
 	pub ix: &'a str,
 	_e: u8,
 	pub fd: Cow<'a, Array>,
-	pub id: Option<Cow<'a, Id>>,
+	pub id: Option<Cow<'a, RecordIdKeyLit>>,
 }
 impl_key!(Index<'a>);
 
@@ -127,7 +127,7 @@ impl<'a> Index<'a> {
 		tb: &'a str,
 		ix: &'a str,
 		fd: &'a Array,
-		id: Option<&'a Id>,
+		id: Option<&'a RecordIdKeyLit>,
 	) -> Self {
 		Self {
 			__: b'/',

@@ -6,22 +6,20 @@ use crate::dbs::QueryType;
 use crate::dbs::response::Response;
 use crate::err;
 use crate::err::Error;
-use crate::expr::Base;
-use crate::expr::ControlFlow;
-use crate::expr::FlowResult;
+use crate::expr::Expr;
+use crate::expr::TopLevelExpr;
 use crate::expr::paths::DB;
 use crate::expr::paths::NS;
 use crate::expr::plan::LogicalPlan;
-use crate::expr::value::Value;
+use crate::expr::statements::{OptionStatement, UseStatement};
+use crate::expr::{Base, ControlFlow, FlowResult};
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
 use crate::sql::planner::SqlToLogical;
-use crate::sql::query::Query;
-use crate::sql::statement::Statement;
-use crate::sql::statements::{OptionStatement, UseStatement};
+use crate::val::Value;
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
@@ -112,10 +110,10 @@ impl Executor {
 	async fn execute_plan_in_transaction(
 		&mut self,
 		txn: Arc<Transaction>,
-		plan: LogicalPlan,
+		plan: TopLevelExpr,
 	) -> FlowResult<Value> {
 		let res = match plan {
-			LogicalPlan::Set(stm) => {
+			TopLevelExpr::Expr(Expr::Let(stm)) => {
 				// Avoid moving in and out of the context via Arc::get_mut
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
@@ -179,7 +177,11 @@ impl Executor {
 	}
 
 	/// Execute a query not wrapped in a transaction block.
-	async fn execute_bare_statement(&mut self, kvs: &Datastore, stmt: Statement) -> Result<Value> {
+	async fn execute_bare_statement(
+		&mut self,
+		kvs: &Datastore,
+		stmt: TopLevelExpr,
+	) -> Result<Value> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
 			None => {}
@@ -193,7 +195,7 @@ impl Executor {
 
 		match stmt {
 			// These statements don't need a transaction.
-			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+			TopLevelExpr::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 			stmt => {
 				let planner = SqlToLogical::new();
 				let plan = planner.statement_to_logical(stmt)?;
@@ -203,9 +205,13 @@ impl Executor {
 		}
 	}
 
-	async fn execute_plan_impl(&mut self, kvs: &Datastore, plan: LogicalPlan) -> Result<Value> {
-		let writeable = plan.writeable();
-		let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
+	async fn execute_plan_impl(&mut self, kvs: &Datastore, plan: TopLevelExpr) -> Result<Value> {
+		let transaction_type = if plan.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
+		let txn = Arc::new(kvs.transaction(transaction_type, LockType::Optimistic).await?);
 		let receiver = self.ctx.has_notifications().then(|| {
 			let (send, recv) = async_channel::unbounded();
 			self.opt.sender = Some(send);
@@ -271,7 +277,7 @@ impl Executor {
 		mut stream: Pin<&mut S>,
 	) -> Result<()>
 	where
-		S: Stream<Item = Result<Statement>>,
+		S: Stream<Item = Result<TopLevelExpr>>,
 	{
 		let Ok(txn) = kvs.transaction(TransactionType::Write, LockType::Optimistic).await else {
 			// couldn't create a transaction.
@@ -279,7 +285,7 @@ impl Executor {
 			while let Some(stmt) = stream.next().await {
 				yield_now!();
 				let stmt = stmt?;
-				if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+				if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
 					return Ok(());
 				}
 
@@ -333,7 +339,7 @@ impl Executor {
 				while let Some(stmt) = stream.next().await {
 					yield_now!();
 					let stmt = stmt?;
-					if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+					if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
 						return Ok(());
 					}
 
@@ -351,21 +357,21 @@ impl Executor {
 				return Ok(());
 			}
 
-			if skip_remaining && !matches!(stmt, Statement::Cancel(_) | Statement::Commit(_)) {
+			if skip_remaining && !matches!(stmt, TopLevelExpr::Cancel | TopLevelExpr::Commit) {
 				continue;
 			}
 
 			trace!(target: TARGET, statement = %stmt, "Executing statement");
 
 			let query_type = match stmt {
-				Statement::Live(_) => QueryType::Live,
-				Statement::Kill(_) => QueryType::Kill,
+				TopLevelExpr::Live(_) => QueryType::Live,
+				TopLevelExpr::Kill(_) => QueryType::Kill,
 				_ => QueryType::Other,
 			};
 
 			let before = Instant::now();
 			let value = match stmt {
-				Statement::Begin(_) => {
+				TopLevelExpr::Begin => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
 
@@ -389,7 +395,7 @@ impl Executor {
 					while let Some(stmt) = stream.next().await {
 						yield_now!();
 						let stmt = stmt?;
-						if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+						if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
 							return Ok(());
 						}
 
@@ -403,7 +409,7 @@ impl Executor {
 					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
 					return Ok(());
 				}
-				Statement::Cancel(_) => {
+				TopLevelExpr::Cancel => {
 					let _ = txn.cancel().await;
 
 					// update the results indicating cancelation.
@@ -416,7 +422,7 @@ impl Executor {
 
 					return Ok(());
 				}
-				Statement::Commit(_) => {
+				TopLevelExpr::Commit => {
 					let mut lock = txn.lock().await;
 
 					// complete_changes and then commit.
@@ -458,7 +464,7 @@ impl Executor {
 
 					return Ok(());
 				}
-				Statement::Option(stmt) => match self.execute_option_statement(stmt) {
+				TopLevelExpr::Option(stmt) => match self.execute_option_statement(stmt) {
 					Ok(_) => {
 						// skip adding the value as executing an option statement doesn't produce
 						// results
@@ -466,9 +472,9 @@ impl Executor {
 					}
 					Err(e) => Err(e),
 				},
-				Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+				TopLevelExpr::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 				stmt => {
-					skip_remaining = matches!(stmt, Statement::Output(_));
+					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
 
 					let planner = SqlToLogical::new();
 					let plan = planner.statement_to_logical(stmt)?;
@@ -502,7 +508,7 @@ impl Executor {
 							while let Some(stmt) = stream.next().await {
 								yield_now!();
 								let stmt = stmt?;
-								if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+								if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
 									return Ok(());
 								}
 
@@ -557,9 +563,9 @@ impl Executor {
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
-		qry: Query,
+		qry: LogicalPlan,
 	) -> Result<Vec<Response>> {
-		let stream = futures::stream::iter(qry.into_iter().map(Ok));
+		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_stream(kvs, ctx, opt, false, stream).await
 	}
 
@@ -567,13 +573,13 @@ impl Executor {
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
-		plan: LogicalPlan,
+		plan: TopLevelExpr,
 	) -> Result<Vec<Response>> {
 		let mut this = Executor::new(ctx, opt);
 
 		let query_type = match &plan {
-			LogicalPlan::Live(_) => QueryType::Live,
-			LogicalPlan::Kill(_) => QueryType::Kill,
+			TopLevelExpr::Live(_) => QueryType::Live,
+			TopLevelExpr::Kill(_) => QueryType::Kill,
 			_ => QueryType::Other,
 		};
 
@@ -596,13 +602,12 @@ impl Executor {
 		stream: S,
 	) -> Result<Vec<Response>>
 	where
-		S: Stream<Item = Result<Statement>>,
+		S: Stream<Item = Result<TopLevelExpr>>,
 	{
 		let mut this = Executor::new(ctx, opt);
 		let mut stream = pin!(stream);
 
 		while let Some(stmt) = stream.next().await {
-			yield_now!();
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
@@ -617,9 +622,9 @@ impl Executor {
 			};
 
 			match stmt {
-				Statement::Option(stmt) => this.execute_option_statement(stmt)?,
+				TopLevelExpr::Option(stmt) => this.execute_option_statement(stmt)?,
 				// handle option here because it doesn't produce a result.
-				Statement::Begin(_) => {
+				TopLevelExpr::Begin => {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(Response {
 							time: Duration::ZERO,
@@ -644,6 +649,7 @@ impl Executor {
 					}
 				}
 			}
+			yield_now!();
 		}
 		Ok(this.results)
 	}

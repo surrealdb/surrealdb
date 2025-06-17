@@ -16,7 +16,30 @@ use std::{
 use super::{ControlFlow, FlowResult};
 
 pub struct LogicalPlan {
-	expressions: Vec<TopLevelExpr>,
+	pub expressions: Vec<TopLevelExpr>,
+}
+
+impl LogicalPlan {
+	/// Check if we require a writeable transaction
+	pub(crate) fn read_only(&self) -> bool {
+		self.expressions.iter().all(|x| x.read_only())
+	}
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> FlowResult<Value> {
+		todo!()
+	}
+}
+
+impl Display for LogicalPlan {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		todo!()
+	}
 }
 
 pub enum TopLevelExpr {
@@ -32,10 +55,21 @@ pub enum TopLevelExpr {
 	Expr(Expr),
 }
 
-impl LogicalPlan {
+impl TopLevelExpr {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		todo!()
+	pub(crate) fn read_only(&self) -> bool {
+		match self {
+			TopLevelExpr::Begin
+			| TopLevelExpr::Cancel
+			| TopLevelExpr::Commit
+			| TopLevelExpr::Info(_)
+			| TopLevelExpr::Use(_) => true,
+			TopLevelExpr::Kill(_)
+			| TopLevelExpr::Live(_)
+			| TopLevelExpr::Option(_)
+			| TopLevelExpr::Rebuild(_) => false,
+			TopLevelExpr::Expr(expr) => expr.read_only(),
+		}
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -49,7 +83,7 @@ impl LogicalPlan {
 	}
 }
 
-impl Display for LogicalPlan {
+impl Display for TopLevelExpr {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		todo!()
 	}

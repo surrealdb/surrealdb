@@ -4,7 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::id::range::IdRange;
+use crate::expr::id::range::KeyRange;
 use crate::expr::range::OldRange;
 use crate::expr::reference::Refs;
 use crate::expr::statements::info::InfoStructure;
@@ -13,7 +13,7 @@ use crate::expr::{
 	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
 	Strand, Subquery, Table, Tables, Thing, Uuid,
 	fmt::{Fmt, Pretty},
-	id::{Gen, Id},
+	id::{Gen, RecordIdKeyLit},
 	model::Model,
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
@@ -157,7 +157,7 @@ impl Value {
 	) -> Result<Self, revision::Error> {
 		Ok(Value::Thing(Thing {
 			tb: fields.0.tb,
-			id: Id::Range(Box::new(IdRange {
+			id: RecordIdKeyLit::Range(Box::new(KeyRange {
 				beg: fields.0.beg,
 				end: fields.0.end,
 			})),
@@ -253,7 +253,7 @@ impl Value {
 	/// Check if this Value is a single Thing
 	pub fn is_thing_single(&self) -> bool {
 		match self {
-			Value::Thing(t) => !matches!(t.id, Id::Range(_)),
+			Value::Thing(t) => !matches!(t.id, RecordIdKeyLit::Range(_)),
 			_ => false,
 		}
 	}
@@ -263,7 +263,7 @@ impl Value {
 		matches!(
 			self,
 			Value::Thing(Thing {
-				id: Id::Range(_),
+				id: RecordIdKeyLit::Range(_),
 				..
 			})
 		)
@@ -1383,8 +1383,8 @@ impl From<BTreeMap<&str, Value>> for Value {
 	}
 }
 
-impl From<IdRange> for Value {
-	fn from(v: IdRange) -> Self {
+impl From<KeyRange> for Value {
+	fn from(v: KeyRange) -> Self {
 		let beg = match v.beg {
 			Bound::Included(beg) => Bound::Included(Value::from(beg)),
 			Bound::Excluded(beg) => Bound::Excluded(Value::from(beg)),
@@ -1404,20 +1404,20 @@ impl From<IdRange> for Value {
 	}
 }
 
-impl From<Id> for Value {
-	fn from(v: Id) -> Self {
+impl From<RecordIdKeyLit> for Value {
+	fn from(v: RecordIdKeyLit) -> Self {
 		match v {
-			Id::Number(v) => v.into(),
-			Id::String(v) => v.into(),
-			Id::Uuid(v) => v.into(),
-			Id::Array(v) => v.into(),
-			Id::Object(v) => v.into(),
-			Id::Generate(v) => match v {
-				Gen::Rand => Id::rand().into(),
-				Gen::Ulid => Id::ulid().into(),
-				Gen::Uuid => Id::uuid().into(),
+			RecordIdKeyLit::Number(v) => v.into(),
+			RecordIdKeyLit::String(v) => v.into(),
+			RecordIdKeyLit::Uuid(v) => v.into(),
+			RecordIdKeyLit::Array(v) => v.into(),
+			RecordIdKeyLit::Object(v) => v.into(),
+			RecordIdKeyLit::Generate(v) => match v {
+				Gen::Rand => RecordIdKeyLit::rand().into(),
+				Gen::Ulid => RecordIdKeyLit::ulid().into(),
+				Gen::Uuid => RecordIdKeyLit::uuid().into(),
 			},
-			Id::Range(v) => v.deref().to_owned().into(),
+			RecordIdKeyLit::Range(v) => v.deref().to_owned().into(),
 		}
 	}
 }

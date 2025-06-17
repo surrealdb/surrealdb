@@ -324,7 +324,7 @@ pub async fn create_grant(
 		}
 	};
 	// Verify the access type.
-	match &ac.kind {
+	match &ac.access_type {
 		AccessType::Jwt(_) => {
 			Err(anyhow::Error::new(Error::Unimplemented(format!("Grants for JWT on {base}"))))
 		}

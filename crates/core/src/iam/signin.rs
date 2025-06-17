@@ -154,7 +154,7 @@ pub async fn db_access(
 			// All access method types are supported except for JWT
 			// The JWT access method is the one that is internal to SurrealDB
 			// The equivalent of signing in with JWT is to authenticate it
-			match av.kind.clone() {
+			match av.access_type.clone() {
 				AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
 					let iss = match &at.jwt.issue {
@@ -398,7 +398,7 @@ pub async fn ns_access(
 	match access {
 		Ok(av) => {
 			// Check the access method type
-			match av.kind.clone() {
+			match av.access_type.clone() {
 				AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
@@ -529,7 +529,7 @@ pub async fn root_access(
 	match access {
 		Ok(av) => {
 			// Check the access method type
-			match av.kind.clone() {
+			match av.access_type.clone() {
 				AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {

@@ -28,8 +28,8 @@ impl Deref for Block {
 
 impl Block {
 	/// Check if this block does only reads.
-	pub(crate) fn readonly(&self) -> bool {
-		self.0.iter().all(|x| x.readonly())
+	pub(crate) fn read_only(&self) -> bool {
+		self.0.iter().all(|x| x.read_only())
 	}
 
 	/// Process this type returning a computed simple Value
@@ -45,7 +45,7 @@ impl Block {
 		// Loop over the statements
 		let mut res = Value::None;
 		for v in self.iter() {
-			res = v.compute(stk, &ctx, opt, doc)?;
+			res = v.compute(stk, &ctx, opt, doc).await?;
 		}
 		// Return nothing
 		Ok(res)

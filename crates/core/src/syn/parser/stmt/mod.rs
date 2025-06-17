@@ -1,18 +1,16 @@
 use reblessive::Stk;
 
-use crate::fnc::util::math::top::Top;
-use crate::sql::block::Entry;
-use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
-use crate::sql::statements::show::{ShowSince, ShowStatement};
-use crate::sql::statements::sleep::SleepStatement;
+use crate::sql::statements::rebuild::RebuildIndexStatement;
+use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
-	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
+	KillStatement, LiveStatement, OptionStatement, RebuildStatement, SetStatement, ShowStatement,
+	SleepStatement, ThrowStatement,
 	access::{
 		AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 		AccessStatementShow, Subject,
 	},
 };
-use crate::sql::{Duration, Fields, Ident, Param, TopLevelExpr};
+use crate::sql::{Duration, Expr, Fields, Ident, Param, TopLevelExpr};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
@@ -102,7 +100,7 @@ impl Parser<'_> {
 			}
 			t!("LIVE") => {
 				self.pop_peek();
-				self.parse_live_stmt(stk).map(TopLevelExpr::Live)
+				self.parse_live_stmt(stk).await.map(TopLevelExpr::Live)
 			}
 			t!("OPTION") => {
 				self.pop_peek();
@@ -116,7 +114,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_rebuild_stmt().map(TopLevelExpr::Rebuild)
 			}
-			_ => self.parse_expr(stk),
+			_ => self.parse_expr_table(stk).await.map(TopLevelExpr::Expr),
 		}
 	}
 
@@ -141,7 +139,7 @@ impl Parser<'_> {
 					}
 					t!("RECORD") => {
 						self.pop_peek();
-						let rid = ctx.run(|ctx| self.parse_thing(ctx)).await?;
+						let rid = ctx.run(|ctx| self.parse_record_id(ctx)).await?;
 						Ok(AccessStatement::Grant(AccessStatementGrant {
 							ac,
 							base,
@@ -333,7 +331,7 @@ impl Parser<'_> {
 	pub(super) async fn parse_for_stmt(&mut self, stk: &mut Stk) -> ParseResult<ForeachStatement> {
 		let param = self.next_token_value()?;
 		expected!(self, t!("IN"));
-		let range = stk.run(|stk| self.parse_value_inherit(stk)).await?;
+		let range = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
 
 		let span = expected!(self, t!("{")).span;
 		let block = self.parse_block(stk, span).await?;
@@ -393,9 +391,9 @@ impl Parser<'_> {
 		let peek = self.peek();
 		let id = match peek.kind {
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
-				self.next_token_value().map(SqlValue::Uuid)?
+				self.next_token_value().map(Expr::Literal)?
 			}
-			t!("$param") => self.next_token_value().map(SqlValue::Param)?,
+			t!("$param") => self.next_token_value().map(Expr::Param)?,
 			_ => unexpected!(self, peek, "a UUID or a parameter"),
 		};
 		Ok(KillStatement {
@@ -484,7 +482,7 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 	) -> ParseResult<OutputStatement> {
-		let what = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
+		let what = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 		let fetch = self.try_parse_fetch(ctx).await?;
 		Ok(OutputStatement {
 			what,
@@ -509,7 +507,7 @@ impl Parser<'_> {
 			None
 		};
 		expected!(self, t!("="));
-		let what = self.parse_value_inherit(ctx).await?;
+		let what = self.parse_expr_inherit(ctx).await?;
 		Ok(SetStatement {
 			name,
 			what,
@@ -580,7 +578,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `THROW` to already be consumed.
 	pub(super) async fn parse_throw_stmt(&mut self, ctx: &mut Stk) -> ParseResult<ThrowStatement> {
-		let error = self.parse_value_inherit(ctx).await?;
+		let error = self.parse_expr_inherit(ctx).await?;
 		Ok(ThrowStatement {
 			error,
 		})

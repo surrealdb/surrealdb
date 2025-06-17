@@ -44,7 +44,7 @@ pub(crate) async fn connect_global(
 	let global = connect(url, true, false).await?;
 
 	// Create a prefixstore for the specified bucket
-	let key = ObjectKey::from(format!("/{ns}/{db}/{bu}"));
+	let key = ObjectKey::new(format!("/{ns}/{db}/{bu}"));
 	Ok(Arc::new(PrefixedStore::new(global, key)))
 }
 

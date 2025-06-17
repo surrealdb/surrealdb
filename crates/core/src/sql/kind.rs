@@ -1,17 +1,11 @@
 use super::escape::EscapeKey;
-use super::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Range,
-	Regex, Strand, Thing, Uuid,
-};
+use super::{Duration, Ident, Idiom, Strand};
 
 use crate::sql::{
-	SqlValue, Table,
+	Table,
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use revision::revisioned;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
@@ -84,91 +78,6 @@ pub enum Kind {
 impl Default for Kind {
 	fn default() -> Self {
 		Self::Any
-	}
-}
-
-impl Kind {
-	/// Returns the kind of a type.
-	pub(crate) fn of<T: HasKind>() -> Kind {
-		T::kind()
-	}
-
-	/// Returns true if this type is an `any`
-	pub(crate) fn is_any(&self) -> bool {
-		matches!(self, Kind::Any)
-	}
-
-	/// Returns true if this type is optional
-	pub(crate) fn can_be_none(&self) -> bool {
-		matches!(self, Kind::Option(_) | Kind::Any)
-	}
-
-	/// Returns the kind in case of a literal, otherwise returns the kind itself
-	fn to_non_literal_kind(&self) -> Self {
-		match self {
-			Kind::Literal(l) => l.to_kind(),
-			k => k.to_owned(),
-		}
-	}
-
-	/// Returns Some if this type can be converted into a discriminated object, None otherwise
-	pub(crate) fn to_discriminated(&self) -> Option<Kind> {
-		match self {
-			Kind::Either(nested) => {
-				if let Some(nested) = nested
-					.iter()
-					.map(|k| match k {
-						Kind::Literal(KindLiteral::Object(o)) => Some(o),
-						_ => None,
-					})
-					.collect::<Option<Vec<&BTreeMap<String, Kind>>>>()
-				{
-					if let Some(first) = nested.first() {
-						let mut key: Option<String> = None;
-
-						'key: for (k, v) in first.iter() {
-							let mut kinds: Vec<Kind> = vec![v.to_owned()];
-							for item in nested[1..].iter() {
-								if let Some(kind) = item.get(k) {
-									match kind {
-										Kind::Literal(l)
-											if kinds.contains(&l.to_kind())
-												|| kinds.contains(&Kind::Literal(l.to_owned())) =>
-										{
-											continue 'key;
-										}
-										kind if kinds
-											.iter()
-											.any(|k| *kind == k.to_non_literal_kind()) =>
-										{
-											continue 'key;
-										}
-										kind => {
-											kinds.push(kind.to_owned());
-										}
-									}
-								} else {
-									continue 'key;
-								}
-							}
-
-							key = Some(k.clone());
-							break;
-						}
-
-						if let Some(key) = key {
-							return Some(Kind::Literal(KindLiteral::DiscriminatedObject(
-								key.clone(),
-								nested.into_iter().map(|o| o.to_owned()).collect(),
-							)));
-						}
-					}
-				}
-
-				None
-			}
-			_ => None,
-		}
 	}
 }
 
@@ -266,136 +175,6 @@ impl From<crate::expr::Kind> for Kind {
 	}
 }
 
-/// Trait for retrieving the `kind` equivalent of a rust type.
-///
-/// Returns the most general kind for a type.
-/// For example Number could be either number or float or int or decimal but the most general is
-/// number.
-///
-/// This trait is only implemented for types which can only be retrieve from
-pub trait HasKind {
-	fn kind() -> Kind;
-}
-
-impl<T: HasKind> HasKind for Option<T> {
-	fn kind() -> Kind {
-		let kind = T::kind();
-		if matches!(kind, Kind::Option(_)) {
-			kind
-		} else {
-			Kind::Option(Box::new(kind))
-		}
-	}
-}
-
-impl<T: HasKind> HasKind for Vec<T> {
-	fn kind() -> Kind {
-		let kind = T::kind();
-		Kind::Array(Box::new(kind), None)
-	}
-}
-
-impl HasKind for Array {
-	fn kind() -> Kind {
-		Kind::Array(Box::new(Kind::Any), None)
-	}
-}
-
-impl<T: HasKind, const SIZE: usize> HasKind for [T; SIZE] {
-	fn kind() -> Kind {
-		let kind = T::kind();
-		Kind::Array(Box::new(kind), Some(SIZE as u64))
-	}
-}
-
-impl HasKind for Thing {
-	fn kind() -> Kind {
-		Kind::Record(Vec::new())
-	}
-}
-
-impl HasKind for Geometry {
-	fn kind() -> Kind {
-		Kind::Geometry(Vec::new())
-	}
-}
-
-impl HasKind for Closure {
-	fn kind() -> Kind {
-		// The inner values of function are currently completely unused.
-		Kind::Function(None, None)
-	}
-}
-
-impl HasKind for Regex {
-	fn kind() -> Kind {
-		Kind::Regex
-	}
-}
-
-impl HasKind for File {
-	fn kind() -> Kind {
-		Kind::File(Vec::new())
-	}
-}
-
-macro_rules! impl_basic_has_kind{
-	($($name:ident => $kind:ident),*$(,)?) => {
-		$(
-			impl HasKind for $name{
-				fn kind() -> Kind{
-					Kind::$kind
-				}
-			}
-		)*
-	}
-}
-
-impl_basic_has_kind! {
-	bool => Bool,
-
-	i64 => Int,
-	f64 => Float,
-	Decimal => Decimal,
-
-	String => String,
-	Strand => String,
-	Bytes => Bytes,
-	Number => Number,
-	Datetime => Datetime,
-	Duration => Duration,
-	Uuid => Uuid,
-	Object => Object,
-	Range => Range,
-}
-
-macro_rules! impl_geometry_has_kind{
-	($($name:ty => $kind:literal),*$(,)?) => {
-		$(
-			impl HasKind for $name{
-				fn kind() -> Kind{
-					Kind::Geometry(vec![$kind.to_string()])
-				}
-			}
-		)*
-	}
-}
-impl_geometry_has_kind! {
-	Point<f64> => "point",
-	LineString<f64> => "line",
-	MultiPoint<f64> => "multipoint",
-	Polygon<f64> => "polygon",
-	MultiLineString<f64> => "multiline",
-	MultiPolygon<f64> => "multipolygon",
-}
-
-impl From<&Kind> for Box<Kind> {
-	#[inline]
-	fn from(v: &Kind) -> Self {
-		Box::new(v.clone())
-	}
-}
-
 impl Display for Kind {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
@@ -461,7 +240,9 @@ impl Display for Kind {
 
 pub enum KindLiteral {
 	String(Strand),
-	Number(Number),
+	Integer(i64),
+	Float(f64),
+	Decimal(Decimal),
 	Duration(Duration),
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
@@ -469,124 +250,13 @@ pub enum KindLiteral {
 	Bool(bool),
 }
 
-impl KindLiteral {
-	/*
-		pub fn to_kind(&self) -> Kind {
-			match self {
-				Self::String(_) => Kind::String,
-				Self::Number(_) => Kind::Number,
-				Self::Duration(_) => Kind::Duration,
-				Self::Array(a) => {
-					if let Some(inner) = a.first() {
-						if a.iter().all(|x| x == inner) {
-							return Kind::Array(Box::new(inner.to_owned()), Some(a.len() as u64));
-						}
-					}
-
-					Kind::Array(Box::new(Kind::Any), None)
-				}
-				Self::Object(_) => Kind::Object,
-				Self::DiscriminatedObject(_, _) => Kind::Object,
-				Self::Bool(_) => Kind::Bool,
-			}
-		}
-
-		pub fn validate_value(&self, value: &SqlValue) -> bool {
-			match self {
-				Self::String(v) => match value {
-					SqlValue::Strand(s) => s == v,
-					_ => false,
-				},
-				Self::Number(v) => match value {
-					SqlValue::Number(n) => n == v,
-					_ => false,
-				},
-				Self::Duration(v) => match value {
-					SqlValue::Duration(n) => n == v,
-					_ => false,
-				},
-				Self::Bool(v) => match value {
-					SqlValue::Bool(b) => b == v,
-					_ => false,
-				},
-				Self::Array(a) => match value {
-					SqlValue::Array(x) => {
-						if a.len() != x.len() {
-							return false;
-						}
-
-						for (i, inner) in a.iter().enumerate() {
-							if let Some(value) = x.get(i) {
-								if value.to_owned().coerce_to_kind(inner).is_err() {
-									return false;
-								}
-							} else {
-								return false;
-							}
-						}
-
-						true
-					}
-					_ => false,
-				},
-				Self::Object(o) => match value {
-					SqlValue::Object(x) => {
-						if o.len() < x.len() {
-							return false;
-						}
-
-						for (k, v) in o.iter() {
-							if let Some(value) = x.get(k) {
-								if value.to_owned().coerce_to_kind(v).is_err() {
-									return false;
-								}
-							} else if !v.can_be_none() {
-								return false;
-							}
-						}
-
-						true
-					}
-					_ => false,
-				},
-				Self::DiscriminatedObject(key, discriminants) => match value {
-					SqlValue::Object(x) => {
-						let value = x.get(key).unwrap_or(&SqlValue::None);
-						if let Some(o) = discriminants
-							.iter()
-							.find(|o| value.to_owned().coerce_to_kind(&o[key]).is_ok())
-						{
-							if o.len() < x.len() {
-								return false;
-							}
-
-							for (k, v) in o.iter() {
-								if let Some(value) = x.get(k) {
-									if value.to_owned().coerce_to_kind(v).is_err() {
-										return false;
-									}
-								} else if !v.can_be_none() {
-									return false;
-								}
-							}
-
-							true
-						} else {
-							false
-						}
-					}
-					_ => false,
-				},
-			}
-		}
-	*/
-}
-
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			KindLiteral::String(s) => write!(f, "{}", s),
-			KindLiteral::Number(n) => write!(f, "{}", n),
+			KindLiteral::Integer(n) => write!(f, "{}", n),
+			KindLiteral::Float(n) => write!(f, "{}", n),
+			KindLiteral::Decimal(n) => write!(f, "{}", n),
 			KindLiteral::Duration(d) => write!(f, "{}", d),
 			KindLiteral::Bool(b) => write!(f, "{}", b),
 			KindLiteral::Array(a) => {
@@ -662,46 +332,54 @@ impl Display for KindLiteral {
 	}
 }
 
-impl From<KindLiteral> for crate::expr::LiteralKind {
+impl From<KindLiteral> for crate::expr::kind::KindLiteral {
 	fn from(v: KindLiteral) -> Self {
 		match v {
-			KindLiteral::String(s) => Self::String(s.into()),
-			KindLiteral::Number(n) => Self::Number(n.into()),
-			KindLiteral::Duration(d) => Self::Duration(d.into()),
-			KindLiteral::Array(a) => Self::Array(a.into_iter().map(Into::into).collect()),
-			KindLiteral::Object(o) => {
-				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
+			KindLiteral::String(s) => crate::expr::kind::KindLiteral::String(s.into()),
+			KindLiteral::Integer(i) => crate::expr::kind::KindLiteral::Integer(i),
+			KindLiteral::Float(f) => crate::expr::kind::KindLiteral::Integer(f),
+			KindLiteral::Decimal(d) => crate::expr::kind::KindLiteral::Decimal(d),
+			KindLiteral::Duration(d) => crate::expr::kind::KindLiteral::Duration(d),
+			KindLiteral::Array(a) => {
+				crate::expr::kind::KindLiteral::Array(a.into_iter().map(Into::into).collect())
 			}
-			KindLiteral::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
-				k,
-				o.into_iter()
-					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
-					.collect(),
+			KindLiteral::Object(o) => crate::expr::kind::KindLiteral::Object(
+				o.into_iter().map(|(k, v)| (k, v.into())).collect(),
 			),
-			KindLiteral::Bool(b) => Self::Bool(b),
+			KindLiteral::DiscriminatedObject(k, o) => {
+				crate::expr::kind::KindLiteral::DiscriminatedObject(
+					k,
+					o.into_iter()
+						.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
+						.collect(),
+				)
+			}
+			KindLiteral::Bool(b) => crate::expr::kind::KindLiteral::Bool(b),
 		}
 	}
 }
 
-impl From<crate::expr::LiteralKind> for KindLiteral {
-	fn from(v: crate::expr::LiteralKind) -> Self {
+impl From<crate::expr::kind::KindLiteral> for KindLiteral {
+	fn from(v: crate::expr::kind::KindLiteral) -> Self {
 		match v {
-			crate::expr::LiteralKind::String(s) => Self::String(s.into()),
-			crate::expr::LiteralKind::Number(n) => Self::Number(n.into()),
-			crate::expr::LiteralKind::Duration(d) => Self::Duration(d.into()),
-			crate::expr::LiteralKind::Array(a) => {
+			crate::expr::kind::KindLiteral::String(s) => Self::String(s.into()),
+			crate::expr::kind::KindLiteral::Integer(i) => Self::Integer(i),
+			crate::expr::kind::KindLiteral::Float(f) => Self::Float(f),
+			crate::expr::kind::KindLiteral::Decimal(d) => Self::Decimal(d),
+			crate::expr::kind::KindLiteral::Duration(d) => Self::Duration(d.into()),
+			crate::expr::kind::KindLiteral::Array(a) => {
 				Self::Array(a.into_iter().map(Into::into).collect())
 			}
-			crate::expr::LiteralKind::Object(o) => {
+			crate::expr::kind::KindLiteral::Object(o) => {
 				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
 			}
-			crate::expr::LiteralKind::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
+			crate::expr::kind::KindLiteral::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
 				k,
 				o.into_iter()
 					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
 					.collect(),
 			),
-			crate::expr::LiteralKind::Bool(b) => Self::Bool(b),
+			crate::expr::kind::KindLiteral::Bool(b) => Self::Bool(b),
 		}
 	}
 }

@@ -65,7 +65,7 @@ impl Parser<'_> {
 			}
 			_ => {
 				let ident = self.next_token_value::<Ident>()?.0;
-				self.parse_thing_from_ident(ctx, ident).await.map(Value::Thing)
+				self.parse_record_id_from_ident(ctx, ident).await.map(Value::Thing)
 			}
 		}
 	}

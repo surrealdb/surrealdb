@@ -1,6 +1,7 @@
 use reblessive::Stk;
 
-use crate::sql::statements::alter::{AlterFieldStatement, AlterSequenceStatement};
+use crate::sql::statements::alter::field::AlterDefault;
+use crate::sql::statements::alter::{AlterFieldStatement, AlterKind, AlterSequenceStatement};
 use crate::syn::error::bail;
 use crate::{
 	sql::{
@@ -52,11 +53,11 @@ impl Parser<'_> {
 					match peek.kind {
 						t!("COMMENT") => {
 							self.pop_peek();
-							res.comment = Some(None);
+							res.comment = AlterKind::Drop;
 						}
 						t!("CHANGEFEED") => {
 							self.pop_peek();
-							res.changefeed = Some(None);
+							res.changefeed = AlterKind::Drop;
 						}
 						_ => {
 							unexpected!(self, peek, "`COMMENT` or `CHANGEFEED`")
@@ -65,7 +66,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(Some(self.next_token_value()?))
+					res.comment = AlterKind::Set(self.next_token_value()?);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -88,11 +89,11 @@ impl Parser<'_> {
 				}
 				t!("SCHEMALESS") => {
 					self.pop_peek();
-					res.full = Some(false);
+					res.schemafull = AlterKind::Drop;
 				}
 				t!("SCHEMAFULL") => {
 					self.pop_peek();
-					res.full = Some(true);
+					res.schemafull = AlterKind::Set(());
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -100,7 +101,7 @@ impl Parser<'_> {
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
-					res.changefeed = Some(Some(self.parse_changefeed()?))
+					res.changefeed = AlterKind::Set(self.parse_changefeed()?)
 				}
 				_ => break,
 			}
@@ -138,32 +139,31 @@ impl Parser<'_> {
 					match peek.kind {
 						t!("FLEXIBLE") => {
 							self.pop_peek();
-							res.flex = Some(false);
+							res.flex = AlterKind::Drop;
 						}
 						t!("TYPE") => {
 							self.pop_peek();
-							res.kind = Some(None);
+							res.kind = AlterKind::Drop;
 						}
 						t!("READONLY") => {
 							self.pop_peek();
-							res.readonly = Some(false);
+							res.readonly = AlterKind::Drop;
 						}
 						t!("VALUE") => {
 							self.pop_peek();
-							res.value = Some(None);
+							res.value = AlterKind::Drop;
 						}
 						t!("ASSERT") => {
 							self.pop_peek();
-							res.assert = Some(None);
+							res.assert = AlterKind::Drop;
 						}
 						t!("DEFAULT") => {
 							self.pop_peek();
-							res.default = Some(None);
-							res.default_always = Some(false);
+							res.default = AlterDefault::Drop;
 						}
 						t!("COMMENT") => {
 							self.pop_peek();
-							res.comment = Some(None);
+							res.comment = AlterKind::Drop;
 						}
 						t!("REFERENCE") => {
 							if !self.settings.references_enabled {
@@ -174,7 +174,7 @@ impl Parser<'_> {
 							}
 
 							self.pop_peek();
-							res.reference = Some(None);
+							res.reference = AlterKind::Drop;
 						}
 						_ => {
 							unexpected!(
@@ -187,28 +187,33 @@ impl Parser<'_> {
 				}
 				t!("FLEXIBLE") => {
 					self.pop_peek();
-					res.flex = Some(true)
+					res.flex = AlterKind::Set(());
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					res.kind = Some(Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?));
+					res.kind = AlterKind::Set(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?);
 				}
 				t!("READONLY") => {
 					self.pop_peek();
-					res.flex = Some(true)
+					res.flex = AlterKind::Set(());
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
+					res.value = AlterKind::Set(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("ASSERT") => {
 					self.pop_peek();
-					res.assert = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
+					res.assert = AlterKind::Set(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("DEFAULT") => {
 					self.pop_peek();
-					res.default_always = Some(self.eat(t!("ALWAYS")));
-					res.default = Some(Some(ctx.run(|ctx| self.parse_value_field(ctx)).await?));
+					if self.eat(t!("ALWAYS")) {
+						res.default =
+							AlterDefault::Always(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
+					} else {
+						res.default =
+							AlterDefault::Set(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
+					}
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -216,7 +221,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(Some(self.next_token_value()?))
+					res.comment = AlterKind::Set(self.next_token_value()?);
 				}
 				t!("REFERENCE") => {
 					if !self.settings.references_enabled {
@@ -227,7 +232,7 @@ impl Parser<'_> {
 					}
 
 					self.pop_peek();
-					res.reference = Some(Some(self.parse_reference(ctx).await?));
+					res.reference = AlterKind::Set(self.parse_reference(ctx).await?);
 				}
 				_ => break,
 			}

@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		Field, Fields, Idioms, Limit, Order, Split, Splits, SqlValues, Start, Version,
+		Field, Fields, Idioms, Limit, Order, Split, Splits, Start, Version,
 		order::{OrderList, Ordering},
 		statements::SelectStatement,
 	},
@@ -33,9 +33,9 @@ impl Parser<'_> {
 
 		let only = self.eat(t!("ONLY"));
 
-		let mut what = vec![stk.run(|ctx| self.parse_value_table(ctx)).await?];
+		let mut what = vec![stk.run(|ctx| self.parse_expr_table(ctx)).await?];
 		while self.eat(t!(",")) {
-			what.push(stk.run(|ctx| self.parse_value_table(ctx)).await?);
+			what.push(stk.run(|ctx| self.parse_expr_table(ctx)).await?);
 		}
 		let what = SqlValues(what);
 
@@ -191,7 +191,7 @@ impl Parser<'_> {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Limit(value)))
 	}
 
@@ -200,7 +200,7 @@ impl Parser<'_> {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
-		let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Start(value)))
 	}
 
@@ -211,7 +211,7 @@ impl Parser<'_> {
 		if !self.eat(t!("VERSION")) {
 			return Ok(None);
 		}
-		let time = self.parse_value_inherit(ctx).await?;
+		let time = self.parse_expr_inherit(ctx).await?;
 		Ok(Some(Version(time)))
 	}
 }

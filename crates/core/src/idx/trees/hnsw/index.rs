@@ -1,5 +1,5 @@
 use crate::expr::index::{HnswParams, VectorType};
-use crate::expr::{Id, Number, Value};
+use crate::expr::{Number, RecordIdKeyLit, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
@@ -89,7 +89,7 @@ impl HnswIndex {
 	pub async fn index_document(
 		&mut self,
 		tx: &Transaction,
-		id: &Id,
+		id: &RecordIdKeyLit,
 		content: &[Value],
 	) -> Result<()> {
 		// Ensure the layers are up-to-date
@@ -111,7 +111,7 @@ impl HnswIndex {
 	pub(crate) async fn remove_document(
 		&mut self,
 		tx: &Transaction,
-		id: Id,
+		id: RecordIdKeyLit,
 		content: &[Value],
 	) -> Result<()> {
 		if let Some(doc_id) = self.docs.remove(tx, id).await? {

@@ -1,3 +1,4 @@
+use crate::expr::Expr;
 use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,3 @@
-use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use crate::err::Error;
 use crate::expr::strand::Strand;
 use crate::fnc::util::math::ToFloat;
@@ -14,10 +13,6 @@ use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
-
-pub mod decimal;
-
-pub use decimal::DecimalExt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 

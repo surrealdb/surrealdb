@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum Language {
 	Arabic,
 	Danish,

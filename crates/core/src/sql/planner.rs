@@ -1,4 +1,4 @@
-use crate::sql::statement::Statement;
+use crate::sql::TopLevelExpr;
 use anyhow::Result;
 
 pub(crate) struct SqlToLogical {}
@@ -8,7 +8,10 @@ impl SqlToLogical {
 		Self {}
 	}
 
-	pub(crate) fn statement_to_logical(&self, stmt: Statement) -> Result<crate::expr::LogicalPlan> {
+	pub(crate) fn statement_to_logical(
+		&self,
+		stmt: TopLevelExpr,
+	) -> Result<crate::expr::TopLevelExpr> {
 		Ok(stmt.into())
 	}
 }

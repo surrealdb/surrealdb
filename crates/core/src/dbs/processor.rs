@@ -4,7 +4,7 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::expr::dir::Dir;
-use crate::expr::id::range::IdRange;
+use crate::expr::id::range::KeyRange;
 use crate::expr::{Edges, Table, Thing, Value};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
@@ -672,7 +672,7 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		opt: &Options,
 		tb: &str,
-		r: IdRange,
+		r: KeyRange,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
@@ -705,7 +705,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: IdRange,
+		r: KeyRange,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -744,7 +744,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: IdRange,
+		r: KeyRange,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -782,7 +782,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: IdRange,
+		r: KeyRange,
 	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();

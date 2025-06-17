@@ -22,13 +22,9 @@ pub struct IfelseStatement {
 
 impl IfelseStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		for (cond, then) in self.exprs.iter() {
-			if cond.writeable() || then.writeable() {
-				return true;
-			}
-		}
-		self.close.as_ref().is_some_and(Value::writeable)
+	pub(crate) fn read_only(&self) -> bool {
+		self.exprs.iter().all(|x| x.0.read_only() && x.1.read_only())
+			&& self.close.map(|x| x.read_only()).unwrap_or(true)
 	}
 	/// Check if we require a writeable transaction
 	pub(crate) fn bracketed(&self) -> bool {

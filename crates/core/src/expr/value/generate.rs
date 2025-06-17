@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::expr::id::Id;
+use crate::expr::id::RecordIdKeyLit;
 use crate::expr::table::Table;
 use crate::expr::thing::Thing;
 use crate::expr::value::Value;
@@ -41,7 +41,7 @@ impl Value {
 			// There is no record id field
 			Value::None => Ok(Thing {
 				tb: tb.0.to_string(),
-				id: Id::rand(),
+				id: RecordIdKeyLit::rand(),
 			}),
 			// There is a record id defined
 			Value::Thing(id) => match retable {

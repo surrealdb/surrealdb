@@ -15,31 +15,22 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
-#[revisioned(revision = 2)]
+use super::AlterKind;
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AlterTableStatement {
 	pub name: Ident,
 	pub if_exists: bool,
-	#[revision(end = 2, convert_fn = "convert_drop")]
-	pub _drop: Option<bool>,
-	pub full: Option<bool>,
+	pub schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
-	pub changefeed: Option<Option<ChangeFeed>>,
-	pub comment: Option<Option<Strand>>,
+	pub changefeed: AlterKind<ChangeFeed>,
+	pub comment: AlterKind<Strand>,
 	pub kind: Option<TableType>,
 }
 
 impl AlterTableStatement {
-	fn convert_drop(
-		&mut self,
-		_revision: u16,
-		_value: Option<bool>,
-	) -> Result<(), revision::Error> {
-		Ok(())
-	}
-
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
@@ -67,7 +58,7 @@ impl AlterTableStatement {
 		};
 		// Process the statement
 		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if let Some(full) = &self.full {
+		if let Some(full) = &self.schemafull {
 			dt.full = *full;
 		}
 		if let Some(permissions) = &self.permissions {
@@ -135,7 +126,7 @@ impl Display for AlterTableStatement {
 				}
 			}
 		}
-		if let Some(full) = self.full {
+		if let Some(full) = self.schemafull {
 			f.write_str(if full {
 				" SCHEMAFULL"
 			} else {

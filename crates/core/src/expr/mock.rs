@@ -1,4 +1,5 @@
-use crate::expr::{Id, Thing, escape::EscapeIdent};
+use crate::expr::escape::EscapeIdent;
+use crate::val::{RecordId, RecordIdKey};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -12,15 +13,15 @@ pub struct IntoIter {
 }
 
 impl Iterator for IntoIter {
-	type Item = Thing;
-	fn next(&mut self) -> Option<Thing> {
+	type Item = RecordId;
+	fn next(&mut self) -> Option<RecordId> {
 		match &self.model {
 			Mock::Count(tb, c) => {
 				if self.index < *c {
 					self.index += 1;
-					Some(Thing {
+					Some(RecordId {
 						tb: tb.to_string(),
-						id: Id::rand(),
+						id: RecordIdKey::rand(),
 					})
 				} else {
 					None
@@ -34,7 +35,7 @@ impl Iterator for IntoIter {
 					self.index += 1;
 					Some(Thing {
 						tb: tb.to_string(),
-						id: Id::from(self.index),
+						id: RecordIdKey::from(self.index),
 					})
 				} else {
 					None

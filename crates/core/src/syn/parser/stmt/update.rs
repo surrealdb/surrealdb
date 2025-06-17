@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{SqlValues, statements::UpdateStatement},
+	sql::statements::UpdateStatement,
 	syn::{
 		parser::{ParseResult, Parser},
 		token::t,
@@ -11,7 +11,7 @@ use crate::{
 impl Parser<'_> {
 	pub async fn parse_update_stmt(&mut self, stk: &mut Stk) -> ParseResult<UpdateStatement> {
 		let only = self.eat(t!("ONLY"));
-		let what = SqlValues(self.parse_what_list(stk).await?);
+		let what = self.parse_what_list(stk).await?;
 		let with = self.try_parse_with()?;
 		let data = self.try_parse_data(stk).await?;
 		let cond = self.try_parse_condition(stk).await?;

@@ -11,7 +11,7 @@ use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::{Read, Write};
 use surrealdb_core::ctx::MutableContext;
 use surrealdb_core::expr::index::{Distance, MTreeParams, VectorType};
-use surrealdb_core::expr::{Id, Number, Thing, Value};
+use surrealdb_core::expr::{Number, RecordIdKeyLit, Thing, Value};
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::MTreeConditionChecker;
 use surrealdb_core::idx::trees::mtree::MTreeIndex;
@@ -141,7 +141,7 @@ async fn insert_objects(
 			for i in 0..samples_size {
 				let vector: Vec<Number> = random_object(&mut rng, vector_size);
 				// Insert the sample
-				let rid = Thing::from(("test", Id::from(i as i64)));
+				let rid = Thing::from(("test", RecordIdKeyLit::from(i as i64)));
 				mt.index_document(stk, &tx, &rid, &[Value::from(vector)]).await.unwrap();
 			}
 		})

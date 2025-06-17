@@ -14,6 +14,14 @@ use super::escape::QuoteStr;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Strand(String);
 
+impl Deref for Strand {
+	type Target = str;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
 impl Strand {
 	/// Create a new strand, returns None if the string contains a null byte.
 	pub fn new(s: String) -> Option<Strand> {
@@ -32,6 +40,10 @@ impl Strand {
 		// Check in debug mode if the variants
 		debug_assert!(!s.contains('\0'));
 		Strand(s)
+	}
+
+	pub fn into_inner(self) -> String {
+		self.0
 	}
 }
 

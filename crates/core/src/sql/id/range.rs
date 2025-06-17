@@ -1,4 +1,4 @@
-use super::Id;
+use super::RecordIdKeyLit;
 use crate::{
 	err::Error,
 	sql::{Range, SqlValue},
@@ -12,20 +12,28 @@ use std::{cmp::Ordering, fmt, ops::Bound};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct IdRange {
-	pub beg: Bound<Id>,
-	pub end: Bound<Id>,
+	pub beg: Bound<RecordIdKeyLit>,
+	pub end: Bound<RecordIdKeyLit>,
 }
 
-impl TryFrom<(Bound<Id>, Bound<Id>)> for IdRange {
+impl TryFrom<(Bound<RecordIdKeyLit>, Bound<RecordIdKeyLit>)> for IdRange {
 	type Error = anyhow::Error;
-	fn try_from((beg, end): (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
-		if matches!(beg, Bound::Included(Id::Range(_)) | Bound::Excluded(Id::Range(_))) {
+	fn try_from(
+		(beg, end): (Bound<RecordIdKeyLit>, Bound<RecordIdKeyLit>),
+	) -> Result<Self, Self::Error> {
+		if matches!(
+			beg,
+			Bound::Included(RecordIdKeyLit::Range(_)) | Bound::Excluded(RecordIdKeyLit::Range(_))
+		) {
 			bail!(Error::IdInvalid {
 				value: "range".into(),
 			});
 		}
 
-		if matches!(end, Bound::Included(Id::Range(_)) | Bound::Excluded(Id::Range(_))) {
+		if matches!(
+			end,
+			Bound::Included(RecordIdKeyLit::Range(_)) | Bound::Excluded(RecordIdKeyLit::Range(_))
+		) {
 			bail!(Error::IdInvalid {
 				value: "range".into(),
 			});
@@ -42,14 +50,14 @@ impl TryFrom<Range> for IdRange {
 	type Error = anyhow::Error;
 	fn try_from(v: Range) -> Result<Self, Self::Error> {
 		let beg = match v.beg {
-			Bound::Included(beg) => Bound::Included(Id::try_from(beg)?),
-			Bound::Excluded(beg) => Bound::Excluded(Id::try_from(beg)?),
+			Bound::Included(beg) => Bound::Included(RecordIdKeyLit::try_from(beg)?),
+			Bound::Excluded(beg) => Bound::Excluded(RecordIdKeyLit::try_from(beg)?),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
 		let end = match v.end {
-			Bound::Included(end) => Bound::Included(Id::try_from(end)?),
-			Bound::Excluded(end) => Bound::Excluded(Id::try_from(end)?),
+			Bound::Included(end) => Bound::Included(RecordIdKeyLit::try_from(end)?),
+			Bound::Excluded(end) => Bound::Excluded(RecordIdKeyLit::try_from(end)?),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
@@ -70,7 +78,7 @@ impl TryFrom<SqlValue> for IdRange {
 	}
 }
 
-impl From<IdRange> for crate::expr::IdRange {
+impl From<IdRange> for crate::expr::KeyRange {
 	fn from(v: IdRange) -> Self {
 		Self {
 			beg: match v.beg {
@@ -87,8 +95,8 @@ impl From<IdRange> for crate::expr::IdRange {
 	}
 }
 
-impl From<crate::expr::IdRange> for IdRange {
-	fn from(v: crate::expr::IdRange) -> Self {
+impl From<crate::expr::KeyRange> for IdRange {
+	fn from(v: crate::expr::KeyRange) -> Self {
 		Self {
 			beg: match v.beg {
 				Bound::Included(v) => Bound::Included(v.into()),

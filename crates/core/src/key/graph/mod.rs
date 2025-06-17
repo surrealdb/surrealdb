@@ -1,6 +1,6 @@
 //! Stores a graph edge pointer
 use crate::expr::dir::Dir;
-use crate::expr::id::Id;
+use crate::expr::id::RecordIdKeyLit;
 use crate::expr::thing::Thing;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -18,12 +18,12 @@ struct Prefix<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKeyLit,
 }
 impl_key!(Prefix<'a>);
 
 impl<'a> Prefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Self {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKeyLit) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -48,13 +48,13 @@ struct PrefixEg<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKeyLit,
 	pub eg: Dir,
 }
 impl_key!(PrefixEg<'a>);
 
 impl<'a> PrefixEg<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, eg: &Dir) -> Self {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKeyLit, eg: &Dir) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -80,14 +80,21 @@ struct PrefixFt<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKeyLit,
 	pub eg: Dir,
 	pub ft: &'a str,
 }
 impl_key!(PrefixFt<'a>);
 
 impl<'a> PrefixFt<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, eg: &Dir, ft: &'a str) -> Self {
+	fn new(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		id: &RecordIdKeyLit,
+		eg: &Dir,
+		ft: &'a str,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -115,10 +122,10 @@ pub struct Graph<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKeyLit,
 	pub eg: Dir,
 	pub ft: &'a str,
-	pub fk: Id,
+	pub fk: RecordIdKeyLit,
 }
 impl_key!(Graph<'a>);
 
@@ -126,44 +133,58 @@ pub fn new<'a>(
 	ns: &'a str,
 	db: &'a str,
 	tb: &'a str,
-	id: &Id,
+	id: &RecordIdKeyLit,
 	eg: &Dir,
 	fk: &'a Thing,
 ) -> Graph<'a> {
 	Graph::new(ns, db, tb, id.to_owned(), eg.to_owned(), fk)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
+pub fn prefix(ns: &str, db: &str, tb: &str, id: &RecordIdKeyLit) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
+pub fn suffix(ns: &str, db: &str, tb: &str, id: &RecordIdKeyLit) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn egprefix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
+pub fn egprefix(ns: &str, db: &str, tb: &str, id: &RecordIdKeyLit, eg: &Dir) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn egsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
+pub fn egsuffix(ns: &str, db: &str, tb: &str, id: &RecordIdKeyLit, eg: &Dir) -> Result<Vec<u8>> {
 	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
+pub fn ftprefix(
+	ns: &str,
+	db: &str,
+	tb: &str,
+	id: &RecordIdKeyLit,
+	eg: &Dir,
+	ft: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
+pub fn ftsuffix(
+	ns: &str,
+	db: &str,
+	tb: &str,
+	id: &RecordIdKeyLit,
+	eg: &Dir,
+	ft: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -176,7 +197,14 @@ impl Categorise for Graph<'_> {
 }
 
 impl<'a> Graph<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id, eg: Dir, fk: &'a Thing) -> Self {
+	pub fn new(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		id: RecordIdKeyLit,
+		eg: Dir,
+		fk: &'a Thing,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -197,10 +225,10 @@ impl<'a> Graph<'a> {
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
-		id: Id,
+		id: RecordIdKeyLit,
 		eg: Dir,
 		ft: &'a str,
-		fk: Id,
+		fk: RecordIdKeyLit,
 	) -> Self {
 		Self {
 			__: b'/',

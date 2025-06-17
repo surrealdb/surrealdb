@@ -1,31 +1,60 @@
-use crate::expr::{Kind, index::Distance};
+use crate::expr::Expr;
+use crate::expr::{Kind, fmt::Fmt, index::Distance};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::expr::Expr;
-
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+//TODO(3.0): Rename to prefix operator after idiom overhaul.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum UnaryOperator {
+pub enum PrefixOperator {
 	/// `!`
 	Not,
 	/// `+`
-	Pos,
+	Positive,
 	/// `-`
-	Neg,
+	Negative,
+	/// `..`
+	Range,
+	/// `..=`
+	RangeInclusive,
 	Cast(Kind),
 }
 
-impl fmt::Display for UnaryOperator {
+impl fmt::Display for PrefixOperator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Not => write!(f, "!"),
-			Self::Pos => write!(f, "+"),
-			Self::Neg => write!(f, "-"),
+			Self::Positive => write!(f, "+"),
+			Self::Negative => write!(f, "-"),
+			Self::Range => write!(f, ".."),
+			Self::RangeInclusive => write!(f, "..="),
 			Self::Cast(kind) => write!(f, "<{kind}>"),
 		}
 	}
 }
 
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum PostfixOperator {
+	Range,
+	RangeSkip,
+	Call(Vec<Expr>),
+}
+
+impl fmt::Display for PostfixOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Range => write!(f, ".."),
+			Self::RangeSkip => write!(f, ">.."),
+			Self::Call(x) => write!(f, "({})", Fmt::comma_separated(x)),
+		}
+	}
+}
+
+#[revision(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum BinaryOperator {

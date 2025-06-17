@@ -1,34 +1,30 @@
-use crate::sql::SqlValue;
-use crate::sql::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::{
+	Expr,
+	fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent},
+};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of else if's
-	pub exprs: Vec<(SqlValue, SqlValue)>,
+	pub exprs: Vec<(Expr, Expr)>,
 	/// the final else body, if there is one
-	pub close: Option<SqlValue>,
+	pub close: Option<Expr>,
 }
 
 impl IfelseStatement {
 	/// Check if the statement is bracketed
 	pub(crate) fn bracketed(&self) -> bool {
-		self.exprs.iter().all(|(_, v)| matches!(v, SqlValue::Block(_)))
-			&& (self.close.as_ref().is_none()
-				|| self.close.as_ref().is_some_and(|v| matches!(v, SqlValue::Block(_))))
+		self.exprs.iter().all(|(_, v)| matches!(v, Expr::Block(_)))
+			&& self.close.as_ref().map(|v| matches!(v, Expr::Block(_))).unwrap_or(true)
 	}
 }
 
 impl From<IfelseStatement> for crate::expr::statements::IfelseStatement {
 	fn from(v: IfelseStatement) -> Self {
 		crate::expr::statements::IfelseStatement {
-			exprs: v.exprs.into_iter().map(|(e1, e2)| (e1.into(), e2.into())).collect(),
+			exprs: v.exprs.into_iter().map(Into::into).collect(),
 			close: v.close.map(Into::into),
 		}
 	}
@@ -37,7 +33,7 @@ impl From<IfelseStatement> for crate::expr::statements::IfelseStatement {
 impl From<crate::expr::statements::IfelseStatement> for IfelseStatement {
 	fn from(v: crate::expr::statements::IfelseStatement) -> Self {
 		IfelseStatement {
-			exprs: v.exprs.into_iter().map(|(e1, e2)| (e1.into(), e2.into())).collect(),
+			exprs: v.exprs.into_iter().map(Into::into).collect(),
 			close: v.close.map(Into::into),
 		}
 	}

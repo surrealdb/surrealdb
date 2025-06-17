@@ -20,7 +20,7 @@ use crate::{
 
 pub enum Numeric {
 	Float(f64),
-	Int(i64),
+	Integer(i64),
 	Decimal(Decimal),
 	Duration(Duration),
 }
@@ -164,7 +164,7 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> {
 	match kind {
 		NumberKind::Integer => number_str
 			.parse()
-			.map(Numeric::Int)
+			.map(Numeric::Integer)
 			.map_err(|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span())),
 		NumberKind::Float => {
 			let number_str = number_str.trim_end_matches('f');

@@ -5,7 +5,7 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Id, Object, Thing, Value};
+use crate::expr::{Object, RecordIdKeyLit, Thing, Value};
 use crate::idx::index::IndexOperation;
 use crate::key::index::ia::Ia;
 use crate::key::index::ip::Ip;
@@ -261,7 +261,7 @@ impl IndexBuilder {
 struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
-	id: Id,
+	id: RecordIdKeyLit,
 }
 
 #[revisioned(revision = 1)]
@@ -389,7 +389,7 @@ impl Building {
 		Ok(Ia::new(ns, db, &self.ix.what, &self.ix.name, i))
 	}
 
-	fn new_ip_key(&self, id: Id) -> Result<Ip> {
+	fn new_ip_key(&self, id: RecordIdKeyLit) -> Result<Ip> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(Ip::new(ns, db, &self.ix.what, &self.ix.name, id))
 	}

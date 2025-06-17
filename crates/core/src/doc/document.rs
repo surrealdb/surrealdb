@@ -6,20 +6,18 @@ use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::FlowResultExt as _;
 use crate::expr::permission::Permission;
-use crate::expr::statements::define::DefineDatabaseStatement;
-use crate::expr::statements::define::DefineEventStatement;
-use crate::expr::statements::define::DefineFieldStatement;
-use crate::expr::statements::define::DefineIndexStatement;
-use crate::expr::statements::define::DefineTableStatement;
+use crate::expr::statements::define::{
+	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
+	DefineTableStatement,
+};
 use crate::expr::statements::live::LiveStatement;
 use crate::expr::table::Table;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
+use crate::val::{RecordId, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use std::fmt::{Debug, Formatter};
@@ -29,7 +27,7 @@ use std::sync::Arc;
 
 pub(crate) struct Document {
 	/// The record id of this document
-	pub(super) id: Option<Arc<Thing>>,
+	pub(super) id: Option<Arc<RecordId>>,
 	/// The table that we should generate a record id from
 	pub(super) r#gen: Option<Table>,
 	/// Whether this is the second iteration of the processing
@@ -45,7 +43,7 @@ pub(crate) struct Document {
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub(crate) struct CursorDoc {
-	pub(crate) rid: Option<Arc<Thing>>,
+	pub(crate) rid: Option<Arc<RecordId>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) doc: CursorValue,
 }
@@ -102,7 +100,7 @@ impl Deref for CursorValue {
 
 impl CursorDoc {
 	pub(crate) fn new<T: Into<CursorValue>>(
-		rid: Option<Arc<Thing>>,
+		rid: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		doc: T,
 	) -> Self {
@@ -173,7 +171,7 @@ pub(crate) enum Permitted {
 impl Document {
 	/// Initialise a new document
 	pub fn new(
-		id: Option<Arc<Thing>>,
+		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		r#gen: Option<Table>,
 		val: Arc<Value>,

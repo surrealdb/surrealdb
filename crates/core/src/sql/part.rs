@@ -1,8 +1,6 @@
-use crate::sql::{Expr, Graph, Ident, Idiom, fmt::Fmt, strand::no_nul_bytes};
-use anyhow::Result;
+use crate::sql::{Expr, Graph, Ident, Idiom, fmt::Fmt};
 use std::fmt;
 use std::fmt::Write;
-use std::str;
 
 use super::fmt::{is_pretty, pretty_indent};
 
@@ -18,7 +16,7 @@ pub enum Part {
 	Graph(Graph),
 	Value(Expr),
 	Start(Expr),
-	Method(#[serde(with = "no_nul_bytes")] String, Vec<Expr>),
+	Method(String, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
 	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),

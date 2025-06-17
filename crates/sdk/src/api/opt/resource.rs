@@ -4,7 +4,7 @@ use crate::{
 };
 use std::ops::{self, Bound};
 use surrealdb_core::expr::{
-	Edges as CoreEdges, Id as CoreId, IdRange as CoreIdRange, Table as CoreTable,
+	Edges as CoreEdges, KeyRange as CoreIdRange, RecordIdKeyLit as CoreId, Table as CoreTable,
 	Thing as CoreThing,
 };
 use surrealdb_core::sql::Table as CoreSqlTable;

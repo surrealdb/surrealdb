@@ -4,7 +4,6 @@ mod api;
 mod bucket;
 pub mod config;
 mod database;
-mod deprecated;
 mod event;
 mod field;
 mod function;
@@ -33,38 +32,23 @@ pub use sequence::DefineSequenceStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
-pub use deprecated::scope::DefineScopeStatement;
-pub use deprecated::token::DefineTokenStatement;
-
 pub use api::ApiAction;
 
-use anyhow::Result;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 5)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+pub enum DefineKind {
+	Default,
+	Overwrite,
+	IfNotExists,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
 	Function(DefineFunctionStatement),
 	Analyzer(DefineAnalyzerStatement),
-	#[revision(
-		end = 2,
-		convert_fn = "convert_token_to_access",
-		fields_name = "DefineTokenStatementFields"
-	)]
-	Token(DefineTokenStatement),
-	#[revision(
-		end = 2,
-		convert_fn = "convert_scope_to_access",
-		fields_name = "DefineScopeStatementFields"
-	)]
-	Scope(DefineScopeStatement),
 	Param(DefineParamStatement),
 	Table(DefineTableStatement),
 	Event(DefineEventStatement),
@@ -72,32 +56,11 @@ pub enum DefineStatement {
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
 	Model(DefineModelStatement),
-	#[revision(start = 2)]
 	Access(DefineAccessStatement),
 	Config(DefineConfigStatement),
-	#[revision(start = 3)]
 	Api(DefineApiStatement),
-	#[revision(start = 4)]
 	Bucket(DefineBucketStatement),
-	#[revision(start = 5)]
 	Sequence(DefineSequenceStatement),
-}
-
-// Revision implementations
-impl DefineStatement {
-	fn convert_token_to_access(
-		fields: DefineTokenStatementFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(DefineStatement::Access(fields.0.into()))
-	}
-
-	fn convert_scope_to_access(
-		fields: DefineScopeStatementFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(DefineStatement::Access(fields.0.into()))
-	}
 }
 
 impl Display for DefineStatement {
@@ -166,22 +129,5 @@ impl From<crate::expr::statements::DefineStatement> for DefineStatement {
 			crate::expr::statements::DefineStatement::Bucket(v) => Self::Bucket(v.into()),
 			crate::expr::statements::DefineStatement::Sequence(v) => Self::Sequence(v.into()),
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-
-	use super::*;
-	use crate::sql::Ident;
-
-	#[test]
-	fn check_define_serialize() {
-		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
-			name: Ident::from("test"),
-			..Default::default()
-		});
-		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(13, enc.len());
 	}
 }

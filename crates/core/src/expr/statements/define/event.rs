@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, Values};
+use crate::expr::{Base, Expr, Ident, Strand, Value, Values};
 use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail};
 
@@ -13,20 +13,19 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use uuid::Uuid;
 
-#[revisioned(revision = 3)]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineEventStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub what: Ident,
-	pub when: Value,
-	pub then: Values,
+	pub when: Expr,
+	pub then: Vec<Expr>,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
 }
 
 impl DefineEventStatement {
@@ -45,12 +44,16 @@ impl DefineEventStatement {
 		let txn = ctx.tx();
 		// Check if the definition exists
 		if txn.get_tb_event(ns, db, &self.what, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::EvAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::EvAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
@@ -61,9 +64,7 @@ impl DefineEventStatement {
 		txn.set(
 			key,
 			revision::to_vec(&DefineEventStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
+				kind: DefineKind::Default,
 				..self.clone()
 			})?,
 			None,

@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Data, Idiom, SqlValue, Subquery, statements::InsertStatement},
+	sql::{Data, Idiom, statements::InsertStatement},
 	syn::{
 		error::bail,
 		parser::{ParseResult, Parser, mac::expected},
@@ -68,7 +68,7 @@ impl Parser<'_> {
 		let token = self.peek();
 		// not a `(` so it cant be `(a,b) VALUES (c,d)`
 		if token.kind != t!("(") {
-			let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 			return Ok(Data::SingleExpression(value));
 		}
 
@@ -129,7 +129,7 @@ impl Parser<'_> {
 			let mut values = Vec::new();
 			let start = expected!(self, t!("(")).span;
 			loop {
-				values.push(self.parse_value_field(ctx).await?);
+				values.push(self.parse_expr_field(ctx).await?);
 
 				if !self.eat(t!(",")) {
 					break;
@@ -165,13 +165,13 @@ impl Parser<'_> {
 		expected!(self, t!("UPDATE"));
 		let l = self.parse_plain_idiom(ctx).await?;
 		let o = self.parse_assigner()?;
-		let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let r = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut data = vec![(l, o, r)];
 
 		while self.eat(t!(",")) {
 			let l = self.parse_plain_idiom(ctx).await?;
 			let o = self.parse_assigner()?;
-			let r = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			let r = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 			data.push((l, o, r))
 		}
 

@@ -2,9 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::ControlFlow;
-use crate::expr::FlowResult;
-use crate::expr::value::Value;
+use crate::expr::{ControlFlow, Expr, FlowResult};
+use crate::val::Value;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -41,31 +40,23 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
 pub struct Model {
 	pub name: String,
 	pub version: String,
-	/// TODO(3.0) factor calling out of the model.
-	pub args: Vec<Expr>,
 }
 
 impl fmt::Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ml::{}<{}>(", self.name, self.version)?;
-		for (idx, p) in self.args.iter().enumerate() {
-			if idx != 0 {
-				write!(f, ",")?;
-			}
-			write!(f, "{}", p)?;
-		}
-		write!(f, ")")
+		write!(f, "ml::{}<{}>", self.name, self.version)
 	}
 }
 
 impl Model {
-	#[cfg(feature = "ml")]
+	//#[cfg(feature = "ml")]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
+		args: &[Expr],
 	) -> FlowResult<Value> {
 		use crate::expr::{FlowResultExt, value::CoerceError};
 
@@ -106,14 +97,7 @@ impl Model {
 				}
 			}
 		}
-		// Compute the function arguments
-		let mut args = stk
-			.scope(|stk| {
-				try_join_all(self.args.iter().map(|v| {
-					stk.run(|stk| async { v.compute(stk, ctx, opt, doc).await.catch_return() })
-				}))
-			})
-			.await?;
+
 		// Check the minimum argument length
 		if args.len() != 1 {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
@@ -121,8 +105,10 @@ impl Model {
 				message: ARGUMENTS.into(),
 			})));
 		}
+
 		// Take the first and only specified argument
-		match args.swap_remove(0) {
+		let argument = stk.run(|stk| args[0].compute(stk, ctx, opt, doc)).await;
+		match argument {
 			// Perform bufferered compute
 			Value::Object(v) => {
 				// Compute the model function arguments

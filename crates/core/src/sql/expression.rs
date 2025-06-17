@@ -1,26 +1,33 @@
-use crate::sql::KindLiteral;
-use crate::sql::operator::Operator;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str;
-
-use super::operator::BindingPower;
+use crate::sql::statements::{
+	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
+	IfelseStatement, InfoStatement, InsertStatement, RebuildStatement, RelateStatement,
+	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
+};
+use crate::sql::{
+	BinaryOperator, Block, Closure, Constant, FunctionCall, Future, Idiom, Literal, Mock, Model,
+	Param, PostfixOperator, PrefixOperator, Table,
+};
+use std::{fmt, str};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum Expr {
-	Literal(KindLiteral),
+	Literal(Literal),
 
 	Param(Param),
 	Idiom(Idiom),
 	Table(Table),
 	Mock(Mock),
+	// TODO(3.0) maybe unbox? check size.
 	Block(Box<Block>),
 	Future(Box<Future>),
 	Constant(Constant),
-	Unary {
-		op: UnaryOperator,
+	Prefix {
+		op: PrefixOperator,
 		expr: Box<Expr>,
+	},
+	Postfix {
+		expr: Box<Expr>,
+		op: PostfixOperator,
 	},
 	Binary {
 		left: Box<Expr>,
@@ -29,14 +36,16 @@ pub enum Expr {
 	},
 	Model(Box<Model>),
 	// TODO: Factor out the call from the function expression.
-	Function(Box<Function>),
+	FunctionCall(Box<FunctionCall>),
+	// TODO: Factor out the call from the function expression.
+	Closure(Box<Closure>),
 
 	Break,
 	Continue,
 	Return(Box<Expr>),
 	Throw(Box<Expr>),
 
-	IfElse(Box<IfelseStatement>),
+	If(Box<IfelseStatement>),
 	Select(Box<SelectStatement>),
 	Create(Box<CreateStatement>),
 	Update(Box<UpdateStatement>),
@@ -50,10 +59,13 @@ pub enum Expr {
 	Alter(Box<AlterStatement>),
 	Info(Box<InfoStatement>),
 	Forach(Box<ForeachStatement>),
+	Let(Box<SetStatement>),
 }
 
-impl fmt::Display for Expression {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {}
+impl fmt::Display for Expr {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		todo!()
+	}
 }
 
 impl From<Expr> for crate::expr::Expr {
@@ -67,10 +79,17 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Block(b) => crate::expr::Expr::Block(b.into()),
 			Expr::Future(f) => crate::expr::Expr::Future(f.into()),
 			Expr::Constant(c) => crate::expr::Expr::Constant(c.into()),
-			Expr::Unary {
+			Expr::Prefix {
 				op,
 				expr,
-			} => crate::expr::Expr::Unary {
+			} => crate::expr::Expr::Prefix {
+				op: op.into(),
+				expr: expr.into(),
+			},
+			Expr::Postfix {
+				op,
+				expr,
+			} => crate::expr::Expr::Postfix {
 				op: op.into(),
 				expr: expr.into(),
 			},
@@ -85,12 +104,13 @@ impl From<Expr> for crate::expr::Expr {
 				right: right.into(),
 			},
 			Expr::Model(m) => crate::expr::Expr::Model(m.into()),
-			Expr::Function(f) => crate::expr::Expr::Function(f.into()),
+			Expr::FunctionCall(f) => crate::expr::Expr::FunctionCall(f.into()),
+			Expr::Closure(s) => crate::expr::Expr::Closure(s.into()),
 			Expr::Break => crate::expr::Expr::Break,
 			Expr::Continue => crate::expr::Expr::Continue,
 			Expr::Return(e) => crate::expr::Expr::Return(e.into()),
 			Expr::Throw(e) => crate::expr::Expr::Throw(e.into()),
-			Expr::IfElse(s) => crate::expr::Expr::IfElse(s.into()),
+			Expr::If(s) => crate::expr::Expr::IfElse(s.into()),
 			Expr::Select(s) => crate::expr::Expr::Select(s.into()),
 			Expr::Create(s) => crate::expr::Expr::Create(s.into()),
 			Expr::Update(s) => crate::expr::Expr::Update(s.into()),
@@ -104,6 +124,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Alter(s) => crate::expr::Expr::Alter(s.into()),
 			Expr::Info(s) => crate::expr::Expr::Info(s.into()),
 			Expr::Forach(s) => crate::expr::Expr::Forach(s.into()),
+			Expr::Let(s) => crate::expr::Expr::Let(s.into()),
 		}
 	}
 }
@@ -119,12 +140,19 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Block(b) => Expr::Block(b.into()),
 			crate::expr::Expr::Future(f) => Expr::Future(f.into()),
 			crate::expr::Expr::Constant(c) => Expr::Constant(c.into()),
-			crate::expr::Expr::Unary {
+			crate::expr::Expr::Prefix {
 				op,
 				expr,
-			} => Expr::Unary {
+			} => Expr::Prefix {
 				op: op.into(),
 				expr: expr.into(),
+			},
+			crate::expr::Expr::Postfix {
+				expr,
+				op,
+			} => Expr::Postfix {
+				expr: expr.into(),
+				op: op.into(),
 			},
 
 			crate::expr::Expr::Binary {
@@ -137,12 +165,13 @@ impl From<crate::expr::Expr> for Expr {
 				right: right.into(),
 			},
 			crate::expr::Expr::Model(m) => Expr::Model(m.into()),
-			crate::expr::Expr::Function(f) => Expr::Function(f.into()),
+			crate::expr::Expr::FunctionCall(f) => Expr::FunctionCall(f.into()),
+			crate::expr::Expr::Closure(s) => Expr::Closure(s.into()),
 			crate::expr::Expr::Break => Expr::Break,
 			crate::expr::Expr::Continue => Expr::Continue,
 			crate::expr::Expr::Return(e) => Expr::Return(e.into()),
 			crate::expr::Expr::Throw(e) => Expr::Throw(e.into()),
-			crate::expr::Expr::IfElse(s) => Expr::IfElse(s.into()),
+			crate::expr::Expr::IfElse(s) => Expr::If(s.into()),
 			crate::expr::Expr::Select(s) => Expr::Select(s.into()),
 			crate::expr::Expr::Create(s) => Expr::Create(s.into()),
 			crate::expr::Expr::Update(s) => Expr::Update(s.into()),
@@ -156,6 +185,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Alter(s) => Expr::Alter(s.into()),
 			crate::expr::Expr::Info(s) => Expr::Info(s.into()),
 			crate::expr::Expr::Forach(s) => Expr::Forach(s.into()),
+			crate::expr::Expr::Let(s) => Expr::Let(s.into()),
 		}
 	}
 }

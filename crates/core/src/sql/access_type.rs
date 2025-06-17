@@ -3,10 +3,11 @@ use crate::sql::statements::DefineAccessStatement;
 
 use crate::sql::{Algorithm, escape::QuoteStr};
 use anyhow::Result;
-use revision::Error as RevisionError;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
+
+use super::Expr;
 
 /// The type of access methods available
 #[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
@@ -116,8 +117,7 @@ impl AccessType {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccess {
 	// Verify is required
@@ -187,34 +187,7 @@ impl From<crate::expr::JwtAccess> for JwtAccess {
 	}
 }
 
-impl JwtAccess {
-	/// Redacts certain parts of the definition for security on export.
-	pub(crate) fn redacted(&self) -> JwtAccess {
-		let mut jwt = self.clone();
-		jwt.verify = match jwt.verify {
-			JwtAccessVerify::Key(mut key) => {
-				// If algorithm is symmetric, the verification key is a secret
-				if key.alg.is_symmetric() {
-					key.key = "[REDACTED]".to_string();
-				}
-				JwtAccessVerify::Key(key)
-			}
-			// No secrets in JWK
-			JwtAccessVerify::Jwks(jwks) => JwtAccessVerify::Jwks(jwks),
-		};
-		jwt.issue = match jwt.issue {
-			Some(mut issue) => {
-				issue.key = "[REDACTED]".to_string();
-				Some(issue)
-			}
-			None => None,
-		};
-		jwt
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
@@ -250,10 +223,8 @@ impl From<crate::expr::access_type::JwtAccessIssue> for JwtAccessIssue {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
 	Jwks(JwtAccessVerifyJwks),
@@ -285,8 +256,7 @@ impl From<crate::expr::access_type::JwtAccessVerify> for JwtAccessVerify {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
@@ -322,8 +292,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyKey> for JwtAccessVerifyKey {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessVerifyJwks {
 	pub url: String,
@@ -345,29 +314,13 @@ impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks
 	}
 }
 
-#[revisioned(revision = 4)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
-	pub signup: Option<SqlValue>,
-	pub signin: Option<SqlValue>,
+	pub signup: Option<Expr>,
+	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
-	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
-	pub authenticate: Option<SqlValue>,
-	#[revision(start = 4)]
 	pub bearer: Option<BearerAccess>,
-}
-
-impl RecordAccess {
-	fn authenticate_revision(
-		&self,
-		_revision: u16,
-		_value: Option<SqlValue>,
-	) -> Result<(), RevisionError> {
-		Err(RevisionError::Conversion(
-			"The \"AUTHENTICATE\" clause has been moved to \"DEFINE ACCESS\"".to_string(),
-		))
-	}
 }
 
 impl Default for RecordAccess {
@@ -380,12 +333,6 @@ impl Default for RecordAccess {
 			},
 			bearer: None,
 		}
-	}
-}
-
-impl Jwt for RecordAccess {
-	fn jwt(&self) -> &JwtAccess {
-		&self.jwt
 	}
 }
 
@@ -411,8 +358,7 @@ impl From<crate::expr::RecordAccess> for RecordAccess {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BearerAccess {
 	pub kind: BearerAccessType,
@@ -458,10 +404,8 @@ impl From<crate::expr::access_type::BearerAccess> for BearerAccess {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum BearerAccessType {
 	Bearer,
 	Refresh,
@@ -505,10 +449,8 @@ impl From<crate::expr::access_type::BearerAccessType> for BearerAccessType {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum BearerAccessSubject {
 	Record,
 	User,

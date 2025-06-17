@@ -8,7 +8,7 @@ use crate::syn::error::bail;
 use crate::{
 	sql::{
 		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, SqlValue, Tables, Timeout, View,
+		Permission, Permissions, Tables, Timeout, View,
 		changefeed::ChangeFeed,
 		index::{Distance, VectorType},
 	},
@@ -38,7 +38,7 @@ impl Parser<'_> {
 				loop {
 					let idiom = self.parse_plain_idiom(ctx).await?;
 					let operator = self.parse_assigner()?;
-					let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+					let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 					set_list.push((idiom, operator, value));
 					if !self.eat(t!(",")) {
 						break;
@@ -53,19 +53,19 @@ impl Parser<'_> {
 			}
 			t!("PATCH") => {
 				self.pop_peek();
-				Data::PatchExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
+				Data::PatchExpression(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			t!("MERGE") => {
 				self.pop_peek();
-				Data::MergeExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
+				Data::MergeExpression(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			t!("REPLACE") => {
 				self.pop_peek();
-				Data::ReplaceExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
+				Data::ReplaceExpression(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			t!("CONTENT") => {
 				self.pop_peek();
-				Data::ContentExpression(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
+				Data::ContentExpression(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			_ => return Ok(None),
 		};
@@ -165,7 +165,7 @@ impl Parser<'_> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
-		let v = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+		let v = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Cond(v)))
 	}
 
@@ -383,7 +383,7 @@ impl Parser<'_> {
 		match next.kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
-			t!("WHERE") => Ok(Permission::Specific(self.parse_value_field(stk).await?)),
+			t!("WHERE") => Ok(Permission::Specific(self.parse_expr_field(stk).await?)),
 			_ => unexpected!(self, next, "'NONE', 'FULL', or 'WHERE'"),
 		}
 	}
@@ -451,7 +451,7 @@ impl Parser<'_> {
 				t!("IGNORE") => ReferenceDeleteStrategy::Ignore,
 				t!("UNSET") => ReferenceDeleteStrategy::Unset,
 				t!("THEN") => ReferenceDeleteStrategy::Custom(
-					ctx.run(|ctx| self.parse_value_field(ctx)).await?,
+					ctx.run(|ctx| self.parse_expr_field(ctx)).await?,
 				),
 				_ => {
 					unexpected!(self, next, "`REJECT`, `CASCASE`, `IGNORE`, `UNSET` or `THEN`")

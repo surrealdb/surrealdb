@@ -1,4 +1,4 @@
-use super::DefineFieldStatement;
+use super::{DefineFieldStatement, DefineKind};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
@@ -28,6 +28,7 @@ use uuid::Uuid;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineTableStatement {
+	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Ident,
 	pub drop: bool,
@@ -36,28 +37,15 @@ pub struct DefineTableStatement {
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub kind: TableType,
-	/// Should we overwrite the field definition if it already exists
-	#[revision(start = 4)]
-	pub overwrite: bool,
+	pub table_type: TableType,
 	/// The last time that a DEFINE FIELD was added to this table
-	#[revision(start = 5)]
 	pub cache_fields_ts: Uuid,
 	/// The last time that a DEFINE EVENT was added to this table
-	#[revision(start = 5)]
 	pub cache_events_ts: Uuid,
 	/// The last time that a DEFINE TABLE was added to this table
-	#[revision(start = 5)]
 	pub cache_tables_ts: Uuid,
 	/// The last time that a DEFINE INDEX was added to this table
-	#[revision(start = 5)]
 	pub cache_indexes_ts: Uuid,
-	/// The last time that a LIVE query was added to this table
-	#[revision(start = 5, end = 6, convert_fn = "convert_cache_ts")]
-	pub cache_lives_ts: Uuid,
 }
 
 impl DefineTableStatement {
@@ -76,12 +64,16 @@ impl DefineTableStatement {
 		let txn = ctx.tx();
 		// Check if the definition exists
 		if txn.get_tb(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::TbAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::TbAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
@@ -97,8 +89,7 @@ impl DefineTableStatement {
 				_ => None,
 			},
 			// Don't persist the `IF NOT EXISTS` clause to the schema
-			if_not_exists: false,
-			overwrite: false,
+			kind: DefineKind::Default,
 			..self.clone()
 		};
 		// Make sure we are refreshing the caches
@@ -205,7 +196,7 @@ impl DefineTableStatement {
 					revision::to_vec(&DefineFieldStatement {
 						name: Idiom::from(IN.to_vec()),
 						what: tb.name.clone(),
-						kind: Some(val),
+						field_kind: Some(val),
 						..Default::default()
 					})?,
 					None,
@@ -221,7 +212,7 @@ impl DefineTableStatement {
 					revision::to_vec(&DefineFieldStatement {
 						name: Idiom::from(OUT.to_vec()),
 						what: tb.name.clone(),
-						kind: Some(val),
+						field_kind: Some(val),
 						..Default::default()
 					})?,
 					None,

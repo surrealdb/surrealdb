@@ -1,7 +1,8 @@
-use crate::expr::id::range::IdRange;
+use crate::expr::id::range::KeyRange;
 use crate::expr::part::DestructurePart;
 use crate::expr::{
-	Array, Cast, Cond, Expression, Function, Id, Idiom, Model, Object, Part, Range, Thing, Value,
+	Array, Cast, Cond, Expression, Function, Idiom, Model, Object, Part, Range, RecordIdKeyLit,
+	Thing, Value,
 };
 use crate::idx::planner::executor::KnnExpressions;
 
@@ -125,12 +126,17 @@ impl<'a> KnnConditionRewriter<'a> {
 		})
 	}
 
-	fn eval_id(&self, id: &Id) -> Option<Id> {
+	fn eval_id(&self, id: &RecordIdKeyLit) -> Option<RecordIdKeyLit> {
 		match id {
-			Id::Number(_) | Id::String(_) | Id::Generate(_) | Id::Uuid(_) => Some(id.clone()),
-			Id::Array(a) => self.eval_array(a).map(Id::Array),
-			Id::Object(o) => self.eval_object(o).map(Id::Object),
-			Id::Range(r) => self.eval_id_range(r).map(|v| Id::Range(Box::new(v))),
+			RecordIdKeyLit::Number(_)
+			| RecordIdKeyLit::String(_)
+			| RecordIdKeyLit::Generate(_)
+			| RecordIdKeyLit::Uuid(_) => Some(id.clone()),
+			RecordIdKeyLit::Array(a) => self.eval_array(a).map(RecordIdKeyLit::Array),
+			RecordIdKeyLit::Object(o) => self.eval_object(o).map(RecordIdKeyLit::Object),
+			RecordIdKeyLit::Range(r) => {
+				self.eval_id_range(r).map(|v| RecordIdKeyLit::Range(Box::new(v)))
+			}
 		}
 	}
 
@@ -204,9 +210,9 @@ impl<'a> KnnConditionRewriter<'a> {
 		}
 	}
 
-	fn eval_id_range(&self, r: &IdRange) -> Option<IdRange> {
+	fn eval_id_range(&self, r: &KeyRange) -> Option<KeyRange> {
 		if let Some(beg) = self.eval_id_bound(&r.beg) {
-			self.eval_id_bound(&r.end).map(|end| IdRange {
+			self.eval_id_bound(&r.end).map(|end| KeyRange {
 				beg,
 				end,
 			})
@@ -215,7 +221,7 @@ impl<'a> KnnConditionRewriter<'a> {
 		}
 	}
 
-	fn eval_id_bound(&self, b: &Bound<Id>) -> Option<Bound<Id>> {
+	fn eval_id_bound(&self, b: &Bound<RecordIdKeyLit>) -> Option<Bound<RecordIdKeyLit>> {
 		match b {
 			Bound::Included(v) => self.eval_id(v).map(Bound::Included),
 			Bound::Excluded(v) => self.eval_id(v).map(Bound::Excluded),

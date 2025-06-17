@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::expr::{Id, Thing};
+use crate::expr::{RecordIdKeyLit, Thing};
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
@@ -52,7 +52,7 @@ impl HnswDocs {
 		})
 	}
 
-	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &Id) -> Result<DocId> {
+	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKeyLit) -> Result<DocId> {
 		let id_key = self.ikb.new_hi_key(id.clone())?;
 		if let Some(v) = tx.get(id_key.clone(), None).await? {
 			let doc_id = u64::from_be_bytes(v.try_into().unwrap());
@@ -85,14 +85,18 @@ impl HnswDocs {
 	) -> Result<Option<Thing>> {
 		let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
 		if let Some(val) = tx.get(doc_key, None).await? {
-			let id: Id = revision::from_slice(&val)?;
+			let id: RecordIdKeyLit = revision::from_slice(&val)?;
 			Ok(Some(Thing::from((self.tb.clone(), id))))
 		} else {
 			Ok(None)
 		}
 	}
 
-	pub(super) async fn remove(&mut self, tx: &Transaction, id: Id) -> Result<Option<DocId>> {
+	pub(super) async fn remove(
+		&mut self,
+		tx: &Transaction,
+		id: RecordIdKeyLit,
+	) -> Result<Option<DocId>> {
 		let id_key = self.ikb.new_hi_key(id)?;
 		if let Some(v) = tx.get(id_key.clone(), None).await? {
 			let Ok(array) = v.try_into() else {

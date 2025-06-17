@@ -1,48 +1,100 @@
-use crate::sql::{Distance, Expr, Kind};
+use crate::sql::fmt::Fmt;
+use crate::sql::{Expr, Kind, index::Distance};
 use std::fmt;
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum UnaryOperator {
+pub enum PrefixOperator {
 	/// `!`
 	Not,
 	/// `+`
-	Pos,
+	Positive,
 	/// `-`
-	Neg,
+	Negative,
+	/// `..`
+	Range,
+	/// `..=`
+	RangeInclusive,
 	Cast(Kind),
 }
 
-impl From<UnaryOperator> for crate::expr::UnaryOperator {
-	fn from(value: UnaryOperator) -> Self {
+impl From<PrefixOperator> for crate::expr::PrefixOperator {
+	fn from(value: PrefixOperator) -> Self {
 		match value {
-			UnaryOperator::Not => crate::expr::UnaryOperator::Not,
-			UnaryOperator::Pos => crate::expr::UnaryOperator::Pos,
-			UnaryOperator::Neg => crate::expr::UnaryOperator::Neg,
-			UnaryOperator::Cast(k) => crate::expr::UnaryOperator::Cast(k.into()),
+			PrefixOperator::Not => crate::expr::PrefixOperator::Not,
+			PrefixOperator::Positive => crate::expr::PrefixOperator::Positive,
+			PrefixOperator::Negative => crate::expr::PrefixOperator::Negative,
+			PrefixOperator::Range => crate::expr::PrefixOperator::Range,
+			PrefixOperator::RangeInclusive => crate::expr::PrefixOperator::RangeInclusive,
+			PrefixOperator::Cast(k) => crate::expr::PrefixOperator::Cast(k.into()),
 		}
 	}
 }
 
-impl From<crate::expr::UnaryOperator> for UnaryOperator {
-	fn from(value: UnaryOperator) -> Self {
+impl From<crate::expr::PrefixOperator> for PrefixOperator {
+	fn from(value: PrefixOperator) -> Self {
 		match value {
-			crate::expr::UnaryOperator::Not => UnaryOperator::Not,
-			crate::expr::UnaryOperator::Pos => UnaryOperator::Pos,
-			crate::expr::UnaryOperator::Neg => UnaryOperator::Neg,
-			crate::expr::UnaryOperator::Cast(k) => UnaryOperator::Cast(k.into()),
+			crate::expr::PrefixOperator::Not => PrefixOperator::Not,
+			crate::expr::PrefixOperator::Positive => PrefixOperator::Positive,
+			crate::expr::PrefixOperator::Negative => PrefixOperator::Negative,
+			crate::expr::PrefixOperator::Range => PrefixOperator::Range,
+			crate::expr::PrefixOperator::RangeInclusive => PrefixOperator::RangeInclusive,
+			crate::expr::PrefixOperator::Cast(k) => PrefixOperator::Cast(k.into()),
 		}
 	}
 }
 
-impl fmt::Display for UnaryOperator {
+impl fmt::Display for PrefixOperator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Not => write!(f, "!"),
-			Self::Pos => write!(f, "+"),
-			Self::Neg => write!(f, "-"),
+			Self::Positive => write!(f, "+"),
+			Self::Negative => write!(f, "-"),
+			Self::Range => write!(f, ".."),
+			Self::RangeInclusive => write!(f, "..="),
 			Self::Cast(kind) => write!(f, "<{kind}>"),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum PostfixOperator {
+	Range,
+	RangeSkip,
+	Call(Vec<Expr>),
+}
+
+impl From<PostfixOperator> for crate::expr::PostfixOperator {
+	fn from(value: PrefixOperator) -> Self {
+		match value {
+			PostfixOperator::Range => crate::expr::PostfixOperator::Range,
+			PostfixOperator::RangeSkip => crate::expr::PostfixOperator::RangeSkip,
+			PostfixOperator::Call(x) => {
+				crate::expr::PostfixOperator::Call(x.into_iter().map(|x| x.into()))
+			}
+		}
+	}
+}
+
+impl From<crate::expr::PostfixOperator> for PostfixOperator {
+	fn from(value: PostfixOperator) -> Self {
+		match value {
+			crate::expr::PostfixOperator::Range => PostfixOperator::Range,
+			crate::expr::PostfixOperator::RangeSkip => PostfixOperator::RangeSkip,
+			crate::expr::PostfixOperator::Call(x) => {
+				PostfixOperator::Call(x.into_iter().map(|x| x.into()))
+			}
+		}
+	}
+}
+
+impl fmt::Display for PostfixOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Range => write!(f, ".."),
+			Self::RangeSkip => write!(f, ">.."),
+			Self::Call(x) => write!(f, "({})", Fmt::comma_separated(x)),
 		}
 	}
 }
@@ -425,7 +477,7 @@ impl BindingPower {
 	/// Value::Range have a different binding power.
 	pub fn for_expr(expr: &Expr) -> BindingPower {
 		match expr {
-			Expr::Unary {
+			Expr::Prefix {
 				..
 			} => BindingPower::Unary,
 			Expr::Binary {
