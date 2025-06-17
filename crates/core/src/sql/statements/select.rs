@@ -165,7 +165,7 @@ impl SelectStatement {
 					if self.only && !limit_is_one_or_zero {
 						return Err(Error::SingleOnlyOutput);
 					}
-					i.prepare_mock(&stm, v)?;
+					i.prepare_mock(&ctx, &stm, v)?;
 				}
 				Value::Table(t) => {
 					if self.only && !limit_is_one_or_zero {
@@ -190,7 +190,7 @@ impl SelectStatement {
 									planner.add_iterables(stk, &stm_ctx, t, p, &mut i).await?;
 								}
 							}
-							Value::Mock(v) => i.prepare_mock(&stm, v)?,
+							Value::Mock(v) => i.prepare_mock(&ctx, &stm, v)?,
 							Value::Edges(v) => i.prepare_edges(&stm, *v)?,
 							Value::Thing(v) => {
 								let p = planner.check_table_permission(&stm_ctx, &v.tb).await?;

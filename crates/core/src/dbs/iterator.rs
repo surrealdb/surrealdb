@@ -151,14 +151,19 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare(&mut self, stm: &Statement<'_>, val: Value) -> Result<(), Error> {
+	pub(crate) fn prepare(
+		&mut self,
+		ctx: &Context,
+		stm: &Statement<'_>,
+		val: Value,
+	) -> Result<(), Error> {
 		// Match the values
 		match val {
-			Value::Mock(v) => self.prepare_mock(stm, v)?,
+			Value::Mock(v) => self.prepare_mock(ctx, stm, v)?,
 			Value::Table(v) => self.prepare_table(stm, v)?,
 			Value::Edges(v) => self.prepare_edges(stm, *v)?,
 			Value::Object(v) => self.prepare_object(stm, v)?,
-			Value::Array(v) => self.prepare_array(stm, v)?,
+			Value::Array(v) => self.prepare_array(ctx, stm, v)?,
 			Value::Thing(v) => match v.is_range() {
 				true => self.prepare_range(stm, v, RecordStrategy::KeysAndValues)?,
 				false => self.prepare_thing(stm, v)?,
@@ -202,12 +207,21 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_mock(&mut self, stm: &Statement<'_>, v: Mock) -> Result<(), Error> {
+	pub(crate) fn prepare_mock(
+		&mut self,
+		ctx: &Context,
+		stm: &Statement<'_>,
+		v: Mock,
+	) -> Result<(), Error> {
 		// Add the records to the iterator
-		for v in v {
+		for (count, v) in v.into_iter().enumerate() {
 			match stm.is_deferable() {
 				true => self.ingest(Iterable::Defer(v)),
 				false => self.ingest(Iterable::Thing(v)),
+			}
+			// Check if the context is finished
+			if ctx.is_done(count % 100 == 0)? {
+				break;
 			}
 		}
 		// All ingested ok
@@ -270,11 +284,16 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_array(&mut self, stm: &Statement<'_>, v: Array) -> Result<(), Error> {
+	pub(crate) fn prepare_array(
+		&mut self,
+		ctx: &Context,
+		stm: &Statement<'_>,
+		v: Array,
+	) -> Result<(), Error> {
 		// Add the records to the iterator
 		for v in v {
 			match v {
-				Value::Mock(v) => self.prepare_mock(stm, v)?,
+				Value::Mock(v) => self.prepare_mock(ctx, stm, v)?,
 				Value::Table(v) => self.prepare_table(stm, v)?,
 				Value::Edges(v) => self.prepare_edges(stm, *v)?,
 				Value::Object(v) => self.prepare_object(stm, v)?,
@@ -594,8 +613,13 @@ impl Iterator {
 		// If any iterator requires distinct, we need to create a global distinct instance
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
-		for v in mem::take(&mut self.entries) {
+		for (count, v) in mem::take(&mut self.entries).into_iter().enumerate() {
 			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
+			// MOCK can create a large collection of iterators,
+			// we need to make space for possible cancellations
+			if ctx.is_done(count % 100 == 0)? {
+				break;
+			}
 		}
 		// Everything processed ok
 		Ok(())
