@@ -2,11 +2,16 @@
 
 name: Stable release
 
-run-name: "Stable release '2.1' (publish: ${{ inputs.publish }})"
+run-name: "Stable release '${{ inputs.git-ref }}' (publish: ${{ inputs.publish }})"
 
 on:
   workflow_dispatch:
     inputs:
+      git-ref:
+        required: true
+        type: string
+        default: releases/2.1
+        description: "The git ref of this release"
       publish:
         required: false
         type: boolean
@@ -26,7 +31,7 @@ jobs:
     uses: ./.github/workflows/reusable_publish_version.yml
     with:
       environment: stable
-      git-ref: '2.1'
+      git-ref: ${{ inputs.git-ref }}
       latest: false
       publish: ${{ inputs.publish }}
       create-release: ${{ inputs.publish }}
