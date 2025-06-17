@@ -33,7 +33,12 @@ pub trait RpcProtocolV2: RpcContext {
 	// ------------------------------
 
 	/// Executes a method on this RPC implementation
-	async fn execute(&self, method: Method, params: Array) -> Result<Data, RpcError> {
+	async fn execute(
+		&self,
+		_txn: Option<uuid::Uuid>,
+		method: Method,
+		params: Array,
+	) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method,

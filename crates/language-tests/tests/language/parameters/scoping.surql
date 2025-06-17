@@ -17,11 +17,11 @@ value = "1"
 value = "NONE"
 
 */
-$a = 1;
+let $a = 1;
 $a;
 {
-	$a = 2;
-	$b = 3;
+	let $a = 2;
+	let $b = 3;
 	{a: $a, b: $b};
 };
 $a;

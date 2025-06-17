@@ -49,7 +49,7 @@ impl DefineParamStatement {
 		if txn.get_db_param(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::PaAlreadyExists {
 					name: self.name.to_string(),
 				});

@@ -892,7 +892,7 @@ impl Datastore {
 			}
 		});
 
-		Executor::execute_stream(self, Arc::new(ctx), opt, stream).await
+		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
 	}
 
 	/// Execute a pre-parsed SQL query
