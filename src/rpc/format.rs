@@ -9,6 +9,7 @@ use http::header::{CONTENT_TYPE, HeaderValue};
 use surrealdb::rpc::RpcError;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::request::Request;
+use surrealdb_core::proto::surrealdb::value::Value as ValueProto;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {
@@ -16,8 +17,9 @@ impl From<&Accept> for Format {
 			Accept::TextPlain => Format::Unsupported,
 			Accept::ApplicationJson => Format::Json,
 			Accept::ApplicationCbor => Format::Cbor,
+			Accept::ApplicationProtobuf => Format::Protobuf,
 			Accept::ApplicationOctetStream => Format::Unsupported,
-			Accept::Surrealdb => Format::Bincode,
+			Accept::Surrealdb => Format::Protobuf,
 		}
 	}
 }
@@ -28,8 +30,9 @@ impl From<&ContentType> for Format {
 			ContentType::TextPlain => Format::Unsupported,
 			ContentType::ApplicationJson => Format::Json,
 			ContentType::ApplicationCbor => Format::Cbor,
+			ContentType::ApplicationProtobuf => Format::Protobuf,
 			ContentType::ApplicationOctetStream => Format::Unsupported,
-			ContentType::Surrealdb => Format::Bincode,
+			ContentType::Surrealdb => Format::Protobuf,
 		}
 	}
 }
@@ -39,9 +42,8 @@ impl From<&Format> for ContentType {
 		match format {
 			Format::Json => ContentType::ApplicationJson,
 			Format::Cbor => ContentType::ApplicationCbor,
+			Format::Protobuf => ContentType::Surrealdb,
 			Format::Unsupported => ContentType::ApplicationOctetStream,
-			Format::Bincode => ContentType::Surrealdb,
-			_ => ContentType::TextPlain,
 		}
 	}
 }
@@ -61,7 +63,10 @@ impl WsFormat for Format {
 	}
 	/// Process a WebSocket RPC response
 	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
-		let res = self.res(res).map_err(Failure::from)?;
+		let value = res.into_value();
+		let value_proto = ValueProto::try_from(value)
+			.map_err(|_| Failure::from(RpcError::InvalidRequest))?;
+		let res = self.res(value_proto).map_err(Failure::from)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be
 			// replaced with unsafe { String::from_utf8_unchecked(res) }
@@ -88,7 +93,10 @@ impl HttpFormat for Format {
 	}
 	/// Process a HTTP RPC response
 	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
-		let res = self.res(res)?;
+		let value = res.into_value();
+		let value_proto = ValueProto::try_from(value)
+			.map_err(|_| RpcError::InvalidRequest)?;
+		let res = self.res(value_proto)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be
 			// replaced with unsafe { String::from_utf8_unchecked(res) }

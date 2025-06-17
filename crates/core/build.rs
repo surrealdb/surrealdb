@@ -22,6 +22,7 @@ fn main() {
 
 	if let Err(err) = config.compile_protos(&[
 			"proto/ast.proto",
+			"proto/rpc.proto",
 			"proto/value.proto",
 		],
                                 &["proto/"]) {

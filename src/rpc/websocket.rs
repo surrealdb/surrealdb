@@ -349,14 +349,14 @@ impl Websocket {
 			match rpc.format.req_ws(msg) {
 				Ok(req) => {
 					// Now that we know the method, we can update the span and create otel context
-					span.record("rpc.method", req.method.to_str());
-					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
+					span.record("rpc.method", &req.method());
+					span.record("otel.name", format!("surrealdb.rpc/{}", &req.method()));
 					span.record(
 						"rpc.request_id",
-						req.id.clone().map(SqlValue::as_string).unwrap_or_default(),
+						req.id.clone().unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
-						req_cx.with_method(req.method.to_str()).with_size(len),
+						req_cx.with_method(&req.method()).with_size(len),
 					));
 					// Process the message
 					tokio::select! {
@@ -385,7 +385,7 @@ impl Websocket {
 							// Otherwise process the request message
 							else {
 								// Process the message
-								Self::process_message(rpc.clone(), req.version, req.method, req.params).await
+								Self::process_message(rpc.clone(), req.rpc_version, req.command).await
 									.into_response(req.id.map(Into::into))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())

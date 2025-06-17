@@ -34,6 +34,16 @@ impl Attach for Variables {
 	}
 }
 
+pub fn proto_variables_to_expr_variables(
+	variables: &BTreeMap<String, crate::proto::surrealdb::value::Value>,
+) -> anyhow::Result<BTreeMap<String, crate::expr::Value>> {
+	let mut expr_variables = BTreeMap::new();
+	for (key, val) in variables {
+		expr_variables.insert(key.clone(), val.clone().try_into()?);
+	}
+	Ok(expr_variables)
+}
+
 pub fn sql_variables_to_expr_variables(
 	variables: &BTreeMap<String, crate::sql::SqlValue>,
 ) -> BTreeMap<String, crate::expr::Value> {

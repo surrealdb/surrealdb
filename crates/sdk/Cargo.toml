@@ -87,6 +87,7 @@ futures.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 indexmap = { workspace = true, features = ["serde"] }
 path-clean.workspace = true
+prost.workspace = true
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 serde-content.workspace = true
 semver = { workspace = true, features = ["serde"] }

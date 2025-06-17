@@ -15,6 +15,11 @@ use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 use surrealdb_core::expr::{Value as CoreValue, from_value as from_core_value};
 
+pub use surrealdb_core::proto::surrealdb::rpc::Response as ResponseProto;
+pub use surrealdb_core::proto::surrealdb::rpc::Request as RequestProto;
+pub use surrealdb_core::proto::surrealdb::value::Value as ValueProto;
+pub use surrealdb_core::proto::surrealdb::rpc::request::Command as CommandProto;
+
 mod cmd;
 pub(crate) use cmd::Command;
 #[cfg(feature = "protocol-http")]
@@ -55,7 +60,7 @@ impl Router {
 	pub(crate) fn send(
 		&self,
 		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<Result<DbResponse>>>> {
+	) -> BoxFuture<'_, Result<Receiver<ResponseProto>>> {
 		Box::pin(async move {
 			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);
@@ -74,14 +79,10 @@ impl Router {
 	/// Receive responses for all methods except `query`
 	pub(crate) fn recv(
 		&self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> BoxFuture<'_, Result<CoreValue>> {
+		receiver: Receiver<Result<ResponseProto>>,
+	) -> BoxFuture<'_, Result<ResponseProto>> {
 		Box::pin(async move {
 			let response = receiver.recv().await?;
-			match response? {
-				DbResponse::Other(value) => Ok(value),
-				DbResponse::Query(..) => unreachable!(),
-			}
 		})
 	}
 
@@ -100,15 +101,9 @@ impl Router {
 	}
 
 	/// Execute all methods except `query`
-	pub(crate) fn execute<R>(&self, command: Command) -> BoxFuture<'_, Result<R>>
-	where
-		R: DeserializeOwned,
-	{
-		Box::pin(async move {
-			let rx = self.send(command).await?;
-			let value = self.recv(rx).await?;
-			from_core_value(value)
-		})
+	pub(crate) async fn execute(&self, command: Command) -> Result<ResponseProto> {
+		let rx = self.send(command).await?;
+		Ok(rx.recv().await?)
 	}
 
 	/// Execute methods that return an optional single response

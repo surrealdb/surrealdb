@@ -13,7 +13,7 @@ use surrealdb::opt::Raw;
 use surrealdb::opt::Resource;
 use surrealdb::opt::auth::Database;
 use surrealdb::opt::auth::Namespace;
-use surrealdb::opt::auth::Record as RecordAccess;
+use surrealdb::opt::auth::RecordCredentials as RecordAccess;
 use surrealdb::opt::{PatchOp, PatchOps};
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;

@@ -12,11 +12,12 @@ use crate::api::opt::PatchOp;
 use crate::api::opt::auth::Database;
 use crate::api::opt::auth::Jwt;
 use crate::api::opt::auth::Namespace;
-use crate::api::opt::auth::Record;
+use crate::api::opt::auth::RecordCredentials;
 use crate::api::opt::auth::Root;
 use protocol::Client;
 use protocol::Test;
 use semver::Version;
+use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::LazyLock;
 use surrealdb_core::sql::statements::{BeginStatement, CommitStatement};
@@ -41,11 +42,11 @@ async fn api() {
 
 	// signup
 	let _: Jwt = DB
-		.signup(Record {
+		.signup(RecordCredentials {
 			namespace: "test-ns",
 			database: "test-db",
 			access: "access",
-			params: AuthParams {},
+			params: BTreeMap::new(),
 		})
 		.await
 		.unwrap();
@@ -76,11 +77,11 @@ async fn api() {
 		.await
 		.unwrap();
 	let _: Jwt = DB
-		.signin(Record {
+		.signin(RecordCredentials {
 			namespace: "test-ns",
 			database: "test-db",
 			access: "access",
-			params: AuthParams {},
+			params: BTreeMap::new(),
 		})
 		.await
 		.unwrap();

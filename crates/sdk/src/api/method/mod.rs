@@ -1,4 +1,5 @@
 //! Methods to use when interacting with a SurrealDB instance
+use crate::api::conn::Command;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::OnceLockExt;
@@ -6,11 +7,18 @@ use crate::api::Surreal;
 use crate::api::opt;
 use crate::api::opt::IntoEndpoint;
 use crate::api::opt::auth;
-use crate::api::opt::auth::Credentials;
+use crate::api::opt::auth::IntoCredentials;
 use crate::api::opt::auth::Jwt;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use serde::Serialize;
+use surrealdb_core::expr::Array as CoreArray;
+use surrealdb_core::proto::surrealdb::rpc::request::Command as CommandProto;
+use surrealdb_core::proto::surrealdb::rpc::QueryResult;
+use surrealdb_core::proto::surrealdb::value::Value as ValueProto;
+use surrealdb_core::proto::surrealdb::rpc::Response as ResponseProto;
+use surrealdb_core::proto::surrealdb::rpc::SigninParams;
+use surrealdb_core::proto::surrealdb::rpc::SignupParams;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -123,6 +131,23 @@ pub struct Live;
 /// Responses returned with statistics
 #[derive(Debug)]
 pub struct WithStats<T>(pub T);
+
+pub trait TryFromResponseProto: Sized {
+	/// Converts a response proto to the type
+	fn try_from_response_proto(proto: ResponseProto) -> anyhow::Result<Self>;
+}
+
+impl<T: TryFromResponseProto> TryFromResponseProto for Option<T> {
+	fn try_from_response_proto(proto: ResponseProto) -> anyhow::Result<Self> {
+		if proto.results.is_empty() {
+			return Ok(None);
+		}
+
+		TryFromResponseProto::try_from_response_proto(proto)
+			.map(Some)
+			.map_err(|e| anyhow::anyhow!("Failed to convert response proto: {e}"))
+	}
+}
 
 impl<C> Surreal<C>
 where
@@ -427,11 +452,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
+	pub fn signup<R: TryFrom<Vec<QueryResult>>>(&self, params: impl Into<SignupParams>) -> Signup<C> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: Serializer::new().serialize(credentials),
-			response_type: PhantomData,
+			params: params.into(),
 		}
 	}
 
@@ -544,11 +568,12 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
+	pub fn signin(&self, credentials: impl IntoCredentials) -> Signin<C> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: Serializer::new().serialize(credentials),
-			response_type: PhantomData,
+			params: SigninParams {
+				access: Some(credentials.into_access()),
+			},
 		}
 	}
 
@@ -1292,7 +1317,7 @@ where
 		Run {
 			client: Cow::Borrowed(self),
 			function: function.into_fn(),
-			args: Ok(serde_content::Value::Tuple(vec![])),
+			args: CoreArray::new(),
 			response_type: PhantomData,
 		}
 	}

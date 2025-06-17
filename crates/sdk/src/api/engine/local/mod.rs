@@ -154,12 +154,16 @@ use crate::{
 	method::Stats,
 	opt::{IntoEndpoint, Table},
 };
+// use surrealdb_core::proto::surrealdb::rpc::{LiveParams, RawQueryParams, Request, UnsetParams};
+// use surrealdb_core::proto::surrealdb::rpc::request::Command;
+
 #[cfg(not(target_family = "wasm"))]
 use anyhow::bail;
 use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
+use surrealdb_core::proto::surrealdb::rpc::{AuthenticateParams, CreateParams, SetParams, UseParams};
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
 #[cfg(not(target_family = "wasm"))]
@@ -622,18 +626,14 @@ async fn router(
 			}
 			Ok(DbResponse::Other(CoreValue::None))
 		}
-		Command::Signup {
-			credentials,
-		} => {
+		Command::Signup(params) => {
 			let response =
-				iam::signup::signup(kvs, &mut *session.write().await, credentials).await?.token;
+				iam::signup::signup(kvs, &mut *session.write().await, params).await?.token;
 			Ok(DbResponse::Other(response.into()))
 		}
-		Command::Signin {
-			credentials,
-		} => {
+		Command::Signin(params) => {
 			let response =
-				iam::signin::signin(kvs, &mut *session.write().await, credentials).await?.token;
+				iam::signin::signin(kvs, &mut *session.write().await, params).await?.token;
 			Ok(DbResponse::Other(response.into()))
 		}
 		Command::Authenticate {

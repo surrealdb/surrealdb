@@ -5941,6 +5941,7 @@ dependencies = [
  "path-clean",
  "pharos",
  "pprof",
+ "prost 0.13.5",
  "radix_trie",
  "rand 0.8.5",
  "rayon",

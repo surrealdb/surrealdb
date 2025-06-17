@@ -243,31 +243,18 @@ pub(crate) struct Response {
 	pub(crate) result: ServerResult,
 }
 
-fn serialize<V>(value: &V, revisioned: bool) -> Result<Vec<u8>>
+fn serialize_proto<V>(value: &V) -> Result<Vec<u8>>
 where
-	V: serde::Serialize + Revisioned,
+	V: prost::Message
 {
-	if revisioned {
-		let mut buf = Vec::new();
-		value.serialize_revisioned(&mut buf)?;
-		return Ok(buf);
-	}
-	surrealdb_core::expr::serde::serialize(value)
-		.map_err(surrealdb_core::err::Error::from)
-		.map_err(anyhow::Error::new)
+	Ok(value.encode_to_vec())
 }
 
-fn deserialize<T>(bytes: &[u8], revisioned: bool) -> Result<T>
+fn deserialize_proto<T>(bytes: &[u8]) -> Result<T>
 where
-	T: Revisioned + DeserializeOwned,
+	T: prost::Message + Default,
 {
-	if revisioned {
-		let mut read = std::io::Cursor::new(bytes);
-		return T::deserialize_revisioned(&mut read)
-			.map_err(surrealdb_core::err::Error::from)
-			.map_err(anyhow::Error::new);
-	}
-	surrealdb_core::expr::serde::deserialize(bytes)
-		.map_err(surrealdb_core::err::Error::from)
+	T::decode(bytes)
+		.map_err(|_| Error::ParseError("Failed to decode protobuf".into()))
 		.map_err(anyhow::Error::new)
 }

@@ -1,0 +1,246 @@
+
+syntax = "proto3";
+
+package surrealdb.rpc;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+import "ast.proto";
+import "value.proto";
+
+
+service SurrealDB {
+    rpc Query(Request) returns (stream surrealdb.value.Value);
+    rpc QueryBatched(Request) returns (Response);
+    // rpc Health(HealthParams) returns (Response);
+    // rpc Version(VersionParams) returns (Response);
+    // rpc Ping(PingParams) returns (Response);
+    // rpc Info(InfoParams) returns (Response);
+    // rpc Use(UseParams) returns (Response);
+    // rpc Signup(SignupParams) returns (Response);
+    // rpc Signin(SigninParams) returns (Response);
+    // rpc Authenticate(AuthenticateParams) returns (Response);
+    // rpc Invalidate(InvalidateParams) returns (Response);
+    // rpc Reset(ResetParams) returns (Response);
+    // rpc Kill(KillParams) returns (Response);
+    // rpc Live(LiveParams) returns (stream Response);
+    // rpc Set(SetParams) returns (Response);
+    // rpc Unset(UnsetParams) returns (Response);
+    // rpc Select(SelectParams) returns (Response);
+    // rpc Insert(InsertParams) returns (Response);
+    // rpc Upsert(UpsertParams) returns (Response);
+    // rpc Update(UpdateParams) returns (Response);
+    // rpc Merge(MergeParams) returns (Response);
+    // rpc Patch(PatchParams) returns (Response);
+    // rpc Delete(DeleteParams) returns (Response);
+    // rpc Query(QueryParams) returns (Response);
+    // rpc RawQuery(RawQueryParams) returns (ResponseValue); // TODO: This should probably be a stream.
+    // rpc Relate(RelateParams) returns (ResponseValue); // TODO: This should probably be a stream.
+    // rpc Run(RunParams) returns (ResponseValue); // TODO: This should probably be a stream.
+    // rpc GraphQL(GraphQLParams) returns (ResponseValue); // TODO: This should probably be a stream.
+    // rpc InsertRelation(InsertRelationParams) returns (ResponseValue); // TODO: This should probably be a stream.
+}
+
+// TODO: This should probably just be a map<string, surrealdb.value.Value> instead of a message.
+message StatementOptions {
+    oneof data {
+        surrealdb.value.Value patch = 1;
+        surrealdb.value.Value merge = 2;
+        surrealdb.value.Value replace = 3;
+        surrealdb.value.Value content = 4;
+        surrealdb.value.Value single = 5;
+    }
+    surrealdb.ast.Fields fields = 6;
+    surrealdb.ast.Output return = 7;
+    surrealdb.value.Value limit = 8;
+    surrealdb.value.Value start = 9;
+    surrealdb.value.Value cond = 10;
+    surrealdb.value.Value version = 11;
+    google.protobuf.Duration timeout = 12;
+    optional bool only = 13;
+    optional bool relation = 14;
+    optional bool unique = 15;
+    map<string, surrealdb.value.Value> vars = 16;
+    optional bool diff = 17;
+    surrealdb.ast.Fetchs fetchs = 18;
+}
+
+
+message Request {
+    string id = 1;
+    optional uint32 rpc_version = 2;
+
+    oneof command {
+        HealthParams health = 3;
+        VersionParams version = 4;
+        InfoParams info = 5;
+        UseParams use = 6;
+        SignupParams signup = 7;
+        SigninParams signin = 8;
+        AuthenticateParams authenticate = 9;
+        InvalidateParams invalidate = 10;
+        ResetParams reset = 11;
+        KillParams kill = 12;
+        LiveParams live = 13;
+        SetParams set = 14;
+        UnsetParams unset = 15;
+        SelectParams select = 16;
+        InsertParams insert = 17;
+        CreateParams create = 18;
+        UpsertParams upsert = 19;
+        UpdateParams update = 20;
+        MergeParams merge = 21;
+        PatchParams patch = 22;
+        DeleteParams delete = 23;
+        QueryParams query = 24;
+        RawQueryParams raw_query = 25;
+        RelateParams relate = 26;
+        RunParams run = 27;
+        GraphQLParams graphql = 28;
+        InsertRelationParams insert_relation = 29;
+    }
+}
+
+message HealthParams {}
+
+message VersionParams {}
+
+message PingParams {}
+
+message InfoParams {}
+
+message UseParams {
+    optional string namespace = 1;
+    optional string database = 2;
+}
+
+message RootUserCredentials {
+    string username = 1;
+    string password = 2;
+}
+message NamespaceAccessCredentials {
+    string namespace = 1;
+    string access = 2;
+    string key = 3;
+}
+message DatabaseAccessCredentials {
+    string namespace = 1;
+    string database = 2;
+    string access = 3;
+    string key = 4;
+    optional string refresh = 5;
+}
+message NamespaceUserCredentials {
+    string namespace = 1;
+    string username = 2;
+    string password = 3;
+}
+message DatabaseUserCredentials {
+    string namespace = 1;
+    string database = 2;
+    string username = 3;
+    string password = 4;
+}
+
+message Access {
+    oneof inner {
+        RootUserCredentials root_user = 1;
+        NamespaceAccessCredentials namespace = 2;
+        DatabaseAccessCredentials database = 3;
+        NamespaceUserCredentials namespace_user = 4;
+        DatabaseUserCredentials database_user = 5;
+    }
+}
+
+message SignupParams {
+    string namespace = 1;
+    string database = 2;
+    string access = 3;
+    map<string, string> access_params = 4;
+}
+
+message SigninParams {
+    Access access = 1;
+}
+
+message AuthenticateParams {
+    string token = 1;
+}
+
+message InvalidateParams {}
+
+message CreateParams {
+}
+
+message ResetParams {}
+message KillParams {
+    // The UUID of the live query to kill.
+    string live_uuid = 1;
+    
+}
+message LiveParams {
+    string table = 1;
+    surrealdb.ast.Fields fields = 2;
+    bool diff = 3;
+    surrealdb.value.Value cond = 4;
+    surrealdb.ast.Fetchs fetchs = 5;
+    map<string, surrealdb.value.Value> vars = 6;
+}
+message SetParams {
+    string key = 1;
+    surrealdb.value.Value value = 2;
+}
+message UnsetParams {
+    string key = 1;
+}
+message SelectParams {
+    surrealdb.value.Value what = 1;
+    StatementOptions options = 2;
+}
+message InsertParams {}
+message UpsertParams {}
+message UpdateParams {}
+message MergeParams {}
+message PatchParams {}
+message DeleteParams {}
+message QueryParams {
+    map<string, surrealdb.value.Value> variables = 1;
+}
+message RawQueryParams {
+    string query = 1;
+    map<string, surrealdb.value.Value> variables = 2;
+}
+message RelateParams {}
+message RunParams {}
+message GraphQLParams {}
+message InsertRelationParams {}
+
+
+
+message Response {
+    string id = 1;
+
+    repeated QueryResult results = 2;
+}
+
+// This is the response for a single statement result.
+message QueryResult {
+    uint64 index = 1;
+    QueryStats stats = 2;
+
+    oneof result {
+        surrealdb.value.Value value = 3;
+        Error error = 4;
+    }
+}
+
+message QueryStats {
+    google.protobuf.Timestamp start_time = 1;
+    google.protobuf.Duration execution_duration = 2;
+}
+
+message Error {
+    int64 code = 1;
+    string message = 2;
+}

@@ -11,13 +11,19 @@ pub mod surrealdb {
     pub mod ast {
         include!(concat!(env!("OUT_DIR"), "/surrealdb.ast.rs"));
     }
+
+    pub mod rpc {
+        include!(concat!(env!("OUT_DIR"), "/surrealdb.rpc.rs"));
+    }
+
     pub mod value {
         include!(concat!(env!("OUT_DIR"), "/surrealdb.value.rs"));
     }
 }
 
-mod value;
 mod ast;
+mod rpc;
+mod value;
 
 #[inline]
 fn proto_timestamp_to_sql_datetime(

@@ -116,156 +116,152 @@ impl StatementOptions {
 		self
 	}
 
-	pub(crate) fn process_options(
-		&mut self,
-		opts: SqlValue,
-		capabilities: &Capabilities,
-	) -> Result<&mut Self, RpcError> {
-		if let SqlValue::Object(mut obj) = opts {
-			// Process "data_expr" option
-			if let Some(data) = &self.data {
-				if let Some(v) = obj.remove("data_expr") {
-					if let SqlValue::Strand(v) = v {
-						self.data =
-							Some(RpcData::from_string(v.to_string(), data.value().to_owned())?);
-					} else {
-						return Err(RpcError::InvalidParams);
-					}
-				}
-			}
+	// pub(crate) fn process_options(
+	// 	&mut self,
+	// 	opts: crate::proto::surrealdb::rpc::StatementOptions,
+	// 	capabilities: &Capabilities,
+	// ) -> Result<&mut Self, RpcError> {
+	// 	// Process "data_expr" option
+	// 	if let Some(data) = &self.data {
+	// 		if let Some(v) = opts.data {
+	// 			if let SqlValue::Strand(v) = v {
+	// 				self.data =
+	// 					Some(RpcData::from_string(v.to_string(), data.value().to_owned())?);
+	// 			} else {
+	// 				return Err(RpcError::InvalidParams);
+	// 			}
+	// 		}
+	// 	}
 
-			// Process "fields" option
-			if let Some(v) = obj.remove("fields") {
-				if let SqlValue::Strand(v) = v {
-					self.fields = Some(fields_with_capabilities(v.as_str(), capabilities)?)
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "fields" option
+	// 	if let Some(v) = opts.fields {
+	// 		if let SqlValue::Strand(v) = v {
+	// 			self.fields = Some(fields_with_capabilities(v.as_str(), capabilities)?)
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "return" option
-			if let Some(v) = obj.remove("return") {
-				if let SqlValue::Strand(v) = v {
-					self.output = Some(output_with_capabilities(v.as_str(), capabilities)?)
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "return" option
+	// 	if let Some(v) = opts.r#return {
+	// 		if let SqlValue::Strand(v) = v {
+	// 			self.output = Some(output_with_capabilities(v.as_str(), capabilities)?)
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "limit" option
-			if let Some(v) = obj.remove("limit") {
-				if let SqlValue::Number(Number::Int(_)) = v {
-					self.limit = Some(Limit(v))
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "limit" option
+	// 	if let Some(v) = opts.limit {
+	// 		if let SqlValue::Number(Number::Int(_)) = v {
+	// 			self.limit = Some(Limit(v))
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "start" option
-			if let Some(v) = obj.remove("start") {
-				if let SqlValue::Number(Number::Int(_)) = v {
-					self.start = Some(Start(v))
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "start" option
+	// 	if let Some(v) = opts.start {
+	// 		if let SqlValue::Number(Number::Int(_)) = v {
+	// 			self.start = Some(Start(v))
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "cond" option
-			if let Some(v) = obj.remove("cond") {
-				if let SqlValue::Strand(v) = v {
-					let v = value_with_capabilities(v.as_str(), capabilities)?;
-					self.cond = Some(Cond(v))
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "cond" option
+	// 	if let Some(v) = opts.cond {
+	// 		if let SqlValue::Strand(v) = v {
+	// 			let v = value_with_capabilities(v.as_str(), capabilities)?;
+	// 			self.cond = Some(Cond(v))
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "version" option
-			if let Some(v) = obj.remove("version") {
-				let v = match v {
-					v @ SqlValue::Datetime(_) => v,
-					SqlValue::Strand(v) => value_with_capabilities(v.as_str(), capabilities)?,
-					_ => {
-						return Err(RpcError::InvalidParams);
-					}
-				};
+	// 	// Process "version" option
+	// 	if let Some(v) = opts.version {
+	// 		let v = match v {
+	// 			v @ SqlValue::Datetime(_) => v,
+	// 			SqlValue::Strand(v) => value_with_capabilities(v.as_str(), capabilities)?,
+	// 			_ => {
+	// 				return Err(RpcError::InvalidParams);
+	// 			}
+	// 		};
 
-				self.version = Some(Version(v))
-			}
+	// 		self.version = Some(Version(v))
+	// 	}
 
-			// Process "timeout" option
-			if let Some(v) = obj.remove("timeout") {
-				if let SqlValue::Duration(v) = v {
-					self.timeout = Some(Timeout(v))
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "timeout" option
+	// 	if let Some(v) = opts.timeout {
+	// 		if let SqlValue::Duration(v) = v {
+	// 			self.timeout = Some(Timeout(v))
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "only" option
-			if let Some(v) = obj.remove("only") {
-				if let SqlValue::Bool(v) = v {
-					self.only = v;
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "only" option
+	// 	if let Some(v) = opts.only {
+	// 		if let SqlValue::Bool(v) = v {
+	// 			self.only = v;
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "relation" option
-			if let Some(v) = obj.remove("relation") {
-				if let SqlValue::Bool(v) = v {
-					self.relation = v;
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "relation" option
+	// 	if let Some(v) = opts.relation {
+	// 		if let SqlValue::Bool(v) = v {
+	// 			self.relation = v;
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "unique" option
-			if let Some(v) = obj.remove("unique") {
-				if let SqlValue::Bool(v) = v {
-					self.unique = v;
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "unique" option
+	// 	if let Some(v) = opts.unique {
+	// 		if let SqlValue::Bool(v) = v {
+	// 			self.unique = v;
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "vars" option
-			if let Some(v) = obj.remove("vars") {
-				if let SqlValue::Object(v) = v {
-					self.vars = Some(v.0)
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "vars" option
+	// 	if let Some(v) = opts.vars {
+	// 		if let SqlValue::Object(v) = v {
+	// 			self.vars = Some(v.0)
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "diff" option
-			if let Some(v) = obj.remove("diff") {
-				if self.fields.is_some() {
-					// diff and fields cannot co-exist, as diff overwrites the fields
-					return Err(RpcError::InvalidParams);
-				}
+	// 	// Process "diff" option
+	// 	if let Some(v) = opts.diff {
+	// 		if self.fields.is_some() {
+	// 			// diff and fields cannot co-exist, as diff overwrites the fields
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
 
-				if let SqlValue::Bool(v) = v {
-					self.diff = v;
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 		if let SqlValue::Bool(v) = v {
+	// 			self.diff = v;
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			// Process "fetch" option
-			if let Some(v) = obj.remove("fetch") {
-				if let SqlValue::Strand(v) = v {
-					self.fetch = Some(fetchs_with_capabilities(v.as_str(), capabilities)?)
-				} else {
-					return Err(RpcError::InvalidParams);
-				}
-			}
+	// 	// Process "fetch" option
+	// 	if let Some(v) = opts.fetch {
+	// 		if let SqlValue::Strand(v) = v {
+	// 			self.fetch = Some(fetchs_with_capabilities(v.as_str(), capabilities)?)
+	// 		} else {
+	// 			return Err(RpcError::InvalidParams);
+	// 		}
+	// 	}
 
-			Ok(self)
-		} else {
-			Err(RpcError::InvalidParams)
-		}
-	}
+	// 	Ok(self)
+	// }
 
 	pub(crate) fn data_expr(&self) -> Option<Data> {
 		self.data.clone().map(|v| v.into())

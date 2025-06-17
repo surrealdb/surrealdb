@@ -6,9 +6,27 @@ package surrealdb.value;
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
+enum ValueType {
+    NULL = 0;
+    BOOL = 1;
+    INT = 2;
+    FLOAT = 3;
+    DECIMAL = 4;
+    STRAND = 5;
+    DURATION = 6;
+    DATETIME = 7;
+    UUID = 8;
+    ARRAY = 9;
+    OBJECT = 10;
+    GEOMETRY = 11;
+    BYTES = 12;
+    RECORD_ID = 13;
+    FILE = 14;
+}
+
 message Value {
     oneof inner {
-        Null null = 1;
+        ValueType null = 1;
         // Boolean boolean = 2;
         bool bool = 2;
         int64 int = 3;
@@ -133,4 +151,15 @@ message IdBound {
 message File {
     string bucket = 1;
     string key = 2;
+}
+
+message Resource {
+    oneof kind {
+        string table = 1;
+        surrealdb.value.RecordId record_id = 2;
+        surrealdb.value.Object object = 3;
+        surrealdb.value.Array array = 4;
+        // TODO(stu): implement this
+        // Edge edge = 5;
+    }
 }

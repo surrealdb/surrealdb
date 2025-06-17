@@ -16,5 +16,4 @@ pub use method::Method;
 pub use request::Request;
 pub use response::Data;
 
-pub use protocol::v1::RpcProtocolV1;
-pub use protocol::v2::RpcProtocolV2;
+pub use protocol::v3::RpcProtocolV3;

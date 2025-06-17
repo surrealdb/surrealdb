@@ -6,10 +6,10 @@ use crate::api::Surreal;
 use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
 use crate::api::conn::RequestData;
-use crate::api::conn::RouterRequest;
-use crate::api::engine::remote::{deserialize, serialize};
+use crate::api::conn::{RequestProto, RouterRequest};
+use crate::api::engine::remote::{deserialize_proto, serialize_proto};
 use crate::api::err::Error;
-use crate::engine::remote::Response;
+
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
@@ -24,6 +24,18 @@ use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
+use surrealdb_core::iam::access;
+use surrealdb_core::proto::surrealdb::rpc::Response as ResponseProto;
+use surrealdb_core::proto::surrealdb::rpc::query_result::Result as ResultProto;
+use surrealdb_core::proto::surrealdb::rpc::Error as ErrorProto;
+use surrealdb_core::proto::surrealdb::rpc::Access;
+use surrealdb_core::proto::surrealdb::rpc::DatabaseAccessCredentials;
+use surrealdb_core::proto::surrealdb::rpc::DatabaseUserCredentials;
+use surrealdb_core::proto::surrealdb::rpc::NamespaceAccessCredentials;
+use surrealdb_core::proto::surrealdb::rpc::NamespaceUserCredentials;
+use surrealdb_core::proto::surrealdb::rpc::RootUserCredentials;
+use surrealdb_core::proto::surrealdb::rpc::QueryParams;
+use surrealdb_core::proto::surrealdb::rpc::UseParams;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
 	Object as CoreObject, Value as CoreValue, from_value as from_core_value,
@@ -250,10 +262,13 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 			}
 		}
 	} else {
-		let response: Vec<QueryMethodResponse> = deserialize(&res.bytes().await?, false)?;
-		for res in response {
-			if let Status::Err = res.status {
-				return Err(Error::Query(res.result.0.as_string()).into());
+		let response: ResponseProto = deserialize_proto(&res.bytes().await?)?;
+		for res in response.results {
+			let Some(result) = res.result else {
+				continue;
+			};
+			if let ResultProto::Error(err) = result {
+				return Err(Error::Query(err.to_string()).into());
 			}
 		}
 	}
@@ -267,7 +282,7 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
 }
 
 async fn send_request(
-	req: RouterRequest,
+	req: RequestProto,
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &HeaderMap,
@@ -275,12 +290,13 @@ async fn send_request(
 ) -> Result<DbResponse> {
 	let url = base_url.join(RPC_PATH).unwrap();
 	let http_req =
-		client.post(url).headers(headers.clone()).auth(auth).body(serialize(&req, false)?);
+		client.post(url).headers(headers.clone()).auth(auth).body(serialize_proto(&req)?);
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 
-	let response: Response = deserialize(&bytes, false)?;
-	DbResponse::from_server_result(response.result)
+	let response: ResponseProto = deserialize_proto(&bytes)?;
+	todo!("STU: FIX THIS");
+	// DbResponse::from_server_result(response.results)
 }
 
 fn flatten_dbresponse_array(res: DbResponse) -> DbResponse {
@@ -340,12 +356,8 @@ async fn router(
 
 			Ok(out)
 		}
-		Command::Signin {
-			credentials,
-		} => {
-			let req = Command::Signin {
-				credentials: credentials.clone(),
-			}
+		Command::Signin(params) => {
+			let req = Command::Signin(params.clone())
 			.into_router_request(None)
 			.expect("signin should be a valid router request");
 
@@ -358,21 +370,62 @@ async fn router(
 				.into());
 			};
 
-			match from_core_value(credentials.into()) {
-				Ok(Credentials {
-					user,
-					pass,
-					ns,
-					db,
-				}) => {
+			let Some(access) = params.access else {
+				return Err(Error::InvalidRequest(format!("missing access in signin command")).into());
+			};
+
+			use surrealdb_core::proto::surrealdb::rpc::access::Inner as AccessInnerProto;
+			match access.inner {
+				Some(AccessInnerProto::RootUser(RootUserCredentials { username, password })) => {
 					*auth = Some(Auth::Basic {
-						user,
-						pass,
-						ns,
-						db,
+						ns: None,
+						db: None,
+						user: username,
+						pass: password,
 					});
 				}
-				_ => {
+				Some(AccessInnerProto::Namespace(NamespaceAccessCredentials {
+					namespace,
+					access,
+					key,
+				})) => {
+					*auth = Some(Auth::Bearer {
+						token: value.to_raw_string(),
+					});
+				}
+				Some(AccessInnerProto::Database(DatabaseAccessCredentials {
+					namespace,
+					database,
+					access,
+					key,
+					refresh,
+				})) => {
+					*auth = Some(Auth::Bearer {
+						token: value.to_raw_string(),
+					})
+				}
+				Some(AccessInnerProto::NamespaceUser(NamespaceUserCredentials { namespace, username, password })) => {
+					*auth = Some(Auth::Basic {
+						ns: Some(namespace),
+						db: None,
+						user: username,
+						pass: password,
+					});
+				}
+				Some(AccessInnerProto::DatabaseUser(DatabaseUserCredentials {
+					namespace,
+					database,
+					username,
+					password,
+				})) => {
+					*auth = Some(Auth::Basic {
+						ns: Some(namespace),
+						db: Some(database),
+						user: username,
+						pass: password,
+					});
+				}
+				None => {
 					*auth = Some(Auth::Bearer {
 						token: value.to_raw_string(),
 					});

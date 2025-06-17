@@ -1,20 +1,22 @@
 use crate::rpc::RpcError;
-use crate::rpc::format::ResTrait;
 use crate::rpc::request::Request;
 use crate::sql::SqlValue;
 use revision::Revisioned;
+use crate::proto::surrealdb::value::Value as ValueProto;
 
 pub fn parse_value(val: Vec<u8>) -> Result<SqlValue, RpcError> {
 	SqlValue::deserialize_revisioned(&mut val.as_slice()).map_err(|_| RpcError::ParseError)
 }
 
 pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
-	parse_value(val)?.try_into()
+	todo!("DELETE")
+	// parse_value(val)?.try_into()
 }
 
-pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
+pub fn res(res: ValueProto) -> Result<Vec<u8>, RpcError> {
 	// Serialize the response with full internal type information
 	let mut buf = Vec::new();
-	res.serialize_revisioned(&mut buf).unwrap();
+	todo!("DELETE");
+	// res.serialize_revisioned(&mut buf).unwrap();
 	Ok(buf)
 }

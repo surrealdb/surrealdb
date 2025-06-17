@@ -4,12 +4,13 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
-use crate::api::conn::{self, RequestData};
-use crate::api::conn::{Command, DbResponse};
+use crate::api::conn::{self, RequestData, Command, DbResponse};
+use surrealdb_core::proto::surrealdb::rpc::Response as ResponseProto;
+use surrealdb_core::proto::surrealdb::rpc::Request as RequestProto;
 use crate::api::engine::remote::Response;
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::PING_INTERVAL;
-use crate::api::engine::remote::{deserialize, serialize};
+use crate::api::engine::remote::{deserialize_proto, serialize_proto};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
@@ -22,6 +23,7 @@ use async_channel::Receiver;
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::stream::{SplitSink, SplitStream};
+use prost::Message as _;
 use revision::revisioned;
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -240,11 +242,7 @@ async fn router_handle_route(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", request);
-		let payload = if endpoint.config.ast_payload {
-			serialize(&request, true).unwrap()
-		} else {
-			serialize(&request.stringify_queries(), true).unwrap()
-		};
+		let payload = serialize_proto(&request).unwrap();
 		Message::Binary(payload)
 	};
 
@@ -267,143 +265,16 @@ async fn router_handle_route(
 	HandleResult::Ok
 }
 
-async fn router_handle_response(response: Message, state: &mut RouterState) -> HandleResult {
-	match Response::try_from(&response) {
-		Ok(option) => {
-			// We are only interested in responses that are not empty
-			if let Some(response) = option {
-				trace!("{response:?}");
-				match response.id {
-					// If `id` is set this is a normal response
-					Some(id) => {
-						if let Ok(id) = id.coerce_to() {
-							match state.pending_requests.remove(&id) {
-								Some(pending) => {
-									let resp = match DbResponse::from_server_result(response.result)
-									{
-										Ok(x) => x,
-										Err(e) => {
-											let _ = pending.response_channel.send(Err(e)).await;
-											return HandleResult::Ok;
-										}
-									};
-									// We can only route responses with IDs
-									match pending.effect {
-										RequestEffect::None => {}
-										RequestEffect::Insert => {
-											// For insert, we need to flatten single responses in an array
-											if let DbResponse::Other(CoreValue::Array(array)) = resp
-											{
-												if array.len() == 1 {
-													let _ = pending
-														.response_channel
-														.send(Ok(DbResponse::Other(
-															array.into_iter().next().unwrap(),
-														)))
-														.await;
-												} else {
-													let _ = pending
-														.response_channel
-														.send(Ok(DbResponse::Other(
-															CoreValue::Array(array),
-														)))
-														.await;
-												}
-												return HandleResult::Ok;
-											}
-										}
-										RequestEffect::Set {
-											key,
-											value,
-										} => {
-											state.vars.insert(key, value);
-										}
-										RequestEffect::Clear {
-											key,
-										} => {
-											state.vars.shift_remove(&key);
-										}
-									}
-									let _res = pending.response_channel.send(Ok(resp)).await;
-								}
-								_ => {
-									warn!(
-										"got response for request with id '{id}', which was not in pending requests"
-									)
-								}
-							}
-						}
-					}
-					// If `id` is not set, this may be a live query notification
-					None => {
-						match response.result {
-							Ok(Data::Live(notification)) => {
-								let live_query_id = notification.id;
-								// Check if this live query is registered
-								if let Some(sender) = state.live_queries.get(&live_query_id) {
-									// Send the notification back to the caller or kill live query if the receiver is already dropped
-									if sender.send(notification).await.is_err() {
-										state.live_queries.remove(&live_query_id);
-										let kill = {
-											let request = Command::Kill {
-												uuid: live_query_id.0,
-											}
-											.into_router_request(None)
-											.unwrap();
-											let value = serialize(&request, true).unwrap();
-											Message::Binary(value)
-										};
-										if let Err(error) = state.sink.send(kill).await {
-											trace!(
-												"failed to send kill query to the server; {error:?}"
-											);
-											return HandleResult::Disconnected;
-										}
-									}
-								}
-							}
-							Ok(..) => { /* Ignored responses like pings */ }
-							Err(error) => error!("{error:?}"),
-						}
-					}
-				}
-			}
-		}
+async fn router_handle_response(bytes: Vec<u8>, state: &mut RouterState) -> HandleResult {
+	let response = match ResponseProto::decode(bytes.as_slice()) {
+		Ok(response) => response,
 		Err(error) => {
-			#[revisioned(revision = 1)]
-			#[derive(Deserialize)]
-			struct ErrorResponse {
-				id: Option<CoreValue>,
-			}
-
-			// Let's try to find out the ID of the response that failed to deserialise
-			if let Message::Binary(binary) = response {
-				match deserialize(&binary, true) {
-					Ok(ErrorResponse {
-						id,
-					}) => {
-						// Return an error if an ID was returned
-						if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
-							match state.pending_requests.remove(&id) {
-								Some(pending) => {
-									let _res = pending.response_channel.send(Err(error)).await;
-								}
-								_ => {
-									warn!(
-										"got response for request with id '{id}', which was not in pending requests"
-									)
-								}
-							}
-						}
-					}
-					_ => {
-						// Unfortunately, we don't know which response failed to deserialize
-						warn!("Failed to deserialise message; {error:?}");
-					}
-				}
-			}
+			trace!("Failed to decode response; {error}");
+			return HandleResult::Disconnected;
 		}
-	}
+	};
+
+
 	HandleResult::Ok
 }
 
@@ -426,7 +297,7 @@ async fn router_reconnect(
 						.into_router_request(None)
 						.expect("replay commands should always convert to route requests");
 
-					let message = serialize(&request, true).unwrap();
+					let message = serialize_proto(&request).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
@@ -442,7 +313,7 @@ async fn router_reconnect(
 					.into_router_request(None)
 					.unwrap();
 					trace!("Request {:?}", request);
-					let payload = serialize(&request, true).unwrap();
+					let payload = serialize_proto(&request).unwrap();
 					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
@@ -470,7 +341,7 @@ pub(crate) async fn run_router(
 ) {
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
-		let value = serialize(&request, true).unwrap();
+		let value = serialize_proto(&request).unwrap();
 		Message::Binary(value)
 	};
 
@@ -540,19 +411,32 @@ pub(crate) async fn run_router(
 					state.last_activity = Instant::now();
 					match result {
 						Ok(message) => {
-							match router_handle_response(message, &mut state).await {
-								HandleResult::Ok => continue,
-								HandleResult::Disconnected => {
-									router_reconnect(
-										&maybe_connector,
-										&config,
-										&mut state,
-										&endpoint,
-									)
-									.await;
-									continue 'router;
+							match message {
+								Message::Binary(bytes) => {
+									match router_handle_response(bytes, &mut state).await {
+										HandleResult::Ok => continue,
+										HandleResult::Disconnected => {
+											router_reconnect(
+												&maybe_connector,
+												&config,
+												&mut state,
+												&endpoint,
+											)
+											.await;
+											continue 'router;
+										}
+									}
+								},
+								Message::Text(text) => {
+									trace!("Received an unexpected text message; {text}");
+									continue;
+								}
+								_ => {
+									trace!("Received an unexpected message; {message:?}");
+									continue;
 								}
 							}
+							
 						}
 						Err(error) => {
 							match error {
@@ -597,43 +481,9 @@ pub(crate) async fn run_router(
 	}
 }
 
-impl Response {
-	fn try_from(message: &Message) -> Result<Option<Self>> {
-		match message {
-			Message::Text(text) => {
-				trace!("Received an unexpected text message; {text}");
-				Ok(None)
-			}
-			Message::Binary(binary) => deserialize(binary, true).map(Some).map_err(|error| {
-				Error::ResponseFromBinary {
-					binary: binary.clone(),
-					error: bincode::ErrorKind::Custom(error.to_string()).into(),
-				}
-				.into()
-			}),
-			Message::Ping(..) => {
-				trace!("Received a ping from the server");
-				Ok(None)
-			}
-			Message::Pong(..) => {
-				trace!("Received a pong from the server");
-				Ok(None)
-			}
-			Message::Frame(..) => {
-				trace!("Received an unexpected raw frame");
-				Ok(None)
-			}
-			Message::Close(..) => {
-				trace!("Received an unexpected close message");
-				Ok(None)
-			}
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
-	use super::serialize;
+	use super::serialize_proto;
 	use bincode::Options;
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
@@ -643,169 +493,169 @@ mod tests {
 	use surrealdb_core::expr::{Array, Value};
 	use surrealdb_core::rpc::format::cbor::Cbor;
 
-	#[test_log::test]
-	fn large_vector_serialisation_bench() {
-		//
-		let timed = |func: &dyn Fn() -> Vec<u8>| {
-			let start = SystemTime::now();
-			let r = func();
-			(start.elapsed().unwrap(), r)
-		};
-		//
-		let compress = |v: &Vec<u8>| {
-			let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-			encoder.write_all(v).unwrap();
-			encoder.finish().unwrap()
-		};
-		// Generate a random vector
-		let vector_size = if cfg!(debug_assertions) {
-			200_000 // Debug is slow
-		} else {
-			2_000_000 // Release is fast
-		};
-		let mut vector: Vec<i32> = Vec::new();
-		let mut rng = thread_rng();
-		for _ in 0..vector_size {
-			vector.push(rng.r#gen());
-		}
-		//	Store the results
-		let mut results = vec![];
-		// Calculate the reference
-		let ref_payload;
-		let ref_compressed;
-		//
-		const BINCODE_REF: &str = "Bincode Vec<i32>";
-		const COMPRESSED_BINCODE_REF: &str = "Compressed Bincode Vec<i32>";
-		{
-			// Bincode Vec<i32>
-			let (duration, payload) = timed(&|| {
-				let mut payload = Vec::new();
-				bincode::options()
-					.with_fixint_encoding()
-					.serialize_into(&mut payload, &vector)
-					.unwrap();
-				payload
-			});
-			ref_payload = payload.len() as f32;
-			results.push((payload.len(), BINCODE_REF, duration, 1.0));
+	// #[test_log::test]
+	// fn large_vector_serialisation_bench() {
+	// 	//
+	// 	let timed = |func: &dyn Fn() -> Vec<u8>| {
+	// 		let start = SystemTime::now();
+	// 		let r = func();
+	// 		(start.elapsed().unwrap(), r)
+	// 	};
+	// 	//
+	// 	let compress = |v: &Vec<u8>| {
+	// 		let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+	// 		encoder.write_all(v).unwrap();
+	// 		encoder.finish().unwrap()
+	// 	};
+	// 	// Generate a random vector
+	// 	let vector_size = if cfg!(debug_assertions) {
+	// 		200_000 // Debug is slow
+	// 	} else {
+	// 		2_000_000 // Release is fast
+	// 	};
+	// 	let mut vector: Vec<i32> = Vec::new();
+	// 	let mut rng = thread_rng();
+	// 	for _ in 0..vector_size {
+	// 		vector.push(rng.r#gen());
+	// 	}
+	// 	//	Store the results
+	// 	let mut results = vec![];
+	// 	// Calculate the reference
+	// 	let ref_payload;
+	// 	let ref_compressed;
+	// 	//
+	// 	const BINCODE_REF: &str = "Bincode Vec<i32>";
+	// 	const COMPRESSED_BINCODE_REF: &str = "Compressed Bincode Vec<i32>";
+	// 	{
+	// 		// Bincode Vec<i32>
+	// 		let (duration, payload) = timed(&|| {
+	// 			let mut payload = Vec::new();
+	// 			bincode::options()
+	// 				.with_fixint_encoding()
+	// 				.serialize_into(&mut payload, &vector)
+	// 				.unwrap();
+	// 			payload
+	// 		});
+	// 		ref_payload = payload.len() as f32;
+	// 		results.push((payload.len(), BINCODE_REF, duration, 1.0));
 
-			// Compressed bincode
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			ref_compressed = payload.len() as f32;
-			results.push((payload.len(), COMPRESSED_BINCODE_REF, duration, 1.0));
-		}
-		// Build the Value
-		let vector = Value::Array(Array::from(vector));
-		//
-		const BINCODE: &str = "Bincode Vec<Value>";
-		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
-		{
-			// Bincode Vec<i32>
-			let (duration, payload) = timed(&|| {
-				let mut payload = Vec::new();
-				bincode::options()
-					.with_varint_encoding()
-					.serialize_into(&mut payload, &vector)
-					.unwrap();
-				payload
-			});
-			results.push((payload.len(), BINCODE, duration, payload.len() as f32 / ref_payload));
+	// 		// Compressed bincode
+	// 		let (compression_duration, payload) = timed(&|| compress(&payload));
+	// 		let duration = duration + compression_duration;
+	// 		ref_compressed = payload.len() as f32;
+	// 		results.push((payload.len(), COMPRESSED_BINCODE_REF, duration, 1.0));
+	// 	}
+	// 	// Build the Value
+	// 	let vector = Value::Array(Array::from(vector));
+	// 	//
+	// 	const BINCODE: &str = "Bincode Vec<Value>";
+	// 	const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
+	// 	{
+	// 		// Bincode Vec<i32>
+	// 		let (duration, payload) = timed(&|| {
+	// 			let mut payload = Vec::new();
+	// 			bincode::options()
+	// 				.with_varint_encoding()
+	// 				.serialize_into(&mut payload, &vector)
+	// 				.unwrap();
+	// 			payload
+	// 		});
+	// 		results.push((payload.len(), BINCODE, duration, payload.len() as f32 / ref_payload));
 
-			// Compressed bincode
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				COMPRESSED_BINCODE,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
-		}
-		const UNVERSIONED: &str = "Unversioned Vec<Value>";
-		const COMPRESSED_UNVERSIONED: &str = "Compressed Unversioned Vec<Value>";
-		{
-			// Unversioned
-			let (duration, payload) = timed(&|| serialize(&vector, false).unwrap());
-			results.push((
-				payload.len(),
-				UNVERSIONED,
-				duration,
-				payload.len() as f32 / ref_payload,
-			));
+	// 		// Compressed bincode
+	// 		let (compression_duration, payload) = timed(&|| compress(&payload));
+	// 		let duration = duration + compression_duration;
+	// 		results.push((
+	// 			payload.len(),
+	// 			COMPRESSED_BINCODE,
+	// 			duration,
+	// 			payload.len() as f32 / ref_compressed,
+	// 		));
+	// 	}
+	// 	const UNVERSIONED: &str = "Unversioned Vec<Value>";
+	// 	const COMPRESSED_UNVERSIONED: &str = "Compressed Unversioned Vec<Value>";
+	// 	{
+	// 		// Unversioned
+	// 		let (duration, payload) = timed(&|| serialize_proto(&vector).unwrap());
+	// 		results.push((
+	// 			payload.len(),
+	// 			UNVERSIONED,
+	// 			duration,
+	// 			payload.len() as f32 / ref_payload,
+	// 		));
 
-			// Compressed Versioned
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				COMPRESSED_UNVERSIONED,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
-		}
-		//
-		const VERSIONED: &str = "Versioned Vec<Value>";
-		const COMPRESSED_VERSIONED: &str = "Compressed Versioned Vec<Value>";
-		{
-			// Versioned
-			let (duration, payload) = timed(&|| serialize(&vector, true).unwrap());
-			results.push((payload.len(), VERSIONED, duration, payload.len() as f32 / ref_payload));
+	// 		// Compressed Versioned
+	// 		let (compression_duration, payload) = timed(&|| compress(&payload));
+	// 		let duration = duration + compression_duration;
+	// 		results.push((
+	// 			payload.len(),
+	// 			COMPRESSED_UNVERSIONED,
+	// 			duration,
+	// 			payload.len() as f32 / ref_compressed,
+	// 		));
+	// 	}
+	// 	//
+	// 	const VERSIONED: &str = "Versioned Vec<Value>";
+	// 	const COMPRESSED_VERSIONED: &str = "Compressed Versioned Vec<Value>";
+	// 	{
+	// 		// Versioned
+	// 		let (duration, payload) = timed(&|| serialize_proto(&vector).unwrap());
+	// 		results.push((payload.len(), VERSIONED, duration, payload.len() as f32 / ref_payload));
 
-			// Compressed Versioned
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				COMPRESSED_VERSIONED,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
-		}
-		//
-		const CBOR: &str = "CBor Vec<Value>";
-		const COMPRESSED_CBOR: &str = "Compressed CBor Vec<Value>";
-		{
-			// CBor
-			let (duration, payload) = timed(&|| {
-				let cbor: Cbor = vector.clone().try_into().unwrap();
-				let mut res = Vec::new();
-				ciborium::into_writer(&cbor.0, &mut res).unwrap();
-				res
-			});
-			results.push((payload.len(), CBOR, duration, payload.len() as f32 / ref_payload));
+	// 		// Compressed Versioned
+	// 		let (compression_duration, payload) = timed(&|| compress(&payload));
+	// 		let duration = duration + compression_duration;
+	// 		results.push((
+	// 			payload.len(),
+	// 			COMPRESSED_VERSIONED,
+	// 			duration,
+	// 			payload.len() as f32 / ref_compressed,
+	// 		));
+	// 	}
+	// 	//
+	// 	const CBOR: &str = "CBor Vec<Value>";
+	// 	const COMPRESSED_CBOR: &str = "Compressed CBor Vec<Value>";
+	// 	{
+	// 		// CBor
+	// 		let (duration, payload) = timed(&|| {
+	// 			let cbor: Cbor = vector.clone().try_into().unwrap();
+	// 			let mut res = Vec::new();
+	// 			ciborium::into_writer(&cbor.0, &mut res).unwrap();
+	// 			res
+	// 		});
+	// 		results.push((payload.len(), CBOR, duration, payload.len() as f32 / ref_payload));
 
-			// Compressed Cbor
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				COMPRESSED_CBOR,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
-		}
-		// Sort the results by ascending size
-		results.sort_by(|(a, _, _, _), (b, _, _, _)| a.cmp(b));
-		for (size, name, duration, factor) in &results {
-			info!("{name} - Size: {size} - Duration: {duration:?} - Factor: {factor}");
-		}
-		// Check the expected sorted results
-		let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();
-		assert_eq!(
-			results,
-			vec![
-				BINCODE_REF,
-				COMPRESSED_BINCODE_REF,
-				COMPRESSED_CBOR,
-				COMPRESSED_BINCODE,
-				COMPRESSED_UNVERSIONED,
-				CBOR,
-				COMPRESSED_VERSIONED,
-				BINCODE,
-				UNVERSIONED,
-				VERSIONED,
-			]
-		)
-	}
+	// 		// Compressed Cbor
+	// 		let (compression_duration, payload) = timed(&|| compress(&payload));
+	// 		let duration = duration + compression_duration;
+	// 		results.push((
+	// 			payload.len(),
+	// 			COMPRESSED_CBOR,
+	// 			duration,
+	// 			payload.len() as f32 / ref_compressed,
+	// 		));
+	// 	}
+	// 	// Sort the results by ascending size
+	// 	results.sort_by(|(a, _, _, _), (b, _, _, _)| a.cmp(b));
+	// 	for (size, name, duration, factor) in &results {
+	// 		info!("{name} - Size: {size} - Duration: {duration:?} - Factor: {factor}");
+	// 	}
+	// 	// Check the expected sorted results
+	// 	let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();
+	// 	assert_eq!(
+	// 		results,
+	// 		vec![
+	// 			BINCODE_REF,
+	// 			COMPRESSED_BINCODE_REF,
+	// 			COMPRESSED_CBOR,
+	// 			COMPRESSED_BINCODE,
+	// 			COMPRESSED_UNVERSIONED,
+	// 			CBOR,
+	// 			COMPRESSED_VERSIONED,
+	// 			BINCODE,
+	// 			UNVERSIONED,
+	// 			VERSIONED,
+	// 		]
+	// 	)
+	// }
 }

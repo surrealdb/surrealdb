@@ -26,7 +26,7 @@ use surrealdb::kvs::TransactionType;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::format::cbor;
 use surrealdb::rpc::format::json;
-use surrealdb::rpc::format::revision;
+use surrealdb::rpc::format::proto;
 use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::{
 	body::ApiBody, invocation::ApiInvocation, method::Method as ApiMethod,
@@ -125,10 +125,10 @@ async fn handler(
 	// Process the result
 	let (mut res, res_instruction) = res?;
 
-	let res_body: Vec<u8> = if let Some(body) = res.body {
+	let res_body: Vec<u8> = if let Some(value) = res.body {
 		match res_instruction {
 			ResponseInstruction::Raw => {
-				match body {
+				match value {
 					Value::Strand(v) => {
 						res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
 							|_| ApiError::Unreachable("Expected a valid format".into()),
@@ -160,10 +160,12 @@ async fn handler(
 					.into());
 				}
 
+				let network_value = surrealdb_core::proto::surrealdb::value::Value::try_from(value).unwrap();
+
 				let (header, val) = match format {
-					Format::Json => ("application/json", json::res(body)?),
-					Format::Cbor => ("application/cbor", cbor::res(body)?),
-					Format::Revision => ("application/surrealdb", revision::res(body)?),
+					Format::Json => ("application/json", json::res(network_value)?),
+					Format::Cbor => ("application/cbor", cbor::res(network_value)?),
+					Format::Protobuf => ("application/surrealdb", proto::res(network_value)?),
 					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
 				};
 

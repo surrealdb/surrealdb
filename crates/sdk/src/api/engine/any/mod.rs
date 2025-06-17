@@ -142,6 +142,8 @@ use crate::api::opt::Endpoint;
 use crate::opt::path_to_string;
 use std::marker::PhantomData;
 use url::Url;
+use surrealdb_core::proto::surrealdb::value::Value as ValueProto;
+use surrealdb_core::proto::surrealdb::rpc::Response as ResponseProto;
 
 /// A trait for converting inputs to a server address object
 pub trait IntoEndpoint: into_endpoint::Sealed {}

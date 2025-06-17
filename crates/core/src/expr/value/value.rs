@@ -26,7 +26,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as Json;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -458,8 +457,8 @@ impl Value {
 	///
 	/// This converts certain types like `Thing` into their simpler formats
 	/// instead of the format used internally by SurrealDB.
-	pub fn into_json(self) -> Json {
-		self.into()
+	pub fn into_json(self) -> serde_json::Value {
+		serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
 	}
 
 	// -----------------------------------
