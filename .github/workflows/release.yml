@@ -2,16 +2,16 @@
 
 name: Stable release
 
-run-name: "Stable release '2.2' (publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
+run-name: "Stable release '${{ inputs.git-ref }}' (publish: ${{ inputs.publish }})"
 
 on:
   workflow_dispatch:
     inputs:
-      latest:
-        required: false
-        type: boolean
-        default: false
-        description: "Consider this release as the latest one and update the Docker image tag and the binary pointer for the installers"
+      git-ref:
+        required: true
+        type: string
+        default: releases/2.2
+        description: "The git ref of this release"
       publish:
         required: false
         type: boolean
@@ -32,8 +32,8 @@ jobs:
     uses: ./.github/workflows/publish-version.yml
     with:
       environment: stable
-      git-ref: '2.2'
-      latest: ${{ inputs.latest }}
+      git-ref: ${{ inputs.git-ref }}
+      latest: false
       publish: ${{ inputs.publish }}
       create-release: ${{ inputs.publish }}
     secrets: inherit
