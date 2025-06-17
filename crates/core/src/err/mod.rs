@@ -10,6 +10,7 @@ use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
+use core::fmt;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -1460,6 +1461,13 @@ impl Serialize for Error {
 	}
 }
 impl Error {
+	#[track_caller]
+	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
+		let location = std::panic::Location::caller();
+		let message = format!("{}:{}: {}", location.file(), location.line(), message);
+		Error::Unreachable(message)
+	}
+
 	/// Check if this error is related to schema checks
 	pub fn is_schema_related(&self) -> bool {
 		matches!(

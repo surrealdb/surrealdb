@@ -165,13 +165,13 @@ impl std::str::FromStr for ExperimentalTarget {
 	type Err = ParseExperimentalTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match_insensitive!(s.trim(), {
+		match s.trim().to_lowercase().as_str() {
 			"record_references" => Ok(ExperimentalTarget::RecordReferences),
 			"graphql" => Ok(ExperimentalTarget::GraphQL),
 			"bearer_access" => Ok(ExperimentalTarget::BearerAccess),
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
-		})
+		}
 	}
 }
 
@@ -450,12 +450,12 @@ impl std::str::FromStr for ArbitraryQueryTarget {
 	type Err = ParseArbitraryQueryTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match_insensitive!(s.trim(), {
+		match s.trim().to_lowercase().as_str() {
 			"guest" => Ok(ArbitraryQueryTarget::Guest),
 			"record" => Ok(ArbitraryQueryTarget::Record),
 			"system" => Ok(ArbitraryQueryTarget::System),
 			_ => Err(ParseArbitraryQueryTargetError::InvalidName),
-		})
+		}
 	}
 }
 
