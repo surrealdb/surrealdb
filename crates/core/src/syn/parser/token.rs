@@ -1,4 +1,4 @@
-use crate::syn::token::{t, Glued, TokenKind};
+use crate::syn::token::{Glued, TokenKind, t};
 
 use super::Parser;
 
@@ -87,7 +87,7 @@ impl Parser<'_> {
 				| t!("DEFINE")
 				| t!("REMOVE")
 				| t!("REBUILD")
-				| t!("IF")
+				| t!("IF") | t!("INFO")
 		)
 	}
 

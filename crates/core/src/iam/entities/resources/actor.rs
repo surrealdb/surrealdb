@@ -1,14 +1,12 @@
 use revision::revisioned;
-use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};
+use crate::expr::statements::{DefineAccessStatement, DefineUserStatement};
 use crate::iam::{Error, Role};
-use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
 
 //
 // User
@@ -49,7 +47,7 @@ impl std::fmt::Display for Actor {
 }
 
 impl Actor {
-	pub fn new(id: String, roles: Vec<Role>, level: Level) -> Self {
+	pub(crate) fn new(id: String, roles: Vec<Role>, level: Level) -> Self {
 		Self {
 			res: Resource::new(id, super::ResourceKind::Actor, level),
 			roles,
@@ -57,57 +55,23 @@ impl Actor {
 	}
 
 	/// Checks if the actor has the given role.
-	pub fn has_role(&self, role: Role) -> bool {
+	pub(crate) fn has_role(&self, role: Role) -> bool {
 		self.roles.contains(&role)
 	}
 
 	/// Checks if the actor has the Owner role.
-	pub fn has_owner_role(&self) -> bool {
+	pub(crate) fn has_owner_role(&self) -> bool {
 		self.roles.iter().any(|r| r.eq(&Role::Owner))
 	}
 
 	/// Checks if the actor has the Editor role.
-	pub fn has_editor_role(&self) -> bool {
+	pub(crate) fn has_editor_role(&self) -> bool {
 		self.roles.iter().any(|r| r.eq(&Role::Owner) || r.eq(&Role::Editor))
 	}
 
 	/// Checks if the actor has the Viewer role.
-	pub fn has_viewer_role(&self) -> bool {
+	pub(crate) fn has_viewer_role(&self) -> bool {
 		self.roles.iter().any(|r| r.eq(&Role::Owner) || r.eq(&Role::Editor) || r.eq(&Role::Viewer))
-	}
-
-	// Cedar policy helpers
-	pub fn cedar_attrs(&self) -> HashMap<String, RestrictedExpression> {
-		[
-			("type", self.kind().into()),
-			("level", self.level().into()),
-			("roles", RestrictedExpression::new_set(self.roles.iter().map(|r| r.into()))),
-		]
-		.into_iter()
-		.map(|(x, v)| (x.into(), v))
-		.collect()
-	}
-
-	pub fn cedar_parents(&self) -> HashSet<EntityUid> {
-		let mut parents = HashSet::with_capacity(1);
-		parents.insert(self.res.level().into());
-		parents
-	}
-
-	pub fn cedar_entities(&self) -> Vec<Entity> {
-		let mut entities = Vec::new();
-
-		entities.push(self.into());
-
-		for role in self.roles.iter() {
-			entities.push(role.into());
-		}
-
-		for level in self.res.level().cedar_entities() {
-			entities.push(level);
-		}
-
-		entities
 	}
 }
 
@@ -118,25 +82,10 @@ impl Deref for Actor {
 	}
 }
 
-impl std::convert::From<&Actor> for EntityUid {
-	fn from(actor: &Actor) -> Self {
-		EntityUid::from_type_name_and_id(
-			EntityTypeName::from_str("Actor").unwrap(),
-			EntityId::from_str(actor.id()).unwrap(),
-		)
-	}
-}
-
-impl std::convert::From<&Actor> for Entity {
-	fn from(actor: &Actor) -> Self {
-		Entity::new(actor.into(), actor.cedar_attrs(), actor.cedar_parents())
-	}
-}
-
 impl std::convert::TryFrom<(&DefineUserStatement, Level)> for Actor {
 	type Error = Error;
 	fn try_from(val: (&DefineUserStatement, Level)) -> Result<Self, Self::Error> {
-		let roles = val.0.roles.iter().map(Role::try_from).collect::<Result<_, _>>()?;
+		let roles = val.0.roles.iter().map(|e| Role::from_str(e)).collect::<Result<_, _>>()?;
 		Ok(Self::new(val.0.name.to_string(), roles, val.1))
 	}
 }

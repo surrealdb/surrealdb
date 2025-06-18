@@ -1,25 +1,18 @@
 [package]
 name = "surrealdb"
 publish = true
-edition = "2021"
-version = "2.3.0"
-rust-version = "1.82.0"
 readme = "CARGO.md"
-authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
-repository = "https://github.com/surrealdb/surrealdb"
-homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb/"
-keywords = [
-    "database",
-    "embedded-database",
-    "key-value",
-    "key-value-store",
-    "kv-store",
-]
-categories = ["database-implementations", "data-structures", "embedded"]
-license-file = "../../LICENSE"
-resolver = "2"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
 
 [features]
 # Public features
@@ -32,7 +25,6 @@ kv-indxdb = ["surrealdb-core/kv-indxdb"]
 kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
 kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
-kv-surrealcs = ["surrealdb-core/kv-surrealcs", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
 http = ["surrealdb-core/http"]
 native-tls = [
@@ -50,10 +42,9 @@ jwks = ["surrealdb-core/jwks"]
 arbitrary = ["surrealdb-core/arbitrary"]
 allocation-tracking = ["surrealdb-core/allocation-tracking"]
 # FoundationDB features
+kv-fdb = ["kv-fdb-7_3"]
 kv-fdb-7_1 = ["surrealdb-core/kv-fdb-7_1"]
 kv-fdb-7_3 = ["surrealdb-core/kv-fdb-7_3"]
-# Deprecated features
-kv-fdb = [] # Use a version specific `kv-fdb-*` feature instead
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -84,11 +75,11 @@ revision = { workspace = true, features = [
     "uuid",
 ] }
 reblessive = { workspace = true, features = ["tree"] }
-trice = {workspace = true, optional = true }
-
+trice = { workspace = true, optional = true }
 
 # Other crates
 arrayvec.workspace = true
+anyhow.workspace = true
 bincode.workspace = true
 async-channel.workspace = true
 chrono = { workspace = true, features = ["serde"] }
@@ -131,9 +122,7 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
-wasmtimer = { workspace = true, default-features = false, features = [
-    "tokio",
-] }
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 ws_stream_wasm.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
@@ -170,12 +159,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ulid = { workspace = true, features = ["serde"] }
 wiremock.workspace = true
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(kv_fdb)',
-    'cfg(storage)',
-    'cfg(surrealdb_unstable)',
-] }
+[lints]
+workspace = true
 
 [lib]
 name = "surrealdb" # Needed for the nightly crate as we will be renaming it

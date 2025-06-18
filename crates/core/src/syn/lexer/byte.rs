@@ -1,10 +1,10 @@
 use crate::syn::{
-	error::{bail, syntax_error, SyntaxError},
+	error::{SyntaxError, bail, syntax_error},
 	lexer::{
-		unicode::{byte, chars},
 		Lexer,
+		unicode::{byte, chars},
 	},
-	token::{t, Token, TokenKind},
+	token::{Token, TokenKind, t},
 };
 
 impl Lexer<'_> {
@@ -355,6 +355,32 @@ impl Lexer<'_> {
 				}
 				_ => {
 					return self.lex_ident_from_next_byte(b'u');
+				}
+			},
+			b'b' => match self.reader.peek() {
+				Some(b'"') => {
+					self.reader.next();
+					t!("b\"")
+				}
+				Some(b'\'') => {
+					self.reader.next();
+					t!("b'")
+				}
+				_ => {
+					return self.lex_ident_from_next_byte(b'b');
+				}
+			},
+			b'f' => match self.reader.peek() {
+				Some(b'"') => {
+					self.reader.next();
+					t!("f\"")
+				}
+				Some(b'\'') => {
+					self.reader.next();
+					t!("f'")
+				}
+				_ => {
+					return self.lex_ident_from_next_byte(b'f');
 				}
 			},
 			b'r' => match self.reader.peek() {

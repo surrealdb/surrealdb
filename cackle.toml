@@ -372,6 +372,9 @@ allow_unsafe = true
 [pkg.tracing-core]
 allow_unsafe = true
 
+[pkg.tracing-appender]
+allow_apis = ["fs"]
+
 [pkg.linux-raw-sys]
 allow_unsafe = true
 
@@ -557,6 +560,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.rustc_version]
+allow_apis = ["process"]
 
 [pkg.concurrent-queue]
 allow_unsafe = true
@@ -695,6 +699,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.relative-path]
+allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.miette]
@@ -808,6 +813,9 @@ allow_unsafe = true
 allow_unsafe = true
 allow_apis = ["net"]
 
+[pkg.tracing-serde]
+allow_apis = ["net"]
+
 [pkg.arrayvec]
 allow_unsafe = true
 
@@ -880,9 +888,6 @@ allow_unsafe = true
 [pkg.half]
 allow_unsafe = true
 
-[pkg.any_ascii]
-allow_unsafe = true
-
 [pkg.zeroize]
 allow_unsafe = true
 
@@ -903,6 +908,7 @@ allow_unsafe = true
 allow_apis = ["net"]
 
 [pkg.surreal]
+allow_unsafe = true
 allow_apis = ["fs", "net", "process"]
 build.allow_build_instructions = ["cargo:rustc-env=*"]
 
@@ -1221,16 +1227,6 @@ allow_unsafe = true
 [pkg.nanoservices-utils]
 allow_unsafe = true
 
-[pkg.surrealcs-kernel]
-allow_apis = [
-    "net",
-]
-
-[pkg.surrealcs]
-allow_apis = [
-    "net",
-]
-
 [pkg.revision]
 allow_apis = ["fs"]
 
@@ -1332,3 +1328,44 @@ allow_proc_macro = true
 
 [pkg.fs-err]
 allow_apis = ["fs"]
+
+[pkg.derive-new]
+allow_proc_macro = true
+
+[pkg.async-recursion]
+allow_proc_macro = true
+
+[pkg.xattr]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.filetime]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.tar]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.ureq]
+allow_apis = ["net"]
+
+[pkg.zip]
+allow_apis = ["fs"]
+
+[pkg.ort]
+allow_apis = ["fs", "process"]
+
+[pkg.prometheus]
+allow_unsafe = true
+
+[pkg.take_mut]
+allow_unsafe = true
+
+[pkg.surrealdb-tikv-client]
+allow_unsafe = true
+allow_apis = ["fs", "net"]
+
+[pkg.rstest_macros]
+allow_apis = ["fs"]
+allow_proc_macro = true

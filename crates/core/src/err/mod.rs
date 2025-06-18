@@ -1,15 +1,17 @@
 use crate::api::err::ApiError;
+use crate::buc::BucketOperation;
+use crate::expr::idiom::Idiom;
+use crate::expr::index::Distance;
+use crate::expr::thing::Thing;
+use crate::expr::value::{CastError, CoerceError, Value};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
-use crate::sql::idiom::Idiom;
-use crate::sql::index::Distance;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
+use core::fmt;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -18,6 +20,7 @@ use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
+use std::fmt::Display;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
@@ -28,11 +31,6 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
-	/// This error is used for ignoring a document when processing a query
-	#[doc(hidden)]
-	#[error("Conditional clause is not truthy")]
-	Ignore,
-
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),
@@ -82,7 +80,9 @@ pub enum Error {
 	TxValueTooLarge,
 
 	/// There was a transaction error that can be retried
-	#[error("Failed to commit transaction due to a read or write conflict. This transaction can be retried")]
+	#[error(
+		"Failed to commit transaction due to a read or write conflict. This transaction can be retried"
+	)]
 	TxRetryable,
 
 	/// The transaction writes too much data for the KV store
@@ -128,7 +128,9 @@ pub enum Error {
 	},
 
 	/// Given test operation failed for JSON Patch
-	#[error("Given test operation failed for JSON Patch. Expected `{expected}`, but got `{got}` instead.")]
+	#[error(
+		"Given test operation failed for JSON Patch. Expected `{expected}`, but got `{got}` instead."
+	)]
 	PatchTest {
 		expected: String,
 		got: String,
@@ -144,7 +146,9 @@ pub enum Error {
 		name: String,
 	},
 
-	#[error("Found '{field}' in SELECT clause on line {line}, but field is not an aggregate function, and is not present in GROUP BY expression")]
+	#[error(
+		"Found '{field}' in SELECT clause on line {line}, but field is not an aggregate function, and is not present in GROUP BY expression"
+	)]
 	InvalidField {
 		line: usize,
 		field: String,
@@ -156,19 +160,25 @@ pub enum Error {
 		value: Value,
 	},
 
-	#[error("Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression")]
+	#[error(
+		"Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression"
+	)]
 	InvalidSplit {
 		line: usize,
 		field: String,
 	},
 
-	#[error("Found '{field}' in ORDER BY clause on line {line}, but field is not present in SELECT expression")]
+	#[error(
+		"Found '{field}' in ORDER BY clause on line {line}, but field is not present in SELECT expression"
+	)]
 	InvalidOrder {
 		line: usize,
 		field: String,
 	},
 
-	#[error("Found '{field}' in GROUP BY clause on line {line}, but field is not present in SELECT expression")]
+	#[error(
+		"Found '{field}' in GROUP BY clause on line {line}, but field is not present in SELECT expression"
+	)]
 	InvalidGroup {
 		line: usize,
 		field: String,
@@ -221,7 +231,9 @@ pub enum Error {
 	},
 
 	/// The wrong quantity or magnitude of arguments was given for the specified function
-	#[error("There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}")]
+	#[error(
+		"There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}"
+	)]
 	FunctionCheck {
 		name: String,
 		value: String,
@@ -240,7 +252,9 @@ pub enum Error {
 	},
 
 	/// The size of the vector is incorrect
-	#[error("Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}")]
+	#[error(
+		"Unable to compute distance.The calculated result is not a valid number: {dist}. Vectors: {left:?} - {right:?}"
+	)]
 	InvalidVectorDistance {
 		left: SharedVector,
 		right: SharedVector,
@@ -364,6 +378,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested database does not exist
+	#[error("The sequence '{name}' does not exist")]
+	SeqNotFound {
+		name: String,
+	},
+
 	/// The requested config does not exist
 	#[error("The config for {name} does not exist")]
 	CgNotFound {
@@ -398,6 +418,12 @@ pub enum Error {
 	#[error("The analyzer '{name}' does not exist")]
 	AzNotFound {
 		name: String,
+	},
+
+	/// The requested api does not exist
+	#[error("The bucket '{value}' does not exist")]
+	BuNotFound {
+		value: String,
 	},
 
 	/// The requested analyzer does not exist
@@ -556,6 +582,13 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The permissions do not allow this query to be run on this table
+	#[error("You don't have permission to {op} this file in the `{name}` bucket")]
+	BucketPermissions {
+		name: String,
+		op: BucketOperation,
+	},
+
 	/// The specified table can not be written as it is setup as a foreign table view
 	#[error("Unable to write to the `{table}` table while setup as a view")]
 	TableIsView {
@@ -584,17 +617,10 @@ pub enum Error {
 		target_type: String,
 	},
 
-	/// The specified field did not conform to the field type check
-	#[error("Found {value} for field `{field}`, with record `{thing}`, but expected a {check}")]
-	FieldCheck {
-		thing: String,
-		value: String,
-		field: Idiom,
-		check: String,
-	},
-
 	/// The specified field did not conform to the field ASSERT clause
-	#[error("Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}")]
+	#[error(
+		"Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}"
+	)]
 	FieldValue {
 		thing: String,
 		value: String,
@@ -603,11 +629,33 @@ pub enum Error {
 	},
 
 	/// The specified value did not conform to the LET type check
-	#[error("Found {value} for param ${name}, but expected a {check}")]
-	SetCheck {
-		value: String,
+	#[error("Tried to set `${name}`, but couldn't coerce value: {error}")]
+	SetCoerce {
 		name: String,
-		check: String,
+		error: Box<CoerceError>,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Couldn't coerce return value from function `{name}`: {error}")]
+	ReturnCoerce {
+		name: String,
+		error: Box<CoerceError>,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Couldn't coerce argument `{argument_idx}` for function `{func_name}`: {error}")]
+	ArgumentCoerce {
+		func_name: String,
+		argument_idx: usize,
+		error: Box<CoerceError>,
+	},
+
+	/// The specified value did not conform to the LET type check
+	#[error("Couldn't coerce value for field `{field_name}` of `{thing}`: {error}")]
+	FieldCoerce {
+		thing: String,
+		field_name: String,
+		error: Box<CoerceError>,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
@@ -675,18 +723,12 @@ pub enum Error {
 	},
 
 	/// Unable to coerce to a value to another value
-	#[error("Expected a {into} but found {from}")]
-	CoerceTo {
-		from: Value,
-		into: String,
-	},
+	#[error("{0}")]
+	Coerce(#[from] CoerceError),
 
 	/// Unable to convert a value to another value
-	#[error("Expected a {into} but cannot convert {from} into a {into}")]
-	ConvertTo {
-		from: Value,
-		into: String,
-	},
+	#[error("{0}")]
+	Cast(#[from] CastError),
 
 	/// Unable to coerce to a value to another value
 	#[error("Expected a {kind} but the array had {size} items")]
@@ -788,12 +830,6 @@ pub enum Error {
 	/// There was an error with model computation
 	#[error("There was an error with model computation: {0}")]
 	ModelComputation(String),
-
-	/// The feature has not yet being implemented
-	#[error("Feature not yet implemented: {feature}")]
-	FeatureNotYetImplemented {
-		feature: String,
-	},
 
 	/// Duplicated match references are not allowed
 	#[error("Duplicated Match reference: {mr}")]
@@ -915,6 +951,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested api already exists
+	#[error("The bucket '{value}' already exists")]
+	BuAlreadyExists {
+		value: String,
+	},
+
 	/// The requested database already exists
 	#[error("The database '{name}' already exists")]
 	DbAlreadyExists {
@@ -966,6 +1008,12 @@ pub enum Error {
 	/// The requested config already exists
 	#[error("The config for {name} already exists")]
 	CgAlreadyExists {
+		name: String,
+	},
+
+	/// The requested sequence already exists
+	#[error("The sequence '{name}' already exists")]
+	SeqAlreadyExists {
 		name: String,
 	},
 
@@ -1030,7 +1078,7 @@ pub enum Error {
 	#[error("A node task has failed: {0}")]
 	NodeAgent(&'static str),
 
-	/// The supplied type could not be serialiazed into `sql::Value`
+	/// The supplied type could not be serialiazed into `expr::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
 
@@ -1178,7 +1226,9 @@ pub enum Error {
 	InvalidStorageVersion,
 
 	/// There was an outdated storage version stored in the database
-	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
+	#[error(
+		"The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation"
+	)]
 	OutdatedStorageVersion,
 
 	#[error("Found a non-computed value where they are not allowed")]
@@ -1258,7 +1308,9 @@ pub enum Error {
 	RefsTypeConflict(String, String),
 
 	/// The `references` type cannot be used with other clauses altering or working with the value
-	#[error("When specifying a `TYPE` clause with `references`, all variants must be of type `references`.")]
+	#[error(
+		"When specifying a `TYPE` clause with `references`, all variants must be of type `references`."
+	)]
 	RefsMismatchingVariants,
 
 	/// Something went wrong while updating references
@@ -1266,10 +1318,14 @@ pub enum Error {
 	RefsUpdateFailure(String, String),
 
 	/// Cannot process `Value::Refs` as there is no Record ID in the context for the operation
-	#[error("Cannot obtain a list of references as there is no Record ID in the context for the operation")]
+	#[error(
+		"Cannot obtain a list of references as there is no Record ID in the context for the operation"
+	)]
 	InvalidRefsContext,
 
-	#[error("Cannot set field `{name}` with type `{kind}` as it mismatched with field `{existing_name}` with type `{existing_kind}`")]
+	#[error(
+		"Cannot set field `{name}` with type `{kind}` as it mismatched with field `{existing_name}` with type `{existing_kind}`"
+	)]
 	MismatchedFieldTypes {
 		name: String,
 		kind: String,
@@ -1288,6 +1344,53 @@ pub enum Error {
 
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
+
+	#[error("No global bucket has been configured")]
+	NoGlobalBucket,
+
+	#[error("Bucket `{0}` is unavailable")]
+	BucketUnavailable(String),
+
+	#[error("File key `{0}` cannot be parsed into a path")]
+	InvalidBucketKey(String),
+
+	#[error("Bucket is unavailable")]
+	GlobalBucketEnforced,
+
+	#[error("Bucket url could not be processed: {0}")]
+	InvalidBucketUrl(String),
+
+	#[error("Bucket backend is not supported")]
+	UnsupportedBackend,
+
+	#[error("Write operation is not supported, as bucket `{0}` is in read-only mode")]
+	ReadonlyBucket(String),
+
+	#[error("Operation for bucket `{0}` failed: {1}")]
+	ObjectStoreFailure(String, String),
+
+	#[error("Failed to connect to bucket: {0}")]
+	BucketConnectionFailed(String),
+}
+
+impl Error {
+	#[track_caller]
+	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
+		let location = std::panic::Location::caller();
+		let message = format!("{}:{}: {}", location.file(), location.line(), message);
+		Error::Unreachable(message)
+	}
+
+	/// Check if this error is related to schema checks
+	pub fn is_schema_related(&self) -> bool {
+		matches!(
+			self,
+			Error::FieldCoerce { .. }
+				| Error::FieldValue { .. }
+				| Error::FieldReadonly { .. }
+				| Error::FieldUndefined { .. }
+		)
+	}
 }
 
 impl From<Error> for String {
@@ -1449,45 +1552,18 @@ impl Serialize for Error {
 		serializer.serialize_str(self.to_string().as_str())
 	}
 }
-impl Error {
-	/// Check if this error is related to schema checks
-	pub fn is_schema_related(&self) -> bool {
-		matches!(
-			self,
-			Error::FieldCheck { .. }
-				| Error::FieldValue { .. }
-				| Error::FieldReadonly { .. }
-				| Error::FieldUndefined { .. }
-		)
-	}
 
-	/// Convert CoerceTo errors in LET statements
-	pub fn set_check_from_coerce(self, name: String) -> Error {
-		match self {
-			Error::CoerceTo {
-				from,
-				into,
-			} => Error::SetCheck {
-				name,
-				value: from.to_string(),
-				check: into,
-			},
-			e => e,
-		}
+impl serde::ser::Error for Error {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: Display,
+	{
+		Self::Serialization(msg.to_string())
 	}
+}
 
-	/// Convert CoerceTo errors in functions and closures
-	pub fn function_check_from_coerce(self, name: impl Into<String>) -> Error {
-		match self {
-			Error::CoerceTo {
-				from,
-				into,
-			} => Error::FunctionCheck {
-				name: name.into(),
-				value: from.to_string(),
-				check: into,
-			},
-			e => e,
-		}
+impl From<serde_content::Error> for Error {
+	fn from(error: serde_content::Error) -> Self {
+		Self::Serialization(error.to_string())
 	}
 }

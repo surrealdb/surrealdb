@@ -1,30 +1,31 @@
 use crate::ctx::Context;
 use crate::ctx::MutableContext;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::dbs::Statement;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::doc::CursorValue;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::expr::Data;
+use crate::expr::FlowResultExt as _;
+use crate::expr::Operator;
+use crate::expr::Part;
+use crate::expr::Thing;
+use crate::expr::dir::Dir;
+use crate::expr::edges::Edges;
+use crate::expr::graph::GraphSubjects;
+use crate::expr::paths::EDGE;
+use crate::expr::paths::IN;
+use crate::expr::paths::OUT;
+use crate::expr::reference::ReferenceDeleteStrategy;
+use crate::expr::statements::DeleteStatement;
+use crate::expr::statements::UpdateStatement;
+use crate::expr::value::{Value, Values};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode;
-use crate::sql::dir::Dir;
-use crate::sql::edges::Edges;
-use crate::sql::paths::EDGE;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
-use crate::sql::reference::ReferenceDeleteStrategy;
-use crate::sql::statements::DeleteStatement;
-use crate::sql::statements::UpdateStatement;
-use crate::sql::table::Tables;
-use crate::sql::value::{Value, Values};
-use crate::sql::Data;
-use crate::sql::FlowResultExt as _;
-use crate::sql::Operator;
-use crate::sql::Part;
-use crate::sql::Thing;
+use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 
@@ -35,7 +36,7 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		_stm: &Statement<'_>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check if changed
 		if !self.changed() {
 			return Ok(());
@@ -80,7 +81,7 @@ impl Document {
 						what: Values(vec![Value::from(Edges {
 							dir: Dir::Both,
 							from: rid.as_ref().clone(),
-							what: Tables::default(),
+							what: GraphSubjects::default(),
 						})]),
 						..DeleteStatement::default()
 					};
@@ -100,6 +101,7 @@ impl Document {
 				let mut stream = txn.stream_keys(range.clone(), None, ScanDirection::Forward);
 				// Loop until no more entries
 				while let Some(res) = stream.next().await {
+					yield_now!();
 					// Decode the key
 					let key = res?;
 					let r#ref = Ref::decode(&key)?;
@@ -117,7 +119,7 @@ impl Document {
 									id: r#ref.fk.clone(),
 								};
 
-								return Err(Error::DeleteRejectedByReference(
+								bail!(Error::DeleteRejectedByReference(
 									rid.to_string(),
 									thing.to_string(),
 								));

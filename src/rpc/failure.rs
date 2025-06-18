@@ -1,10 +1,9 @@
-use crate::err::Error;
-use revision::revisioned;
 use revision::Revisioned;
+use revision::revisioned;
 use serde::Serialize;
 use std::borrow::Cow;
 use surrealdb::rpc::RpcError;
-use surrealdb::sql::Value;
+use surrealdb_core::expr::Value;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Failure {
@@ -46,12 +45,6 @@ impl From<&str> for Failure {
 	}
 }
 
-impl From<Error> for Failure {
-	fn from(err: Error) -> Self {
-		Failure::custom(err.to_string())
-	}
-}
-
 impl From<RpcError> for Failure {
 	fn from(err: RpcError) -> Self {
 		match err {
@@ -76,7 +69,6 @@ impl From<Failure> for Value {
 	}
 }
 
-#[allow(dead_code)]
 impl Failure {
 	pub const PARSE_ERROR: Failure = Failure {
 		code: -32700,

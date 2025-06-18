@@ -3,12 +3,12 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn strict_typing_inline() -> Result<(), Error> {
+async fn strict_typing_inline() -> Result<()> {
 	let sql = "
 		UPSERT person:test SET age = <int> NONE;
 		UPSERT person:test SET age = <int> '18';
@@ -26,30 +26,25 @@ async fn strict_typing_inline() -> Result<(), Error> {
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Expected a int but cannot convert NONE into a int"
-	));
+	assert_eq!(tmp.unwrap_err().to_string(), "Expected `int` but found a `NONE`");
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				age: 18,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Expected a bool | int but cannot convert NONE into a bool | int"
-	));
+	assert_eq!(tmp.unwrap_err().to_string(), "Expected `bool | int` but found a `NONE`");
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -57,11 +52,12 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				enabled: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -70,11 +66,12 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				name: 'Tobie Morgan Hitchcock',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -84,11 +81,12 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -98,11 +96,12 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				scores: [1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -112,20 +111,21 @@ async fn strict_typing_inline() -> Result<(), Error> {
 				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Expected a array<float, 5> but the array had 10 items"
-	));
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Expected `array<float,5>` buf found an collection of length `10`"
+	);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn strict_typing_defined() -> Result<(), Error> {
+async fn strict_typing_defined() -> Result<()> {
 	let sql = "
 		DEFINE FIELD age ON person TYPE int;
 		DEFINE FIELD enabled ON person TYPE bool | int;
@@ -154,25 +154,26 @@ async fn strict_typing_defined() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `age`, with record `person:test`, but expected a int"
-	));
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Couldn't coerce value for field `age` of `person:test`: Expected `int` but found `NONE`"
+	);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `enabled`, with record `person:test`, but expected a bool | int"
-	));
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Couldn't coerce value for field `enabled` of `person:test`: Expected `bool | int` but found `NONE`"
+	);
 	//
 	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `name`, with record `person:test`, but expected a string"
-	));
+
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"Couldn't coerce value for field `name` of `person:test`: Expected `string` but found `NONE`"
+	);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -182,14 +183,15 @@ async fn strict_typing_defined() -> Result<(), Error> {
 				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn strict_typing_none_null() -> Result<(), Error> {
+async fn strict_typing_none_null() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD name ON TABLE person TYPE option<string>;
@@ -223,7 +225,7 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 		]",
 	)?;
 	t.expect_error(
-		"Found NULL for field `name`, with record `person:test`, but expected a option<string>",
+		"Couldn't coerce value for field `name` of `person:test`: Expected `string` but found `NULL`",
 	)?;
 	t.expect_val(
 		"[
@@ -276,14 +278,14 @@ async fn strict_typing_none_null() -> Result<(), Error> {
 		]",
 	)?;
 	t.expect_error(
-		"Found NONE for field `name`, with record `person:test`, but expected a string | null",
+		"Couldn't coerce value for field `name` of `person:test`: Expected `string | null` but found `NONE`"
 	)?;
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn literal_typing() -> Result<(), Error> {
+async fn literal_typing() -> Result<()> {
 	let sql = "
 		DEFINE TABLE test SCHEMAFULL;
 		DEFINE FIELD obj ON test TYPE {
@@ -311,14 +313,14 @@ async fn literal_typing() -> Result<(), Error> {
 		}",
 	)?;
 	t.expect_error(
-		"Found { a: 3, b: 'bar', c: 'forbidden' } for field `obj`, with record `test:3`, but expected a { a: int, b: option<string> }",
+		"Couldn't coerce value for field `obj` of `test:3`: Expected `{ a: int, b: option<string> }` but found `{ a: 3, b: 'bar', c: 'forbidden' }`"
 	)?;
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn strict_typing_optional_object() -> Result<(), Error> {
+async fn strict_typing_optional_object() -> Result<()> {
 	let sql = "
         DEFINE TABLE test SCHEMAFULL;
         DEFINE FIELD obj ON test TYPE option<object>;
@@ -338,7 +340,9 @@ async fn strict_typing_optional_object() -> Result<(), Error> {
         }",
 	)?;
 	//
-	t.expect_error("Found NONE for field `obj.a`, with record `test:2`, but expected a string")?;
+	t.expect_error(
+		"Couldn't coerce value for field `obj.a` of `test:2`: Expected `string` but found `NONE`",
+	)?;
 	//
 	t.expect_val(
 		"{

@@ -1,19 +1,20 @@
 use reblessive::Stk;
 
+use crate::sql::statements::remove::RemoveSequenceStatement;
 use crate::{
 	sql::{
-		statements::{
-			remove::RemoveAnalyzerStatement, RemoveAccessStatement, RemoveDatabaseStatement,
-			RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
-			RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
-			RemoveUserStatement,
-		},
 		Param,
+		statements::{
+			RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
+			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
+			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveUserStatement,
+			remove::{RemoveAnalyzerStatement, RemoveBucketStatement},
+		},
 	},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
 			ParseResult, Parser,
+			mac::{expected, unexpected},
 		},
 		token::t,
 	},
@@ -209,6 +210,19 @@ impl Parser<'_> {
 					if_exists,
 				})
 			}
+			t!("SEQUENCE") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				let name = self.next_token_value()?;
+				RemoveStatement::Sequence(RemoveSequenceStatement {
+					name,
+					if_exists,
+				})
+			}
 			t!("USER") => {
 				let if_exists = if self.eat(t!("IF")) {
 					expected!(self, t!("EXISTS"));
@@ -223,6 +237,20 @@ impl Parser<'_> {
 				RemoveStatement::User(RemoveUserStatement {
 					name,
 					base,
+					if_exists,
+				})
+			}
+			t!("BUCKET") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				let name = self.next_token_value()?;
+
+				RemoveStatement::Bucket(RemoveBucketStatement {
+					name,
 					if_exists,
 				})
 			}

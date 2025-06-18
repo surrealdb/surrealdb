@@ -1,8 +1,8 @@
-use super::value::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
+use super::value::{TryAdd, TryNeg};
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::sql::strand::Strand;
-use crate::sql::Value;
+use anyhow::Result;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,11 @@ use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
-use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
+use std::ops::{self, Add, Neg};
+
+pub mod decimal;
+
+pub use decimal::DecimalExt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
@@ -32,6 +36,26 @@ pub enum Number {
 impl Default for Number {
 	fn default() -> Self {
 		Self::Int(0)
+	}
+}
+
+impl From<Number> for crate::expr::Number {
+	fn from(v: Number) -> Self {
+		match v {
+			Number::Int(v) => Self::Int(v),
+			Number::Float(v) => Self::Float(v),
+			Number::Decimal(v) => Self::Decimal(v),
+		}
+	}
+}
+
+impl From<crate::expr::Number> for Number {
+	fn from(v: crate::expr::Number) -> Self {
+		match v {
+			crate::expr::Number::Int(v) => Self::Int(v),
+			crate::expr::Number::Float(v) => Self::Float(v),
+			crate::expr::Number::Decimal(v) => Self::Decimal(v),
+		}
 	}
 }
 
@@ -153,54 +177,6 @@ impl TryFrom<Number> for Decimal {
 			},
 			Number::Decimal(x) => Ok(x),
 		}
-	}
-}
-
-impl TryFrom<&Number> for f64 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		Ok(n.to_float())
-	}
-}
-
-impl TryFrom<&Number> for f32 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		n.to_float().to_f32().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(*n),
-			into: "f32".to_string(),
-		})
-	}
-}
-
-impl TryFrom<&Number> for i64 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		Ok(n.to_int())
-	}
-}
-impl TryFrom<&Number> for i32 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		n.to_int().to_i32().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(*n),
-			into: "i32".to_string(),
-		})
-	}
-}
-
-impl TryFrom<&Number> for i16 {
-	type Error = Error;
-
-	fn try_from(n: &Number) -> Result<Self, Self::Error> {
-		n.to_int().to_i16().ok_or_else(|| Error::ConvertTo {
-			from: Value::Number(*n),
-			into: "i16".to_string(),
-		})
 	}
 }
 
@@ -777,7 +753,7 @@ macro_rules! impl_simple_try_op {
 	($trt:ident, $fn:ident, $unchecked:ident, $checked:ident) => {
 		impl $trt for Number {
 			type Output = Self;
-			fn $fn(self, other: Self) -> Result<Self, Error> {
+			fn $fn(self, other: Self) -> Result<Self> {
 				Ok(match (self, other) {
 					(Number::Int(v), Number::Int(w)) => Number::Int(
 						v.$checked(w).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
@@ -800,84 +776,17 @@ macro_rules! impl_simple_try_op {
 }
 
 impl_simple_try_op!(TryAdd, try_add, add, checked_add);
-impl_simple_try_op!(TrySub, try_sub, sub, checked_sub);
-impl_simple_try_op!(TryMul, try_mul, mul, checked_mul);
-impl_simple_try_op!(TryDiv, try_div, div, checked_div);
-impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
-
-impl TryPow for Number {
-	type Output = Self;
-	fn try_pow(self, power: Self) -> Result<Self, Error> {
-		Ok(match (self, power) {
-			(Self::Int(v), Self::Int(p)) => Self::Int(match v {
-				0 => match p.cmp(&0) {
-					// 0^(-x)
-					Ordering::Less => return Err(Error::TryPow(v.to_string(), p.to_string())),
-					// 0^0
-					Ordering::Equal => 1,
-					// 0^x
-					Ordering::Greater => 0,
-				},
-				// 1^p
-				1 => 1,
-				-1 => {
-					if p % 2 == 0 {
-						// (-1)^even
-						1
-					} else {
-						// (-1)^odd
-						-1
-					}
-				}
-				// try_into may cause an error, which would be wrong for the above cases.
-				_ => p
-					.try_into()
-					.ok()
-					.and_then(|p| v.checked_pow(p))
-					.ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			}),
-			(Self::Decimal(v), Self::Int(p)) => Self::Decimal(
-				v.checked_powi(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			),
-			(Self::Decimal(v), Self::Float(p)) => Self::Decimal(
-				v.checked_powf(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			),
-			(Self::Decimal(v), Self::Decimal(p)) => Self::Decimal(
-				v.checked_powd(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			),
-			(v, p) => v.as_float().powf(p.as_float()).into(),
-		})
-	}
-}
 
 impl TryNeg for Number {
 	type Output = Self;
 
-	fn try_neg(self) -> Result<Self::Output, Error> {
+	fn try_neg(self) -> Result<Self::Output> {
 		Ok(match self {
 			Self::Int(n) => {
 				Number::Int(n.checked_neg().ok_or_else(|| Error::TryNeg(n.to_string()))?)
 			}
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
-		})
-	}
-}
-
-impl TryFloatDiv for Number {
-	type Output = Self;
-	fn try_float_div(self, other: Self) -> Result<Self, Error> {
-		Ok(match (self, other) {
-			(Number::Int(v), Number::Int(w)) => {
-				let quotient = (v as f64).div(w as f64);
-				if quotient.fract() != 0.0 {
-					return Ok(Number::Float(quotient));
-				}
-				Number::Int(
-					v.checked_div(w).ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
-				)
-			}
-			(v, w) => v.try_div(w)?,
 		})
 	}
 }
@@ -1044,22 +953,6 @@ impl<'a> Product<&'a Self> for Number {
 	}
 }
 
-#[non_exhaustive]
-pub struct Sorted<T>(pub T);
-
-pub trait Sort {
-	fn sorted(&mut self) -> Sorted<&Self>
-	where
-		Self: Sized;
-}
-
-impl Sort for Vec<Number> {
-	fn sorted(&mut self) -> Sorted<&Vec<Number>> {
-		self.sort();
-		Sorted(self)
-	}
-}
-
 impl ToFloat for Number {
 	fn to_float(&self) -> f64 {
 		self.to_float()
@@ -1070,36 +963,25 @@ impl ToFloat for Number {
 mod tests {
 	use std::cmp::Ordering;
 
+	use rand::Rng;
 	use rand::seq::SliceRandom;
 	use rand::thread_rng;
-	use rand::Rng;
 	use rust_decimal::Decimal;
 
-	use super::Number;
-	use super::TryFloatDiv;
-	#[test]
-	fn test_try_float_div() {
-		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
-		assert_eq!(sum_one.try_float_div(count_one).unwrap(), Number::Float(2.5));
-		// i64::MIN
-
-		let (sum_two, count_two) = (Number::Int(10), Number::Int(5));
-		assert_eq!(sum_two.try_float_div(count_two).unwrap(), Number::Int(2));
-
-		let (sum_three, count_three) = (Number::Float(6.3), Number::Int(3));
-		assert_eq!(sum_three.try_float_div(count_three).unwrap(), Number::Float(2.1));
-	}
+	use super::*;
 
 	#[test]
 	fn ord_test() {
 		let a = Number::Float(-f64::NAN);
 		let b = Number::Float(-f64::INFINITY);
 		let c = Number::Float(1f64);
-		let d = Number::Decimal(Decimal::from_str_exact("1.0000000000000000000000000002").unwrap());
-		let e = Number::Decimal(Decimal::from_str_exact("1.1").unwrap());
+		let d = Number::Decimal(
+			Decimal::from_str_exact_normalized("1.0000000000000000000000000002").unwrap(),
+		);
+		let e = Number::Decimal(Decimal::from_str_exact_normalized("1.1").unwrap());
 		let f = Number::Float(1.1f64);
 		let g = Number::Float(1.5f64);
-		let h = Number::Decimal(Decimal::from_str_exact("1.5").unwrap());
+		let h = Number::Decimal(Decimal::from_str_exact_normalized("1.5").unwrap());
 		let i = Number::Float(f64::INFINITY);
 		let j = Number::Float(f64::NAN);
 		let original = vec![a, b, c, d, e, f, g, h, i, j];
@@ -1115,9 +997,9 @@ mod tests {
 		fn random_number() -> Number {
 			let mut rng = thread_rng();
 			match rng.gen_range(0..3) {
-				0 => Number::Int(rng.gen()),
-				1 => Number::Float(f64::from_bits(rng.gen())),
-				_ => Number::Decimal(Number::Float(f64::from_bits(rng.gen())).as_decimal()),
+				0 => Number::Int(rng.r#gen()),
+				1 => Number::Float(f64::from_bits(rng.r#gen())),
+				_ => Number::Decimal(Number::Float(f64::from_bits(rng.r#gen())).as_decimal()),
 			}
 		}
 
@@ -1145,7 +1027,7 @@ mod tests {
 		fn random_permutation(number: Number) -> Number {
 			let mut rng = thread_rng();
 			let value = match rng.gen_range(0..4) {
-				0 => number + Number::from(rng.gen::<f64>()),
+				0 => number + Number::from(rng.r#gen::<f64>()),
 				1 if !matches!(number, Number::Int(i64::MIN)) => number * Number::from(-1),
 				2 => Number::Float(next_down(number.as_float())),
 				_ => number,

@@ -1,12 +1,8 @@
-use crate::err::Error;
-use crate::fnc::util::math::vector::{
-	ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
-	ManhattanDistance, MinkowskiDistance, PearsonSimilarity,
-};
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Number, Value};
+
+use crate::sql::Number;
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -31,6 +27,30 @@ pub enum Index {
 	Hnsw(HnswParams),
 }
 
+impl From<Index> for crate::expr::index::Index {
+	fn from(v: Index) -> Self {
+		match v {
+			Index::Idx => Self::Idx,
+			Index::Uniq => Self::Uniq,
+			Index::Search(p) => Self::Search(p.into()),
+			Index::MTree(p) => Self::MTree(p.into()),
+			Index::Hnsw(p) => Self::Hnsw(p.into()),
+		}
+	}
+}
+
+impl From<crate::expr::index::Index> for Index {
+	fn from(v: crate::expr::index::Index) -> Self {
+		match v {
+			crate::expr::index::Index::Idx => Self::Idx,
+			crate::expr::index::Index::Uniq => Self::Uniq,
+			crate::expr::index::Index::Search(p) => Self::Search(p.into()),
+			crate::expr::index::Index::MTree(p) => Self::MTree(p.into()),
+			crate::expr::index::Index::Hnsw(p) => Self::Hnsw(p.into()),
+		}
+	}
+}
+
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -51,6 +71,41 @@ pub struct SearchParams {
 	pub postings_cache: u32,
 	#[revision(start = 2)]
 	pub terms_cache: u32,
+}
+
+impl From<SearchParams> for crate::expr::index::SearchParams {
+	fn from(v: SearchParams) -> Self {
+		crate::expr::index::SearchParams {
+			az: v.az.into(),
+			hl: v.hl,
+			sc: v.sc.into(),
+			doc_ids_order: v.doc_ids_order,
+			doc_lengths_order: v.doc_lengths_order,
+			postings_order: v.postings_order,
+			terms_order: v.terms_order,
+			doc_ids_cache: v.doc_ids_cache,
+			doc_lengths_cache: v.doc_lengths_cache,
+			postings_cache: v.postings_cache,
+			terms_cache: v.terms_cache,
+		}
+	}
+}
+impl From<crate::expr::index::SearchParams> for SearchParams {
+	fn from(v: crate::expr::index::SearchParams) -> Self {
+		Self {
+			az: v.az.into(),
+			hl: v.hl,
+			sc: v.sc.into(),
+			doc_ids_order: v.doc_ids_order,
+			doc_lengths_order: v.doc_lengths_order,
+			postings_order: v.postings_order,
+			terms_order: v.terms_order,
+			doc_ids_cache: v.doc_ids_cache,
+			doc_lengths_cache: v.doc_lengths_cache,
+			postings_cache: v.postings_cache,
+			terms_cache: v.terms_cache,
+		}
+	}
 }
 
 #[revisioned(revision = 2)]
@@ -109,6 +164,34 @@ impl MTreeParams {
 	}
 }
 
+impl From<MTreeParams> for crate::expr::index::MTreeParams {
+	fn from(v: MTreeParams) -> Self {
+		crate::expr::index::MTreeParams {
+			dimension: v.dimension,
+			distance: v.distance.into(),
+			vector_type: v.vector_type.into(),
+			capacity: v.capacity,
+			doc_ids_order: v.doc_ids_order,
+			doc_ids_cache: v.doc_ids_cache,
+			mtree_cache: v.mtree_cache,
+		}
+	}
+}
+
+impl From<crate::expr::index::MTreeParams> for MTreeParams {
+	fn from(v: crate::expr::index::MTreeParams) -> Self {
+		Self {
+			dimension: v.dimension,
+			distance: v.distance.into(),
+			vector_type: v.vector_type.into(),
+			capacity: v.capacity,
+			doc_ids_order: v.doc_ids_order,
+			doc_ids_cache: v.doc_ids_cache,
+			mtree_cache: v.mtree_cache,
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -139,7 +222,7 @@ pub struct HnswParams {
 }
 
 impl HnswParams {
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub fn new(
 		dimension: u16,
 		distance: Distance,
@@ -165,6 +248,38 @@ impl HnswParams {
 	}
 }
 
+impl From<HnswParams> for crate::expr::index::HnswParams {
+	fn from(v: HnswParams) -> Self {
+		crate::expr::index::HnswParams {
+			dimension: v.dimension,
+			distance: v.distance.into(),
+			vector_type: v.vector_type.into(),
+			m: v.m,
+			m0: v.m0,
+			ef_construction: v.ef_construction,
+			ml: v.ml.into(),
+			extend_candidates: v.extend_candidates,
+			keep_pruned_connections: v.keep_pruned_connections,
+		}
+	}
+}
+
+impl From<crate::expr::index::HnswParams> for HnswParams {
+	fn from(v: crate::expr::index::HnswParams) -> Self {
+		Self {
+			dimension: v.dimension,
+			distance: v.distance.into(),
+			vector_type: v.vector_type.into(),
+			m: v.m,
+			m0: v.m0,
+			ef_construction: v.ef_construction,
+			ml: v.ml.into(),
+			extend_candidates: v.extend_candidates,
+			keep_pruned_connections: v.keep_pruned_connections,
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -181,21 +296,6 @@ pub enum Distance {
 	Pearson,
 }
 
-impl Distance {
-	pub(crate) fn compute(&self, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number, Error> {
-		match self {
-			Self::Cosine => v1.cosine_distance(v2),
-			Self::Chebyshev => v1.chebyshev_distance(v2),
-			Self::Euclidean => v1.euclidean_distance(v2),
-			Self::Hamming => v1.hamming_distance(v2),
-			Self::Jaccard => v1.jaccard_similarity(v2),
-			Self::Manhattan => v1.manhattan_distance(v2),
-			Self::Minkowski(r) => v1.minkowski_distance(v2, r),
-			Self::Pearson => v1.pearson_similarity(v2),
-		}
-	}
-}
-
 impl Display for Distance {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
@@ -207,6 +307,36 @@ impl Display for Distance {
 			Self::Manhattan => f.write_str("MANHATTAN"),
 			Self::Minkowski(order) => write!(f, "MINKOWSKI {}", order),
 			Self::Pearson => f.write_str("PEARSON"),
+		}
+	}
+}
+
+impl From<Distance> for crate::expr::index::Distance {
+	fn from(v: Distance) -> Self {
+		match v {
+			Distance::Chebyshev => crate::expr::index::Distance::Chebyshev,
+			Distance::Cosine => crate::expr::index::Distance::Cosine,
+			Distance::Euclidean => crate::expr::index::Distance::Euclidean,
+			Distance::Hamming => crate::expr::index::Distance::Hamming,
+			Distance::Jaccard => crate::expr::index::Distance::Jaccard,
+			Distance::Manhattan => crate::expr::index::Distance::Manhattan,
+			Distance::Minkowski(n) => crate::expr::index::Distance::Minkowski(n.into()),
+			Distance::Pearson => crate::expr::index::Distance::Pearson,
+		}
+	}
+}
+
+impl From<crate::expr::index::Distance> for Distance {
+	fn from(v: crate::expr::index::Distance) -> Self {
+		match v {
+			crate::expr::index::Distance::Chebyshev => Self::Chebyshev,
+			crate::expr::index::Distance::Cosine => Self::Cosine,
+			crate::expr::index::Distance::Euclidean => Self::Euclidean,
+			crate::expr::index::Distance::Hamming => Self::Hamming,
+			crate::expr::index::Distance::Jaccard => Self::Jaccard,
+			crate::expr::index::Distance::Manhattan => Self::Manhattan,
+			crate::expr::index::Distance::Minkowski(n) => Self::Minkowski(n.into()),
+			crate::expr::index::Distance::Pearson => Self::Pearson,
 		}
 	}
 }
@@ -265,7 +395,13 @@ impl Display for Index {
 				write!(
 					f,
 					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
-					p.dimension, p.distance, p.vector_type, p.capacity, p.doc_ids_order, p.doc_ids_cache, p.mtree_cache
+					p.dimension,
+					p.distance,
+					p.vector_type,
+					p.capacity,
+					p.doc_ids_order,
+					p.doc_ids_cache,
+					p.mtree_cache
 				)
 			}
 			Self::Hnsw(p) => {
@@ -286,8 +422,26 @@ impl Display for Index {
 	}
 }
 
-impl InfoStructure for Index {
-	fn structure(self) -> Value {
-		self.to_string().into()
+impl From<VectorType> for crate::expr::index::VectorType {
+	fn from(v: VectorType) -> Self {
+		match v {
+			VectorType::F64 => Self::F64,
+			VectorType::F32 => Self::F32,
+			VectorType::I64 => Self::I64,
+			VectorType::I32 => Self::I32,
+			VectorType::I16 => Self::I16,
+		}
+	}
+}
+
+impl From<crate::expr::index::VectorType> for VectorType {
+	fn from(v: crate::expr::index::VectorType) -> Self {
+		match v {
+			crate::expr::index::VectorType::F64 => Self::F64,
+			crate::expr::index::VectorType::F32 => Self::F32,
+			crate::expr::index::VectorType::I64 => Self::I64,
+			crate::expr::index::VectorType::I32 => Self::I32,
+			crate::expr::index::VectorType::I16 => Self::I16,
+		}
 	}
 }

@@ -2,13 +2,13 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
+		Field, Fields, Idioms, Limit, Order, Split, Splits, SqlValues, Start, Version,
 		order::{OrderList, Ordering},
 		statements::SelectStatement,
-		Field, Fields, Idioms, Limit, Order, Split, Splits, Start, Values, Version,
 	},
 	syn::{
-		parser::{mac::expected, ParseResult, Parser},
-		token::{t, Span},
+		parser::{ParseResult, Parser, mac::expected},
+		token::{Span, t},
 	},
 };
 
@@ -37,7 +37,7 @@ impl Parser<'_> {
 		while self.eat(t!(",")) {
 			what.push(stk.run(|ctx| self.parse_value_table(ctx)).await?);
 		}
-		let what = Values(what);
+		let what = SqlValues(what);
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(stk).await?;

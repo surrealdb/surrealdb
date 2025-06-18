@@ -1,9 +1,9 @@
 //! stub implementations for the fetch API when `http` is not enabled.
 
 use js::{
+	Class, Ctx, Exception, Function, Object, Result,
 	class::{JsClass, Trace, Tracer},
 	function::Constructor,
-	Class, Ctx, Exception, Function, Object, Result,
 };
 
 #[cfg(test)]
@@ -22,7 +22,10 @@ pub fn register(ctx: &Ctx<'_>) -> Result<()> {
 
 #[js::function]
 fn fetch<'js>(ctx: Ctx<'js>) -> Result<()> {
-	Err(Exception::throw_internal(&ctx,"The 'fetch' function is not available in this build of SurrealDB. In order to use 'fetch', enable the 'http' feature."))
+	Err(Exception::throw_internal(
+		&ctx,
+		"The 'fetch' function is not available in this build of SurrealDB. In order to use 'fetch', enable the 'http' feature.",
+	))
 }
 
 macro_rules! impl_stub_class {

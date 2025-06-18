@@ -5,7 +5,6 @@
 	feature = "kv-tikv",
 	feature = "kv-fdb",
 	feature = "kv-surrealkv",
-	feature = "kv-surrealcs",
 ))]
 
 use super::Datastore;
@@ -33,20 +32,20 @@ mod timestamp_to_versionstamp;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Kvs {
-	#[allow(dead_code)]
+	#[cfg_attr(not(feature = "kv-mem"), expect(dead_code))]
 	Mem,
-	#[allow(dead_code)]
+	#[cfg_attr(not(feature = "kv-rocksdb"), expect(dead_code))]
 	Rocksdb,
-	#[allow(dead_code)]
+	#[cfg_attr(not(feature = "kv-tikv"), expect(dead_code))]
 	Tikv,
-	#[allow(dead_code)]
+	#[cfg_attr(not(feature = "kv-fdb"), expect(dead_code))]
 	Fdb,
-	#[allow(dead_code)]
+	#[cfg_attr(not(feature = "kv-surrealkv"), expect(dead_code))]
 	SurrealKV,
 }
 
 // This type is unsused when no store is enabled.
-#[allow(dead_code)]
+#[cfg_attr(not(test), expect(dead_code))]
 type ClockType = Arc<SizedClock>;
 
 trait CreateDs {

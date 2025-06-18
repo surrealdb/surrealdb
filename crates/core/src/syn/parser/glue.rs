@@ -4,7 +4,7 @@ use crate::{
 	sql::{Datetime, Duration, Strand, Uuid},
 	syn::{
 		lexer::compound,
-		token::{t, Glued, Token, TokenKind},
+		token::{Glued, Token, TokenKind, t},
 	},
 };
 
@@ -96,6 +96,24 @@ impl Parser<'_> {
 				self.prepend_token(Token {
 					span: value.span,
 					kind: TokenKind::Glued(Glued::Uuid),
+				});
+			}
+			t!("b\"") | t!("b'") => {
+				self.pop_peek();
+				let value = self.lexer.lex_compound(token, compound::bytes)?;
+				self.glued_value = GluedValue::Bytes(value.value);
+				self.prepend_token(Token {
+					span: value.span,
+					kind: TokenKind::Glued(Glued::Bytes),
+				});
+			}
+			t!("f\"") | t!("f'") => {
+				self.pop_peek();
+				let value = self.lexer.lex_compound(token, compound::file)?;
+				self.glued_value = GluedValue::File(value.value);
+				self.prepend_token(Token {
+					span: value.span,
+					kind: TokenKind::Glued(Glued::File),
 				});
 			}
 			_ => {}

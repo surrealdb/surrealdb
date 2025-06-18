@@ -1,12 +1,16 @@
+//! Debugging utilities for the `key` module.
+
 use std::ops::Range;
 
+/// A trait for types that can be converted to a string representation for readability.
 pub trait Sprintable {
+	/// Converts the implementing type to a string representation.
 	fn sprint(&self) -> String;
 }
 
 impl Sprintable for &str {
 	fn sprint(&self) -> String {
-		self.to_string()
+		(*self).to_string()
 	}
 }
 

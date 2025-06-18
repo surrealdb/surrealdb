@@ -1,5 +1,5 @@
 use super::lookup::Lookup;
-use crate::sql::id::Id;
+use crate::expr::id::Id;
 use uuid::Uuid;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
@@ -32,6 +32,8 @@ pub(crate) enum Key {
 	Aps(String, String),
 	/// A cache key for analyzers (on a database)
 	Azs(String, String),
+	/// A cache key for buckets (on a database)
+	Bus(String, String),
 	/// A cache key for functions (on a database)
 	Fcs(String, String),
 	/// A cache key for models (on a database)
@@ -42,6 +44,8 @@ pub(crate) enum Key {
 	Pas(String, String),
 	/// A cache key for tables
 	Tbs(String, String),
+	/// A cache key for sequences (on a database)
+	Seq(String, String),
 	/// A cache key for events (on a table)
 	Evs(String, String, String),
 	/// A cache key for fieds (on a table)
@@ -80,6 +84,8 @@ pub(crate) enum Key {
 	Ap(String, String, String),
 	/// A cache key for an analyzer (on a database)
 	Az(String, String, String),
+	/// A cache key for a bucket (on a database)
+	Bu(String, String, String),
 	/// A cache key for a function (on a database)
 	Fc(String, String, String),
 	/// A cache key for a model (on a database)
@@ -88,6 +94,8 @@ pub(crate) enum Key {
 	Cg(String, String, String),
 	/// A cache key for a parameter (on a database)
 	Pa(String, String, String),
+	/// A cache key for a sequence (on a database)
+	Sq(String, String, String),
 	/// A cache key for a table
 	Tb(String, String, String),
 	/// A cache key for an event (on a table)
@@ -119,10 +127,12 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Dgs(a, b, c) => Key::Dgs(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Aps(a, b) => Key::Aps(a.to_string(), b.to_string()),
 			Lookup::Azs(a, b) => Key::Azs(a.to_string(), b.to_string()),
+			Lookup::Bus(a, b) => Key::Bus(a.to_string(), b.to_string()),
 			Lookup::Fcs(a, b) => Key::Fcs(a.to_string(), b.to_string()),
 			Lookup::Mls(a, b) => Key::Mls(a.to_string(), b.to_string()),
 			Lookup::Cgs(a, b) => Key::Cgs(a.to_string(), b.to_string()),
 			Lookup::Pas(a, b) => Key::Pas(a.to_string(), b.to_string()),
+			Lookup::Sqs(a, b) => Key::Seq(a.to_string(), b.to_string()),
 			Lookup::Tbs(a, b) => Key::Tbs(a.to_string(), b.to_string()),
 			Lookup::Evs(a, b, c) => Key::Evs(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Fds(a, b, c) => Key::Fds(a.to_string(), b.to_string(), c.to_string()),
@@ -144,10 +154,12 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Dg(a, b, c, d) => Key::Dg(a.to_string(), b.to_string(), c.to_string(), d.to_string()),
 			Lookup::Ap(a, b, c) => Key::Ap(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Az(a, b, c) => Key::Az(a.to_string(), b.to_string(), c.to_string()),
+			Lookup::Bu(a, b, c) => Key::Bu(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Fc(a, b, c) => Key::Fc(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Ml(a, b, c, d) => Key::Ml(a.to_string(), b.to_string(), c.to_string(), d.to_string()),
 			Lookup::Cg(a, b, c) => Key::Cg(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Pa(a, b, c) => Key::Pa(a.to_string(), b.to_string(), c.to_string()),
+			Lookup::Sq(a, b,c) => Key::Sq(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Tb(a, b, c) => Key::Tb(a.to_string(), b.to_string(), c.to_string()),
 			Lookup::Ev(a, b, c, d) => Key::Ev(a.to_string(), b.to_string(), c.to_string(), d.to_string()),
 			Lookup::Fd(a, b, c, d) => Key::Fd(a.to_string(), b.to_string(), c.to_string(), d.to_string()),

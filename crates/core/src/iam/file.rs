@@ -1,14 +1,16 @@
 use crate::cnf::FILE_ALLOWLIST;
 use crate::err::Error;
+use anyhow::Result;
+use path_clean::PathClean;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn is_path_allowed(path: &Path) -> Result<PathBuf, Error> {
+pub(crate) fn is_path_allowed(path: &Path) -> Result<PathBuf> {
 	check_is_path_allowed(path, &FILE_ALLOWLIST)
 }
 
 /// Checks if the requested file path is within any of the allowed directories.
-fn check_is_path_allowed(path: &Path, allowed_path: &[PathBuf]) -> Result<PathBuf, Error> {
+fn check_is_path_allowed(path: &Path, allowed_path: &[PathBuf]) -> Result<PathBuf> {
 	// Convert the requested path to its canonical form.
 	let canonical_path = fs::canonicalize(path)?;
 
@@ -21,11 +23,15 @@ fn check_is_path_allowed(path: &Path, allowed_path: &[PathBuf]) -> Result<PathBu
 	if allowed_path.iter().any(|allowed| canonical_path.starts_with(allowed)) {
 		Ok(canonical_path)
 	} else {
-		Err(Error::FileAccessDenied(path.to_string_lossy().to_string()))
+		Err(anyhow::Error::new(Error::FileAccessDenied(path.to_string_lossy().to_string())))
 	}
 }
 
-pub(crate) fn extract_allowed_paths(input: &str) -> Vec<PathBuf> {
+pub(crate) fn extract_allowed_paths(
+	input: &str,
+	canonicalize: bool,
+	subject: &str,
+) -> Vec<PathBuf> {
 	// or a semicolon on Windows.
 	let delimiter = if cfg!(target_os = "windows") {
 		";"
@@ -40,10 +46,20 @@ pub(crate) fn extract_allowed_paths(input: &str) -> Vec<PathBuf> {
 			if trimmed.is_empty() {
 				None
 			} else {
-				// Convert to a PathBuf and canonicalize it.
-				fs::canonicalize(trimmed).ok().inspect(|p| {
-					debug!("Allowed file path: {}", p.to_string_lossy());
-				})
+				let path = PathBuf::from(trimmed).clean();
+				let path = if canonicalize {
+					let Ok(path) = fs::canonicalize(&path) else {
+						warn!("Failed to canonicalize {subject} path: {}", path.to_string_lossy());
+						return None;
+					};
+
+					path
+				} else {
+					path
+				};
+
+				debug!("Allowed {subject} path: {}", path.to_string_lossy());
+				Some(path)
 			}
 		})
 		.collect()
@@ -84,7 +100,7 @@ mod tests {
 			delimiter,
 			dir2.path().to_string_lossy()
 		);
-		let allowlist = extract_allowed_paths(&combined);
+		let allowlist = extract_allowed_paths(&combined, true, "file");
 
 		// Create a file in the first allowed directory.
 		let allowed_file1 = dir1.path().join("file1.txt");

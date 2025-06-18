@@ -2,11 +2,12 @@
 
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::expr::Thing;
+use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
-use crate::sql::value::Value;
-use crate::sql::Thing;
+use anyhow::Result;
 use reblessive::tree::Stk;
 pub mod api;
 pub mod args;
@@ -16,6 +17,7 @@ pub mod count;
 pub mod crypto;
 pub mod duration;
 pub mod encoding;
+pub mod file;
 pub mod geo;
 pub mod http;
 pub mod math;
@@ -27,6 +29,7 @@ pub mod rand;
 pub mod record;
 pub mod script;
 pub mod search;
+pub mod sequence;
 pub mod session;
 pub mod sleep;
 pub mod string;
@@ -44,7 +47,7 @@ pub async fn run(
 	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	if name.eq("sleep")
 		|| name.eq("api::invoke")
 		|| name.eq("array::all")
@@ -60,12 +63,24 @@ pub async fn run(
 		|| name.eq("array::map")
 		|| name.eq("array::reduce")
 		|| name.eq("array::some")
+		|| name.eq("file::put")
+		|| name.eq("file::put_if_not_exists")
+		|| name.eq("file::get")
+		|| name.eq("file::head")
+		|| name.eq("file::delete")
+		|| name.eq("file::exists")
+		|| name.eq("file::copy")
+		|| name.eq("file::copy_if_not_exists")
+		|| name.eq("file::rename")
+		|| name.eq("file::rename_if_not_exists")
+		|| name.eq("file::list")
 		|| name.eq("record::exists")
 		|| name.eq("record::refs")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
+		|| name.eq("sequence::nextval")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
@@ -85,23 +100,36 @@ pub async fn run(
 /// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
-	($name: ident, $args: expr, $message: expr, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
-		{
-			match $name {
-				$($function_name => {
-					let args = args::FromArgs::from_args($name, $args)?;
-					#[allow(clippy::redundant_closure_call)]
-					$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
-				},)+
-				_ => {
-					Err($crate::err::Error::InvalidFunction{
-						name: String::from($name),
-						message: $message.to_string()
-					})
-				}
-			}
-		}
-	};
+    ($ctx: ident, $name: ident, $args: expr_2021, $message: expr_2021,
+        $($(exp($exp_target: ident))? $function_name: literal =>
+            $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr_2021))* $(.$await:tt)*,)+
+    ) => {
+        {
+            match $name {
+                $(
+                    $function_name => {
+                        $(
+                            if !$ctx.get_capabilities().allows_experimental(&ExperimentalTarget::$exp_target) {
+                                return Err(::anyhow::Error::new($crate::err::Error::InvalidFunction {
+                                    name: String::from($name),
+                                    message: format!("Experimental feature {} is not enabled", ExperimentalTarget::$exp_target),
+                                }));
+                            }
+                        )?
+                        let args = args::FromArgs::from_args($name, $args)?;
+                        #[allow(clippy::redundant_closure_call)]
+                        $($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
+                    },
+                )+
+                _ => {
+                    return Err(::anyhow::Error::new($crate::err::Error::InvalidFunction{
+                        name: String::from($name),
+                        message: $message.to_string()
+                    }))
+                }
+            }
+        }
+    };
 }
 
 /// Attempts to run any synchronous function.
@@ -110,8 +138,9 @@ pub fn synchronous(
 	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	dispatch!(
+		ctx,
 		name,
 		args,
 		"no such builtin function found",
@@ -193,6 +222,9 @@ pub fn synchronous(
 		"duration::from::secs" => duration::from::secs,
 		"duration::from::weeks" => duration::from::weeks,
 		//
+		exp(Files) "file::bucket" => file::bucket,
+		exp(Files) "file::key" => file::key,
+		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
 		"encoding::cbor::decode" => encoding::cbor::decode,
@@ -255,6 +287,8 @@ pub fn synchronous(
 		"not" => not::not,
 		//
 		"object::entries" => object::entries,
+		"object::extend" => object::extend,
+		"object::remove" => object::remove,
 		"object::from_entries" => object::from_entries,
 		"object::is_empty" => object::is_empty,
 		"object::keys" => object::keys,
@@ -273,6 +307,7 @@ pub fn synchronous(
 		//
 		"rand" => rand::rand,
 		"rand::bool" => rand::bool,
+		"rand::duration" => rand::duration,
 		"rand::enum" => rand::r#enum,
 		"rand::float" => rand::float,
 		"rand::guid" => rand::guid,
@@ -397,6 +432,7 @@ pub fn synchronous(
 		"type::datetime" => r#type::datetime,
 		"type::decimal" => r#type::decimal,
 		"type::duration" => r#type::duration,
+		exp(Files) "type::file" => r#type::file,
 		"type::float" => r#type::float,
 		"type::geometry" => r#type::geometry,
 		"type::int" => r#type::int,
@@ -405,6 +441,7 @@ pub fn synchronous(
 		"type::range" => r#type::range,
 		"type::record" => r#type::record,
 		"type::string" => r#type::string,
+		"type::string_lossy" => r#type::string_lossy,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
 		"type::uuid" => r#type::uuid,
@@ -466,7 +503,7 @@ pub async fn asynchronous(
 	doc: Option<&CursorDoc>,
 	name: &str,
 	args: Vec<Value>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
 	#[cfg(not(target_family = "wasm"))]
@@ -484,11 +521,12 @@ pub async fn asynchronous(
 	}
 
 	dispatch!(
+		ctx,
 		name,
 		args,
 		"no such builtin function found",
 		//
-		"api::invoke" => api::invoke((stk, ctx, opt)).await,
+		exp(DefineApi) "api::invoke" => api::invoke((stk, ctx, opt)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,
@@ -505,13 +543,25 @@ pub async fn asynchronous(
 		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
 		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
-		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
+		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::r#gen.await,
 		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
-		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
+		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::r#gen.await,
 		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
-		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
+		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::r#gen.await,
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
-		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::r#gen.await,
+		//
+		exp(Files) "file::put" => file::put((stk, ctx, opt, doc)).await,
+		exp(Files) "file::put_if_not_exists" => file::put_if_not_exists((stk, ctx, opt, doc)).await,
+		exp(Files) "file::get" => file::get((stk, ctx, opt, doc)).await,
+		exp(Files) "file::head" => file::head((stk, ctx, opt, doc)).await,
+		exp(Files) "file::delete" => file::delete((stk, ctx, opt, doc)).await,
+		exp(Files) "file::copy" => file::copy((stk, ctx, opt, doc)).await,
+		exp(Files) "file::copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
+		exp(Files) "file::rename" => file::rename((stk, ctx, opt, doc)).await,
+		exp(Files) "file::rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
+		exp(Files) "file::exists" => file::exists((stk, ctx, opt, doc)).await,
+		exp(Files) "file::list" => file::list((stk, ctx, opt, doc)).await,
 		//
 		"http::head" => http::head(ctx).await,
 		"http::get" => http::get(ctx).await,
@@ -530,6 +580,8 @@ pub async fn asynchronous(
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
+		"sequence::nextval" => sequence::nextval((ctx, opt)).await,
+		//
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 		//
@@ -546,12 +598,14 @@ pub async fn idiom(
 	doc: Option<&CursorDoc>,
 	value: Value,
 	name: &str,
-	args: Vec<Value>,
-) -> Result<Value, Error> {
-	let args = [vec![value.clone()], args].concat();
-	let specific = match value {
-		Value::Array(_) => {
+	mut args: Vec<Value>,
+) -> Result<Value> {
+	ctx.check_allowed_function(&idiom_name_to_normal(value.kindof(), name))?;
+	match value {
+		Value::Array(x) => {
+			args.insert(0, Value::Array(x));
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the array type",
@@ -638,19 +692,120 @@ pub async fn idiom(
 				"vector_similarity_jaccard" => vector::similarity::jaccard,
 				"vector_similarity_pearson" => vector::similarity::pearson,
 				"vector_similarity_spearman" => vector::similarity::spearman,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Bytes(_) => {
+		Value::Bytes(x) => {
+			args.insert(0, Value::Bytes(x));
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the bytes type",
 				//
 				"len" => bytes::len,
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Duration(_) => {
+		Value::Duration(d) => {
+			args.insert(0, Value::Duration(d));
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the duration type",
@@ -664,10 +819,61 @@ pub async fn idiom(
 				"secs" => duration::secs,
 				"weeks" => duration::weeks,
 				"years" => duration::years,
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
+
 			)
 		}
-		Value::Geometry(_) => {
+		Value::Geometry(g) => {
+			args.insert(0, Value::Geometry(g));
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the geometry type",
@@ -679,10 +885,61 @@ pub async fn idiom(
 				"hash_decode" => geo::hash::decode,
 				"hash_encode" => geo::hash::encode,
 				"is_valid" => geo::is::valid,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Thing(_) => {
+		Value::Thing(t) => {
+			args.insert(0, Value::Thing(t));
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the record type",
@@ -692,23 +949,127 @@ pub async fn idiom(
 				"table" => record::tb,
 				"tb" => record::tb,
 				"refs" => record::refs((stk, ctx, opt, doc)).await,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Object(_) => {
+		Value::Object(o) => {
+			args.insert(0, Value::Object(o));
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the object type",
 				//
 				"entries" => object::entries,
+				"extend" => object::extend,
 				"is_empty" => object::is_empty,
 				"keys" => object::keys,
 				"len" => object::len,
+				"remove" => object::remove,
 				"values" => object::values,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Number(_) => {
+		Value::Number(n) => {
+			args.insert(0, Value::Number(n));
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the number type",
@@ -732,10 +1093,61 @@ pub async fn idiom(
 				"sign" => math::sign,
 				"sin" => math::sin,
 				"tan" => math::tan,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		Value::Strand(_) => {
+		Value::Strand(s) => {
+			args.insert(0, Value::Strand(s));
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the string type",
@@ -797,10 +1209,56 @@ pub async fn idiom(
 				"semver_set_major" => string::semver::set::major,
 				"semver_set_minor" => string::semver::set::minor,
 				"semver_set_patch" => string::semver::set::patch,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_string" => r#type::is::string,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
 			)
 		}
-		Value::Datetime(_) => {
+		Value::Datetime(d) => {
+			args.insert(0, Value::Datetime(d));
 			dispatch!(
+				ctx,
 				name,
 				args.clone(),
 				"no such method found for the datetime type",
@@ -824,20 +1282,134 @@ pub async fn idiom(
 				"week" => time::week,
 				"yday" => time::yday,
 				"year" => time::year,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
 			)
 		}
-		_ => Err(Error::InvalidFunction {
-			name: "".into(),
-			message: "".into(),
-		}),
-	};
-
-	match specific {
-		Err(Error::InvalidFunction {
-			..
-		}) => {
-			let message = format!("no such method found for the {} type", value.kindof());
+		Value::File(f) => {
+			args.insert(0, Value::File(f));
 			dispatch!(
+				ctx,
+				name,
+				args.clone(),
+				"no such method found for the file type",
+				//
+				exp(Files) "bucket" => file::bucket,
+				exp(Files) "key" => file::key,
+				//
+				exp(Files) "put" => file::put((stk, ctx, opt, doc)).await,
+				exp(Files) "put_if_not_exists" => file::put_if_not_exists((stk, ctx, opt, doc)).await,
+				exp(Files) "get" => file::get((stk, ctx, opt, doc)).await,
+				exp(Files) "head" => file::head((stk, ctx, opt, doc)).await,
+				exp(Files) "delete" => file::delete((stk, ctx, opt, doc)).await,
+				exp(Files) "copy" => file::copy((stk, ctx, opt, doc)).await,
+				exp(Files) "copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
+				exp(Files) "rename" => file::rename((stk, ctx, opt, doc)).await,
+				exp(Files) "rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
+				exp(Files) "exists" => file::exists((stk, ctx, opt, doc)).await,
+
+
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
+				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				//
+				"repeat" => array::repeat,
+			)
+		}
+		x => {
+			let message = format!("no such method found for the {} type", x.kindof());
+			args.insert(0, x);
+			dispatch!(
+				ctx,
 				name,
 				args,
 				message,
@@ -881,6 +1453,7 @@ pub async fn idiom(
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
 				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
@@ -890,7 +1463,6 @@ pub async fn idiom(
 				"repeat" => array::repeat,
 			)
 		}
-		v => v,
 	}
 }
 
@@ -910,6 +1482,99 @@ fn get_execution_context<'a>(
 	None
 }
 
+fn idiom_name_to_normal(kind: &str, name: &str) -> String {
+	let (kind, name): (&str, &str) = match kind {
+		"array" => match name {
+			"vector_add" => return "vector::add".to_string(),
+			"vector_angle" => return "vector::angle".to_string(),
+			"vector_cross" => return "vector::cross".to_string(),
+			"vector_dot" => return "vector::dot".to_string(),
+			"vector_divide" => return "vector::divide".to_string(),
+			"vector_magnitude" => return "vector::magnitude".to_string(),
+			"vector_multiply" => return "vector::multiply".to_string(),
+			"vector_normalize" => return "vector::normalize".to_string(),
+			"vector_project" => return "vector::project".to_string(),
+			"vector_scale" => return "vector::scale".to_string(),
+			"vector_subtract" => return "vector::subtract".to_string(),
+			"vector_distance_chebyshev" => return "vector::distance::chebyshev".to_string(),
+			"vector_distance_euclidean" => return "vector::distance::euclidean".to_string(),
+			"vector_distance_hamming" => return "vector::distance::hamming".to_string(),
+			"vector_distance_knn" => return "vector::distance::knn".to_string(),
+			"vector_distance_mahalanobis" => return "vector::distance::mahalanobis".to_string(),
+			"vector_distance_manhattan" => return "vector::distance::manhattan".to_string(),
+			"vector_distance_minkowski" => return "vector::distance::minkowski".to_string(),
+			"vector_similarity_cosine" => return "vector::similarity::cosine".to_string(),
+			"vector_similarity_jaccard" => return "vector::similarity::jaccard".to_string(),
+			"vector_similarity_pearson" => return "vector::similarity::pearson".to_string(),
+			"vector_similarity_spearman" => return "vector::similarity::spearman".to_string(),
+			_ => (kind, name),
+		},
+		"geometry" => match name {
+			"hash_decode" => return "geo::hash::decode".to_string(),
+			"hash_encode" => return "geo::hash::encode".to_string(),
+			"is_valid" => return "geo::is::valid".to_string(),
+			_ => ("geo", name),
+		},
+		"number" => ("math", name),
+		"string" => match name {
+			"distance_damerau_levenshtein" => {
+				return "string::distance::damerau_levenshtein".to_string();
+			}
+			"distance_hamming" => return "string::distance::hamming".to_string(),
+			"distance_levenshtein" => return "string::distance::levenshtein".to_string(),
+			"distance_normalized_damerau_levenshtein" => {
+				return "string::distance::normalized_damerau_levenshtein".to_string();
+			}
+			"distance_normalized_levenshtein" => {
+				return "string::distance::normalized_levenshtein".to_string();
+			}
+			"html_encode" => return "string::html::encode".to_string(),
+			"html_sanitize" => return "string::html::sanitize".to_string(),
+			"is_alphanum" => return "string::is::alphanum".to_string(),
+			"is_alpha" => return "string::is::alpha".to_string(),
+			"is_ascii" => return "string::is::ascii".to_string(),
+			"is_datetime" => return "string::is::datetime".to_string(),
+			"is_domain" => return "string::is::domain".to_string(),
+			"is_email" => return "string::is::email".to_string(),
+			"is_hexadecimal" => return "string::is::hexadecimal".to_string(),
+			"is_ip" => return "string::is::ip".to_string(),
+			"is_ipv4" => return "string::is::ipv4".to_string(),
+			"is_ipv6" => return "string::is::ipv6".to_string(),
+			"is_latitude" => return "string::is::latitude".to_string(),
+			"is_longitude" => return "string::is::longitude".to_string(),
+			"is_numeric" => return "string::is::numeric".to_string(),
+			"is_semver" => return "string::is::semver".to_string(),
+			"is_url" => return "string::is::url".to_string(),
+			"is_ulid" => return "string::is::ulid".to_string(),
+			"is_uuid" => return "string::is::uuid".to_string(),
+			"is_record" => return "string::is::record".to_string(),
+			"similarity_fuzzy" => return "string::similarity::fuzzy".to_string(),
+			"similarity_jaro" => return "string::similarity::jaro".to_string(),
+			"similarity_jaro_winkler" => return "string::similarity::jaro_winkler".to_string(),
+			"similarity_smithwaterman" => return "string::similarity::smithwaterman".to_string(),
+			"similarity_sorensen_dice" => return "string::similarity::sorensen_dice".to_string(),
+			"semver_compare" => return "string::semver::compare".to_string(),
+			"semver_major" => return "string::semver::major".to_string(),
+			"semver_minor" => return "string::semver::minor".to_string(),
+			"semver_patch" => return "string::semver::patch".to_string(),
+			"semver_inc_major" => return "string::semver::inc::major".to_string(),
+			"semver_inc_minor" => return "string::semver::inc::minor".to_string(),
+			"semver_inc_patch" => return "string::semver::inc::patch".to_string(),
+			"semver_set_major" => return "string::semver::set::major".to_string(),
+			"semver_set_minor" => return "string::semver::set::minor".to_string(),
+			"semver_set_patch" => return "string::semver::set::patch".to_string(),
+			_ => (kind, name),
+		},
+		"datetime" => match name {
+			"is_leap_year" => return "time::is::leap_year".to_string(),
+			_ => ("time", name),
+		},
+		_ => (kind, name),
+	};
+
+	format!("{kind}::{name}")
+}
+
 #[cfg(test)]
 mod tests {
 	use regex::Regex;
@@ -917,7 +1582,7 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::{
 		dbs::capabilities::ExperimentalTarget,
-		sql::{statements::OutputStatement, Function, Query, Statement, Value},
+		sql::{Function, Query, SqlValue, Statement, statements::OutputStatement},
 	};
 
 	#[tokio::test]
@@ -932,10 +1597,17 @@ mod tests {
 		let re = Regex::new(r"(?ms)pub async fn idiom\(.*}").unwrap();
 		let fnc_no_idiom = re.replace(fnc_mod, "");
 
+		let exp_regex = Regex::new(r"exp\(.*\) ").unwrap();
+
 		for line in fnc_no_idiom.lines() {
-			if !(line.contains("=>")
-				&& (line.trim().starts_with('"') || line.trim().ends_with(',')))
-			{
+			let line = line.trim();
+			let line = if line.starts_with("exp") {
+				&exp_regex.replace(line, "")
+			} else {
+				line
+			};
+
+			if !(line.contains("=>") && (line.starts_with('"') || line.ends_with(','))) {
 				// This line does not define a function name.
 				continue;
 			}
@@ -951,7 +1623,7 @@ mod tests {
 			if let Ok(Query(mut x)) = res {
 				match x.0.pop() {
 					Some(Statement::Output(OutputStatement {
-						what: Value::Function(x),
+						what: SqlValue::Function(x),
 						..
 					})) => match *x {
 						Function::Normal(parsed_name, _) => {
@@ -974,7 +1646,7 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::sql::Value;
+				use crate::expr::Value;
 
 				let name = name.replace("::", ".");
 				let sql =
@@ -999,7 +1671,9 @@ mod tests {
 			for problem in problems {
 				eprintln!(" - {problem}");
 			}
-			panic!("ensure functions can be parsed in core/src/sql/function.rs and are exported to JS in core/src/fnc/script/modules/surrealdb");
+			panic!(
+				"ensure functions can be parsed in core/src/sql/function.rs and are exported to JS in core/src/fnc/script/modules/surrealdb"
+			);
 		}
 	}
 }

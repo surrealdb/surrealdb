@@ -4,10 +4,15 @@ mod bytes_hack;
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
-use serde::{de, Deserialize, Serialize};
+use semver::VersionReq;
+use serde::{Deserialize, Serialize, de};
 use surrealdb_core::{
-	dbs::capabilities::{ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget},
-	sql::{Thing, Value as CoreValue},
+	dbs::capabilities::{
+		Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
+		RouteTarget, Targets,
+	},
+	expr::{Thing, Value as CoreValue},
+	sql::Object as CoreObject,
 	syn,
 };
 
@@ -39,7 +44,7 @@ impl TestConfig {
 
 	/// Returns the imports for this file, empty if no imports are defined.
 	pub fn imports(&self) -> &[String] {
-		self.env.as_ref().and_then(|x| x.imports.as_ref()).map(|x| x.as_slice()).unwrap_or(&[])
+		self.env.as_ref().map(|x| x.imports.as_slice()).unwrap_or(&[])
 	}
 
 	/// Returns if this test must be run without other test running.
@@ -77,14 +82,17 @@ pub struct TestEnv {
 	pub clean: bool,
 
 	#[serde(default)]
-	pub auth: bool,
+	pub strict: bool,
 
 	pub namespace: Option<BoolOr<String>>,
 	pub database: Option<BoolOr<String>>,
 
-	pub login: Option<TestLogin>,
+	pub auth: Option<TestAuth>,
+	pub signup: Option<SurrealObject>,
+	pub signin: Option<SurrealObject>,
 
-	pub imports: Option<Vec<String>>,
+	#[serde(default)]
+	pub imports: Vec<String>,
 	pub timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
 
@@ -131,7 +139,7 @@ impl TestEnv {
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum TestExpectation {
 	// NOTE! Ordering of variants here is important.
@@ -148,6 +156,36 @@ pub enum TestExpectation {
 	Value(ValueTestResult),
 }
 
+fn to_deser_error<T: std::fmt::Display, D: serde::de::Error>(e: T) -> D {
+	D::custom(e)
+}
+
+impl<'de> Deserialize<'de> for TestExpectation {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: de::Deserializer<'de>,
+	{
+		let v = toml::Value::deserialize(deserializer)?;
+		if v.is_str() {
+			SurrealValue::deserialize(v).map_err(to_deser_error).map(TestExpectation::Plain)
+		} else if let Some(x) = v.as_table() {
+			if x.contains_key("match") {
+				MatchTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Match)
+			} else if x.contains_key("value") {
+				ValueTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Value)
+			} else if x.contains_key("error") {
+				ErrorTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Error)
+			} else {
+				Err(to_deser_error(
+					"Table does not match any the options, expected table to contain altleast one `match`, `value` or `error` field",
+				))
+			}
+		} else {
+			Err(to_deser_error("Expected a string or a table"))
+		}
+	}
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ErrorTestResult {
@@ -158,9 +196,16 @@ pub struct ErrorTestResult {
 #[serde(rename_all = "kebab-case")]
 pub struct ValueTestResult {
 	pub value: SurrealValue,
+	#[serde(default)]
 	pub skip_datetime: Option<bool>,
+	#[serde(default)]
 	pub skip_record_id_key: Option<bool>,
+	#[serde(default)]
 	pub skip_uuid: Option<bool>,
+	#[serde(default)]
+	pub float_roughly_eq: Option<bool>,
+	#[serde(default)]
+	pub decimal_roughly_eq: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -168,6 +213,7 @@ pub struct ValueTestResult {
 pub struct MatchTestResult {
 	#[serde(rename = "match")]
 	pub _match: SurrealValue,
+	#[serde(default)]
 	pub error: Option<bool>,
 }
 
@@ -184,11 +230,25 @@ pub struct MatchTestResult {
 /// [env]
 /// timeout = 1000
 /// ```
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum BoolOr<T> {
 	Bool(bool),
 	Value(T),
+}
+
+impl<'d, T: Deserialize<'d>> Deserialize<'d> for BoolOr<T> {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: de::Deserializer<'d>,
+	{
+		let v = toml::Value::deserialize(deserializer)?;
+		if v.is_bool() {
+			bool::deserialize(v).map(BoolOr::Bool).map_err(to_deser_error)
+		} else {
+			T::deserialize(v).map(BoolOr::Value).map_err(to_deser_error)
+		}
+	}
 }
 
 impl<T> BoolOr<T> {
@@ -226,7 +286,7 @@ impl<'de> Deserialize<'de> for Version {
 		D: serde::Deserializer<'de>,
 	{
 		let str = String::deserialize(deserializer)?;
-		let version = semver::VersionReq::parse(&str).map_err(<D::Error as de::Error>::custom)?;
+		let version = semver::VersionReq::parse(&str).map_err(to_deser_error)?;
 		Ok(Version(version))
 	}
 }
@@ -244,7 +304,6 @@ impl Serialize for Version {
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestDetails {
-	pub results: Option<TestDetailsResults>,
 	pub reason: Option<String>,
 	run: Option<bool>,
 	issue: Option<u64>,
@@ -252,9 +311,14 @@ pub struct TestDetails {
 	pub fuzzing_reproduction: Option<String>,
 
 	#[serde(default)]
-	pub is_upgrade: bool,
+	pub upgrade: bool,
 
-	pub version: Option<Version>,
+	#[serde(default)]
+	pub version: VersionReq,
+	#[serde(default)]
+	pub importing_version: VersionReq,
+
+	pub results: Option<TestDetailsResults>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
@@ -286,24 +350,80 @@ impl TestDetails {
 				TestDetailsResults::ParserError(x) => res.append(
 					&mut x._unused_keys.keys().map(|x| format!("test.results.{x}")).collect(),
 				),
+				TestDetailsResults::SignupError(x) => res.append(
+					&mut x._unused_keys.keys().map(|x| format!("test.results.{x}")).collect(),
+				),
+				TestDetailsResults::SigninError(x) => res.append(
+					&mut x._unused_keys.keys().map(|x| format!("test.results.{x}")).collect(),
+				),
 			}
 		}
 		res
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 #[serde(rename_all = "kebab-case")]
 pub enum TestDetailsResults {
 	QueryResult(Vec<TestExpectation>),
 	ParserError(ParsingTestResult),
+	SigninError(SigninErrorResult),
+	SignupError(SignupErrorResult),
+}
+
+impl<'de> Deserialize<'de> for TestDetailsResults {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: de::Deserializer<'de>,
+	{
+		let value = toml::Value::deserialize(deserializer)?;
+		if value.is_array() {
+			Deserialize::deserialize(value)
+				.map_err(to_deser_error)
+				.map(TestDetailsResults::QueryResult)
+		} else if let Some(t) = value.as_table() {
+			if t.contains_key("signin-error") {
+				Deserialize::deserialize(value)
+					.map_err(to_deser_error)
+					.map(TestDetailsResults::SigninError)
+			} else if t.contains_key("signup-error") {
+				Deserialize::deserialize(value)
+					.map_err(to_deser_error)
+					.map(TestDetailsResults::SignupError)
+			} else {
+				Deserialize::deserialize(value)
+					.map_err(to_deser_error)
+					.map(TestDetailsResults::ParserError)
+			}
+		} else {
+			Err(to_deser_error("Expected table or array"))
+		}
+	}
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ParsingTestResult {
 	pub parsing_error: BoolOr<String>,
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SigninErrorResult {
+	pub signin_error: BoolOr<String>,
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SignupErrorResult {
+	pub signup_error: BoolOr<String>,
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
@@ -328,7 +448,10 @@ impl<'de> Deserialize<'de> for SurrealValue {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let mut v = syn::value(&source).map_err(<D::Error as serde::de::Error>::custom)?;
+		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
+		let mut v: CoreValue = syn::value_with_capabilities(&source, &capabilities)
+			.map_err(<D::Error as serde::de::Error>::custom)?
+			.into();
 		bytes_hack::compute_bytes_inplace(&mut v);
 		Ok(SurrealValue(v))
 	}
@@ -353,7 +476,10 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let v = syn::value(&source).map_err(<D::Error as serde::de::Error>::custom)?;
+		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
+		let v: CoreValue = syn::value_with_capabilities(&source, &capabilities)
+			.map_err(<D::Error as serde::de::Error>::custom)?
+			.into();
 		if let CoreValue::Thing(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {
@@ -364,50 +490,68 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-#[serde(rename_all = "kebab-case")]
-pub enum TestLogin {
-	Leveled(TestLeveledLogin),
-	Record(TestRecordLogin),
+#[derive(Clone, Debug)]
+pub struct SurrealObject(pub CoreObject);
+
+impl Serialize for SurrealObject {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		let v = self.0.to_string();
+		v.serialize(serializer)
+	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct TestLeveledLogin {
-	pub level: TestLevel,
-	pub role: Option<TestRole>,
-
-	#[serde(skip_serializing)]
-	#[serde(flatten)]
-	_unused_keys: BTreeMap<String, toml::Value>,
+impl<'de> Deserialize<'de> for SurrealObject {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		let source = String::deserialize(deserializer)?;
+		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
+		let v = syn::value_with_capabilities(&source, &capabilities)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
+		v.into_object().map(SurrealObject).ok_or_else(|| {
+			<D::Error as serde::de::Error>::custom(format_args!(
+				"Expected a object, found '{source}'"
+			))
+		})
+	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
-pub enum TestRole {
-	Viewer,
-	Editor,
+pub enum AuthLevel {
+	#[default]
 	Owner,
+	Editor,
+	Viewer,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TestLevel {
-	Root,
-	Namespace,
-	Database,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct TestRecordLogin {
-	pub access: String,
-	pub rid: SurrealRecordId,
-
-	#[serde(skip_serializing)]
-	#[serde(flatten)]
-	_unused_keys: BTreeMap<String, toml::Value>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", untagged)]
+pub enum TestAuth {
+	Record {
+		namespace: String,
+		database: String,
+		access: String,
+		rid: SurrealRecordId,
+	},
+	Database {
+		namespace: String,
+		database: String,
+		#[serde(default)]
+		level: AuthLevel,
+	},
+	Namespace {
+		namespace: String,
+		#[serde(default)]
+		level: AuthLevel,
+	},
+	Root {
+		level: AuthLevel,
+	},
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

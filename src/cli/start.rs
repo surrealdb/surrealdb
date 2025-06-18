@@ -1,19 +1,24 @@
-use super::config::{Config, CF};
+use super::config::{CF, Config};
 use crate::cnf::LOGO;
 use crate::dbs;
 use crate::dbs::StartCommandDbsOptions;
 use crate::env;
-use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
+use anyhow::Result;
 use clap::Args;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::engine::any::IntoEndpoint;
+use surrealdb::engine::any;
 use surrealdb::engine::tasks;
 use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
+
+#[cfg(feature = "ml")]
+use anyhow::Context;
+#[cfg(feature = "ml")]
+use surrealdb_core::ml::execution::session::set_environment;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -163,13 +168,13 @@ pub async fn init(
 		no_identification_headers,
 		..
 	}: StartCommandArguments,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");
 	}
 	// Clean the path
-	let endpoint = path.into_endpoint()?;
+	let endpoint = any::__into_endpoint(path)?;
 	let path = if endpoint.path.is_empty() {
 		endpoint.url.to_string()
 	} else {
@@ -189,7 +194,7 @@ pub async fn init(
 		.with_changefeed_gc_interval(changefeed_gc_interval);
 	// Configure the config
 	let config = Config {
-		bind: listen_addresses.first().cloned().unwrap(),
+		bind: listen_addresses.first().copied().unwrap(),
 		client_ip,
 		path,
 		user,
@@ -202,7 +207,12 @@ pub async fn init(
 	// Setup the command-line options
 	let _ = CF.set(config);
 	// Initiate environment
-	env::init().await?;
+	env::init()?;
+
+	// if ML feature is enabled load the ONNX runtime lib that is embedded
+	#[cfg(feature = "ml")]
+	set_environment().context("Failed to initialize ML library")?;
+
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore

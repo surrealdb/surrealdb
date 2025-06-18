@@ -8,9 +8,11 @@ impl_module_def!(
 	Package,
 	"object",
 	"entries" => run,
+	"extend" => run,
 	"from_entries" => run,
 	"is_empty" => run,
 	"keys" => run,
 	"len" => run,
+	"remove" => run,
 	"values" => run
 );

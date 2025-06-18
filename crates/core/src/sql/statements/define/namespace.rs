@@ -1,10 +1,4 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{Base, Ident, Strand, Value};
+use crate::sql::{Ident, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -24,53 +18,6 @@ pub struct DefineNamespaceStatement {
 	pub overwrite: bool,
 }
 
-impl DefineNamespaceStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Check if the definition exists
-		if txn.get_ns(&self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				return Err(Error::NsAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::root::ns::new(&self.name);
-		txn.set(
-			key,
-			revision::to_vec(&DefineNamespaceStatement {
-				id: if self.id.is_none() {
-					Some(txn.lock().await.get_next_ns_id().await?)
-				} else {
-					None
-				},
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
 impl Display for DefineNamespaceStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE NAMESPACE")?;
@@ -88,11 +35,26 @@ impl Display for DefineNamespaceStatement {
 	}
 }
 
-impl InfoStructure for DefineNamespaceStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespaceStatement {
+	fn from(v: DefineNamespaceStatement) -> Self {
+		Self {
+			id: v.id,
+			name: v.name.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineNamespaceStatement> for DefineNamespaceStatement {
+	fn from(v: crate::expr::statements::DefineNamespaceStatement) -> Self {
+		Self {
+			id: v.id,
+			name: v.name.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
 	}
 }

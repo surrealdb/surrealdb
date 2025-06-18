@@ -1,4 +1,4 @@
-#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+#[cfg(not(target_family = "wasm"))]
 use crate::gql::SchemaCache;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -13,7 +13,7 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::Array;
 
-#[allow(async_fn_in_trait)]
+#[expect(async_fn_in_trait)]
 pub trait RpcContext {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore;
@@ -51,11 +51,11 @@ pub trait RpcContext {
 	// ------------------------------
 
 	/// GraphQL queries are disabled by default
-	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+	#[cfg(not(target_family = "wasm"))]
 	const GQL_SUPPORT: bool = false;
 
 	/// Returns the GraphQL schema cache used in GraphQL queries
-	#[cfg(all(not(target_family = "wasm"), surrealdb_unstable))]
+	#[cfg(not(target_family = "wasm"))]
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		unimplemented!("graphql_schema_cache function must be implemented if GQL_SUPPORT = true")
 	}
@@ -68,6 +68,7 @@ pub trait RpcContext {
 	async fn execute(
 		&self,
 		version: Option<u8>,
+		txn: Option<Uuid>,
 		method: Method,
 		params: Array,
 	) -> Result<Data, RpcError>
@@ -77,7 +78,7 @@ pub trait RpcContext {
 	{
 		match version {
 			Some(1) => RpcProtocolV1::execute(self, method, params).await,
-			Some(2) => RpcProtocolV2::execute(self, method, params).await,
+			Some(2) => RpcProtocolV2::execute(self, txn, method, params).await,
 			_ => RpcProtocolV1::execute(self, method, params).await,
 		}
 	}

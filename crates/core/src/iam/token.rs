@@ -1,6 +1,6 @@
+use crate::expr::Object;
+use crate::expr::Value;
 use crate::sql::json;
-use crate::sql::Object;
-use crate::sql::Value;
 use jsonwebtoken::{Algorithm, Header};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -147,7 +147,7 @@ impl From<Claims> for Value {
 						continue;
 					}
 				};
-				out.insert(claim.to_owned(), claim_value);
+				out.insert(claim.clone(), claim_value.into());
 			}
 		}
 		// Return value
@@ -229,7 +229,7 @@ impl From<&Claims> for Value {
 						continue;
 					}
 				};
-				out.insert(claim.to_owned(), claim_value);
+				out.insert(claim.to_owned(), claim_value.into());
 			}
 		}
 		// Return value

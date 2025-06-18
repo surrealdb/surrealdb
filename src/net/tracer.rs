@@ -7,7 +7,7 @@ use tower_http::{
 	request_id::RequestId,
 	trace::{MakeSpan, OnFailure, OnRequest, OnResponse},
 };
-use tracing::{field, Level, Span};
+use tracing::{Level, Span, field};
 
 use super::client_ip::ExtractClientIP;
 
@@ -27,7 +27,6 @@ use super::client_ip::ExtractClientIP;
 ///   .route("/version", get(|| async { "0.1.0" }))
 ///   .layer(trace);
 /// ```
-
 #[derive(Default, Clone)]
 pub(crate) struct HttpTraceLayerHooks;
 

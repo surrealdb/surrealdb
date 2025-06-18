@@ -1,5 +1,3 @@
-use crate::err::Error;
-use crate::sql::value::Value;
 use crate::sql::Datetime;
 use chrono::TimeZone;
 use chrono::Utc;
@@ -7,6 +5,8 @@ use chrono::Utc;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use super::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
 
@@ -38,6 +38,9 @@ pub enum Constant {
 	MathSqrt2,
 	MathTau,
 	TimeEpoch,
+	TimeMin,
+	TimeMax,
+	DurationMax,
 	// Add new variants here
 }
 
@@ -45,6 +48,7 @@ pub enum Constant {
 pub(crate) enum ConstantValue {
 	Float(f64),
 	Datetime(Datetime),
+	Duration(Duration),
 }
 
 impl Constant {
@@ -73,14 +77,10 @@ impl Constant {
 			Self::MathSqrt2 => ConstantValue::Float(f64c::SQRT_2),
 			Self::MathTau => ConstantValue::Float(f64c::TAU),
 			Self::TimeEpoch => ConstantValue::Datetime(Datetime(Utc.timestamp_nanos(0))),
+			Self::TimeMin => ConstantValue::Datetime(Datetime::MIN_UTC),
+			Self::TimeMax => ConstantValue::Datetime(Datetime::MAX_UTC),
+			Self::DurationMax => ConstantValue::Duration(Duration::MAX),
 		}
-	}
-	/// Process this type returning a computed simple Value
-	pub fn compute(&self) -> Result<Value, Error> {
-		Ok(match self.value() {
-			ConstantValue::Datetime(d) => d.into(),
-			ConstantValue::Float(f) => f.into(),
-		})
 	}
 }
 
@@ -109,6 +109,73 @@ impl fmt::Display for Constant {
 			Self::MathSqrt2 => "math::SQRT_2",
 			Self::MathTau => "math::TAU",
 			Self::TimeEpoch => "time::EPOCH",
+			Self::TimeMin => "time::MINIMUM",
+			Self::TimeMax => "time::MAXIMUM",
+			Self::DurationMax => "duration::MAX",
 		})
+	}
+}
+
+impl From<Constant> for crate::expr::Constant {
+	fn from(value: Constant) -> Self {
+		match value {
+			Constant::MathE => Self::MathE,
+			Constant::MathFrac1Pi => Self::MathFrac1Pi,
+			Constant::MathFrac1Sqrt2 => Self::MathFrac1Sqrt2,
+			Constant::MathFrac2Pi => Self::MathFrac2Pi,
+			Constant::MathFrac2SqrtPi => Self::MathFrac2SqrtPi,
+			Constant::MathFracPi2 => Self::MathFracPi2,
+			Constant::MathFracPi3 => Self::MathFracPi3,
+			Constant::MathFracPi4 => Self::MathFracPi4,
+			Constant::MathFracPi6 => Self::MathFracPi6,
+			Constant::MathFracPi8 => Self::MathFracPi8,
+			Constant::MathInf => Self::MathInf,
+			Constant::MathLn10 => Self::MathLn10,
+			Constant::MathLn2 => Self::MathLn2,
+			Constant::MathLog102 => Self::MathLog102,
+			Constant::MathLog10E => Self::MathLog10E,
+			Constant::MathLog210 => Self::MathLog210,
+			Constant::MathLog2E => Self::MathLog2E,
+			Constant::MathNegInf => Self::MathNegInf,
+			Constant::MathPi => Self::MathPi,
+			Constant::MathSqrt2 => Self::MathSqrt2,
+			Constant::MathTau => Self::MathTau,
+			Constant::TimeEpoch => Self::TimeEpoch,
+			Constant::TimeMin => Self::TimeMin,
+			Constant::TimeMax => Self::TimeMax,
+			Constant::DurationMax => Self::DurationMax,
+		}
+	}
+}
+
+impl From<crate::expr::Constant> for Constant {
+	fn from(value: crate::expr::Constant) -> Self {
+		match value {
+			crate::expr::Constant::MathE => Self::MathE,
+			crate::expr::Constant::MathFrac1Pi => Self::MathFrac1Pi,
+			crate::expr::Constant::MathFrac1Sqrt2 => Self::MathFrac1Sqrt2,
+			crate::expr::Constant::MathFrac2Pi => Self::MathFrac2Pi,
+			crate::expr::Constant::MathFrac2SqrtPi => Self::MathFrac2SqrtPi,
+			crate::expr::Constant::MathFracPi2 => Self::MathFracPi2,
+			crate::expr::Constant::MathFracPi3 => Self::MathFracPi3,
+			crate::expr::Constant::MathFracPi4 => Self::MathFracPi4,
+			crate::expr::Constant::MathFracPi6 => Self::MathFracPi6,
+			crate::expr::Constant::MathFracPi8 => Self::MathFracPi8,
+			crate::expr::Constant::MathInf => Self::MathInf,
+			crate::expr::Constant::MathLn10 => Self::MathLn10,
+			crate::expr::Constant::MathLn2 => Self::MathLn2,
+			crate::expr::Constant::MathLog102 => Self::MathLog102,
+			crate::expr::Constant::MathLog10E => Self::MathLog10E,
+			crate::expr::Constant::MathLog210 => Self::MathLog210,
+			crate::expr::Constant::MathLog2E => Self::MathLog2E,
+			crate::expr::Constant::MathNegInf => Self::MathNegInf,
+			crate::expr::Constant::MathPi => Self::MathPi,
+			crate::expr::Constant::MathSqrt2 => Self::MathSqrt2,
+			crate::expr::Constant::MathTau => Self::MathTau,
+			crate::expr::Constant::TimeEpoch => Self::TimeEpoch,
+			crate::expr::Constant::TimeMin => Self::TimeMin,
+			crate::expr::Constant::TimeMax => Self::TimeMax,
+			crate::expr::Constant::DurationMax => Self::DurationMax,
+		}
 	}
 }

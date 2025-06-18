@@ -1,6 +1,6 @@
 /**
 [env]
-login = { access = "test", rid = "user:john" }
+auth = { database = "test", namespace = "test", access = "test", rid = "user:john" }
 imports = ["language/statements/delete/permissions/no_select_import.surql"]
 
 [test]

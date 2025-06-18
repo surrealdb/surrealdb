@@ -17,3 +17,14 @@ impl fmt::Display for Explain {
 		Ok(())
 	}
 }
+
+impl From<Explain> for crate::expr::Explain {
+	fn from(v: Explain) -> Self {
+		Self(v.0)
+	}
+}
+impl From<crate::expr::Explain> for Explain {
+	fn from(v: crate::expr::Explain) -> Self {
+		Self(v.0)
+	}
+}

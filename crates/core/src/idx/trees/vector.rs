@@ -1,10 +1,11 @@
 use crate::err::Error;
+use crate::expr::index::{Distance, VectorType};
+use crate::expr::{Number, Value};
 use crate::fnc::util::math::ToFloat;
 use crate::idx::VersionedStore;
-use crate::sql::index::{Distance, VectorType};
-use crate::sql::{Number, Value};
 use ahash::AHasher;
 use ahash::HashSet;
+use anyhow::{Result, ensure};
 use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
@@ -420,7 +421,7 @@ impl From<&Vector> for Value {
 }
 
 impl Vector {
-	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self, Error> {
+	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(d);
@@ -451,9 +452,9 @@ impl Vector {
 		Ok(res)
 	}
 
-	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<(), Error>
+	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<()>
 	where
-		T: for<'a> TryFrom<&'a Number, Error = Error>,
+		T: TryFrom<Number, Error = Error>,
 	{
 		match value {
 			Value::Array(a) => {
@@ -463,14 +464,14 @@ impl Vector {
 				Ok(())
 			}
 			Value::Number(n) => {
-				vec.push(n.try_into()?);
+				vec.push((*n).try_into()?);
 				Ok(())
 			}
-			_ => Err(Error::InvalidVectorValue(value.clone().to_raw_string())),
+			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.clone().to_raw_string()))),
 		}
 	}
 
-	pub fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self, Error> {
+	pub fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(v.len());
@@ -501,12 +502,12 @@ impl Vector {
 		Ok(res)
 	}
 
-	fn check_vector_number<T>(v: &[Number], vec: &mut Vec<T>) -> Result<(), Error>
+	fn check_vector_number<T>(v: &[Number], vec: &mut Vec<T>) -> Result<()>
 	where
-		T: for<'a> TryFrom<&'a Number, Error = Error>,
+		T: TryFrom<Number, Error = Error>,
 	{
 		for n in v {
-			vec.push(n.try_into()?);
+			vec.push((*n).try_into()?);
 		}
 		Ok(())
 	}
@@ -521,18 +522,18 @@ impl Vector {
 		}
 	}
 
-	pub(super) fn check_expected_dimension(current: usize, expected: usize) -> Result<(), Error> {
-		if current != expected {
-			Err(Error::InvalidVectorDimension {
+	pub(super) fn check_expected_dimension(current: usize, expected: usize) -> Result<()> {
+		ensure!(
+			current == expected,
+			Error::InvalidVectorDimension {
 				current,
 				expected,
-			})
-		} else {
-			Ok(())
-		}
+			}
+		);
+		Ok(())
 	}
 
-	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<(), Error> {
+	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<()> {
 		Self::check_expected_dimension(self.len(), expected_dim)
 	}
 }
@@ -554,9 +555,9 @@ impl Distance {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::trees::knn::tests::{get_seed_rnd, new_random_vec, RandomItemGenerator};
+	use crate::expr::index::{Distance, VectorType};
+	use crate::idx::trees::knn::tests::{RandomItemGenerator, get_seed_rnd, new_random_vec};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::sql::index::{Distance, VectorType};
 
 	fn test_distance(dist: Distance, a1: &[f64], a2: &[f64], res: f64) {
 		// Convert the arrays to Vec<Number>
@@ -580,11 +581,11 @@ mod tests {
 		for vt in
 			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
 		{
-			let gen = RandomItemGenerator::new(&dist, dim);
+			let r#gen = RandomItemGenerator::new(&dist, dim);
 			let mut num_zero = 0;
 			for i in 0..size {
-				let v1 = new_random_vec(&mut rng, vt, dim, &gen);
-				let v2 = new_random_vec(&mut rng, vt, dim, &gen);
+				let v1 = new_random_vec(&mut rng, vt, dim, &r#gen);
+				let v2 = new_random_vec(&mut rng, vt, dim, &r#gen);
 				let d = dist.calculate(&v1, &v2);
 				assert!(
 					d.is_finite() && !d.is_nan(),

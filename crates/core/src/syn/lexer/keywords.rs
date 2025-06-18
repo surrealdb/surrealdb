@@ -1,5 +1,5 @@
 use crate::{
-	sql::{language::Language, Algorithm},
+	sql::{Algorithm, language::Language},
 	syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind},
 };
 use phf::{phf_map, phf_set};
@@ -48,6 +48,7 @@ pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("FALSE"),
 	UniCase::ascii("WHERE"),
 	UniCase::ascii("TABLE"),
+	UniCase::ascii("SEQUENCE"),
 };
 
 pub fn could_be_reserved(s: &str) -> bool {
@@ -74,12 +75,15 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("AT") => TokenKind::Keyword(Keyword::At),
 	UniCase::ascii("AUTHENTICATE") => TokenKind::Keyword(Keyword::Authenticate),
 	UniCase::ascii("AUTO") => TokenKind::Keyword(Keyword::Auto),
+	UniCase::ascii("BACKEND") => TokenKind::Keyword(Keyword::Backend),
+	UniCase::ascii("BATCH") => TokenKind::Keyword(Keyword::Batch),
 	UniCase::ascii("BEARER") => TokenKind::Keyword(Keyword::Bearer),
 	UniCase::ascii("BEFORE") => TokenKind::Keyword(Keyword::Before),
 	UniCase::ascii("BEGIN") => TokenKind::Keyword(Keyword::Begin),
 	UniCase::ascii("BLANK") => TokenKind::Keyword(Keyword::Blank),
 	UniCase::ascii("BM25") => TokenKind::Keyword(Keyword::Bm25),
 	UniCase::ascii("BREAK") => TokenKind::Keyword(Keyword::Break),
+	UniCase::ascii("BUCKET") => TokenKind::Keyword(Keyword::Bucket),
 	UniCase::ascii("BY") => TokenKind::Keyword(Keyword::By),
 	UniCase::ascii("CAMEL") => TokenKind::Keyword(Keyword::Camel),
 	UniCase::ascii("CANCEL") => TokenKind::Keyword(Keyword::Cancel),
@@ -220,6 +224,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("SC") => TokenKind::Keyword(Keyword::Scope),
 	UniCase::ascii("SEARCH") => TokenKind::Keyword(Keyword::Search),
 	UniCase::ascii("SELECT") => TokenKind::Keyword(Keyword::Select),
+	UniCase::ascii("SEQUENCE") => TokenKind::Keyword(Keyword::Sequence),
 	UniCase::ascii("SESSION") => TokenKind::Keyword(Keyword::Session),
 	UniCase::ascii("SET") => TokenKind::Keyword(Keyword::Set),
 	UniCase::ascii("SHOW") => TokenKind::Keyword(Keyword::Show),
@@ -312,6 +317,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("MULTILINE") => TokenKind::Keyword(Keyword::MultiLine),
 	UniCase::ascii("MULTIPOLYGON") => TokenKind::Keyword(Keyword::MultiPolygon),
 	UniCase::ascii("COLLECTION") => TokenKind::Keyword(Keyword::Collection),
+	UniCase::ascii("FILE") => TokenKind::Keyword(Keyword::File),
 
 	// Languages
 	UniCase::ascii("ARABIC") => TokenKind::Language(Language::Arabic),

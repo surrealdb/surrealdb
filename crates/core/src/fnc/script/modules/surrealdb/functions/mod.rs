@@ -1,8 +1,8 @@
+use crate::expr::Value;
 use crate::fnc;
 use crate::fnc::script::modules::impl_module_def;
-use crate::sql::Value;
-use js::prelude::Async;
 use js::Result;
+use js::prelude::Async;
 use reblessive::tree::Stk;
 
 use super::query::QueryContext;
@@ -13,6 +13,7 @@ mod bytes;
 mod crypto;
 mod duration;
 mod encoding;
+mod file;
 mod geo;
 mod http;
 mod math;
@@ -22,6 +23,7 @@ mod parse;
 mod rand;
 mod record;
 mod search;
+mod sequence;
 mod session;
 mod string;
 mod time;
@@ -42,6 +44,7 @@ impl_module_def!(
 	"crypto" => (crypto::Package),
 	"duration" => (duration::Package),
 	"encoding" => (encoding::Package),
+	"file" => (file::Package),
 	"geo" => (geo::Package),
 	"http" => (http::Package),
 	"math" => (math::Package),
@@ -52,6 +55,7 @@ impl_module_def!(
 	"rand" => (rand::Package),
 	"record" => (record::Package),
 	"search" => (search::Package),
+	"sequence" => (sequence::Package),
 	"session" => (session::Package),
 	"sleep" => fut Async,
 	"string" => (string::Package),

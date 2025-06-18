@@ -1,9 +1,12 @@
 use crate::{
-	sql::{language::Language, Datetime, Duration, Ident, Param, Regex, Strand, Table, Uuid},
+	sql::{
+		Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid,
+		language::Language,
+	},
 	syn::{
 		lexer::compound,
-		parser::{mac::unexpected, ParseResult, Parser},
-		token::{self, t, TokenKind},
+		parser::{ParseResult, Parser, mac::unexpected},
+		token::{self, TokenKind, t},
 	},
 };
 
@@ -134,6 +137,40 @@ impl TokenValue for Uuid {
 	}
 }
 
+impl TokenValue for File {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.peek();
+		if !parser.settings.files_enabled {
+			unexpected!(parser, token, "the experimental files feature to be enabled");
+		}
+
+		match token.kind {
+			TokenKind::Glued(token::Glued::File) => Ok(pop_glued!(parser, File)),
+			t!("f\"") | t!("f'") => {
+				parser.pop_peek();
+				let v = parser.lexer.lex_compound(token, compound::file)?.value;
+				Ok(v)
+			}
+			_ => unexpected!(parser, token, "a file"),
+		}
+	}
+}
+
+impl TokenValue for Bytes {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.peek();
+		match token.kind {
+			TokenKind::Glued(token::Glued::Bytes) => Ok(pop_glued!(parser, Bytes)),
+			t!("b\"") | t!("b'") => {
+				parser.pop_peek();
+				let v = parser.lexer.lex_compound(token, compound::bytes)?.value;
+				Ok(v)
+			}
+			_ => unexpected!(parser, token, "a bytestring"),
+		}
+	}
+}
+
 impl TokenValue for Regex {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let peek = parser.peek();
@@ -212,7 +249,7 @@ mod test {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Idiom(
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Idiom(
 					sql::Idiom(vec![Part::Field(Ident(ident.to_string()))])
 				))]))
 			)

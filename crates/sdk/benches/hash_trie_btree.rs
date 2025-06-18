@@ -1,10 +1,10 @@
 use criterion::measurement::WallTime;
-use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
+use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use radix_trie::{Trie, TrieCommon, TrieKey};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::time::Duration;
-use surrealdb::sql::{value, Array, Id, Thing};
+use surrealdb::sql::{Array, Id, Thing, value};
 
 // Common use case: VectorSearch
 fn bench_hash_trie_btree_large_vector(c: &mut Criterion) {
@@ -28,7 +28,7 @@ fn bench_hash_trie_btree_ix_key(c: &mut Criterion) {
 	for i in 0..N {
 		let mut key = b"/*test\0*test\0*test\0!ixtest".to_vec();
 		key.append(&mut i.to_be_bytes().to_vec());
-		samples.push((key.to_vec(), i));
+		samples.push((key.clone(), i));
 	}
 
 	let mut g = new_group(c, "bench_hash_trie_btree_ix_key", N);
@@ -57,7 +57,10 @@ fn bench_hash_trie_btree_value(c: &mut Criterion) {
 	const N: usize = 100_000;
 	let mut samples = Vec::with_capacity(N);
 	for i in 0..N {
-		let key = value(&format!("{{ test: {{ something: [1, 'two', null, test:{i}, {{ trueee: false, noneee: nulll }}] }} }}")).unwrap();
+		let key = value(&format!(
+			"{{ test: {{ something: [1, 'two', null, test:{i}, {{ trueee: false, noneee: nulll }}] }} }}"
+		))
+		.unwrap();
 		samples.push((key, i));
 	}
 

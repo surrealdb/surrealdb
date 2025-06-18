@@ -1,14 +1,14 @@
-use crate::api::conn::Command;
-use crate::api::conn::MlExportConfig;
-use crate::api::method::BoxFuture;
+use crate::Surreal;
 use crate::api::Connection;
 use crate::api::Error;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
+use crate::api::conn::Command;
+use crate::api::conn::MlExportConfig;
+use crate::api::method::BoxFuture;
 use crate::method::ExportConfig as Config;
 use crate::method::Model;
 use crate::method::OnceLockExt;
-use crate::Surreal;
 use async_channel::Receiver;
 use futures::Stream;
 use futures::StreamExt;

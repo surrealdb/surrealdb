@@ -1,9 +1,10 @@
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
+use crate::expr::Base;
+use crate::expr::statements::define::{DefineIndexStatement, DefineTableStatement};
 use crate::iam::{Action, Auth, ResourceKind};
-use crate::sql::statements::define::{DefineIndexStatement, DefineTableStatement};
-use crate::sql::Base;
+use anyhow::{Result, bail};
 use async_channel::Sender;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -347,60 +348,62 @@ impl Options {
 
 	/// Get current Node ID
 	#[inline(always)]
-	pub fn id(&self) -> Result<Uuid, Error> {
-		self.id.ok_or_else(|| fail!("No Node ID is specified"))
+	pub fn id(&self) -> Result<Uuid> {
+		self.id
+			.ok_or_else(|| Error::unreachable("No Node ID is specified"))
+			.map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected NS
 	#[inline(always)]
-	pub fn ns(&self) -> Result<&str, Error> {
-		self.ns.as_deref().ok_or(Error::NsEmpty)
+	pub fn ns(&self) -> Result<&str> {
+		self.ns.as_deref().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected DB
 	#[inline(always)]
-	pub fn db(&self) -> Result<&str, Error> {
-		self.db.as_deref().ok_or(Error::DbEmpty)
+	pub fn db(&self) -> Result<&str> {
+		self.db.as_deref().ok_or_else(|| Error::DbEmpty).map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected NS and DB
 	#[inline(always)]
-	pub fn ns_db(&self) -> Result<(&str, &str), Error> {
+	pub fn ns_db(&self) -> Result<(&str, &str)> {
 		Ok((self.ns()?, self.db()?))
 	}
 
 	/// Check whether this request supports realtime queries
 	#[inline(always)]
-	pub fn realtime(&self) -> Result<(), Error> {
+	pub fn realtime(&self) -> Result<()> {
 		if !self.live {
-			return Err(Error::RealtimeDisabled);
+			bail!(Error::RealtimeDisabled);
 		}
 		Ok(())
 	}
 
 	// Validate Options for Namespace
 	#[inline(always)]
-	pub fn valid_for_ns(&self) -> Result<(), Error> {
+	pub fn valid_for_ns(&self) -> Result<()> {
 		if self.ns.is_none() {
-			return Err(Error::NsEmpty);
+			bail!(Error::NsEmpty);
 		}
 		Ok(())
 	}
 
 	// Validate Options for Database
 	#[inline(always)]
-	pub fn valid_for_db(&self) -> Result<(), Error> {
+	pub fn valid_for_db(&self) -> Result<()> {
 		if self.ns.is_none() {
-			return Err(Error::NsEmpty);
+			bail!(Error::NsEmpty);
 		}
 		if self.db.is_none() {
-			return Err(Error::DbEmpty);
+			bail!(Error::DbEmpty);
 		}
 		Ok(())
 	}
 
 	/// Check if the current auth is allowed to perform an action on a given resource
-	pub fn is_allowed(&self, action: Action, res: ResourceKind, base: &Base) -> Result<(), Error> {
+	pub fn is_allowed(&self, action: Action, res: ResourceKind, base: &Base) -> Result<()> {
 		// Validate the target resource and base
 		let res = match base {
 			Base::Root => res.on_root(),
@@ -412,7 +415,7 @@ impl Options {
 			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
 			Base::Sc(_) => {
 				// We should not get here, the scope base is only used in parsing for backward compatibility.
-				return Err(Error::InvalidAuth);
+				bail!(Error::InvalidAuth);
 			}
 		};
 
@@ -421,7 +424,10 @@ impl Options {
 			return Ok(());
 		}
 
-		self.auth.is_allowed(action, &res).map_err(Error::IamError)
+		self.auth.is_allowed(action, &res).map_err(|x| match x.downcast() {
+			Ok(x) => anyhow::Error::new(Error::IamError(x)),
+			Err(e) => e,
+		})
 	}
 
 	/// Checks the current server configuration, and
@@ -435,7 +441,7 @@ impl Options {
 	/// We decided to bypass the system cedar auth
 	/// system as a temporary solution until the
 	/// new authorization system is optimised.
-	pub fn check_perms(&self, action: Action) -> Result<bool, Error> {
+	pub fn check_perms(&self, action: Action) -> Result<bool> {
 		// Check if permissions are enabled for this sub-process
 		if !self.perms {
 			return Ok(false);

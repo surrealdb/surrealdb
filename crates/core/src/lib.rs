@@ -14,6 +14,10 @@
 
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
+// TODO: Remove
+// This is added to keep the move anyhow PR somewhat smaller. This should be removed in a follow-up
+// PR.
+#![allow(clippy::large_enum_variant)]
 
 #[macro_use]
 extern crate tracing;
@@ -21,10 +25,14 @@ extern crate tracing;
 #[macro_use]
 mod mac;
 
+mod buc;
 mod cf;
 mod doc;
 mod exe;
 mod fnc;
+mod idg;
+mod key;
+mod sys;
 
 pub mod api;
 pub mod cnf;
@@ -32,29 +40,31 @@ pub mod ctx;
 pub mod dbs;
 pub mod env;
 pub mod err;
-pub mod fflags;
+pub mod expr;
 pub mod gql;
 pub mod iam;
-pub mod idg;
 pub mod idx;
-pub mod key;
 pub mod kvs;
 pub mod mem;
 pub mod obs;
 pub mod options;
 pub mod rpc;
 pub mod sql;
+pub mod str;
 pub mod syn;
-pub mod sys;
 pub mod vs;
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;
 
+#[cfg(feature = "enterprise")]
+#[rustfmt::skip]
+pub mod ent;
+
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
-	pub use async_channel::bounded;
-	pub use async_channel::unbounded;
 	pub use async_channel::Receiver;
 	pub use async_channel::Sender;
+	pub use async_channel::bounded;
+	pub use async_channel::unbounded;
 }

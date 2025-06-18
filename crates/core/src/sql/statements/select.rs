@@ -1,20 +1,13 @@
-use crate::ctx::Context;
-use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::sql::FlowResultExt as _;
 use crate::sql::{
+	Cond, Explain, Fetchs, Fields, Groups, Idioms, Limit, Splits, SqlValues, Start, Timeout,
+	Version, With,
 	order::{OldOrders, Order, OrderList, Ordering},
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
-	Values, Version, With,
 };
+use anyhow::Result;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -27,7 +20,7 @@ pub struct SelectStatement {
 	#[revision(start = 2)]
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
-	pub what: Values,
+	pub what: SqlValues,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
@@ -76,83 +69,6 @@ impl SelectStatement {
 		self.order = Some(Ordering::Order(OrderList(new_ord)));
 
 		Ok(())
-	}
-
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		if self.expr.iter().any(|v| match v {
-			Field::All => false,
-			Field::Single {
-				expr,
-				..
-			} => expr.writeable(),
-		}) {
-			return true;
-		}
-		if self.what.iter().any(|v| v.writeable()) {
-			return true;
-		}
-		self.cond.as_deref().is_some_and(Value::writeable)
-	}
-
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Valid options?
-		opt.valid_for_db()?;
-		// Assign the statement
-		let stm = Statement::from(self);
-		// Create a new iterator
-		let mut i = Iterator::new();
-		// Ensure futures are stored and the version is set if specified
-		let version = match &self.version {
-			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
-			_ => None,
-		};
-		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
-		// Extract the limits
-		i.setup_limit(stk, ctx, &opt, &stm).await?;
-		// Fail for multiple targets without a limit
-		if self.only && !i.is_limit_one_or_zero() && self.what.0.len() > 1 {
-			return Err(Error::SingleOnlyOutput);
-		}
-		// Check if there is a timeout
-		let ctx = stm.setup_timeout(ctx)?;
-		// Get a query planner
-		let mut planner = QueryPlanner::new();
-		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
-		// Loop over the select targets
-		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, &opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await?;
-		}
-		// Attach the query planner to the context
-		let ctx = stm.setup_query_planner(planner, ctx);
-		// Process the statement
-		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		if ctx.is_timedout()? {
-			return Err(Error::QueryTimedout);
-		}
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There were no results
-				0 => Ok(Value::None),
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(Error::SingleOnlyOutput),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
 	}
 }
 
@@ -204,5 +120,53 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl From<SelectStatement> for crate::expr::statements::SelectStatement {
+	fn from(v: SelectStatement) -> Self {
+		Self {
+			expr: v.expr.into(),
+			omit: v.omit.map(Into::into),
+			only: v.only,
+			what: v.what.into(),
+			with: v.with.map(Into::into),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			version: v.version.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			explain: v.explain.map(Into::into),
+			tempfiles: v.tempfiles,
+		}
+	}
+}
+
+impl From<crate::expr::statements::SelectStatement> for SelectStatement {
+	fn from(v: crate::expr::statements::SelectStatement) -> Self {
+		Self {
+			expr: v.expr.into(),
+			omit: v.omit.map(Into::into),
+			only: v.only,
+			what: v.what.into(),
+			with: v.with.map(Into::into),
+			cond: v.cond.map(Into::into),
+			split: v.split.map(Into::into),
+			group: v.group.map(Into::into),
+			order: v.order.map(Into::into),
+			limit: v.limit.map(Into::into),
+			start: v.start.map(Into::into),
+			fetch: v.fetch.map(Into::into),
+			version: v.version.map(Into::into),
+			timeout: v.timeout.map(Into::into),
+			parallel: v.parallel,
+			explain: v.explain.map(Into::into),
+			tempfiles: v.tempfiles,
+		}
 	}
 }

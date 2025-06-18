@@ -1,8 +1,4 @@
-use std::str::FromStr;
-
-use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid};
-
-use crate::dbs::Statement;
+use crate::{dbs::Statement, expr::permission::PermissionKind};
 
 // TODO(sgirones): For now keep it simple. In the future, we will allow for custom roles and policies using a more exhaustive list of actions and resources.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
@@ -27,21 +23,6 @@ impl Action {
 	}
 }
 
-impl std::convert::From<&Action> for EntityUid {
-	fn from(action: &Action) -> Self {
-		EntityUid::from_type_name_and_id(
-			EntityTypeName::from_str("Action").unwrap(),
-			EntityId::from_str(&action.id()).unwrap(),
-		)
-	}
-}
-
-impl std::convert::From<&Action> for Entity {
-	fn from(action: &Action) -> Self {
-		Entity::new(action.into(), Default::default(), Default::default())
-	}
-}
-
 impl From<&Statement<'_>> for Action {
 	fn from(stmt: &Statement) -> Self {
 		match stmt {
@@ -55,6 +36,17 @@ impl From<&Statement<'_>> for Action {
 			Statement::Delete(_) => Action::Edit,
 			Statement::Insert(_) => Action::Edit,
 			Statement::Access(_) => Action::Edit,
+		}
+	}
+}
+
+impl std::convert::From<PermissionKind> for Action {
+	fn from(kind: PermissionKind) -> Self {
+		match kind {
+			PermissionKind::Select => Action::View,
+			PermissionKind::Create => Action::Edit,
+			PermissionKind::Update => Action::Edit,
+			PermissionKind::Delete => Action::Edit,
 		}
 	}
 }

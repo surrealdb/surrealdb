@@ -3,10 +3,10 @@
 use std::{fmt, hash::Hash};
 
 mod keyword;
-pub(crate) use keyword::keyword_t;
 pub use keyword::Keyword;
+pub(crate) use keyword::keyword_t;
 mod mac;
-use crate::sql::{language::Language, Algorithm};
+use crate::sql::{Algorithm, language::Language};
 pub(crate) use mac::t;
 
 /// A location in the source passed to the lexer.
@@ -298,6 +298,14 @@ pub enum QouteKind {
 	DateTime,
 	/// `d"`
 	DateTimeDouble,
+	/// `b'`
+	Bytes,
+	/// `b"`
+	BytesDouble,
+	/// `f'`
+	File,
+	/// `f"`
+	FileDouble,
 }
 
 impl QouteKind {
@@ -307,6 +315,8 @@ impl QouteKind {
 			QouteKind::RecordId | QouteKind::RecordIdDouble => "a record-id strand",
 			QouteKind::Uuid | QouteKind::UuidDouble => "a uuid",
 			QouteKind::DateTime | QouteKind::DateTimeDouble => "a datetime",
+			QouteKind::Bytes | QouteKind::BytesDouble => "a bytestring",
+			QouteKind::File | QouteKind::FileDouble => "a file",
 		}
 	}
 }
@@ -318,6 +328,8 @@ pub enum Glued {
 	Strand,
 	Datetime,
 	Uuid,
+	Bytes,
+	File,
 }
 
 impl Glued {
@@ -328,6 +340,8 @@ impl Glued {
 			Glued::Uuid => "a uuid",
 			Glued::Datetime => "a datetime",
 			Glued::Duration => "a duration",
+			Glued::Bytes => "a bytestring",
+			Glued::File => "a file",
 		}
 	}
 }

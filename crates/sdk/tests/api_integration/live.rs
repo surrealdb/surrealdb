@@ -14,19 +14,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Result;
 use futures::Stream;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use surrealdb::fflags::FFLAGS;
-use surrealdb::method::QueryStream;
-use surrealdb::opt::Resource;
 use surrealdb::Action;
-use surrealdb::Error;
 use surrealdb::Notification;
 use surrealdb::RecordId;
 use surrealdb::Value;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb::method::QueryStream;
+use surrealdb::opt::Resource;
+use surrealdb_core::expr::Value as CoreValue;
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
@@ -46,13 +45,7 @@ pub async fn live_select_table(new_db: impl CreateDb) {
 
 	{
 		let table = format!("table_{}", Ulid::new());
-		if FFLAGS.change_feed_live_queries.enabled() {
-			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
-				.await
-				.unwrap();
-		} else {
-			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
-		}
+		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 
 		// Start listening
 		let mut users = db.select(&table).live().await.unwrap();
@@ -86,13 +79,7 @@ pub async fn live_select_table(new_db: impl CreateDb) {
 
 	{
 		let table = format!("table_{}", Ulid::new());
-		if FFLAGS.change_feed_live_queries.enabled() {
-			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
-				.await
-				.unwrap();
-		} else {
-			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
-		}
+		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 
 		// Start listening
 		let mut users = db.select(Resource::from(&table)).live().await.unwrap();
@@ -117,13 +104,8 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 
 	{
 		let table = format!("table_{}", Ulid::new());
-		if FFLAGS.change_feed_live_queries.enabled() {
-			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
-				.await
-				.unwrap();
-		} else {
-			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
-		}
+		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
 		let record_id = RecordId::from((table, "john".to_owned()));
 
 		// Start listening
@@ -159,13 +141,8 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 
 	{
 		let table = format!("table_{}", Ulid::new());
-		if FFLAGS.change_feed_live_queries.enabled() {
-			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
-				.await
-				.unwrap();
-		} else {
-			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
-		}
+		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
 		let record_id = RecordId::from((table, "john".to_owned()));
 
 		// Start listening
@@ -192,13 +169,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 	{
 		let table = format!("table_{}", Ulid::new());
-		if FFLAGS.change_feed_live_queries.enabled() {
-			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
-				.await
-				.unwrap();
-		} else {
-			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
-		}
+		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 
 		// Start listening
 		let mut users = db.select(&table).range("jane".."john").live().await.unwrap();
@@ -235,13 +206,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 	{
 		let table = format!("table_{}", Ulid::new());
-		if FFLAGS.change_feed_live_queries.enabled() {
-			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
-				.await
-				.unwrap();
-		} else {
-			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
-		}
+		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 
 		// Start listening
 		let mut users =
@@ -291,13 +256,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	{
 		let table = format!("table_{}", Ulid::new());
-		if FFLAGS.change_feed_live_queries.enabled() {
-			db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL"))
-				.await
-				.unwrap();
-		} else {
-			db.query(format!("DEFINE TABLE {table}")).await.unwrap();
-		}
+		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 
 		// Start listening
 		info!("Starting live query");
@@ -466,11 +425,7 @@ pub async fn live_select_with_fetch(new_db: impl CreateDb) {
 
 	let table = format!("table_{}", Ulid::new());
 	let linktb = format!("link_{}", Ulid::new());
-	if FFLAGS.change_feed_live_queries.enabled() {
-		db.query(format!("DEFINE TABLE {table} CHANGEFEED 10m INCLUDE ORIGINAL")).await.unwrap();
-	} else {
-		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
-	}
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 
 	// Start listening
 	let mut users = db
@@ -544,10 +499,7 @@ pub async fn live_select_with_fetch(new_db: impl CreateDb) {
 	drop(permit);
 }
 
-async fn receive_all_pending_notifications<
-	S: Stream<Item = Result<Notification<I>, Error>> + Unpin,
-	I,
->(
+async fn receive_all_pending_notifications<S: Stream<Item = Result<Notification<I>>> + Unpin, I>(
 	stream: Arc<RwLock<S>>,
 	timeout: Duration,
 ) -> Vec<Notification<I>> {

@@ -1,10 +1,5 @@
 use revision::revisioned;
-use std::{
-	collections::{HashMap, HashSet},
-	str::FromStr,
-};
 
-use cedar_policy::{Entity, EntityTypeName, EntityUid, RestrictedExpression};
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
@@ -33,17 +28,35 @@ impl std::fmt::Display for Level {
 }
 
 impl Level {
-	pub fn level_name(&self) -> &str {
+	/// Returns if the level is a sub level of the given level.
+	/// For example Level::Namespace is a sublevel of Level::Root, and Level::Database("foo", "bar") is a sublevel of Level::Namespace("foo").
+	/// Every level is also a sublevel of itself.
+	pub(crate) fn sublevel_of(&self, other: &Self) -> bool {
 		match self {
-			Level::No => "No",
-			Level::Root => "Root",
-			Level::Namespace(_) => "Namespace",
-			Level::Database(_, _) => "Database",
-			Level::Record(_, _, _) => "Record",
+			Level::No => true,
+			Level::Root => matches!(other, Level::Root),
+			Level::Namespace(a) => match other {
+				Level::Root => true,
+				Level::Namespace(b) => a == b,
+				_ => false,
+			},
+			Level::Database(ns0, db0) => match other {
+				Level::Root => true,
+				Level::Namespace(ns1) => ns0 == ns1,
+				Level::Database(ns1, db1) => ns0 == ns1 && db0 == db1,
+				_ => false,
+			},
+			Level::Record(ns0, db0, ac0) => match other {
+				Level::Root => true,
+				Level::Namespace(ns1) => ns0 == ns1,
+				Level::Database(ns1, db1) => ns0 == ns1 && db0 == db1,
+				Level::Record(ns1, db1, ac1) => ns0 == ns1 && db0 == db1 && ac0 == ac1,
+				_ => false,
+			},
 		}
 	}
 
-	pub fn ns(&self) -> Option<&str> {
+	pub(crate) fn ns(&self) -> Option<&str> {
 		match self {
 			Level::Namespace(ns) => Some(ns),
 			Level::Database(ns, _) => Some(ns),
@@ -52,7 +65,7 @@ impl Level {
 		}
 	}
 
-	pub fn db(&self) -> Option<&str> {
+	pub(crate) fn db(&self) -> Option<&str> {
 		match self {
 			Level::Database(_, db) => Some(db),
 			Level::Record(_, db, _) => Some(db),
@@ -60,137 +73,11 @@ impl Level {
 		}
 	}
 
-	pub fn id(&self) -> Option<&str> {
+	#[cfg(test)]
+	pub(crate) fn id(&self) -> Option<&str> {
 		match self {
 			Level::Record(_, _, id) => Some(id),
 			_ => None,
 		}
-	}
-
-	fn parent(&self) -> Option<Level> {
-		match self {
-			Level::No => None,
-			Level::Root => None,
-			Level::Namespace(_) => Some(Level::Root),
-			Level::Database(ns, _) => Some(Level::Namespace(ns.to_owned())),
-			Level::Record(ns, db, _) => Some(Level::Database(ns.to_owned(), db.to_owned())),
-		}
-	}
-
-	// Cedar policy helpers
-	pub fn cedar_attrs(&self) -> HashMap<String, RestrictedExpression> {
-		let mut attrs = HashMap::with_capacity(5);
-		attrs.insert("type".into(), RestrictedExpression::new_string(self.level_name().to_owned()));
-
-		if let Some(ns) = self.ns() {
-			attrs.insert("ns".into(), RestrictedExpression::new_string(ns.to_owned()));
-		}
-
-		if let Some(db) = self.db() {
-			attrs.insert("db".into(), RestrictedExpression::new_string(db.to_owned()));
-		}
-
-		if let Some(id) = self.id() {
-			attrs.insert("id".into(), RestrictedExpression::new_string(id.to_owned()));
-		}
-
-		attrs
-	}
-
-	pub fn cedar_parents(&self) -> HashSet<EntityUid> {
-		if let Some(parent) = self.parent() {
-			return HashSet::from([parent.into()]);
-		}
-		HashSet::with_capacity(0)
-	}
-
-	pub fn cedar_entities(&self) -> Vec<Entity> {
-		let mut entities = Vec::new();
-
-		entities.push(self.into());
-
-		// Find all the parents
-		let mut parent = self.parent();
-		while let Some(p) = parent {
-			parent = p.parent();
-			entities.push(p.into());
-		}
-
-		entities
-	}
-}
-
-impl From<()> for Level {
-	fn from(_: ()) -> Self {
-		Level::Root
-	}
-}
-
-impl From<(&str,)> for Level {
-	fn from((ns,): (&str,)) -> Self {
-		Level::Namespace(ns.to_owned())
-	}
-}
-
-impl From<(&str, &str)> for Level {
-	fn from((ns, db): (&str, &str)) -> Self {
-		Level::Database(ns.to_owned(), db.to_owned())
-	}
-}
-
-impl From<(&str, &str, &str)> for Level {
-	fn from((ns, db, id): (&str, &str, &str)) -> Self {
-		Level::Record(ns.to_owned(), db.to_owned(), id.to_owned())
-	}
-}
-
-impl From<(Option<&str>, Option<&str>, Option<&str>)> for Level {
-	fn from(val: (Option<&str>, Option<&str>, Option<&str>)) -> Self {
-		match val {
-			(None, None, None) => ().into(),
-			(Some(ns), None, None) => (ns,).into(),
-			(Some(ns), Some(db), None) => (ns, db).into(),
-			(Some(ns), Some(db), Some(id)) => (ns, db, id).into(),
-			_ => Level::No,
-		}
-	}
-}
-
-impl std::convert::From<Level> for EntityUid {
-	fn from(level: Level) -> Self {
-		EntityUid::from_type_name_and_id(
-			EntityTypeName::from_str("Level").unwrap(),
-			format!("{}", level).parse().unwrap(),
-		)
-	}
-}
-
-impl std::convert::From<&Level> for EntityUid {
-	fn from(level: &Level) -> Self {
-		level.to_owned().into()
-	}
-}
-
-impl std::convert::From<Level> for Entity {
-	fn from(level: Level) -> Self {
-		Entity::new(level.to_owned().into(), level.cedar_attrs(), level.cedar_parents())
-	}
-}
-
-impl std::convert::From<&Level> for Entity {
-	fn from(level: &Level) -> Self {
-		level.to_owned().into()
-	}
-}
-
-impl std::convert::From<Level> for RestrictedExpression {
-	fn from(level: Level) -> Self {
-		format!("{}", EntityUid::from(level)).parse().unwrap()
-	}
-}
-
-impl std::convert::From<&Level> for RestrictedExpression {
-	fn from(level: &Level) -> Self {
-		level.to_owned().into()
 	}
 }

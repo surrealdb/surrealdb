@@ -1,7 +1,7 @@
 use super::classes;
-use crate::sql::geometry::Geometry;
-use crate::sql::number::Number;
-use crate::sql::value::Value;
+use crate::expr::geometry::Geometry;
+use crate::expr::number::Number;
+use crate::expr::value::Value;
 use js::Array;
 use js::BigInt;
 use js::Class;
@@ -111,6 +111,13 @@ impl<'js> IntoJs<'js> for &Value {
 			}
 			Value::Bytes(ref v) => TypedArray::new_copy(ctx.clone(), v.0.as_slice())?.into_js(ctx),
 			Value::Geometry(ref v) => v.into_js(ctx),
+			Value::File(ref v) => Ok(Class::<classes::file::File>::instance(
+				ctx.clone(),
+				classes::file::File {
+					value: v.to_owned(),
+				},
+			)?
+			.into_value()),
 			_ => Undefined.into_js(ctx),
 		}
 	}

@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
+use super::GqlError;
 use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
 use super::utils::field_val_erase_owned;
-use super::GqlError;
 use crate::dbs::Session;
+use crate::expr::statements::DefineFunctionStatement;
+use crate::expr::{Kind, Value as SqlValue};
 use crate::gql::schema::kind_to_type;
 use crate::gql::utils::GQLTx;
 use crate::kvs::Datastore;
-use crate::sql::statements::DefineFunctionStatement;
-use crate::sql::{Kind, Value as SqlValue};
 use async_graphql::dynamic::FieldFuture;
 use async_graphql::dynamic::InputValue;
 use async_graphql::dynamic::Object;
