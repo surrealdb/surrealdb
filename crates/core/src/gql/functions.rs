@@ -23,7 +23,7 @@ pub async fn process_fns(
 	datastore: &Arc<Datastore>,
 ) -> Result<Object, GqlError> {
 	for fnd in fns.iter() {
-		let Some(kind) = &fnd.returns else {
+		let Some(kind) = fnd.returns().await? else {
 			// TODO: handle case where there are no typed functions and give graceful error
 			continue;
 		};
@@ -44,9 +44,9 @@ pub async fn process_fns(
 					let gql_args = ctx.args.as_index_map();
 					let mut args = Vec::new();
 
-					for (arg_name, arg_kind) in fnd1.args {
+					for (arg_name, arg_kind) in fnd1.args().await? {
 						if let Some(arg_val) = gql_args.get(arg_name.as_str()) {
-							let arg_val = gql_to_sql_kind(arg_val, arg_kind)?;
+							let arg_val = gql_to_sql_kind(arg_val, arg_kind.clone())?;
 							args.push(arg_val);
 						} else {
 							args.push(SqlValue::None);
@@ -76,7 +76,7 @@ pub async fn process_fns(
 		);
 
 		let fnd2 = fnd.clone();
-		for (arg_name, arg_kind) in fnd2.args {
+		for (arg_name, arg_kind) in fnd2.args().await? {
 			let arg_ty = kind_to_type(arg_kind.clone(), types)?;
 			field = field.argument(InputValue::new(&arg_name.0, arg_ty))
 		}

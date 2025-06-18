@@ -9,16 +9,21 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
+use super::Ident;
+
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Function {
 	Normal(String, Vec<SqlValue>),
+	#[revision(end = 3, convert_fn = "convert_custom_add_version", fields_name = "OldCustomFields")]
 	Custom(String, Vec<SqlValue>),
+	#[revision(start = 3)]
+	Custom(CustomFunctionName, Vec<SqlValue>),
 	Script(Script, Vec<SqlValue>),
 	#[revision(
 		end = 2,
@@ -29,6 +34,14 @@ pub enum Function {
 	/// Fields are: the function object itself, it's arguments and whether the arguments are calculated.
 	#[revision(start = 2)]
 	Anonymous(SqlValue, Vec<SqlValue>, bool),
+	#[revision(start = 3)]
+	Silo {
+		organisation: Ident,
+		package: Ident,
+		version: FunctionVersion,
+		submodule: Option<Ident>,
+		args: Vec<SqlValue>,
+	},
 	// Add new variants here
 }
 
@@ -39,19 +52,48 @@ impl Function {
 	) -> Result<Self, revision::Error> {
 		Ok(Function::Anonymous(old.0, old.1, false))
 	}
+
+	fn convert_custom_add_version(
+		old: OldCustomFields,
+		_revision: u16,
+	) -> Result<Self, revision::Error> {
+		Ok(Function::Custom(
+			CustomFunctionName {
+				name: Ident(old.0),
+				version: None,
+				submodule: None,
+			},
+			old.1,
+		))
+	}
 }
 
 impl From<Function> for crate::expr::Function {
 	fn from(v: Function) -> Self {
 		match v {
 			Function::Normal(s, e) => Self::Normal(s, e.into_iter().map(Into::into).collect()),
-			Function::Custom(s, e) => Self::Custom(s, e.into_iter().map(Into::into).collect()),
+			Function::Custom(s, e) => {
+				Self::Custom(s.into(), e.into_iter().map(Into::into).collect())
+			}
 			Function::Script(s, e) => {
 				Self::Script(s.into(), e.into_iter().map(Into::into).collect())
 			}
 			Function::Anonymous(p, e, b) => {
 				Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b)
 			}
+			Function::Silo {
+				organisation,
+				package,
+				version,
+				submodule,
+				args,
+			} => Self::Silo {
+				organisation: organisation.into(),
+				package: package.into(),
+				version: version.into(),
+				submodule: submodule.map(Into::into),
+				args: args.into_iter().map(Into::into).collect(),
+			},
 		}
 	}
 }
@@ -63,7 +105,7 @@ impl From<crate::expr::Function> for Function {
 				Self::Normal(s, e.into_iter().map(Into::into).collect())
 			}
 			crate::expr::Function::Custom(s, e) => {
-				Self::Custom(s, e.into_iter().map(Into::into).collect())
+				Self::Custom(s.into(), e.into_iter().map(Into::into).collect())
 			}
 			crate::expr::Function::Script(s, e) => {
 				Self::Script(s.into(), e.into_iter().map(Into::into).collect())
@@ -71,6 +113,19 @@ impl From<crate::expr::Function> for Function {
 			crate::expr::Function::Anonymous(p, e, b) => {
 				Self::Anonymous(p.into(), e.into_iter().map(Into::into).collect(), b)
 			}
+			crate::expr::Function::Silo {
+				organisation,
+				package,
+				version,
+				submodule,
+				args,
+			} => Self::Silo {
+				organisation: organisation.into(),
+				package: package.into(),
+				version: version.into(),
+				submodule: submodule.map(Into::into),
+				args: args.into_iter().map(Into::into).collect(),
+			},
 		}
 	}
 }
@@ -87,7 +142,7 @@ impl Function {
 	pub fn name(&self) -> Option<&str> {
 		match self {
 			Self::Normal(n, _) => Some(n.as_str()),
-			Self::Custom(n, _) => Some(n.as_str()),
+			Self::Custom(n, _) => Some(n.name.as_str()),
 			_ => None,
 		}
 	}
@@ -96,6 +151,10 @@ impl Function {
 		match self {
 			Self::Normal(_, a) => a,
 			Self::Custom(_, a) => a,
+			Self::Silo {
+				args,
+				..
+			} => args,
 			_ => &[],
 		}
 	}
@@ -105,7 +164,20 @@ impl Function {
 			Self::Anonymous(_, _, _) => "function".to_string().into(),
 			Self::Script(_, _) => "function".to_string().into(),
 			Self::Normal(f, _) => f.to_owned().into(),
-			Self::Custom(f, _) => format!("fn::{f}").into(),
+			Self::Custom(f, _) => f.to_string().into(),
+			Self::Silo {
+				organisation,
+				package,
+				version,
+				submodule,
+				..
+			} => {
+				if let Some(submodule) = submodule {
+					format!("silo::{organisation}::{package}<{version}>::{submodule}").into()
+				} else {
+					format!("silo::{organisation}::{package}<{version}>").into()
+				}
+			}
 		}
 	}
 	/// Convert this function to an aggregate
@@ -199,6 +271,27 @@ impl fmt::Display for Function {
 		match self {
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
+			Self::Silo {
+				organisation,
+				package,
+				version,
+				submodule,
+				args,
+			} => {
+				if let Some(submodule) = submodule {
+					write!(
+						f,
+						"silo::{organisation}::{package}<{version}>::{submodule}({})",
+						Fmt::comma_separated(args)
+					)
+				} else {
+					write!(
+						f,
+						"silo::{organisation}::{package}<{version}>({})",
+						Fmt::comma_separated(args)
+					)
+				}
+			}
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
 			Self::Anonymous(p, e, _) => {
 				if BindingPower::for_value(p) < BindingPower::Postfix {
@@ -208,6 +301,124 @@ impl fmt::Display for Function {
 				}
 				write!(f, "({})", Fmt::comma_separated(e))
 			}
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Function")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+/// Does not store the function's prefix
+pub struct CustomFunctionName {
+	pub name: Ident,
+	pub version: Option<FunctionVersion>,
+	pub submodule: Option<Ident>,
+}
+
+impl CustomFunctionName {
+	pub fn new(name: Ident, version: Option<FunctionVersion>, submodule: Option<Ident>) -> Self {
+		CustomFunctionName {
+			name,
+			version,
+			submodule,
+		}
+	}
+}
+
+impl From<CustomFunctionName> for crate::expr::CustomFunctionName {
+	fn from(v: CustomFunctionName) -> Self {
+		Self {
+			name: v.name.into(),
+			version: v.version.map(Into::into),
+			submodule: v.submodule.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::CustomFunctionName> for CustomFunctionName {
+	fn from(v: crate::expr::CustomFunctionName) -> Self {
+		Self {
+			name: v.name.into(),
+			version: v.version.map(Into::into),
+			submodule: v.submodule.map(Into::into),
+		}
+	}
+}
+
+impl fmt::Display for CustomFunctionName {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}", self.name.0)?;
+		match (&self.version, &self.submodule) {
+			(Some(version), None) => write!(f, "<{version}>")?,
+			(Some(version), Some(submodule)) => write!(f, "<{version}>::{}", submodule.0)?,
+			(None, Some(submodule)) => write!(f, "<latest>::{}", submodule.0)?,
+			_ => (),
+		};
+
+		Ok(())
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Function")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+/// Does not store the function's prefix
+pub enum FunctionVersion {
+	#[default]
+	Latest,
+	Major(u32),
+	Minor(u32, u32),
+	Patch(u32, u32, u32),
+}
+
+impl FunctionVersion {
+	pub(crate) fn is_patch(&self) -> bool {
+		matches!(self, Self::Patch(_, _, _))
+	}
+
+	pub(crate) fn kind(&self) -> &str {
+		match self {
+			Self::Latest => "latest",
+			Self::Major(_) => "major",
+			Self::Minor(_, _) => "minor",
+			Self::Patch(_, _, _) => "patch",
+		}
+	}
+}
+
+impl From<FunctionVersion> for crate::expr::FunctionVersion {
+	fn from(v: FunctionVersion) -> Self {
+		match v {
+			FunctionVersion::Latest => Self::Latest,
+			FunctionVersion::Major(x) => Self::Major(x),
+			FunctionVersion::Minor(x, y) => Self::Minor(x, y),
+			FunctionVersion::Patch(x, y, z) => Self::Patch(x, y, z),
+		}
+	}
+}
+
+impl From<crate::expr::FunctionVersion> for FunctionVersion {
+	fn from(v: crate::expr::FunctionVersion) -> Self {
+		match v {
+			crate::expr::FunctionVersion::Latest => Self::Latest,
+			crate::expr::FunctionVersion::Major(x) => Self::Major(x),
+			crate::expr::FunctionVersion::Minor(x, y) => Self::Minor(x, y),
+			crate::expr::FunctionVersion::Patch(x, y, z) => Self::Patch(x, y, z),
+		}
+	}
+}
+
+impl fmt::Display for FunctionVersion {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Latest => write!(f, "latest"),
+			Self::Major(a) => write!(f, "{a}"),
+			Self::Minor(a, b) => write!(f, "{a}.{b}"),
+			Self::Patch(a, b, c) => write!(f, "{a}.{b}.{c}"),
 		}
 	}
 }

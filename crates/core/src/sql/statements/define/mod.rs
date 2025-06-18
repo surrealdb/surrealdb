@@ -37,6 +37,7 @@ pub use deprecated::scope::DefineScopeStatement;
 pub use deprecated::token::DefineTokenStatement;
 
 pub use api::ApiAction;
+pub use function::Executable;
 
 use anyhow::Result;
 
