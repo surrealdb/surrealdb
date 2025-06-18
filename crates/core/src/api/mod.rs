@@ -7,3 +7,11 @@ pub mod method;
 pub mod middleware;
 pub mod path;
 pub mod response;
+
+
+pub enum Format {
+    Json,          // JSON format
+    Flatbuffer,    // Flatbuffer format
+    Unsupported,   // Unsupported format
+}
+

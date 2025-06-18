@@ -132,22 +132,22 @@ pub struct Live;
 #[derive(Debug)]
 pub struct WithStats<T>(pub T);
 
-pub trait TryFromResponseProto: Sized {
-	/// Converts a response proto to the type
-	fn try_from_response_proto(proto: ResponseProto) -> anyhow::Result<Self>;
-}
+// pub trait TryFromResponseProto: Sized {
+// 	/// Converts a response proto to the type
+// 	fn try_from_response_results(results: impl Iterator<Item = ValueProto>) -> anyhow::Result<Self>;
+// }
 
-impl<T: TryFromResponseProto> TryFromResponseProto for Option<T> {
-	fn try_from_response_proto(proto: ResponseProto) -> anyhow::Result<Self> {
-		if proto.results.is_empty() {
-			return Ok(None);
-		}
+// impl<T: TryFromResponseProto> TryFromResponseProto for Option<T> {
+// 	fn try_from_response_results(results: impl Iterator<Item = Value>) -> anyhow::Result<Self> {
+// 		if results.is_empty() {
+// 			return Ok(None);
+// 		}
 
-		TryFromResponseProto::try_from_response_proto(proto)
-			.map(Some)
-			.map_err(|e| anyhow::anyhow!("Failed to convert response proto: {e}"))
-	}
-}
+// 		TryFromResponseProto::try_from_response_results(results)
+// 			.map(Some)
+// 			.map_err(|e| anyhow::anyhow!("Failed to convert response proto: {e}"))
+// 	}
+// }
 
 impl<C> Surreal<C>
 where

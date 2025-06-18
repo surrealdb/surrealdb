@@ -1,18 +1,20 @@
-use crate::rpc::Method;
-use crate::rpc::RpcError;
-use crate::rpc::format::cbor::Cbor;
-use crate::sql::Array;
-use crate::sql::Number;
-use crate::sql::SqlValue;
+// use crate::rpc::Method;
+// use crate::rpc::RpcError;
+// use crate::rpc::format::cbor::Cbor;
+// use crate::sql::Array;
+// use crate::sql::Number;
+// use crate::sql::SqlValue;
 
-pub static ID: &str = "id";
-pub static METHOD: &str = "method";
-pub static PARAMS: &str = "params";
-pub static VERSION: &str = "version";
+// pub static ID: &str = "id";
+// pub static METHOD: &str = "method";
+// pub static PARAMS: &str = "params";
+// pub static VERSION: &str = "version";
 
 
 
-pub use crate::protocol::surrealdb::rpc::Request;
+// pub use crate::protocol::surrealdb::rpc::Request;
+
+pub use crate::protocol::flatbuffers::surreal_db::protocol::rpc::Request;
 
 // #[derive(Debug)]
 // pub struct Request {

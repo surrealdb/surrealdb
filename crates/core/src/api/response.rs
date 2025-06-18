@@ -6,7 +6,6 @@ use http::{
 use crate::{
 	err::Error,
 	expr::{Object, Value},
-	rpc::format::Format,
 };
 
 use super::{convert, err::ApiError, invocation::ApiInvocation};
@@ -84,27 +83,25 @@ impl TryInto<Value> for ApiResponse {
 }
 
 pub enum ResponseInstruction {
-	Native,
 	Raw,
-	Format(Format),
+	Ipc,
 }
 
-impl ResponseInstruction {
-	pub fn for_format(invocation: &ApiInvocation) -> Result<Self, Error> {
-		let mime = invocation
-			.headers
-			.get(ACCEPT)
-			.or_else(|| invocation.headers.get(CONTENT_TYPE))
-			.and_then(|v| v.to_str().ok());
+// impl ResponseInstruction {
+// 	pub fn for_format(invocation: &ApiInvocation) -> Result<Self, Error> {
+// 		let mime = invocation
+// 			.headers
+// 			.get(ACCEPT)
+// 			.or_else(|| invocation.headers.get(CONTENT_TYPE))
+// 			.and_then(|v| v.to_str().ok());
 
-		let format = match mime {
-			Some("application/json") => Format::Json,
-			Some("application/cbor") => Format::Cbor,
-			Some("application/protobuf") => Format::Protobuf,
-			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
-			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
-		};
+// 		let format = match mime {
+// 			Some("application/json") => Format::Json,
+// 			Some("application/flatbuffer") => Format::Flatbuffer,
+// 			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
+// 			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
+// 		};
 
-		Ok(ResponseInstruction::Format(format))
-	}
-}
+// 		Ok(ResponseInstruction::Ipc(format))
+// 	}
+// }

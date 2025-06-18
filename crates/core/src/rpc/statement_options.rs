@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-	dbs::{Capabilities, sql_variables_to_expr_variables},
+	dbs::{Capabilities},
 	expr::Value,
 	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, SqlValue, Start, Timeout, Version},
 	syn::{
@@ -96,7 +96,7 @@ pub(crate) struct StatementOptions {
 	pub timeout: Option<Timeout>,
 	/// - An object, containing variables to define during execution of the method
 	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete`) methods
-	pub vars: Option<BTreeMap<String, SqlValue>>,
+	pub vars: Option<BTreeMap<String, Value>>,
 	/// - A boolean, stating wether the LQ notifications should contain diffs
 	/// - For the `live` method
 	pub diff: bool,
@@ -270,7 +270,7 @@ impl StatementOptions {
 	pub(crate) fn merge_vars(&self, v: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
 		match &self.vars {
 			Some(vars) => {
-				let mut vars = sql_variables_to_expr_variables(vars);
+				let mut vars = vars.clone();
 				mrg! {vars, v}
 			}
 			None => v.clone(),

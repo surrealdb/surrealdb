@@ -5,28 +5,12 @@ use std::sync::Arc;
 
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
-use crate::dbs::proto_variables_to_expr_variables;
 use crate::err::Error;
-use crate::protocol::surrealdb::rpc::request::Command;
-use crate::protocol::surrealdb::rpc::AuthenticateParams;
-use crate::protocol::surrealdb::rpc::CreateParams;
-use crate::protocol::surrealdb::rpc::DeleteParams;
 #[cfg(not(target_family = "wasm"))]
-use crate::protocol::surrealdb::rpc::GraphQlParams;
-use crate::protocol::surrealdb::rpc::InsertParams;
-use crate::protocol::surrealdb::rpc::KillParams;
-use crate::protocol::surrealdb::rpc::LiveParams;
-use crate::protocol::surrealdb::rpc::QueryParams;
-use crate::protocol::surrealdb::rpc::RelateParams;
-use crate::protocol::surrealdb::rpc::RunParams;
-use crate::protocol::surrealdb::rpc::SelectParams;
-use crate::protocol::surrealdb::rpc::SetParams;
-use crate::protocol::surrealdb::rpc::SigninParams;
-use crate::protocol::surrealdb::rpc::SignupParams;
-use crate::protocol::surrealdb::rpc::UnsetParams;
-use crate::protocol::surrealdb::rpc::UpdateParams;
-use crate::protocol::surrealdb::rpc::UpsertParams;
-use crate::protocol::surrealdb::rpc::VersionParams;
+use crate::protocol::flatbuffers::surreal_db::protocol::rpc::GraphQlParams;
+use crate::protocol::flatbuffers::surreal_db::protocol::rpc::{AuthenticateParams, Command, CreateParams, DeleteParams, InsertParams, KillParams, LiveParams, QueryParams, RelateParams, Request, RunParams, SelectParams, SetParams, SigninParams, SignupParams, UnsetParams, UpdateParams, UpsertParams, VersionParams};
+use crate::protocol::flatbuffers::surreal_db::protocol::rpc::UseParams;
+use crate::protocol::FromFlatbuffers;
 use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
@@ -35,17 +19,15 @@ use crate::rpc::statement_options::StatementOptions;
 use crate::sql::Uuid;
 use crate::{
 	dbs::{QueryType, Response, capabilities::MethodTarget},
-	expr::Value,
 	rpc::args::Take,
-	sql::{
-		Array, Fields, Function, Model, Output, Query, SqlValue, Strand,
+	expr::{
+		Array, Fields, Function, Model, Output, Query, Value, Strand,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
 	},
 };
-use crate::protocol::surrealdb::rpc::UseParams;
 use anyhow::Result;
 
 #[expect(async_fn_in_trait)]
@@ -55,7 +37,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// ------------------------------
 
 	/// Executes a method on this RPC implementation
-	async fn execute(&self, command: Command) -> Result<Data, RpcError> {
+	async fn execute<'rpc>(&'rpc self, request: Request<'rpc>) -> Result<Data, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		// TODO(STU): DO NOT MERGE: Put this back.
 		// if !self.kvs().allows_rpc_method(&MethodTarget {
@@ -65,30 +47,81 @@ pub trait RpcProtocolV3: RpcContext {
 		// 	return Err(RpcError::MethodNotAllowed);
 		// }
 		// Execute the desired method
-		match command {
-			Command::Health(_) => Ok(Value::None.into()),
-			Command::Version(params) => self.version(params).await,
-			Command::Info(_) => self.info().await,
-			Command::Use(params) => self.yuse(params).await,
-			Command::Signup(params) => self.signup(params).await,
-			Command::Signin(params) => self.signin(params).await,
-			Command::Authenticate(params) => self.authenticate(params).await,
-			Command::Invalidate(_) => self.invalidate().await,
-			Command::Reset(_) => self.reset().await,
-			Command::Kill(params) => self.kill(params).await,
-			Command::Live(params) => self.live(params).await,
-			Command::Set(params) => self.set(params).await,
-			Command::Unset(params) => self.unset(params).await,
-			Command::Select(params) => self.select(params).await,
-			Command::Insert(params) => self.insert(params).await,
-			Command::Create(params) => self.create(params).await,
-			Command::Upsert(params) => self.upsert(params).await,
-			Command::Update(params) => self.update(params).await,
-			Command::Delete(params) => self.delete(params).await,
-			Command::Query(params) => self.query(params).await,
-			Command::Relate(params) => self.relate(params).await,
-			Command::Run(params) => self.run(params).await,
-			Command::Graphql(params) => self.graphql(params).await,
+
+		match request.command_type() {
+			Command::Health => Ok(Value::None.into()),
+			Command::Version => {
+				let params = request.command_as_version().expect("Version command should have parameters");
+				self.version(params).await},
+			Command::Info => self.info().await,
+			Command::Use => self.yuse(request.command_as_use().expect("Variant must contain UseParams")).await,
+			Command::Signup => {
+				let params = request.command_as_signup().expect("Variant must contain SignupParams");
+				self.signup(params).await},
+			Command::Signin => {
+				let params = request.command_as_signin().expect("Variant must contain SigninParams");
+				self.signin(params).await},
+			Command::Authenticate => {
+				let params = request.command_as_authenticate().expect("Variant must contain AuthenticateParams");
+				self.authenticate(params).await},
+			Command::Invalidate => self.invalidate().await,
+			Command::Reset => self.reset().await,
+			Command::Kill => {
+				let params = request.command_as_kill().expect("Variant must contain KillParams");
+				self.kill(params).await
+			},
+			Command::Live => {
+				let params = request.command_as_live().expect("Variant must contain LiveParams");
+				self.live(params).await
+			},
+			Command::Set => {
+				let params = request.command_as_set().expect("Variant must contain SetParams");
+				self.set(params).await
+			},
+			Command::Unset => {
+				let params = request.command_as_unset().expect("Variant must contain UnsetParams");
+				self.unset(params).await
+			},
+			Command::Select => {
+				let params = request.command_as_select().expect("Variant must contain SelectParams");
+				self.select(params).await
+			},
+			Command::Insert => {
+				let params = request.command_as_insert().expect("Variant must contain InsertParams");
+				self.insert(params).await
+			},
+			Command::Create => {
+				let params = request.command_as_create().expect("Variant must contain CreateParams");
+				self.create(params).await
+			},
+			Command::Upsert => {
+				let params = request.command_as_upsert().expect("Variant must contain UpsertParams");
+				self.upsert(params).await
+			},
+			Command::Update => {
+				let params = request.command_as_update().expect("Variant must contain UpdateParams");
+				self.update(params).await
+			},
+			Command::Delete => {
+				let params = request.command_as_delete().expect("Variant must contain DeleteParams");
+				self.delete(params).await
+			},
+			Command::Query => {
+				let params = request.command_as_query().expect("Variant must contain QueryParams");
+				self.query(params).await
+			},
+			Command::Relate => {
+				let params = request.command_as_relate().expect("Variant must contain RelateParams");
+				self.relate(params).await
+			},
+			Command::Run => {
+				let params = request.command_as_run().expect("Variant must contain RunParams");
+				self.run(params).await
+			},
+			Command::GraphQl => {
+				let params = request.command_as_graph_ql().expect("Variant must contain GraphqlParams");
+				self.graphql(params).await
+			},
 			_ => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -97,7 +130,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for authentication
 	// ------------------------------
 
-	async fn yuse(&self, UseParams { namespace, database }: UseParams) -> Result<Data, RpcError> {
+	async fn yuse<'rpc>(&'rpc self, params: UseParams<'rpc>) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -112,6 +145,9 @@ pub trait RpcProtocolV3: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Update the selected namespace
+
+		let namespace = params.namespace().map(|ns| ns.to_string());
+		let database = params.database().map(|db| db.to_string());
 
 		match (namespace, database) {
 			(Some(ns), None) => {
@@ -139,7 +175,7 @@ pub trait RpcProtocolV3: RpcContext {
 		Ok(Value::None.into())
 	}
 
-	async fn signup(&self, params: SignupParams) -> Result<Data, RpcError> {
+	async fn signup(&self, params: SignupParams<'_>) -> Result<Data, RpcError> {
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -159,7 +195,7 @@ pub trait RpcProtocolV3: RpcContext {
 		out.map(Into::into).map_err(Into::into)
 	}
 
-	async fn signin(&self, params: SigninParams) -> Result<Data, RpcError> {
+	async fn signin(&self, params: SigninParams<'_>) -> Result<Data, RpcError> {
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -179,7 +215,9 @@ pub trait RpcProtocolV3: RpcContext {
 		out.map(Into::into).map_err(Into::into)
 	}
 
-	async fn authenticate(&self, params: AuthenticateParams) -> Result<Data, RpcError> {
+	async fn authenticate(&self, params: AuthenticateParams<'_>) -> Result<Data, RpcError> {
+		let token = params.token().ok_or_else(|| RpcError::InvalidParams)?;
+
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -187,7 +225,7 @@ pub trait RpcProtocolV3: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Attempt authentication, mutating the session
-		let out: Result<Value> = crate::iam::verify::token(self.kvs(), &mut session, &params.token)
+		let out: Result<Value> = crate::iam::verify::token(self.kvs(), &mut session, token)
 			.await
 			.map(|_| Value::None);
 		// Store the updated session
@@ -240,14 +278,14 @@ pub trait RpcProtocolV3: RpcContext {
 
 	async fn info(&self) -> Result<Data, RpcError> {
 		// Specify the SQL query string
-		let sql = SelectStatement {
+		let plan = SelectStatement {
 			expr: Fields::all(),
-			what: vec![SqlValue::Param("auth".into())].into(),
+			what: vec![Value::Param("auth".into())].into(),
 			..Default::default()
 		}
 		.into();
 		// Execute the query on the database
-		let mut res = self.kvs().process(sql, &self.session(), None).await?;
+		let mut res = self.kvs().process_plan(plan, &self.session(), None).await?;
 		// Extract the first value from the result
 		Ok(res.remove(0).result?.first().into())
 	}
@@ -256,22 +294,24 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for setting variables
 	// ------------------------------
 
-	async fn set(&self, SetParams { key, value }: SetParams) -> Result<Data, RpcError> {
+	async fn set(&self, params: SetParams<'_>) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		};
 
-		let Some(val) = value else {
+		let Some(val) = params.value() else {
+			return Err(RpcError::InvalidParams);
+		};
+		let Some(key) = params.key() else {
 			return Err(RpcError::InvalidParams);
 		};
 
-		let val: Value = val.try_into()
-			.map_err(|_| RpcError::InvalidParams)?;
+		let val = Value::from_fb(val).map_err(|e| RpcError::InvalidParams)?;
 
 		// Specify the query parameters
 		let var = Some(map! {
-			key.clone() => Value::None,
+			key.to_string() => Value::None,
 		});
 		// Compute the specified parameter
 		match self.kvs().compute(val.into(), &self.session(), var).await? {
@@ -284,7 +324,7 @@ pub trait RpcProtocolV3: RpcContext {
 				// Clone the parameters
 				let mut session = self.session().as_ref().clone();
 				// Remove the set parameter
-				session.parameters.remove(&key);
+				session.parameters.remove(key);
 				// Store the updated session
 				self.set_session(Arc::new(session));
 				// Drop the mutex guard
@@ -299,7 +339,7 @@ pub trait RpcProtocolV3: RpcContext {
 				// Clone the parameters
 				let mut session = self.session().as_ref().clone();
 				// Remove the set parameter
-				session.parameters.insert(key, v);
+				session.parameters.insert(key.to_string(), v);
 				// Store the updated session
 				self.set_session(Arc::new(session));
 				// Drop the mutex guard
@@ -310,11 +350,16 @@ pub trait RpcProtocolV3: RpcContext {
 		Ok(Value::Null.into())
 	}
 
-	async fn unset(&self, UnsetParams { key }: UnsetParams) -> Result<Data, RpcError> {
+	async fn unset(&self, params: UnsetParams<'_>) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
+
+		let Some(key) = params.key() else {
+			return Err(RpcError::InvalidParams);
+		};
+
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -322,7 +367,7 @@ pub trait RpcProtocolV3: RpcContext {
 		// Clone the parameters
 		let mut session = self.session().as_ref().clone();
 		// Remove the set parameter
-		session.parameters.remove(&key);
+		session.parameters.remove(key);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -335,15 +380,19 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for live queries
 	// ------------------------------
 
-	async fn kill(&self, KillParams { live_uuid }: KillParams) -> Result<Data, RpcError> {
+	async fn kill(&self, params: KillParams<'_>) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
 
+		let Some(live_uuid) = params.live_uuid() else {
+			return Err(RpcError::InvalidParams);
+		};
+
 		// Specify the SQL query string
 		let sql = KillStatement {
-			id: SqlValue::Uuid(live_uuid.parse()?),
+			id: Value::Uuid(live_uuid.parse()?),
 		}
 		.into();
 		// Specify the query parameters
@@ -354,7 +403,7 @@ pub trait RpcProtocolV3: RpcContext {
 		Ok(res.remove(0).result?.into())
 	}
 
-	async fn live(&self, LiveParams { table, fields, diff, cond, fetchs, vars }: LiveParams) -> Result<Data, RpcError> {
+	async fn live(&self, params: LiveParams<'_>) -> Result<Data, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -362,9 +411,9 @@ pub trait RpcProtocolV3: RpcContext {
 		// Prepare options
 		let mut opts = StatementOptions::default();
 		// Specify the query parameters
-		let mut vars = proto_variables_to_expr_variables(&vars)?;
-		let vars = mrg! {vars, &self.session().parameters};
 		todo!("STU: Implement live queries in v3 protocol");
+		// let mut vars = proto_variables_to_expr_variables(&vars)?;
+		// let vars = mrg! {vars, &self.session().parameters};
 		// // Specify the SQL query string
 		// let sql = LiveStatement {
 		// 	id: Uuid::new_v4(),
@@ -390,52 +439,51 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for selecting
 	// ------------------------------
 
-	async fn select(&self, SelectParams { what, options}: SelectParams) -> Result<Data, RpcError> {
-		todo!("STU: Implement select in v3 protocol");
-		// // Check if the user is allowed to query
-		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
-		// 	return Err(RpcError::MethodNotAllowed);
-		// }
-		// // Prepare options
-		// let mut opts = StatementOptions::default();
-		// // Apply user options
-		// if let Some(options) = options {
-		// 	opts.process_options(options, self.kvs().get_capabilities())?;
-		// }
-		// // Specify the query parameters
-		// let var = Some(opts.merge_vars(&self.session().parameters));
-		// // Specify the SQL query string
-		// let sql = SelectStatement {
-		// 	only: opts.only,
-		// 	expr: opts.fields.unwrap_or_else(Fields::all),
-		// 	what: vec![what.could_be_table()].into(),
-		// 	start: opts.start,
-		// 	limit: opts.limit,
-		// 	cond: opts.cond,
-		// 	timeout: opts.timeout,
-		// 	version: opts.version,
-		// 	fetch: opts.fetch,
-		// 	..Default::default()
-		// }
-		// .into();
-		// // Execute the query on the database
-		// let mut res = self.kvs().process(sql, &self.session(), var).await?;
-		// // Extract the first query result
-		// Ok(res
-		// 	.remove(0)
-		// 	.result
-		// 	.or_else(|e| match e.downcast_ref() {
-		// 		Some(Error::SingleOnlyOutput) => Ok(Value::None),
-		// 		_ => Err(RpcError::InternalError(e)),
-		// 	})?
-		// 	.into())
+	async fn select(&self, params: SelectParams<'_>) -> Result<Data, RpcError> {
+		// Check if the user is allowed to query
+		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
+			return Err(RpcError::MethodNotAllowed);
+		}
+		// Prepare options
+		let mut opts = StatementOptions::default();
+		// Apply user options
+		if let Some(options) = options {
+			opts.process_options(options, self.kvs().get_capabilities())?;
+		}
+		// Specify the query parameters
+		let var = Some(opts.merge_vars(&self.session().parameters));
+		// Specify the SQL query string
+		let sql = SelectStatement {
+			only: opts.only,
+			expr: opts.fields.unwrap_or_else(Fields::all),
+			what: vec![what.could_be_table()].into(),
+			start: opts.start,
+			limit: opts.limit,
+			cond: opts.cond,
+			timeout: opts.timeout,
+			version: opts.version,
+			fetch: opts.fetch,
+			..Default::default()
+		}
+		.into();
+		// Execute the query on the database
+		let mut res = self.kvs().process(sql, &self.session(), var).await?;
+		// Extract the first query result
+		Ok(res
+			.remove(0)
+			.result
+			.or_else(|e| match e.downcast_ref() {
+				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				_ => Err(RpcError::InternalError(e)),
+			})?
+			.into())
 	}
 
 	// ------------------------------
 	// Methods for inserting
 	// ------------------------------
 
-	async fn insert(&self, params: InsertParams) -> Result<Data, RpcError> {
+	async fn insert(&self, params: InsertParams<'_>) -> Result<Data, RpcError> {
 		todo!("STU: Implement insert in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
@@ -492,7 +540,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for creating
 	// ------------------------------
 
-	async fn create(&self, params: CreateParams) -> Result<Data, RpcError> {
+	async fn create(&self, params: CreateParams<'_>) -> Result<Data, RpcError> {
 		todo!("STU: Implement create in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
@@ -545,7 +593,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for upserting
 	// ------------------------------
 
-	async fn upsert(&self, params: UpsertParams) -> Result<Data, RpcError> {
+	async fn upsert(&self, params: UpsertParams<'_>) -> Result<Data, RpcError> {
 		todo!("STU: Implement upsert in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
@@ -597,7 +645,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for updating
 	// ------------------------------
 
-	async fn update(&self, params: UpdateParams) -> Result<Data, RpcError> {
+	async fn update(&self, params: UpdateParams<'_>) -> Result<Data, RpcError> {
 		todo!("STU: Implement update in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
@@ -649,7 +697,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for relating
 	// ------------------------------
 
-	async fn relate(&self, params: RelateParams) -> Result<Data, RpcError> {
+	async fn relate(&self, params: RelateParams<'_>) -> Result<Data, RpcError> {
 		todo!("STU: Implement relate in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
@@ -703,7 +751,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for deleting
 	// ------------------------------
 
-	async fn delete(&self, params: DeleteParams) -> Result<Data, RpcError> {
+	async fn delete(&self, params: DeleteParams<'_>) -> Result<Data, RpcError> {
 		todo!("STU: Implement delete in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
@@ -750,7 +798,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for getting info
 	// ------------------------------
 
-	async fn version(&self, params: VersionParams) -> Result<Data, RpcError> {
+	async fn version(&self, params: VersionParams<'_>) -> Result<Data, RpcError> {
 		Ok(self.version_data())
 	}
 
@@ -758,7 +806,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for querying
 	// ------------------------------
 
-	async fn query(&self, params: QueryParams) -> Result<Data, RpcError> {
+	async fn query(&self, params: QueryParams<'_>) -> Result<Data, RpcError> {
 		todo!("STU: Implement query in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
@@ -789,7 +837,7 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for running functions
 	// ------------------------------
 
-	async fn run(&self, params: RunParams) -> Result<Data, RpcError> {
+	async fn run(&self, params: RunParams<'_>) -> Result<Data, RpcError> {
 		todo!("STU: Implement run in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
@@ -840,12 +888,12 @@ pub trait RpcProtocolV3: RpcContext {
 	// ------------------------------
 
 	#[cfg(target_family = "wasm")]
-	async fn graphql(&self, _: GraphQlParams) -> Result<Data, RpcError> {
+	async fn graphql(&self, _: GraphQlParams<'_>) -> Result<Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	async fn graphql(&self, params: GraphQlParams) -> Result<Data, RpcError> {
+	async fn graphql(&self, params: GraphQlParams<'_>) -> Result<Data, RpcError> {
 		todo!("STU: Implement graphql in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {

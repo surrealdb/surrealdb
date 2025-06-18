@@ -1,0 +1,19 @@
+
+namespace SurrealDB.Protocol.Common;
+
+table Decimal { value: string (id: 0); }
+table Bytes { value:[ubyte] (id: 0); }
+
+table Duration {
+    seconds: uint64 (id: 0);
+    nanos: uint32 (id: 1);
+}
+
+table Timestamp {
+    seconds: int64 (id: 0);
+    nanos: uint32 (id: 1);
+}
+
+table Uuid {
+    bytes: [ubyte] (id: 0);
+}

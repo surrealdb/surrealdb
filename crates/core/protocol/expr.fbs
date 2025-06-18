@@ -1,4 +1,7 @@
-namespace SurrealDb.Protocol.Expr;
+
+include "common.fbs";
+
+namespace SurrealDB.Protocol.Expr;
 
 
 table NullValue {}
@@ -7,22 +10,7 @@ table Int64Value { value: int64 (id: 0); }
 table UInt64Value { value: uint64 (id: 0); }
 table Float64Value { value: double (id: 0); }
 table StringValue { value: string (id: 0); }
-table Decimal { value: string (id: 0); }
-table Bytes { value:[ubyte] (id: 0); }
 
-table Duration {
-    seconds: uint64 (id: 0);
-    nanos: uint32 (id: 1);
-}
-
-table Timestamp {
-    seconds: int64 (id: 0);
-    nanos: uint32 (id: 1);
-}
-
-table Uuid {
-    bytes: [ubyte] (id: 0);
-}
 
 // Geometry types
 table Point {
@@ -101,15 +89,15 @@ union ValueType {
     Int64: Int64Value (id: 3),
     UInt64: UInt64Value (id: 4),
     Float64: Float64Value (id: 5),
-    Decimal (id: 6),
-    String: StringValue (id: 7),
-    Duration (id: 8),
-    Timestamp (id: 9),
-    Uuid (id: 10),
-    Array (id: 11),
-    Object (id: 12),
-    Geometry (id: 13),
-    Bytes (id: 14),
+    String: StringValue (id: 6),
+    Bytes: SurrealDB.Protocol.Common.Bytes (id: 7),
+    Decimal: SurrealDB.Protocol.Common.Decimal (id: 8),
+    Duration: SurrealDB.Protocol.Common.Duration (id: 9),
+    Timestamp: SurrealDB.Protocol.Common.Timestamp (id: 10),
+    Uuid: SurrealDB.Protocol.Common.Uuid (id: 11),
+    Array (id: 12),
+    Object (id: 13),
+    Geometry (id: 14),
     RecordId (id: 15),
     File (id: 16),
 }
@@ -122,7 +110,7 @@ table Value {
 union IdType {
     Int64: Int64Value (id: 1),
     String: StringValue (id: 2),
-    Uuid (id: 3),
+    Uuid: SurrealDB.Protocol.Common.Uuid (id: 3),
     Array (id: 4)
 }
 
@@ -160,4 +148,13 @@ table Field {
 table Fields {
     single: bool (id: 0);
     fields:[Field] (id: 1);
+}
+
+table Variable {
+    key: string (id: 0);
+    value: Value (id: 1);
+}
+
+table Variables {
+    items: [Variable] (id: 0);
 }

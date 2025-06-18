@@ -163,7 +163,6 @@ use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
-use surrealdb_core::protocol::surrealdb::rpc::{AuthenticateParams, CreateParams, SetParams, UseParams};
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
 #[cfg(not(target_family = "wasm"))]

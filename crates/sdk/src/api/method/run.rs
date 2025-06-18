@@ -69,7 +69,7 @@ where
 				})
 				.await?;
 
-			TryFromResponseProto::try_from_response_proto(response)
+			TryFromResponseProto::try_from_response_results(response.into_results())
 
 
 		})

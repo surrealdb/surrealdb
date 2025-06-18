@@ -152,7 +152,7 @@ async fn handler(
 					}
 				}
 			}
-			ResponseInstruction::Format(format) => {
+			ResponseInstruction::Ipc(format) => {
 				if res.headers.contains_key("Content-Type") {
 					return Err(ApiError::InvalidApiResponse(
 						"A Content-Type header was already set while this was not expected".into(),
@@ -176,12 +176,6 @@ async fn handler(
 						.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
 				);
 				val
-			}
-			ResponseInstruction::Native => {
-				return Err(ApiError::Unreachable(
-					"Found a native response instruction where this is not supported".into(),
-				)
-				.into());
 			}
 		}
 	} else {

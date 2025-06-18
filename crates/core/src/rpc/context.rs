@@ -1,6 +1,7 @@
 #[cfg(not(target_family = "wasm"))]
 use crate::gql::SchemaCache;
-use crate::protocol::surrealdb::rpc::request::Command;
+use crate::protocol::flatbuffers::surreal_db::protocol::rpc::Command;
+use crate::protocol::flatbuffers::surreal_db::protocol::rpc::Request;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
@@ -65,10 +66,10 @@ pub trait RpcContext {
 	// ------------------------------
 
 	/// Executes a method on this RPC implementation
-	async fn execute(
-		&self,
+	async fn execute<'rpc>(
+		&'rpc self,
 		version: Option<u8>,
-		command: Command
+		command: Request<'rpc>
 	) -> Result<Data, RpcError>
 	where
 		Self: RpcProtocolV3,

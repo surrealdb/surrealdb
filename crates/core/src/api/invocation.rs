@@ -96,12 +96,10 @@ impl ApiInvocation {
 		inv_ctx.apply_middleware(builtin)?;
 
 		// Prepare the response headers and conversion
-		let res_instruction = if body.is_native() {
-			ResponseInstruction::Native
-		} else if inv_ctx.response_body_raw {
+		let res_instruction = if inv_ctx.response_body_raw {
 			ResponseInstruction::Raw
 		} else {
-			ResponseInstruction::for_format(&self)?
+			ResponseInstruction::Ipc
 		};
 
 		let body = body.process(&inv_ctx, &self).await?;

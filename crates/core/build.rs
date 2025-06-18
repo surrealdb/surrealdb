@@ -42,7 +42,10 @@ fn main() {
 
 
 	BuilderOptions::new_with_files([
+		"protocol/common.fbs",
 		"protocol/expr.fbs",
+		"protocol/options.fbs",
+		"protocol/rpc.fbs",
 
 	])
 	.compile()

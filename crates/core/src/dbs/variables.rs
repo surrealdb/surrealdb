@@ -2,6 +2,7 @@ use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::MutableContext;
 use crate::err::Error;
 use crate::expr::value::Value;
+use crate::protocol::FromFlatbuffers;
 use anyhow::Result;
 use std::collections::BTreeMap;
 
@@ -34,32 +35,6 @@ impl Attach for Variables {
 	}
 }
 
-pub fn proto_variables_to_expr_variables(
-	variables: &BTreeMap<String, crate::protocol::surrealdb::value::Value>,
-) -> anyhow::Result<BTreeMap<String, crate::expr::Value>> {
-	let mut expr_variables = BTreeMap::new();
-	for (key, val) in variables {
-		expr_variables.insert(key.clone(), val.clone().try_into()?);
-	}
-	Ok(expr_variables)
-}
+// impl FromFlatbuffers for Variables {
 
-pub fn sql_variables_to_expr_variables(
-	variables: &BTreeMap<String, crate::sql::SqlValue>,
-) -> BTreeMap<String, crate::expr::Value> {
-	let mut expr_variables = BTreeMap::new();
-	for (key, val) in variables {
-		expr_variables.insert(key.clone(), val.clone().into());
-	}
-	expr_variables
-}
-
-pub fn expr_variables_to_sql_variables(
-	variables: &BTreeMap<String, crate::expr::Value>,
-) -> BTreeMap<String, crate::sql::SqlValue> {
-	let mut sql_variables = BTreeMap::new();
-	for (key, val) in variables {
-		sql_variables.insert(key.clone(), val.clone().into());
-	}
-	sql_variables
-}
+// }

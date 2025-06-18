@@ -25,17 +25,6 @@ use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
 use surrealdb_core::iam::access;
-use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
-use surrealdb_core::protocol::surrealdb::rpc::query_result::Result as ResultProto;
-use surrealdb_core::protocol::surrealdb::rpc::Error as ErrorProto;
-use surrealdb_core::protocol::surrealdb::rpc::Access;
-use surrealdb_core::protocol::surrealdb::rpc::DatabaseAccessCredentials;
-use surrealdb_core::protocol::surrealdb::rpc::DatabaseUserCredentials;
-use surrealdb_core::protocol::surrealdb::rpc::NamespaceAccessCredentials;
-use surrealdb_core::protocol::surrealdb::rpc::NamespaceUserCredentials;
-use surrealdb_core::protocol::surrealdb::rpc::RootUserCredentials;
-use surrealdb_core::protocol::surrealdb::rpc::QueryParams;
-use surrealdb_core::protocol::surrealdb::rpc::UseParams;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
 	Object as CoreObject, Value as CoreValue, from_value as from_core_value,

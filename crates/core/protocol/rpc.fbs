@@ -1,0 +1,177 @@
+include "expr.fbs";
+include "options.fbs";
+
+namespace SurrealDB.Protocol.Rpc;
+
+table HealthParams {
+}
+table VersionParams {
+}
+table PingParams {
+}
+table InfoParams {
+}
+table UseParams {
+    namespace: string (id: 0);
+    database: string (id: 1);
+}
+table RootUserCredentials {
+    username: string (id: 0);
+    password: string (id: 1);
+}
+table NamespaceAccessCredentials {
+    namespace: string (id: 0);
+    access: string (id: 1);
+    key: string (id: 2);
+}
+table DatabaseAccessCredentials {
+    namespace: string (id: 0);
+    database: string (id: 1);
+    access: string (id: 2);
+    key: string (id: 3);
+    refresh: string (id: 4);
+}
+table NamespaceUserCredentials {
+    namespace: string (id: 0);
+    username: string (id: 1);
+    password: string (id: 2);
+}
+table DatabaseUserCredentials {
+    namespace: string (id: 0);
+    database: string (id: 1);
+    username: string (id: 2);
+    password: string (id: 3);
+}
+
+union Access {
+    Root: RootUserCredentials (id: 1),
+    Namespace: NamespaceAccessCredentials (id: 2),
+    Database: DatabaseAccessCredentials (id: 3),
+    NamespaceUser: NamespaceUserCredentials (id: 4),
+    DatabaseUser: DatabaseUserCredentials (id: 5),
+}
+
+table SignupParams {
+    namespace: string (id: 0);
+    database: string (id: 1);
+    access: string (id: 2);
+    access_params: SurrealDB.Protocol.Expr.Variables (id: 3);
+}
+table SigninParams {
+    access: Access (id: 1);
+}
+table AuthenticateParams {
+    token: string (id: 0);
+}
+table InvalidateParams {
+}
+table CreateParams {
+}
+table ResetParams {
+}
+table KillParams {
+    live_uuid: string (id: 0);
+}
+table LiveParams {
+    table: string (id: 0);
+    // fields: surrealdb.ast.Fields (id: 1);
+    // diff: bool (id: 3);
+    // cond: surrealdb.value.Value (id: 4);
+    // fetchs: surrealdb.ast.Fetchs (id: 5);
+    // vars: map<string, surrealdb.value.Value> (id: 6);
+}
+table SetParams {
+    key: string (id: 0);
+    value: SurrealDB.Protocol.Expr.Value (id: 1);
+}
+table UnsetParams {
+    key: string (id: 0);
+}
+table SelectParams {
+    what: SurrealDB.Protocol.Expr.Value (id: 0);
+    options: SurrealDB.Protocol.Options.StatementOptions (id: 1);
+}
+table InsertParams {
+}
+table UpsertParams {
+}
+table UpdateParams {
+}
+table MergeParams {
+}
+table PatchParams {
+}
+table DeleteParams {
+}
+table QueryParams {
+    query: string (id: 0);
+    variables: SurrealDB.Protocol.Expr.Variables (id: 1);
+}
+
+table RelateParams {
+}
+table RunParams {
+}
+table GraphQlParams {
+}
+table InsertRelationParams {
+}
+
+union Command {
+    Health: HealthParams (id: 1),
+    Version: VersionParams (id: 2),
+    Ping: PingParams (id: 3),
+    Info: InfoParams (id: 4),
+    Use: UseParams (id: 5),
+    Signup: SignupParams (id: 6),
+    Signin: SigninParams (id: 7),
+    Authenticate: AuthenticateParams (id: 8),
+    Invalidate: InvalidateParams (id: 9),
+    Reset: ResetParams (id: 10),
+    Kill: KillParams (id: 11),
+    Live: LiveParams (id: 12),
+    Set: SetParams (id: 13),
+    Unset: UnsetParams (id: 14),
+    Select: SelectParams (id: 15),
+    Create: CreateParams (id: 16),
+    Insert: InsertParams (id: 17),
+    Upsert: UpsertParams (id: 18),
+    Update: UpdateParams (id: 19),
+    Merge: MergeParams (id: 20),
+    Patch: PatchParams (id: 21),
+    Delete: DeleteParams (id: 22),
+    Query: QueryParams (id: 23),
+    Relate: RelateParams (id: 24),
+    Run: RunParams (id: 25),
+    GraphQl: GraphQlParams (id: 26),
+    InsertRelation: InsertRelationParams (id: 27)
+}
+
+table Request {
+    id: string (id: 0);
+    rpc_version: uint32 (id: 1);
+
+    command: Command (id: 3);
+}
+
+
+table QueryResponse {
+    index: uint64 (id: 0);
+    stats: QueryStats (id: 1);
+
+    result: SurrealDB.Protocol.Expr.Value (id: 2);
+}
+
+table Response {
+    id: string (id: 0);
+    results: [QueryResponse] (id: 1);
+}
+
+table QueryStats {
+    start_time: SurrealDB.Protocol.Common.Timestamp (id: 0);
+    execution_duration: SurrealDB.Protocol.Common.Duration (id: 1);
+}
+table Error {
+    code: int64 (id: 0);
+    message: string (id: 1);
+}
