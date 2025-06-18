@@ -148,7 +148,7 @@ serial_test = "2.0.0"
 temp-dir = "0.1.11"
 test-log = "0.2.13"
 time = "0.3.36"
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 wiremock = "0.6.0"
 
 [features]

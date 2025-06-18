@@ -2,7 +2,8 @@ mod logs;
 pub mod metrics;
 pub mod traces;
 
-use crate::cli::validator::parser::env_filter::CustomEnvFilter;
+use crate::cli::LogFormat;
+use crate::cli::validator::parser::tracing::CustomFilter;
 use crate::err::Error;
 use opentelemetry::global;
 use opentelemetry::KeyValue;
@@ -15,7 +16,7 @@ use std::time::Duration;
 use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::NonBlockingBuilder;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::filter::ParseError;
+use tracing_subscriber::filter::{LevelFilter, ParseError};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
@@ -42,7 +43,15 @@ pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 
 #[derive(Debug, Clone)]
 pub struct Builder {
-	filter: CustomEnvFilter,
+	format: LogFormat,
+	filter: CustomFilter,
+	file_filter: Option<CustomFilter>,
+	otel_filter: Option<CustomFilter>,
+	log_file_enabled: bool,
+	log_file_format: LogFormat,
+	log_file_path: Option<String>,
+	log_file_name: Option<String>,
+	log_file_rotation: Option<String>,
 }
 
 pub fn builder() -> Builder {
@@ -52,7 +61,18 @@ pub fn builder() -> Builder {
 impl Default for Builder {
 	fn default() -> Self {
 		Self {
-			filter: CustomEnvFilter(EnvFilter::default()),
+			filter: CustomFilter {
+				env: EnvFilter::default(),
+				spans: std::collections::HashMap::new(),
+			},
+			format: LogFormat::Text,
+			file_filter: None,
+			otel_filter: None,
+			log_file_format: LogFormat::Text,
+			log_file_enabled: false,
+			log_file_path: Some("logs".to_string()),
+			log_file_name: Some("surrealdb.log".to_string()),
+			log_file_rotation: Some("daily".to_string()),
 		}
 	}
 }
@@ -61,15 +81,15 @@ impl Builder {
 	/// Install the tracing dispatcher globally
 	pub fn init(self) -> Result<(WorkerGuard, WorkerGuard), Error> {
 		// Setup logs, tracing, and metrics
-		let (registry, stdout, stderr) = self.build()?;
+		let (registry, guards) = self.build()?;
 		// Initialise the registry
 		registry.init();
 		// Everything ok
-		Ok((stdout, stderr))
+		Ok(guards)
 	}
 
 	/// Set the log filter on the builder
-	pub fn with_filter(mut self, filter: CustomEnvFilter) -> Self {
+	pub fn with_filter(mut self, filter: CustomFilter) -> Self {
 		self.filter = filter;
 		self
 	}
@@ -77,15 +97,68 @@ impl Builder {
 	/// Set the log level on the builder
 	pub fn with_log_level(mut self, log_level: &str) -> Self {
 		if let Ok(filter) = filter_from_value(log_level) {
-			self.filter = CustomEnvFilter(filter);
+			self.filter = CustomFilter {
+				env: filter,
+				spans: std::collections::HashMap::new(),
+			};
 		}
 		self
 	}
 
+	/// Set a custom log filter for file output
+	pub fn with_file_filter(mut self, filter: Option<CustomFilter>) -> Self {
+		self.file_filter = filter;
+		self
+	}
+
+	/// Set a custom log filter for otel output
+	pub fn with_otel_filter(mut self, filter: Option<CustomFilter>) -> Self {
+		self.otel_filter = filter;
+		self
+	}
+
+	/// Set the terminal log output format
+	pub fn with_log_format(mut self, format: LogFormat) -> Self {
+		self.format = format;
+		self
+	}
+
+	/// Enable or disable the log file
+	pub fn with_log_file_enabled(mut self, enabled: bool) -> Self {
+		self.log_file_enabled = enabled;
+		self
+	}
+
+	/// Set the log file output format
+	pub fn with_log_file_format(mut self, format: LogFormat) -> Self {
+		self.log_file_format = format;
+		self
+	}
+
+	/// Set the log file path
+	pub fn with_log_file_path(mut self, path: Option<String>) -> Self {
+		self.log_file_path = path;
+		self
+	}
+
+	/// Set the log file name
+	pub fn with_log_file_name(mut self, name: Option<String>) -> Self {
+		self.log_file_name = name;
+		self
+	}
+
+	/// Set the log file rotation interval (daily, hourly, or never)
+	pub fn with_log_file_rotation(mut self, rotation: Option<String>) -> Self {
+		self.log_file_rotation = rotation;
+		self
+	}
+
 	/// Build a tracing dispatcher with the logs and tracer subscriber
-	pub fn build(
-		&self,
-	) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, WorkerGuard, WorkerGuard), Error> {
+	pub fn build(&self) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, Vec<WorkerGuard>), Error> {
+		// Setup the metrics layer
+		if let Some(provider) = metrics::init()? {
+			global::set_meter_provider(provider);
+		}
 		// Create a non-blocking stdout log destination
 		let (stdout, stdout_guard) = NonBlockingBuilder::default()
 			.lossy(true)
@@ -96,22 +169,48 @@ impl Builder {
 			.lossy(true)
 			.thread_name("surrealdb-logger-stderr")
 			.finish(std::io::stderr());
-		// Create the logging destination layer
-		let log_layer = logs::new(self.filter.clone(), stdout, stderr)?;
-		// Create the trace destination layer
-		let trace_layer = traces::new(self.filter.clone())?;
+		// Create the display destination layer
+		let output_layer = logs::output(self.filter.clone(), stdout, stderr, self.format)?;
+		// Create the otel destination layer
+		let telemetry_filter = self.otel_filter.clone().unwrap_or_else(|| self.filter.clone());
+		let telemetry_layer = traces::new(telemetry_filter)?;
 		// Setup a registry for composing layers
 		let registry = tracing_subscriber::registry();
-		// Setup logging layer
-		let registry = registry.with(log_layer);
-		// Setup tracing layer
-		let registry = registry.with(trace_layer);
-		// Setup the metrics layer
-		if let Some(provider) = metrics::init()? {
-			global::set_meter_provider(provider);
-		}
-		// Return the registry
-		Ok((Box::new(registry), stdout_guard, stderr_guard))
+		// Setup output layer
+		let registry = registry.with(output_layer);
+		// Setup telemetry layer
+		let registry = registry.with(telemetry_layer);
+		// Setup file logging if enabled
+		Ok(if self.log_file_enabled {
+			// Create the file appender based on rotation setting
+			let file_appender = {
+				// Parse the path and name
+				let path = self.log_file_path.as_deref().unwrap_or("logs");
+				let name = self.log_file_name.as_deref().unwrap_or("surrealdb.log");
+				// Create the file appender based on rotation setting
+				match self.log_file_rotation.as_deref() {
+					Some("hourly") => tracing_appender::rolling::hourly(path, name),
+					Some("daily") => tracing_appender::rolling::daily(path, name),
+					Some("never") => tracing_appender::rolling::never(path, name),
+					_ => tracing_appender::rolling::daily(path, name),
+				}
+			};
+			// Create a non-blocking file log destination
+			let (file, file_guard) = NonBlockingBuilder::default()
+				.lossy(false)
+				.thread_name("surrealdb-logger-file")
+				.finish(file_appender);
+			// Create the file destination layer
+			let file_filter = self.file_filter.clone().unwrap_or_else(|| self.filter.clone());
+			let file_layer = logs::file(file_filter, file, self.log_file_format)?;
+			// Setup logging layer
+			let registry = registry.with(file_layer);
+			// Return the registry
+			(Box::new(registry), vec![stdout_guard, stderr_guard, file_guard])
+		} else {
+			// Return the registry
+			(Box::new(registry), vec![stdout_guard, stderr_guard])
+		})
 	}
 }
 
@@ -136,17 +235,26 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 		// Otherwise, let's show info and above
 		"info" => Ok(EnvFilter::default().add_directive(Level::INFO.into())),
 		// Otherwise, let's show debugs and above
-		"debug" => EnvFilter::builder().parse(
-			"warn,surreal=debug,surrealdb=debug,surrealcs=warn,surrealdb::core::kvs::tr=debug",
-		),
+		"debug" => Ok(EnvFilter::default()
+			.add_directive(Level::WARN.into())
+			.add_directive("surreal=debug".parse().unwrap())
+			.add_directive("surrealdb=debug".parse().unwrap())
+			.add_directive("surrealdb::core::kvs::tx=debug".parse().unwrap())
+			.add_directive("surrealdb::core::kvs::tr=debug".parse().unwrap())),
 		// Specify the log level for each code area
-		"trace" => EnvFilter::builder().parse(
-			"warn,surreal=trace,surrealdb=trace,surrealcs=warn,surrealdb::core::kvs::tr=debug",
-		),
+		"trace" => Ok(EnvFilter::default()
+			.add_directive(Level::WARN.into())
+			.add_directive("surreal=trace".parse().unwrap())
+			.add_directive("surrealdb=trace".parse().unwrap())
+			.add_directive("surrealdb::core::kvs::tx=debug".parse().unwrap())
+			.add_directive("surrealdb::core::kvs::tr=debug".parse().unwrap())),
 		// Check if we should show all surreal logs
-		"full" => EnvFilter::builder().parse(
-			"debug,surreal=trace,surrealdb=trace,surrealcs=debug,surrealdb::core::kvs::tr=trace",
-		),
+		"full" => Ok(EnvFilter::default()
+			.add_directive(Level::DEBUG.into())
+			.add_directive("surreal=trace".parse().unwrap())
+			.add_directive("surrealdb=trace".parse().unwrap())
+			.add_directive("surrealdb::core::kvs::tx=trace".parse().unwrap())
+			.add_directive("surrealdb::core::kvs::tr=trace".parse().unwrap())),
 		// Check if we should show all module logs
 		"all" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
 		// Let's try to parse the custom log level
@@ -154,15 +262,35 @@ pub fn filter_from_value(v: &str) -> Result<EnvFilter, ParseError> {
 	}
 }
 
+/// Parse span level directives from the given value.
+pub fn span_filters_from_value(v: &str) -> Vec<(String, LevelFilter)> {
+	v.split(',')
+		.filter_map(|d| {
+			let d = d.trim();
+			if !d.starts_with('[') {
+				return None;
+			}
+			let close = d.find(']')?;
+			let name = &d[1..close];
+			let level = d[close + 1..].trim();
+			let level = if let Some(stripped) = level.strip_prefix('=') {
+				stripped.parse().ok()?
+			} else {
+				LevelFilter::TRACE
+			};
+			Some((name.to_string(), level))
+		})
+		.collect()
+}
+
 #[cfg(test)]
 mod tests {
 	use std::{ffi::OsString, sync::Mutex};
 
+	use crate::telemetry;
 	use opentelemetry::global::shutdown_tracer_provider;
 	use tracing::{span, Level};
 	use tracing_subscriber::util::SubscriberInitExt;
-
-	use crate::telemetry;
 
 	static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -214,7 +342,7 @@ mod tests {
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
 				|| {
-					let (registry, outg, errg) =
+					let (registry, guards) =
 						telemetry::builder().with_log_level("info").build().unwrap();
 
 					let _enter = registry.set_default();
@@ -228,8 +356,9 @@ mod tests {
 					}
 
 					shutdown_tracer_provider();
-					drop(outg);
-					drop(errg);
+					for guard in guards {
+						drop(guard);
+					}
 				},
 			)
 		}
@@ -260,7 +389,7 @@ mod tests {
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
 				|| {
-					let (registry, outg, errg) =
+					let (registry, guards) =
 						telemetry::builder().with_log_level("debug").build().unwrap();
 
 					let _enter = registry.set_default();
@@ -282,8 +411,9 @@ mod tests {
 					}
 
 					shutdown_tracer_provider();
-					drop(outg);
-					drop(errg);
+					for guard in guards {
+						drop(guard);
+					}
 				},
 			)
 		}
