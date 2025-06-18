@@ -3,6 +3,7 @@ pub mod metrics;
 pub mod traces;
 
 use crate::cli::validator::parser::tracing::CustomFilter;
+use crate::cli::LogFormat;
 use anyhow::Result;
 use opentelemetry::KeyValue;
 use opentelemetry::global;
@@ -42,10 +43,12 @@ pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 
 #[derive(Debug, Clone)]
 pub struct Builder {
+	format: LogFormat,
 	filter: CustomFilter,
 	file_filter: Option<CustomFilter>,
 	otel_filter: Option<CustomFilter>,
 	log_file_enabled: bool,
+	log_file_format: LogFormat,
 	log_file_path: Option<String>,
 	log_file_name: Option<String>,
 	log_file_rotation: Option<String>,
@@ -62,8 +65,10 @@ impl Default for Builder {
 				env: EnvFilter::default(),
 				spans: std::collections::HashMap::new(),
 			},
+			format: LogFormat::Text,
 			file_filter: None,
 			otel_filter: None,
+			log_file_format: LogFormat::Text,
 			log_file_enabled: false,
 			log_file_path: Some("logs".to_string()),
 			log_file_name: Some("surrealdb.log".to_string()),
@@ -112,9 +117,21 @@ impl Builder {
 		self
 	}
 
+	/// Set the terminal log output format
+	pub fn with_log_format(mut self, format: LogFormat) -> Self {
+		self.format = format;
+		self
+	}
+
 	/// Enable or disable the log file
 	pub fn with_log_file_enabled(mut self, enabled: bool) -> Self {
 		self.log_file_enabled = enabled;
+		self
+	}
+
+	/// Set the log file output format
+	pub fn with_log_file_format(mut self, format: LogFormat) -> Self {
+		self.log_file_format = format;
 		self
 	}
 
@@ -153,8 +170,8 @@ impl Builder {
 			.thread_name("surrealdb-logger-stderr")
 			.finish(std::io::stderr());
 		// Create the display destination layer
-		let output_layer = logs::output(self.filter.clone(), stdout, stderr)?;
-		// Create the trace destination layer
+		let output_layer = logs::output(self.filter.clone(), stdout, stderr, self.format)?;
+		// Create the otel destination layer
 		let telemetry_filter = self.otel_filter.clone().unwrap_or_else(|| self.filter.clone());
 		let telemetry_layer = traces::new(telemetry_filter)?;
 		// Setup a registry for composing layers
@@ -183,10 +200,9 @@ impl Builder {
 				.lossy(false)
 				.thread_name("surrealdb-logger-file")
 				.finish(file_appender);
-			// Setup tracing layer
 			// Create the file destination layer
 			let file_filter = self.file_filter.clone().unwrap_or_else(|| self.filter.clone());
-			let file_layer = logs::file(file_filter, file)?;
+			let file_layer = logs::file(file_filter, file, self.log_file_format)?;
 			// Setup logging layer
 			let registry = registry.with(file_layer);
 			// Return the registry

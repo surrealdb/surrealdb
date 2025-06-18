@@ -73,6 +73,12 @@ struct Cli {
 	#[arg(default_value = "info")]
 	#[arg(value_parser = CustomFilterParser::new())]
 	log: CustomFilter,
+	#[arg(help = "The format for terminal log output", help_heading = "Logging")]
+	#[arg(env = "SURREAL_LOG_FORMAT", long = "log-format")]
+	#[arg(global = true)]
+	#[arg(default_value = "text")]
+	#[arg(value_enum)]
+	log_format: LogFormat,
 	#[arg(help = "Override the logging level for file output", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG_FILE_LEVEL", long = "log-file-level")]
 	#[arg(global = true)]
@@ -107,6 +113,12 @@ struct Cli {
 	#[arg(default_value = "daily")]
 	#[arg(value_enum)]
 	pub log_file_rotation: LogFileRotation,
+	#[arg(help = "The format for log file output", help_heading = "Logging")]
+	#[arg(env = "SURREAL_LOG_FILE_FORMAT", long = "log-file-format")]
+	#[arg(global = true)]
+	#[arg(default_value = "text")]
+	#[arg(value_enum)]
+	pub log_file_format: LogFormat,
 	//
 	// Version check
 	//
@@ -146,6 +158,12 @@ enum Commands {
 	Validate(ValidateCommandArguments),
 	#[command(about = "Fix database storage issues")]
 	Fix(FixCommandArguments),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum LogFormat {
+	Text,
+	Json,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -205,10 +223,12 @@ pub async fn init() -> ExitCode {
 		.with_filter(args.log.clone())
 		.with_file_filter(args.log_file_level.clone())
 		.with_otel_filter(args.log_otel_level.clone())
+		.with_log_format(args.log_format)
 		.with_log_file_enabled(args.log_file_enabled)
 		.with_log_file_path(Some(args.log_file_path.clone()))
 		.with_log_file_name(Some(args.log_file_name.clone()))
-		.with_log_file_rotation(Some(args.log_file_rotation.as_str().to_string()));
+		.with_log_file_rotation(Some(args.log_file_rotation.as_str().to_string()))
+		.with_log_file_format(args.log_file_format);
 	// Extract the telemetry log guards
 	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
