@@ -142,6 +142,11 @@ who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "1.0.1"
 
+[[audits.tracing-serde]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.2.0"
+
 [[audits.trim-in-place]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
