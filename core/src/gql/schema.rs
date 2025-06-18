@@ -325,7 +325,6 @@ pub async fn generate_schema(
 
 						if let GqlValue::Object(obj) = input {
 							for (key, value) in obj {
-								// Find the field definition to get its kind
 								let field_def = fds.iter().find(|fd| fd.name.to_string() == key.as_str());
 
 								if let Some(fd) = field_def {
@@ -363,11 +362,29 @@ pub async fn generate_schema(
 								let erased: ErasedRecord = (gtx, t);
 								Ok(Some(field_val_erase_owned(erased)))
 							}
+							SqlValue::Object(ref obj) => {
+								// Extract the ID from the object (CREATE with OUTPUT AFTER returns full record)
+								if let Some(SqlValue::Thing(t)) = obj.get("id") {
+									let erased: ErasedRecord = (gtx, t.clone());
+									Ok(Some(field_val_erase_owned(erased)))
+								} else {
+									Ok(None)
+								}
+							}
 							SqlValue::Array(mut a) if a.len() == 1 => {
 								match a.0.pop() {
 									Some(SqlValue::Thing(t)) => {
 										let erased: ErasedRecord = (gtx, t);
 										Ok(Some(field_val_erase_owned(erased)))
+									}
+									Some(SqlValue::Object(ref obj)) => {
+										// Handle array containing object
+										if let Some(SqlValue::Thing(t)) = obj.get("id") {
+											let erased: ErasedRecord = (gtx, t.clone());
+											Ok(Some(field_val_erase_owned(erased)))
+										} else {
+											Ok(None)
+										}
 									}
 									_ => Ok(None)
 								}
@@ -450,11 +467,29 @@ pub async fn generate_schema(
 								let erased: ErasedRecord = (gtx, t);
 								Ok(Some(field_val_erase_owned(erased)))
 							}
+							SqlValue::Object(ref obj) => {
+								// Extract the ID from the object (UPDATE with OUTPUT AFTER returns full record)
+								if let Some(SqlValue::Thing(t)) = obj.get("id") {
+									let erased: ErasedRecord = (gtx, t.clone());
+									Ok(Some(field_val_erase_owned(erased)))
+								} else {
+									Ok(None)
+								}
+							}
 							SqlValue::Array(mut a) if a.len() == 1 => {
 								match a.0.pop() {
 									Some(SqlValue::Thing(t)) => {
 										let erased: ErasedRecord = (gtx, t);
 										Ok(Some(field_val_erase_owned(erased)))
+									}
+									Some(SqlValue::Object(ref obj)) => {
+										// Handle array containing object
+										if let Some(SqlValue::Thing(t)) = obj.get("id") {
+											let erased: ErasedRecord = (gtx, t.clone());
+											Ok(Some(field_val_erase_owned(erased)))
+										} else {
+											Ok(None)
+										}
 									}
 									_ => Ok(None)
 								}

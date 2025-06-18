@@ -112,13 +112,11 @@ impl GQLTx {
 		sess: &Session,
 		stmt: Statement,
 	) -> Result<SqlValue, GqlError> {
-		// Execute the statement using the datastore's process method
 		let query = crate::sql::Query(crate::sql::Statements(vec![stmt]));
 		let mut results = kvs.process(query, sess, None).await?;
 
-		// Extract the result
 		if let Some(response) = results.pop() {
-			Ok(response.result?.first())
+			response.result.map_err(Into::into)
 		} else {
 			Err(GqlError::InternalError("No response from mutation".to_string()))
 		}
