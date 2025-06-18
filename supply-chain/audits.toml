@@ -87,6 +87,11 @@ who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "0.15.2"
 
+[[audits.ntapi]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.4.1"
+
 [[audits.openssl]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
@@ -136,6 +141,11 @@ version = "0.9.1"
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "1.0.1"
+
+[[audits.tracing-serde]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.2.0"
 
 [[audits.trim-in-place]]
 who = "Micha de Vries <micha@devrie.sh>"
@@ -804,13 +814,13 @@ end = "2025-08-06"
 
 [[trusted.system-configuration]]
 criteria = "safe-to-deploy"
-user-id = 1459 # Linus Färnstrand (faern)
+user-id = 1459
 start = "2019-10-16"
 end = "2026-05-06"
 
 [[trusted.system-configuration-sys]]
 criteria = "safe-to-deploy"
-user-id = 1459 # Linus Färnstrand (faern)
+user-id = 1459
 start = "2019-10-16"
 end = "2026-05-06"
 
