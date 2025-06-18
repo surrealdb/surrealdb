@@ -1,0 +1,163 @@
+namespace SurrealDb.Protocol.Expr;
+
+
+table NullValue {}
+table BoolValue { value: bool (id: 0); }
+table Int64Value { value: int64 (id: 0); }
+table UInt64Value { value: uint64 (id: 0); }
+table Float64Value { value: double (id: 0); }
+table StringValue { value: string (id: 0); }
+table Decimal { value: string (id: 0); }
+table Bytes { value:[ubyte] (id: 0); }
+
+table Duration {
+    seconds: uint64 (id: 0);
+    nanos: uint32 (id: 1);
+}
+
+table Timestamp {
+    seconds: int64 (id: 0);
+    nanos: uint32 (id: 1);
+}
+
+table Uuid {
+    bytes: [ubyte] (id: 0);
+}
+
+// Geometry types
+table Point {
+    x: double (id: 0);
+    y: double (id: 1);
+}
+
+table LineString {
+    points:[Point] (id: 0);
+}
+
+table Polygon {
+    exterior: LineString (id: 0);
+    interiors: [LineString] (id: 1);
+}
+
+table MultiPoint {
+    points: [Point] (id: 0);
+}
+
+table MultiLineString {
+    lines: [LineString] (id: 0);
+}
+
+table MultiPolygon {
+    polygons: [Polygon] (id: 0);
+}
+
+table GeometryCollection {
+    geometries: [Geometry] (id: 0);
+}
+
+union GeometryType {
+    Point (id: 1),
+    LineString (id: 2),
+    Polygon (id: 3),
+    MultiPoint (id: 4),
+    MultiLineString (id: 5),
+    MultiPolygon (id: 6),
+    Collection: GeometryCollection (id: 7),
+}
+
+table Geometry {
+    geometry: GeometryType (id: 1);
+}
+
+table RecordId {
+    table: string (id: 0);
+    id: Id (id: 1);
+}
+
+// File type
+table File {
+    bucket: string (id: 0);
+    key: string (id: 1);
+}
+
+// Collections
+table Array {
+    values:[Value] (id: 0);
+}
+
+table KeyValue {
+    key: string (id: 0);
+    value: Value (id: 1);
+}
+
+table Object {
+    items:[KeyValue] (id: 0);
+}
+
+// Main Value union
+union ValueType {
+    Null: NullValue (id: 1),
+    Bool: BoolValue (id: 2),
+    Int64: Int64Value (id: 3),
+    UInt64: UInt64Value (id: 4),
+    Float64: Float64Value (id: 5),
+    Decimal (id: 6),
+    String: StringValue (id: 7),
+    Duration (id: 8),
+    Timestamp (id: 9),
+    Uuid (id: 10),
+    Array (id: 11),
+    Object (id: 12),
+    Geometry (id: 13),
+    Bytes (id: 14),
+    RecordId (id: 15),
+    File (id: 16),
+}
+
+table Value {
+    value: ValueType (id: 1);
+}
+
+// ID types
+union IdType {
+    Int64: Int64Value (id: 1),
+    String: StringValue (id: 2),
+    Uuid (id: 3),
+    Array (id: 4)
+}
+
+table Id {
+    id: IdType (id: 1);
+}
+
+// Resource types
+union ResourceType {
+    String: StringValue (id: 1),
+    RecordId (id: 2),
+    Object (id: 3),
+    Array (id: 4),
+}
+
+table Resource {
+    resource: ResourceType (id: 1);
+}
+
+// Field types
+table SingleField {
+    name: string (id: 0);
+    alias: string (id: 1);
+}
+
+union FieldType {
+    NullValue (id: 1),
+    SingleField (id: 2),
+}
+
+table Field {
+    field: FieldType (id: 1);
+}
+
+table Fields {
+    single: bool (id: 0);
+    fields:[Field] (id: 1);
+}

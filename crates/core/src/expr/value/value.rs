@@ -117,6 +117,8 @@ pub enum Value {
 	Geometry(Geometry),
 	Bytes(Bytes),
 	Thing(Thing),
+	File(File),
+
 	// These Value types are un-computed values
 	// and are not used in query responses sent
 	// to the client. These types need to be
@@ -145,7 +147,7 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	Refs(Refs),
-	File(File),
+	
 	// Add new variants here
 }
 

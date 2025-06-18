@@ -130,6 +130,7 @@ chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
+flatbuffers.workspace = true
 fst.workspace = true
 futures.workspace = true
 fuzzy-matcher.workspace = true
@@ -190,6 +191,7 @@ tempfile = { workspace = true, optional = true }
 
 [build-dependencies]
 capnpc.workspace = true
+flatbuffers-build.workspace = true
 prost-build.workspace = true
 
 [dev-dependencies]

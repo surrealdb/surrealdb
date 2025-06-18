@@ -1,5 +1,12 @@
 
 
+#[allow(warnings)]
+#[rustfmt::skip]
+pub mod flatbuffers {
+    include!(concat!(env!("OUT_DIR"), "/flatbuffers/mod.rs"));
+}
+
+// Cap'n Proto
 pub mod expr_capnp {
     include!(concat!(env!("OUT_DIR"), "/protocol/expr_capnp.rs"));
 }
@@ -8,6 +15,8 @@ pub mod rpc_capnp {
     include!(concat!(env!("OUT_DIR"), "/protocol/rpc_capnp.rs"));
 }
 
+
+// Protobuf
 pub mod google {
     pub mod protobuf {
         include!(concat!(env!("OUT_DIR"), "/google.protobuf.rs"));
@@ -29,9 +38,9 @@ pub mod surrealdb {
 }
 
 mod ast;
+mod expr;
 mod rpc;
 mod value;
-mod expr;
 
 /// Traits 
 pub trait ToCapnp {
@@ -48,12 +57,22 @@ pub trait FromCapnp {
         Self: Sized;
 }
 
+pub trait ToFlatbuffers {
+    type Output<'bldr>;
 
+    fn to_fb<'bldr>(
+        &self,
+        builder: &mut ::flatbuffers::FlatBufferBuilder<'bldr>,
+    ) -> Self::Output<'bldr>;
+}
 
+pub trait FromFlatbuffers {
+    type Input<'a>;
 
-
-
-
+    fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self>
+    where
+        Self: Sized;
+}
 
 
 

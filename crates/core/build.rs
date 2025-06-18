@@ -1,3 +1,4 @@
+use flatbuffers_build::BuilderOptions;
 
 fn main() {
 	if cfg!(target_family = "wasm") {
@@ -38,4 +39,12 @@ fn main() {
 		.default_parent_module(vec!["protocol".into()])
         .run()
         .expect("compiling schema");
+
+
+	BuilderOptions::new_with_files([
+		"protocol/expr.fbs",
+
+	])
+	.compile()
+	.expect("Failed to compile flatbuffers schema");
 }
