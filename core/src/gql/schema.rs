@@ -6,12 +6,12 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::TablesConfig;
-use crate::sql::statements::{DefineFieldStatement, SelectStatement};
+use crate::sql::statements::{DefineFieldStatement, SelectStatement, CreateStatement, UpdateStatement, DeleteStatement};
 use crate::sql::{self, Table};
-use crate::sql::{Cond, Fields};
-use crate::sql::{Expression, Geometry};
-use crate::sql::{Idiom, Kind};
-use crate::sql::{Statement, Thing};
+use crate::sql::{Cond, Data, Fields};
+use crate::sql::{Expression, Geometry, Operator};
+use crate::sql::{Ident, Idiom, Kind, Part};
+use crate::sql::{Statement, Thing, Values};
 use async_graphql::dynamic::{Enum, FieldValue, ResolverContext, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
@@ -78,6 +78,14 @@ fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
 
+fn uppercase(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
+}
+
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
 	session: &Session,
@@ -109,6 +117,7 @@ pub async fn generate_schema(
 	};
 
 	let mut query = Object::new("Query");
+	let mut mutation = Object::new("Mutation");
 	let mut types: Vec<Type> = Vec::new();
 
 	trace!(ns, db, ?tbs, "generating schema");
@@ -288,6 +297,226 @@ pub async fn generate_schema(
 			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
 		);
 
+		// Define input type names for mutations
+		let create_input_name = format!("Create{}Input", uppercase(&tb.name));
+		let update_input_name = format!("Update{}Input", uppercase(&tb.name));
+
+		let create_tb_name = tb.name.to_string();
+		let create_sess = session.to_owned();
+		let create_fds = fds.clone();
+		let create_kvs = datastore.clone();
+		let create_input_name_ref = create_input_name.clone();
+
+		mutation = mutation.field(
+			Field::new(
+				format!("create{}", uppercase(&tb.name)),
+				TypeRef::named(tb.name.to_string()),
+				move |ctx| {
+					let tb_name = create_tb_name.clone();
+					let sess = create_sess.clone();
+					let fds = create_fds.clone();
+					let kvs = create_kvs.clone();
+
+					FieldFuture::new(async move {
+						let args = ctx.args.as_index_map();
+						let input = args.get("data").ok_or_else(|| resolver_error("data argument is required"))?;
+
+						let mut data_fields = Vec::new();
+
+						if let GqlValue::Object(obj) = input {
+							for (key, value) in obj {
+								// Find the field definition to get its kind
+								let field_def = fds.iter().find(|fd| fd.name.to_string() == key.as_str());
+
+								if let Some(fd) = field_def {
+									if let Some(ref kind) = fd.kind {
+										let sql_value = gql_to_sql_kind(value, kind.clone())?;
+										data_fields.push((
+											Idiom(vec![Part::Field(Ident(key.to_string()))]),
+											Operator::Equal,
+											sql_value
+										));
+									}
+								}
+							}
+						} else {
+							return Err(resolver_error("data must be an object").into());
+						}
+
+						let ast = Statement::Create(CreateStatement {
+							only: true,
+							what: Values(vec![SqlValue::Table(tb_name.intox())]),
+							data: Some(Data::SetExpression(data_fields.clone())),
+							output: Some(crate::sql::Output::After),
+							timeout: None,
+							parallel: false,
+							version: None,
+						});
+
+						let res = GQLTx::execute_mutation(&kvs, &sess, ast).await?;
+
+						// Create a read-only GQLTx for field resolution
+						let gtx = GQLTx::new(&kvs, &sess).await?;
+
+						match res {
+							SqlValue::Thing(t) => {
+								let erased: ErasedRecord = (gtx, t);
+								Ok(Some(field_val_erase_owned(erased)))
+							}
+							SqlValue::Array(mut a) if a.len() == 1 => {
+								match a.0.pop() {
+									Some(SqlValue::Thing(t)) => {
+										let erased: ErasedRecord = (gtx, t);
+										Ok(Some(field_val_erase_owned(erased)))
+									}
+									_ => Ok(None)
+								}
+							}
+							_ => Ok(None),
+						}
+					})
+				},
+			)
+			.description(format!("Create a new {} record", tb.name))
+			.argument(InputValue::new("data", TypeRef::named_nn(&create_input_name_ref))),
+		);
+
+		let update_tb_name = tb.name.to_string();
+		let update_sess = session.to_owned();
+		let update_fds = fds.clone();
+		let update_kvs = datastore.clone();
+		let update_input_name_ref = update_input_name.clone();
+
+		mutation = mutation.field(
+			Field::new(
+				format!("update{}", uppercase(&tb.name)),
+				TypeRef::named(tb.name.to_string()),
+				move |ctx| {
+					let tb_name = update_tb_name.clone();
+					let sess = update_sess.clone();
+					let fds = update_fds.clone();
+					let kvs = update_kvs.clone();
+
+					FieldFuture::new(async move {
+						let args = ctx.args.as_index_map();
+						let id = args.get("id").and_then(GqlValueUtils::as_string)
+							.ok_or_else(|| resolver_error("id argument is required"))?;
+						let input = args.get("data").ok_or_else(|| resolver_error("data argument is required"))?;
+
+						let thing = match id.clone().try_into() {
+							Ok(t) => t,
+							Err(_) => Thing::from((tb_name.clone(), id)),
+						};
+
+						let mut data_fields = Vec::new();
+
+						if let GqlValue::Object(obj) = input {
+							for (key, value) in obj {
+								// Find the field definition to get its kind
+								let field_def = fds.iter().find(|fd| fd.name.to_string() == key.as_str());
+
+								if let Some(fd) = field_def {
+									if let Some(ref kind) = fd.kind {
+										let sql_value = gql_to_sql_kind(value, kind.clone())?;
+										data_fields.push((
+											Idiom(vec![Part::Field(Ident(key.to_string()))]),
+											Operator::Equal,
+											sql_value
+										));
+									}
+								}
+							}
+						} else {
+							return Err(resolver_error("data must be an object").into());
+						}
+
+						let ast = Statement::Update(UpdateStatement {
+							only: true,
+							what: Values(vec![SqlValue::Thing(thing)]),
+							data: Some(Data::SetExpression(data_fields)),
+							cond: None,
+							output: Some(crate::sql::Output::After),
+							timeout: None,
+							parallel: false,
+						});
+
+						let res = GQLTx::execute_mutation(&kvs, &sess, ast).await?;
+
+						// Create a read-only GQLTx for field resolution
+						let gtx = GQLTx::new(&kvs, &sess).await?;
+
+						match res {
+							SqlValue::Thing(t) => {
+								let erased: ErasedRecord = (gtx, t);
+								Ok(Some(field_val_erase_owned(erased)))
+							}
+							SqlValue::Array(mut a) if a.len() == 1 => {
+								match a.0.pop() {
+									Some(SqlValue::Thing(t)) => {
+										let erased: ErasedRecord = (gtx, t);
+										Ok(Some(field_val_erase_owned(erased)))
+									}
+									_ => Ok(None)
+								}
+							}
+							_ => Ok(None),
+						}
+					})
+				},
+			)
+			.description(format!("Update a {} record by ID", tb.name))
+			.argument(id_input!())
+			.argument(InputValue::new("data", TypeRef::named_nn(&update_input_name_ref))),
+		);
+
+		let delete_tb_name = tb.name.to_string();
+		let delete_sess = session.to_owned();
+		let delete_kvs = datastore.clone();
+
+		mutation = mutation.field(
+			Field::new(
+				format!("delete{}", uppercase(&tb.name)),
+				TypeRef::named_nn(TypeRef::BOOLEAN),
+				move |ctx| {
+					let tb_name = delete_tb_name.clone();
+					let sess = delete_sess.clone();
+					let kvs = delete_kvs.clone();
+
+					FieldFuture::new(async move {
+						let args = ctx.args.as_index_map();
+						let id = args.get("id").and_then(GqlValueUtils::as_string)
+							.ok_or_else(|| resolver_error("id argument is required"))?;
+
+						let thing = match id.clone().try_into() {
+							Ok(t) => t,
+							Err(_) => Thing::from((tb_name, id)),
+						};
+
+						let ast = Statement::Delete(DeleteStatement {
+							only: true,
+							what: Values(vec![SqlValue::Thing(thing)]),
+							cond: None,
+							output: Some(crate::sql::Output::Before),
+							timeout: None,
+							parallel: false,
+						});
+
+						let res = GQLTx::execute_mutation(&kvs, &sess, ast).await?;
+
+						// Return true if something was deleted, false otherwise
+						match res {
+							SqlValue::None => Ok(Some(FieldValue::value(GqlValue::Boolean(false)))),
+							SqlValue::Thing(_) => Ok(Some(FieldValue::value(GqlValue::Boolean(true)))),
+							SqlValue::Array(a) => Ok(Some(FieldValue::value(GqlValue::Boolean(!a.is_empty())))),
+							_ => Ok(Some(FieldValue::value(GqlValue::Boolean(true)))),
+						}
+					})
+				},
+			)
+			.description(format!("Delete a {} record by ID", tb.name))
+			.argument(id_input!()),
+		);
+
 		let sess2 = session.to_owned();
 		let kvs2 = datastore.to_owned();
 		query = query.field(
@@ -382,6 +611,31 @@ pub async fn generate_schema(
 		types.push(table_order.into());
 		types.push(Type::Enum(table_orderable));
 		types.push(Type::InputObject(table_filter));
+
+		// Create input types for mutations
+		let mut create_input = InputObject::new(&create_input_name)
+			.description(format!("Input type for creating a new {} record", tb.name));
+
+		let mut update_input = InputObject::new(&update_input_name)
+			.description(format!("Input type for updating a {} record", tb.name));
+
+		// Add fields to create and update input types
+		for fd in fds.iter() {
+			let Some(ref kind) = fd.kind else {
+				continue;
+			};
+
+			// Skip ID field for create input
+			if fd.name.to_string() != "id" {
+				let fd_type = kind_to_type(kind.clone(), &mut types)?;
+				create_input = create_input.field(InputValue::new(fd.name.to_string(), fd_type.clone()));
+				// Make all fields optional for update
+				update_input = update_input.field(InputValue::new(fd.name.to_string(), unwrap_type(fd_type)));
+			}
+		}
+
+		types.push(Type::InputObject(create_input));
+		types.push(Type::InputObject(update_input));
 	}
 
 	let sess3 = session.to_owned();
@@ -427,7 +681,7 @@ pub async fn generate_schema(
 
 	trace!("current Query object for schema: {:?}", query);
 
-	let mut schema = Schema::build("Query", None, None).register(query);
+	let mut schema = Schema::build("Query", Some("Mutation"), None).register(query).register(mutation);
 	for ty in types {
 		trace!("adding type: {ty:?}");
 		schema = schema.register(ty);

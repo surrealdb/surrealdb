@@ -106,4 +106,21 @@ impl GQLTx {
 
 		Ok(res)
 	}
+
+	pub async fn execute_mutation(
+		kvs: &Arc<Datastore>,
+		sess: &Session,
+		stmt: Statement,
+	) -> Result<SqlValue, GqlError> {
+		// Execute the statement using the datastore's process method
+		let query = crate::sql::Query(crate::sql::Statements(vec![stmt]));
+		let mut results = kvs.process(query, sess, None).await?;
+
+		// Extract the result
+		if let Some(response) = results.pop() {
+			Ok(response.result?.first())
+		} else {
+			Err(GqlError::InternalError("No response from mutation".to_string()))
+		}
+	}
 }
