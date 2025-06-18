@@ -2,8 +2,8 @@ mod logs;
 pub mod metrics;
 pub mod traces;
 
-use crate::cli::validator::parser::tracing::CustomFilter;
 use crate::cli::LogFormat;
+use crate::cli::validator::parser::tracing::CustomFilter;
 use anyhow::Result;
 use opentelemetry::KeyValue;
 use opentelemetry::global;
