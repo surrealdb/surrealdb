@@ -66,19 +66,16 @@ table AuthenticateParams {
 table InvalidateParams {
 }
 table CreateParams {
+    // TODO: Match the surrealdb_core::expr::CreateStatement parameters.
 }
 table ResetParams {
+    // TODO: Match the surrealdb_core::expr::ResetStatement parameters.
 }
 table KillParams {
     live_uuid: string (id: 0);
 }
 table LiveParams {
-    table: string (id: 0);
-    // fields: surrealdb.ast.Fields (id: 1);
-    // diff: bool (id: 3);
-    // cond: surrealdb.value.Value (id: 4);
-    // fetchs: surrealdb.ast.Fetchs (id: 5);
-    // vars: map<string, surrealdb.value.Value> (id: 6);
+    // TODO: Match the surrealdb_core::expr::LiveStatement parameters.
 }
 table SetParams {
     key: string (id: 0);
@@ -88,20 +85,19 @@ table UnsetParams {
     key: string (id: 0);
 }
 table SelectParams {
-    what: SurrealDB.Protocol.Expr.Value (id: 0);
-    options: SurrealDB.Protocol.Options.StatementOptions (id: 1);
+    // TODO: Match the surrealdb_core::expr::SelectStatement parameters.
 }
 table InsertParams {
+    // TODO: Match the surrealdb_core::expr::InsertStatement parameters.
 }
 table UpsertParams {
+    // TODO: Match the surrealdb_core::expr::UpsertStatement parameters.
 }
 table UpdateParams {
-}
-table MergeParams {
-}
-table PatchParams {
+    // TODO: Match the surrealdb_core::expr::UpdateStatement parameters.
 }
 table DeleteParams {
+    // TODO: Match the surrealdb_core::expr::DeleteStatement parameters.
 }
 table QueryParams {
     query: string (id: 0);
@@ -109,12 +105,13 @@ table QueryParams {
 }
 
 table RelateParams {
+    // TODO: Match the surrealdb_core::expr::RelateStatement parameters.
 }
 table RunParams {
+    // TODO: This is for running a surrealdb function. Match the cmd.rs parameters here.
 }
 table GraphQlParams {
-}
-table InsertRelationParams {
+    // TODO: Fill in the parameters for GraphQL queries.
 }
 
 union Command {
@@ -137,14 +134,11 @@ union Command {
     Insert: InsertParams (id: 17),
     Upsert: UpsertParams (id: 18),
     Update: UpdateParams (id: 19),
-    Merge: MergeParams (id: 20),
-    Patch: PatchParams (id: 21),
-    Delete: DeleteParams (id: 22),
-    Query: QueryParams (id: 23),
-    Relate: RelateParams (id: 24),
-    Run: RunParams (id: 25),
-    GraphQl: GraphQlParams (id: 26),
-    InsertRelation: InsertRelationParams (id: 27)
+    Delete: DeleteParams (id: 20),
+    Query: QueryParams (id: 21),
+    Relate: RelateParams (id: 22),
+    Run: RunParams (id: 23),
+    GraphQl: GraphQlParams (id: 24),
 }
 
 table Request {

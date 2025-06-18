@@ -58,20 +58,6 @@ pub(crate) enum Command {
 		what: Option<String>,
 		data: CoreValue,
 	},
-	InsertRelation {
-		what: Option<String>,
-		data: CoreValue,
-	},
-	Patch {
-		what: Resource,
-		data: Option<CoreValue>,
-		upsert: bool,
-	},
-	Merge {
-		what: Resource,
-		data: Option<CoreValue>,
-		upsert: bool,
-	},
 	Select {
 		what: Resource,
 	},
@@ -79,10 +65,6 @@ pub(crate) enum Command {
 		what: Resource,
 	},
 	Query {
-		query: CoreSqlQuery,
-		variables: CoreObject,
-	},
-	RawQuery {
 		query: Cow<'static, str>,
 		variables: CoreObject,
 	},
