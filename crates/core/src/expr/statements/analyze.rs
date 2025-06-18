@@ -8,7 +8,7 @@ use crate::expr::index::Index;
 use crate::expr::value::Value;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::FtIndex;
+use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::kvs::TransactionType;
 use anyhow::{Result, bail};
@@ -45,9 +45,15 @@ impl AnalyzeStatement {
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
-						let ft =
-							FtIndex::new(ctx, opt, p.az.as_str(), ikb, p, TransactionType::Read)
-								.await?;
+						let ft = SearchIndex::new(
+							ctx,
+							opt,
+							p.az.as_str(),
+							ikb,
+							p,
+							TransactionType::Read,
+						)
+						.await?;
 						ft.statistics(ctx).await?.into()
 					}
 					Index::MTree(p) => {
