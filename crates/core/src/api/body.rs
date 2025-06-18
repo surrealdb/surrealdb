@@ -103,7 +103,7 @@ impl ApiBody {
 			} else {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
-					
+
 				todo!("STUDOTHIS");
 				// let parsed = match content_type {
 				// 	Some("application/flatbuffer") => {

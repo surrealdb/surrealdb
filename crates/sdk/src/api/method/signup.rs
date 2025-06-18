@@ -1,22 +1,22 @@
-use crate::opt::auth::Jwt;
 use crate::Surreal;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::error::Api;
-use anyhow::Context;
-use surrealdb_core::protocol::surrealdb::rpc::QueryResult;
 use crate::expr::to_value;
 use crate::method::OnceLockExt;
+use crate::opt::auth::Jwt;
+use anyhow::Context;
 use serde::de::DeserializeOwned;
 use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
-use surrealdb_core::protocol::surrealdb::rpc::SignupParams;
+use surrealdb_core::protocol::surrealdb::rpc::QueryResult;
 use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
+use surrealdb_core::protocol::surrealdb::rpc::SignupParams;
+use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
 
 /// A signup future
 #[derive(Debug)]
@@ -54,14 +54,10 @@ where
 
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			let response = router
-				.execute(Command::Signup(params))
-				.await?;
+			let response = router.execute(Command::Signup(params)).await?;
 
 			let results = response.into_results();
-			let value = results
-				.next()
-				.context("No results returned from signup")??;
+			let value = results.next().context("No results returned from signup")??;
 
 			Jwt::try_from(value)
 		})

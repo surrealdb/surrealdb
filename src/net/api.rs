@@ -160,7 +160,8 @@ async fn handler(
 					.into());
 				}
 
-				let network_value = surrealdb_core::protocol::surrealdb::value::Value::try_from(value).unwrap();
+				let network_value =
+					surrealdb_core::protocol::surrealdb::value::Value::try_from(value).unwrap();
 
 				let (header, val) = match format {
 					Format::Json => ("application/json", json::res(network_value)?),

@@ -1,4 +1,3 @@
-use crate::opt::auth::Jwt;
 use crate::Surreal;
 use crate::api::Connection;
 use crate::api::Result;
@@ -7,15 +6,16 @@ use crate::api::method::BoxFuture;
 use crate::error::Api;
 use crate::expr::to_value;
 use crate::method::OnceLockExt;
+use crate::opt::auth::Jwt;
 use serde::de::DeserializeOwned;
 use serde_content::Value as Content;
-use surrealdb_core::protocol::surrealdb::rpc::QueryResult;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
+use surrealdb_core::protocol::surrealdb::rpc::QueryResult;
 use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
 use surrealdb_core::protocol::surrealdb::rpc::SigninParams;
+use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
 
 /// A signin future
 #[derive(Debug)]
@@ -52,9 +52,7 @@ where
 		} = self;
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			let response = router
-				.execute(Command::Signin(params))
-				.await?;
+			let response = router.execute(Command::Signin(params)).await?;
 
 			let results = response.into_results();
 

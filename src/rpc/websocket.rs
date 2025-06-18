@@ -351,10 +351,7 @@ impl Websocket {
 					// Now that we know the method, we can update the span and create otel context
 					span.record("rpc.method", &req.method());
 					span.record("otel.name", format!("surrealdb.rpc/{}", &req.method()));
-					span.record(
-						"rpc.request_id",
-						req.id.clone().unwrap_or_default(),
-					);
+					span.record("rpc.request_id", req.id.clone().unwrap_or_default());
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(&req.method()).with_size(len),
 					));

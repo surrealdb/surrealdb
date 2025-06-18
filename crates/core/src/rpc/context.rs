@@ -69,7 +69,7 @@ pub trait RpcContext {
 	async fn execute<'rpc>(
 		&'rpc self,
 		version: Option<u8>,
-		command: Request<'rpc>
+		command: Request<'rpc>,
 	) -> Result<Data, RpcError>
 	where
 		Self: RpcProtocolV3,

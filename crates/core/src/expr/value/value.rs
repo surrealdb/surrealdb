@@ -147,7 +147,6 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	Refs(Refs),
-	
 	// Add new variants here
 }
 

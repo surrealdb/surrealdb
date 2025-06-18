@@ -24,11 +24,11 @@ use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb_core::iam::access;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
 	Object as CoreObject, Value as CoreValue, from_value as from_core_value,
 };
+use surrealdb_core::iam::access;
 use surrealdb_core::sql::Statement;
 use surrealdb_core::sql::statements::OutputStatement;
 use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue};
@@ -347,8 +347,8 @@ async fn router(
 		}
 		Command::Signin(params) => {
 			let req = Command::Signin(params.clone())
-			.into_router_request(None)
-			.expect("signin should be a valid router request");
+				.into_router_request(None)
+				.expect("signin should be a valid router request");
 
 			let DbResponse::Other(value) =
 				send_request(req, base_url, client, headers, auth).await?
@@ -360,12 +360,17 @@ async fn router(
 			};
 
 			let Some(access) = params.access else {
-				return Err(Error::InvalidRequest(format!("missing access in signin command")).into());
+				return Err(
+					Error::InvalidRequest(format!("missing access in signin command")).into()
+				);
 			};
 
 			use surrealdb_core::protocol::surrealdb::rpc::access::Inner as AccessInnerProto;
 			match access.inner {
-				Some(AccessInnerProto::RootUser(RootUserCredentials { username, password })) => {
+				Some(AccessInnerProto::RootUser(RootUserCredentials {
+					username,
+					password,
+				})) => {
 					*auth = Some(Auth::Basic {
 						ns: None,
 						db: None,
@@ -393,7 +398,11 @@ async fn router(
 						token: value.to_raw_string(),
 					})
 				}
-				Some(AccessInnerProto::NamespaceUser(NamespaceUserCredentials { namespace, username, password })) => {
+				Some(AccessInnerProto::NamespaceUser(NamespaceUserCredentials {
+					namespace,
+					username,
+					password,
+				})) => {
 					*auth = Some(Auth::Basic {
 						ns: Some(namespace),
 						db: None,

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-	dbs::{Capabilities},
+	dbs::Capabilities,
 	expr::Value,
 	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, SqlValue, Start, Timeout, Version},
 	syn::{

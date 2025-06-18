@@ -1,4 +1,3 @@
-
 // use std::collections::BTreeMap;
 
 // use crate::protocol::surrealdb::value::{
@@ -75,7 +74,6 @@
 // 	}
 // }
 
-
 // impl TryFrom<crate::expr::Value> for ValueProto {
 //     type Error = anyhow::Error;
 
@@ -118,11 +116,11 @@
 //             | Value::Param(_)
 //             | Value::Function(_)
 //             | Value::Table(_)
-//             | Value::Mock(_) 
+//             | Value::Mock(_)
 //             | Value::Regex(_)
 //             | Value::Cast(_)
 //             | Value::Block(_)
-//             | Value::Range(_) 
+//             | Value::Range(_)
 //             | Value::Edges(_)
 //             | Value::Future(_)
 //             | Value::Constant(_)
@@ -476,7 +474,6 @@
 //         }
 //     }
 // }
-
 
 // impl TryFrom<IdProto> for crate::expr::Id {
 //     type Error = anyhow::Error;

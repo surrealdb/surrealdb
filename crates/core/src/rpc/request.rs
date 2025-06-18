@@ -10,8 +10,6 @@
 // pub static PARAMS: &str = "params";
 // pub static VERSION: &str = "version";
 
-
-
 // pub use crate::protocol::surrealdb::rpc::Request;
 
 pub use crate::protocol::flatbuffers::surreal_db::protocol::rpc::Request;

@@ -7,10 +7,8 @@ use crate::{
 	protocol::{
 		ToFlatbuffers,
 		flatbuffers::surreal_db::protocol::{
-			rpc::{
-				QueryResponse, QueryResponseArgs, Response, ResponseArgs,
-			},
 			expr::Value as ValueFb,
+			rpc::{QueryResponse, QueryResponseArgs, Response, ResponseArgs},
 		},
 	},
 	sql::SqlValue,

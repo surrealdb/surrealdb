@@ -11,9 +11,9 @@ use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
 use crate::iam::{Actor, Level};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::protocol::flatbuffers::surreal_db::protocol::rpc::SignupParams;
 use crate::protocol::FromFlatbuffers;
-use anyhow::{bail, Context, Result};
+use crate::protocol::flatbuffers::surreal_db::protocol::rpc::SignupParams;
+use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
 use revision::revisioned;
@@ -44,18 +44,31 @@ impl From<SignupData> for Value {
 	}
 }
 
-pub async fn signup(kvs: &Datastore, session: &mut Session, params: SignupParams<'_>) -> Result<SignupData> {
-		// Attempt to signup using specified access method
-		// Currently, signup is only supported at the database level
+pub async fn signup(
+	kvs: &Datastore,
+	session: &mut Session,
+	params: SignupParams<'_>,
+) -> Result<SignupData> {
+	// Attempt to signup using specified access method
+	// Currently, signup is only supported at the database level
 
-		let namespace = params.namespace().context("Namespace is required for signup")?;
-		let database = params.database().context("Database is required for signup")?;
-		let access = params.access().context("Access method is required for signup")?;
-		let access_params = params.access_params().context("Access parameters are required for signup")?;
-		let access_params = BTreeMap::<String, Value>::from_fb(access_params)
-			.context("Failed to convert access parameters from flatbuffers")?;
+	let namespace = params.namespace().context("Namespace is required for signup")?;
+	let database = params.database().context("Database is required for signup")?;
+	let access = params.access().context("Access method is required for signup")?;
+	let access_params =
+		params.access_params().context("Access parameters are required for signup")?;
+	let access_params = BTreeMap::<String, Value>::from_fb(access_params)
+		.context("Failed to convert access parameters from flatbuffers")?;
 
-		super::signup::db_access(kvs, session, namespace.to_string(), database.to_string(), access.to_string(), access_params).await
+	super::signup::db_access(
+		kvs,
+		session,
+		namespace.to_string(),
+		database.to_string(),
+		access.to_string(),
+		access_params,
+	)
+	.await
 }
 
 pub async fn db_access(

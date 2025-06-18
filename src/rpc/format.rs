@@ -64,8 +64,8 @@ impl WsFormat for Format {
 	/// Process a WebSocket RPC response
 	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
 		let value = res.into_value();
-		let value_proto = ValueProto::try_from(value)
-			.map_err(|_| Failure::from(RpcError::InvalidRequest))?;
+		let value_proto =
+			ValueProto::try_from(value).map_err(|_| Failure::from(RpcError::InvalidRequest))?;
 		let res = self.res(value_proto).map_err(Failure::from)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be
@@ -94,8 +94,7 @@ impl HttpFormat for Format {
 	/// Process a HTTP RPC response
 	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
 		let value = res.into_value();
-		let value_proto = ValueProto::try_from(value)
-			.map_err(|_| RpcError::InvalidRequest)?;
+		let value_proto = ValueProto::try_from(value).map_err(|_| RpcError::InvalidRequest)?;
 		let res = self.res(value_proto)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be

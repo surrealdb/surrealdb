@@ -1,10 +1,12 @@
-use std::{collections::BTreeMap, fmt::Display};
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
+use std::{collections::BTreeMap, fmt::Display};
 use uuid::Uuid;
 
-use crate::{expr::access, protocol::{FromFlatbuffers, ToFlatbuffers}};
-
+use crate::{
+	expr::access,
+	protocol::{FromFlatbuffers, ToFlatbuffers},
+};
 
 // impl super::surrealdb::rpc::Request {
 //     pub fn new(command: super::surrealdb::rpc::request::Command) -> Self {
@@ -27,7 +29,7 @@ use crate::{expr::access, protocol::{FromFlatbuffers, ToFlatbuffers}};
 //             })
 //         })
 //     }
-// }        
+// }
 
 // // impl From<super::surrealdb::rpc::Response> for super::surrealdb::value::Value {}
 
@@ -87,7 +89,6 @@ use crate::{expr::access, protocol::{FromFlatbuffers, ToFlatbuffers}};
 //     }
 // }
 
-
 // pub trait RpcCommand {
 //     type Response;
 
@@ -104,25 +105,25 @@ use crate::{expr::access, protocol::{FromFlatbuffers, ToFlatbuffers}};
 //     }
 
 //     fn response_from_proto(response: super::surrealdb::rpc::Response) -> anyhow::Result<Self::Response> {
-        
+
 //     }
-    
+
 // }
 
-
 impl FromFlatbuffers for BTreeMap<String, crate::expr::Value> {
-    type Input<'a> = crate::protocol::flatbuffers::surreal_db::protocol::expr::Variables<'a>;
+	type Input<'a> = crate::protocol::flatbuffers::surreal_db::protocol::expr::Variables<'a>;
 
-    fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self>
-        where
-            Self: Sized {
-        let mut map = BTreeMap::new();
-        let items = input.items().context("Failed to get entries from BTreeMap")?;
-        for item in items {
-            let key = item.key().ok_or_else(|| anyhow!("Missing key in BTreeMap"))?;
-            let value = item.value().ok_or_else(|| anyhow!("Missing value in BTreeMap"))?;
-            map.insert(key.to_string(), crate::expr::Value::from_fb(value)?);
-        }
-        Ok(map)
-    }
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self>
+	where
+		Self: Sized,
+	{
+		let mut map = BTreeMap::new();
+		let items = input.items().context("Failed to get entries from BTreeMap")?;
+		for item in items {
+			let key = item.key().ok_or_else(|| anyhow!("Missing key in BTreeMap"))?;
+			let value = item.value().ok_or_else(|| anyhow!("Missing value in BTreeMap"))?;
+			map.insert(key.to_string(), crate::expr::Value::from_fb(value)?);
+		}
+		Ok(map)
+	}
 }

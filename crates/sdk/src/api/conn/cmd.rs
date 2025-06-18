@@ -221,8 +221,7 @@ impl Command {
 
 				use surrealdb_core::protocol::surrealdb::rpc::InsertParams;
 
-				CommandProto::Insert(InsertParams {
-				})
+				CommandProto::Insert(InsertParams {})
 			}
 			Command::InsertRelation {
 				what,
@@ -244,8 +243,7 @@ impl Command {
 				// 	params: Some(params.into()),
 				// }
 				use surrealdb_core::protocol::surrealdb::rpc::InsertRelationParams;
-				CommandProto::InsertRelation(InsertRelationParams {
-				})
+				CommandProto::InsertRelation(InsertRelationParams {})
 			}
 			Command::Patch {
 				what,
@@ -279,8 +277,7 @@ impl Command {
 
 				use surrealdb_core::protocol::surrealdb::rpc::PatchParams;
 
-				CommandProto::Patch(PatchParams {
-				})
+				CommandProto::Patch(PatchParams {})
 			}
 			Command::Merge {
 				what,
@@ -312,8 +309,7 @@ impl Command {
 				// 	params: Some(params.into()),
 				// }
 				use surrealdb_core::protocol::surrealdb::rpc::MergeParams;
-				CommandProto::Merge(MergeParams {
-				})
+				CommandProto::Merge(MergeParams {})
 			}
 			Command::Select {
 				what,
@@ -324,14 +320,14 @@ impl Command {
 				// 	method: "select",
 				// 	params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
 				// }
-		
+
 				use surrealdb_core::protocol::surrealdb::rpc::SelectParams;
 
 				CommandProto::Select(SelectParams {
 					what: Some(what.try_into()?),
-					options: None
+					options: None,
 				})
-			},
+			}
 			Command::Delete {
 				what,
 				..

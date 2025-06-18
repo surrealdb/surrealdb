@@ -1,4 +1,3 @@
-use crate::method::TryFromResponseProto;
 use crate::Surreal;
 use crate::api::Connection;
 use crate::api::Result;
@@ -6,6 +5,7 @@ use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::expr::Value;
 use crate::method::OnceLockExt;
+use crate::method::TryFromResponseProto;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_content::Serializer;
@@ -14,10 +14,10 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Array;
+use surrealdb_core::expr::Array as CoreArray;
 use surrealdb_core::expr::to_value;
 use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
 use surrealdb_core::protocol::surrealdb::value::Array as ArrayProto;
-use surrealdb_core::expr::Array as CoreArray;
 
 /// A run future
 #[derive(Debug)]
@@ -44,7 +44,7 @@ where
 impl<'r, Client, R> IntoFuture for Run<'r, Client, R>
 where
 	Client: Connection,
-	R: TryFromResponseProto
+	R: TryFromResponseProto,
 {
 	type Output = Result<R>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -70,8 +70,6 @@ where
 				.await?;
 
 			TryFromResponseProto::try_from_response_results(response.into_results())
-
-
 		})
 	}
 }

@@ -245,7 +245,7 @@ pub(crate) struct Response {
 
 fn serialize_proto<V>(value: &V) -> Result<Vec<u8>>
 where
-	V: prost::Message
+	V: prost::Message,
 {
 	Ok(value.encode_to_vec())
 }

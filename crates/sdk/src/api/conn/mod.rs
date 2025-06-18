@@ -15,10 +15,10 @@ use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 use surrealdb_core::expr::{Value as CoreValue, from_value as from_core_value};
 
-pub use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
 pub use surrealdb_core::protocol::surrealdb::rpc::Request as RequestProto;
-pub use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
+pub use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
 pub use surrealdb_core::protocol::surrealdb::rpc::request::Command as CommandProto;
+pub use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
 
 mod cmd;
 pub(crate) use cmd::Command;
@@ -57,10 +57,7 @@ impl Router {
 		self.last_id.fetch_add(1, Ordering::SeqCst)
 	}
 
-	pub(crate) fn send(
-		&self,
-		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<ResponseProto>>> {
+	pub(crate) fn send(&self, command: Command) -> BoxFuture<'_, Result<Receiver<ResponseProto>>> {
 		Box::pin(async move {
 			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);

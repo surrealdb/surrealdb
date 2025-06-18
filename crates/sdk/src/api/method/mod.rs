@@ -1,9 +1,9 @@
 //! Methods to use when interacting with a SurrealDB instance
-use crate::api::conn::Command;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::OnceLockExt;
 use crate::api::Surreal;
+use crate::api::conn::Command;
 use crate::api::opt;
 use crate::api::opt::IntoEndpoint;
 use crate::api::opt::auth;
@@ -12,13 +12,6 @@ use crate::api::opt::auth::Jwt;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use serde::Serialize;
-use surrealdb_core::expr::Array as CoreArray;
-use surrealdb_core::protocol::surrealdb::rpc::request::Command as CommandProto;
-use surrealdb_core::protocol::surrealdb::rpc::QueryResult;
-use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
-use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
-use surrealdb_core::protocol::surrealdb::rpc::SigninParams;
-use surrealdb_core::protocol::surrealdb::rpc::SignupParams;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -26,8 +19,15 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
+use surrealdb_core::expr::Array as CoreArray;
 use surrealdb_core::expr::Value as CoreValue;
 use surrealdb_core::expr::to_value as to_core_value;
+use surrealdb_core::protocol::surrealdb::rpc::QueryResult;
+use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
+use surrealdb_core::protocol::surrealdb::rpc::SigninParams;
+use surrealdb_core::protocol::surrealdb::rpc::SignupParams;
+use surrealdb_core::protocol::surrealdb::rpc::request::Command as CommandProto;
+use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
 use surrealdb_core::syn;
 
 pub(crate) mod live;
@@ -452,7 +452,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R: TryFrom<Vec<QueryResult>>>(&self, params: impl Into<SignupParams>) -> Signup<C> {
+	pub fn signup<R: TryFrom<Vec<QueryResult>>>(
+		&self,
+		params: impl Into<SignupParams>,
+	) -> Signup<C> {
 		Signup {
 			client: Cow::Borrowed(self),
 			params: params.into(),

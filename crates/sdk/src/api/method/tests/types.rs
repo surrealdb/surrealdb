@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb_core::protocol::surrealdb::value::{value, Value as ValueProto};
+use surrealdb_core::protocol::surrealdb::value::{Value as ValueProto, value};
 
 pub const USER: &str = "user";
 
@@ -18,9 +18,20 @@ impl TryFrom<ValueProto> for User {
 			return Err(anyhow::anyhow!("Expected an object value, got {:?}", value.inner));
 		};
 
-		let id = obj.get("id").and_then(|v| v.downcast_str()).ok_or_else(|| anyhow::anyhow!("Missing or invalid 'id' field"))?.to_owned();
-		let name = obj.get("name").and_then(|v| v.downcast_str()).ok_or_else(|| anyhow::anyhow!("Missing or invalid 'name' field"))?.to_owned();
-		Ok(User { id, name })
+		let id = obj
+			.get("id")
+			.and_then(|v| v.downcast_str())
+			.ok_or_else(|| anyhow::anyhow!("Missing or invalid 'id' field"))?
+			.to_owned();
+		let name = obj
+			.get("name")
+			.and_then(|v| v.downcast_str())
+			.ok_or_else(|| anyhow::anyhow!("Missing or invalid 'name' field"))?
+			.to_owned();
+		Ok(User {
+			id,
+			name,
+		})
 	}
 }
 

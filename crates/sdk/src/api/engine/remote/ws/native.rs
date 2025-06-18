@@ -4,9 +4,7 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
-use crate::api::conn::{self, RequestData, Command, DbResponse};
-use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
-use surrealdb_core::protocol::surrealdb::rpc::Request as RequestProto;
+use crate::api::conn::{self, Command, DbResponse, RequestData};
 use crate::api::engine::remote::Response;
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::PING_INTERVAL;
@@ -30,6 +28,8 @@ use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
 use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::protocol::surrealdb::rpc::Request as RequestProto;
+use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -274,7 +274,6 @@ async fn router_handle_response(bytes: Vec<u8>, state: &mut RouterState) -> Hand
 		}
 	};
 
-
 	HandleResult::Ok
 }
 
@@ -436,7 +435,7 @@ pub(crate) async fn run_router(
 									continue;
 								}
 							}
-							
+
 						}
 						Err(error) => {
 							match error {

@@ -6,11 +6,15 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::protocol::FromFlatbuffers;
 #[cfg(not(target_family = "wasm"))]
 use crate::protocol::flatbuffers::surreal_db::protocol::rpc::GraphQlParams;
-use crate::protocol::flatbuffers::surreal_db::protocol::rpc::{AuthenticateParams, Command, CreateParams, DeleteParams, InsertParams, KillParams, LiveParams, QueryParams, RelateParams, Request, RunParams, SelectParams, SetParams, SigninParams, SignupParams, UnsetParams, UpdateParams, UpsertParams, VersionParams};
 use crate::protocol::flatbuffers::surreal_db::protocol::rpc::UseParams;
-use crate::protocol::FromFlatbuffers;
+use crate::protocol::flatbuffers::surreal_db::protocol::rpc::{
+	AuthenticateParams, Command, CreateParams, DeleteParams, InsertParams, KillParams, LiveParams,
+	QueryParams, RelateParams, Request, RunParams, SelectParams, SetParams, SigninParams,
+	SignupParams, UnsetParams, UpdateParams, UpsertParams, VersionParams,
+};
 use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
@@ -19,14 +23,14 @@ use crate::rpc::statement_options::StatementOptions;
 use crate::sql::Uuid;
 use crate::{
 	dbs::{QueryType, Response, capabilities::MethodTarget},
-	rpc::args::Take,
 	expr::{
-		Array, Fields, Function, Model, Output, Query, Value, Strand,
+		Array, Fields, Function, Model, Output, Query, Strand, Value,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
 	},
+	rpc::args::Take,
 };
 use anyhow::Result;
 
@@ -51,77 +55,96 @@ pub trait RpcProtocolV3: RpcContext {
 		match request.command_type() {
 			Command::Health => Ok(Value::None.into()),
 			Command::Version => {
-				let params = request.command_as_version().expect("Version command should have parameters");
-				self.version(params).await},
+				let params =
+					request.command_as_version().expect("Version command should have parameters");
+				self.version(params).await
+			}
 			Command::Info => self.info().await,
-			Command::Use => self.yuse(request.command_as_use().expect("Variant must contain UseParams")).await,
+			Command::Use => {
+				self.yuse(request.command_as_use().expect("Variant must contain UseParams")).await
+			}
 			Command::Signup => {
-				let params = request.command_as_signup().expect("Variant must contain SignupParams");
-				self.signup(params).await},
+				let params =
+					request.command_as_signup().expect("Variant must contain SignupParams");
+				self.signup(params).await
+			}
 			Command::Signin => {
-				let params = request.command_as_signin().expect("Variant must contain SigninParams");
-				self.signin(params).await},
+				let params =
+					request.command_as_signin().expect("Variant must contain SigninParams");
+				self.signin(params).await
+			}
 			Command::Authenticate => {
-				let params = request.command_as_authenticate().expect("Variant must contain AuthenticateParams");
-				self.authenticate(params).await},
+				let params = request
+					.command_as_authenticate()
+					.expect("Variant must contain AuthenticateParams");
+				self.authenticate(params).await
+			}
 			Command::Invalidate => self.invalidate().await,
 			Command::Reset => self.reset().await,
 			Command::Kill => {
 				let params = request.command_as_kill().expect("Variant must contain KillParams");
 				self.kill(params).await
-			},
+			}
 			Command::Live => {
 				let params = request.command_as_live().expect("Variant must contain LiveParams");
 				self.live(params).await
-			},
+			}
 			Command::Set => {
 				let params = request.command_as_set().expect("Variant must contain SetParams");
 				self.set(params).await
-			},
+			}
 			Command::Unset => {
 				let params = request.command_as_unset().expect("Variant must contain UnsetParams");
 				self.unset(params).await
-			},
+			}
 			Command::Select => {
-				let params = request.command_as_select().expect("Variant must contain SelectParams");
+				let params =
+					request.command_as_select().expect("Variant must contain SelectParams");
 				self.select(params).await
-			},
+			}
 			Command::Insert => {
-				let params = request.command_as_insert().expect("Variant must contain InsertParams");
+				let params =
+					request.command_as_insert().expect("Variant must contain InsertParams");
 				self.insert(params).await
-			},
+			}
 			Command::Create => {
-				let params = request.command_as_create().expect("Variant must contain CreateParams");
+				let params =
+					request.command_as_create().expect("Variant must contain CreateParams");
 				self.create(params).await
-			},
+			}
 			Command::Upsert => {
-				let params = request.command_as_upsert().expect("Variant must contain UpsertParams");
+				let params =
+					request.command_as_upsert().expect("Variant must contain UpsertParams");
 				self.upsert(params).await
-			},
+			}
 			Command::Update => {
-				let params = request.command_as_update().expect("Variant must contain UpdateParams");
+				let params =
+					request.command_as_update().expect("Variant must contain UpdateParams");
 				self.update(params).await
-			},
+			}
 			Command::Delete => {
-				let params = request.command_as_delete().expect("Variant must contain DeleteParams");
+				let params =
+					request.command_as_delete().expect("Variant must contain DeleteParams");
 				self.delete(params).await
-			},
+			}
 			Command::Query => {
 				let params = request.command_as_query().expect("Variant must contain QueryParams");
 				self.query(params).await
-			},
+			}
 			Command::Relate => {
-				let params = request.command_as_relate().expect("Variant must contain RelateParams");
+				let params =
+					request.command_as_relate().expect("Variant must contain RelateParams");
 				self.relate(params).await
-			},
+			}
 			Command::Run => {
 				let params = request.command_as_run().expect("Variant must contain RunParams");
 				self.run(params).await
-			},
+			}
 			Command::GraphQl => {
-				let params = request.command_as_graph_ql().expect("Variant must contain GraphqlParams");
+				let params =
+					request.command_as_graph_ql().expect("Variant must contain GraphqlParams");
 				self.graphql(params).await
-			},
+			}
 			_ => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -184,9 +207,7 @@ pub trait RpcProtocolV3: RpcContext {
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
 		let out: Result<Value> =
-			crate::iam::signup::signup(self.kvs(), &mut session, params)
-				.await
-				.map(Value::from);
+			crate::iam::signup::signup(self.kvs(), &mut session, params).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -204,9 +225,7 @@ pub trait RpcProtocolV3: RpcContext {
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
 		let out: Result<Value> =
-			crate::iam::signin::signin(self.kvs(), &mut session, params)
-				.await
-				.map(Value::from);
+			crate::iam::signin::signin(self.kvs(), &mut session, params).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -225,9 +244,8 @@ pub trait RpcProtocolV3: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Attempt authentication, mutating the session
-		let out: Result<Value> = crate::iam::verify::token(self.kvs(), &mut session, token)
-			.await
-			.map(|_| Value::None);
+		let out: Result<Value> =
+			crate::iam::verify::token(self.kvs(), &mut session, token).await.map(|_| Value::None);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
