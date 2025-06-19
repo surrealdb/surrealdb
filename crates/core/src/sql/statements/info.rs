@@ -1,4 +1,4 @@
-use crate::sql::{Base, Ident, Version};
+use crate::sql::{Base, Expr, Ident};
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -8,8 +8,8 @@ pub enum InfoStatement {
 	// removing not at the end of the enum definition.
 	Root(bool),
 	Ns(bool),
-	Db(bool, Option<Version>),
-	Tb(Ident, bool, Option<Version>),
+	Db(bool, Option<Expr>),
+	Tb(Ident, bool, Option<Expr>),
 	User(Ident, Option<Base>, bool),
 	Index(Ident, Ident, bool),
 }

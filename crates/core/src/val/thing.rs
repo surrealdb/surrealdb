@@ -15,6 +15,10 @@ pub enum RecordIdKey {
 	Uuid(Uuid),
 	Object(Object),
 	Array(Array),
+	Range {
+		start: Box<RecordIdKey>,
+		end: Box<RecordIdKey>,
+	},
 }
 
 #[revisioned(revision = 1)]

@@ -3,8 +3,8 @@ use reblessive::Stk;
 use super::{ParseResult, Parser, mac::pop_glued};
 use crate::{
 	sql::{
-		Closure, Dir, Duration, Expr, Function, Ident, Idiom, Kind, Literal, Mock, Param, Part,
-		Script, Strand, Table,
+		Closure, Dir, Duration, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock,
+		Param, Part, Script, Strand, Table,
 	},
 	syn::{
 		error::bail,
@@ -18,36 +18,6 @@ use crate::{
 };
 
 impl Parser<'_> {
-	pub(super) async fn continue_parse_inline_call(
-		&mut self,
-		ctx: &mut Stk,
-		lhs: Expr,
-	) -> ParseResult<Expr> {
-		// TODO: Figure out why this is whitespace sensitive.
-		if self.eat_whitespace(t!("(")) {
-			let start = self.last_span();
-			let mut args = Vec::new();
-			loop {
-				if self.eat(t!(")")) {
-					break;
-				}
-
-				let arg = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
-				args.push(arg);
-
-				if !self.eat(t!(",")) {
-					self.expect_closing_delimiter(t!(")"), start)?;
-					break;
-				}
-			}
-
-			let value = Expr::Function(Box::new(Function::Anonymous(lhs, args, false)));
-			ctx.run(|ctx| self.continue_parse_inline_call(ctx, value)).await
-		} else {
-			Ok(lhs)
-		}
-	}
-
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {
 		let token = self.peek();
 		match token.kind {
@@ -169,14 +139,11 @@ impl Parser<'_> {
 				self.pop_peek();
 				Expr::Literal(Literal::Float(f64::NAN))
 			}
-			t!("$param") => {
-				let value = Expr::Param(self.next_token_value()?);
-				self.continue_parse_inline_call(ctx, value).await?
-			}
+			t!("$param") => Expr::Param(self.next_token_value()?),
 			t!("FUNCTION") => {
 				self.pop_peek();
 				let script = self.parse_script(ctx).await?;
-				Expr::Function(Box::new(script))
+				Expr::FunctionCall(Box::new(script))
 			}
 			t!("->") => {
 				self.pop_peek();
@@ -189,8 +156,7 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				let value = self.parse_object_like(ctx, token.span).await?;
-				self.continue_parse_inline_call(ctx, value).await?
+				self.parse_object_like(ctx, token.span).await?
 			}
 			t!("|") => {
 				self.pop_peek();
@@ -209,8 +175,7 @@ impl Parser<'_> {
 			}
 			t!("(") => {
 				self.pop_peek();
-				let value = self.parse_covered_expr_or_coordinate(ctx, token.span).await?;
-				self.continue_parse_inline_call(ctx, value).await?
+				self.parse_covered_expr_or_coordinate(ctx, token.span).await?
 			}
 			t!("/") => {
 				let regex = self.next_token_value()?;
@@ -227,14 +192,14 @@ impl Parser<'_> {
 			| t!("DEFINE")
 			| t!("REMOVE")
 			| t!("REBUILD")
-			| t!("INFO") => self.parse_inner_subquery(ctx, None).await,
+			| t!("INFO") => self.parse_inner_subquery(ctx, None).await?,
 			t!("fn") => {
 				self.pop_peek();
-				self.parse_custom_function(ctx).await.map(|x| Expr::Function(Box::new(x)))?
+				self.parse_custom_function(ctx).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}
 			t!("ml") => {
 				self.pop_peek();
-				self.parse_model(ctx).await.map(|x| Expr::Model(Box::new(x)))?
+				self.parse_model(ctx).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}
 			x if Self::kind_is_identifier(x) => {
 				let peek = self.peek1();
@@ -245,7 +210,9 @@ impl Parser<'_> {
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?.0;
-						self.parse_record_id_or_range(ctx, str).await.map(SqlValue::Thing)?
+						self.parse_record_id_or_range(ctx, str)
+							.await
+							.map(|x| Expr::Literal(Literal::RecordId(x)))?
 					}
 					_ => {
 						if self.table_as_field {
@@ -263,14 +230,13 @@ impl Parser<'_> {
 
 		// Parse the rest of the idiom if it is being continued.
 		if self.peek_continues_idiom() {
-			let value = match value {
+			match value {
 				Expr::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(ctx, x).await,
 				Expr::Table(Table(x)) => {
 					self.parse_remaining_value_idiom(ctx, vec![Part::Field(Ident(x))]).await
 				}
 				x => self.parse_remaining_value_idiom(ctx, vec![Part::Start(x)]).await,
-			}?;
-			self.continue_parse_inline_call(ctx, value).await
+			}
 		} else {
 			Ok(value)
 		}
@@ -558,7 +524,7 @@ impl Parser<'_> {
 		Literal::Strand(text)
 	}
 
-	async fn parse_script(&mut self, ctx: &mut Stk) -> ParseResult<Function> {
+	async fn parse_script(&mut self, ctx: &mut Stk) -> ParseResult<FunctionCall> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
@@ -580,7 +546,11 @@ impl Parser<'_> {
 		span.offset += 1;
 		span.len -= 2;
 		let body = self.lexer.span_str(span);
-		Ok(Function::Script(Script(body.to_string()), args))
+		let receiver = Function::Script(Script(body.to_string()));
+		Ok(FunctionCall {
+			receiver,
+			arguments: args,
+		})
 	}
 }
 

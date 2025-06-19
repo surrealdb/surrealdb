@@ -10,7 +10,7 @@ pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub when: Expr,
-	pub then: Expr,
+	pub then: Vec<Expr>,
 	pub comment: Option<Strand>,
 }
 

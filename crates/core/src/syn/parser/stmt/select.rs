@@ -37,7 +37,6 @@ impl Parser<'_> {
 		while self.eat(t!(",")) {
 			what.push(stk.run(|ctx| self.parse_expr_table(ctx)).await?);
 		}
-		let what = SqlValues(what);
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(stk).await?;
@@ -54,7 +53,11 @@ impl Parser<'_> {
 			(limit, start)
 		};
 		let fetch = self.try_parse_fetch(stk).await?;
-		let version = self.try_parse_version(stk).await?;
+		let version = if self.eat(t!("VERSION")) {
+			Some(self.parse_expr_field(stk).await?)
+		} else {
+			None
+		};
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		let tempfiles = self.eat(t!("TEMPFILES"));
@@ -93,7 +96,7 @@ impl Parser<'_> {
 
 		self.eat(t!("ON"));
 
-		let has_all = fields.contains(&Field::All);
+		let has_all = fields.0.contains(&Field::All);
 
 		let before = self.peek().span;
 		let split = self.parse_basic_idiom(ctx).await?;
@@ -134,7 +137,7 @@ impl Parser<'_> {
 			return Ok(Some(Ordering::Random));
 		};
 
-		let has_all = fields.contains(&Field::All);
+		let has_all = fields.0.contains(&Field::All);
 
 		let before = self.recent_span();
 		let order = self.parse_order(ctx).await?;
@@ -202,16 +205,5 @@ impl Parser<'_> {
 		self.eat(t!("AT"));
 		let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Start(value)))
-	}
-
-	pub(crate) async fn try_parse_version(
-		&mut self,
-		ctx: &mut Stk,
-	) -> ParseResult<Option<Version>> {
-		if !self.eat(t!("VERSION")) {
-			return Ok(None);
-		}
-		let time = self.parse_expr_inherit(ctx).await?;
-		Ok(Some(Version(time)))
 	}
 }

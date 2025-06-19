@@ -3,13 +3,13 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Duration, Ident, Strand},
+	sql::{Duration, Strand},
 	syn::{
 		lexer::compound::{self, Numeric},
 		parser::mac::{expected, pop_glued},
 		token::{Glued, Span, TokenKind, t},
 	},
-	val::{Array, Object, Value},
+	val::{Array, Number, Object, Value},
 };
 
 use super::{ParseResult, Parser};
@@ -41,33 +41,44 @@ impl Parser<'_> {
 			t!("\"") | t!("'") => {
 				let strand: Strand = self.next_token_value()?;
 				if self.settings.legacy_strands {
-					if let Some(x) = self.reparse_legacy_strand(ctx, &strand.0).await {
-						return Ok(x);
-					}
+					self.reparse_json_legacy_strand(ctx, strand).await
+				} else {
+					Ok(Value::Strand(strand.into()))
 				}
-				Ok(Value::Strand(strand))
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
-					Numeric::Duration(x) => Ok(Value::Duration(Duration(x))),
-					Numeric::Number(x) => Ok(Value::Number(x)),
+					Numeric::Duration(x) => Ok(Value::Duration(Duration(x).into())),
+					Numeric::Integer(x) => Ok(Value::Number(Number::Int(x))),
+					Numeric::Float(x) => Ok(Value::Number(Number::Float(x))),
+					Numeric::Decimal(x) => Ok(Value::Number(Number::Decimal(x))),
 				}
 			}
 			TokenKind::Glued(Glued::Strand) => {
 				let glued = pop_glued!(self, Strand);
-				Ok(Value::Strand(glued))
+				Ok(Value::Strand(glued.into()))
 			}
 			TokenKind::Glued(Glued::Duration) => {
 				let glued = pop_glued!(self, Duration);
-				Ok(Value::Duration(glued))
+				Ok(Value::Duration(glued.into()))
 			}
 			_ => {
-				let ident = self.next_token_value::<Ident>()?.0;
-				self.parse_record_id_from_ident(ctx, ident).await.map(Value::Thing)
+				//let ident = self.next_token_value::<Ident>()?.0;
+				//self.parse_record_id_from_ident(ctx, ident).await.map(|x| Value::Thing(x))
+				todo!()
 			}
 		}
+	}
+
+	async fn reparse_json_legacy_strand(
+		&mut self,
+		_stk: &mut Stk,
+		strand: Strand,
+	) -> ParseResult<Value> {
+		//TODO: Fix record id and others
+		Ok(Value::Strand(strand.into()))
 	}
 
 	async fn parse_json_object(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Object> {

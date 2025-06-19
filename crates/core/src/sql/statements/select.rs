@@ -21,7 +21,7 @@ pub struct SelectStatement {
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub explain: Option<Explain>,

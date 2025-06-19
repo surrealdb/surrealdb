@@ -13,7 +13,7 @@ mod namespace;
 mod param;
 mod sequence;
 mod table;
-mod user;
+pub mod user;
 
 pub use access::DefineAccessStatement;
 pub use analyzer::DefineAnalyzerStatement;
@@ -22,7 +22,7 @@ pub use bucket::DefineBucketStatement;
 pub use config::DefineConfigStatement;
 pub use database::DefineDatabaseStatement;
 pub use event::DefineEventStatement;
-pub use field::DefineFieldStatement;
+pub use field::{DefineDefault, DefineFieldStatement};
 pub use function::DefineFunctionStatement;
 pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;

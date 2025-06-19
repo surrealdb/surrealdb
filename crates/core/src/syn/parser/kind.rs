@@ -12,7 +12,7 @@ use crate::{
 	},
 };
 
-use super::{ParseResult, Parser, mac::unexpected};
+use super::{ParseResult, Parser, basic::NumberToken, mac::unexpected};
 
 impl Parser<'_> {
 	/// Parse a kind production.
@@ -37,7 +37,6 @@ impl Parser<'_> {
 						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
 					let kind = Kind::Either(kind);
-					let kind = kind.to_discriminated().unwrap_or(kind);
 					Ok(kind)
 				} else {
 					Ok(first)
@@ -64,8 +63,7 @@ impl Parser<'_> {
 						kind.push(ctx.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
 
-					let kind = Kind::Either(kind);
-					first = kind.to_discriminated().unwrap_or(kind);
+					first = Kind::Either(kind);
 				}
 				self.expect_closing_delimiter(t!(">"), delim)?;
 				Ok(Kind::Option(Box::new(first)))
@@ -224,14 +222,22 @@ impl Parser<'_> {
 				Ok(KindLiteral::String(s))
 			}
 			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {
-				self.next_token_value().map(KindLiteral::Number)
+				let kind = self.next_token_value::<NumberToken>()?;
+				let kind = match kind {
+					NumberToken::Float(f) => KindLiteral::Float(f),
+					NumberToken::Integer(i) => KindLiteral::Integer(i),
+					NumberToken::Decimal(d) => KindLiteral::Decimal(d),
+				};
+				Ok(kind)
 			}
 			TokenKind::Glued(Glued::Duration) => self.next_token_value().map(KindLiteral::Duration),
 			TokenKind::Digits => {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(peek, compound::numeric)?;
 				let v = match compound.value {
-					compound::Numeric::Number(x) => KindLiteral::Number(x),
+					compound::Numeric::Integer(x) => KindLiteral::Integer(x),
+					compound::Numeric::Float(x) => KindLiteral::Float(x),
+					compound::Numeric::Decimal(x) => KindLiteral::Decimal(x),
 					compound::Numeric::Duration(x) => KindLiteral::Duration(Duration(x)),
 				};
 				Ok(v)

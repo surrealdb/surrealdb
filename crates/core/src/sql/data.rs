@@ -20,9 +20,9 @@ pub enum Data {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Assignment {
-	place: Idiom,
-	operator: AssignOperator,
-	value: Expr,
+	pub place: Idiom,
+	pub operator: AssignOperator,
+	pub value: Expr,
 }
 
 impl Default for Data {

@@ -17,7 +17,7 @@ pub struct InsertStatement {
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub relation: bool,
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 }
 
 impl fmt::Display for InsertStatement {
@@ -40,7 +40,7 @@ impl fmt::Display for InsertStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " {v}")?
+			write!(f, " VERSION {v}")?
 		}
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?

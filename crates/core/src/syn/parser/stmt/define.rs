@@ -7,8 +7,10 @@ use crate::sql::statements::DefineApiStatement;
 use crate::sql::statements::define::config::ConfigInner;
 use crate::sql::statements::define::config::api::{ApiConfig, RequestMiddleware};
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
+use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineKind, DefineSequenceStatement,
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineKind,
+	DefineSequenceStatement,
 };
 use crate::sql::{Expr, Literal};
 use crate::syn::error::bail;
@@ -28,7 +30,6 @@ use crate::{
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		user,
 	},
 	syn::{
 		parser::{
@@ -213,13 +214,13 @@ impl Parser<'_> {
 		expected!(self, t!("ON"));
 		let base = self.parse_base(false)?;
 
-		let mut res = DefineUserStatement::from_parsed_values(
+		let mut res = DefineUserStatement {
+			kind,
 			name,
 			base,
-			kind,
-			vec!["Viewer".into()], // New users get the viewer role by default
-			user::UserDuration::default(),
-		);
+			roles: vec!["Viewer".into()], // New users get the viewer role by default
+			..DefineUserStatement::default()
+		};
 
 		loop {
 			match self.peek_kind() {
@@ -228,12 +229,19 @@ impl Parser<'_> {
 					res.comment = Some(self.next_token_value()?);
 				}
 				t!("PASSWORD") => {
-					self.pop_peek();
-					res.set_password(&self.next_token_value::<Strand>()?.into_inner());
+					let token = self.pop_peek();
+					if let PassType::Hash(_) = res.pass_type {
+						bail!("Unexpected token `PASSWORD`", @token.span => "Can't set both a passhash and a password");
+					}
+					res.pass_type =
+						PassType::Password(self.next_token_value::<Strand>()?.into_inner());
 				}
 				t!("PASSHASH") => {
-					self.pop_peek();
-					res.set_passhash(self.next_token_value::<Strand>()?.into_inner());
+					let token = self.pop_peek();
+					if let PassType::Password(_) = res.pass_type {
+						bail!("Unexpected token `PASSHASH`", @token.span => "Can't set both a passhash and a password");
+					}
+					res.pass_type = PassType::Hash(self.next_token_value::<Strand>()?.into_inner());
 				}
 				t!("ROLES") => {
 					self.pop_peek();
@@ -252,15 +260,17 @@ impl Parser<'_> {
 						roles.push(role);
 
 						if !self.eat(t!(",")) {
-							res.roles = roles;
 							break;
 						}
 					}
+					res.roles = roles;
 				}
 				t!("DURATION") => {
 					self.pop_peek();
-					while self.eat(t!("FOR")) {
-						match self.peek_kind() {
+					expected!(self, t!("FOR"));
+					loop {
+						let token = self.peek();
+						match token {
 							t!("TOKEN") => {
 								self.pop_peek();
 								let peek = self.peek();
@@ -270,7 +280,7 @@ impl Parser<'_> {
 										// For this reason, some token duration must be set.
 										unexpected!(self, peek, "a token duration");
 									}
-									_ => res.set_token_duration(Some(self.next_token_value()?)),
+									_ => res.token_duration = Some(self.next_token_value()?),
 								}
 							}
 							t!("SESSION") => {
@@ -278,14 +288,17 @@ impl Parser<'_> {
 								match self.peek_kind() {
 									t!("NONE") => {
 										self.pop_peek();
-										res.set_session_duration(None)
+										res.session_duration = None;
 									}
-									_ => res.set_session_duration(Some(self.next_token_value()?)),
+									_ => res.session_duration = Some(self.next_token_value()?),
 								}
 							}
-							_ => break,
+							_ => unexpected!(self, token, "`TOKEN` or `SESSION`"),
 						}
-						self.eat(t!(","));
+
+						if !self.eat(t!("FOR")) {
+							break;
+						}
 					}
 				}
 				_ => break,
@@ -316,7 +329,7 @@ impl Parser<'_> {
 		let mut res = DefineAccessStatement {
 			name,
 			base,
-			access_type: kind,
+			kind,
 			..Default::default()
 		};
 
@@ -340,9 +353,8 @@ impl Parser<'_> {
 							if !matches!(res.base, Base::Db) {
 								unexpected!(self, token, "a valid access type at this level");
 							}
-							let mut ac = access_type::RecordAccess {
-								..Default::default()
-							};
+							let mut ac = access_type::RecordAccess::default();
+
 							loop {
 								match self.peek_kind() {
 									t!("SIGNUP") => {
@@ -358,8 +370,10 @@ impl Parser<'_> {
 									_ => break,
 								}
 							}
+
 							while self.eat(t!("WITH")) {
-								match self.peek_kind() {
+								let token = self.peek();
+								match token.kind {
 									t!("JWT") => {
 										self.pop_peek();
 										let jwt = self.parse_jwt()?;
@@ -388,7 +402,13 @@ impl Parser<'_> {
 											jwt: ac.jwt.clone(),
 										});
 									}
-									_ => break,
+									_ => {
+										if self.settings.bearer_access_enabled {
+											unexpected!(self, token, "JWT or REFRESH")
+										} else {
+											unexpected!(self, token, "JWT")
+										}
+									}
 								}
 								self.eat(t!(","));
 							}
@@ -423,7 +443,7 @@ impl Parser<'_> {
 									ac.subject = access_type::BearerAccessSubject::Record;
 								}
 								_ => match &res.base {
-									Base::Db => unexpected!(self, peek, "either USER or RECORD"),
+									Base::Db => unexpected!(self, peek, "USER or RECORD"),
 									_ => unexpected!(self, peek, "USER"),
 								},
 							}
@@ -443,7 +463,8 @@ impl Parser<'_> {
 				t!("DURATION") => {
 					self.pop_peek();
 					while self.eat(t!("FOR")) {
-						match self.peek_kind() {
+						let peek = self.peek();
+						match peek.kind {
 							t!("GRANT") => {
 								self.pop_peek();
 								match self.peek_kind() {
@@ -478,7 +499,7 @@ impl Parser<'_> {
 									_ => res.duration.session = Some(self.next_token_value()?),
 								}
 							}
-							_ => break,
+							_ => unexpected!(self, peek, "GRANT, TOKEN or SESSIONS"),
 						}
 						self.eat(t!(","));
 					}
@@ -713,8 +734,7 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
-		let mut kind: Option<TableType> = None;
-
+		let mut set_table_type = false;
 		loop {
 			match self.peek_kind() {
 				t!("COMMENT") => {
@@ -731,18 +751,19 @@ impl Parser<'_> {
 					match peek.kind {
 						t!("NORMAL") => {
 							self.pop_peek();
-							kind = Some(TableType::Normal);
+							res.table_type = TableType::Normal;
 						}
 						t!("RELATION") => {
 							self.pop_peek();
-							kind = Some(TableType::Relation(self.parse_relation_schema()?));
+							res.table_type = TableType::Relation(self.parse_relation_schema()?);
 						}
 						t!("ANY") => {
 							self.pop_peek();
-							kind = Some(TableType::Any);
+							res.table_type = TableType::Any;
 						}
 						_ => unexpected!(self, peek, "`NORMAL`, `RELATION`, or `ANY`"),
 					}
+					set_table_type = true;
 				}
 				t!("SCHEMALESS") => {
 					self.pop_peek();
@@ -751,8 +772,9 @@ impl Parser<'_> {
 				t!("SCHEMAFULL") => {
 					self.pop_peek();
 					res.full = true;
-					if kind.is_none() {
-						kind = Some(TableType::Normal);
+					// TODO: Move logic out of parser.
+					if !set_table_type {
+						table_type = TableType::Normal;
 					}
 				}
 				t!("PERMISSIONS") => {
@@ -780,10 +802,6 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
-		}
-
-		if let Some(kind) = kind {
-			res.kind = kind;
 		}
 
 		Ok(res)
@@ -959,7 +977,7 @@ impl Parser<'_> {
 				}
 				t!("TYPE") => {
 					self.pop_peek();
-					res.kind = Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?);
+					res.field_kind = Some(ctx.run(|ctx| self.parse_inner_kind(ctx)).await?);
 				}
 				t!("READONLY") => {
 					self.pop_peek();
@@ -976,10 +994,12 @@ impl Parser<'_> {
 				t!("DEFAULT") => {
 					self.pop_peek();
 					if self.eat(t!("ALWAYS")) {
-						res.default_always = true;
+						res.default =
+							DefineDefault::Always(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
+					} else {
+						res.default =
+							DefineDefault::Set(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
-
-					res.default = Some(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();

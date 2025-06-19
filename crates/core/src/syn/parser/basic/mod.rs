@@ -1,16 +1,21 @@
+use std::mem;
+
+use rust_decimal::Decimal;
+
 use crate::{
 	sql::{
 		Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid,
 		language::Language,
 	},
 	syn::{
-		lexer::compound,
+		error::syntax_error,
+		lexer::compound::{self, NumberKind},
 		parser::{ParseResult, Parser, mac::unexpected},
 		token::{self, TokenKind, t},
 	},
 };
 
-use super::mac::pop_glued;
+use super::{GluedValue, mac::pop_glued};
 
 mod number;
 
@@ -186,6 +191,56 @@ impl TokenValue for Regex {
 				Ok(Regex(v))
 			}
 			_ => unexpected!(parser, peek, "a regex"),
+		}
+	}
+}
+
+pub enum NumberToken {
+	Float(f64),
+	Integer(i64),
+	Decimal(Decimal),
+}
+
+impl TokenValue for NumberToken {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.peek();
+		match token.kind {
+			TokenKind::Glued(token::Glued::Number) => {
+				parser.pop_peek();
+				let GluedValue::Number(x) = mem::take(&mut parser.glued_value) else {
+					panic!("Glued token was next but glued value was not of the correct value");
+				};
+				let number_str = parser.lexer.span_str(token.span);
+				match x {
+					NumberKind::Integer => number_str
+						.parse()
+						.map(NumberToken::Integer)
+						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
+					NumberKind::Float => number_str
+						.trim_end_matches("f")
+						.parse()
+						.map(NumberToken::Float)
+						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
+					NumberKind::Decimal => {
+						let number_str = number_str.trim_end_matches("dec");
+						let decimal = if number_str.contains(['e', 'E']) {
+							Decimal::from_scientific(number_str).map_err(
+								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
+							)?
+						} else {
+							Decimal::from_str_normalized(number_str).map_err(
+								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
+							)?
+						};
+						Ok(NumberToken::Decimal(decimal))
+					}
+				}
+			}
+			t!("+") | t!("-") | TokenKind::Digits => {
+				parser.pop_peek();
+				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
+			}
+			_ => unexpected!(parser, token, "a number"),
 		}
 	}
 }

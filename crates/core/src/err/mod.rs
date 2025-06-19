@@ -2,12 +2,12 @@ use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
 use crate::expr::idiom::Idiom;
 use crate::expr::index::Distance;
-use crate::expr::thing::Thing;
-use crate::expr::value::{CastError, CoerceError, Value};
+use crate::expr::value::{CastError, CoerceError};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
 use crate::syn::error::RenderedError as RenderedParserError;
+use crate::val::{RecordId, Value};
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
@@ -598,13 +598,13 @@ pub enum Error {
 	/// A database entry for the specified record already exists
 	#[error("Database record `{thing}` already exists")]
 	RecordExists {
-		thing: Thing,
+		thing: RecordId,
 	},
 
 	/// A database index entry for the specified record already exists
 	#[error("Database index `{index}` already contains {value}, with record `{thing}`")]
 	IndexExists {
-		thing: Thing,
+		thing: RecordId,
 		index: String,
 		value: String,
 	},

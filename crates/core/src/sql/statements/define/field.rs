@@ -6,9 +6,10 @@ use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DefineDefault {
+	#[default]
 	None,
 	Always(Expr),
 	Set(Expr),
@@ -42,7 +43,7 @@ impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,

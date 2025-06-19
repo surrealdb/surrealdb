@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use super::{Idiom, Table};
-use crate::expr::Expr;
+use crate::sql::Expr;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

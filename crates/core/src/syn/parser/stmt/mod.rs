@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use crate::sql::data::Assignment;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
@@ -10,7 +11,7 @@ use crate::sql::statements::{
 		AccessStatementShow, Subject,
 	},
 };
-use crate::sql::{Duration, Expr, Fields, Ident, Param, TopLevelExpr};
+use crate::sql::{AssignOperator, Duration, Expr, Fields, Ident, Param, TopLevelExpr};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
@@ -100,7 +101,7 @@ impl Parser<'_> {
 			}
 			t!("LIVE") => {
 				self.pop_peek();
-				self.parse_live_stmt(stk).await.map(TopLevelExpr::Live)
+				self.parse_live_stmt(stk).await.map(|x| TopLevelExpr::Live(Box::new(x)))
 			}
 			t!("OPTION") => {
 				self.pop_peek();
@@ -350,36 +351,50 @@ impl Parser<'_> {
 		expected!(self, t!("FOR"));
 		let next = self.next();
 		let mut stmt = match next.kind {
-			t!("ROOT") => InfoStatement::Root(false),
-			t!("NAMESPACE") => InfoStatement::Ns(false),
-			t!("DATABASE") => InfoStatement::Db(false, None),
+			t!("ROOT") => {
+				let structure = self.eat(t!("STRUCTURE"));
+				InfoStatement::Root(structure)
+			}
+			t!("NAMESPACE") => {
+				let structure = self.eat(t!("STRUCTURE"));
+				InfoStatement::Ns(structure)
+			}
+			t!("DATABASE") => {
+				let version = if self.eat(t!("VERSION")) {
+					Some(self.parse_expr_inherit(stk).await?)
+				} else {
+					None
+				};
+				let structure = self.eat(t!("STRUCTURE"));
+				InfoStatement::Db(structure, version)
+			}
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;
-				InfoStatement::Tb(ident, false, None)
+				let version = if self.eat(t!("VERSION")) {
+					Some(self.parse_expr_inherit(stk).await?)
+				} else {
+					None
+				};
+				let structure = self.eat(t!("STRUCTURE"));
+				InfoStatement::Tb(ident, structure, version)
 			}
 			t!("USER") => {
 				let ident = self.next_token_value()?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base(false)).transpose()?;
-				InfoStatement::User(ident, base, false)
+				let structure = self.eat(t!("STRUCTURE"));
+				InfoStatement::User(ident, base, structure)
 			}
 			t!("INDEX") => {
 				let index = self.next_token_value()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let table = self.next_token_value()?;
-				InfoStatement::Index(index, table, false)
+				let structure = self.eat(t!("STRUCTURE"));
+				InfoStatement::Index(index, table, structure)
 			}
 			_ => unexpected!(self, next, "an info target"),
 		};
 
-		if let Some(version) = self.try_parse_version(stk).await? {
-			stmt = stmt.versionize(version);
-		}
-
-		if self.peek_kind() == t!("STRUCTURE") {
-			self.pop_peek();
-			stmt = stmt.structurize();
-		};
 		Ok(stmt)
 	}
 
@@ -417,13 +432,18 @@ impl Parser<'_> {
 		};
 		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
-			t!("$param") => SqlValue::Param(self.next_token_value()?),
-			_ => SqlValue::Table(self.next_token_value()?),
+			t!("$param") => Expr::Param(self.next_token_value()?),
+			_ => Expr::Table(self.next_token_value()?),
 		};
 		let cond = self.try_parse_condition(stk).await?;
 		let fetch = self.try_parse_fetch(stk).await?;
 
-		Ok(LiveStatement::from_source_parts(expr, what, cond, fetch))
+		Ok(LiveStatement {
+			expr,
+			what,
+			cond,
+			fetch,
+		})
 	}
 
 	/// Parsers a OPTION statement.
@@ -581,6 +601,24 @@ impl Parser<'_> {
 		let error = self.parse_expr_inherit(ctx).await?;
 		Ok(ThrowStatement {
 			error,
+		})
+	}
+
+	pub(super) async fn parse_assignment(&mut self, stk: &mut Stk) -> ParseResult<Assignment> {
+		let place = self.parse_plain_idiom(stk).await?;
+		let token = self.next();
+		let operator = match token.kind {
+			t!("=") => AssignOperator::Assign,
+			t!("+=") => AssignOperator::Add,
+			t!("-=") => AssignOperator::Subtract,
+			t!("+?=") => AssignOperator::Extend,
+			_ => unexpected!(self, token, "an assign operator"),
+		};
+		let value = stk.run(|stk| self.parse_expr_field(stk)).await?;
+		Ok(Assignment {
+			place,
+			operator,
+			value,
 		})
 	}
 }

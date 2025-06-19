@@ -17,7 +17,11 @@ impl Parser<'_> {
 		let what = self.parse_what_list(ctx).await?;
 		let data = self.try_parse_data(ctx).await?;
 		let output = self.try_parse_output(ctx).await?;
-		let version = self.try_parse_version(ctx).await?;
+		let version = if self.eat(t!("VERSION")) {
+			Some(self.parse_expr_field(ctx).await?)
+		} else {
+			None
+		};
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 

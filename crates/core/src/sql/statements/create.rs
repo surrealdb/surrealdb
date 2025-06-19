@@ -17,7 +17,7 @@ pub struct CreateStatement {
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 }
 
 impl fmt::Display for CreateStatement {
@@ -34,7 +34,7 @@ impl fmt::Display for CreateStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " {v}")?
+			write!(f, " VERSION {v}")?
 		}
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?

@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Data, Idiom, statements::InsertStatement},
+	sql::{Data, Expr, Idiom, statements::InsertStatement},
 	syn::{
 		error::bail,
 		parser::{ParseResult, Parser, mac::expected},
@@ -20,11 +20,11 @@ impl Parser<'_> {
 			let r = match self.peek().kind {
 				t!("$param") => {
 					let param = self.next_token_value()?;
-					SqlValue::Param(param)
+					Expr::Param(param)
 				}
 				_ => {
 					let table = self.next_token_value()?;
-					SqlValue::Table(table)
+					Expr::Table(table)
 				}
 			};
 			Some(r)
@@ -40,7 +40,12 @@ impl Parser<'_> {
 			None
 		};
 		let output = self.try_parse_output(ctx).await?;
-		let version = self.try_parse_version(ctx).await?;
+
+		let version = if self.eat(t!("VERSION")) {
+			Some(self.parse_expr_field(ctx).await?)
+		} else {
+			None
+		};
 		let timeout = self.try_parse_timeout()?;
 		let parallel = self.eat(t!("PARALLEL"));
 		Ok(InsertStatement {
@@ -54,14 +59,6 @@ impl Parser<'_> {
 			relation,
 			version,
 		})
-	}
-
-	fn extract_idiom(subquery: Subquery) -> Option<Idiom> {
-		let Subquery::Value(SqlValue::Idiom(idiom)) = subquery else {
-			return None;
-		};
-
-		Some(idiom)
 	}
 
 	async fn parse_insert_values(&mut self, ctx: &mut Stk) -> ParseResult<Data> {
@@ -89,11 +86,11 @@ impl Parser<'_> {
 
 			if !self.eat(t!("VALUES")) {
 				// found a subquery
-				return Ok(Data::SingleExpression(SqlValue::Subquery(Box::new(subquery))));
+				return Ok(Data::SingleExpression(subquery));
 			}
 
 			// found an values expression, so subquery must be an idiom
-			let Some(idiom) = Self::extract_idiom(subquery) else {
+			let Expr::Idiom(idiom) = subquery else {
 				bail!("Invalid value, expected an idiom in INSERT VALUES statement.",
 					@subquery_span => "Here only idioms are allowed")
 			};
@@ -102,7 +99,7 @@ impl Parser<'_> {
 			select_span
 		} else {
 			// found an values expression, so subquery must be an idiom
-			let Some(idiom) = Self::extract_idiom(subquery) else {
+			let Expr::Idiom(idiom) = subquery else {
 				bail!("Invalid value, expected an idiom in INSERT VALUES statement.",
 					@subquery_span => "Here only idioms are allowed")
 			};
@@ -159,22 +156,19 @@ impl Parser<'_> {
 		))
 	}
 
-	async fn parse_insert_update(&mut self, ctx: &mut Stk) -> ParseResult<Data> {
+	async fn parse_insert_update(&mut self, stk: &mut Stk) -> ParseResult<Data> {
 		expected!(self, t!("DUPLICATE"));
 		expected!(self, t!("KEY"));
 		expected!(self, t!("UPDATE"));
-		let l = self.parse_plain_idiom(ctx).await?;
-		let o = self.parse_assigner()?;
-		let r = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
-		let mut data = vec![(l, o, r)];
 
-		while self.eat(t!(",")) {
-			let l = self.parse_plain_idiom(ctx).await?;
-			let o = self.parse_assigner()?;
-			let r = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
-			data.push((l, o, r))
+		let mut res = Vec::new();
+		loop {
+			res.push(self.parse_assignment(stk).await?);
+
+			if !self.eat(t!(",")) {
+				break;
+			}
 		}
-
-		Ok(Data::UpdateExpression(data))
+		Ok(Data::UpdateExpression(res))
 	}
 }

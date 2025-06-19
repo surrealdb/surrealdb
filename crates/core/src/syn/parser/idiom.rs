@@ -1,3 +1,5 @@
+use std::mem;
+
 use reblessive::Stk;
 
 use crate::{
@@ -7,15 +9,16 @@ use crate::{
 		part::{DestructurePart, Recurse, RecurseInstruction},
 	},
 	syn::{
-		error::bail,
-		lexer::compound::Numeric,
+		error::{bail, syntax_error},
+		lexer::compound::{self, NumberKind, Numeric},
 		token::{Glued, Span, TokenKind, t},
 	},
 };
 
 use super::{
-	ParseResult, Parser,
-	mac::{expected, unexpected},
+	GluedValue, ParseResult, Parser,
+	basic::NumberToken,
+	mac::{expected, pop_glued, unexpected},
 };
 
 impl Parser<'_> {
@@ -351,7 +354,6 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 	) -> ParseResult<Option<RecurseInstruction>> {
 		let instruction = if self.eat(t!("+")) {
-			let what = "instruction";
 			let kind = self.next_token_value::<Ident>()?;
 			if kind.0.eq_ignore_ascii_case("path") {
 				let mut inclusive = false;
@@ -501,8 +503,13 @@ impl Parser<'_> {
 							Part::Last
 						}
 						TokenKind::Digits | t!("+") | TokenKind::Glued(Glued::Number) => {
-							let number = self.next_token_value::<Numeric>()?.into_literal();
-							Part::Value(number)
+							let number = self.next_token_value::<NumberToken>()?;
+							let expr = match number {
+								NumberToken::Float(x) => Expr::Literal(Literal::Float(x)),
+								NumberToken::Integer(x) => Expr::Literal(Literal::Integer(x)),
+								NumberToken::Decimal(x) => Expr::Literal(Literal::Decimal(x)),
+							};
+							Part::Value(expr)
 						}
 						t!("-") => {
 							let peek_digit = self.peek_whitespace1();
@@ -547,8 +554,27 @@ impl Parser<'_> {
 							self.pop_peek();
 							Part::All
 						}
-						TokenKind::Digits | t!("+") | TokenKind::Glued(Glued::Number) => {
-							let number = self.next_token_value()?;
+						TokenKind::Digits | t!("+") => {
+							let number = self.lexer.lex_compound(self.next(), compound::numeric)?;
+							let number = match number.value {
+								Numeric::Duration(x) => {
+									bail!("Unexpected token `duration` expected a number", @number.span );
+								}
+								Numeric::Integer(x) => Expr::Literal(Literal::Integer(x)),
+								Numeric::Float(x) => Expr::Literal(Literal::Float(x)),
+								Numeric::Decimal(x) => Expr::Literal(Literal::Decimal(x)),
+							};
+							Part::Value(number)
+						}
+						TokenKind::Glued(Glued::Number) => {
+							let number = self.next_token_value::<NumberToken>()?;
+							let number = match number {
+								NumberToken::Float(f) => Expr::Literal(Literal::Float(x)),
+								NumberToken::Integer(i) => Expr::Literal(Literal::Integer(i)),
+								NumberToken::Decimal(decimal) => {
+									Expr::Literal(Literal::Decimal(decimal))
+								}
+							};
 							Part::Value(number)
 						}
 						t!("-") => {
@@ -587,9 +613,9 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects to be at the start of a what list.
 	pub(super) async fn parse_what_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Expr>> {
-		let mut res = vec![self.parse_expr(ctx).await?];
+		let mut res = vec![self.parse_expr_inherit(ctx).await?];
 		while self.eat(t!(",")) {
-			res.push(self.parse_expr(ctx).await?)
+			res.push(self.parse_expr_inherit(ctx).await?)
 		}
 		Ok(res)
 	}

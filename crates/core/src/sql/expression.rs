@@ -1,7 +1,8 @@
 use crate::sql::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
-	IfelseStatement, InfoStatement, InsertStatement, RebuildStatement, RelateStatement,
-	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
+	IfelseStatement, InfoStatement, InsertStatement, OutputStatement, RebuildStatement,
+	RelateStatement, RemoveStatement, SelectStatement, SetStatement, UpdateStatement,
+	UpsertStatement,
 };
 use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, FunctionCall, Future, Idiom, Literal, Mock, Model,
@@ -42,9 +43,9 @@ pub enum Expr {
 
 	Break,
 	Continue,
-	Return(Box<Expr>),
 	Throw(Box<Expr>),
 
+	Return(Box<OutputStatement>),
 	If(Box<IfelseStatement>),
 	Select(Box<SelectStatement>),
 	Create(Box<CreateStatement>),

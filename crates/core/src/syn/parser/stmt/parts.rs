@@ -2,13 +2,14 @@
 
 use reblessive::Stk;
 
+use crate::sql::data::Assignment;
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
-use crate::sql::{Explain, Fetch, With};
+use crate::sql::{AssignOperator, Explain, Expr, Fetch, With};
 use crate::syn::error::bail;
 use crate::{
 	sql::{
 		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, Tables, Timeout, View,
+		Permission, Permissions, Timeout, View,
 		changefeed::ChangeFeed,
 		index::{Distance, VectorType},
 	},
@@ -30,16 +31,14 @@ pub(crate) enum MissingKind {
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
-	pub async fn try_parse_data(&mut self, ctx: &mut Stk) -> ParseResult<Option<Data>> {
+	pub async fn try_parse_data(&mut self, stk: &mut Stk) -> ParseResult<Option<Data>> {
 		let res = match self.peek().kind {
 			t!("SET") => {
 				self.pop_peek();
 				let mut set_list = Vec::new();
 				loop {
-					let idiom = self.parse_plain_idiom(ctx).await?;
-					let operator = self.parse_assigner()?;
-					let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
-					set_list.push((idiom, operator, value));
+					let assignment = self.parse_assignment(stk).await?;
+					set_list.push(assignment);
 					if !self.eat(t!(",")) {
 						break;
 					}
@@ -48,24 +47,24 @@ impl Parser<'_> {
 			}
 			t!("UNSET") => {
 				self.pop_peek();
-				let idiom_list = self.parse_idiom_list(ctx).await?;
+				let idiom_list = self.parse_idiom_list(stk).await?;
 				Data::UnsetExpression(idiom_list)
 			}
 			t!("PATCH") => {
 				self.pop_peek();
-				Data::PatchExpression(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
+				Data::PatchExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			t!("MERGE") => {
 				self.pop_peek();
-				Data::MergeExpression(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
+				Data::MergeExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			t!("REPLACE") => {
 				self.pop_peek();
-				Data::ReplaceExpression(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
+				Data::ReplaceExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			t!("CONTENT") => {
 				self.pop_peek();
-				Data::ContentExpression(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
+				Data::ContentExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 			}
 			_ => return Ok(None),
 		};
@@ -137,7 +136,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 	) -> ParseResult<Vec<Fetch>> {
 		match self.peek().kind {
-			t!("$param") => Ok(vec![SqlValue::Param(self.next_token_value()?).into()]),
+			t!("$param") => Ok(vec![Fetch(Expr::Param(self.next_token_value()?))]),
 			t!("TYPE") => {
 				let fields = self.parse_fields(ctx).await?;
 				let fetches = fields
@@ -149,7 +148,7 @@ impl Parser<'_> {
 							..
 						} = f
 						{
-							Some(expr.into())
+							Some(Fetch(expr))
 						} else {
 							None
 						}
@@ -157,7 +156,7 @@ impl Parser<'_> {
 					.collect();
 				Ok(fetches)
 			}
-			_ => Ok(vec![SqlValue::Idiom(self.parse_plain_idiom(ctx).await?).into()]),
+			_ => Ok(vec![Fetch(Expr::Idiom(self.parse_plain_idiom(ctx).await?))]),
 		}
 	}
 
@@ -177,7 +176,7 @@ impl Parser<'_> {
 		idiom_span: Span,
 	) -> ParseResult<&'a Field> {
 		let mut found = None;
-		for field in fields.iter() {
+		for field in fields.0.iter() {
 			let Field::Single {
 				expr,
 				alias,
@@ -194,7 +193,7 @@ impl Parser<'_> {
 			}
 
 			match expr {
-				SqlValue::Idiom(x) => {
+				Expr::Idiom(x) => {
 					if idiom == x {
 						found = Some(field);
 						break;
@@ -254,7 +253,7 @@ impl Parser<'_> {
 
 		self.eat(t!("BY"));
 
-		let has_all = fields.contains(&Field::All);
+		let has_all = fields.0.contains(&Field::All);
 
 		let before = self.peek().span;
 		let group = self.parse_basic_idiom(ctx).await?;
@@ -487,7 +486,7 @@ impl Parser<'_> {
 
 		Ok(View {
 			expr: fields,
-			what: Tables(from),
+			what: from,
 			cond,
 			group,
 		})

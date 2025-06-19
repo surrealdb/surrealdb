@@ -10,7 +10,7 @@ pub enum PrefixOperator {
 	/// `+`
 	Positive,
 	/// `-`
-	Negative,
+	Negate,
 	/// `..`
 	Range,
 	/// `..=`
@@ -23,7 +23,7 @@ impl From<PrefixOperator> for crate::expr::PrefixOperator {
 		match value {
 			PrefixOperator::Not => crate::expr::PrefixOperator::Not,
 			PrefixOperator::Positive => crate::expr::PrefixOperator::Positive,
-			PrefixOperator::Negative => crate::expr::PrefixOperator::Negative,
+			PrefixOperator::Negate => crate::expr::PrefixOperator::Negative,
 			PrefixOperator::Range => crate::expr::PrefixOperator::Range,
 			PrefixOperator::RangeInclusive => crate::expr::PrefixOperator::RangeInclusive,
 			PrefixOperator::Cast(k) => crate::expr::PrefixOperator::Cast(k.into()),
@@ -36,7 +36,7 @@ impl From<crate::expr::PrefixOperator> for PrefixOperator {
 		match value {
 			crate::expr::PrefixOperator::Not => PrefixOperator::Not,
 			crate::expr::PrefixOperator::Positive => PrefixOperator::Positive,
-			crate::expr::PrefixOperator::Negative => PrefixOperator::Negative,
+			crate::expr::PrefixOperator::Negative => PrefixOperator::Negate,
 			crate::expr::PrefixOperator::Range => PrefixOperator::Range,
 			crate::expr::PrefixOperator::RangeInclusive => PrefixOperator::RangeInclusive,
 			crate::expr::PrefixOperator::Cast(k) => PrefixOperator::Cast(k.into()),
@@ -49,7 +49,7 @@ impl fmt::Display for PrefixOperator {
 		match self {
 			Self::Not => write!(f, "!"),
 			Self::Positive => write!(f, "+"),
-			Self::Negative => write!(f, "-"),
+			Self::Negate => write!(f, "-"),
 			Self::Range => write!(f, ".."),
 			Self::RangeInclusive => write!(f, "..="),
 			Self::Cast(kind) => write!(f, "<{kind}>"),
@@ -411,8 +411,8 @@ pub enum BindingPower {
 	Power,
 	Range,
 	Nullish,
-	Unary,
-	Postfix,
+	Prefix,
+	Call,
 	Prime,
 }
 
@@ -479,7 +479,7 @@ impl BindingPower {
 		match expr {
 			Expr::Prefix {
 				..
-			} => BindingPower::Unary,
+			} => BindingPower::Prefix,
 			Expr::Binary {
 				op,
 				..

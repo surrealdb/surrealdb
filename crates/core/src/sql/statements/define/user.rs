@@ -1,6 +1,14 @@
 use super::DefineKind;
-use crate::sql::{Base, Ident, Strand, escape::QuoteStr, fmt::Fmt, user::UserDuration};
+use crate::sql::{Base, Duration, Ident, Strand, escape::QuoteStr, fmt::Fmt, user::UserDuration};
 use std::fmt::{self, Display};
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum PassType {
+	#[default]
+	Unset,
+	Hash(String),
+	Password(String),
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -8,9 +16,11 @@ pub struct DefineUserStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
 	pub base: Base,
-	pub hash: String,
+	pub pass_type: PassType,
 	pub roles: Vec<Ident>,
-	pub duration: UserDuration,
+	pub token_duration: Option<Duration>,
+	pub session_duration: Option<Duration>,
+
 	pub comment: Option<Strand>,
 }
 

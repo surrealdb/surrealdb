@@ -1,5 +1,4 @@
-use crate::expr::Expr;
-use crate::expr::{Kind, fmt::Fmt, index::Distance};
+use crate::expr::{Expr, Kind, fmt::Fmt, index::Distance};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -54,7 +53,7 @@ impl fmt::Display for PostfixOperator {
 	}
 }
 
-#[revision(revision = 1)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum BinaryOperator {
@@ -246,7 +245,7 @@ pub enum BindingPower {
 	Power,
 	Range,
 	Nullish,
-	Unary,
+	Prefix,
 	Postfix,
 	Prime,
 }
@@ -260,7 +259,7 @@ impl BindingPower {
 	/// powers.
 	///
 	/// This function returns the binding power for if the operator is used in the infix position.
-	pub fn for_binary_opator(op: &BinaryOperator) -> Self {
+	pub fn for_binary_operator(op: &BinaryOperator) -> Self {
 		match op {
 			BinaryOperator::Or => BindingPower::Or,
 			BinaryOperator::And => BindingPower::And,
@@ -307,18 +306,29 @@ impl BindingPower {
 		}
 	}
 
+	pub fn for_postfix_operator(op: &PostfixOperator) -> Self {
+		match op {
+			PostfixOperator::Range | PostfixOperator::RangeSkip => BindingPower::Range,
+			PostfixOperator::Call(_) => BindingPower::Postfix,
+		}
+	}
+
 	/// Returns the binding power for this expression. This is generally `BindingPower::Prime` as
 	/// most value variants are prime expressions, however some like Value::Expression and
 	/// Value::Range have a different binding power.
 	pub fn for_expr(expr: &Expr) -> BindingPower {
 		match expr {
-			Expr::Unary {
+			Expr::Prefix {
 				..
-			} => BindingPower::Unary,
+			} => BindingPower::Prefix,
+			Expr::Postfix {
+				op,
+				..
+			} => BindingPower::for_postfix_operator,
 			Expr::Binary {
 				op,
 				..
-			} => BindingPower::for_binary_opator(op),
+			} => BindingPower::for_binary_operator(op),
 			_ => BindingPower::Prime,
 		}
 	}

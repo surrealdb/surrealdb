@@ -246,7 +246,6 @@ pub enum KindLiteral {
 	Duration(Duration),
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
-	DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
 	Bool(bool),
 }
 
@@ -294,40 +293,6 @@ impl Display for KindLiteral {
 					f.write_str(" }")
 				}
 			}
-			KindLiteral::DiscriminatedObject(_, discriminants) => {
-				let mut f = Pretty::from(f);
-
-				for (i, o) in discriminants.iter().enumerate() {
-					if i > 0 {
-						f.write_str(" | ")?;
-					}
-
-					if is_pretty() {
-						f.write_char('{')?;
-					} else {
-						f.write_str("{ ")?;
-					}
-					if !o.is_empty() {
-						let indent = pretty_indent();
-						write!(
-							f,
-							"{}",
-							Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
-								args,
-								|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
-							)),)
-						)?;
-						drop(indent);
-					}
-					if is_pretty() {
-						f.write_char('}')?;
-					} else {
-						f.write_str(" }")?;
-					}
-				}
-
-				Ok(())
-			}
 		}
 	}
 }
@@ -344,16 +309,9 @@ impl From<KindLiteral> for crate::expr::kind::KindLiteral {
 				crate::expr::kind::KindLiteral::Array(a.into_iter().map(Into::into).collect())
 			}
 			KindLiteral::Object(o) => crate::expr::kind::KindLiteral::Object(
+				// TODO: DiscriminatedObject
 				o.into_iter().map(|(k, v)| (k, v.into())).collect(),
 			),
-			KindLiteral::DiscriminatedObject(k, o) => {
-				crate::expr::kind::KindLiteral::DiscriminatedObject(
-					k,
-					o.into_iter()
-						.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
-						.collect(),
-				)
-			}
 			KindLiteral::Bool(b) => crate::expr::kind::KindLiteral::Bool(b),
 		}
 	}

@@ -1,10 +1,11 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-mod array;
-mod number;
-mod object;
+pub mod array;
+pub mod number;
+pub mod object;
 mod range;
 mod thing;
+mod value;
 pub use array::Array;
 pub use number::Number;
 pub use object::Object;
@@ -23,6 +24,7 @@ use crate::expr::{
 };
 use crate::expr::{Closure, FlowResult, Ident, Kind};
 use crate::fnc::util::string::fuzzy::Fuzzy;
+use crate::sql::Table;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -138,7 +140,7 @@ impl Value {
 	/// Check if this Value is a single Thing
 	pub fn is_thing_single(&self) -> bool {
 		match self {
-			Value::Thing(t) => !matches!(t.id, RecordIdKeyLit::Range(_)),
+			Value::Thing(t) => !matches!(t.key, RecordIdKeyLit::Range(_)),
 			_ => false,
 		}
 	}
@@ -148,7 +150,7 @@ impl Value {
 		matches!(
 			self,
 			Value::Thing(RecordId {
-				id: RecordIdKeyLit::Range(_),
+				key: RecordIdKey::Range { .. },
 				..
 			})
 		)
@@ -158,7 +160,7 @@ impl Value {
 	pub fn is_record_of_table(&self, table: String) -> bool {
 		match self {
 			Value::Thing(RecordId {
-				tb,
+				table: tb,
 				..
 			}) => *tb == table,
 			_ => false,
@@ -392,6 +394,9 @@ impl Value {
 			Self::Geometry(Geometry::Collection(_)) => "geometry<collection>",
 			Self::Bytes(_) => "bytes",
 			Self::Range(_) => "range",
+			Self::Thing(_) => todo!(),
+			Self::Closure(_) => todo!(),
+			Self::Range(_) => todo!(),
 		}
 	}
 

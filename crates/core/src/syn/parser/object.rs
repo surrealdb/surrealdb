@@ -29,7 +29,7 @@ impl Parser<'_> {
 
 		// Now check first if it can be an object.
 		if self.glue_and_peek1()?.kind == t!(":") {
-			self.parse_object(ctx, start).await.map(Literal::Object).map(Expr::Literal)
+			return self.parse_object(ctx, start).await.map(Literal::Object).map(Expr::Literal);
 		}
 
 		// not an object so instead parse as a block.
@@ -57,7 +57,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		start: Span,
 	) -> ParseResult<Vec<ObjectEntry>> {
-		let res = Vec::new();
+		let mut res = Vec::new();
 		loop {
 			if self.eat(t!("}")) {
 				return Ok(res);

@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::statements::IfelseStatement,
+	sql::{Expr, statements::IfelseStatement},
 	syn::{
 		parser::{
 			ParseResult, Parser,
@@ -30,7 +30,7 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				let body = self.parse_block(ctx, next.span).await?;
-				res.exprs.push((condition, body.into()));
+				res.exprs.push((condition, Expr::Block(Box::new(body))));
 				self.parse_bracketed_tail(ctx, &mut res).await?;
 			}
 			_ => unexpected!(self, next, "THEN or '{'"),
@@ -81,11 +81,11 @@ impl Parser<'_> {
 						let condition = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 						let span = expected!(self, t!("{")).span;
 						let body = self.parse_block(ctx, span).await?;
-						res.exprs.push((condition, body.into()));
+						res.exprs.push((condition, Expr::Block(Box::new(body))));
 					} else {
 						let span = expected!(self, t!("{")).span;
 						let value = self.parse_block(ctx, span).await?;
-						res.close = Some(value.into());
+						res.close = Some(Expr::Block(Box::new(value)));
 						return Ok(());
 					}
 				}

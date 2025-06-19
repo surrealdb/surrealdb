@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::{
-	sql::{Expr, Function, Ident, Model},
+	sql::{Expr, Function, FunctionCall, Ident, Model},
 	syn::{
 		error::syntax_error,
 		parser::mac::{expected, expected_whitespace, unexpected},
@@ -15,7 +15,10 @@ impl Parser<'_> {
 	/// Parse a custom function function call
 	///
 	/// Expects `fn` to already be called.
-	pub(super) async fn parse_custom_function(&mut self, ctx: &mut Stk) -> ParseResult<Function> {
+	pub(super) async fn parse_custom_function(
+		&mut self,
+		ctx: &mut Stk,
+	) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {
@@ -24,13 +27,14 @@ impl Parser<'_> {
 		}
 		expected!(self, t!("(")).span;
 		let args = self.parse_function_args(ctx).await?;
-		Ok(Function::Custom(name, args))
+		let name = Function::Custom(name);
+		Ok(FunctionCall {
+			receiver: name,
+			arguments: args,
+		})
 	}
 
-	pub(super) async fn parse_function_args(
-		&mut self,
-		ctx: &mut Stk,
-	) -> ParseResult<Vec<SqlValue>> {
+	pub(super) async fn parse_function_args(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Expr>> {
 		let start = self.last_span();
 		let mut args = Vec::new();
 		loop {
@@ -52,7 +56,7 @@ impl Parser<'_> {
 	/// Parse a model invocation
 	///
 	/// Expects `ml` to already be called.
-	pub(super) async fn parse_model(&mut self, ctx: &mut Stk) -> ParseResult<Model> {
+	pub(super) async fn parse_model(&mut self, ctx: &mut Stk) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
 		let mut name = self.next_token_value::<Ident>()?.0;
 		while self.eat(t!("::")) {
@@ -109,10 +113,15 @@ impl Parser<'_> {
 				break;
 			}
 		}
-		Ok(Model {
+
+		let func = Function::Model(Model {
 			name,
 			version: format!("{}.{}.{}", major, minor, patch),
-			args,
+		});
+
+		Ok(FunctionCall {
+			receiver: func,
+			arguments: args,
 		})
 	}
 }
