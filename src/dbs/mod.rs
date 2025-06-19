@@ -520,6 +520,7 @@ mod tests {
 		let server1 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
+				.and(path("/"))
 				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
 				.expect(1);
 
