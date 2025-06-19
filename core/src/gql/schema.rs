@@ -777,6 +777,15 @@ pub async fn generate_schema(
 	scalar_debug_validated!(schema, "Object", Kind::Object);
 	scalar_debug_validated!(schema, "Any", Kind::Any);
 
+	scalar_debug_validated!(schema, "geometry", Kind::Geometry(vec![]));
+	scalar_debug_validated!(schema, "point", Kind::Geometry(vec!["point".to_string()]));
+	scalar_debug_validated!(schema, "line", Kind::Geometry(vec!["line".to_string()]));
+	scalar_debug_validated!(schema, "polygon", Kind::Geometry(vec!["polygon".to_string()]));
+	scalar_debug_validated!(schema, "multipoint", Kind::Geometry(vec!["multipoint".to_string()]));
+	scalar_debug_validated!(schema, "multiline", Kind::Geometry(vec!["multiline".to_string()]));
+	scalar_debug_validated!(schema, "multipolygon", Kind::Geometry(vec!["multipolygon".to_string()]));
+	scalar_debug_validated!(schema, "collection", Kind::Geometry(vec!["collection".to_string()]));
+
 	let id_interface =
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
 	schema = schema.register(id_interface);
@@ -864,7 +873,141 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
 				.collect(),
 		),
-		SqlValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
+		SqlValue::Geometry(geom) => {
+			// Convert geometry to GeoJSON format
+			match geom {
+				crate::sql::Geometry::Point(point) => {
+					let coords = vec![
+						GqlValue::Number(Number::from_f64(point.x()).unwrap()),
+						GqlValue::Number(Number::from_f64(point.y()).unwrap()),
+					];
+					{
+						let mut map = IndexMap::new();
+						map.insert(Name::new("type"), GqlValue::String("Point".to_string()));
+						map.insert(Name::new("coordinates"), GqlValue::List(coords));
+						GqlValue::Object(map)
+					}
+				}
+				crate::sql::Geometry::Line(line) => {
+					let coords: Vec<GqlValue> = line.coords()
+						.map(|coord| GqlValue::List(vec![
+							GqlValue::Number(Number::from_f64(coord.x).unwrap()),
+							GqlValue::Number(Number::from_f64(coord.y).unwrap()),
+						]))
+						.collect();
+					{
+						let mut map = IndexMap::new();
+						map.insert(Name::new("type"), GqlValue::String("LineString".to_string()));
+						map.insert(Name::new("coordinates"), GqlValue::List(coords));
+						GqlValue::Object(map)
+					}
+				}
+				crate::sql::Geometry::Polygon(polygon) => {
+					let exterior_coords: Vec<GqlValue> = polygon.exterior()
+						.coords()
+						.map(|coord| GqlValue::List(vec![
+							GqlValue::Number(Number::from_f64(coord.x).unwrap()),
+							GqlValue::Number(Number::from_f64(coord.y).unwrap()),
+						]))
+						.collect();
+
+					let mut rings = vec![GqlValue::List(exterior_coords)];
+					for interior in polygon.interiors() {
+						let interior_coords: Vec<GqlValue> = interior
+							.coords()
+							.map(|coord| GqlValue::List(vec![
+								GqlValue::Number(Number::from_f64(coord.x).unwrap()),
+								GqlValue::Number(Number::from_f64(coord.y).unwrap()),
+							]))
+							.collect();
+						rings.push(GqlValue::List(interior_coords));
+					}
+
+					{
+						let mut map = IndexMap::new();
+						map.insert(Name::new("type"), GqlValue::String("Polygon".to_string()));
+						map.insert(Name::new("coordinates"), GqlValue::List(rings));
+						GqlValue::Object(map)
+					}
+				}
+				crate::sql::Geometry::MultiPoint(multipoint) => {
+					let coords: Vec<GqlValue> = multipoint.iter()
+						.map(|point| GqlValue::List(vec![
+							GqlValue::Number(Number::from_f64(point.x()).unwrap()),
+							GqlValue::Number(Number::from_f64(point.y()).unwrap()),
+						]))
+						.collect();
+					{
+						let mut map = IndexMap::new();
+						map.insert(Name::new("type"), GqlValue::String("MultiPoint".to_string()));
+						map.insert(Name::new("coordinates"), GqlValue::List(coords));
+						GqlValue::Object(map)
+					}
+				}
+				crate::sql::Geometry::MultiLine(multiline) => {
+					let coords: Vec<GqlValue> = multiline.iter()
+						.map(|line| {
+							let line_coords: Vec<GqlValue> = line.coords()
+								.map(|coord| GqlValue::List(vec![
+									GqlValue::Number(Number::from_f64(coord.x).unwrap()),
+									GqlValue::Number(Number::from_f64(coord.y).unwrap()),
+								]))
+								.collect();
+							GqlValue::List(line_coords)
+						})
+						.collect();
+					{
+						let mut map = IndexMap::new();
+						map.insert(Name::new("type"), GqlValue::String("MultiLineString".to_string()));
+						map.insert(Name::new("coordinates"), GqlValue::List(coords));
+						GqlValue::Object(map)
+					}
+				}
+				crate::sql::Geometry::MultiPolygon(multipolygon) => {
+					let coords: Vec<GqlValue> = multipolygon.iter()
+						.map(|polygon| {
+							let exterior_coords: Vec<GqlValue> = polygon.exterior()
+								.coords()
+								.map(|coord| GqlValue::List(vec![
+									GqlValue::Number(Number::from_f64(coord.x).unwrap()),
+									GqlValue::Number(Number::from_f64(coord.y).unwrap()),
+								]))
+								.collect();
+
+							let mut rings = vec![GqlValue::List(exterior_coords)];
+							for interior in polygon.interiors() {
+								let interior_coords: Vec<GqlValue> = interior
+									.coords()
+									.map(|coord| GqlValue::List(vec![
+										GqlValue::Number(Number::from_f64(coord.x).unwrap()),
+										GqlValue::Number(Number::from_f64(coord.y).unwrap()),
+									]))
+									.collect();
+								rings.push(GqlValue::List(interior_coords));
+							}
+							GqlValue::List(rings)
+						})
+						.collect();
+					{
+						let mut map = IndexMap::new();
+						map.insert(Name::new("type"), GqlValue::String("MultiPolygon".to_string()));
+						map.insert(Name::new("coordinates"), GqlValue::List(coords));
+						GqlValue::Object(map)
+					}
+				}
+				crate::sql::Geometry::Collection(geometries) => {
+					let geoms: Result<Vec<GqlValue>, GqlError> = geometries.iter()
+						.map(|g| sql_value_to_gql_value(SqlValue::Geometry(g.clone())))
+						.collect();
+					{
+						let mut map = IndexMap::new();
+						map.insert(Name::new("type"), GqlValue::String("GeometryCollection".to_string()));
+						map.insert(Name::new("geometries"), GqlValue::List(geoms?));
+						GqlValue::Object(map)
+					}
+				}
+			}
+		},
 		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
 		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
@@ -909,7 +1052,25 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 				TypeRef::named(ty_name)
 			}
 		},
-		Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
+		Kind::Geometry(ref geom_types) => {
+			if geom_types.is_empty() {
+				TypeRef::named("geometry")
+			} else if geom_types.len() == 1 {
+				TypeRef::named(geom_types[0].clone())
+			} else {
+				// Create a union type for multiple geometry types
+				let union_name = format!("geometry_{}", geom_types.join("_or_"));
+				let mut geom_union = Union::new(union_name.clone())
+					.description(format!("A geometry which is one of: {}", geom_types.join(", ")));
+
+				for geom_type in geom_types {
+					geom_union = geom_union.possible_type(geom_type.clone());
+				}
+
+				types.push(Type::Union(geom_union));
+				TypeRef::named(union_name)
+			}
+		},
 		Kind::Option(t) => {
 			let mut non_op_ty = *t;
 			while let Kind::Option(inner) = non_op_ty {
@@ -1403,8 +1564,108 @@ fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		// TODO: add geometry
-		Kind::Geometry(_) => Err(resolver_error("Geometry is not yet supported")),
+		// GeoJSON / Geometries
+		Kind::Geometry(ref geom_types) => match val {
+			GqlValue::String(s) => {
+				use crate::syn;
+				match syn::value(s) {
+					Ok(SqlValue::Geometry(geom)) => {
+						if !geom_types.is_empty() {
+							let geom_type_name = match geom {
+								crate::sql::Geometry::Point(_) => "point",
+								crate::sql::Geometry::Line(_) => "line",
+								crate::sql::Geometry::Polygon(_) => "polygon",
+								crate::sql::Geometry::MultiPoint(_) => "multipoint",
+								crate::sql::Geometry::MultiLine(_) => "multiline",
+								crate::sql::Geometry::MultiPolygon(_) => "multipolygon",
+								crate::sql::Geometry::Collection(_) => "collection",
+							};
+
+							if !geom_types.contains(&geom_type_name.to_string()) {
+								return Err(type_error(kind, val));
+							}
+						}
+						Ok(SqlValue::Geometry(geom))
+					}
+					_ => Err(type_error(kind, val)),
+				}
+			}
+			GqlValue::Object(obj) => {
+				if let (Some(GqlValue::String(geom_type)), Some(coordinates)) =
+					(obj.get("type"), obj.get("coordinates")) {
+
+					match geom_type.to_lowercase().as_str() {
+						"point" => {
+							if let GqlValue::List(coords) = coordinates {
+								if coords.len() == 2 {
+									if let (Some(GqlValue::Number(x)), Some(GqlValue::Number(y))) =
+										(coords.get(0), coords.get(1)) {
+										if let (Some(x_val), Some(y_val)) = (x.as_f64(), y.as_f64()) {
+											let geom = crate::sql::Geometry::Point((x_val, y_val).into());
+											if !geom_types.is_empty() && !geom_types.contains(&"point".to_string()) {
+												return Err(type_error(kind, val));
+											}
+											return Ok(SqlValue::Geometry(geom));
+										}
+									}
+								}
+							}
+						}
+						"linestring" => {
+							if let GqlValue::List(coords) = coordinates {
+								let mut line_coords = Vec::new();
+								for coord in coords {
+									if let GqlValue::List(point) = coord {
+										if point.len() == 2 {
+											if let (Some(GqlValue::Number(x)), Some(GqlValue::Number(y))) =
+												(point.get(0), point.get(1)) {
+												if let (Some(x_val), Some(y_val)) = (x.as_f64(), y.as_f64()) {
+													line_coords.push((x_val, y_val));
+												} else {
+													return Err(type_error(kind, val));
+												}
+											} else {
+												return Err(type_error(kind, val));
+											}
+										} else {
+											return Err(type_error(kind, val));
+										}
+									} else {
+										return Err(type_error(kind, val));
+									}
+								}
+								if line_coords.len() >= 2 {
+									let geom = crate::sql::Geometry::Line(line_coords.into());
+									if !geom_types.is_empty() && !geom_types.contains(&"line".to_string()) {
+										return Err(type_error(kind, val));
+									}
+									return Ok(SqlValue::Geometry(geom));
+								}
+							}
+						}
+						_ => return Err(type_error(kind, val)),
+					}
+				}
+				Err(type_error(kind, val))
+			}
+			GqlValue::List(coords) => {
+				// Handle simple point format [x, y]
+				if coords.len() == 2 {
+					if let (Some(GqlValue::Number(x)), Some(GqlValue::Number(y))) =
+						(coords.get(0), coords.get(1)) {
+						if let (Some(x_val), Some(y_val)) = (x.as_f64(), y.as_f64()) {
+							let geom = crate::sql::Geometry::Point((x_val, y_val).into());
+							if !geom_types.is_empty() && !geom_types.contains(&"point".to_string()) {
+								return Err(type_error(kind, val));
+							}
+							return Ok(SqlValue::Geometry(geom));
+						}
+					}
+				}
+				Err(type_error(kind, val))
+			}
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::Option(k) => match val {
 			GqlValue::Null => Ok(SqlValue::None),
 			v => gql_to_sql_kind(v, *k),
