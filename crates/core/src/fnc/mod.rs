@@ -197,6 +197,7 @@ pub fn synchronous(
 		"bytes::len" => bytes::len,
 		//
 		"count" => count::count,
+		"count_value" => count::count_value,
 		//
 		"crypto::blake3" => crypto::blake3,
 		"crypto::md5" => crypto::md5,
