@@ -92,6 +92,14 @@ impl GQLTx {
 		self.opt.version
 	}
 
+	pub fn get_context(&self) -> &Context {
+		&self.ctx
+	}
+
+	pub fn get_options(&self) -> &Options {
+		&self.opt
+	}
+
 	pub async fn get_record_field(
 		&self,
 		rid: Thing,

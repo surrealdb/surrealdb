@@ -33,6 +33,7 @@ use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::{NamedContainer, TryAsExt};
 use crate::gql::utils::{GQLTx, GqlValueUtils};
 use crate::kvs::LockType;
+use reblessive::TreeStack;
 use crate::kvs::TransactionType;
 use crate::sql::Value as SqlValue;
 
@@ -819,6 +820,33 @@ pub async fn generate_schema(
 		.description("allows fetching arbitrary records".to_string())
 		.argument(id_input!()),
 	);
+
+	// Add _param_{PARAM} fields for DEFINE PARAM statements
+	let params = tx.all_db_params(ns, db).await?;
+	for param in params.iter() {
+		let param_name = param.name.to_string();
+		let field_name = format!("_param_{}", param_name);
+		let param_value = param.value.clone();
+		let datastore_clone = datastore.clone();
+		let session_clone = session.clone();
+
+		query = query.field(
+			Field::new(&field_name, TypeRef::named("String"), move |_ctx| {
+				let param_val = param_value.clone();
+				let kvs = datastore_clone.clone();
+				let sess = session_clone.clone();
+				FieldFuture::new(async move {
+					// Create a minimal context to evaluate the param value, todo: Possibly refactor without TreeStack
+					let gtx = GQLTx::new(&kvs, &sess).await?;
+					let mut stack = TreeStack::new();
+					let computed_value = stack.enter(|stk| param_val.compute(stk, gtx.get_context(), gtx.get_options(), None)).finish().await?;
+					let gql_value = sql_value_to_gql_value(computed_value)?;
+					Ok(Some(FieldValue::value(gql_value)))
+				})
+			})
+			.description(format!("Global parameter: {}", param_name))
+		);
+	}
 
 	trace!("current Query object for schema: {:?}", query);
 
