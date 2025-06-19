@@ -1,8 +1,6 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-#[cfg(feature = "http")]
-use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
@@ -24,6 +22,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use trice::Instant;
+
+#[cfg(feature = "http")]
+use crate::dbs::capabilities::NetTarget;
 #[cfg(feature = "http")]
 use url::Url;
 
