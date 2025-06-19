@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use surrealdb::dbs::Session;
-use surrealdb::{kvs::Datastore, sql::Id};
+use surrealdb::{kvs::Datastore, sql::RecordIdKeyLit};
 use tokio::{runtime::Runtime, task::JoinSet};
 
 pub struct Create {
@@ -13,7 +13,7 @@ impl Create {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", Id::rand().to_raw()),
+			table_name: format!("table_{}", RecordIdKeyLit::rand().to_raw()),
 		}
 	}
 }
@@ -43,8 +43,12 @@ impl super::Routine for Create {
 					async move {
 						let mut res = criterion::black_box(
 							ds.execute(
-								format!("CREATE {} SET field = '{}'", &table_name, Id::rand())
-									.as_str(),
+								format!(
+									"CREATE {} SET field = '{}'",
+									&table_name,
+									RecordIdKeyLit::rand()
+								)
+								.as_str(),
 								&session,
 								None,
 							)

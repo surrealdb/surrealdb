@@ -1,4 +1,4 @@
-use crate::expr::{Array, IdRange, Object, id::Gen, id::Id as NewId};
+use crate::expr::{Array, KeyRange, Object, id::Gen, id::RecordIdKeyLit as NewId};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ pub enum Id {
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
-	Range(Box<IdRange>),
+	Range(Box<KeyRange>),
 }
 
 impl Id {
@@ -56,7 +56,7 @@ pub mod key {
 	use serde::{Deserialize, Serialize};
 
 	use crate::{
-		expr::{Dir, id::Id as NewId},
+		expr::{Dir, id::RecordIdKeyLit as NewId},
 		kvs::impl_key,
 	};
 

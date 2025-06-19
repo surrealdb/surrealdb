@@ -2,7 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Data, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
+use crate::expr::{
+	Cond, Data, Explain, Expr, FlowResultExt as _, Output, Timeout, Value, Values, With,
+};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use anyhow::{Result, ensure};
 
@@ -11,30 +13,23 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct UpdateStatement {
-	#[revision(start = 2)]
 	pub only: bool,
-	pub what: Values,
-	#[revision(start = 3)]
+	pub what: Vec<Expr>,
 	pub with: Option<With>,
 	pub data: Option<Data>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	#[revision(start = 3)]
 	pub explain: Option<Explain>,
 }
 
 impl UpdateStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

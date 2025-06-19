@@ -3,7 +3,7 @@ use crate::api::path::Path;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::{Fmt, pretty_indent};
-use crate::expr::{Base, FlowResultExt as _, Object, Strand, Value};
+use crate::expr::{Base, Expr, FlowResultExt as _, Strand, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::{ctx::Context, expr::statements::info::InfoStructure};
 use anyhow::{Result, bail};
@@ -12,21 +12,18 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-use super::CursorDoc;
 use super::config::api::ApiConfig;
+use super::{CursorDoc, DefineKind};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineApiStatement {
-	pub if_not_exists: bool,
-	pub overwrite: bool,
+	pub kind: DefineKind,
 	pub path: Value,
 	pub actions: Vec<ApiAction>,
-	pub fallback: Option<Value>,
+	pub fallback: Option<Expr>,
 	pub config: Option<ApiConfig>,
-	#[revision(start = 2)]
 	pub comment: Option<Strand>,
 }
 
@@ -45,12 +42,18 @@ impl DefineApiStatement {
 		let (ns, db) = (opt.ns()?, opt.db()?);
 		// Check if the definition exists
 		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::ApAlreadyExists {
-					value: self.path.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::ApAlreadyExists {
+							value: self.path.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
 			}
 		}
 		// Process the statement

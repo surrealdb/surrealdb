@@ -4,8 +4,8 @@ use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::expr::Idiom;
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::thing::Thing;
 use crate::kvs::{Key, KeyEncode};
+use crate::val::RecordId;
 use anyhow::Result;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
@@ -70,7 +70,7 @@ impl Writer {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: Thing,
+		id: RecordId,
 		previous: CursorValue,
 		current: CursorValue,
 		store_difference: bool,
@@ -153,14 +153,13 @@ mod tests {
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::expr::Datetime;
 	use crate::expr::changefeed::ChangeFeed;
-	use crate::expr::id::Id;
+	use crate::expr::id::RecordIdKeyLit;
 	use crate::expr::statements::show::ShowSince;
 	use crate::expr::statements::{
 		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
 	};
-	use crate::expr::thing::Thing;
-	use crate::expr::value::Value;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
+	use crate::val::{RecordId, Value};
 	use crate::vs::VersionStamp;
 
 	const DONT_STORE_PREVIOUS: bool = false;
@@ -183,9 +182,9 @@ mod tests {
 		//
 
 		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let thing_a = Thing {
-			tb: TB.to_owned(),
-			id: Id::from("A"),
+		let thing_a = RecordId {
+			table: TB.to_owned(),
+			key: RecordIdKeyLit::String("A".to_owned()),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None;
@@ -202,9 +201,9 @@ mod tests {
 		tx1.commit().await.unwrap();
 
 		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let thing_c = Thing {
-			tb: TB.to_owned(),
-			id: Id::from("C"),
+		let thing_c = RecordId {
+			table: TB.to_owned(),
+			key: RecordIdKeyLit::from("C"),
 		};
 		let value_c: Value = "c".into();
 		tx2.record_change(
@@ -220,9 +219,9 @@ mod tests {
 		tx2.commit().await.unwrap();
 
 		let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let thing_b = Thing {
-			tb: TB.to_owned(),
-			id: Id::from("B"),
+		let thing_b = RecordId {
+			table: TB.to_owned(),
+			key: RecordIdKeyLit::from("B"),
 		};
 		let value_b: Value = "b".into();
 		tx3.record_change(
@@ -234,9 +233,9 @@ mod tests {
 			value_b.into(),
 			DONT_STORE_PREVIOUS,
 		);
-		let thing_c2 = Thing {
-			tb: TB.to_owned(),
-			id: Id::from("C"),
+		let thing_c2 = RecordId {
+			table: TB.to_owned(),
+			key: RecordIdKeyLit::from("C"),
 		};
 		let value_c2: Value = "c2".into();
 		tx3.record_change(
@@ -269,7 +268,7 @@ mod tests {
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
-						Thing::from((TB.to_string(), "A".to_string())),
+						RecordId::from((TB.to_string(), "A".to_string())),
 						Value::from("a"),
 					)],
 				)]),
@@ -279,7 +278,7 @@ mod tests {
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
-						Thing::from((TB.to_string(), "C".to_string())),
+						RecordId::from((TB.to_string(), "C".to_string())),
 						Value::from("c"),
 					)],
 				)]),
@@ -290,11 +289,11 @@ mod tests {
 					TB.to_string(),
 					vec![
 						TableMutation::Set(
-							Thing::from((TB.to_string(), "B".to_string())),
+							RecordId::from((TB.to_string(), "B".to_string())),
 							Value::from("b"),
 						),
 						TableMutation::Set(
-							Thing::from((TB.to_string(), "C".to_string())),
+							RecordId::from((TB.to_string(), "C".to_string())),
 							Value::from("c2"),
 						),
 					],
@@ -323,11 +322,11 @@ mod tests {
 				TB.to_string(),
 				vec![
 					TableMutation::Set(
-						Thing::from((TB.to_string(), "B".to_string())),
+						RecordId::from((TB.to_string(), "B".to_string())),
 						Value::from("b"),
 					),
 					TableMutation::Set(
-						Thing::from((TB.to_string(), "C".to_string())),
+						RecordId::from((TB.to_string(), "C".to_string())),
 						Value::from("c2"),
 					),
 				],
@@ -394,10 +393,10 @@ mod tests {
 		r
 	}
 
-	async fn record_change_feed_entry(tx: Transaction, id: String) -> Thing {
-		let thing = Thing {
-			tb: TB.to_owned(),
-			id: Id::from(id),
+	async fn record_change_feed_entry(tx: Transaction, key: String) -> RecordId {
+		let thing = RecordId {
+			table: TB.to_owned(),
+			key: RecordIdKeyLit::from(id),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None.into();
@@ -449,7 +448,7 @@ mod tests {
 		tx.put(&ns_root, revision::to_vec(&dns).unwrap(), None).await.unwrap();
 		let db_root = crate::key::namespace::db::new(NS, DB);
 		tx.put(&db_root, revision::to_vec(&ddb).unwrap(), None).await.unwrap();
-		let tb_root = crate::key::database::tb::new(NS, DB, TB);
+		let tb_root = crate::key::database::table::new(NS, DB, TB);
 		tx.put(&tb_root, revision::to_vec(&dtb).unwrap(), None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds

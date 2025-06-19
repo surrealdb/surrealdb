@@ -3,8 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{AccessType, Base, Ident, Strand, Value, access::AccessDuration};
+use crate::expr::{AccessType, Base, Expr, Ident, Strand, access::AccessDuration};
 use crate::iam::{Action, ResourceKind};
+use crate::val::Value;
 use anyhow::{Result, bail};
 
 use rand::Rng;
@@ -13,21 +14,19 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineAccessStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub base: Base,
-	pub kind: AccessType,
-	#[revision(start = 2)]
-	pub authenticate: Option<Value>,
+	pub access_type: AccessType,
+	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
 }
 
 impl DefineAccessStatement {
@@ -43,7 +42,7 @@ impl DefineAccessStatement {
 	/// This function should NOT be used when displaying the statement for export purposes
 	pub fn redacted(&self) -> DefineAccessStatement {
 		let mut das = self.clone();
-		das.kind = match das.kind {
+		das.access_type = match das.access_type {
 			AccessType::Jwt(ac) => AccessType::Jwt(ac.redacted()),
 			AccessType::Record(mut ac) => {
 				ac.jwt = ac.jwt.redacted();
@@ -75,12 +74,16 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if access method already exists
 				if txn.get_root_access(&self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite && !opt.import {
-						bail!(Error::AccessRootAlreadyExists {
-							ac: self.name.to_string(),
-						});
+					match self.access_type {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::AccessRootAlreadyExists {
+									ac: self.name.to_string(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
 				// Process the statement
@@ -89,8 +92,7 @@ impl DefineAccessStatement {
 					key,
 					revision::to_vec(&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
+						access_type: DefineKind::Default,
 						..self.clone()
 					})?,
 					None,
@@ -105,14 +107,19 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				if txn.get_ns_access(opt.ns()?, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite && !opt.import {
-						bail!(Error::AccessNsAlreadyExists {
-							ac: self.name.to_string(),
-							ns: opt.ns()?.into(),
-						});
+				let ns = opt.ns()?;
+				if txn.get_ns_access(ns, &self.name).await.is_ok() {
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::AccessNsAlreadyExists {
+									ns: ns.to_owned(),
+									ac: self.name.to_string(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
 				// Process the statement
@@ -122,8 +129,7 @@ impl DefineAccessStatement {
 					key,
 					revision::to_vec(&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
+						access_type: DefineKind::Default,
 						..self.clone()
 					})?,
 					None,
@@ -140,14 +146,18 @@ impl DefineAccessStatement {
 				// Check if the definition exists
 				let (ns, db) = opt.ns_db()?;
 				if txn.get_db_access(ns, db, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite && !opt.import {
-						bail!(Error::AccessDbAlreadyExists {
-							ac: self.name.to_string(),
-							ns: ns.into(),
-							db: db.into(),
-						});
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::AccessDbAlreadyExists {
+									ns: ns.to_owned(),
+									db: db.to_owned(),
+									ac: self.name.to_string(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
 				// Process the statement
@@ -158,8 +168,7 @@ impl DefineAccessStatement {
 					key,
 					revision::to_vec(&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
+						access_type: DefineKind::Default,
 						..self.clone()
 					})?,
 					None,
@@ -186,7 +195,7 @@ impl Display for DefineAccessStatement {
 			write!(f, " OVERWRITE")?
 		}
 		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.kind)?;
+		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
 			write!(f, " AUTHENTICATE {v}")?
@@ -195,7 +204,7 @@ impl Display for DefineAccessStatement {
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
 		write!(f, " DURATION")?;
-		if self.kind.can_issue_grants() {
+		if self.access_type.can_issue_grants() {
 			write!(
 				f,
 				" FOR GRANT {},",
@@ -205,7 +214,7 @@ impl Display for DefineAccessStatement {
 				}
 			)?;
 		}
-		if self.kind.can_issue_tokens() {
+		if self.access_type.can_issue_tokens() {
 			write!(
 				f,
 				" FOR TOKEN {},",
@@ -238,10 +247,10 @@ impl InfoStructure for DefineAccessStatement {
 			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
 			"duration".to_string() => Value::from(map!{
 				"session".to_string() => self.duration.session.into(),
-				"grant".to_string(), if self.kind.can_issue_grants() => self.duration.grant.into(),
-				"token".to_string(), if self.kind.can_issue_tokens() => self.duration.token.into(),
+				"grant".to_string(), if self.access_type.can_issue_grants() => self.duration.grant.into(),
+				"token".to_string(), if self.access_type.can_issue_tokens() => self.duration.token.into(),
 			}),
-			"kind".to_string() => self.kind.structure(),
+			"kind".to_string() => self.access_type.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

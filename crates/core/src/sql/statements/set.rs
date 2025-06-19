@@ -1,18 +1,12 @@
-use crate::sql::Kind;
-use crate::sql::SqlValue;
+use crate::sql::{Expr, Kind};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct SetStatement {
 	pub name: String,
-	pub what: SqlValue,
-	#[revision(start = 2)]
+	pub what: Expr,
 	pub kind: Option<Kind>,
 }
 

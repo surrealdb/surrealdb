@@ -10,14 +10,8 @@ use std::ops;
 use std::str::{Chars, FromStr};
 
 use super::Strand;
-use super::value::TryAdd;
 
-#[revisioned(revision = 1)]
-#[derive(
-	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,
-)]
-#[serde(rename = "$surrealdb::private::sql::Bytesize")]
-#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Ord)]
 pub struct Bytesize(pub u64);
 
 const KIB: u64 = 1024;

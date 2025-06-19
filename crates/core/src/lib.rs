@@ -52,6 +52,7 @@ pub mod rpc;
 pub mod sql;
 pub mod str;
 pub mod syn;
+pub mod val;
 pub mod vs;
 
 #[cfg(feature = "ml")]

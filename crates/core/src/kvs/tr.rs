@@ -40,15 +40,6 @@ pub enum TransactionType {
 	Write,
 }
 
-impl From<bool> for TransactionType {
-	fn from(value: bool) -> Self {
-		match value {
-			true => TransactionType::Write,
-			false => TransactionType::Read,
-		}
-	}
-}
-
 /// Specifies whether the transaction is optimistic or pessimistic.
 #[derive(Copy, Clone)]
 pub enum LockType {

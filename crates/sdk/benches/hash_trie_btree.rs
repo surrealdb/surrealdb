@@ -4,7 +4,7 @@ use radix_trie::{Trie, TrieCommon, TrieKey};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 use std::time::Duration;
-use surrealdb::sql::{Array, Id, Thing, value};
+use surrealdb::sql::{Array, RecordIdKeyLit, Thing, value};
 
 // Common use case: VectorSearch
 fn bench_hash_trie_btree_large_vector(c: &mut Criterion) {
@@ -74,7 +74,7 @@ fn bench_hash_trie_btree_thing(c: &mut Criterion) {
 	const N: usize = 50_000;
 	let mut samples = Vec::with_capacity(N);
 	for i in 0..N {
-		let key = Thing::from(("test", Id::from(Array::from(vec![i as i32; 5]))));
+		let key = Thing::from(("test", RecordIdKeyLit::from(Array::from(vec![i as i32; 5]))));
 		samples.push((key, i));
 	}
 

@@ -18,7 +18,7 @@ use surrealdb::opt::{PatchOp, PatchOps};
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
 use surrealdb::{error::Api as ApiError, error::Db as DbError};
-use surrealdb_core::expr::{Id, Value as CoreValue};
+use surrealdb_core::expr::{RecordIdKeyLit, Value as CoreValue};
 use ulid::Ulid;
 
 use crate::api_integration::NS;
@@ -757,7 +757,7 @@ pub async fn select_record_ranges(new_db: impl CreateDb) {
 		users
 			.into_iter()
 			.map(|user| {
-				let Id::String(ref x) = user.id.into_inner().id else {
+				let RecordIdKeyLit::String(ref x) = user.id.into_inner().id else {
 					panic!()
 				};
 				x.clone()

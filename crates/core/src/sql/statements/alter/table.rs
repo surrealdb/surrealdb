@@ -3,23 +3,19 @@ use crate::sql::{ChangeFeed, Ident, Permissions, Strand};
 use crate::sql::{Kind, TableType};
 use anyhow::Result;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::AlterKind;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AlterTableStatement {
 	pub name: Ident,
 	pub if_exists: bool,
-	#[revision(end = 2, convert_fn = "convert_drop")]
-	pub _drop: Option<bool>,
-	pub full: Option<bool>,
+	pub schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
-	pub changefeed: Option<Option<ChangeFeed>>,
-	pub comment: Option<Option<Strand>>,
+	pub changefeed: AlterKind<ChangeFeed>,
+	pub comment: AlterKind<Strand>,
 	pub kind: Option<TableType>,
 }
 
@@ -68,7 +64,7 @@ impl Display for AlterTableStatement {
 				}
 			}
 		}
-		if let Some(full) = self.full {
+		if let Some(full) = self.schemafull {
 			f.write_str(if full {
 				" SCHEMAFULL"
 			} else {
@@ -107,10 +103,10 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 		crate::expr::statements::alter::AlterTableStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			full: v.full,
+			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
-			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
-			comment: v.comment.map(|opt| opt.map(Into::into)),
+			changefeed: v.changefeed.into(),
+			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
 		}
 	}
@@ -121,10 +117,10 @@ impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableSta
 		AlterTableStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			full: v.full,
+			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
-			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
-			comment: v.comment.map(|opt| opt.map(Into::into)),
+			changefeed: v.changefeed.into(),
+			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
 		}
 	}

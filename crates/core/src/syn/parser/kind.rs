@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	sql::{Duration, Idiom, Kind, Strand, Table, kind::Literal},
+	sql::{Duration, Idiom, Kind, Strand, Table, kind::KindLiteral},
 	syn::{
 		error::bail,
 		lexer::compound,
@@ -208,31 +208,31 @@ impl Parser<'_> {
 	}
 
 	/// Parse a literal kind
-	async fn parse_literal_kind(&mut self, ctx: &mut Stk) -> ParseResult<Literal> {
+	async fn parse_literal_kind(&mut self, ctx: &mut Stk) -> ParseResult<KindLiteral> {
 		let peek = self.peek();
 		match peek.kind {
 			t!("true") => {
 				self.pop_peek();
-				Ok(Literal::Bool(true))
+				Ok(KindLiteral::Bool(true))
 			}
 			t!("false") => {
 				self.pop_peek();
-				Ok(Literal::Bool(false))
+				Ok(KindLiteral::Bool(false))
 			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
-				Ok(Literal::String(s))
+				Ok(KindLiteral::String(s))
 			}
 			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {
-				self.next_token_value().map(Literal::Number)
+				self.next_token_value().map(KindLiteral::Number)
 			}
-			TokenKind::Glued(Glued::Duration) => self.next_token_value().map(Literal::Duration),
+			TokenKind::Glued(Glued::Duration) => self.next_token_value().map(KindLiteral::Duration),
 			TokenKind::Digits => {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(peek, compound::numeric)?;
 				let v = match compound.value {
-					compound::Numeric::Number(x) => Literal::Number(x),
-					compound::Numeric::Duration(x) => Literal::Duration(Duration(x)),
+					compound::Numeric::Number(x) => KindLiteral::Number(x),
+					compound::Numeric::Duration(x) => KindLiteral::Duration(Duration(x)),
 				};
 				Ok(v)
 			}
@@ -246,7 +246,7 @@ impl Parser<'_> {
 					obj.insert(key, kind);
 					self.eat(t!(","));
 				}
-				Ok(Literal::Object(obj))
+				Ok(KindLiteral::Object(obj))
 			}
 			t!("[") => {
 				self.pop_peek();
@@ -256,7 +256,7 @@ impl Parser<'_> {
 					arr.push(kind);
 					self.eat(t!(","));
 				}
-				Ok(Literal::Array(arr))
+				Ok(KindLiteral::Array(arr))
 			}
 			_ => unexpected!(self, peek, "a literal kind"),
 		}
@@ -552,15 +552,15 @@ mod tests {
 		);
 		assert_eq!(
 			out,
-			Kind::Literal(Literal::DiscriminatedObject(
+			Kind::Literal(KindLiteral::DiscriminatedObject(
 				"status".to_string(),
 				vec![
 					map! {
-						"status".to_string() => Kind::Literal(Literal::String("ok".into())),
+						"status".to_string() => Kind::Literal(KindLiteral::String("ok".into())),
 						"data".to_string() => Kind::Object,
 					},
 					map! {
-						"status".to_string() => Kind::Literal(Literal::String("error".into())),
+						"status".to_string() => Kind::Literal(KindLiteral::String("error".into())),
 						"message".to_string() => Kind::String,
 					},
 				]
@@ -580,11 +580,11 @@ mod tests {
 		assert_eq!(
 			out,
 			Kind::Either(vec![
-				Kind::Literal(Literal::Object(map! {
-					"status".to_string() => Kind::Literal(Literal::String("ok".into())),
+				Kind::Literal(KindLiteral::Object(map! {
+					"status".to_string() => Kind::Literal(KindLiteral::String("ok".into())),
 					"data".to_string() => Kind::Object,
 				})),
-				Kind::Literal(Literal::Object(map! {
+				Kind::Literal(KindLiteral::Object(map! {
 					"status".to_string() => Kind::String,
 					"message".to_string() => Kind::String,
 				})),

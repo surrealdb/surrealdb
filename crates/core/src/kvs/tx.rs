@@ -8,8 +8,8 @@ use super::util;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::expr::Id;
 use crate::expr::Permissions;
+use crate::expr::RecordIdKeyLit;
 use crate::expr::Value;
 use crate::expr::statements::AccessGrant;
 use crate::expr::statements::DefineAccessStatement;
@@ -1566,7 +1566,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKeyLit,
 		version: Option<u64>,
 	) -> Result<Arc<Value>> {
 		// Cache is not versioned
@@ -1620,7 +1620,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKeyLit,
 		val: Value,
 	) -> Result<()> {
 		// Set the value in the datastore
@@ -1639,7 +1639,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKeyLit,
 		val: Arc<Value>,
 	) -> Result<()> {
 		// Set the value in the cache
@@ -1650,7 +1650,13 @@ impl Transaction {
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn del_record(&self, ns: &str, db: &str, tb: &str, id: &Id) -> Result<()> {
+	pub async fn del_record(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		id: &RecordIdKeyLit,
+	) -> Result<()> {
 		// Set the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
 		self.del(&key).await?;

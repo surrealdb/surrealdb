@@ -21,7 +21,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Bound, Deref};
 
 use super::fmt::Fmt;
-use super::{Id, IdRange, Table, Thing};
+use super::{KeyRange, RecordIdKeyLit, Table, Thing};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -198,7 +198,7 @@ impl Display for GraphSubjects {
 #[non_exhaustive]
 pub enum GraphSubject {
 	Table(Table),
-	Range(Table, IdRange),
+	Range(Table, KeyRange),
 }
 
 impl GraphSubject {
@@ -222,7 +222,7 @@ impl GraphSubject {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKeyLit,
 		dir: &Dir,
 	) -> (Result<Vec<u8>>, Result<Vec<u8>>) {
 		match self {

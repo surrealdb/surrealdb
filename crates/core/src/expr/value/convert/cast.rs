@@ -4,8 +4,8 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::expr::{
-	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Ident, Kind, Literal,
-	Number, Object, Range, Regex, Strand, Table, Thing, Uuid, Value, array::Uniq as _,
+	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Ident, Kind,
+	LiteralKind, Number, Object, Range, Regex, Strand, Table, Thing, Uuid, Value, array::Uniq as _,
 	kind::HasKind, value::Null,
 };
 
@@ -767,7 +767,7 @@ impl Value {
 		self.is_geometry_type(val)
 	}
 
-	fn can_cast_to_literal(&self, val: &Literal) -> bool {
+	fn can_cast_to_literal(&self, val: &LiteralKind) -> bool {
 		val.validate_value(self)
 	}
 
@@ -848,7 +848,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Literal, returns a `Value` with the coerced value
-	pub(crate) fn cast_to_literal(self, literal: &Literal) -> Result<Value, CastError> {
+	pub(crate) fn cast_to_literal(self, literal: &LiteralKind) -> Result<Value, CastError> {
 		if literal.validate_value(&self) {
 			Ok(self)
 		} else {

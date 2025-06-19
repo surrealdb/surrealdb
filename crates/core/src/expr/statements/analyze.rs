@@ -5,12 +5,12 @@ use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::ident::Ident;
 use crate::expr::index::Index;
-use crate::expr::value::Value;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::kvs::TransactionType;
+use crate::val::Value;
 use anyhow::{Result, bail};
 
 use revision::revisioned;

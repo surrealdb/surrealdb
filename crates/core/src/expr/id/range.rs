@@ -1,11 +1,5 @@
-use super::Id;
-use crate::{
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	expr::{Range, Value},
-};
+use super::RecordIdKeyLit;
+use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, expr::Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -15,58 +9,66 @@ use std::{cmp::Ordering, fmt, ops::Bound};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct IdRange {
-	pub beg: Bound<Id>,
-	pub end: Bound<Id>,
+pub struct KeyRange {
+	pub beg: Bound<RecordIdKeyLit>,
+	pub end: Bound<RecordIdKeyLit>,
 }
 
-impl TryFrom<(Bound<Id>, Bound<Id>)> for IdRange {
+impl TryFrom<(Bound<RecordIdKeyLit>, Bound<RecordIdKeyLit>)> for KeyRange {
 	type Error = anyhow::Error;
-	fn try_from((beg, end): (Bound<Id>, Bound<Id>)) -> Result<Self, Self::Error> {
-		if matches!(beg, Bound::Included(Id::Range(_)) | Bound::Excluded(Id::Range(_))) {
+	fn try_from(
+		(beg, end): (Bound<RecordIdKeyLit>, Bound<RecordIdKeyLit>),
+	) -> Result<Self, Self::Error> {
+		if matches!(
+			beg,
+			Bound::Included(RecordIdKeyLit::Range(_)) | Bound::Excluded(RecordIdKeyLit::Range(_))
+		) {
 			bail!(Error::IdInvalid {
 				value: "range".into(),
 			});
 		}
 
-		if matches!(end, Bound::Included(Id::Range(_)) | Bound::Excluded(Id::Range(_))) {
+		if matches!(
+			end,
+			Bound::Included(RecordIdKeyLit::Range(_)) | Bound::Excluded(RecordIdKeyLit::Range(_))
+		) {
 			bail!(Error::IdInvalid {
 				value: "range".into(),
 			});
 		}
 
-		Ok(IdRange {
+		Ok(KeyRange {
 			beg,
 			end,
 		})
 	}
 }
 
-impl TryFrom<Range> for IdRange {
+impl TryFrom<Range> for KeyRange {
 	type Error = anyhow::Error;
 	fn try_from(v: Range) -> Result<Self, Self::Error> {
 		let beg = match v.beg {
-			Bound::Included(beg) => Bound::Included(Id::try_from(beg)?),
-			Bound::Excluded(beg) => Bound::Excluded(Id::try_from(beg)?),
+			Bound::Included(beg) => Bound::Included(RecordIdKeyLit::try_from(beg)?),
+			Bound::Excluded(beg) => Bound::Excluded(RecordIdKeyLit::try_from(beg)?),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
 		let end = match v.end {
-			Bound::Included(end) => Bound::Included(Id::try_from(end)?),
-			Bound::Excluded(end) => Bound::Excluded(Id::try_from(end)?),
+			Bound::Included(end) => Bound::Included(RecordIdKeyLit::try_from(end)?),
+			Bound::Excluded(end) => Bound::Excluded(RecordIdKeyLit::try_from(end)?),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 
 		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
-		IdRange::try_from((beg, end))
+		KeyRange::try_from((beg, end))
 	}
 }
 
-impl TryFrom<Value> for IdRange {
+impl TryFrom<Value> for KeyRange {
 	type Error = anyhow::Error;
 	fn try_from(v: Value) -> Result<Self, Self::Error> {
 		match v {
-			Value::Range(v) => IdRange::try_from(*v),
+			Value::Range(v) => KeyRange::try_from(*v),
 			v => Err(anyhow::Error::new(Error::IdInvalid {
 				value: v.kindof().to_string(),
 			})),
@@ -74,13 +76,13 @@ impl TryFrom<Value> for IdRange {
 	}
 }
 
-impl PartialOrd for IdRange {
+impl PartialOrd for KeyRange {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
-impl Ord for IdRange {
+impl Ord for KeyRange {
 	fn cmp(&self, other: &Self) -> Ordering {
 		match &self.beg {
 			Bound::Unbounded => match &other.beg {
@@ -134,7 +136,7 @@ impl Ord for IdRange {
 	}
 }
 
-impl fmt::Display for IdRange {
+impl fmt::Display for KeyRange {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match &self.beg {
 			Bound::Unbounded => write!(f, ""),
@@ -150,7 +152,7 @@ impl fmt::Display for IdRange {
 	}
 }
 
-impl IdRange {
+impl KeyRange {
 	/// Process the values in the bounds for this IdRange
 	pub(crate) async fn compute(
 		&self,
@@ -158,7 +160,7 @@ impl IdRange {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<IdRange> {
+	) -> Result<KeyRange> {
 		let beg = match &self.beg {
 			Bound::Included(beg) => {
 				Bound::Included(stk.run(|stk| beg.compute(stk, ctx, opt, doc)).await?)
@@ -180,6 +182,6 @@ impl IdRange {
 		};
 
 		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
-		IdRange::try_from((beg, end))
+		KeyRange::try_from((beg, end))
 	}
 }

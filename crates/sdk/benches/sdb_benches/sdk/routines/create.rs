@@ -1,4 +1,4 @@
-use surrealdb::{Surreal, engine::any::Any, sql::Id};
+use surrealdb::{Surreal, engine::any::Any, sql::RecordIdKeyLit};
 use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::sdb_benches::sdk::Record;
@@ -12,7 +12,7 @@ impl Create {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", Id::rand().to_raw()),
+			table_name: format!("table_{}", RecordIdKeyLit::rand().to_raw()),
 		}
 	}
 }
@@ -23,7 +23,7 @@ impl super::Routine for Create {
 	fn run(&self, client: &'static Surreal<Any>, num_ops: usize) {
 		self.runtime.block_on(async {
 			let data = Record {
-				field: Id::rand(),
+				field: RecordIdKeyLit::rand(),
 			};
 
 			client.query(format!("DEFINE TABLE {}", self.table_name)).await.unwrap();

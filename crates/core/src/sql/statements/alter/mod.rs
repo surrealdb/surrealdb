@@ -1,4 +1,4 @@
-mod field;
+pub mod field;
 mod sequence;
 mod table;
 
@@ -10,15 +10,50 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
+pub enum AlterKind<T> {
+	Set(T),
+	Drop,
+	None,
+}
+
+impl<T> Default for AlterKind<T> {
+	fn default() -> Self {
+		AlterKind::None
+	}
+}
+
+impl<A, B> From<AlterKind<A>> for crate::expr::statements::alter::AlterKind<B>
+where
+	B: From<A>,
+{
+	fn from(value: AlterKind<A>) -> Self {
+		match value {
+			AlterKind::Set(a) => crate::expr::statements::alter::AlterKind::Set(a.into()),
+			AlterKind::Drop => crate::expr::statements::alter::AlterKind::Drop,
+			AlterKind::None => crate::expr::statements::alter::AlterKind::None,
+		}
+	}
+}
+
+impl<A, B> From<crate::expr::statements::alter::AlterKind<A>> for AlterKind<B>
+where
+	B: From<A>,
+{
+	fn from(value: crate::expr::statements::alter::AlterKind<A>) -> Self {
+		match value {
+			crate::expr::statements::alter::AlterKind::Set(a) => AlterKind::Set(a.into()),
+			crate::expr::statements::alter::AlterKind::Drop => AlterKind::Drop,
+			crate::expr::statements::alter::AlterKind::None => AlterKind::None,
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum AlterStatement {
 	Table(AlterTableStatement),
-	#[revision(start = 2)]
 	Sequence(AlterSequenceStatement),
-	#[revision(start = 3)]
 	Field(AlterFieldStatement),
 }
 

@@ -5,7 +5,7 @@ use std::{
 	ops::Deref,
 };
 
-use crate::expr::Value;
+use crate::val::Value;
 
 /// Path represents a normalized file path in the object store.
 #[derive(Clone, Debug)]
@@ -68,18 +68,6 @@ impl ObjectKey {
 	}
 }
 
-impl From<String> for ObjectKey {
-	fn from(value: String) -> Self {
-		ObjectKey::new(value)
-	}
-}
-
-impl From<&str> for ObjectKey {
-	fn from(value: &str) -> Self {
-		ObjectKey::new(value)
-	}
-}
-
 impl From<ObjectKey> for Value {
 	fn from(val: ObjectKey) -> Self {
 		Value::from(val.0)
@@ -97,18 +85,6 @@ impl Deref for ObjectKey {
 impl fmt::Display for ObjectKey {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "{}", self.0)
-	}
-}
-
-impl AsRef<str> for ObjectKey {
-	fn as_ref(&self) -> &str {
-		self.as_str()
-	}
-}
-
-impl Borrow<str> for ObjectKey {
-	fn borrow(&self) -> &str {
-		self.as_str()
 	}
 }
 

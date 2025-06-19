@@ -3,18 +3,11 @@ use crate::sql::{
 	fmt::{Fmt, fmt_separated_by},
 };
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -49,49 +42,8 @@ impl From<crate::expr::Idioms> for Idioms {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Idiom")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Idiom(pub Vec<Part>);
-
-impl Deref for Idiom {
-	type Target = [Part];
-	fn deref(&self) -> &Self::Target {
-		self.0.as_slice()
-	}
-}
-
-impl From<String> for Idiom {
-	fn from(v: String) -> Self {
-		Self(vec![Part::from(v)])
-	}
-}
-
-impl From<&str> for Idiom {
-	fn from(v: &str) -> Self {
-		Self(vec![Part::from(v)])
-	}
-}
-
-impl From<Vec<Part>> for Idiom {
-	fn from(v: Vec<Part>) -> Self {
-		Self(v)
-	}
-}
-
-impl From<&[Part]> for Idiom {
-	fn from(v: &[Part]) -> Self {
-		Self(v.to_vec())
-	}
-}
-
-impl From<Part> for Idiom {
-	fn from(v: Part) -> Self {
-		Self(vec![v])
-	}
-}
 
 impl From<Idiom> for crate::expr::Idiom {
 	fn from(v: Idiom) -> Self {
@@ -106,6 +58,7 @@ impl From<crate::expr::Idiom> for Idiom {
 }
 
 impl Idiom {
+	/*
 	/// Appends a part to the end of this Idiom
 	pub(crate) fn push(mut self, n: Part) -> Idiom {
 		self.0.push(n);
@@ -124,6 +77,7 @@ impl Idiom {
 			.collect::<Vec<_>>()
 			.into()
 	}
+	*/
 }
 
 impl Display for Idiom {

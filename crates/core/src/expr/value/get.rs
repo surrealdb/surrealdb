@@ -9,7 +9,7 @@ use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::expr::edges::Edges;
 use crate::expr::field::{Field, Fields};
-use crate::expr::id::Id;
+use crate::expr::id::RecordIdKeyLit;
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, SplitByRepeatRecurse};
 use crate::expr::part::{Part, Skip};
 use crate::expr::statements::select::SelectStatement;
@@ -191,14 +191,14 @@ impl Value {
 					// If requesting an `id` field, check if it is a complex Record ID
 					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f.as_str()) {
 						Some(Value::Thing(Thing {
-							id: Id::Object(v),
+							id: RecordIdKeyLit::Object(v),
 							..
 						})) => {
 							let v = Value::Object(v.clone());
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
 						Some(Value::Thing(Thing {
-							id: Id::Array(v),
+							id: RecordIdKeyLit::Array(v),
 							..
 						})) => {
 							let v = Value::Array(v.clone());
@@ -672,7 +672,7 @@ mod tests {
 			res,
 			Value::from(Thing {
 				tb: String::from("test"),
-				id: Id::from("tobie")
+				id: RecordIdKeyLit::from("tobie")
 			})
 		);
 	}
@@ -699,7 +699,7 @@ mod tests {
 			res,
 			Value::from(Thing {
 				tb: String::from("test"),
-				id: Id::from("jaime")
+				id: RecordIdKeyLit::from("jaime")
 			})
 		);
 	}

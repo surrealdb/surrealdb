@@ -46,6 +46,7 @@ pub use self::kill::KillStatement;
 pub use self::live::LiveStatement;
 pub use self::option::OptionStatement;
 pub use self::output::OutputStatement;
+pub use self::rebuild::RebuildStatement;
 pub use self::relate::RelateStatement;
 pub use self::select::SelectStatement;
 pub use self::set::SetStatement;

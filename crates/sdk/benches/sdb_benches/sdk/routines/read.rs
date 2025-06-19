@@ -1,4 +1,4 @@
-use surrealdb::{Surreal, engine::any::Any, sql::Id};
+use surrealdb::{Surreal, engine::any::Any, sql::RecordIdKeyLit};
 use tokio::{runtime::Runtime, task::JoinSet};
 
 use crate::sdb_benches::sdk::Record;
@@ -12,7 +12,7 @@ impl Read {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", Id::rand().to_raw()),
+			table_name: format!("table_{}", RecordIdKeyLit::rand().to_raw()),
 		}
 	}
 }
@@ -30,7 +30,7 @@ impl super::Routine for Read {
 					let _: Option<Record> = client
 						.create((table_name, task_id as i64))
 						.content(Record {
-							field: Id::rand(),
+							field: RecordIdKeyLit::rand(),
 						})
 						.await
 						.expect("[setup] create record failed")

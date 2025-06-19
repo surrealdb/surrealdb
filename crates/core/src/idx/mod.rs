@@ -5,7 +5,7 @@ pub mod planner;
 pub mod trees;
 
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Id, Thing};
+use crate::expr::{RecordIdKeyLit, Thing};
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
@@ -206,7 +206,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_hi_key(&self, id: Id) -> Result<Key> {
+	fn new_hi_key(&self, id: RecordIdKeyLit) -> Result<Key> {
 		Hi::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),

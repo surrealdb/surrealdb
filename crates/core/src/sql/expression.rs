@@ -1,162 +1,191 @@
-use crate::sql::operator::Operator;
-use crate::sql::value::SqlValue;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str;
+use crate::sql::statements::{
+	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
+	IfelseStatement, InfoStatement, InsertStatement, RebuildStatement, RelateStatement,
+	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
+};
+use crate::sql::{
+	BinaryOperator, Block, Closure, Constant, FunctionCall, Future, Idiom, Literal, Mock, Model,
+	Param, PostfixOperator, PrefixOperator, Table,
+};
+use std::{fmt, str};
 
-use super::operator::BindingPower;
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+pub enum Expr {
+	Literal(Literal),
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
-
-/// Binary expressions.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Expression")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum Expression {
-	Unary {
-		o: Operator,
-		v: SqlValue,
+	Param(Param),
+	Idiom(Idiom),
+	Table(Table),
+	Mock(Mock),
+	// TODO(3.0) maybe unbox? check size.
+	Block(Box<Block>),
+	Future(Box<Future>),
+	Constant(Constant),
+	Prefix {
+		op: PrefixOperator,
+		expr: Box<Expr>,
+	},
+	Postfix {
+		expr: Box<Expr>,
+		op: PostfixOperator,
 	},
 	Binary {
-		l: SqlValue,
-		o: Operator,
-		r: SqlValue,
+		left: Box<Expr>,
+		op: BinaryOperator,
+		right: Box<Expr>,
 	},
+	Model(Box<Model>),
+	// TODO: Factor out the call from the function expression.
+	FunctionCall(Box<FunctionCall>),
+	// TODO: Factor out the call from the function expression.
+	Closure(Box<Closure>),
+
+	Break,
+	Continue,
+	Return(Box<Expr>),
+	Throw(Box<Expr>),
+
+	If(Box<IfelseStatement>),
+	Select(Box<SelectStatement>),
+	Create(Box<CreateStatement>),
+	Update(Box<UpdateStatement>),
+	Delete(Box<DeleteStatement>),
+	Relate(Box<RelateStatement>),
+	Insert(Box<InsertStatement>),
+	Define(Box<DefineStatement>),
+	Remove(Box<RemoveStatement>),
+	Rebuild(Box<RebuildStatement>),
+	Upsert(Box<UpsertStatement>),
+	Alter(Box<AlterStatement>),
+	Info(Box<InfoStatement>),
+	Forach(Box<ForeachStatement>),
+	Let(Box<SetStatement>),
 }
 
-impl Default for Expression {
-	fn default() -> Expression {
-		Expression::Binary {
-			l: SqlValue::Null,
-			o: Operator::default(),
-			r: SqlValue::Null,
-		}
-	}
-}
-
-impl Expression {
-	/// Create a new binary expression
-	pub fn new(l: SqlValue, o: Operator, r: SqlValue) -> Self {
-		Self::Binary {
-			l,
-			o,
-			r,
-		}
-	}
-}
-
-impl Expression {
-	/// Checks whether all expression parts are static values
-	pub(crate) fn is_static(&self) -> bool {
-		match self {
-			Self::Unary {
-				v,
-				..
-			} => v.is_static(),
-			Self::Binary {
-				l,
-				r,
-				..
-			} => l.is_static() && r.is_static(),
-		}
-	}
-
-	/// Returns the operator
-	pub(crate) fn operator(&self) -> &Operator {
-		match self {
-			Expression::Unary {
-				o,
-				..
-			} => o,
-			Expression::Binary {
-				o,
-				..
-			} => o,
-		}
-	}
-}
-
-impl fmt::Display for Expression {
+impl fmt::Display for Expr {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Unary {
-				o,
-				v,
-			} => {
-				if BindingPower::for_value(v) < BindingPower::Unary {
-					write!(f, "{o}({v})")
-				} else {
-					write!(f, "{o}{v}")
-				}
-			}
-			Self::Binary {
-				l,
-				o,
-				r,
-			} => {
-				let op_bp = BindingPower::for_operator(o);
-				if BindingPower::for_value(l) < op_bp {
-					write!(f, "({l})")?;
-				} else {
-					write!(f, "{l}")?;
-				}
-				write!(f, " {o} ")?;
-				if BindingPower::for_value(r) < op_bp {
-					write!(f, "({r})")?;
-				} else {
-					write!(f, "{r}")?;
-				}
-				Ok(())
-			}
+		todo!()
+	}
+}
+
+impl From<Expr> for crate::expr::Expr {
+	fn from(v: Expr) -> Self {
+		match v {
+			Expr::Literal(l) => crate::expr::Expr::Literal(l.into()),
+			Expr::Param(p) => crate::expr::Expr::Param(p.into()),
+			Expr::Idiom(i) => crate::expr::Expr::Idiom(i.into()),
+			Expr::Table(t) => crate::expr::Expr::Table(t.into()),
+			Expr::Mock(m) => crate::expr::Expr::Mock(m.into()),
+			Expr::Block(b) => crate::expr::Expr::Block(b.into()),
+			Expr::Future(f) => crate::expr::Expr::Future(f.into()),
+			Expr::Constant(c) => crate::expr::Expr::Constant(c.into()),
+			Expr::Prefix {
+				op,
+				expr,
+			} => crate::expr::Expr::Prefix {
+				op: op.into(),
+				expr: expr.into(),
+			},
+			Expr::Postfix {
+				op,
+				expr,
+			} => crate::expr::Expr::Postfix {
+				op: op.into(),
+				expr: expr.into(),
+			},
+
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => crate::expr::Expr::Binary {
+				left: left.into(),
+				op: op.into(),
+				right: right.into(),
+			},
+			Expr::Model(m) => crate::expr::Expr::Model(m.into()),
+			Expr::FunctionCall(f) => crate::expr::Expr::FunctionCall(f.into()),
+			Expr::Closure(s) => crate::expr::Expr::Closure(s.into()),
+			Expr::Break => crate::expr::Expr::Break,
+			Expr::Continue => crate::expr::Expr::Continue,
+			Expr::Return(e) => crate::expr::Expr::Return(e.into()),
+			Expr::Throw(e) => crate::expr::Expr::Throw(e.into()),
+			Expr::If(s) => crate::expr::Expr::IfElse(s.into()),
+			Expr::Select(s) => crate::expr::Expr::Select(s.into()),
+			Expr::Create(s) => crate::expr::Expr::Create(s.into()),
+			Expr::Update(s) => crate::expr::Expr::Update(s.into()),
+			Expr::Delete(s) => crate::expr::Expr::Delete(s.into()),
+			Expr::Relate(s) => crate::expr::Expr::Relate(s.into()),
+			Expr::Insert(s) => crate::expr::Expr::Insert(s.into()),
+			Expr::Define(s) => crate::expr::Expr::Define(s.into()),
+			Expr::Remove(s) => crate::expr::Expr::Remove(s.into()),
+			Expr::Rebuild(s) => crate::expr::Expr::Rebuild(s.into()),
+			Expr::Upsert(s) => crate::expr::Expr::Upsert(s.into()),
+			Expr::Alter(s) => crate::expr::Expr::Alter(s.into()),
+			Expr::Info(s) => crate::expr::Expr::Info(s.into()),
+			Expr::Forach(s) => crate::expr::Expr::Forach(s.into()),
+			Expr::Let(s) => crate::expr::Expr::Let(s.into()),
 		}
 	}
 }
 
-impl From<Expression> for crate::expr::Expression {
-	fn from(v: Expression) -> Self {
+impl From<crate::expr::Expr> for Expr {
+	fn from(v: crate::expr::Expr) -> Self {
 		match v {
-			Expression::Unary {
-				o,
-				v,
-			} => Self::Unary {
-				o: o.into(),
-				v: v.into(),
+			crate::expr::Expr::Literal(l) => Expr::Literal(l.into()),
+			crate::expr::Expr::Param(p) => Expr::Param(p.into()),
+			crate::expr::Expr::Idiom(i) => Expr::Idiom(i.into()),
+			crate::expr::Expr::Table(t) => Expr::Table(t.into()),
+			crate::expr::Expr::Mock(m) => Expr::Mock(m.into()),
+			crate::expr::Expr::Block(b) => Expr::Block(b.into()),
+			crate::expr::Expr::Future(f) => Expr::Future(f.into()),
+			crate::expr::Expr::Constant(c) => Expr::Constant(c.into()),
+			crate::expr::Expr::Prefix {
+				op,
+				expr,
+			} => Expr::Prefix {
+				op: op.into(),
+				expr: expr.into(),
 			},
-			Expression::Binary {
-				l,
-				o,
-				r,
-			} => Self::Binary {
-				l: l.into(),
-				o: o.into(),
-				r: r.into(),
+			crate::expr::Expr::Postfix {
+				expr,
+				op,
+			} => Expr::Postfix {
+				expr: expr.into(),
+				op: op.into(),
 			},
-		}
-	}
-}
 
-impl From<crate::expr::Expression> for Expression {
-	fn from(v: crate::expr::Expression) -> Self {
-		match v {
-			crate::expr::Expression::Unary {
-				o,
-				v,
-			} => Self::Unary {
-				o: o.into(),
-				v: v.into(),
+			crate::expr::Expr::Binary {
+				left,
+				op,
+				right,
+			} => Expr::Binary {
+				left: left.into(),
+				op: op.into(),
+				right: right.into(),
 			},
-			crate::expr::Expression::Binary {
-				l,
-				o,
-				r,
-			} => Self::Binary {
-				l: l.into(),
-				o: o.into(),
-				r: r.into(),
-			},
+			crate::expr::Expr::Model(m) => Expr::Model(m.into()),
+			crate::expr::Expr::FunctionCall(f) => Expr::FunctionCall(f.into()),
+			crate::expr::Expr::Closure(s) => Expr::Closure(s.into()),
+			crate::expr::Expr::Break => Expr::Break,
+			crate::expr::Expr::Continue => Expr::Continue,
+			crate::expr::Expr::Return(e) => Expr::Return(e.into()),
+			crate::expr::Expr::Throw(e) => Expr::Throw(e.into()),
+			crate::expr::Expr::IfElse(s) => Expr::If(s.into()),
+			crate::expr::Expr::Select(s) => Expr::Select(s.into()),
+			crate::expr::Expr::Create(s) => Expr::Create(s.into()),
+			crate::expr::Expr::Update(s) => Expr::Update(s.into()),
+			crate::expr::Expr::Delete(s) => Expr::Delete(s.into()),
+			crate::expr::Expr::Relate(s) => Expr::Relate(s.into()),
+			crate::expr::Expr::Insert(s) => Expr::Insert(s.into()),
+			crate::expr::Expr::Define(s) => Expr::Define(s.into()),
+			crate::expr::Expr::Remove(s) => Expr::Remove(s.into()),
+			crate::expr::Expr::Rebuild(s) => Expr::Rebuild(s.into()),
+			crate::expr::Expr::Upsert(s) => Expr::Upsert(s.into()),
+			crate::expr::Expr::Alter(s) => Expr::Alter(s.into()),
+			crate::expr::Expr::Info(s) => Expr::Info(s.into()),
+			crate::expr::Expr::Forach(s) => Expr::Forach(s.into()),
+			crate::expr::Expr::Let(s) => Expr::Let(s.into()),
 		}
 	}
 }

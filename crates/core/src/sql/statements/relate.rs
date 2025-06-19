@@ -1,19 +1,13 @@
-use crate::sql::{Data, Output, SqlValue, Timeout};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::{Data, Expr, Output, Timeout};
 use std::fmt;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RelateStatement {
-	#[revision(start = 2)]
 	pub only: bool,
-	pub kind: SqlValue,
-	pub from: SqlValue,
-	pub with: SqlValue,
+	pub kind: Expr,
+	pub from: Expr,
+	pub with: Expr,
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,

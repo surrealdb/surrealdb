@@ -167,7 +167,7 @@ impl TryFrom<Cbor> for sql::SqlValue {
 								}
 							};
 
-							let id = sql::Id::try_from(v.remove(0))?;
+							let id = sql::RecordIdKeyLit::try_from(v.remove(0))?;
 
 							Ok(sql::SqlValue::Thing(sql::Thing {
 								tb,
@@ -408,15 +408,15 @@ impl TryFrom<sql::SqlValue> for Cbor {
 				Box::new(CborData::Array(vec![
 					CborData::Text(v.tb),
 					match v.id {
-						sql::Id::Number(v) => CborData::Integer(v.into()),
-						sql::Id::String(v) => CborData::Text(v),
-						sql::Id::Uuid(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
-						sql::Id::Array(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
-						sql::Id::Object(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
-						sql::Id::Generate(_) => {
+						sql::RecordIdKeyLit::Number(v) => CborData::Integer(v.into()),
+						sql::RecordIdKeyLit::String(v) => CborData::Text(v),
+						sql::RecordIdKeyLit::Uuid(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
+						sql::RecordIdKeyLit::Array(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
+						sql::RecordIdKeyLit::Object(v) => Cbor::try_from(sql::SqlValue::from(v))?.0,
+						sql::RecordIdKeyLit::Generate(_) => {
 							return Err("Cannot encode an ungenerated Record ID into CBOR");
 						}
-						sql::Id::Range(v) => {
+						sql::RecordIdKeyLit::Range(v) => {
 							CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?))
 						}
 					},
@@ -553,10 +553,14 @@ impl TryFrom<sql::Range> for CborData {
 impl TryFrom<CborData> for sql::id::range::IdRange {
 	type Error = &'static str;
 	fn try_from(val: CborData) -> Result<Self, &'static str> {
-		fn decode_bound(v: CborData) -> Result<Bound<sql::Id>, &'static str> {
+		fn decode_bound(v: CborData) -> Result<Bound<sql::RecordIdKeyLit>, &'static str> {
 			match v {
-				CborData::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(sql::Id::try_from(*v)?)),
-				CborData::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(sql::Id::try_from(*v)?)),
+				CborData::Tag(TAG_BOUND_INCLUDED, v) => {
+					Ok(Bound::Included(sql::RecordIdKeyLit::try_from(*v)?))
+				}
+				CborData::Tag(TAG_BOUND_EXCLUDED, v) => {
+					Ok(Bound::Excluded(sql::RecordIdKeyLit::try_from(*v)?))
+				}
 				CborData::Null => Ok(Bound::Unbounded),
 				_ => Err("Expected a bound tag"),
 			}
@@ -578,7 +582,7 @@ impl TryFrom<CborData> for sql::id::range::IdRange {
 impl TryFrom<sql::id::range::IdRange> for CborData {
 	type Error = &'static str;
 	fn try_from(r: sql::id::range::IdRange) -> Result<CborData, &'static str> {
-		fn encode(b: Bound<sql::Id>) -> Result<CborData, &'static str> {
+		fn encode(b: Bound<sql::RecordIdKeyLit>) -> Result<CborData, &'static str> {
 			match b {
 				Bound::Included(v) => {
 					Ok(CborData::Tag(TAG_BOUND_INCLUDED, Box::new(v.try_into()?)))
@@ -594,39 +598,45 @@ impl TryFrom<sql::id::range::IdRange> for CborData {
 	}
 }
 
-impl TryFrom<CborData> for sql::Id {
+impl TryFrom<CborData> for sql::RecordIdKeyLit {
 	type Error = &'static str;
 	fn try_from(val: CborData) -> Result<Self, &'static str> {
 		match val {
-			CborData::Integer(v) => Ok(sql::Id::Number(i128::from(v) as i64)),
-			CborData::Text(v) => Ok(sql::Id::String(v)),
-			CborData::Array(v) => Ok(sql::Id::Array(v.try_into()?)),
-			CborData::Map(v) => Ok(sql::Id::Object(v.try_into()?)),
+			CborData::Integer(v) => Ok(sql::RecordIdKeyLit::Number(i128::from(v) as i64)),
+			CborData::Text(v) => Ok(sql::RecordIdKeyLit::String(v)),
+			CborData::Array(v) => Ok(sql::RecordIdKeyLit::Array(v.try_into()?)),
+			CborData::Map(v) => Ok(sql::RecordIdKeyLit::Object(v.try_into()?)),
 			CborData::Tag(TAG_RANGE, v) => {
-				Ok(sql::Id::Range(Box::new(sql::id::range::IdRange::try_from(*v)?)))
+				Ok(sql::RecordIdKeyLit::Range(Box::new(sql::id::range::IdRange::try_from(*v)?)))
 			}
-			CborData::Tag(TAG_STRING_UUID, v) => v.deref().to_owned().try_into().map(sql::Id::Uuid),
-			CborData::Tag(TAG_SPEC_UUID, v) => v.deref().to_owned().try_into().map(sql::Id::Uuid),
+			CborData::Tag(TAG_STRING_UUID, v) => {
+				v.deref().to_owned().try_into().map(sql::RecordIdKeyLit::Uuid)
+			}
+			CborData::Tag(TAG_SPEC_UUID, v) => {
+				v.deref().to_owned().try_into().map(sql::RecordIdKeyLit::Uuid)
+			}
 			_ => Err("Expected a CBOR integer, text, array or map"),
 		}
 	}
 }
 
-impl TryFrom<sql::Id> for CborData {
+impl TryFrom<sql::RecordIdKeyLit> for CborData {
 	type Error = &'static str;
-	fn try_from(v: sql::Id) -> Result<CborData, &'static str> {
+	fn try_from(v: sql::RecordIdKeyLit) -> Result<CborData, &'static str> {
 		match v {
-			sql::Id::Number(v) => Ok(CborData::Integer(v.into())),
-			sql::Id::String(v) => Ok(CborData::Text(v)),
-			sql::Id::Array(v) => Ok(Cbor::try_from(sql::SqlValue::from(v))?.0),
-			sql::Id::Object(v) => Ok(Cbor::try_from(sql::SqlValue::from(v))?.0),
-			sql::Id::Range(v) => {
+			sql::RecordIdKeyLit::Number(v) => Ok(CborData::Integer(v.into())),
+			sql::RecordIdKeyLit::String(v) => Ok(CborData::Text(v)),
+			sql::RecordIdKeyLit::Array(v) => Ok(Cbor::try_from(sql::SqlValue::from(v))?.0),
+			sql::RecordIdKeyLit::Object(v) => Ok(Cbor::try_from(sql::SqlValue::from(v))?.0),
+			sql::RecordIdKeyLit::Range(v) => {
 				Ok(CborData::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?)))
 			}
-			sql::Id::Uuid(v) => {
+			sql::RecordIdKeyLit::Uuid(v) => {
 				Ok(CborData::Tag(TAG_SPEC_UUID, Box::new(CborData::Bytes(v.into_bytes().into()))))
 			}
-			sql::Id::Generate(_) => Err("Cannot encode an ungenerated Record ID into CBOR"),
+			sql::RecordIdKeyLit::Generate(_) => {
+				Err("Cannot encode an ungenerated Record ID into CBOR")
+			}
 		}
 	}
 }
@@ -792,7 +802,7 @@ pub mod convert_expr {
 									}
 								};
 
-								let id = expr::Id::try_from(v.remove(0))?;
+								let id = expr::RecordIdKeyLit::try_from(v.remove(0))?;
 
 								Ok(expr::Value::Thing(expr::Thing {
 									tb,
@@ -1045,15 +1055,21 @@ pub mod convert_expr {
 					Box::new(CborData::Array(vec![
 						CborData::Text(v.tb),
 						match v.id {
-							expr::Id::Number(v) => CborData::Integer(v.into()),
-							expr::Id::String(v) => CborData::Text(v),
-							expr::Id::Uuid(v) => Cbor::try_from(expr::Value::from(v))?.0,
-							expr::Id::Array(v) => Cbor::try_from(expr::Value::from(v))?.0,
-							expr::Id::Object(v) => Cbor::try_from(expr::Value::from(v))?.0,
-							expr::Id::Generate(_) => {
+							expr::RecordIdKeyLit::Number(v) => CborData::Integer(v.into()),
+							expr::RecordIdKeyLit::String(v) => CborData::Text(v),
+							expr::RecordIdKeyLit::Uuid(v) => {
+								Cbor::try_from(expr::Value::from(v))?.0
+							}
+							expr::RecordIdKeyLit::Array(v) => {
+								Cbor::try_from(expr::Value::from(v))?.0
+							}
+							expr::RecordIdKeyLit::Object(v) => {
+								Cbor::try_from(expr::Value::from(v))?.0
+							}
+							expr::RecordIdKeyLit::Generate(_) => {
 								return Err("Cannot encode an ungenerated Record ID into CBOR");
 							}
-							expr::Id::Range(v) => {
+							expr::RecordIdKeyLit::Range(v) => {
 								CborData::Tag(TAG_RANGE, Box::new(CborData::try_from(*v)?))
 							}
 						},
@@ -1187,16 +1203,16 @@ pub mod convert_expr {
 		}
 	}
 
-	impl TryFrom<CborData> for expr::id::range::IdRange {
+	impl TryFrom<CborData> for expr::id::range::KeyRange {
 		type Error = &'static str;
 		fn try_from(val: CborData) -> Result<Self, &'static str> {
-			fn decode_bound(v: CborData) -> Result<Bound<expr::Id>, &'static str> {
+			fn decode_bound(v: CborData) -> Result<Bound<expr::RecordIdKeyLit>, &'static str> {
 				match v {
 					CborData::Tag(TAG_BOUND_INCLUDED, v) => {
-						Ok(Bound::Included(expr::Id::try_from(*v)?))
+						Ok(Bound::Included(expr::RecordIdKeyLit::try_from(*v)?))
 					}
 					CborData::Tag(TAG_BOUND_EXCLUDED, v) => {
-						Ok(Bound::Excluded(expr::Id::try_from(*v)?))
+						Ok(Bound::Excluded(expr::RecordIdKeyLit::try_from(*v)?))
 					}
 					CborData::Null => Ok(Bound::Unbounded),
 					_ => Err("Expected a bound tag"),
@@ -1208,7 +1224,7 @@ pub mod convert_expr {
 					let mut v = v;
 					let beg = decode_bound(v.remove(0).clone())?;
 					let end = decode_bound(v.remove(0).clone())?;
-					Ok(expr::id::range::IdRange::try_from((beg, end))
+					Ok(expr::id::range::KeyRange::try_from((beg, end))
 						.map_err(|_| "Found an invalid range with ranges as bounds")?)
 				}
 				_ => Err("Expected a CBOR array with 2 bounds"),
@@ -1216,10 +1232,10 @@ pub mod convert_expr {
 		}
 	}
 
-	impl TryFrom<expr::id::range::IdRange> for CborData {
+	impl TryFrom<expr::id::range::KeyRange> for CborData {
 		type Error = &'static str;
-		fn try_from(r: expr::id::range::IdRange) -> Result<CborData, &'static str> {
-			fn encode(b: Bound<expr::Id>) -> Result<CborData, &'static str> {
+		fn try_from(r: expr::id::range::KeyRange) -> Result<CborData, &'static str> {
+			fn encode(b: Bound<expr::RecordIdKeyLit>) -> Result<CborData, &'static str> {
 				match b {
 					Bound::Included(v) => {
 						Ok(CborData::Tag(TAG_BOUND_INCLUDED, Box::new(v.try_into()?)))
@@ -1235,44 +1251,46 @@ pub mod convert_expr {
 		}
 	}
 
-	impl TryFrom<CborData> for expr::Id {
+	impl TryFrom<CborData> for expr::RecordIdKeyLit {
 		type Error = &'static str;
 		fn try_from(val: CborData) -> Result<Self, &'static str> {
 			match val {
-				CborData::Integer(v) => Ok(expr::Id::Number(i128::from(v) as i64)),
-				CborData::Text(v) => Ok(expr::Id::String(v)),
-				CborData::Array(v) => Ok(expr::Id::Array(v.try_into()?)),
-				CborData::Map(v) => Ok(expr::Id::Object(v.try_into()?)),
-				CborData::Tag(TAG_RANGE, v) => {
-					Ok(expr::Id::Range(Box::new(expr::id::range::IdRange::try_from(*v)?)))
-				}
+				CborData::Integer(v) => Ok(expr::RecordIdKeyLit::Number(i128::from(v) as i64)),
+				CborData::Text(v) => Ok(expr::RecordIdKeyLit::String(v)),
+				CborData::Array(v) => Ok(expr::RecordIdKeyLit::Array(v.try_into()?)),
+				CborData::Map(v) => Ok(expr::RecordIdKeyLit::Object(v.try_into()?)),
+				CborData::Tag(TAG_RANGE, v) => Ok(expr::RecordIdKeyLit::Range(Box::new(
+					expr::id::range::KeyRange::try_from(*v)?,
+				))),
 				CborData::Tag(TAG_STRING_UUID, v) => {
-					v.deref().to_owned().try_into().map(expr::Id::Uuid)
+					v.deref().to_owned().try_into().map(expr::RecordIdKeyLit::Uuid)
 				}
 				CborData::Tag(TAG_SPEC_UUID, v) => {
-					v.deref().to_owned().try_into().map(expr::Id::Uuid)
+					v.deref().to_owned().try_into().map(expr::RecordIdKeyLit::Uuid)
 				}
 				_ => Err("Expected a CBOR integer, text, array or map"),
 			}
 		}
 	}
 
-	impl TryFrom<expr::Id> for CborData {
+	impl TryFrom<expr::RecordIdKeyLit> for CborData {
 		type Error = &'static str;
-		fn try_from(v: expr::Id) -> Result<CborData, &'static str> {
+		fn try_from(v: expr::RecordIdKeyLit) -> Result<CborData, &'static str> {
 			match v {
-				expr::Id::Number(v) => Ok(CborData::Integer(v.into())),
-				expr::Id::String(v) => Ok(CborData::Text(v)),
-				expr::Id::Array(v) => Ok(Cbor::try_from(expr::Value::from(v))?.0),
-				expr::Id::Object(v) => Ok(Cbor::try_from(expr::Value::from(v))?.0),
-				expr::Id::Range(v) => {
+				expr::RecordIdKeyLit::Number(v) => Ok(CborData::Integer(v.into())),
+				expr::RecordIdKeyLit::String(v) => Ok(CborData::Text(v)),
+				expr::RecordIdKeyLit::Array(v) => Ok(Cbor::try_from(expr::Value::from(v))?.0),
+				expr::RecordIdKeyLit::Object(v) => Ok(Cbor::try_from(expr::Value::from(v))?.0),
+				expr::RecordIdKeyLit::Range(v) => {
 					Ok(CborData::Tag(TAG_RANGE, Box::new(v.deref().to_owned().try_into()?)))
 				}
-				expr::Id::Uuid(v) => Ok(CborData::Tag(
+				expr::RecordIdKeyLit::Uuid(v) => Ok(CborData::Tag(
 					TAG_SPEC_UUID,
 					Box::new(CborData::Bytes(v.into_bytes().into())),
 				)),
-				expr::Id::Generate(_) => Err("Cannot encode an ungenerated Record ID into CBOR"),
+				expr::RecordIdKeyLit::Generate(_) => {
+					Err("Cannot encode an ungenerated Record ID into CBOR")
+				}
 			}
 		}
 	}

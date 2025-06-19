@@ -2,10 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Object, Value, Version};
+use crate::expr::{Base, Ident, Version};
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sys::INFORMATION;
+use crate::val::{Object, Value};
 use anyhow::Result;
 use anyhow::bail;
 
@@ -15,30 +16,22 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
-#[revisioned(revision = 5)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.
-	#[revision(override(revision = 2, discriminant = 1), override(revision = 3, discriminant = 1))]
-	Root(#[revision(start = 2)] bool),
+	Root(bool),
 
-	#[revision(override(revision = 2, discriminant = 3), override(revision = 3, discriminant = 3))]
-	Ns(#[revision(start = 2)] bool),
+	Ns(bool),
 
-	#[revision(override(revision = 2, discriminant = 5), override(revision = 3, discriminant = 5))]
-	Db(#[revision(start = 2)] bool, #[revision(start = 5)] Option<Version>),
+	Db(bool, Option<Version>),
 
-	#[revision(override(revision = 2, discriminant = 7), override(revision = 3, discriminant = 7))]
-	Tb(Ident, #[revision(start = 2)] bool, #[revision(start = 5)] Option<Version>),
+	Tb(Ident, bool, Option<Version>),
 
-	#[revision(override(revision = 2, discriminant = 9), override(revision = 3, discriminant = 9))]
-	User(Ident, Option<Base>, #[revision(start = 2)] bool),
+	User(Ident, Option<Base>, bool),
 
-	#[revision(start = 3)]
-	#[revision(override(revision = 3, discriminant = 10))]
 	Index(Ident, Ident, bool),
 }
 

@@ -179,7 +179,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.kind {
+			let cf = match &de.access_type {
 				AccessType::Record(at) => match &at.jwt.verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
@@ -240,10 +240,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			match &de.kind {
+			match &de.access_type {
 				// If the access type is Jwt or Bearer, this is database access
 				AccessType::Jwt(_) | AccessType::Bearer(_) => {
-					let cf = match &de.kind.jwt().verify {
+					let cf = match &de.access_type.jwt().verify {
 						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 						#[cfg(feature = "jwks")]
 						JwtAccessVerify::Jwks(jwks) => {
@@ -402,8 +402,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.kind {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
+			let cf = match &de.access_type {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -508,8 +508,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.kind {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
+			let cf = match &de.access_type {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {

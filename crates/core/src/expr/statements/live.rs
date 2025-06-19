@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
+use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Uuid};
 use crate::iam::Auth;
 use crate::kvs::Live;
 use anyhow::{Result, bail};
@@ -21,7 +21,7 @@ pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub expr: Fields,
-	pub what: Value,
+	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
 	// When a live query is created, we must also store the
@@ -35,7 +35,7 @@ pub struct LiveStatement {
 	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
-	pub(crate) session: Option<Value>,
+	pub(crate) session: Option<Expr>,
 }
 
 impl LiveStatement {

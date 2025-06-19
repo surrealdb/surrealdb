@@ -1,30 +1,9 @@
-use crate::sql::datetime::Datetime;
-use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::Expr;
 use std::fmt;
 
-use super::SqlValue;
-
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Version(
-	#[revision(end = 2, convert_fn = "convert_version_datetime")] pub Datetime,
-	#[revision(start = 2)] pub SqlValue,
-);
-
-impl Version {
-	fn convert_version_datetime(
-		&mut self,
-		_revision: u16,
-		old: Datetime,
-	) -> Result<(), revision::Error> {
-		self.0 = SqlValue::Datetime(old);
-		Ok(())
-	}
-}
+pub struct Version(pub Expr);
 
 impl fmt::Display for Version {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

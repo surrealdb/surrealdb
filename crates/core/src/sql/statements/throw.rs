@@ -1,15 +1,10 @@
-use crate::sql::SqlValue;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::Expr;
 use std::fmt;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct ThrowStatement {
-	pub error: SqlValue,
+	pub error: Expr,
 }
 
 impl fmt::Display for ThrowStatement {

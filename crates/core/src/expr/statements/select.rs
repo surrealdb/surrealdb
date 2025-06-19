@@ -4,8 +4,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::{
-	Cond, Explain, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Value,
-	Values, Version, With,
+	Cond, Explain, Expr, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout,
+	Value, Values, Version, With,
 	order::{OldOrders, Order, OrderList, Ordering},
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -25,17 +25,13 @@ pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
 	pub omit: Option<Idioms>,
-	#[revision(start = 2)]
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
-	pub what: Values,
+	pub what: Vec<Expr>,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
-	#[revision(end = 4, convert_fn = "convert_old_orders")]
-	pub old_order: Option<OldOrders>,
-	#[revision(start = 4)]
 	pub order: Option<Ordering>,
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
@@ -44,7 +40,6 @@ pub struct SelectStatement {
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
-	#[revision(start = 3)]
 	pub tempfiles: bool,
 }
 
@@ -80,20 +75,15 @@ impl SelectStatement {
 	}
 
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		if self.expr.iter().any(|v| match v {
-			Field::All => false,
+	pub(crate) fn read_only(&self) -> bool {
+		self.expr.iter().all(|v| match v {
+			Field::All => true,
 			Field::Single {
 				expr,
 				..
-			} => expr.writeable(),
-		}) {
-			return true;
-		}
-		if self.what.iter().any(|v| v.writeable()) {
-			return true;
-		}
-		self.cond.as_deref().is_some_and(Value::writeable)
+			} => expr.read_only(),
+		}) && self.what.iter().all(|v| v.read_only())
+			&& self.cond.map(|x| x.0.read_only()).unwrap_or(true)
 	}
 
 	/// Process this type returning a computed simple Value
@@ -129,7 +119,7 @@ impl SelectStatement {
 		let mut planner = QueryPlanner::new();
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
 		// Loop over the select targets
-		for w in self.what.0.iter() {
+		for w in self.what.iter() {
 			let v = w.compute(stk, &ctx, &opt, doc).await.catch_return()?;
 			i.prepare(stk, &mut planner, &stm_ctx, v).await?;
 		}
@@ -139,20 +129,15 @@ impl SelectStatement {
 		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There were no results
-				0 => Ok(Value::None),
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
+
+		if self.only {
+			if let Some(array) = res.into_array() {
+				ensure!(array.len() != 1, Error::SingleOnlyOutput);
+				return Ok(array.0.pop().unwrap());
+			}
 		}
+
+		Ok(res)
 	}
 }
 

@@ -2,15 +2,13 @@ use std::fmt::{self, Display};
 
 use crate::sql::fmt::Fmt;
 
-use crate::sql::{Permission, SqlValue};
+use crate::sql::{Expr, Permission};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct RequestMiddleware(pub Vec<(String, Vec<SqlValue>)>);
+pub struct RequestMiddleware(pub Vec<(String, Vec<Expr>)>);
 
 impl From<RequestMiddleware> for crate::api::middleware::RequestMiddleware {
 	fn from(v: RequestMiddleware) -> Self {
@@ -28,10 +26,8 @@ impl From<crate::api::middleware::RequestMiddleware> for RequestMiddleware {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct ApiConfig {
 	pub middleware: Option<RequestMiddleware>,
 	pub permissions: Option<Permission>,

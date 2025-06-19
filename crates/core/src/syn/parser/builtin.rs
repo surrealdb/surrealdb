@@ -1,6 +1,6 @@
 use super::{ParseResult, Parser};
 use crate::{
-	sql::{Constant, Function, SqlValue},
+	sql::{Constant, Function},
 	syn::{
 		error::{MessageKind, bail},
 		parser::{SyntaxError, mac::expected, unexpected},
@@ -592,7 +592,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_value_inherit(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {

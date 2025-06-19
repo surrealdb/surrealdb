@@ -12,7 +12,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 /// The type of access methods available
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -20,7 +20,6 @@ pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
 	// TODO(gguillemas): Document once bearer access is no longer experimental.
-	#[revision(start = 2)]
 	Bearer(BearerAccess),
 }
 

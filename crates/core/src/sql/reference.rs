@@ -2,13 +2,11 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::{Idiom, SqlValue, Table};
+use super::{Idiom, Table};
+use crate::expr::Expr;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::Reference")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
@@ -44,7 +42,7 @@ pub enum ReferenceDeleteStrategy {
 	Ignore,
 	Cascade,
 	Unset,
-	Custom(SqlValue),
+	Custom(Expr),
 }
 
 impl fmt::Display for ReferenceDeleteStrategy {

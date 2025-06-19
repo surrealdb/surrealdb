@@ -3,27 +3,27 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, changefeed::ChangeFeed};
+use crate::expr::{Base, Ident, Strand, changefeed::ChangeFeed};
 use crate::iam::{Action, ResourceKind};
+use crate::val::Value;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 3)]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineDatabaseStatement {
+	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Ident,
 	pub comment: Option<Strand>,
 	pub changefeed: Option<ChangeFeed>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
 }
 
 impl DefineDatabaseStatement {
@@ -42,12 +42,18 @@ impl DefineDatabaseStatement {
 		let txn = ctx.tx();
 		// Check if the definition exists
 		if txn.get_db(ns, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::DbAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::DbAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
 			}
 		}
 		// Process the statement
@@ -62,8 +68,7 @@ impl DefineDatabaseStatement {
 					(None, None) => None,
 				},
 				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
+				kind: DefineKind::Default,
 				..self.clone()
 			})?,
 			None,

@@ -3,7 +3,7 @@ use crate::{
 	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
-	expr::{Permission, ident::Ident, value::Value},
+	expr::{Permission, ident::Ident},
 	iam::Action,
 };
 use anyhow::{Result, bail};

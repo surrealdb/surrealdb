@@ -1,19 +1,13 @@
-use crate::sql::{Data, Output, SqlValues, Timeout, Version};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use crate::sql::{Data, Expr, Output, Timeout, Version};
 use std::fmt;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
-	#[revision(start = 2)]
 	pub only: bool,
 	// Where we are creating (i.e. table, or record ID)
-	pub what: SqlValues,
+	pub what: Vec<Expr>,
 	// The data associated with the record being created
 	pub data: Option<Data>,
 	//  What the result of the statement should resemble (i.e. Diff or no result etc).
@@ -23,7 +17,6 @@ pub struct CreateStatement {
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
-	#[revision(start = 3)]
 	pub version: Option<Version>,
 }
 

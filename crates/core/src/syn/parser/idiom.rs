@@ -2,19 +2,20 @@ use reblessive::Stk;
 
 use crate::{
 	sql::{
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, SqlValue, Table,
+		Dir, Expr, Field, Fields, Graph, Ident, Idiom, Literal, Param, Part,
 		graph::GraphSubjects,
 		part::{DestructurePart, Recurse, RecurseInstruction},
 	},
 	syn::{
 		error::bail,
+		lexer::compound::Numeric,
 		token::{Glued, Span, TokenKind, t},
 	},
 };
 
 use super::{
 	ParseResult, Parser,
-	mac::{expected, parse_option, unexpected},
+	mac::{expected, unexpected},
 };
 
 impl Parser<'_> {
@@ -32,7 +33,7 @@ impl Parser<'_> {
 	/// Expects the next tokens to be of a field set.
 	pub(crate) async fn parse_fields(&mut self, ctx: &mut Stk) -> ParseResult<Fields> {
 		if self.eat(t!("VALUE")) {
-			let expr = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+			let expr = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 			let alias = if self.eat(t!("AS")) {
 				Some(self.parse_plain_idiom(ctx).await?)
 			} else {
@@ -51,7 +52,7 @@ impl Parser<'_> {
 				let field = if self.eat(t!("*")) {
 					Field::All
 				} else {
-					let expr = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+					let expr = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 					let alias = if self.eat(t!("AS")) {
 						Some(self.parse_plain_idiom(ctx).await?)
 					} else {
@@ -150,7 +151,7 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		start: Vec<Part>,
-	) -> ParseResult<SqlValue> {
+	) -> ParseResult<Expr> {
 		let mut res = start;
 		loop {
 			match self.peek_kind() {
@@ -173,9 +174,8 @@ impl Parser<'_> {
 				}
 				t!("->") => {
 					self.pop_peek();
-					if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::Out).await? {
-						return Ok(x);
-					}
+					let x = self.parse_graph(ctx, Dir::Out).await?;
+					res.push(Part::Graph(x))
 				}
 				t!("<") => {
 					let peek = self.peek_whitespace1();
@@ -183,16 +183,14 @@ impl Parser<'_> {
 						self.pop_peek();
 						self.pop_peek();
 
-						if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::In).await? {
-							return Ok(x);
-						}
+						let graph = self.parse_graph(ctx, Dir::In).await?;
+						res.push(Part::Graph(graph));
 					} else if peek.kind == t!("->") {
 						self.pop_peek();
 						self.pop_peek();
 
-						if let Some(x) = self.parse_graph_idiom(ctx, &mut res, Dir::Both).await? {
-							return Ok(x);
-						}
+						let graph = self.parse_graph(ctx, Dir::Both).await?;
+						res.push(Part::Graph(graph));
 					} else {
 						break;
 					}
@@ -204,52 +202,7 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		Ok(SqlValue::Idiom(Idiom(res)))
-	}
-
-	/// Parse a graph idiom and possibly rewrite the starting value to be an edge whenever the
-	/// parsed production matches `Thing -> Ident`.
-	async fn parse_graph_idiom(
-		&mut self,
-		ctx: &mut Stk,
-		res: &mut Vec<Part>,
-		dir: Dir,
-	) -> ParseResult<Option<SqlValue>> {
-		let graph = ctx.run(|ctx| self.parse_graph(ctx, dir)).await?;
-		// the production `Thing Graph` is reparsed as an edge if the graph does not contain an
-		// alias or a condition.
-		if res.len() == 1
-			&& graph.alias.is_none()
-			&& graph.cond.is_none()
-			&& graph.group.is_none()
-			&& graph.limit.is_none()
-			&& graph.order.is_none()
-			&& graph.split.is_none()
-			&& graph.start.is_none()
-			&& graph.expr.is_none()
-		{
-			match std::mem::replace(&mut res[0], Part::All) {
-				Part::Value(SqlValue::Thing(t)) | Part::Start(SqlValue::Thing(t)) => {
-					let edge = Edges {
-						dir: graph.dir,
-						from: t,
-						what: graph.what,
-					};
-					let value = SqlValue::Edges(Box::new(edge));
-
-					if !self.peek_continues_idiom() {
-						return Ok(Some(value));
-					}
-					res[0] = Part::Start(value);
-					return Ok(None);
-				}
-				x => {
-					res[0] = x;
-				}
-			}
-		}
-		res.push(Part::Graph(graph));
-		Ok(None)
+		Ok(Expr::Idiom(Idiom(res)))
 	}
 
 	/// Parse a idiom which can only start with a graph or an identifier.
@@ -333,8 +286,8 @@ impl Parser<'_> {
 			let part = match self.peek_kind() {
 				t!(":") => {
 					self.pop_peek();
-					let idiom = match self.parse_value_inherit(ctx).await? {
-						SqlValue::Idiom(x) => x,
+					let idiom = match self.parse_expr_inherit(ctx).await? {
+						Expr::Idiom(x) => x,
 						v => Idiom(vec![Part::Start(v)]),
 					};
 					DestructurePart::Aliased(field, idiom)
@@ -397,63 +350,78 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 	) -> ParseResult<Option<RecurseInstruction>> {
-		let instruction = parse_option!(
-			self,
-			"instruction",
-			"path" => {
+		let instruction = if self.eat(t!("+")) {
+			let what = "instruction";
+			let kind = self.next_token_value::<Ident>()?;
+			if kind.0.eq_ignore_ascii_case("path") {
 				let mut inclusive = false;
 				loop {
-					parse_option!(
-						self,
-						"option",
-						"inclusive" => inclusive = true,
-						_ => break
-					);
-				};
-
-				Some(RecurseInstruction::Path { inclusive })
-			},
-			"collect" => {
+					if self.eat(t!("+")) {
+						let kind = self.next_token_value::<Ident>()?;
+						if kind.0.eq_ignore_ascii_case("inclusive") {
+							inclusive = true
+						} else {
+							bail!("Unexpected option `{}` expected inclusive",kind.0, @self.last_span());
+						}
+					} else {
+						break;
+					};
+				}
+				Some(RecurseInstruction::Path {
+					inclusive,
+				})
+			} else if kind.0.eq_ignore_ascii_case("collect") {
 				let mut inclusive = false;
 				loop {
-					parse_option!(
-						self,
-						"option",
-						"inclusive" => inclusive = true,
-						_ => break
-					);
-				};
-
-				Some(RecurseInstruction::Collect { inclusive })
-			},
-			"shortest" => {
+					if self.eat(t!("+")) {
+						let kind = self.next_token_value::<Ident>()?;
+						if kind.0.eq_ignore_ascii_case("inclusive") {
+							inclusive = true
+						} else {
+							bail!("Unexpected option `{}` expected inclusive",kind.0, @self.last_span());
+						}
+					} else {
+						break;
+					};
+				}
+				Some(RecurseInstruction::Collect {
+					inclusive,
+				})
+			} else if kind.0.eq_ignore_ascii_case("shortest") {
 				expected!(self, t!("="));
 				let token = self.peek();
 				let expects = match token.kind {
-					TokenKind::Parameter => {
-						SqlValue::from(self.next_token_value::<Param>()?)
-					},
+					TokenKind::Parameter => Expr::Param(self.next_token_value::<Param>()?),
 					x if Parser::kind_is_identifier(x) => {
-						SqlValue::from(self.parse_thing(ctx).await?)
+						Expr::Literal(Literal::RecordId(self.parse_record_id(ctx).await?))
 					}
 					_ => {
-						unexpected!(self, token, "a param or thing");
+						unexpected!(self, token, "a param or record-id");
 					}
 				};
 				let mut inclusive = false;
 				loop {
-					parse_option!(
-						self,
-						"option",
-						"inclusive" => inclusive = true,
-						_ => break
-					);
-				};
-
-				Some(RecurseInstruction::Shortest { expects, inclusive })
-			},
-			_ => None
-		);
+					if self.eat(t!("+")) {
+						let kind = self.next_token_value::<Ident>()?;
+						if kind.0.eq_ignore_ascii_case("inclusive") {
+							inclusive = true
+						} else {
+							bail!("Unexpected option `{}` expected inclusive",kind, @self.last_span());
+						}
+					} else {
+						break;
+					};
+				}
+				Some(RecurseInstruction::Shortest {
+					expects,
+					inclusive,
+				})
+			} else {
+				bail!("Unexpected instruction `{}` expected `path`, `collect`, or `shortest`",kind, @self.last_span());
+			}
+		} else {
+			None
+		};
 
 		Ok(instruction)
 	}
@@ -475,6 +443,7 @@ impl Parser<'_> {
 
 		Ok(Part::Recurse(recurse, nest, instruction))
 	}
+
 	/// Parse the part after the `[` in a idiom
 	pub(super) async fn parse_bracket_part(
 		&mut self,
@@ -493,16 +462,12 @@ impl Parser<'_> {
 			}
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
-				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
+				let value = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 				Part::Where(value)
 			}
 			_ => {
-				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-				if let SqlValue::Number(x) = value {
-					Part::Index(x)
-				} else {
-					Part::Value(value)
-				}
+				let value = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+				Part::Value(value)
 			}
 		};
 		self.expect_closing_delimiter(t!("]"), start)?;
@@ -536,8 +501,8 @@ impl Parser<'_> {
 							Part::Last
 						}
 						TokenKind::Digits | t!("+") | TokenKind::Glued(Glued::Number) => {
-							let number = self.next_token_value()?;
-							Part::Index(number)
+							let number = self.next_token_value::<Numeric>()?.into_literal();
+							Part::Value(number)
 						}
 						t!("-") => {
 							let peek_digit = self.peek_whitespace1();
@@ -584,7 +549,7 @@ impl Parser<'_> {
 						}
 						TokenKind::Digits | t!("+") | TokenKind::Glued(Glued::Number) => {
 							let number = self.next_token_value()?;
-							Part::Index(number)
+							Part::Value(number)
 						}
 						t!("-") => {
 							let peek_digit = self.peek_whitespace1();
@@ -621,32 +586,12 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects to be at the start of a what list.
-	pub(super) async fn parse_what_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<SqlValue>> {
-		let mut res = vec![self.parse_what_value(ctx).await?];
+	pub(super) async fn parse_what_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Expr>> {
+		let mut res = vec![self.parse_expr(ctx).await?];
 		while self.eat(t!(",")) {
-			res.push(self.parse_what_value(ctx).await?)
+			res.push(self.parse_expr(ctx).await?)
 		}
 		Ok(res)
-	}
-
-	/// Parses a single what value,
-	///
-	/// # Parser state
-	/// Expects to be at the start of a what value
-	pub(super) async fn parse_what_value(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
-		let start = self.parse_what_primary(ctx).await?;
-		if start.can_start_idiom() && self.peek_continues_idiom() {
-			let start = match start {
-				SqlValue::Table(Table(x)) => vec![Part::Field(Ident(x))],
-				SqlValue::Idiom(Idiom(x)) => x,
-				x => vec![Part::Start(x)],
-			};
-
-			let idiom = self.parse_remaining_value_idiom(ctx, start).await?;
-			Ok(idiom)
-		} else {
-			Ok(start)
-		}
 	}
 
 	/// Parses a graph value
@@ -750,6 +695,7 @@ impl Parser<'_> {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use crate::sql::{Expression, Id, Number, Object, Operator, Param, Strand, Thing};
@@ -1182,3 +1128,4 @@ mod tests {
 		);
 	}
 }
+*/

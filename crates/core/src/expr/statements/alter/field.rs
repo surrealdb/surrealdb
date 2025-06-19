@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, Ident, Permissions, Strand, Value};
+use crate::expr::{Base, Expr, Ident, Permissions, Strand, Value};
 use crate::expr::{Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
 
@@ -16,6 +16,15 @@ use std::fmt::{self, Display};
 use std::ops::Deref;
 use uuid::Uuid;
 
+use super::AlterKind;
+
+pub enum AlterDefault {
+	None,
+	Drop,
+	Always(Expr),
+	Change(Expr),
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -24,16 +33,15 @@ pub struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
 	pub if_exists: bool,
-	pub flex: Option<bool>,
-	pub kind: Option<Option<Kind>>,
-	pub readonly: Option<bool>,
-	pub value: Option<Option<Value>>,
-	pub assert: Option<Option<Value>>,
-	pub default: Option<Option<Value>>,
+	pub flex: AlterKind<()>,
+	pub kind: AlterKind<Kind>,
+	pub readonly: AlterKind<()>,
+	pub value: AlterKind<Expr>,
+	pub assert: AlterKind<Expr>,
+	pub default: AlterDefault,
 	pub permissions: Option<Permissions>,
-	pub comment: Option<Option<Strand>>,
-	pub reference: Option<Option<Reference>>,
-	pub default_always: Option<bool>,
+	pub comment: AlterKind<Strand>,
+	pub reference: AlterKind<Reference>,
 }
 
 impl AlterFieldStatement {

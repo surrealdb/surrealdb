@@ -5,7 +5,7 @@ use crate::dbs::Session;
 use crate::expr;
 use crate::expr::Geometry;
 use crate::expr::Kind;
-use crate::expr::kind::Literal;
+use crate::expr::kind::LiteralKind;
 use crate::expr::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
 use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
@@ -266,13 +266,13 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		}
 		Kind::Either(ks) => {
 			let (ls, others): (Vec<Kind>, Vec<Kind>) =
-				ks.into_iter().partition(|k| matches!(k, Kind::Literal(Literal::String(_))));
+				ks.into_iter().partition(|k| matches!(k, Kind::Literal(LiteralKind::String(_))));
 
 			let enum_ty = if !ls.is_empty() {
 				let vals: Vec<String> = ls
 					.into_iter()
 					.map(|l| {
-						let Kind::Literal(Literal::String(out)) = l else {
+						let Kind::Literal(LiteralKind::String(out)) = l else {
 							unreachable!(
 								"just checked that this is a Kind::Literal(Literal::String(_))"
 							);

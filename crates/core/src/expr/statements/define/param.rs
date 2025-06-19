@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, FlowResultExt as _, Ident, Permission, Strand, Value};
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Permission, Strand, Value};
 use crate::iam::{Action, ResourceKind};
 use anyhow::{Result, bail};
 
@@ -13,19 +13,24 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 3)]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct DefineParamStatement {
+pub struct DefineParamStore {
 	pub name: Ident,
 	pub value: Value,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
+}
+
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct DefineParamStatement {
+	pub kind: DefineKind,
+	pub name: Ident,
+	pub value: Expr,
+	pub comment: Option<Strand>,
+	pub permissions: Permission,
 }
 
 impl DefineParamStatement {
@@ -47,12 +52,16 @@ impl DefineParamStatement {
 		// Check if the definition exists
 		let (ns, db) = opt.ns_db()?;
 		if txn.get_db_param(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::PaAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::PaAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
@@ -61,13 +70,13 @@ impl DefineParamStatement {
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
 			key,
-			revision::to_vec(&DefineParamStatement {
+			revision::to_vec(&DefineParamStore {
 				// Compute the param
 				value,
 				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
+				name: self.name.clone(),
+				comment: self.comment.clone(),
+				permissions: self.permissions.clone(),
 			})?,
 			None,
 		)

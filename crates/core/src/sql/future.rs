@@ -1,23 +1,13 @@
-use crate::sql::block::Block;
-use crate::sql::value::SqlValue;
+use crate::sql::Block;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Future")]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Future(pub Block);
-
-impl From<SqlValue> for Future {
-	fn from(v: SqlValue) -> Self {
-		Future(Block::from(v))
-	}
-}
 
 impl fmt::Display for Future {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

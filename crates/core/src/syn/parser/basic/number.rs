@@ -2,15 +2,12 @@ use std::{mem, num::ParseIntError, str::FromStr};
 
 use rust_decimal::Decimal;
 
-use crate::sql::number::decimal::DecimalExt;
-use crate::{
-	sql::Number,
-	syn::{
-		error::{bail, syntax_error},
-		lexer::compound::{self, NumberKind},
-		parser::{GluedValue, ParseResult, Parser, mac::unexpected},
-		token::{self, TokenKind, t},
-	},
+use crate::syn::lexer::compound::Numeric;
+use crate::syn::{
+	error::{bail, syntax_error},
+	lexer::compound::{self, NumberKind},
+	parser::{GluedValue, ParseResult, Parser, mac::unexpected},
+	token::{self, TokenKind, t},
 };
 
 use super::TokenValue;
@@ -104,7 +101,7 @@ impl TokenValue for f64 {
 	}
 }
 
-impl TokenValue for Number {
+impl TokenValue for Numeric {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
@@ -117,12 +114,12 @@ impl TokenValue for Number {
 				match x {
 					NumberKind::Integer => number_str
 						.parse()
-						.map(Number::Int)
+						.map(Numeric::Integer)
 						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
 					NumberKind::Float => number_str
 						.trim_end_matches("f")
 						.parse()
-						.map(Number::Float)
+						.map(Numeric::Float)
 						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
 					NumberKind::Decimal => {
 						let number_str = number_str.trim_end_matches("dec");
@@ -135,7 +132,7 @@ impl TokenValue for Number {
 								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
 							)?
 						};
-						Ok(Number::Decimal(decimal))
+						Ok(Numeric::Decimal(decimal))
 					}
 				}
 			}

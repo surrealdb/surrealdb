@@ -1,16 +1,7 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self};
+use std::fmt;
 
-use super::Ident;
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::File";
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::File")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct File {
 	pub bucket: String,
 	pub key: String,
@@ -22,14 +13,12 @@ impl File {
 		types.is_empty() || types.iter().any(|buc| buc.0 == self.bucket)
 	}
 
-	pub fn display_inner(&self) -> String {
-		format!("{}:{}", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
-	}
+	pub fn display_inner(&self) -> String {}
 }
 
 impl fmt::Display for File {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "f\"{}\"", self.display_inner())
+		write!(f, "f\"{}:{}\"", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
 	}
 }
 

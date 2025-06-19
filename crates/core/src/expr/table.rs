@@ -1,4 +1,6 @@
-use crate::expr::{Id, Ident, Thing, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes};
+use crate::expr::{
+	Ident, RecordIdKeyLit, Thing, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes,
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -68,7 +70,7 @@ impl Table {
 	pub fn generate(&self) -> Thing {
 		Thing {
 			tb: self.0.clone(),
-			id: Id::rand(),
+			id: RecordIdKeyLit::rand(),
 		}
 	}
 }

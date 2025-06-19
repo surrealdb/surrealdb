@@ -1,7 +1,7 @@
 use super::classes;
 use crate::expr::Bytes;
 use crate::expr::Geometry;
-use crate::expr::Id;
+use crate::expr::RecordIdKeyLit;
 use crate::expr::Strand;
 use crate::expr::array::Array;
 use crate::expr::datetime::Datetime;
@@ -121,7 +121,7 @@ impl<'js> FromJs<'js> for Value {
 					let borrow = v.borrow();
 					let v: &classes::record::Record = &borrow;
 					check_nul(&v.value.tb)?;
-					if let Id::String(s) = &v.value.id {
+					if let RecordIdKeyLit::String(s) = &v.value.id {
 						check_nul(s)?;
 					}
 					return Ok(v.value.clone().into());

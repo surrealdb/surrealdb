@@ -5,7 +5,7 @@ use super::lexer::Lexer;
 use super::parse;
 use super::parser::Parser;
 use crate::err::Error;
-use crate::sql::{Array, Expression, Ident, Idiom, Param, Script, SqlValue, Thing};
+use crate::sql::{Ident, Idiom, Param, Script, Thing};
 use crate::syn::token::{TokenKind, t};
 
 impl Parse<Self> for SqlValue {
@@ -13,7 +13,7 @@ impl Parse<Self> for SqlValue {
 		let mut parser = Parser::new(val.as_bytes());
 		let mut stack = Stack::new();
 		stack
-			.enter(|stk| parser.parse_value_field(stk))
+			.enter(|stk| parser.parse_expr_field(stk))
 			.finish()
 			.and_then(|e| parser.assert_finished().map(|_| e))
 			.map_err(|e| e.render_on(val))
@@ -69,7 +69,7 @@ impl Parse<Self> for Expression {
 		let mut parser = Parser::new(val.as_bytes());
 		let mut stack = Stack::new();
 		let value = stack
-			.enter(|ctx| parser.parse_value_field(ctx))
+			.enter(|ctx| parser.parse_expr_field(ctx))
 			.finish()
 			.map_err(|e| e.render_on(val))
 			.unwrap();

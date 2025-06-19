@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use surrealdb::dbs::Session;
-use surrealdb::{kvs::Datastore, sql::Id};
+use surrealdb::{kvs::Datastore, sql::RecordIdKeyLit};
 use tokio::{runtime::Runtime, task::JoinSet};
 
 pub struct Read {
@@ -13,7 +13,7 @@ impl Read {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", Id::rand().to_raw()),
+			table_name: format!("table_{}", RecordIdKeyLit::rand().to_raw()),
 		}
 	}
 }
@@ -43,7 +43,7 @@ impl super::Routine for Read {
 									"CREATE {}:{} SET field = '{}'",
 									&table_name,
 									task_id,
-									Id::rand()
+									RecordIdKeyLit::rand()
 								)
 								.as_str(),
 								&session,
@@ -86,7 +86,7 @@ impl super::Routine for Read {
 									"SELECT * FROM {}:{} WHERE field = '{}'",
 									&table_name,
 									task_id,
-									Id::rand()
+									RecordIdKeyLit::rand()
 								)
 								.as_str(),
 								&session,

@@ -10,22 +10,20 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::DefineKind;
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineConfigStatement {
+	pub kind: DefineKind,
 	pub inner: ConfigInner,
-	pub if_not_exists: bool,
-	pub overwrite: bool,
 }
 
 impl From<DefineConfigStatement> for crate::expr::statements::define::DefineConfigStatement {
 	fn from(v: DefineConfigStatement) -> Self {
 		crate::expr::statements::define::DefineConfigStatement {
 			inner: v.inner.into(),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			kind: v.kind.into(),
 		}
 	}
 }
@@ -34,16 +32,13 @@ impl From<crate::expr::statements::define::DefineConfigStatement> for DefineConf
 	fn from(v: crate::expr::statements::define::DefineConfigStatement) -> Self {
 		DefineConfigStatement {
 			inner: v.inner.into(),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			kind: v.kind.into(),
 		}
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
@@ -67,21 +62,6 @@ impl ConfigInner {
 		match self {
 			ConfigInner::Api(a) => Ok(a),
 			c => fail!("found {c} when a api config was expected"),
-		}
-	}
-}
-
-impl From<ConfigInner> for ConfigKind {
-	fn from(value: ConfigInner) -> Self {
-		(&value).into()
-	}
-}
-
-impl From<&ConfigInner> for ConfigKind {
-	fn from(value: &ConfigInner) -> Self {
-		match value {
-			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
-			ConfigInner::Api(_) => ConfigKind::Api,
 		}
 	}
 }
