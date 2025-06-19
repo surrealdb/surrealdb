@@ -1,12 +1,15 @@
 //! Contains the actual fetch function.
 
-use crate::fnc::script::{
-	fetch::{
-		body::{Body, BodyData, BodyKind},
-		classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
-		RequestError,
+use crate::fnc::{
+	http::resolver,
+	script::{
+		fetch::{
+			body::{Body, BodyData, BodyKind},
+			classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
+			RequestError,
+		},
+		modules::surrealdb::query::QueryContext,
 	},
-	modules::surrealdb::query::QueryContext,
 };
 use futures::TryStreamExt;
 use js::{function::Opt, Class, Ctx, Exception, Result, Value};
@@ -40,6 +43,7 @@ pub async fn fetch<'js>(
 	query_ctx
 		.check_allowed_net(&url)
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+	let capabilities = query_ctx.get_capabilities();
 
 	let req = reqwest::Request::new(js_req.init.method, url.clone());
 
@@ -71,9 +75,15 @@ pub async fn fetch<'js>(
 		}
 	});
 
-	let client = reqwest::Client::builder().redirect(policy).build().map_err(|e| {
-		Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
-	})?;
+	let client = reqwest::Client::builder()
+		.redirect(policy)
+		.dns_resolver(std::sync::Arc::new(resolver::FilteringResolver::from_capabilities(
+			capabilities,
+		)))
+		.build()
+		.map_err(|e| {
+			Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
+		})?;
 
 	// Set the body for the request.
 	let mut req_builder = reqwest::RequestBuilder::from_parts(client, req);

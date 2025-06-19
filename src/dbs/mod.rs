@@ -520,10 +520,17 @@ mod tests {
 		let server1 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
+				.and(path("/"))
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(1);
+
+			let get2 = Mock::given(method("GET"))
+				.and(path("/test"))
 				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
 				.expect(1);
 
 			s.register(get).await;
+			s.register(get2).await;
 			s
 		};
 
