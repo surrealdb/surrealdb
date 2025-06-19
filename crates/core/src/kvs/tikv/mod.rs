@@ -15,9 +15,7 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tikv::TimestampExt;
-use tikv::TransactionOptions;
-use tikv::{CheckLevel, Config, TransactionClient};
+use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 
