@@ -273,20 +273,13 @@ pub async fn generate_schema(
 							}
 						});
 
-						trace!("generated query ast with version {:?}: {ast:?}", version);
-						trace!("gtx options version: {:?}", gtx.get_version());
-						trace!("SQL query being executed: {}", ast);
-
-						// Use kvs.process() instead of gtx.process_stmt() for better version handling
 						let query = crate::sql::Query(crate::sql::Statements(vec![ast]));
-						trace!("Full query object: {:?}", query);
 						let mut results = kvs1.process(query, &sess1, None).await?;
 						let res = if let Some(response) = results.pop() {
 							response.result.map_err(|e| -> crate::gql::error::GqlError { e.into() })?
 						} else {
 							return Err("No response from query".into());
 						};
-						trace!("query result: {:?}", res);
 
 						let res_vec =
 							match res {
@@ -302,7 +295,6 @@ pub async fn generate_schema(
 							.into_iter()
 							.map(|v| {
 								v.try_as_thing().map(|t| {
-									trace!("resolving fields for record: {:?} with gtx version: {:?}", t, gtx.get_version());
 									let erased: ErasedRecord = (gtx.clone(), t);
 									field_val_erase_owned(erased)
 								})
@@ -641,7 +633,6 @@ pub async fn generate_schema(
 							} else {
 								GQLTx::new(&kvs2, &sess2).await?
 							};
-							trace!("_get_ query gtx version: {:?}", gtx.get_version());
 
 							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
 								Some(i) => i,
@@ -668,8 +659,6 @@ pub async fn generate_schema(
 								..Default::default()
 							});
 
-							trace!("_get_ query ast with version {:?}: {ast:?}", version);
-
 							// Use kvs.process() for proper version handling
 							let query = crate::sql::Query(crate::sql::Statements(vec![ast]));
 							let mut results = kvs2.process(query, &sess2, None).await?;
@@ -679,36 +668,25 @@ pub async fn generate_schema(
 								return Err("No response from _get_ query".into());
 							};
 
-							trace!("_get_ query result: {:?}", res);
-
 							match res {
 								SqlValue::Array(mut a) if a.len() == 1 => {
 									match a.0.pop() {
 										Some(SqlValue::Object(obj)) => {
 											if let Some(SqlValue::Thing(t)) = obj.get("id") {
-												trace!("_get_ found record: {:?} for thing: {:?}", t, thing);
 												let erased: ErasedRecord = (gtx, t.clone());
 												Ok(Some(field_val_erase_owned(erased)))
 											} else {
-												trace!("_get_ no id field in record for thing: {:?}", thing);
 												Ok(None)
 											}
 										}
 										Some(SqlValue::Thing(t)) => {
-											trace!("_get_ found record: {:?} for thing: {:?}", t, thing);
 											let erased: ErasedRecord = (gtx, t);
 											Ok(Some(field_val_erase_owned(erased)))
 										}
-										_ => {
-											trace!("_get_ no record found for thing: {:?}", thing);
-											Ok(None)
-										}
+										_ => Ok(None)
 									}
 								}
-								_ => {
-									trace!("_get_ no record found for thing: {:?}", thing);
-									Ok(None)
-								}
+								_ => Ok(None)
 							}
 						}
 					})
@@ -946,26 +924,32 @@ fn make_table_field_resolver(
 					.downcast_ref::<ErasedRecord>()
 					.ok_or_else(|| internal_error("failed to downcast"))?;
 
-				// Use SELECT statement with version instead of get_record_field
-				let version = gtx.get_version().map(|v| {
-					let dt = chrono::DateTime::from_timestamp_nanos(v as i64);
-					crate::sql::Version(crate::sql::datetime::Datetime::from(dt))
-				});
+				// Use SELECT statement with version for versioned queries, get_record_field for non-versioned
+				let val = if let Some(version_nanos) = gtx.get_version() {
+					// Use SELECT statement with version for proper version handling
+					let version = {
+						let dt = chrono::DateTime::from_timestamp_nanos(version_nanos as i64);
+						Some(crate::sql::Version(crate::sql::datetime::Datetime::from(dt)))
+					};
 
-				let ast = Statement::Select(SelectStatement {
-					what: vec![SqlValue::Thing(rid.clone())].into(),
-					expr: Fields(
-						vec![sql::Field::Single {
-							expr: SqlValue::Idiom(Idiom::from(fd_name.as_str())),
-							alias: None,
-						}],
-						true, // VALUE keyword
-					),
-					version,
-					..Default::default()
-				});
+					let ast = Statement::Select(SelectStatement {
+						what: vec![SqlValue::Thing(rid.clone())].into(),
+						expr: Fields(
+							vec![sql::Field::Single {
+								expr: SqlValue::Idiom(Idiom::from(fd_name.as_str())),
+								alias: None,
+							}],
+							true, // VALUE keyword
+						),
+						version,
+						..Default::default()
+					});
 
-				let val = gtx.process_stmt(ast).await?;
+					gtx.process_stmt(ast).await?
+				} else {
+					// Use get_record_field for non-versioned queries (better type handling)
+					gtx.get_record_field(rid.clone(), fd_name.as_str()).await?
+				};
 
 				let out = match val {
 					SqlValue::Thing(rid) if fd_name != "id" => {
