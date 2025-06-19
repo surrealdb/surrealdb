@@ -81,8 +81,8 @@ macro_rules! order {
 	}};
 }
 
-fn filter_name_from_table(tb_name: impl Display) -> String {
-	format!("_filter_{tb_name}")
+fn where_name_from_table(tb_name: impl Display) -> String {
+	format!("_where_{tb_name}")
 }
 
 fn uppercase(s: &str) -> String {
@@ -155,14 +155,14 @@ pub async fn generate_schema(
 			.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
 
-		let table_filter_name = filter_name_from_table(tb_name);
-		let mut table_filter = InputObject::new(&table_filter_name);
-		table_filter = table_filter
-			.field(InputValue::new("id", TypeRef::named("_filter_id")))
-			.field(InputValue::new("and", TypeRef::named_nn_list(&table_filter_name)))
-			.field(InputValue::new("or", TypeRef::named_nn_list(&table_filter_name)))
-			.field(InputValue::new("not", TypeRef::named(&table_filter_name)));
-		types.push(Type::InputObject(filter_id()));
+		let table_where_name = where_name_from_table(tb_name);
+		let mut table_where = InputObject::new(&table_where_name);
+		table_where = table_where
+			.field(InputValue::new("id", TypeRef::named("_where_id")))
+			.field(InputValue::new("and", TypeRef::named_nn_list(&table_where_name)))
+			.field(InputValue::new("or", TypeRef::named_nn_list(&table_where_name)))
+			.field(InputValue::new("not", TypeRef::named(&table_where_name)));
+		types.push(Type::InputObject(where_id()));
 
 		let sess1 = session.to_owned();
 		let fds = tx.all_tb_fields(ns, db, &tb.name.0, None).await?;
@@ -188,7 +188,7 @@ pub async fn generate_schema(
 
 						let order = args.get("order");
 
-						let filter = args.get("filter");
+						let where_clause = args.get("where");
 
 						let version = args.get("version").and_then(|v| v.as_string()).and_then(|s| {
 							s.parse::<crate::sql::datetime::Datetime>().ok().map(crate::sql::Version)
@@ -234,24 +234,24 @@ pub async fn generate_schema(
 						};
 						trace!("parsed orders: {orders:?}");
 
-						let cond = match filter {
-							Some(f) => {
-								let o = match f {
+						let cond = match where_clause {
+							Some(w) => {
+								let o = match w {
 									GqlValue::Object(o) => o,
-									f => {
-										error!("Found filter {f}, which should be object and should have been rejected by async graphql.");
+									w => {
+										error!("Found where clause {w}, which should be object and should have been rejected by async graphql.");
 										return Err("Value in cond doesn't fit schema".into());
 									}
 								};
 
-								let cond = cond_from_filter(o, &fds1)?;
+								let cond = cond_from_where(o, &fds1)?;
 
 								Some(cond)
 							}
 							None => None,
 						};
 
-						trace!("parsed filter: {cond:?}");
+						trace!("parsed where clause: {cond:?}");
 
 						// SELECT VALUE id FROM ...
 						let ast = Statement::Select({
@@ -311,11 +311,11 @@ pub async fn generate_schema(
 					})
 				},
 			)
-			.description(format!("Generated from table `{}`{}\nallows querying a table with filters", tb.name, if let Some(ref c) = &tb.comment {format!("\n{c}")} else {"".to_string()}))
+			.description(format!("Generated from table `{}`{}\nallows querying a table with where conditions", tb.name, if let Some(ref c) = &tb.comment {format!("\n{c}")} else {"".to_string()}))
 			.argument(limit_input!())
 			.argument(start_input!())
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
-			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name)))
+			.argument(InputValue::new("where", TypeRef::named(&table_where_name)))
 			.argument(version_input!()),
 		);
 
@@ -724,18 +724,18 @@ pub async fn generate_schema(
 			let fd_name = Name::new(fd.name.to_string());
 			let fd_type = kind_to_type(kind.clone(), &mut types)?;
 			table_orderable = table_orderable.item(fd_name.to_string());
-			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
+			let type_where_name = format!("_where_{}", unwrap_type(fd_type.clone()));
 
-			let type_filter = Type::InputObject(filter_from_type(
+			let type_where = Type::InputObject(where_from_type(
 				kind.clone(),
-				type_filter_name.clone(),
+				type_where_name.clone(),
 				&mut types,
 			)?);
-			trace!("\n{type_filter:?}\n");
-			types.push(type_filter);
+			trace!("\n{type_where:?}\n");
+			types.push(type_where);
 
-			table_filter = table_filter
-				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
+			table_where = table_where
+				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_where_name)));
 
 			table_ty_obj = table_ty_obj.field(Field::new(
 				fd.name.to_string(),
@@ -747,19 +747,17 @@ pub async fn generate_schema(
 		types.push(Type::Object(table_ty_obj));
 		types.push(table_order.into());
 		types.push(Type::Enum(table_orderable));
-		types.push(Type::InputObject(table_filter));
+		types.push(Type::InputObject(table_where));
 
-		// Create input types for mutations
 		let mut create_input = InputObject::new(&create_input_name)
 			.description(format!("Input type for creating a new {} record", tb.name));
 
 		let mut update_input = InputObject::new(&update_input_name)
 			.description(format!("Input type for updating a {} record", tb.name));
 
-		// Explicitly add optional id field to create input (id is implicit in SurrealDB)
+		// Explicitly add optional id field to create input
 		create_input = create_input.field(InputValue::new("id", TypeRef::named(TypeRef::ID)));
 
-		// Add fields to create and update input types
 		for fd in fds.iter() {
 			let Some(ref kind) = fd.kind else {
 				continue;
@@ -1431,23 +1429,23 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 	Ok(out)
 }
 
-macro_rules! filter_impl {
-	($filter:ident, $ty:ident, $name:expr) => {
-		$filter = $filter.field(InputValue::new($name, $ty.clone()));
+macro_rules! where_impl {
+	($where_obj:ident, $ty:ident, $name:expr) => {
+		$where_obj = $where_obj.field(InputValue::new($name, $ty.clone()));
 	};
 }
 
-fn filter_id() -> InputObject {
-	let mut filter = InputObject::new("_filter_id");
+fn where_id() -> InputObject {
+	let mut where_obj = InputObject::new("_where_id");
 	let ty = TypeRef::named(TypeRef::ID);
-	filter_impl!(filter, ty, "eq");
-	filter_impl!(filter, ty, "ne");
-	filter
+	where_impl!(where_obj, ty, "eq");
+	where_impl!(where_obj, ty, "ne");
+	where_obj
 }
 
-fn filter_from_type(
+fn where_from_type(
 	kind: Kind,
-	filter_name: String,
+	where_name: String,
 	types: &mut Vec<Type>,
 ) -> Result<InputObject, GqlError> {
 	let inner_kind = match &kind {
@@ -1457,7 +1455,7 @@ fn filter_from_type(
 
 	let ty = match &inner_kind {
 		Kind::Record(ts) => match ts.len() {
-			1 => TypeRef::named(filter_name_from_table(
+			1 => TypeRef::named(where_name_from_table(
 				ts.first().expect("ts should have exactly one element").as_str(),
 			)),
 			_ => TypeRef::named(TypeRef::ID),
@@ -1465,24 +1463,65 @@ fn filter_from_type(
 		k => unwrap_type(kind_to_type(k.clone(), types)?),
 	};
 
-	let mut filter = InputObject::new(filter_name);
-	filter_impl!(filter, ty, "eq");
-	filter_impl!(filter, ty, "ne");
+	let mut where_obj = InputObject::new(where_name);
+	where_impl!(where_obj, ty, "eq");
+	where_impl!(where_obj, ty, "ne");
 
 	match inner_kind {
+		Kind::String => {
+			let string_ty = TypeRef::named(TypeRef::STRING);
+			let string_list_ty = TypeRef::named_nn_list(TypeRef::STRING);
+			where_impl!(where_obj, string_ty, "contains");
+			where_impl!(where_obj, string_ty, "startsWith");
+			where_impl!(where_obj, string_ty, "endsWith");
+			where_impl!(where_obj, string_ty, "regex");
+			where_impl!(where_obj, string_list_ty, "in");
+		}
+		Kind::Int => {
+			where_impl!(where_obj, ty, "gt");
+			where_impl!(where_obj, ty, "gte");
+			where_impl!(where_obj, ty, "lt");
+			where_impl!(where_obj, ty, "lte");
+			let list_ty = TypeRef::named_nn_list(TypeRef::INT);
+			where_impl!(where_obj, list_ty, "in");
+		}
+		Kind::Float => {
+			where_impl!(where_obj, ty, "gt");
+			where_impl!(where_obj, ty, "gte");
+			where_impl!(where_obj, ty, "lt");
+			where_impl!(where_obj, ty, "lte");
+			let list_ty = TypeRef::named_nn_list(TypeRef::FLOAT);
+			where_impl!(where_obj, list_ty, "in");
+		}
+		Kind::Number => {
+			where_impl!(where_obj, ty, "gt");
+			where_impl!(where_obj, ty, "gte");
+			where_impl!(where_obj, ty, "lt");
+			where_impl!(where_obj, ty, "lte");
+			let list_ty = TypeRef::named_nn_list("Number");
+			where_impl!(where_obj, list_ty, "in");
+		}
+		Kind::Decimal => {
+			where_impl!(where_obj, ty, "gt");
+			where_impl!(where_obj, ty, "gte");
+			where_impl!(where_obj, ty, "lt");
+			where_impl!(where_obj, ty, "lte");
+			let list_ty = TypeRef::named_nn_list("Decimal");
+			where_impl!(where_obj, list_ty, "in");
+		}
+		Kind::Bool => {}
+		Kind::Datetime => {
+			where_impl!(where_obj, ty, "gt");
+			where_impl!(where_obj, ty, "gte");
+			where_impl!(where_obj, ty, "lt");
+			where_impl!(where_obj, ty, "lte");
+		}
 		Kind::Any => {}
 		Kind::Null => {}
-		Kind::Bool => {}
 		Kind::Bytes => {}
-		Kind::Datetime => {}
-		Kind::Decimal => {}
 		Kind::Duration => {}
-		Kind::Float => {}
-		Kind::Int => {}
-		Kind::Number => {}
 		Kind::Object => {}
 		Kind::Point => {}
-		Kind::String => {}
 		Kind::Uuid => {}
 		Kind::Record(_) => {}
 		Kind::Geometry(_) => {}
@@ -1494,7 +1533,7 @@ fn filter_from_type(
 		Kind::Range => {}
 		Kind::Literal(_) => {}
 	};
-	Ok(filter)
+	Ok(where_obj)
 }
 
 fn unwrap_type(ty: TypeRef) -> TypeRef {
@@ -1504,22 +1543,22 @@ fn unwrap_type(ty: TypeRef) -> TypeRef {
 	}
 }
 
-fn cond_from_filter(
-	filter: &IndexMap<Name, GqlValue>,
+fn cond_from_where(
+	where_clause: &IndexMap<Name, GqlValue>,
 	fds: &[DefineFieldStatement],
 ) -> Result<Cond, GqlError> {
-	val_from_filter(filter, fds).map(IntoExt::intox)
+	val_from_where(where_clause, fds).map(IntoExt::intox)
 }
 
-fn val_from_filter(
-	filter: &IndexMap<Name, GqlValue>,
+fn val_from_where(
+	where_clause: &IndexMap<Name, GqlValue>,
 	fds: &[DefineFieldStatement],
 ) -> Result<SqlValue, GqlError> {
-	if filter.len() != 1 {
-		return Err(resolver_error("Table Filter must have one item"));
+	if where_clause.len() != 1 {
+		return Err(resolver_error("Table Where clause must have one item"));
 	}
 
-	let (k, v) = filter.iter().next().unwrap();
+	let (k, v) = where_clause.iter().next().unwrap();
 
 	let cond = match k.as_str().to_lowercase().as_str() {
 		"or" => aggregate(v, AggregateOp::Or, fds),
@@ -1535,13 +1574,22 @@ fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, GqlError> {
 	match name.as_ref() {
 		"eq" => Ok(sql::Operator::Equal),
 		"ne" => Ok(sql::Operator::NotEqual),
+		"gt" => Ok(sql::Operator::MoreThan),
+		"gte" => Ok(sql::Operator::MoreThanOrEqual),
+		"lt" => Ok(sql::Operator::LessThan),
+		"lte" => Ok(sql::Operator::LessThanOrEqual),
+		"contains" => Ok(sql::Operator::Contain),
+		"startsWith" => Ok(sql::Operator::Equal),
+		"endsWith" => Ok(sql::Operator::Equal),
+		"regex" => Ok(sql::Operator::Matches(None)),
+		"in" => Ok(sql::Operator::Inside),
 		op => Err(resolver_error(format!("Unsupported op: {op}"))),
 	}
 }
 
-fn negate(filter: &GqlValue, fds: &[DefineFieldStatement]) -> Result<SqlValue, GqlError> {
-	let obj = filter.as_object().ok_or(resolver_error("Value of NOT must be object"))?;
-	let inner_cond = val_from_filter(obj, fds)?;
+fn negate(where_clause: &GqlValue, fds: &[DefineFieldStatement]) -> Result<SqlValue, GqlError> {
+	let obj = where_clause.as_object().ok_or(resolver_error("Value of NOT must be object"))?;
+	let inner_cond = val_from_where(obj, fds)?;
 
 	Ok(Expression::Unary {
 		o: sql::Operator::Not,
@@ -1570,13 +1618,13 @@ fn aggregate(
 	};
 	let list =
 		filter.as_list().ok_or(resolver_error(format!("Value of {op_str} should be a list")))?;
-	let filter_arr = list
+	let where_arr = list
 		.iter()
-		.map(|v| v.as_object().map(|o| val_from_filter(o, fds)))
+		.map(|v| v.as_object().map(|o| val_from_where(o, fds)))
 		.collect::<Option<Result<Vec<SqlValue>, GqlError>>>()
 		.ok_or(resolver_error(format!("List of {op_str} should contain objects")))??;
 
-	let mut iter = filter_arr.into_iter();
+	let mut iter = where_arr.into_iter();
 
 	let mut cond = iter
 		.next()
@@ -1599,14 +1647,14 @@ fn binop(
 	val: &GqlValue,
 	fds: &[DefineFieldStatement],
 ) -> Result<SqlValue, GqlError> {
-	let obj = val.as_object().ok_or(resolver_error("Field filter should be object"))?;
+	let obj = val.as_object().ok_or(resolver_error("Field where condition should be object"))?;
 
 	let Some(fd) = fds.iter().find(|fd| fd.name.to_string() == field_name) else {
 		return Err(resolver_error(format!("Field `{field_name}` not found")));
 	};
 
 	if obj.len() != 1 {
-		return Err(resolver_error("Field Filter must have one item"));
+		return Err(resolver_error("Field Where condition must have one item"));
 	}
 
 	let lhs = sql::Value::Idiom(field_name.intox());
@@ -1614,7 +1662,35 @@ fn binop(
 	let (k, v) = obj.iter().next().unwrap();
 	let op = parse_op(k)?;
 
-	let rhs = gql_to_sql_kind(v, fd.kind.clone().unwrap_or_default())?;
+	// Handle special cases that need function calls instead of binary operators
+	if k.as_str() == "startsWith" {
+		let value = gql_to_sql_kind(v, fd.kind.clone().unwrap_or_default())?;
+		let func_val = sql::Value::Function(Box::new(sql::Function::Normal(
+			"string::starts_with".to_string(),
+			vec![lhs, value]
+		)));
+		return Ok(func_val);
+	} else if k.as_str() == "endsWith" {
+		let value = gql_to_sql_kind(v, fd.kind.clone().unwrap_or_default())?;
+		let func_val = sql::Value::Function(Box::new(sql::Function::Normal(
+			"string::ends_with".to_string(),
+			vec![lhs, value]
+		)));
+		return Ok(func_val);
+	}
+
+	let rhs = if k.as_str() == "in" {
+		// For 'in' operator, expect an array of values
+		let list = v.as_list().ok_or(resolver_error("Value for 'in' operator must be a list"))?;
+		let field_kind = fd.kind.clone().unwrap_or_default();
+		let sql_values: Result<Vec<_>, _> = list
+			.iter()
+			.map(|item| gql_to_sql_kind(item, field_kind.clone()))
+			.collect();
+		sql::Value::Array(sql_values?.into())
+	} else {
+		gql_to_sql_kind(v, fd.kind.clone().unwrap_or_default())?
+	};
 
 	let expr = sql::Expression::Binary {
 		l: lhs,
