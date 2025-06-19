@@ -214,6 +214,7 @@
 "crypto"
 "crypto::"
 "crypto::blake3("
+"crypto::joaat("
 "crypto::md5("
 "crypto::sha1("
 "crypto::sha256("
