@@ -63,6 +63,10 @@ pub struct GQLTx {
 
 impl GQLTx {
 	pub async fn new(kvs: &Arc<Datastore>, sess: &Session) -> Result<Self, GqlError> {
+		Self::new_with_version(kvs, sess, None).await
+	}
+
+	pub async fn new_with_version(kvs: &Arc<Datastore>, sess: &Session, version: Option<u64>) -> Result<Self, GqlError> {
 		kvs.check_anon(sess).map_err(|_| {
 			Error::IamError(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
@@ -80,8 +84,12 @@ impl GQLTx {
 
 		Ok(GQLTx {
 			ctx: ctx.freeze(),
-			opt: kvs.setup_options(sess),
+			opt: kvs.setup_options(sess).with_version(version),
 		})
+	}
+
+	pub fn get_version(&self) -> Option<u64> {
+		self.opt.version
 	}
 
 	pub async fn get_record_field(
