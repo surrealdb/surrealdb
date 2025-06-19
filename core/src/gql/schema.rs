@@ -662,7 +662,7 @@ pub async fn generate_schema(
 
 			// Skip ID field for create input
 			if fd.name.to_string() != "id" {
-				let fd_type = kind_to_type(kind.clone(), &mut types)?;
+				let fd_type = kind_to_input_type(kind.clone(), &mut types)?;
 				create_input = create_input.field(InputValue::new(fd.name.to_string(), fd_type.clone()));
 				// Make all fields optional for update
 				update_input = update_input.field(InputValue::new(fd.name.to_string(), unwrap_type(fd_type)));
@@ -1015,6 +1015,136 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 	Ok(out)
 }
 
+fn kind_to_input_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
+	let (optional, match_kind) = match kind {
+		Kind::Option(op_ty) => (true, *op_ty),
+		_ => (false, kind),
+	};
+	let out_ty = match match_kind {
+		Kind::Any => TypeRef::named("any"),
+		Kind::Null => TypeRef::named("null"),
+		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
+		Kind::Bytes => TypeRef::named("bytes"),
+		Kind::Datetime => TypeRef::named("datetime"),
+		Kind::Decimal => TypeRef::named("decimal"),
+		Kind::Duration => TypeRef::named("duration"),
+		Kind::Float => TypeRef::named(TypeRef::FLOAT),
+		Kind::Int => TypeRef::named(TypeRef::INT),
+		Kind::Number => TypeRef::named("number"),
+		Kind::Object => TypeRef::named("object"),
+		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
+		Kind::String => TypeRef::named(TypeRef::STRING),
+		Kind::Uuid => TypeRef::named("uuid"),
+		Kind::Record(mut r) => match r.len() {
+			0 => TypeRef::named("record"),
+			1 => {
+				let table_name = r.pop().unwrap().0;
+				TypeRef::named(format!("Create{}Input", uppercase(&table_name)))
+			},
+			_ => {
+				let names: Vec<String> = r.into_iter().map(|t| format!("Create{}Input", uppercase(&t.0))).collect();
+				let ty_name = names.join("_or_");
+
+				let mut tmp_union = Union::new(ty_name.clone())
+					.description(format!("An input which is one of: {}", names.join(", ")));
+				for n in names {
+					tmp_union = tmp_union.possible_type(n);
+				}
+
+				types.push(Type::Union(tmp_union));
+				TypeRef::named(ty_name)
+			}
+		},
+		Kind::Geometry(ref geom_types) => {
+			if geom_types.is_empty() {
+				TypeRef::named("geometry")
+			} else if geom_types.len() == 1 {
+				TypeRef::named(geom_types[0].clone())
+			} else {
+				// Create a union type for multiple geometry types
+				let union_name = format!("geometry_{}", geom_types.join("_or_"));
+				let mut geom_union = Union::new(union_name.clone())
+					.description(format!("A geometry which is one of: {}", geom_types.join(", ")));
+
+				for geom_type in geom_types {
+					geom_union = geom_union.possible_type(geom_type.clone());
+				}
+
+				types.push(Type::Union(geom_union));
+				TypeRef::named(union_name)
+			}
+		},
+		Kind::Option(t) => {
+			let mut non_op_ty = *t;
+			while let Kind::Option(inner) = non_op_ty {
+				non_op_ty = *inner;
+			}
+			kind_to_input_type(non_op_ty, types)?
+		}
+		Kind::Either(ks) => {
+			let (ls, others): (Vec<Kind>, Vec<Kind>) =
+				ks.into_iter().partition(|k| matches!(k, Kind::Literal(Literal::String(_))));
+
+			let enum_ty = if ls.len() > 0 {
+				let vals: Vec<String> = ls
+					.into_iter()
+					.map(|l| {
+						let Kind::Literal(Literal::String(out)) = l else {
+							unreachable!(
+								"just checked that this is a Kind::Literal(Literal::String(_))"
+							);
+						};
+						out.0
+					})
+					.collect();
+
+				let mut tmp = Enum::new(vals.join("_or_"));
+				tmp = tmp.items(vals);
+
+				let enum_ty = tmp.type_name().to_string();
+
+				types.push(Type::Enum(tmp));
+				if others.len() == 0 {
+					return Ok(TypeRef::named(enum_ty));
+				}
+				Some(enum_ty)
+			} else {
+				None
+			};
+
+			let pos_names: Result<Vec<TypeRef>, GqlError> =
+				others.into_iter().map(|k| kind_to_input_type(k, types)).collect();
+			let pos_names: Vec<String> = pos_names?.into_iter().map(|tr| tr.to_string()).collect();
+			let ty_name = pos_names.join("_or_");
+
+			let mut tmp_union = Union::new(ty_name.clone());
+			for n in pos_names {
+				tmp_union = tmp_union.possible_type(n);
+			}
+
+			if let Some(ty) = enum_ty {
+				tmp_union = tmp_union.possible_type(ty);
+			}
+
+			types.push(Type::Union(tmp_union));
+			TypeRef::named(ty_name)
+		}
+		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
+		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_input_type(*k, types)?)),
+		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
+		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
+		// TODO(raphaeldarley): check if union is of literals and generate enum
+		// generate custom scalar from other literals?
+		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
+	};
+
+	let out = match optional {
+		true => out_ty,
+		false => TypeRef::NonNull(Box::new(out_ty)),
+	};
+	Ok(out)
+}
+
 fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
 	let (optional, match_kind) = match kind {
 		Kind::Option(op_ty) => (true, *op_ty),
@@ -1155,12 +1285,18 @@ fn filter_id() -> InputObject {
 	filter_impl!(filter, ty, "ne");
 	filter
 }
+
 fn filter_from_type(
 	kind: Kind,
 	filter_name: String,
 	types: &mut Vec<Type>,
 ) -> Result<InputObject, GqlError> {
-	let ty = match &kind {
+	let inner_kind = match &kind {
+		Kind::Option(inner) => inner.as_ref().clone(),
+		_ => kind.clone(),
+	};
+
+	let ty = match &inner_kind {
 		Kind::Record(ts) => match ts.len() {
 			1 => TypeRef::named(filter_name_from_table(
 				ts.first().expect("ts should have exactly one element").as_str(),
@@ -1174,7 +1310,7 @@ fn filter_from_type(
 	filter_impl!(filter, ty, "eq");
 	filter_impl!(filter, ty, "ne");
 
-	match kind {
+	match inner_kind {
 		Kind::Any => {}
 		Kind::Null => {}
 		Kind::Bool => {}
