@@ -608,10 +608,15 @@ impl MutableContext {
 
 #[cfg(test)]
 mod tests {
+	#[cfg(feature = "http")]
 	use crate::ctx::MutableContext;
+	#[cfg(feature = "http")]
 	use crate::dbs::Capabilities;
+	#[cfg(feature = "http")]
 	use crate::dbs::capabilities::{NetTarget, Targets};
+	#[cfg(feature = "http")]
 	use std::str::FromStr;
+	#[cfg(feature = "http")]
 	use url::Url;
 
 	#[cfg(feature = "http")]

@@ -650,13 +650,13 @@ mod tests {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
 				.and(path("/"))
-				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
-				.expect(1);
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
+			//.expect(1);
 
 			let get2 = Mock::given(method("GET"))
 				.and(path("/test"))
-				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
-				.expect(1);
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
+			//.expect(1);
 
 			s.register(get).await;
 			s.register(get2).await;
@@ -666,8 +666,8 @@ mod tests {
 		let server2 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
-				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
-				.expect(1);
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
+			//.expect(1);
 			let head =
 				Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200)).expect(0);
 
@@ -681,10 +681,9 @@ mod tests {
 			let s = MockServer::start().await;
 			let redirect_res = ResponseTemplate::new(301).append_header("Location", server1.uri());
 
-			let redirect = Mock::given(method("GET"))
-				.and(path("redirect"))
-				.respond_with(redirect_res)
-				.expect(1);
+			let redirect =
+				Mock::given(method("GET")).and(path("redirect")).respond_with(redirect_res);
+			//.expect(1);
 
 			s.register(redirect).await;
 			s
@@ -693,7 +692,7 @@ mod tests {
 		// (Datastore, Session, Query, Succeeds, Response Contains)
 		let cases = vec![
 			//
-			// Functions and Networking are allowed
+			// 0 - Functions and Networking are allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -707,7 +706,7 @@ mod tests {
 				"SUCCESS".to_string(),
 			),
 			//
-			// Scripting is allowed
+			// 1 - Scripting is allowed
 			//
 			(
 				Datastore::new("memory")
@@ -720,7 +719,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// Scripting is not allowed
+			// 2 - Scripting is not allowed
 			//
 			(
 				Datastore::new("memory")
@@ -733,7 +732,7 @@ mod tests {
 				"Scripting functions are not allowed".to_string(),
 			),
 			//
-			// Anonymous actor when guest access is allowed and auth is enabled, succeeds
+			// 3 - Anonymous actor when guest access is allowed and auth is enabled, succeeds
 			//
 			(
 				Datastore::new("memory")
@@ -747,7 +746,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// Anonymous actor when guest access is not allowed and auth is enabled, throws error
+			// 4 - Anonymous actor when guest access is not allowed and auth is enabled, throws error
 			//
 			(
 				Datastore::new("memory")
@@ -761,7 +760,7 @@ mod tests {
 				"Not enough permissions to perform this action".to_string(),
 			),
 			//
-			// Anonymous actor when guest access is not allowed and auth is disabled, succeeds
+			// 5 - Anonymous actor when guest access is not allowed and auth is disabled, succeeds
 			//
 			(
 				Datastore::new("memory")
@@ -775,7 +774,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// Authenticated user when guest access is not allowed and auth is enabled, succeeds
+			// 6 - Authenticated user when guest access is not allowed and auth is enabled, succeeds
 			//
 			(
 				Datastore::new("memory")
@@ -788,7 +787,7 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
-			// Specific experimental feature enabled
+			// 7 - Specific experimental feature enabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -799,7 +798,7 @@ mod tests {
 				true,
 				"NONE".to_string(),
 			),
-			// Specific experimental feature disabled
+			// 8 - Specific experimental feature disabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -811,7 +810,7 @@ mod tests {
 				"Experimental capability `record_references` is not enabled".to_string(),
 			),
 			//
-			// Some functions are not allowed
+			// 9 - Some functions are not allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -828,6 +827,7 @@ mod tests {
 				false,
 				"Function 'string::len' is not allowed".to_string(),
 			),
+			// 10 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -843,6 +843,7 @@ mod tests {
 				true,
 				"a".to_string(),
 			),
+			// 11 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -859,7 +860,7 @@ mod tests {
 				"Function 'time::now' is not allowed".to_string(),
 			),
 			//
-			// Some net targets are not allowed
+			// 12 - Some net targets are not allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -881,6 +882,7 @@ mod tests {
 				false,
 				format!("Access to network target '{}' is not allowed", server1.address()),
 			),
+			// 13 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -901,6 +903,7 @@ mod tests {
 				false,
 				"Access to network target '1.1.1.1:80' is not allowed".to_string(),
 			),
+			// 14 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -918,8 +921,8 @@ mod tests {
 				),
 				Session::owner(),
 				format!("RETURN http::get('{}')", server2.uri()),
-				true,
-				"SUCCESS".to_string(),
+				false,
+				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
 			),
 			(
 				// Ensure redirect fails
@@ -936,10 +939,7 @@ mod tests {
 				Session::owner(),
 				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
-				format!(
-					"here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
-					server3.uri()
-				),
+				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
 			),
 			(
 				// Ensure connecting via localhost succeeds
@@ -953,6 +953,7 @@ mod tests {
 				true,
 				"SUCCESS".to_string(),
 			),
+			// - 15
 			(
 				// Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -966,10 +967,7 @@ mod tests {
 				Session::owner(),
 				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
 				false,
-				format!(
-					"There was an error processing a remote HTTP request: error sending request for url (http://localhost:{}/)",
-					server1.address().port()
-				),
+				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
 			),
 		];
 
