@@ -500,17 +500,25 @@ impl MutableContext {
 
 	/// Check if a network target is allowed
 	#[cfg(feature = "http")]
-	pub(crate) fn check_allowed_net(&self, url: &Url) -> Result<()> {
+	pub(crate) async fn check_allowed_net(&self, url: &Url) -> Result<()> {
+		let check = |target| {
+			if !self.capabilities.allows_network_target(target) {
+				warn!(
+					"Capabilities denied outgoing network connection attempt, target: '{target}'"
+				);
+				bail!(Error::NetTargetNotAllowed(target.to_string()));
+			}
+			trace!("Capabilities allowed outgoing network connection, target: '{target}'");
+			Ok(())
+		};
 		match url.host() {
 			Some(host) => {
-				let target = &NetTarget::Host(host.to_owned(), url.port_or_known_default());
-				if !self.capabilities.allows_network_target(target) {
-					warn!(
-						"Capabilities denied outgoing network connection attempt, target: '{target}'"
-					);
-					bail!(Error::NetTargetNotAllowed(target.to_string()));
+				let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
+				check(&target)?;
+				let targets = target.resolve().await?;
+				for t in &targets {
+					check(t)?;
 				}
-				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 				Ok(())
 			}
 			_ => bail!(Error::InvalidUrl(url.to_string())),
@@ -553,5 +561,30 @@ impl MutableContext {
 		} else {
 			bail!(Error::BucketUnavailable(bu.into()))
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::ctx::MutableContext;
+	use crate::dbs::Capabilities;
+	use crate::dbs::capabilities::{NetTarget, Targets};
+	use std::str::FromStr;
+	use url::Url;
+
+	#[cfg(feature = "http")]
+	#[tokio::test]
+	async fn test_context_check_allowed_net() {
+		let cap = Capabilities::all().without_network_targets(Targets::Some(
+			[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+		));
+		let mut ctx = MutableContext::background();
+		ctx.capabilities = cap.into();
+		let ctx = ctx.freeze();
+		let r = ctx.check_allowed_net(&Url::parse("http://localhost").unwrap()).await;
+		assert_eq!(
+			r.err().unwrap().to_string(),
+			"Access to network target '127.0.0.1/32' is not allowed"
+		);
 	}
 }

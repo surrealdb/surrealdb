@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use crate::iam::{Auth, Level};
 use crate::rpc::Method;
 use ipnet::IpNet;
+use tokio::net::lookup_host;
 use url::Url;
 
 pub trait Target<Item: ?Sized = Self> {
@@ -183,7 +184,25 @@ impl std::str::FromStr for ExperimentalTarget {
 #[non_exhaustive]
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
-	IPNet(ipnet::IpNet),
+	IPNet(IpNet),
+}
+
+impl NetTarget {
+	pub(crate) async fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
+		match self {
+			NetTarget::Host(h, p) => {
+				let r = lookup_host((h.to_string(), p.unwrap_or(80)))
+					.await?
+					.map(|a| {
+						let ipnet: IpNet = a.ip().into();
+						NetTarget::IPNet(ipnet)
+					})
+					.collect();
+				Ok(r)
+			}
+			NetTarget::IPNet(_) => Ok(vec![]),
+		}
+	}
 }
 
 // impl display
@@ -969,6 +988,17 @@ mod tests {
 		assert!(NetTarget::from_str("11111.3.4.5").is_err());
 		assert!(NetTarget::from_str("2001:db8::1/129").is_err());
 		assert!(NetTarget::from_str("[2001:db8::1").is_err());
+	}
+
+	#[tokio::test]
+	async fn test_net_target_resolve() {
+		assert_eq!(
+			NetTarget::from_str("localhost").unwrap().resolve().await.unwrap(),
+			vec![
+				NetTarget::from_str("127.0.0.1").unwrap(),
+				NetTarget::from_str("::1/128").unwrap()
+			]
+		);
 	}
 
 	#[test]
