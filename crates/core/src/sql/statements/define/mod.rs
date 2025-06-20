@@ -4,7 +4,6 @@ mod api;
 mod bucket;
 pub mod config;
 mod database;
-mod deprecated;
 mod event;
 mod field;
 mod function;
@@ -33,12 +32,7 @@ pub use sequence::DefineSequenceStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
-pub use deprecated::scope::DefineScopeStatement;
-pub use deprecated::token::DefineTokenStatement;
-
 pub use api::ApiAction;
-
-use anyhow::Result;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -53,18 +47,6 @@ pub enum DefineStatement {
 	Database(DefineDatabaseStatement),
 	Function(DefineFunctionStatement),
 	Analyzer(DefineAnalyzerStatement),
-	#[revision(
-		end = 2,
-		convert_fn = "convert_token_to_access",
-		fields_name = "DefineTokenStatementFields"
-	)]
-	Token(DefineTokenStatement),
-	#[revision(
-		end = 2,
-		convert_fn = "convert_scope_to_access",
-		fields_name = "DefineScopeStatementFields"
-	)]
-	Scope(DefineScopeStatement),
 	Param(DefineParamStatement),
 	Table(DefineTableStatement),
 	Event(DefineEventStatement),
@@ -81,23 +63,6 @@ pub enum DefineStatement {
 	Bucket(DefineBucketStatement),
 	#[revision(start = 5)]
 	Sequence(DefineSequenceStatement),
-}
-
-// Revision implementations
-impl DefineStatement {
-	fn convert_token_to_access(
-		fields: DefineTokenStatementFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(DefineStatement::Access(fields.0.into()))
-	}
-
-	fn convert_scope_to_access(
-		fields: DefineScopeStatementFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(DefineStatement::Access(fields.0.into()))
-	}
 }
 
 impl Display for DefineStatement {
