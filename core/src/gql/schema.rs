@@ -495,6 +495,7 @@ pub async fn generate_schema(
 		let create_fds = fds.clone();
 		let create_kvs = datastore.clone();
 		let create_input_name_ref = create_input_name.clone();
+		let tb_kind = tb.kind.clone();
 
 		mutation = mutation.field(
 			Field::new(
@@ -505,6 +506,7 @@ pub async fn generate_schema(
 					let sess = create_sess.clone();
 					let fds = create_fds.clone();
 					let kvs = create_kvs.clone();
+					let table_kind = tb_kind.clone();
 
 					FieldFuture::new(async move {
 						let args = ctx.args.as_index_map();
@@ -516,6 +518,8 @@ pub async fn generate_schema(
 
 						let mut data_fields = Vec::new();
 						let mut record_id = None;
+						let mut in_value = None;
+						let mut out_value = None;
 
 						if let GqlValue::Object(obj) = input {
 							for (key, value) in obj {
@@ -528,7 +532,31 @@ pub async fn generate_schema(
 										};
 										record_id = Some(thing);
 									}
-									continue; // Skip adding id to data fields
+									continue;
+								}
+
+								// Handle in/out fields for relation tables
+								if matches!(&table_kind, TableType::Relation(_)) {
+									if key.as_str() == "in" {
+										if let Some(id_str) = value.as_string() {
+											let thing = match id_str.clone().try_into() {
+												Ok(t) => t,
+												Err(_) => return Err(resolver_error("Invalid 'in' record ID").into()),
+											};
+											in_value = Some(thing);
+										}
+										continue;
+									}
+									if key.as_str() == "out" {
+										if let Some(id_str) = value.as_string() {
+											let thing = match id_str.clone().try_into() {
+												Ok(t) => t,
+												Err(_) => return Err(resolver_error("Invalid 'out' record ID").into()),
+											};
+											out_value = Some(thing);
+										}
+										continue;
+									}
 								}
 
 								let field_def = fds.iter().find(|fd| fd.name.to_string() == key.as_str());
@@ -548,23 +576,48 @@ pub async fn generate_schema(
 							return Err(resolver_error("data must be an object").into());
 						}
 
-						let what_value = if let Some(thing) = record_id {
-							// If ID is provided in data, create a specific record
-							SqlValue::Thing(thing)
-						} else {
-							// If no ID provided, create from table
-							SqlValue::Table(tb_name.intox())
-						};
+						let ast = if matches!(&table_kind, TableType::Relation(_)) {
+							// For relation tables, use RELATE statement
+							let in_thing = in_value.ok_or_else(|| resolver_error("Relation table requires 'in' field"))?;
+							let out_thing = out_value.ok_or_else(|| resolver_error("Relation table requires 'out' field"))?;
 
-						let ast = Statement::Create(CreateStatement {
-							only: true,
-							what: Values(vec![what_value]),
-							data: Some(Data::SetExpression(data_fields)),
-							output: Some(crate::sql::Output::After),
-							timeout: None,
-							parallel: false,
-							version,
-						});
+							let kind_value = if let Some(thing) = record_id {
+								SqlValue::Thing(thing)
+							} else {
+								SqlValue::Table(tb_name.intox())
+							};
+
+							Statement::Relate(crate::sql::statements::RelateStatement {
+								only: true,
+								kind: kind_value,
+								from: SqlValue::Thing(in_thing),
+								with: SqlValue::Thing(out_thing),
+								uniq: false,
+								data: if data_fields.is_empty() { None } else { Some(Data::SetExpression(data_fields)) },
+								output: Some(crate::sql::Output::After),
+								timeout: None,
+								parallel: false,
+							})
+						} else {
+							// For regular tables, use CREATE statement
+							let what_value = if let Some(thing) = record_id {
+								// If ID is provided in data, create a specific record
+								SqlValue::Thing(thing)
+							} else {
+								// If no ID provided, create from table
+								SqlValue::Table(tb_name.intox())
+							};
+
+							Statement::Create(CreateStatement {
+								only: true,
+								what: Values(vec![what_value]),
+								data: Some(Data::SetExpression(data_fields)),
+								output: Some(crate::sql::Output::After),
+								timeout: None,
+								parallel: false,
+								version,
+							})
+						};
 
 						let res = GQLTx::execute_mutation(&kvs, &sess, ast).await?;
 						let gtx = GQLTx::new(&kvs, &sess).await?;
