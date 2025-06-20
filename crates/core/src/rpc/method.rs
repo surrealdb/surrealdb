@@ -82,9 +82,7 @@ impl Method {
 			_ => Self::Unknown,
 		}
 	}
-}
 
-impl Method {
 	pub fn to_str(&self) -> &str {
 		match self {
 			Self::Unknown => "unknown",
@@ -116,17 +114,15 @@ impl Method {
 			Self::InsertRelation => "insert_relation",
 		}
 	}
+
+	/// Checks if the provided method is a valid and supported RPC method
+	pub fn is_valid(&self) -> bool {
+		!matches!(self, Self::Unknown)
+	}
 }
 
 impl std::fmt::Display for Method {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{}", self.to_str())
-	}
-}
-
-impl Method {
-	/// Checks if the provided method is a valid and supported RPC method
-	pub fn is_valid(&self) -> bool {
-		!matches!(self, Self::Unknown)
 	}
 }

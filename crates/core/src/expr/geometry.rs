@@ -265,198 +265,7 @@ impl Geometry {
 		};
 		Some(Point::from(((*a).try_into().ok()?, (*b).try_into().ok()?)))
 	}
-}
 
-impl PartialOrd for Geometry {
-	#[rustfmt::skip]
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		fn coord(v: &Coord) -> (f64, f64) {
-			v.x_y()
-		}
-
-		fn point(v: &Point) -> (f64, f64) {
-			coord(&v.0)
-		}
-
-		fn line(v: &LineString) -> impl Iterator<Item = (f64, f64)> + '_ {
-			v.into_iter().map(coord)
-		}
-
-		fn polygon(v: &Polygon) -> impl Iterator<Item = (f64, f64)> + '_ {
-			v.interiors().iter().chain(once(v.exterior())).flat_map(line)
-		}
-
-		fn multipoint(v: &MultiPoint) -> impl Iterator<Item = (f64, f64)> + '_ {
-			v.iter().map(point)
-		}
-
-		fn multiline(v: &MultiLineString) -> impl Iterator<Item = (f64, f64)> + '_ {
-			v.iter().flat_map(line)
-		}
-
-		fn multipolygon(v: &MultiPolygon) -> impl Iterator<Item = (f64, f64)> + '_ {
-			v.iter().flat_map(polygon)
-		}
-
-		match (self, other) {
-			//
-			(Self::Point(_), Self::Line(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::Polygon(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::MultiPoint(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::Line(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::Line(_), Self::Polygon(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::MultiPoint(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::Polygon(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::Polygon(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::Polygon(_), Self::MultiPoint(_)) => Some(Ordering::Less),
-			(Self::Polygon(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::Polygon(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::Polygon(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::MultiPoint(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::MultiPoint(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::MultiPoint(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::MultiPoint(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::MultiPoint(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::MultiPoint(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::MultiLine(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::MultiLine(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::MultiPolygon(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::MultiLine(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::Collection(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::MultiLine(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::MultiPolygon(_)) => Some(Ordering::Greater),
-			//
-			(Self::Point(a), Self::Point(b)) => point(a).partial_cmp(&point(b)),
-			(Self::Line(a), Self::Line(b)) => line(a).partial_cmp(line(b)),
-			(Self::Polygon(a), Self::Polygon(b)) => polygon(a).partial_cmp(polygon(b)),
-			(Self::MultiPoint(a), Self::MultiPoint(b)) => multipoint(a).partial_cmp(multipoint(b)),
-			(Self::MultiLine(a), Self::MultiLine(b)) => multiline(a).partial_cmp(multiline(b)),
-			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => multipolygon(a).partial_cmp(multipolygon(b)),
-			(Self::Collection(a), Self::Collection(b)) => a.partial_cmp(b),
-		}
-	}
-}
-
-impl From<(f64, f64)> for Geometry {
-	fn from(v: (f64, f64)) -> Self {
-		Self::Point(v.into())
-	}
-}
-
-impl From<[f64; 2]> for Geometry {
-	fn from(v: [f64; 2]) -> Self {
-		Self::Point(v.into())
-	}
-}
-
-impl From<Point<f64>> for Geometry {
-	fn from(v: Point<f64>) -> Self {
-		Self::Point(v)
-	}
-}
-
-impl From<LineString<f64>> for Geometry {
-	fn from(v: LineString<f64>) -> Self {
-		Self::Line(v)
-	}
-}
-
-impl From<Polygon<f64>> for Geometry {
-	fn from(v: Polygon<f64>) -> Self {
-		Self::Polygon(v)
-	}
-}
-
-impl From<MultiPoint<f64>> for Geometry {
-	fn from(v: MultiPoint<f64>) -> Self {
-		Self::MultiPoint(v)
-	}
-}
-
-impl From<MultiLineString<f64>> for Geometry {
-	fn from(v: MultiLineString<f64>) -> Self {
-		Self::MultiLine(v)
-	}
-}
-
-impl From<MultiPolygon<f64>> for Geometry {
-	fn from(v: MultiPolygon<f64>) -> Self {
-		Self::MultiPolygon(v)
-	}
-}
-
-impl From<Vec<Geometry>> for Geometry {
-	fn from(v: Vec<Geometry>) -> Self {
-		Self::Collection(v)
-	}
-}
-
-impl From<Vec<Point<f64>>> for Geometry {
-	fn from(v: Vec<Point<f64>>) -> Self {
-		Self::MultiPoint(MultiPoint(v))
-	}
-}
-
-impl From<Vec<LineString<f64>>> for Geometry {
-	fn from(v: Vec<LineString<f64>>) -> Self {
-		Self::MultiLine(MultiLineString(v))
-	}
-}
-
-impl From<Vec<Polygon<f64>>> for Geometry {
-	fn from(v: Vec<Polygon<f64>>) -> Self {
-		Self::MultiPolygon(MultiPolygon(v))
-	}
-}
-
-impl From<Geometry> for geo::Geometry<f64> {
-	fn from(v: Geometry) -> Self {
-		match v {
-			Geometry::Point(v) => v.into(),
-			Geometry::Line(v) => v.into(),
-			Geometry::Polygon(v) => v.into(),
-			Geometry::MultiPoint(v) => v.into(),
-			Geometry::MultiLine(v) => v.into(),
-			Geometry::MultiPolygon(v) => v.into(),
-			Geometry::Collection(v) => v.into_iter().collect::<geo::Geometry<f64>>(),
-		}
-	}
-}
-
-impl FromIterator<Geometry> for geo::Geometry<f64> {
-	fn from_iter<I: IntoIterator<Item = Geometry>>(iter: I) -> Self {
-		let mut c: Vec<geo::Geometry<f64>> = vec![];
-		for i in iter {
-			c.push(i.into())
-		}
-		geo::Geometry::GeometryCollection(geo::GeometryCollection(c))
-	}
-}
-
-impl Geometry {
 	// -----------------------------------
 	// Value operations
 	// -----------------------------------
@@ -567,6 +376,99 @@ impl Geometry {
 				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
 			},
 			Self::Collection(v) => v.iter().all(|x| x.intersects(other)),
+		}
+	}
+}
+
+impl PartialOrd for Geometry {
+	#[rustfmt::skip]
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		fn coord(v: &Coord) -> (f64, f64) {
+			v.x_y()
+		}
+
+		fn point(v: &Point) -> (f64, f64) {
+			coord(&v.0)
+		}
+
+		fn line(v: &LineString) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.into_iter().map(coord)
+		}
+
+		fn polygon(v: &Polygon) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.interiors().iter().chain(once(v.exterior())).flat_map(line)
+		}
+
+		fn multipoint(v: &MultiPoint) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.iter().map(point)
+		}
+
+		fn multiline(v: &MultiLineString) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.iter().flat_map(line)
+		}
+
+		fn multipolygon(v: &MultiPolygon) -> impl Iterator<Item = (f64, f64)> + '_ {
+			v.iter().flat_map(polygon)
+		}
+
+		match (self, other) {
+			//
+			(Self::Point(_), Self::Line(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::Polygon(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::MultiPoint(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::Line(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::Line(_), Self::Polygon(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::MultiPoint(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::Polygon(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::Polygon(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::Polygon(_), Self::MultiPoint(_)) => Some(Ordering::Less),
+			(Self::Polygon(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::Polygon(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::Polygon(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::MultiPoint(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::MultiPoint(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::MultiPoint(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::MultiPoint(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::MultiPoint(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::MultiPoint(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::MultiLine(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::MultiLine(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::MultiPolygon(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::MultiLine(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::Collection(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::MultiLine(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::MultiPolygon(_)) => Some(Ordering::Greater),
+			//
+			(Self::Point(a), Self::Point(b)) => point(a).partial_cmp(&point(b)),
+			(Self::Line(a), Self::Line(b)) => line(a).partial_cmp(line(b)),
+			(Self::Polygon(a), Self::Polygon(b)) => polygon(a).partial_cmp(polygon(b)),
+			(Self::MultiPoint(a), Self::MultiPoint(b)) => multipoint(a).partial_cmp(multipoint(b)),
+			(Self::MultiLine(a), Self::MultiLine(b)) => multiline(a).partial_cmp(multiline(b)),
+			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => multipolygon(a).partial_cmp(multipolygon(b)),
+			(Self::Collection(a), Self::Collection(b)) => a.partial_cmp(b),
 		}
 	}
 }
@@ -727,5 +629,101 @@ impl hash::Hash for Geometry {
 				v.iter().for_each(|v| v.hash(state));
 			}
 		}
+	}
+}
+
+impl From<(f64, f64)> for Geometry {
+	fn from(v: (f64, f64)) -> Self {
+		Self::Point(v.into())
+	}
+}
+
+impl From<[f64; 2]> for Geometry {
+	fn from(v: [f64; 2]) -> Self {
+		Self::Point(v.into())
+	}
+}
+
+impl From<Point<f64>> for Geometry {
+	fn from(v: Point<f64>) -> Self {
+		Self::Point(v)
+	}
+}
+
+impl From<LineString<f64>> for Geometry {
+	fn from(v: LineString<f64>) -> Self {
+		Self::Line(v)
+	}
+}
+
+impl From<Polygon<f64>> for Geometry {
+	fn from(v: Polygon<f64>) -> Self {
+		Self::Polygon(v)
+	}
+}
+
+impl From<MultiPoint<f64>> for Geometry {
+	fn from(v: MultiPoint<f64>) -> Self {
+		Self::MultiPoint(v)
+	}
+}
+
+impl From<MultiLineString<f64>> for Geometry {
+	fn from(v: MultiLineString<f64>) -> Self {
+		Self::MultiLine(v)
+	}
+}
+
+impl From<MultiPolygon<f64>> for Geometry {
+	fn from(v: MultiPolygon<f64>) -> Self {
+		Self::MultiPolygon(v)
+	}
+}
+
+impl From<Vec<Geometry>> for Geometry {
+	fn from(v: Vec<Geometry>) -> Self {
+		Self::Collection(v)
+	}
+}
+
+impl From<Vec<Point<f64>>> for Geometry {
+	fn from(v: Vec<Point<f64>>) -> Self {
+		Self::MultiPoint(MultiPoint(v))
+	}
+}
+
+impl From<Vec<LineString<f64>>> for Geometry {
+	fn from(v: Vec<LineString<f64>>) -> Self {
+		Self::MultiLine(MultiLineString(v))
+	}
+}
+
+impl From<Vec<Polygon<f64>>> for Geometry {
+	fn from(v: Vec<Polygon<f64>>) -> Self {
+		Self::MultiPolygon(MultiPolygon(v))
+	}
+}
+
+impl From<Geometry> for geo::Geometry<f64> {
+	fn from(v: Geometry) -> Self {
+		match v {
+			Geometry::Point(v) => v.into(),
+			Geometry::Line(v) => v.into(),
+			Geometry::Polygon(v) => v.into(),
+			Geometry::MultiPoint(v) => v.into(),
+			Geometry::MultiLine(v) => v.into(),
+			Geometry::MultiPolygon(v) => v.into(),
+			Geometry::Collection(v) => v.into_iter().collect::<geo::Geometry<f64>>(),
+		}
+	}
+}
+
+impl FromIterator<Geometry> for geo::Geometry<f64> {
+	fn from_iter<I: IntoIterator<Item = Geometry>>(iter: I) -> Self {
+		let mut c: Vec<geo::Geometry<f64>> = vec![];
+		for i in iter {
+			c.push(i.into())
+		}
+		geo::Geometry::GeometryCollection(geo::GeometryCollection(c))
 	}
 }

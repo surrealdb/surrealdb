@@ -73,39 +73,7 @@ impl Fields {
 		}
 		is_count_only
 	}
-}
 
-impl Deref for Fields {
-	type Target = Vec<Field>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl IntoIterator for Fields {
-	type Item = Field;
-	type IntoIter = std::vec::IntoIter<Self::Item>;
-	fn into_iter(self) -> Self::IntoIter {
-		self.0.into_iter()
-	}
-}
-
-impl Display for Fields {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self.single() {
-			Some(v) => write!(f, "VALUE {}", &v),
-			None => Display::fmt(&Fmt::comma_separated(&self.0), f),
-		}
-	}
-}
-
-impl InfoStructure for Fields {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
-
-impl Fields {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -284,6 +252,36 @@ impl Fields {
 			}
 		}
 		Ok(out)
+	}
+}
+
+impl Deref for Fields {
+	type Target = Vec<Field>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl IntoIterator for Fields {
+	type Item = Field;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
+
+impl Display for Fields {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self.single() {
+			Some(v) => write!(f, "VALUE {}", &v),
+			None => Display::fmt(&Fmt::comma_separated(&self.0), f),
+		}
+	}
+}
+
+impl InfoStructure for Fields {
+	fn structure(self) -> Value {
+		self.to_string().into()
 	}
 }
 
