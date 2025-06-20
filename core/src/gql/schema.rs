@@ -567,8 +567,6 @@ pub async fn generate_schema(
 						});
 
 						let res = GQLTx::execute_mutation(&kvs, &sess, ast).await?;
-
-						// Create a read-only GQLTx for field resolution
 						let gtx = GQLTx::new(&kvs, &sess).await?;
 
 						match res {
@@ -892,15 +890,23 @@ pub async fn generate_schema(
 			let fd_name = Name::new(fd.name.to_string());
 			let fd_type = kind_to_type(kind.clone(), &mut types)?;
 			table_orderable = table_orderable.item(fd_name.to_string());
-			let type_where_name = format!("_where_{}", unwrap_type(fd_type.clone()));
 
-			let type_where = Type::InputObject(where_from_type(
-				kind.clone(),
-				type_where_name.clone(),
-				&mut types,
-			)?);
-			trace!("\n{type_where:?}\n");
-			types.push(type_where);
+			// For Record fields, use _where_id directly to avoid nested structures
+			let type_where_name = match kind {
+				Kind::Record(_) => "_where_id".to_string(),
+				_ => format!("_where_{}", unwrap_type(fd_type.clone()))
+			};
+
+			// Only create new where types for non-Record fields
+			if !matches!(kind, Kind::Record(_)) {
+				let type_where = Type::InputObject(where_from_type(
+					kind.clone(),
+					type_where_name.clone(),
+					&mut types,
+				)?);
+				trace!("\n{type_where:?}\n");
+				types.push(type_where);
+			}
 
 			table_where = table_where
 				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_where_name)));
@@ -934,6 +940,15 @@ pub async fn generate_schema(
 			let sess_clone = session.clone();
 			let current_table = tb_name.clone();
 
+			// For relation tables, create specific where types that include in/out field filtering
+			let relation_where_type = match &relation.relation_type {
+				RelationType::OutgoingRelation { relation_table } |
+				RelationType::IncomingRelation { relation_table } => {
+					where_name_from_table(relation_table)
+				}
+				_ => where_name_from_table(&relation.target_table)
+			};
+
 			table_ty_obj = table_ty_obj.field(
 				Field::new(
 					&relation.field_name,
@@ -958,7 +973,7 @@ pub async fn generate_schema(
 				.description(format!("Relation to {}", relation.target_table))
 				.argument(limit_input!())
 				.argument(start_input!())
-				.argument(InputValue::new("where", TypeRef::named(where_name_from_table(&relation.target_table))))
+				.argument(InputValue::new("where", TypeRef::named(relation_where_type)))
 				.argument(InputValue::new("order", TypeRef::named(format!("_order_{}", relation.target_table))))
 				.argument(version_input!()),
 			);
@@ -1538,11 +1553,67 @@ async fn make_relation_field_resolver(
 	let args = ctx.args.as_index_map();
 	let start = args.get("start").and_then(|v| v.as_i64()).map(|s| s.intox());
 	let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| l.intox());
-	let _where_clause = args.get("where");
-	let _order = args.get("order");
+	let where_clause = args.get("where");
+	let order = args.get("order");
 	let version = args.get("version").and_then(|v| v.as_string()).and_then(|s| {
 		s.parse::<crate::sql::datetime::Datetime>().ok().map(crate::sql::Version)
 	});
+
+	// Get relation table fields for where clause processing
+	let relation_table_name = match &relation.relation_type {
+		RelationType::Direct => &relation.target_table,
+		RelationType::OutgoingRelation { relation_table } => relation_table,
+		RelationType::IncomingRelation { relation_table } => relation_table,
+	};
+
+	// Fetch fields for the target table to process where clause
+	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+	let ns = sess.ns.as_ref().ok_or_else(|| internal_error("No namespace in session"))?;
+	let db = sess.db.as_ref().ok_or_else(|| internal_error("No database in session"))?;
+	let target_fields = tx.all_tb_fields(ns, db, relation_table_name, None).await.map_err(|e| internal_error(format!("Failed to get fields: {}", e)))?;
+
+	// Process where clause if provided
+	let additional_cond = if let Some(where_val) = where_clause {
+		if let GqlValue::Object(where_obj) = where_val {
+			Some(cond_from_where(where_obj, &target_fields).map_err(|e| internal_error(format!("Failed to process where clause: {}", e)))?)
+		} else {
+			None
+		}
+	} else {
+		None
+	};
+
+	// Process order clause if provided
+	let orders = if let Some(GqlValue::Object(order_obj)) = order {
+		let mut orders = vec![];
+		let mut current = order_obj;
+		loop {
+			let asc = current.get("asc");
+			let desc = current.get("desc");
+			match (asc, desc) {
+				(Some(_), Some(_)) => {
+					return Err("Found both asc and desc in order".into());
+				}
+				(Some(GqlValue::Enum(a)), None) => {
+					orders.push(order!(asc, a.as_str()))
+				}
+				(None, Some(GqlValue::Enum(d))) => {
+					orders.push(order!(desc, d.as_str()))
+				}
+				(_, _) => {
+					break;
+				}
+			}
+			if let Some(GqlValue::Object(next)) = current.get("then") {
+				current = next;
+			} else {
+				break;
+			}
+		}
+		if orders.is_empty() { None } else { Some(orders) }
+	} else {
+		None
+	};
 
 	// Build the appropriate query based on relation type
 	let query_stmt = match &relation.relation_type {
@@ -1583,19 +1654,31 @@ async fn make_relation_field_resolver(
 			}
 		}
 		RelationType::OutgoingRelation { relation_table } => {
-			// Query: SELECT * FROM relation_table WHERE in = current_record
+			// Build base condition: in = current_record
+			let base_cond = SqlValue::Expression(Box::new(Expression::Binary {
+				l: SqlValue::Idiom(Idiom::from("in")),
+				o: Operator::Equal,
+				r: SqlValue::Thing(rid.clone()),
+			}));
+
+			let final_cond = if let Some(additional) = additional_cond {
+				Some(Cond(SqlValue::Expression(Box::new(Expression::Binary {
+					l: base_cond,
+					o: Operator::And,
+					r: additional.0,
+				}))))
+			} else {
+				Some(Cond(base_cond))
+			};
+
 			Statement::Select(SelectStatement {
 				what: vec![SqlValue::Table(relation_table.clone().intox())].into(),
 				expr: Fields(
 					vec![sql::Field::All],
 					false, // Don't use VALUE keyword to get full records
 				),
-				cond: Some(Cond(SqlValue::Expression(Box::new(Expression::Binary {
-					l: SqlValue::Idiom(Idiom::from("in")),
-					o: Operator::Equal,
-					r: SqlValue::Thing(rid.clone()),
-				})))),
-				order: None, // We'll handle ordering later
+				cond: final_cond,
+				order: orders.map(IntoExt::intox),
 				limit,
 				start,
 				version: version.clone(),
@@ -1603,19 +1686,32 @@ async fn make_relation_field_resolver(
 			})
 		}
 		RelationType::IncomingRelation { relation_table } => {
-			// Query: SELECT * FROM relation_table WHERE out = current_record
+			// Build base condition: out = current_record
+			let base_cond = SqlValue::Expression(Box::new(Expression::Binary {
+				l: SqlValue::Idiom(Idiom::from("out")),
+				o: Operator::Equal,
+				r: SqlValue::Thing(rid.clone()),
+			}));
+
+			let final_cond = if let Some(additional) = additional_cond {
+				Some(Cond(SqlValue::Expression(Box::new(Expression::Binary {
+					l: base_cond,
+					o: Operator::And,
+					r: additional.0,
+				}))))
+			} else {
+				Some(Cond(base_cond))
+			};
+
+			// Query: SELECT * FROM relation_table WHERE out = current_record [AND additional_conditions]
 			Statement::Select(SelectStatement {
 				what: vec![SqlValue::Table(relation_table.clone().intox())].into(),
 				expr: Fields(
 					vec![sql::Field::All],
-					false, // Don't use VALUE keyword to get full records
+					false,
 				),
-				cond: Some(Cond(SqlValue::Expression(Box::new(Expression::Binary {
-					l: SqlValue::Idiom(Idiom::from("out")),
-					o: Operator::Equal,
-					r: SqlValue::Thing(rid.clone()),
-				})))),
-				order: None, // We'll handle ordering later
+				cond: final_cond,
+				order: orders.map(IntoExt::intox),
 				limit,
 				start,
 				version: version.clone(),
@@ -1624,7 +1720,6 @@ async fn make_relation_field_resolver(
 		}
 	};
 
-	// Execute the query
 	let query = crate::sql::Query(crate::sql::Statements(vec![query_stmt]));
 	let mut results = kvs.process(query, &sess, None).await?;
 	let res = if let Some(response) = results.pop() {
@@ -1633,7 +1728,6 @@ async fn make_relation_field_resolver(
 		return Err("No response from relation query".into());
 	};
 
-	// Process the results
 	let res_vec = match res {
 		SqlValue::Array(a) => a,
 		v => {
@@ -1686,232 +1780,86 @@ async fn make_relation_field_resolver(
 	}
 }
 
-pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
-	let out = match v {
-		SqlValue::None => GqlValue::Null,
-		SqlValue::Null => GqlValue::Null,
-		SqlValue::Bool(b) => GqlValue::Boolean(b),
-		SqlValue::Number(n) => match n {
-			crate::sql::Number::Int(i) => GqlValue::Number(i.into()),
-			crate::sql::Number::Float(f) => GqlValue::Number(
-				Number::from_f64(f)
-					.ok_or(resolver_error("unimplemented: graceful NaN and Inf handling"))?,
-			),
-			num @ crate::sql::Number::Decimal(_) => GqlValue::String(num.to_string()),
-		},
-		SqlValue::Strand(s) => GqlValue::String(s.0),
-		d @ SqlValue::Duration(_) => GqlValue::String(d.to_string()),
-		SqlValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
-		SqlValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
-		SqlValue::Array(a) => {
-			GqlValue::List(a.into_iter().map(|v| sql_value_to_gql_value(v).unwrap()).collect())
-		}
-		SqlValue::Object(o) => GqlValue::Object(
-			o.0.into_iter()
-				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
-				.collect(),
-		),
-		SqlValue::Geometry(geom) => {
-			// Convert geometry to GeoJSON format
-			match geom {
-				crate::sql::Geometry::Point(point) => {
-					let coords = vec![
-						GqlValue::Number(Number::from_f64(point.x()).unwrap()),
-						GqlValue::Number(Number::from_f64(point.y()).unwrap()),
-					];
-					{
-						let mut map = IndexMap::new();
-						map.insert(Name::new("type"), GqlValue::String("Point".to_string()));
-						map.insert(Name::new("coordinates"), GqlValue::List(coords));
-						GqlValue::Object(map)
-					}
+pub fn sql_value_to_gql_value(val: SqlValue) -> Result<GqlValue, GqlError> {
+	match val {
+		SqlValue::None | SqlValue::Null => Ok(GqlValue::Null),
+		SqlValue::Bool(b) => Ok(GqlValue::Boolean(b)),
+		SqlValue::Number(n) => {
+			if let Ok(i) = TryInto::<i64>::try_into(n.clone()) {
+				Ok(GqlValue::Number(serde_json::Number::from(i)))
+			} else if let Ok(f) = TryInto::<f64>::try_into(n.clone()) {
+				if let Some(num) = serde_json::Number::from_f64(f) {
+					Ok(GqlValue::Number(num))
+				} else {
+					Err(schema_error(format!("Invalid f64 number: {f}")))
 				}
-				crate::sql::Geometry::Line(line) => {
-					let coords: Vec<GqlValue> = line.coords()
-						.map(|coord| GqlValue::List(vec![
-							GqlValue::Number(Number::from_f64(coord.x).unwrap()),
-							GqlValue::Number(Number::from_f64(coord.y).unwrap()),
-						]))
-						.collect();
-					{
-						let mut map = IndexMap::new();
-						map.insert(Name::new("type"), GqlValue::String("LineString".to_string()));
-						map.insert(Name::new("coordinates"), GqlValue::List(coords));
-						GqlValue::Object(map)
-					}
-				}
-				crate::sql::Geometry::Polygon(polygon) => {
-					let exterior_coords: Vec<GqlValue> = polygon.exterior()
-						.coords()
-						.map(|coord| GqlValue::List(vec![
-							GqlValue::Number(Number::from_f64(coord.x).unwrap()),
-							GqlValue::Number(Number::from_f64(coord.y).unwrap()),
-						]))
-						.collect();
-
-					let mut rings = vec![GqlValue::List(exterior_coords)];
-					for interior in polygon.interiors() {
-						let interior_coords: Vec<GqlValue> = interior
-							.coords()
-							.map(|coord| GqlValue::List(vec![
-								GqlValue::Number(Number::from_f64(coord.x).unwrap()),
-								GqlValue::Number(Number::from_f64(coord.y).unwrap()),
-							]))
-							.collect();
-						rings.push(GqlValue::List(interior_coords));
-					}
-
-					{
-						let mut map = IndexMap::new();
-						map.insert(Name::new("type"), GqlValue::String("Polygon".to_string()));
-						map.insert(Name::new("coordinates"), GqlValue::List(rings));
-						GqlValue::Object(map)
-					}
-				}
-				crate::sql::Geometry::MultiPoint(multipoint) => {
-					let coords: Vec<GqlValue> = multipoint.iter()
-						.map(|point| GqlValue::List(vec![
-							GqlValue::Number(Number::from_f64(point.x()).unwrap()),
-							GqlValue::Number(Number::from_f64(point.y()).unwrap()),
-						]))
-						.collect();
-					{
-						let mut map = IndexMap::new();
-						map.insert(Name::new("type"), GqlValue::String("MultiPoint".to_string()));
-						map.insert(Name::new("coordinates"), GqlValue::List(coords));
-						GqlValue::Object(map)
-					}
-				}
-				crate::sql::Geometry::MultiLine(multiline) => {
-					let coords: Vec<GqlValue> = multiline.iter()
-						.map(|line| {
-							let line_coords: Vec<GqlValue> = line.coords()
-								.map(|coord| GqlValue::List(vec![
-									GqlValue::Number(Number::from_f64(coord.x).unwrap()),
-									GqlValue::Number(Number::from_f64(coord.y).unwrap()),
-								]))
-								.collect();
-							GqlValue::List(line_coords)
-						})
-						.collect();
-					{
-						let mut map = IndexMap::new();
-						map.insert(Name::new("type"), GqlValue::String("MultiLineString".to_string()));
-						map.insert(Name::new("coordinates"), GqlValue::List(coords));
-						GqlValue::Object(map)
-					}
-				}
-				crate::sql::Geometry::MultiPolygon(multipolygon) => {
-					let coords: Vec<GqlValue> = multipolygon.iter()
-						.map(|polygon| {
-							let exterior_coords: Vec<GqlValue> = polygon.exterior()
-								.coords()
-								.map(|coord| GqlValue::List(vec![
-									GqlValue::Number(Number::from_f64(coord.x).unwrap()),
-									GqlValue::Number(Number::from_f64(coord.y).unwrap()),
-								]))
-								.collect();
-
-							let mut rings = vec![GqlValue::List(exterior_coords)];
-							for interior in polygon.interiors() {
-								let interior_coords: Vec<GqlValue> = interior
-									.coords()
-									.map(|coord| GqlValue::List(vec![
-										GqlValue::Number(Number::from_f64(coord.x).unwrap()),
-										GqlValue::Number(Number::from_f64(coord.y).unwrap()),
-									]))
-									.collect();
-								rings.push(GqlValue::List(interior_coords));
-							}
-							GqlValue::List(rings)
-						})
-						.collect();
-					{
-						let mut map = IndexMap::new();
-						map.insert(Name::new("type"), GqlValue::String("MultiPolygon".to_string()));
-						map.insert(Name::new("coordinates"), GqlValue::List(coords));
-						GqlValue::Object(map)
-					}
-				}
-				crate::sql::Geometry::Collection(geometries) => {
-					let geoms: Result<Vec<GqlValue>, GqlError> = geometries.iter()
-						.map(|g| sql_value_to_gql_value(SqlValue::Geometry(g.clone())))
-						.collect();
-					{
-						let mut map = IndexMap::new();
-						map.insert(Name::new("type"), GqlValue::String("GeometryCollection".to_string()));
-						map.insert(Name::new("geometries"), GqlValue::List(geoms?));
-						GqlValue::Object(map)
-					}
-				}
+			} else {
+				// Fallback to string representation for very large numbers
+				Ok(GqlValue::String(n.to_string()))
 			}
-		},
-		SqlValue::Bytes(b) => GqlValue::Binary(b.into_inner().into()),
-		SqlValue::Thing(t) => GqlValue::String(t.to_string()),
-		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
-	};
-	Ok(out)
+		}
+		SqlValue::Strand(s) => Ok(GqlValue::String(s.0)),
+		SqlValue::Datetime(dt) => Ok(GqlValue::String(dt.to_raw())),
+		SqlValue::Duration(d) => Ok(GqlValue::String(d.to_raw())),
+		SqlValue::Thing(t) => Ok(GqlValue::String(t.to_raw())),
+		SqlValue::Geometry(g) => Ok(GqlValue::String(format!("{}", g))),
+		SqlValue::Bytes(b) => Ok(GqlValue::String(base64::encode(b.0))),
+		SqlValue::Uuid(u) => Ok(GqlValue::String(u.to_raw())),
+		SqlValue::Array(a) => {
+			let mut values = Vec::new();
+			for item in a.0 {
+				values.push(sql_value_to_gql_value(item)?);
+			}
+			Ok(GqlValue::List(values))
+		}
+		SqlValue::Object(o) => {
+			let mut map = IndexMap::new();
+			for (k, v) in o.0 {
+				map.insert(Name::new(k), sql_value_to_gql_value(v)?);
+			}
+			Ok(GqlValue::Object(map))
+		}
+		_ => Ok(GqlValue::String(format!("{}", val))),
+	}
 }
 
 fn kind_to_input_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
-	let (optional, match_kind) = match kind {
-		Kind::Option(op_ty) => (true, *op_ty),
-		_ => (false, kind),
+	let (optional, inner_kind) = match kind {
+		Kind::Option(inner) => (true, *inner),
+		k => (false, k),
 	};
-	let out_ty = match match_kind {
+
+	let out_ty = match inner_kind {
 		Kind::Any => TypeRef::named("any"),
 		Kind::Null => TypeRef::named("null"),
 		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
 		Kind::Bytes => TypeRef::named("bytes"),
-		Kind::Datetime => TypeRef::named("Datetime"),
+		Kind::Datetime => TypeRef::named("datetime"),
 		Kind::Decimal => TypeRef::named("decimal"),
-		Kind::Duration => TypeRef::named("Duration"),
+		Kind::Duration => TypeRef::named("duration"),
 		Kind::Float => TypeRef::named(TypeRef::FLOAT),
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
 		Kind::Object => TypeRef::named("object"),
-		Kind::Point => return Err(schema_error("Kind::Point is not yet supported")),
+		Kind::Point => TypeRef::named("point"),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
-		Kind::Record(mut r) => match r.len() {
-			0 => TypeRef::named("record"),
-			1 => {
-				let table_name = r.pop().unwrap().0;
-				TypeRef::named(format!("Create{}Input", uppercase(&table_name)))
-			},
-			_ => {
-				let names: Vec<String> = r.into_iter().map(|t| format!("Create{}Input", uppercase(&t.0))).collect();
-				let ty_name = names.join("_or_");
-
-				let mut tmp_union = Union::new(ty_name.clone())
-					.description(format!("An input which is one of: {}", names.join(", ")));
-				for n in names {
-					tmp_union = tmp_union.possible_type(n);
-				}
-
-				types.push(Type::Union(tmp_union));
-				TypeRef::named(ty_name)
+		Kind::Record(ref ts) => {
+			if ts.len() == 1 {
+				TypeRef::named(TypeRef::ID)
+			} else {
+				TypeRef::named(TypeRef::ID)
 			}
-		},
+		}
 		Kind::Geometry(ref geom_types) => {
 			if geom_types.is_empty() {
 				TypeRef::named("geometry")
 			} else if geom_types.len() == 1 {
 				TypeRef::named(geom_types[0].clone())
 			} else {
-				// Create a union type for multiple geometry types
-				let union_name = format!("geometry_{}", geom_types.join("_or_"));
-				let mut geom_union = Union::new(union_name.clone())
-					.description(format!("A geometry which is one of: {}", geom_types.join(", ")));
-
-				for geom_type in geom_types {
-					geom_union = geom_union.possible_type(geom_type.clone());
-				}
-
-				types.push(Type::Union(geom_union));
-				TypeRef::named(union_name)
+				TypeRef::named("geometry")
 			}
-		},
+		}
 		Kind::Option(t) => {
 			let mut non_op_ty = *t;
 			while let Kind::Option(inner) = non_op_ty {
@@ -1919,69 +1867,136 @@ fn kind_to_input_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlE
 			}
 			kind_to_input_type(non_op_ty, types)?
 		}
-		Kind::Either(ks) => {
-			let (ls, others): (Vec<Kind>, Vec<Kind>) =
-				ks.into_iter().partition(|k| matches!(k, Kind::Literal(Literal::String(_))));
-
-			let enum_ty = if ls.len() > 0 {
-				let vals: Vec<String> = ls
-					.into_iter()
-					.map(|l| {
-						let Kind::Literal(Literal::String(out)) = l else {
-							unreachable!(
-								"just checked that this is a Kind::Literal(Literal::String(_))"
-							);
-						};
-						out.0
-					})
-					.collect();
-
-				let mut tmp = Enum::new(vals.join("_or_"));
-				tmp = tmp.items(vals);
-
-				let enum_ty = tmp.type_name().to_string();
-
-				types.push(Type::Enum(tmp));
-				if others.len() == 0 {
-					return Ok(TypeRef::named(enum_ty));
-				}
-				Some(enum_ty)
-			} else {
-				None
-			};
-
-			let pos_names: Result<Vec<TypeRef>, GqlError> =
-				others.into_iter().map(|k| kind_to_input_type(k, types)).collect();
-			let pos_names: Vec<String> = pos_names?.into_iter().map(|tr| tr.to_string()).collect();
-			let ty_name = pos_names.join("_or_");
-
-			let mut tmp_union = Union::new(ty_name.clone());
-			for n in pos_names {
-				tmp_union = tmp_union.possible_type(n);
-			}
-
-			if let Some(ty) = enum_ty {
-				tmp_union = tmp_union.possible_type(ty);
-			}
-
-			types.push(Type::Union(tmp_union));
-			TypeRef::named(ty_name)
+		Kind::Either(_ks) => {
+			// For input types, use string as fallback
+			TypeRef::named(TypeRef::STRING)
 		}
-		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
+		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported for input")),
 		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_input_type(*k, types)?)),
-		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
-		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
-		// TODO(raphaeldarley): check if union is of literals and generate enum
-		// generate custom scalar from other literals?
-		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
+		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported for input")),
+		Kind::Range => return Err(schema_error("Kind::Range is not yet supported for input")),
+		Kind::Literal(_) => TypeRef::named(TypeRef::STRING),
 	};
 
 	let out = match optional {
 		true => out_ty,
 		false => TypeRef::NonNull(Box::new(out_ty)),
 	};
+
 	Ok(out)
 }
+
+
+
+macro_rules! where_impl {
+	($obj:ident, $ty:expr, $op:literal) => {
+		$obj = $obj.field(InputValue::new($op, $ty));
+	};
+}
+
+fn where_id() -> InputObject {
+	let mut where_obj = InputObject::new("_where_id");
+	let ty = TypeRef::named(TypeRef::ID);
+	where_impl!(where_obj, ty.clone(), "eq");
+	where_impl!(where_obj, ty, "ne");
+	where_obj
+}
+
+
+
+fn where_from_type(
+	kind: Kind,
+	where_name: String,
+	types: &mut Vec<Type>,
+) -> Result<InputObject, GqlError> {
+	let inner_kind = match &kind {
+		Kind::Option(inner) => inner.as_ref().clone(),
+		_ => kind.clone(),
+	};
+
+	let ty = match &inner_kind {
+		Kind::Record(_) => TypeRef::named("_where_id"),
+		k => unwrap_type(kind_to_type(k.clone(), types)?),
+	};
+
+	let mut where_obj = InputObject::new(where_name);
+	where_impl!(where_obj, ty.clone(), "eq");
+	where_impl!(where_obj, ty.clone(), "ne");
+
+	match inner_kind {
+		Kind::String => {
+			let string_ty = TypeRef::named(TypeRef::STRING);
+			let string_list_ty = TypeRef::named_nn_list(TypeRef::STRING);
+			where_impl!(where_obj, string_ty.clone(), "contains");
+			where_impl!(where_obj, string_ty.clone(), "startsWith");
+			where_impl!(where_obj, string_ty.clone(), "endsWith");
+			where_impl!(where_obj, string_ty, "regex");
+			where_impl!(where_obj, string_list_ty, "in");
+		}
+		Kind::Int => {
+			where_impl!(where_obj, ty.clone(), "gt");
+			where_impl!(where_obj, ty.clone(), "gte");
+			where_impl!(where_obj, ty.clone(), "lt");
+			where_impl!(where_obj, ty.clone(), "lte");
+			let list_ty = TypeRef::named_nn_list(TypeRef::INT);
+			where_impl!(where_obj, list_ty, "in");
+		}
+		Kind::Float => {
+			where_impl!(where_obj, ty.clone(), "gt");
+			where_impl!(where_obj, ty.clone(), "gte");
+			where_impl!(where_obj, ty.clone(), "lt");
+			where_impl!(where_obj, ty.clone(), "lte");
+			let list_ty = TypeRef::named_nn_list(TypeRef::FLOAT);
+			where_impl!(where_obj, list_ty, "in");
+		}
+		Kind::Number => {
+			where_impl!(where_obj, ty.clone(), "gt");
+			where_impl!(where_obj, ty.clone(), "gte");
+			where_impl!(where_obj, ty.clone(), "lt");
+			where_impl!(where_obj, ty.clone(), "lte");
+			let list_ty = TypeRef::named_nn_list("Number");
+			where_impl!(where_obj, list_ty, "in");
+		}
+		Kind::Decimal => {
+			where_impl!(where_obj, ty.clone(), "gt");
+			where_impl!(where_obj, ty.clone(), "gte");
+			where_impl!(where_obj, ty.clone(), "lt");
+			where_impl!(where_obj, ty.clone(), "lte");
+			let list_ty = TypeRef::named_nn_list("Decimal");
+			where_impl!(where_obj, list_ty, "in");
+		}
+		Kind::Bool => {}
+		Kind::Datetime => {
+			where_impl!(where_obj, ty.clone(), "gt");
+			where_impl!(where_obj, ty.clone(), "gte");
+			where_impl!(where_obj, ty.clone(), "lt");
+			where_impl!(where_obj, ty.clone(), "lte");
+		}
+		Kind::Any => {}
+		Kind::Null => {}
+		Kind::Bytes => {}
+		Kind::Duration => {}
+		Kind::Object => {}
+		Kind::Point => {}
+		Kind::Uuid => {}
+		Kind::Record(_) => {
+			let list_ty = TypeRef::named_nn_list(TypeRef::ID);
+			where_impl!(where_obj, list_ty, "in");
+		}
+		Kind::Geometry(_) => {}
+		Kind::Option(_) => {}
+		Kind::Either(_) => {}
+		Kind::Set(_, _) => {}
+		Kind::Array(_, _) => {}
+		Kind::Function(_, _) => {}
+		Kind::Range => {}
+		Kind::Literal(_) => {}
+	};
+	Ok(where_obj)
+}
+
+
+
 
 fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
 	let (optional, match_kind) = match kind {
@@ -2110,112 +2125,7 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 	Ok(out)
 }
 
-macro_rules! where_impl {
-	($where_obj:ident, $ty:ident, $name:expr) => {
-		$where_obj = $where_obj.field(InputValue::new($name, $ty.clone()));
-	};
-}
 
-fn where_id() -> InputObject {
-	let mut where_obj = InputObject::new("_where_id");
-	let ty = TypeRef::named(TypeRef::ID);
-	where_impl!(where_obj, ty, "eq");
-	where_impl!(where_obj, ty, "ne");
-	where_obj
-}
-
-fn where_from_type(
-	kind: Kind,
-	where_name: String,
-	types: &mut Vec<Type>,
-) -> Result<InputObject, GqlError> {
-	let inner_kind = match &kind {
-		Kind::Option(inner) => inner.as_ref().clone(),
-		_ => kind.clone(),
-	};
-
-	let ty = match &inner_kind {
-		Kind::Record(ts) => match ts.len() {
-			1 => TypeRef::named(where_name_from_table(
-				ts.first().expect("ts should have exactly one element").as_str(),
-			)),
-			_ => TypeRef::named(TypeRef::ID),
-		},
-		k => unwrap_type(kind_to_type(k.clone(), types)?),
-	};
-
-	let mut where_obj = InputObject::new(where_name);
-	where_impl!(where_obj, ty, "eq");
-	where_impl!(where_obj, ty, "ne");
-
-	match inner_kind {
-		Kind::String => {
-			let string_ty = TypeRef::named(TypeRef::STRING);
-			let string_list_ty = TypeRef::named_nn_list(TypeRef::STRING);
-			where_impl!(where_obj, string_ty, "contains");
-			where_impl!(where_obj, string_ty, "startsWith");
-			where_impl!(where_obj, string_ty, "endsWith");
-			where_impl!(where_obj, string_ty, "regex");
-			where_impl!(where_obj, string_list_ty, "in");
-		}
-		Kind::Int => {
-			where_impl!(where_obj, ty, "gt");
-			where_impl!(where_obj, ty, "gte");
-			where_impl!(where_obj, ty, "lt");
-			where_impl!(where_obj, ty, "lte");
-			let list_ty = TypeRef::named_nn_list(TypeRef::INT);
-			where_impl!(where_obj, list_ty, "in");
-		}
-		Kind::Float => {
-			where_impl!(where_obj, ty, "gt");
-			where_impl!(where_obj, ty, "gte");
-			where_impl!(where_obj, ty, "lt");
-			where_impl!(where_obj, ty, "lte");
-			let list_ty = TypeRef::named_nn_list(TypeRef::FLOAT);
-			where_impl!(where_obj, list_ty, "in");
-		}
-		Kind::Number => {
-			where_impl!(where_obj, ty, "gt");
-			where_impl!(where_obj, ty, "gte");
-			where_impl!(where_obj, ty, "lt");
-			where_impl!(where_obj, ty, "lte");
-			let list_ty = TypeRef::named_nn_list("Number");
-			where_impl!(where_obj, list_ty, "in");
-		}
-		Kind::Decimal => {
-			where_impl!(where_obj, ty, "gt");
-			where_impl!(where_obj, ty, "gte");
-			where_impl!(where_obj, ty, "lt");
-			where_impl!(where_obj, ty, "lte");
-			let list_ty = TypeRef::named_nn_list("Decimal");
-			where_impl!(where_obj, list_ty, "in");
-		}
-		Kind::Bool => {}
-		Kind::Datetime => {
-			where_impl!(where_obj, ty, "gt");
-			where_impl!(where_obj, ty, "gte");
-			where_impl!(where_obj, ty, "lt");
-			where_impl!(where_obj, ty, "lte");
-		}
-		Kind::Any => {}
-		Kind::Null => {}
-		Kind::Bytes => {}
-		Kind::Duration => {}
-		Kind::Object => {}
-		Kind::Point => {}
-		Kind::Uuid => {}
-		Kind::Record(_) => {}
-		Kind::Geometry(_) => {}
-		Kind::Option(_) => {}
-		Kind::Either(_) => {}
-		Kind::Set(_, _) => {}
-		Kind::Array(_, _) => {}
-		Kind::Function(_, _) => {}
-		Kind::Range => {}
-		Kind::Literal(_) => {}
-	};
-	Ok(where_obj)
-}
 
 fn unwrap_type(ty: TypeRef) -> TypeRef {
 	match ty {
@@ -2235,20 +2145,50 @@ fn val_from_where(
 	where_clause: &IndexMap<Name, GqlValue>,
 	fds: &[DefineFieldStatement],
 ) -> Result<SqlValue, GqlError> {
-	if where_clause.len() != 1 {
-		return Err(resolver_error("Table Where clause must have one item"));
+	// Handle empty where clause
+	if where_clause.is_empty() {
+		return Err(resolver_error("Where clause cannot be empty"));
 	}
 
-	let (k, v) = where_clause.iter().next().unwrap();
+	// Handle single condition (existing behavior)
+	if where_clause.len() == 1 {
+		let (k, v) = where_clause.iter().next().unwrap();
+		let cond = match k.as_str().to_lowercase().as_str() {
+			"or" => aggregate(v, AggregateOp::Or, fds),
+			"and" => aggregate(v, AggregateOp::And, fds),
+			"not" => negate(v, fds),
+			_ => binop(k.as_str(), v, fds),
+		};
+		return cond;
+	}
 
-	let cond = match k.as_str().to_lowercase().as_str() {
-		"or" => aggregate(v, AggregateOp::Or, fds),
-		"and" => aggregate(v, AggregateOp::And, fds),
-		"not" => negate(v, fds),
-		_ => binop(k.as_str(), v, fds),
-	};
+	// Handle multiple conditions - implicit AND
+	let mut conditions = Vec::new();
+	for (k, v) in where_clause.iter() {
+		let cond = match k.as_str().to_lowercase().as_str() {
+			"or" => aggregate(v, AggregateOp::Or, fds),
+			"and" => aggregate(v, AggregateOp::And, fds),
+			"not" => negate(v, fds),
+			_ => binop(k.as_str(), v, fds),
+		};
+		conditions.push(cond?);
+	}
 
-	cond
+	// Combine all conditions with AND
+	if conditions.len() == 1 {
+		Ok(conditions.into_iter().next().unwrap())
+	} else {
+		let mut iter = conditions.into_iter();
+		let mut result = iter.next().unwrap();
+		for condition in iter {
+			result = SqlValue::Expression(Box::new(Expression::Binary {
+				l: result,
+				o: Operator::And,
+				r: condition,
+			}));
+		}
+		Ok(result)
+	}
 }
 
 fn parse_op(name: impl AsRef<str>) -> Result<sql::Operator, GqlError> {
