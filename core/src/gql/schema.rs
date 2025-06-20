@@ -365,7 +365,16 @@ pub async fn generate_schema(
 					})
 				},
 			)
-			.description(format!("Generated from table `{}`{}\nallows querying a table with where conditions", tb.name, if let Some(ref c) = &tb.comment {format!("\n{c}")} else {"".to_string()}))
+			.description(format!(
+				"{}. Table: `{}`",
+				if let Some(ref c) = &tb.comment {
+					let comment = c.trim_matches('\'');
+					comment.to_string()
+				} else {
+					"".to_string()
+				},
+				tb.name
+			))
 			.argument(limit_input!())
 			.argument(start_input!())
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
@@ -373,7 +382,6 @@ pub async fn generate_schema(
 			.argument(version_input!()),
 		);
 
-		// Define input type names for mutations
 		let create_input_name = format!("Create{}Input", uppercase(&tb.name));
 		let update_input_name = format!("Update{}Input", uppercase(&tb.name));
 
@@ -748,13 +756,14 @@ pub async fn generate_schema(
 				},
 			)
 			.description(format!(
-				"Generated from table `{}`{}\nallows querying a single record in a table by id",
-				tb.name,
+				"{}. Table: `{}`",
 				if let Some(ref c) = &tb.comment {
-					format!("\n{c}")
+					let comment = c.trim_matches('\'');
+					comment.to_string()
 				} else {
 					"".to_string()
-				}
+				},
+				tb.name
 			))
 			.argument(id_input!())
 			.argument(version_input!()),
