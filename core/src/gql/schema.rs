@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Display;
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use crate::sql::{self, Table};
 use crate::sql::{Cond, Data, Fields};
 use crate::sql::{Expression, Geometry, Operator};
 use crate::sql::{Ident, Idiom, Kind, Part};
-use crate::sql::{Statement, Thing, Values, Object as SqlObject};
+use crate::sql::{Statement, Thing, Values, Object as SqlObject, TableType};
 use async_graphql::dynamic::{Enum, FieldValue, ResolverContext, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
@@ -37,6 +37,24 @@ use crate::kvs::LockType;
 use reblessive::TreeStack;
 use crate::kvs::TransactionType;
 use crate::sql::Value as SqlValue;
+
+#[derive(Debug, Clone)]
+struct RelationInfo {
+    field_name: String,
+    target_table: String,
+    relation_type: RelationType,
+    is_list: bool,
+}
+
+#[derive(Debug, Clone)]
+enum RelationType {
+    /// Direct field reference (field is record<table>)
+    Direct,
+    /// Incoming relation through a relation table (this table is referenced by out field)
+    IncomingRelation { relation_table: String },
+    /// Outgoing relation through a relation table (this table is referenced by in field)
+    OutgoingRelation { relation_table: String },
+}
 
 type ErasedRecord = (GQLTx, Thing);
 
@@ -187,6 +205,88 @@ pub async fn generate_schema(
 		return Err(schema_error("no tables found in database"));
 	}
 
+	// Collect relation information for all tables
+	let mut table_relations: HashMap<String, Vec<RelationInfo>> = HashMap::new();
+
+	// First pass: collect all direct field relations and relation tables
+	for tb in tbs.iter() {
+		let tb_name = tb.name.to_string();
+		let mut relations = Vec::new();
+
+		trace!("Processing table: {} with type: {:?}", tb_name, tb.kind);
+		println!("🔍 Processing table: {} with type: {:?}", tb_name, tb.kind);
+
+		// Get all fields for this table
+		let fds = tx.all_tb_fields(ns, db, &tb.name.0, None).await?;
+
+		// Check for direct record field relations
+		for fd in fds.iter() {
+			if let Some(Kind::Record(target_tables)) = &fd.kind {
+				if !target_tables.is_empty() && fd.name.to_string() != "id" {
+					// For now, handle single target table (most common case)
+					// TODO: Handle multiple target tables properly
+					if target_tables.len() == 1 {
+						relations.push(RelationInfo {
+							field_name: fd.name.to_string(),
+							target_table: target_tables[0].0.clone(),
+							relation_type: RelationType::Direct,
+							is_list: false, // Direct field references are typically single records
+						});
+					}
+				}
+			}
+		}
+
+		// Check if this table is a relation table
+		if let TableType::Relation(rel) = &tb.kind {
+			trace!("Found relation table: {} with from: {:?}, to: {:?}", tb_name, rel.from, rel.to);
+			println!("🔗 Found relation table: {} with from: {:?}, to: {:?}", tb_name, rel.from, rel.to);
+			// For relation tables, we'll add reverse relations to connected tables
+			if let (Some(Kind::Record(from_tables)), Some(Kind::Record(to_tables))) = (&rel.from, &rel.to) {
+				trace!("Processing relation table {} with from_tables: {:?}, to_tables: {:?}", tb_name, from_tables, to_tables);
+				println!("📊 Processing relation table {} with from_tables: {:?}, to_tables: {:?}", tb_name, from_tables, to_tables);
+				// Add outgoing relations from 'from' tables
+				for from_table in from_tables {
+					let from_table_name = from_table.0.clone();
+					let relation_info = RelationInfo {
+						field_name: tb_name.clone(),
+						target_table: tb_name.clone(), // Return the relation table records
+						relation_type: RelationType::OutgoingRelation { relation_table: tb_name.clone() },
+						is_list: true, // Relation tables typically return lists
+					};
+					trace!("Adding outgoing relation to {}: {:?}", from_table_name, relation_info);
+					println!("➡️  Adding outgoing relation to {}: {:?}", from_table_name, relation_info);
+					table_relations.entry(from_table_name.clone()).or_default().push(relation_info);
+				}
+
+				// Add incoming relations to 'to' tables
+				for to_table in to_tables {
+					let to_table_name = to_table.0.clone();
+					let relation_info = RelationInfo {
+						field_name: format!("{}_in", tb_name),
+						target_table: tb_name.clone(), // Return the relation table records
+						relation_type: RelationType::IncomingRelation { relation_table: tb_name.clone() },
+						is_list: true, // Relation tables typically return lists
+					};
+					trace!("Adding incoming relation to {}: {:?}", to_table_name, relation_info);
+					println!("⬅️  Adding incoming relation to {}: {:?}", to_table_name, relation_info);
+					table_relations.entry(to_table_name.clone()).or_default().push(relation_info);
+				}
+			} else {
+				trace!("Relation table {} missing from/to table definitions", tb_name);
+			}
+		} else {
+			trace!("Table {} is not a relation table, type: {:?}", tb_name, tb.kind);
+		}
+
+		trace!("Final relations for table {}: {:?}", tb_name, relations);
+		println!("📋 Final relations for table {}: {:?}", tb_name, relations);
+		table_relations.entry(tb_name.clone()).or_default().extend(relations);
+	}
+
+	trace!("All table relations collected: {:?}", table_relations);
+	println!("🗂️  All table relations collected: {:?}", table_relations);
+
 	for tb in tbs.iter() {
 		trace!("Adding table: {}", tb.name);
 		let tb_name = tb.name.to_string();
@@ -209,7 +309,7 @@ pub async fn generate_schema(
 			.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
 			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
 
-		let table_where_name = where_name_from_table(tb_name);
+		let table_where_name = where_name_from_table(&tb_name);
 		let mut table_where = InputObject::new(&table_where_name);
 		table_where = table_where
 			.field(InputValue::new("id", TypeRef::named("_where_id")))
@@ -222,6 +322,11 @@ pub async fn generate_schema(
 		let fds = tx.all_tb_fields(ns, db, &tb.name.0, None).await?;
 		let fds1 = fds.clone();
 		let kvs1 = datastore.clone();
+
+		// Get relations for this table
+		let table_relations_for_tb = table_relations.get(&tb_name).cloned().unwrap_or_default();
+		trace!("Relations for table {}: {:?}", tb_name, table_relations_for_tb);
+		println!("🎯 Relations for table {}: {:?}", tb_name, table_relations_for_tb);
 
 		query = query.field(
 			Field::new(
@@ -807,6 +912,58 @@ pub async fn generate_schema(
 			));
 		}
 
+		// Add relation fields to the table object (excluding direct field relations which are already handled)
+		for relation in table_relations_for_tb.iter() {
+			// Skip direct field relations as they're already added by the regular field processing loop
+			if matches!(relation.relation_type, RelationType::Direct) {
+				trace!("Skipping direct relation field: {}", relation.field_name);
+				continue;
+			}
+
+			trace!("Adding relation field {} to table {}", relation.field_name, tb_name);
+			println!("✅ Adding relation field {} to table {}", relation.field_name, tb_name);
+
+			let field_type = if relation.is_list {
+				TypeRef::named_nn_list(relation.target_table.clone())
+			} else {
+				TypeRef::named(relation.target_table.clone())
+			};
+
+			let relation_clone = relation.clone();
+			let kvs_clone = datastore.clone();
+			let sess_clone = session.clone();
+			let current_table = tb_name.clone();
+
+			table_ty_obj = table_ty_obj.field(
+				Field::new(
+					&relation.field_name,
+					field_type,
+					move |ctx| {
+						let relation = relation_clone.clone();
+						let kvs = kvs_clone.clone();
+						let sess = sess_clone.clone();
+						let table_name = current_table.clone();
+
+						FieldFuture::new(async move {
+							make_relation_field_resolver(
+								ctx,
+								relation,
+								kvs,
+								sess,
+								table_name,
+							).await
+						})
+					},
+				)
+				.description(format!("Relation to {}", relation.target_table))
+				.argument(limit_input!())
+				.argument(start_input!())
+				.argument(InputValue::new("where", TypeRef::named(where_name_from_table(&relation.target_table))))
+				.argument(InputValue::new("order", TypeRef::named(format!("_order_{}", relation.target_table))))
+				.argument(version_input!()),
+			);
+		}
+
 		types.push(Type::Object(table_ty_obj));
 		types.push(table_order.into());
 		types.push(Type::Enum(table_orderable));
@@ -1366,6 +1523,169 @@ fn make_table_field_resolver(
 	}
 }
 
+async fn make_relation_field_resolver(
+	ctx: ResolverContext<'_>,
+	relation: RelationInfo,
+	kvs: Arc<Datastore>,
+	sess: Session,
+	_current_table: String,
+) -> Result<Option<FieldValue>, async_graphql::Error> {
+	let (ref gtx, ref rid) = ctx
+		.parent_value
+		.downcast_ref::<ErasedRecord>()
+		.ok_or_else(|| internal_error("failed to downcast"))?;
+
+	let args = ctx.args.as_index_map();
+	let start = args.get("start").and_then(|v| v.as_i64()).map(|s| s.intox());
+	let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| l.intox());
+	let _where_clause = args.get("where");
+	let _order = args.get("order");
+	let version = args.get("version").and_then(|v| v.as_string()).and_then(|s| {
+		s.parse::<crate::sql::datetime::Datetime>().ok().map(crate::sql::Version)
+	});
+
+	// Build the appropriate query based on relation type
+	let query_stmt = match &relation.relation_type {
+		RelationType::Direct => {
+			// Direct field reference - get the field value and resolve it as a record
+			let field_value = gtx.get_record_field(rid.clone(), relation.field_name.as_str()).await?;
+
+			match field_value {
+				SqlValue::Thing(thing) => {
+					// Single record reference
+					let gtx_clone = if let Some(ref v) = version {
+						GQLTx::new_with_version(&kvs, &sess, Some(v.to_u64())).await?
+					} else {
+						GQLTx::new(&kvs, &sess).await?
+					};
+
+					let erased: ErasedRecord = (gtx_clone, thing);
+					return Ok(Some(field_val_erase_owned(erased)));
+				}
+				SqlValue::Array(arr) => {
+					// Multiple record references
+					let gtx_clone = if let Some(ref v) = version {
+						GQLTx::new_with_version(&kvs, &sess, Some(v.to_u64())).await?
+					} else {
+						GQLTx::new(&kvs, &sess).await?
+					};
+
+					let mut results = Vec::new();
+					for val in arr.0 {
+						if let SqlValue::Thing(thing) = val {
+							let erased: ErasedRecord = (gtx_clone.clone(), thing);
+							results.push(field_val_erase_owned(erased));
+						}
+					}
+					return Ok(Some(FieldValue::list(results)));
+				}
+				_ => return Ok(None),
+			}
+		}
+		RelationType::OutgoingRelation { relation_table } => {
+			// Query: SELECT * FROM relation_table WHERE in = current_record
+			Statement::Select(SelectStatement {
+				what: vec![SqlValue::Table(relation_table.clone().intox())].into(),
+				expr: Fields(
+					vec![sql::Field::All],
+					false, // Don't use VALUE keyword to get full records
+				),
+				cond: Some(Cond(SqlValue::Expression(Box::new(Expression::Binary {
+					l: SqlValue::Idiom(Idiom::from("in")),
+					o: Operator::Equal,
+					r: SqlValue::Thing(rid.clone()),
+				})))),
+				order: None, // We'll handle ordering later
+				limit,
+				start,
+				version: version.clone(),
+				..Default::default()
+			})
+		}
+		RelationType::IncomingRelation { relation_table } => {
+			// Query: SELECT * FROM relation_table WHERE out = current_record
+			Statement::Select(SelectStatement {
+				what: vec![SqlValue::Table(relation_table.clone().intox())].into(),
+				expr: Fields(
+					vec![sql::Field::All],
+					false, // Don't use VALUE keyword to get full records
+				),
+				cond: Some(Cond(SqlValue::Expression(Box::new(Expression::Binary {
+					l: SqlValue::Idiom(Idiom::from("out")),
+					o: Operator::Equal,
+					r: SqlValue::Thing(rid.clone()),
+				})))),
+				order: None, // We'll handle ordering later
+				limit,
+				start,
+				version: version.clone(),
+				..Default::default()
+			})
+		}
+	};
+
+	// Execute the query
+	let query = crate::sql::Query(crate::sql::Statements(vec![query_stmt]));
+	let mut results = kvs.process(query, &sess, None).await?;
+	let res = if let Some(response) = results.pop() {
+		response.result.map_err(|e| -> crate::gql::error::GqlError { e.into() })?
+	} else {
+		return Err("No response from relation query".into());
+	};
+
+	// Process the results
+	let res_vec = match res {
+		SqlValue::Array(a) => a,
+		v => {
+			// Single result, wrap in array
+			crate::sql::Array(vec![v])
+		}
+	};
+
+	// Create the appropriate GQLTx for field resolution
+	let gtx_clone = if let Some(ref v) = version {
+		GQLTx::new_with_version(&kvs, &sess, Some(v.to_u64())).await?
+	} else {
+		GQLTx::new(&kvs, &sess).await?
+	};
+
+	let out: Result<Vec<FieldValue>, String> = res_vec
+		.0
+		.into_iter()
+		.map(|v| {
+			match v {
+				SqlValue::Object(obj) => {
+					if let Some(SqlValue::Thing(t)) = obj.get("id") {
+						let erased: ErasedRecord = (gtx_clone.clone(), t.clone());
+						Ok(field_val_erase_owned(erased))
+					} else {
+						Err("Relation record missing id field".to_string())
+					}
+				}
+				SqlValue::Thing(t) => {
+					let erased: ErasedRecord = (gtx_clone.clone(), t);
+					Ok(field_val_erase_owned(erased))
+				}
+				_ => Err(format!("Expected object or thing, found: {:?}", v))
+			}
+		})
+		.collect();
+
+	match out {
+		Ok(l) => {
+			if relation.is_list {
+				Ok(Some(FieldValue::list(l)))
+			} else {
+				// For single relations, return the first item or None
+				Ok(l.into_iter().next().map(|v| v))
+			}
+		}
+		Err(v) => {
+			Err(internal_error(format!("expected thing, found: {v:?}")).into())
+		}
+	}
+}
+
 pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 	let out = match v {
 		SqlValue::None => GqlValue::Null,
@@ -1543,9 +1863,9 @@ fn kind_to_input_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlE
 		Kind::Null => TypeRef::named("null"),
 		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
 		Kind::Bytes => TypeRef::named("bytes"),
-		Kind::Datetime => TypeRef::named("datetime"),
+		Kind::Datetime => TypeRef::named("Datetime"),
 		Kind::Decimal => TypeRef::named("decimal"),
-		Kind::Duration => TypeRef::named("duration"),
+		Kind::Duration => TypeRef::named("Duration"),
 		Kind::Float => TypeRef::named(TypeRef::FLOAT),
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
@@ -1673,9 +1993,9 @@ fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> 
 		Kind::Null => TypeRef::named("null"),
 		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
 		Kind::Bytes => TypeRef::named("bytes"),
-		Kind::Datetime => TypeRef::named("datetime"),
+		Kind::Datetime => TypeRef::named("Datetime"),
 		Kind::Decimal => TypeRef::named("decimal"),
-		Kind::Duration => TypeRef::named("duration"),
+		Kind::Duration => TypeRef::named("Duration"),
 		Kind::Float => TypeRef::named(TypeRef::FLOAT),
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
