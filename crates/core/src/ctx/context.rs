@@ -553,7 +553,10 @@ impl MutableContext {
 				// Check the domain name (if any)
 				is_allowed(&target)?;
 				// Resolve the domain name to a vector of IP addresses
+				#[cfg(not(target_family = "wasm"))]
 				let targets = target.resolve().await?;
+				#[cfg(target_family = "wasm")]
+				let targets = target.resolve()?;
 				for t in &targets {
 					// For each IP address resolved, check it is allowed
 					is_allowed(t)?;

@@ -1,11 +1,12 @@
+use crate::iam::{Auth, Level};
+use crate::rpc::Method;
+use ipnet::IpNet;
 use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
-
-use crate::iam::{Auth, Level};
-use crate::rpc::Method;
-use ipnet::IpNet;
+#[cfg(all(target_family = "wasm", feature = "http"))]
+use std::net::ToSocketAddrs;
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
 use url::Url;
@@ -188,7 +189,7 @@ pub enum NetTarget {
 	IPNet(IpNet),
 }
 
-#[cfg(all(not(target_family = "wasm"), feature = "http"))]
+#[cfg(feature = "http")]
 impl NetTarget {
 	/// Resolves a `NetTarget` to its associated IP address representations.
 	///
@@ -216,15 +217,27 @@ impl NetTarget {
 	/// # Notes
 	/// - The function uses `lookup_host` for DNS resolution, which must be awaited.
 	/// - The optional port is replaced by port 80 as a default if not provided.
+	#[cfg(not(target_family = "wasm"))]
 	pub(crate) async fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
 		match self {
 			NetTarget::Host(h, p) => {
 				let r = lookup_host((h.to_string(), p.unwrap_or(80)))
 					.await?
-					.map(|a| {
-						let ipnet: IpNet = a.ip().into();
-						NetTarget::IPNet(ipnet)
-					})
+					.map(|a| NetTarget::IPNet(a.ip().into()))
+					.collect();
+				Ok(r)
+			}
+			NetTarget::IPNet(_) => Ok(vec![]),
+		}
+	}
+
+	#[cfg(target_family = "wasm")]
+	pub(crate) fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
+		match self {
+			NetTarget::Host(h, p) => {
+				let r = (h.to_string(), p.unwrap_or(80))
+					.to_socket_addrs()?
+					.map(|a| NetTarget::IPNet(a.ip().into()))
 					.collect();
 				Ok(r)
 			}
