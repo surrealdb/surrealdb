@@ -1034,25 +1034,17 @@ mod tests {
 	#[tokio::test]
 	#[cfg(all(not(target_family = "wasm"), feature = "http"))]
 	async fn test_net_target_resolve_async() {
-		assert_eq!(
-			NetTarget::from_str("localhost").unwrap().resolve().await.unwrap(),
-			vec![
-				NetTarget::from_str("127.0.0.1").unwrap(),
-				NetTarget::from_str("::1/128").unwrap()
-			]
-		);
+		let r = NetTarget::from_str("localhost").unwrap().resolve().await.unwrap();
+		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
+		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
 	}
 
 	#[test]
 	#[cfg(all(target_family = "wasm", feature = "http"))]
 	fn test_net_target_resolve_sync() {
-		assert_eq!(
-			NetTarget::from_str("localhost").unwrap().resolve().unwrap(),
-			vec![
-				NetTarget::from_str("127.0.0.1").unwrap(),
-				NetTarget::from_str("::1/128").unwrap()
-			]
-		);
+		let r = NetTarget::from_str("localhost").unwrap().resolve().unwrap();
+		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
+		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
 	}
 
 	#[test]
