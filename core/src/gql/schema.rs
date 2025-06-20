@@ -1,9 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Display;
 use std::sync::Arc;
 
 use crate::dbs::Session;
 use crate::kvs::Datastore;
+use crate::iam;
 use crate::sql::kind::Literal;
 use crate::sql::statements::define::config::graphql::TablesConfig;
 use crate::sql::statements::{DefineFieldStatement, SelectStatement, CreateStatement, UpdateStatement, DeleteStatement};
@@ -11,7 +12,7 @@ use crate::sql::{self, Table};
 use crate::sql::{Cond, Data, Fields};
 use crate::sql::{Expression, Geometry, Operator};
 use crate::sql::{Ident, Idiom, Kind, Part};
-use crate::sql::{Statement, Thing, Values};
+use crate::sql::{Statement, Thing, Values, Object as SqlObject};
 use async_graphql::dynamic::{Enum, FieldValue, ResolverContext, Type, Union};
 use async_graphql::dynamic::{Field, Interface};
 use async_graphql::dynamic::{FieldFuture, InterfaceField};
@@ -126,6 +127,59 @@ pub async fn generate_schema(
 	let mut query = Object::new("Query");
 	let mut mutation = Object::new("Mutation");
 	let mut types: Vec<Type> = Vec::new();
+
+	let accesses = tx.all_db_accesses(ns, db).await?;
+	let mut all_signin_vars = std::collections::HashSet::new();
+	let mut all_signup_vars = std::collections::HashSet::new();
+
+	// Add root authentication fields (only for signin, not signup)
+	all_signin_vars.insert("username".to_string());
+	all_signin_vars.insert("password".to_string());
+
+	for access in accesses.iter() {
+		if let crate::sql::AccessType::Record(record_access) = &access.kind {
+			// Collect signin variables from SIGNIN clauses only
+			if let Some(signin_clause) = &record_access.signin {
+				let signin_vars = extract_signin_variables(signin_clause);
+				for var in signin_vars {
+					all_signin_vars.insert(var);
+				}
+			}
+
+			// Collect signup variables from SIGNUP clauses only
+			if let Some(signup_clause) = &record_access.signup {
+				let signup_vars = extract_signin_variables(signup_clause);
+				for var in signup_vars {
+					all_signup_vars.insert(var);
+				}
+			}
+		}
+	}
+
+	let mut signin_input = InputObject::new("SignInInput")
+		.description("Input for authentication - contains all possible authentication parameters");
+
+	for var_name in &all_signin_vars {
+		signin_input = signin_input.field(
+			InputValue::new(var_name, TypeRef::named(TypeRef::STRING))
+				.description(format!("Authentication parameter: {}", var_name))
+		);
+	}
+	types.push(Type::InputObject(signin_input));
+
+	// Create SignUpInput only if there are signup variables from SIGNUP clauses (from ACCESSES)
+	if !all_signup_vars.is_empty() {
+		let mut signup_input = InputObject::new("SignUpInput")
+			.description("Input for registration - contains all possible registration parameters");
+
+		for var_name in &all_signup_vars {
+			signup_input = signup_input.field(
+				InputValue::new(var_name, TypeRef::named(TypeRef::STRING))
+					.description(format!("Registration parameter: {}", var_name))
+			);
+		}
+		types.push(Type::InputObject(signup_input));
+	}
 
 	trace!(ns, db, ?tbs, "generating schema");
 
@@ -846,6 +900,165 @@ pub async fn generate_schema(
 		);
 	}
 
+	// Create list of valid access names for validation
+	let valid_access_names: Vec<String> = accesses.iter().map(|access| access.name.0.clone()).collect();
+
+	// Create description with available access methods
+	let access_description = if valid_access_names.is_empty() {
+		"Access method name (Optional for root authentication)".to_string()
+	} else {
+		format!("Access method name (Optional for root authentication). Available access methods: {}", valid_access_names.join(", "))
+	};
+
+	let has_signup_access = !all_signup_vars.is_empty();
+
+	let signin_kvs = datastore.clone();
+	let signin_session = session.clone();
+	let signin_valid_accesses = valid_access_names.clone();
+	mutation = mutation.field(
+		Field::new("signIn", TypeRef::named_nn(TypeRef::STRING), move |ctx| {
+			let kvs = signin_kvs.clone();
+			let session = signin_session.clone();
+			let valid_accesses = signin_valid_accesses.clone();
+
+			FieldFuture::new(async move {
+				let args = ctx.args.as_index_map();
+				let access = args.get("access").and_then(|v| v.as_string());
+				let variables = args.get("variables").ok_or_else(|| resolver_error("variables argument is required"))?;
+
+				// Validate access name if provided
+				if let Some(access_name) = &access {
+					if !valid_accesses.contains(access_name) {
+						return Err(resolver_error(format!("Invalid access method: '{}'. Valid access methods are: {}", access_name, valid_accesses.join(", "))).into());
+					}
+				}
+
+				if let GqlValue::Object(obj) = variables {
+					// Convert GraphQL input to SQL Object for signin
+					let mut vars = SqlObject::default();
+
+					// Add NS and DB from GraphQL context
+					if let Some(ns) = &session.ns {
+						vars.insert("NS".to_string(), SqlValue::from(ns.to_string()));
+					}
+					if let Some(db) = &session.db {
+						vars.insert("DB".to_string(), SqlValue::from(db.to_string()));
+					}
+
+					// Add access method if specified
+					if let Some(access_name) = access {
+						vars.insert("AC".to_string(), SqlValue::from(access_name));
+					}
+
+					// Add all variable fields to vars
+					for (key, value) in obj {
+						let sql_val = match value {
+							GqlValue::String(s) => SqlValue::from(s.clone()),
+							GqlValue::Number(n) => {
+								if let Some(i) = n.as_i64() {
+									SqlValue::from(i)
+								} else if let Some(f) = n.as_f64() {
+									SqlValue::from(f)
+								} else {
+									SqlValue::from(n.to_string())
+								}
+							},
+							GqlValue::Boolean(b) => SqlValue::from(*b),
+							GqlValue::Null => SqlValue::Null,
+							_ => SqlValue::from(value.to_string()),
+						};
+						vars.insert(key.to_string(), sql_val);
+					}
+
+					// Call signin function
+					let mut signin_session = session.clone();
+					match iam::signin::signin(&kvs, &mut signin_session, vars).await {
+						Ok(token) => Ok(Some(FieldValue::value(GqlValue::String(token)))),
+						Err(e) => Err(resolver_error(format!("Authentication failed: {}", e)).into()),
+					}
+				} else {
+					Err(resolver_error("variables must be an object").into())
+				}
+			})
+		})
+		.description("Sign in and receive a JWT token")
+		.argument(InputValue::new("access", TypeRef::named(TypeRef::STRING)).description(&access_description))
+		.argument(InputValue::new("variables", TypeRef::named_nn("SignInInput")).description("Authentication variables"))
+	);
+
+	if has_signup_access {
+		let signup_kvs = datastore.clone();
+		let signup_session = session.clone();
+		let signup_valid_accesses = valid_access_names.clone();
+		mutation = mutation.field(
+			Field::new("signUp", TypeRef::named_nn(TypeRef::STRING), move |ctx| {
+				let kvs = signup_kvs.clone();
+				let session = signup_session.clone();
+				let valid_accesses = signup_valid_accesses.clone();
+
+				FieldFuture::new(async move {
+					let args = ctx.args.as_index_map();
+					let access = args.get("access").and_then(|v| v.as_string()).ok_or_else(|| resolver_error("access argument is required"))?;
+					let variables = args.get("variables").ok_or_else(|| resolver_error("variables argument is required"))?;
+
+					// Validate access name (required)
+					if !valid_accesses.contains(&access) {
+						return Err(resolver_error(format!("Invalid access method: '{}'. Valid access methods are: {}", access, valid_accesses.join(", "))).into());
+					}
+
+					if let GqlValue::Object(obj) = variables {
+						// Convert GraphQL input to SQL Object for signup
+						let mut vars = SqlObject::default();
+
+						// Add NS and DB from GraphQL context
+						if let Some(ns) = &session.ns {
+							vars.insert("NS".to_string(), SqlValue::from(ns.to_string()));
+						}
+						if let Some(db) = &session.db {
+							vars.insert("DB".to_string(), SqlValue::from(db.to_string()));
+						}
+
+						// Add access method (required)
+						vars.insert("AC".to_string(), SqlValue::from(access));
+
+						// Add all variable fields to vars
+						for (key, value) in obj {
+							let sql_val = match value {
+								GqlValue::String(s) => SqlValue::from(s.clone()),
+								GqlValue::Number(n) => {
+									if let Some(i) = n.as_i64() {
+										SqlValue::from(i)
+									} else if let Some(f) = n.as_f64() {
+										SqlValue::from(f)
+									} else {
+										SqlValue::from(n.to_string())
+									}
+								},
+								GqlValue::Boolean(b) => SqlValue::from(*b),
+								GqlValue::Null => SqlValue::Null,
+								_ => SqlValue::from(value.to_string()),
+							};
+							vars.insert(key.to_string(), sql_val);
+						}
+
+						// Call signup function
+						let mut signup_session = session.clone();
+						match iam::signup::signup(&kvs, &mut signup_session, vars).await {
+							Ok(Some(token)) => Ok(Some(FieldValue::value(GqlValue::String(token)))),
+							Ok(None) => Err(resolver_error("Registration completed but no token returned").into()),
+							Err(e) => Err(resolver_error(format!("Registration failed: {}", e)).into()),
+						}
+					} else {
+						Err(resolver_error("variables must be an object").into())
+					}
+				})
+			})
+			.description("Sign up and receive a JWT token")
+			.argument(InputValue::new("access", TypeRef::named_nn(TypeRef::STRING)).description("Access method name (required for registration)"))
+			.argument(InputValue::new("variables", TypeRef::named_nn("SignUpInput")).description("Registration variables"))
+		);
+	}
+
 	trace!("current Query object for schema: {:?}", query);
 
 	let mut schema = Schema::build("Query", Some("Mutation"), None).register(query).register(mutation);
@@ -933,6 +1146,145 @@ pub async fn generate_schema(
 	schema
 		.finish()
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
+}
+
+// Helper function to extract variable names from SIGNIN clause
+fn extract_signin_variables(signin_value: &SqlValue) -> Vec<String> {
+	let mut variables = HashSet::new();
+	extract_variables_recursive(signin_value, &mut variables);
+
+	// Filter out system parameters that are automatically provided
+	let filtered_vars: Vec<String> = variables
+		.into_iter()
+		.filter(|var| {
+			// Exclude system parameters that are automatically set by the GraphQL context
+			!matches!(var.to_uppercase().as_str(), "NS" | "DB" | "AC")
+		})
+		.collect();
+
+	let mut sorted_vars = filtered_vars;
+	sorted_vars.sort();
+	sorted_vars
+}
+
+// Recursively extract parameter variables from SQL Value
+fn extract_variables_recursive(value: &SqlValue, variables: &mut HashSet<String>) {
+	match value {
+		SqlValue::Param(param) => {
+			variables.insert(param.0.to_string());
+		}
+		SqlValue::Expression(expr) => {
+			match &**expr {
+				crate::sql::Expression::Binary { l, r, .. } => {
+					extract_variables_recursive(l, variables);
+					extract_variables_recursive(r, variables);
+				}
+				crate::sql::Expression::Unary { v, .. } => {
+					extract_variables_recursive(v, variables);
+				}
+			}
+		}
+		SqlValue::Function(func) => {
+			for arg in func.args() {
+				extract_variables_recursive(arg, variables);
+			}
+		}
+		SqlValue::Subquery(subquery) => {
+			match &**subquery {
+				crate::sql::Subquery::Select(select) => {
+					if let Some(cond) = &select.cond {
+						extract_variables_from_cond(cond, variables);
+					}
+					// Also check fields and other parts of SELECT
+					for field in &select.expr.0 {
+						extract_variables_from_field(field, variables);
+					}
+				}
+				crate::sql::Subquery::Create(create) => {
+					// Handle CREATE statements (common in SIGNUP clauses)
+					if let Some(data) = &create.data {
+						extract_variables_from_data(data, variables);
+					}
+				}
+				crate::sql::Subquery::Update(update) => {
+					// Handle UPDATE statements
+					if let Some(data) = &update.data {
+						extract_variables_from_data(data, variables);
+					}
+					if let Some(cond) = &update.cond {
+						extract_variables_from_cond(cond, variables);
+					}
+				}
+				_ => {}
+			}
+		}
+		SqlValue::Array(array) => {
+			for item in &array.0 {
+				extract_variables_recursive(item, variables);
+			}
+		}
+		SqlValue::Object(object) => {
+			for (_, val) in &object.0 {
+				extract_variables_recursive(val, variables);
+			}
+		}
+		_ => {}
+	}
+}
+
+// Extract variables from condition expressions
+fn extract_variables_from_cond(cond: &Cond, variables: &mut HashSet<String>) {
+	extract_variables_recursive(&cond.0, variables);
+}
+
+// Extract variables from field expressions
+fn extract_variables_from_field(field: &crate::sql::Field, variables: &mut HashSet<String>) {
+	match field {
+		crate::sql::Field::Single { expr, .. } => {
+			extract_variables_recursive(expr, variables);
+		}
+		crate::sql::Field::All => {}
+	}
+}
+
+// Extract variables from data expressions (SET clauses in CREATE/UPDATE)
+fn extract_variables_from_data(data: &crate::sql::Data, variables: &mut HashSet<String>) {
+	match data {
+		crate::sql::Data::SetExpression(obj) => {
+			for (_, _, val) in obj {
+				extract_variables_recursive(val, variables);
+			}
+		}
+		crate::sql::Data::UpdateExpression(ops) => {
+			for (_, _, val) in ops {
+				extract_variables_recursive(val, variables);
+			}
+		}
+		crate::sql::Data::PatchExpression(val) => {
+			extract_variables_recursive(val, variables);
+		}
+		crate::sql::Data::MergeExpression(val) => {
+			extract_variables_recursive(val, variables);
+		}
+		crate::sql::Data::ReplaceExpression(val) => {
+			extract_variables_recursive(val, variables);
+		}
+		crate::sql::Data::ContentExpression(val) => {
+			extract_variables_recursive(val, variables);
+		}
+		crate::sql::Data::SingleExpression(val) => {
+			extract_variables_recursive(val, variables);
+		}
+		crate::sql::Data::ValuesExpression(vals) => {
+			for row in vals {
+				for (_, val) in row {
+					extract_variables_recursive(val, variables);
+				}
+			}
+		}
+		crate::sql::Data::EmptyExpression => {}
+		crate::sql::Data::UnsetExpression(_) => {}
+	}
 }
 
 fn make_table_field_resolver(
