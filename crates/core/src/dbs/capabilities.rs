@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use crate::iam::{Auth, Level};
 use crate::rpc::Method;
 use ipnet::IpNet;
+#[cfg(feature = "http")]
 use tokio::net::lookup_host;
 use url::Url;
 
@@ -187,7 +188,34 @@ pub enum NetTarget {
 	IPNet(IpNet),
 }
 
+#[cfg(feature = "http")]
 impl NetTarget {
+	/// Resolves a `NetTarget` to its associated IP address representations.
+	///
+	/// This function performs an asynchronous resolution of a `NetTarget` enum instance. If the
+	/// `NetTarget` is of variant `Host`, it attempts to resolve the provided hostname and optional
+	/// port into a list of `IPNet` values. If the port is not provided, port 80 is used by default.
+	/// If the `NetTarget` is of variant `IPNet`, it simply returns an empty vector, as there is nothing
+	/// to resolve.
+	///
+	/// # Returns
+	/// - On success, this function returns a `Vec<Self>` where each resolved `NetTarget::Host` is
+	/// transformed into a `NetTarget::IPNet`.
+	/// - On error, it returns a `std::io::Error` indicating the issue during resolution.
+	///
+	/// # Variants
+	/// - `NetTarget::Host(h, p)`:
+	///    - Resolves the given hostname `h` with an optional port `p` (default is 80) to a list of IPs.
+	///    - Each resolved IP is converted into a `NetTarget::IPNet` value.
+	/// - `NetTarget::IPNet(_)`:
+	///    - Returns an empty vector, as `IPNet` does not require resolution.
+	///
+	/// # Errors
+	/// - Returns `std::io::Error` if there is an issue in the asynchronous DNS resolution process.
+	///
+	/// # Notes
+	/// - The function uses `lookup_host` for DNS resolution, which must be awaited.
+	/// - The optional port is replaced by port 80 as a default if not provided.
 	pub(crate) async fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
 		match self {
 			NetTarget::Host(h, p) => {

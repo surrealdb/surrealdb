@@ -498,10 +498,46 @@ impl MutableContext {
 		Ok(())
 	}
 
-	/// Check if a network target is allowed
+	/// Checks if the provided URL's network target is allowed based on current capabilities.
+	///
+	/// This function performs a validation to ensure that the outgoing network connection
+	/// specified by the provided `url` is permitted. It checks the resolved network targets
+	/// associated with the URL and ensures that all targets adhere to the configured
+	/// capabilities.
+	///
+	/// # Features
+	/// The function is only available if the `http` feature is enabled.
+	///
+	/// # Parameters
+	/// - `url`: A reference to a [`Url`] object representing the target endpoint to check.
+	///
+	/// # Returns
+	/// This function returns a [`Result<()>`]:
+	/// - On success, it returns `Ok(())` indicating the network target is allowed.
+	/// - On failure, it returns an error wrapped in the [`Error`] type:
+	///   - `NetTargetNotAllowed` if the target is not permitted.
+	///   - `InvalidUrl` if the provided URL is invalid.
+	///
+	/// # Behavior
+	/// 1. Extracts the host and port information from the URL.
+	/// 2. Constructs a [`NetTarget`] object and checks if it is allowed by the current
+	///    network capabilities.
+	/// 3. If the network target resolves to multiple targets (e.g., DNS resolution), each
+	///    target is validated individually.
+	/// 4. Logs a warning and prevents the connection if the target is denied by the
+	///    capabilities.
+	///
+	/// # Logging
+	/// - Logs a warning message if the network target is denied.
+	/// - Logs a trace message if the network target is permitted.
+	///
+	/// # Errors
+	/// - `NetTargetNotAllowed`: Returned if any of the resolved targets are not allowed.
+	/// - `InvalidUrl`: Returned if the URL does not have a valid host.
+	///
 	#[cfg(feature = "http")]
 	pub(crate) async fn check_allowed_net(&self, url: &Url) -> Result<()> {
-		let check = |target| {
+		let is_allowed = |target| {
 			if !self.capabilities.allows_network_target(target) {
 				warn!(
 					"Capabilities denied outgoing network connection attempt, target: '{target}'"
@@ -514,10 +550,13 @@ impl MutableContext {
 		match url.host() {
 			Some(host) => {
 				let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
-				check(&target)?;
+				// Check the domain name (if any)
+				is_allowed(&target)?;
+				// Resolve the domain name to a vector of IP addresses
 				let targets = target.resolve().await?;
 				for t in &targets {
-					check(t)?;
+					// For each IP address resolved, check it is allowed
+					is_allowed(t)?;
 				}
 				Ok(())
 			}

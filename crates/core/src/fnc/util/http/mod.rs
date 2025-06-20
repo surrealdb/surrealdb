@@ -5,10 +5,12 @@ use crate::syn;
 
 use anyhow::{Context as _, Result, bail};
 use reqwest::header::CONTENT_TYPE;
+#[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::Attempt;
 #[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
+#[cfg(not(target_family = "wasm"))]
 use tokio::runtime::Handle;
 use url::Url;
 
