@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::fmt::Fmt;
 use crate::expr::paths::ID;
-use crate::expr::{AssignOperator, Expr, Idiom, Part, Value};
+use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -63,22 +63,22 @@ impl Data {
 	) -> Result<Option<Value>> {
 		match self {
 			Self::MergeExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => {
+				Expr::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
+				Expr::Literal(Literal::Object(_)) => {
 					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
 				}
 				_ => Ok(None),
 			},
 			Self::ReplaceExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => {
+				Expr::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
+				Expr::Literal(Literal::Object(_)) => {
 					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
 				}
 				_ => Ok(None),
 			},
 			Self::ContentExpression(v) => match v {
-				Value::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Value::Object(_) => {
+				Expr::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
+				Expr::Literal(Literal::Object(_)) => {
 					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
 				}
 				_ => Ok(None),

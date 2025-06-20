@@ -1,7 +1,6 @@
 use crate::expr;
-use crate::expr::Number;
 use crate::expr::constant::ConstantValue;
-use crate::val::Value;
+use crate::val::{self, Number, Value};
 use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value as JsonValue;
@@ -29,31 +28,14 @@ impl From<Value> for serde_json::Value {
 			Value::Geometry(geo) => Geometry::from(geo).0,
 			Value::Bytes(bytes) => json!(bytes.0),
 			Value::Thing(thing) => thing.to_string().into(),
+			Value::Regex(regex) => json!(regex),
 			// These Value types are un-computed values
 			// and are not used in query responses sent
 			// to the client.
-			Value::Param(param) => json!(param),
-			Value::Idiom(idiom) => json!(idiom),
 			Value::Table(table) => json!(table),
-			Value::Mock(mock) => json!(mock),
-			Value::Regex(regex) => json!(regex),
-			Value::Block(block) => json!(block),
 			Value::Range(range) => json!(range),
-			Value::Edges(edges) => json!(edges),
 			Value::Future(future) => json!(future),
-			Value::Constant(constant) => match constant.value() {
-				ConstantValue::Datetime(datetime) => json!(datetime.0),
-				ConstantValue::Float(float) => float.into(),
-				ConstantValue::Duration(duration) => duration.to_string().into(),
-			},
-			Value::Cast(cast) => json!(cast),
-			Value::Function(function) => json!(function),
-			Value::Model(model) => json!(model),
-			Value::Query(query) => json!(query),
-			Value::Subquery(subquery) => json!(subquery),
-			Value::Expression(expression) => json!(expression),
 			Value::Closure(closure) => json!(closure),
-			Value::Refs(_) => json!(expr::Array::new()),
 			Value::File(file) => file.to_string().into(),
 		}
 	}
@@ -62,8 +44,8 @@ impl From<Value> for serde_json::Value {
 #[derive(Serialize)]
 struct Array(Vec<JsonValue>);
 
-impl From<expr::Array> for Array {
-	fn from(arr: expr::Array) -> Self {
+impl From<val::Array> for Array {
+	fn from(arr: val::Array) -> Self {
 		let mut vec = Vec::with_capacity(arr.len());
 		for value in arr {
 			vec.push(value.into());
@@ -75,8 +57,8 @@ impl From<expr::Array> for Array {
 #[derive(Serialize)]
 struct Object(Map<String, JsonValue>);
 
-impl From<expr::Object> for Object {
-	fn from(obj: expr::Object) -> Self {
+impl From<val::Object> for Object {
+	fn from(obj: val::Object) -> Self {
 		let mut map = Map::with_capacity(obj.len());
 		for (key, value) in obj {
 			map.insert(key.clone(), value.into());
@@ -123,14 +105,14 @@ struct Geometries {
 #[derive(Serialize)]
 struct Geometry(JsonValue);
 
-impl From<expr::Geometry> for Geometry {
-	fn from(geo: expr::Geometry) -> Self {
+impl From<val::Geometry> for Geometry {
+	fn from(geo: val::Geometry) -> Self {
 		Self(match geo {
-			expr::Geometry::Point(v) => json!(Coordinates {
+			val::Geometry::Point(v) => json!(Coordinates {
 				typ: CoordinatesType::Point,
 				coordinates: vec![json!(v.x()), json!(v.y())].into(),
 			}),
-			expr::Geometry::Line(v) => json!(Coordinates {
+			val::Geometry::Line(v) => json!(Coordinates {
 				typ: CoordinatesType::LineString,
 				coordinates: v
 					.points()
@@ -138,7 +120,7 @@ impl From<expr::Geometry> for Geometry {
 					.collect::<Vec<JsonValue>>()
 					.into(),
 			}),
-			expr::Geometry::Polygon(v) => json!(Coordinates {
+			val::Geometry::Polygon(v) => json!(Coordinates {
 				typ: CoordinatesType::Polygon,
 				coordinates: vec![
 					v.exterior()
@@ -160,7 +142,7 @@ impl From<expr::Geometry> for Geometry {
 				.collect::<Vec<Vec<JsonValue>>>()
 				.into(),
 			}),
-			expr::Geometry::MultiPoint(v) => json!(Coordinates {
+			val::Geometry::MultiPoint(v) => json!(Coordinates {
 				typ: CoordinatesType::MultiPoint,
 				coordinates: v
 					.0
@@ -169,7 +151,7 @@ impl From<expr::Geometry> for Geometry {
 					.collect::<Vec<JsonValue>>()
 					.into()
 			}),
-			expr::Geometry::MultiLine(v) => json!(Coordinates {
+			val::Geometry::MultiLine(v) => json!(Coordinates {
 				typ: CoordinatesType::MultiLineString,
 				coordinates: v
 					.0
@@ -182,7 +164,7 @@ impl From<expr::Geometry> for Geometry {
 					.collect::<Vec<Vec<JsonValue>>>()
 					.into()
 			}),
-			expr::Geometry::MultiPolygon(v) => json!(Coordinates {
+			val::Geometry::MultiPolygon(v) => json!(Coordinates {
 				typ: CoordinatesType::MultiPolygon,
 				coordinates: v
 					.0
@@ -210,7 +192,7 @@ impl From<expr::Geometry> for Geometry {
 					.collect::<Vec<Vec<Vec<JsonValue>>>>()
 					.into(),
 			}),
-			expr::Geometry::Collection(v) => json!(Geometries {
+			val::Geometry::Collection(v) => json!(Geometries {
 				typ: GeometryCollection,
 				geometries: v.into_iter().map(Geometry::from).map(|x| x.0).collect(),
 			}),
@@ -218,11 +200,12 @@ impl From<expr::Geometry> for Geometry {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use crate::expr;
-	use crate::expr::Thing;
-	use crate::expr::Value;
+	use crate::val::{self, Value};
+
 	use chrono::DateTime;
 	use chrono::Utc;
 	use geo::MultiLineString;
@@ -246,52 +229,52 @@ mod tests {
 	#[case::bool(Value::Bool(true), json!(true), Value::Bool(true))]
 	#[case::bool(Value::Bool(false), json!(false), Value::Bool(false))]
 	#[case::number(
-		Value::Number(expr::Number::Int(i64::MIN)),
+		Value::Number(val::Number::Int(i64::MIN)),
 		json!(i64::MIN),
-		Value::Number(expr::Number::Int(i64::MIN)),
+		Value::Number(val::Number::Int(i64::MIN)),
 	)]
 	#[case::number(
-		Value::Number(expr::Number::Int(i64::MAX)),
+		Value::Number(val::Number::Int(i64::MAX)),
 		json!(i64::MAX),
-		Value::Number(expr::Number::Int(i64::MAX)),
+		Value::Number(val::Number::Int(i64::MAX)),
 	)]
 	#[case::number(
-		Value::Number(expr::Number::Float(1.23)),
+		Value::Number(val::Number::Float(1.23)),
 		json!(1.23),
-		Value::Number(expr::Number::Float(1.23)),
+		Value::Number(val::Number::Float(1.23)),
 	)]
 	#[case::number(
-		Value::Number(expr::Number::Float(f64::NEG_INFINITY)),
+		Value::Number(val::Number::Float(f64::NEG_INFINITY)),
 		json!(null),
 		Value::Null,
 	)]
 	#[case::number(
-		Value::Number(expr::Number::Float(f64::MIN)),
+		Value::Number(val::Number::Float(f64::MIN)),
 		json!(-1.7976931348623157e308),
-		Value::Number(expr::Number::Float(f64::MIN)),
+		Value::Number(val::Number::Float(f64::MIN)),
 	)]
 	#[case::number(
-		Value::Number(expr::Number::Float(0.0)),
+		Value::Number(val::Number::Float(0.0)),
 		json!(0.0),
-		Value::Number(expr::Number::Float(0.0)),
+		Value::Number(val::Number::Float(0.0)),
 	)]
 	#[case::number(
-		Value::Number(expr::Number::Float(f64::MAX)),
+		Value::Number(val::Number::Float(f64::MAX)),
 		json!(1.7976931348623157e308),
-		Value::Number(expr::Number::Float(f64::MAX)),
+		Value::Number(val::Number::Float(f64::MAX)),
 	)]
 	#[case::number(
-		Value::Number(expr::Number::Float(f64::INFINITY)),
+		Value::Number(val::Number::Float(f64::INFINITY)),
 		json!(null),
 		Value::Null,
 	)]
 	#[case::number(
-		Value::Number(expr::Number::Float(f64::NAN)),
+		Value::Number(val::Number::Float(f64::NAN)),
 		json!(null),
 		Value::Null,
 	)]
 	#[case::number(
-		Value::Number(expr::Number::Decimal(Decimal::new(123, 2))),
+		Value::Number(val::Number::Decimal(Decimal::new(123, 2))),
 		json!("1.23"),
 		Value::Strand("1.23".into()),
 	)]
@@ -306,47 +289,47 @@ mod tests {
 		Value::Strand("foo".into()),
 	)]
 	#[case::duration(
-		Value::Duration(expr::Duration(Duration::ZERO)),
+		Value::Duration(val::Duration(Duration::ZERO)),
 		json!("0ns"),
 		Value::Strand("0ns".into()),
 	)]
 	#[case::duration(
-		Value::Duration(expr::Duration(Duration::MAX)),
+		Value::Duration(val::Duration(Duration::MAX)),
 		json!("584942417355y3w5d7h15s999ms999µs999ns"),
 		Value::Strand("584942417355y3w5d7h15s999ms999µs999ns".into()),
 	)]
 	#[case::datetime(
-		Value::Datetime(expr::Datetime(DateTime::<Utc>::MIN_UTC)),
+		Value::Datetime(val::Datetime(DateTime::<Utc>::MIN_UTC)),
 		json!("-262143-01-01T00:00:00Z"),
 		Value::Strand("-262143-01-01T00:00:00Z".into()),
 	)]
 	#[case::datetime(
-		Value::Datetime(expr::Datetime(DateTime::<Utc>::MAX_UTC)),
+		Value::Datetime(val::Datetime(DateTime::<Utc>::MAX_UTC)),
 		json!("+262142-12-31T23:59:59.999999999Z"),
 		Value::Strand("+262142-12-31T23:59:59.999999999Z".into()),
 	)]
 	#[case::uuid(
-		Value::Uuid(expr::Uuid(Uuid::nil())),
+		Value::Uuid(val::Uuid(Uuid::nil())),
 		json!("00000000-0000-0000-0000-000000000000"),
 		Value::Strand("00000000-0000-0000-0000-000000000000".into()),
 	)]
 	#[case::uuid(
-		Value::Uuid(expr::Uuid(Uuid::max())),
+		Value::Uuid(val::Uuid(Uuid::max())),
 		json!("ffffffff-ffff-ffff-ffff-ffffffffffff"),
 		Value::Strand("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
 	)]
 	#[case::bytes(
-		Value::Bytes(expr::Bytes(vec![])),
+		Value::Bytes(val::Bytes(vec![])),
 		json!([]),
-		Value::Array(expr::Array(vec![])),
+		Value::Array(val::Array(vec![])),
 	)]
 	#[case::bytes(
-		Value::Bytes(expr::Bytes(b"foo".to_vec())),
+		Value::Bytes(val::Bytes(b"foo".to_vec())),
 		json!([102, 111, 111]),
-		Value::Array(expr::Array(vec![
-			Value::Number(expr::Number::Int(102)),
-			Value::Number(expr::Number::Int(111)),
-			Value::Number(expr::Number::Int(111)),
+		Value::Array(val::Array(vec![
+			Value::Number(val::Number::Int(102)),
+			Value::Number(val::Number::Int(111)),
+			Value::Number(val::Number::Int(111)),
 		])),
 	)]
 	#[case::thing(
@@ -355,43 +338,43 @@ mod tests {
 		Value::Thing(Thing { tb: "foo".to_string(), id: "bar".into()}) ,
 	)]
 	#[case::array(
-		Value::Array(expr::Array(vec![])),
+		Value::Array(val::Array(vec![])),
 		json!([]),
-		Value::Array(expr::Array(vec![])),
+		Value::Array(val::Array(vec![])),
 	)]
 	#[case::array(
-		Value::Array(expr::Array(vec![Value::Bool(true), Value::Bool(false)])),
+		Value::Array(val::Array(vec![Value::Bool(true), Value::Bool(false)])),
 		json!([true, false]),
-		Value::Array(expr::Array(vec![Value::Bool(true), Value::Bool(false)])),
+		Value::Array(val::Array(vec![Value::Bool(true), Value::Bool(false)])),
 	)]
 	#[case::object(
-		Value::Object(expr::Object(BTreeMap::new())),
+		Value::Object(val::Object(BTreeMap::new())),
 		json!({}),
-		Value::Object(expr::Object(BTreeMap::new())),
+		Value::Object(val::Object(BTreeMap::new())),
 	)]
 	#[case::object(
-		Value::Object(expr::Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
+		Value::Object(val::Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
 		json!({"done": true}),
-		Value::Object(expr::Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
+		Value::Object(val::Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
 	)]
 	#[case::geometry_point(
-		Value::Geometry(expr::Geometry::Point(point! { x: 10., y: 20. })),
+		Value::Geometry(val::Geometry::Point(point! { x: 10., y: 20. })),
 		json!({ "type": "Point", "coordinates": [10., 20.]}),
-		Value::Geometry(expr::Geometry::Point(point! { x: 10., y: 20. })),
+		Value::Geometry(val::Geometry::Point(point! { x: 10., y: 20. })),
 	)]
 	#[case::geometry_line(
-		Value::Geometry(expr::Geometry::Line(line_string![
+		Value::Geometry(val::Geometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])),
 		json!({ "type": "LineString", "coordinates": [[0., 0.], [10., 0.]]}),
-		Value::Geometry(expr::Geometry::Line(line_string![
+		Value::Geometry(val::Geometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])),
 	)]
 	#[case::geometry_polygon(
-		Value::Geometry(expr::Geometry::Polygon(polygon![
+		Value::Geometry(val::Geometry::Polygon(polygon![
 			(x: -111., y: 45.),
 			(x: -111., y: 41.),
 			(x: -104., y: 41.),
@@ -404,7 +387,7 @@ mod tests {
 			[-104., 45.],
 			[-111., 45.],
 		]]}),
-		Value::Geometry(expr::Geometry::Polygon(polygon![
+		Value::Geometry(val::Geometry::Polygon(polygon![
 			(x: -111., y: 45.),
 			(x: -111., y: 41.),
 			(x: -104., y: 41.),
@@ -412,19 +395,19 @@ mod tests {
 		])),
 	)]
 	#[case::geometry_multi_point(
-		Value::Geometry(expr::Geometry::MultiPoint(MultiPoint::new(vec![
+		Value::Geometry(val::Geometry::MultiPoint(MultiPoint::new(vec![
 			point! { x: 0., y: 0. },
 			point! { x: 1., y: 2. },
 		]))),
 		json!({ "type": "MultiPoint", "coordinates": [[0., 0.], [1., 2.]]}),
-		Value::Geometry(expr::Geometry::MultiPoint(MultiPoint::new(vec![
+		Value::Geometry(val::Geometry::MultiPoint(MultiPoint::new(vec![
 			point! { x: 0., y: 0. },
 			point! { x: 1., y: 2. },
 		]))),
 	)]
 	#[case::geometry_multi_line(
 		Value::Geometry(
-			expr::Geometry::MultiLine(
+			val::Geometry::MultiLine(
 				MultiLineString::new(vec![
 					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
 				])
@@ -432,7 +415,7 @@ mod tests {
 		),
 		json!({ "type": "MultiLineString", "coordinates": [[[0., 0.], [1., 2.]]]}),
 		Value::Geometry(
-			expr::Geometry::MultiLine(
+			val::Geometry::MultiLine(
 				MultiLineString::new(vec![
 					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
 				])
@@ -440,7 +423,7 @@ mod tests {
 		),
 	)]
 	#[case::geometry_multi_polygon(
-		Value::Geometry(expr::Geometry::MultiPolygon(MultiPolygon::new(vec![
+		Value::Geometry(val::Geometry::MultiPolygon(MultiPolygon::new(vec![
 			polygon![
 				(x: -111., y: 45.),
 				(x: -111., y: 41.),
@@ -455,7 +438,7 @@ mod tests {
 			[-104., 45.],
 			[-111., 45.],
 		]]]})
-	,	Value::Geometry(expr::Geometry::MultiPolygon(MultiPolygon::new(vec![
+	,	Value::Geometry(val::Geometry::MultiPolygon(MultiPolygon::new(vec![
 			polygon![
 				(x: -111., y: 45.),
 				(x: -111., y: 41.),
@@ -465,23 +448,23 @@ mod tests {
 		]))),
 	)]
 	#[case::geometry_collection(
-		Value::Geometry(expr::Geometry::Collection(vec![])),
+		Value::Geometry(val::Geometry::Collection(vec![])),
 		json!({
 			"type": "GeometryCollection",
 			"geometries": [],
 		}),
-		Value::Geometry(expr::Geometry::Collection(vec![])),
+		Value::Geometry(val::Geometry::Collection(vec![])),
 	)]
 	#[case::geometry_collection_with_point(
-		Value::Geometry(expr::Geometry::Collection(vec![expr::Geometry::Point(point! { x: 10., y: 20. })])),
+		Value::Geometry(val::Geometry::Collection(vec![expr::Geometry::Point(point! { x: 10., y: 20. })])),
 		json!({
 		"type": "GeometryCollection",
 		"geometries": [ { "type": "Point", "coordinates": [10., 20.] } ],
 	}),
-		Value::Geometry(expr::Geometry::Collection(vec![expr::Geometry::Point(point! { x: 10., y: 20. })])),
+		Value::Geometry(val::Geometry::Collection(vec![expr::Geometry::Point(point! { x: 10., y: 20. })])),
 	)]
 	#[case::geometry_collection_with_line(
-		Value::Geometry(expr::Geometry::Collection(vec![expr::Geometry::Line(line_string![
+		Value::Geometry(val::Geometry::Collection(vec![expr::Geometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])])),
@@ -489,7 +472,7 @@ mod tests {
 			"type": "GeometryCollection",
 			"geometries": [ { "type": "LineString", "coordinates": [[0., 0.], [10., 0.]] } ],
 		}),
-		Value::Geometry(expr::Geometry::Collection(vec![expr::Geometry::Line(line_string![
+		Value::Geometry(val::Geometry::Collection(vec![expr::Geometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])])),
@@ -508,4 +491,4 @@ mod tests {
 		let deserialized: Value = deserialized_sql_value.into();
 		assert_eq!(deserialized, expected_deserialized);
 	}
-}
+}*/

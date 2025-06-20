@@ -3,20 +3,20 @@ use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Uuid, Value, escape::EscapeRid};
-use crate::val::{Array, Number, Object};
+use crate::expr::{Expr, Uuid, Value, escape::EscapeRid, literal::ObjectEntry};
+use crate::val::{Array, Number, Object, RecordId, RecordIdKey, RecordIdKeyRange};
 
 use anyhow::Result;
 use nanoid::nanoid;
-use range::KeyRange;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 use ulid::Ulid;
 
 pub mod range;
+pub use range::RecordIdKeyRangeLit;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
@@ -36,10 +36,10 @@ pub enum RecordIdKeyLit {
 	Number(i64),
 	String(String),
 	Uuid(Uuid),
-	Array(Array),
-	Object(Object),
+	Array(Vec<Expr>),
+	Object(Vec<ObjectEntry>),
 	Generate(Gen),
-	Range(Box<KeyRange>),
+	Range(Box<RecordIdKeyRangeLit>),
 }
 
 impl RecordIdKeyLit {
@@ -58,25 +58,13 @@ impl RecordIdKeyLit {
 	}
 }
 
-impl From<KeyRange> for RecordIdKeyLit {
-	fn from(v: KeyRange) -> Self {
+impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
+	fn from(v: RecordIdKeyRangeLit) -> Self {
 		Self::Range(Box::new(v))
 	}
 }
 
 impl RecordIdKeyLit {
-	/// Generate a new random ID
-	pub fn rand() -> Self {
-		Self::String(nanoid!(20, &ID_CHARS))
-	}
-	/// Generate a new random ULID
-	pub fn ulid() -> Self {
-		Self::String(Ulid::new().to_string())
-	}
-	/// Generate a new random UUID
-	pub fn uuid() -> Self {
-		Self::Uuid(Uuid::new_v7())
-	}
 	/// Check if this Id matches a value
 	pub fn is(&self, val: &Value) -> bool {
 		match (self, val) {
@@ -117,28 +105,48 @@ impl RecordIdKeyLit {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<RecordIdKeyLit> {
+	) -> Result<RecordIdKey> {
 		match self {
-			RecordIdKeyLit::Number(v) => Ok(RecordIdKeyLit::Number(*v)),
-			RecordIdKeyLit::String(v) => Ok(RecordIdKeyLit::String(v.clone())),
-			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKeyLit::Uuid(*v)),
-			RecordIdKeyLit::Array(v) => match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-				Value::Array(v) => Ok(RecordIdKeyLit::Array(v)),
-				v => fail!("Expected a Value::Array but found {v:?}"),
-			},
-			RecordIdKeyLit::Object(v) => {
-				match v.compute(stk, ctx, opt, doc).await.catch_return()? {
-					Value::Object(v) => Ok(RecordIdKeyLit::Object(v)),
-					v => fail!("Expected a Value::Object but found {v:?}"),
+			RecordIdKeyLit::Number(v) => Ok(RecordIdKey::Number(*v)),
+			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone())),
+			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKey::Uuid(*v)),
+			RecordIdKeyLit::Array(v) => {
+				let mut res = Vec::new();
+				for v in v.iter() {
+					let v = v.compute(stk, ctx, opt, doc).await.catch_return()?;
+					res.push(v);
 				}
+				Ok(RecordIdKey::Array(Array(res)))
+			}
+			RecordIdKeyLit::Object(v) => {
+				let mut res = Object::default();
+				for entry in v.iter() {
+					let v = entry.value.compute(stk, ctx, opt, doc).await.catch_return()?;
+					res.insert(entry.key.clone(), v);
+				}
+				Ok(RecordIdKey::Object(res))
 			}
 			RecordIdKeyLit::Generate(v) => match v {
-				Gen::Rand => Ok(Self::rand()),
-				Gen::Ulid => Ok(Self::ulid()),
-				Gen::Uuid => Ok(Self::uuid()),
+				Gen::Rand => Ok(RecordIdKey::rand()),
+				Gen::Ulid => Ok(RecordIdKey::ulid()),
+				Gen::Uuid => Ok(RecordIdKey::uuid()),
 			},
 			RecordIdKeyLit::Range(v) => {
-				Ok(RecordIdKeyLit::Range(Box::new(v.compute(stk, ctx, opt, doc).await?)))
+				let start = match v.start {
+					Bound::Included(x) => Bound::Included(x.compute(stk, ctx, opt, doc).await?),
+					Bound::Excluded(x) => Bound::Excluded(x.compute(stk, ctx, opt, doc).await?),
+					Bound::Unbounded => Bound::Unbounded,
+				};
+				let end = match v.end {
+					Bound::Included(x) => Bound::Included(x.compute(stk, ctx, opt, doc).await?),
+					Bound::Excluded(x) => Bound::Excluded(x.compute(stk, ctx, opt, doc).await?),
+					Bound::Unbounded => Bound::Unbounded,
+				};
+
+				Ok(RecordIdKey::Range(Box::new(RecordIdKeyRange {
+					start,
+					end,
+				})))
 			}
 		}
 	}

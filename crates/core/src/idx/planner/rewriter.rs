@@ -1,4 +1,4 @@
-use crate::expr::id::range::KeyRange;
+use crate::expr::id::range::RecordIdKeyRangeLit;
 use crate::expr::part::DestructurePart;
 use crate::expr::{
 	Array, Cast, Cond, Expression, Function, Idiom, Model, Object, Part, Range, RecordIdKeyLit,
@@ -210,10 +210,10 @@ impl<'a> KnnConditionRewriter<'a> {
 		}
 	}
 
-	fn eval_id_range(&self, r: &KeyRange) -> Option<KeyRange> {
-		if let Some(beg) = self.eval_id_bound(&r.beg) {
-			self.eval_id_bound(&r.end).map(|end| KeyRange {
-				beg,
+	fn eval_id_range(&self, r: &RecordIdKeyRangeLit) -> Option<RecordIdKeyRangeLit> {
+		if let Some(beg) = self.eval_id_bound(&r.start) {
+			self.eval_id_bound(&r.end).map(|end| RecordIdKeyRangeLit {
+				start: beg,
 				end,
 			})
 		} else {

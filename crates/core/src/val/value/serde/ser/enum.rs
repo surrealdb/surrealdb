@@ -1,7 +1,5 @@
 use super::Content;
-use crate::expr;
-use crate::expr::Object;
-use crate::expr::Value;
+use crate::val::{self, Object, Value};
 use anyhow::Result;
 use serde::Deserialize;
 use serde::de::IntoDeserializer;
@@ -13,39 +11,16 @@ use std::collections::BTreeMap;
 pub(super) fn to_value(content: Content) -> Result<Value> {
 	match content {
 		Content::Enum(v) => match v.name.as_ref() {
-			expr::expression::TOKEN => {
-				expr::Expression::deserialize(Content::Enum(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
-			expr::subquery::TOKEN => {
-				expr::Subquery::deserialize(Content::Enum(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
-			expr::function::TOKEN => {
-				expr::Function::deserialize(Content::Enum(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
-			expr::constant::TOKEN => {
-				expr::Constant::deserialize(Content::Enum(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
-			expr::mock::TOKEN => expr::Mock::deserialize(Content::Enum(v).into_deserializer())
+			val::number::TOKEN => val::Number::deserialize(Content::Enum(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::number::TOKEN => expr::Number::deserialize(Content::Enum(v).into_deserializer())
-				.map(Into::into)
-				.map_err(Into::into),
-			expr::geometry::TOKEN => {
-				expr::Geometry::deserialize(Content::Enum(v).into_deserializer())
+			val::geometry::TOKEN => {
+				val::Geometry::deserialize(Content::Enum(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::value::TOKEN => {
-				expr::Value::deserialize(Content::Enum(v).into_deserializer()).map_err(Into::into)
+			val::TOKEN => {
+				Value::deserialize(Content::Enum(v).into_deserializer()).map_err(Into::into)
 			}
 			_ => match v.data {
 				Data::Unit => Ok(v.variant.into_owned().into()),

@@ -1,15 +1,13 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::Expr;
+use crate::expr::literal::ObjectEntry;
 use crate::expr::{
-	Operation, Thing, Value,
 	escape::EscapeKey,
 	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
 };
-use anyhow::{Result, bail};
+use crate::val::{RecordId, Value};
+use anyhow::Result;
 use http::{HeaderMap, HeaderName, HeaderValue};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -72,6 +70,7 @@ impl From<Option<Self>> for Object {
 	}
 }
 
+/*
 impl From<Operation> for Object {
 	fn from(v: Operation) -> Self {
 		Self(match v {
@@ -132,6 +131,7 @@ impl From<Operation> for Object {
 		})
 	}
 }
+*/
 
 impl Deref for Object {
 	type Target = BTreeMap<String, Value>;
@@ -177,12 +177,21 @@ impl TryInto<HeaderMap> for Object {
 
 impl Object {
 	/// Fetch the record id if there is one
-	pub fn rid(&self) -> Option<Thing> {
+	pub fn rid(&self) -> Option<RecordId> {
 		match self.get("id") {
 			Some(Value::Thing(v)) => Some(v.clone()),
 			_ => None,
 		}
 	}
+
+	pub fn into_literal(self) -> Vec<ObjectEntry> {
+		self.0.into_iter().map(|(k, v)| ObjectEntry {
+			key: k,
+			value: Expr::Literal(v.into_literal()),
+		})
+	}
+
+	/*
 	/// Convert this object to a diff-match-patch operation
 	pub fn to_operation(&self) -> Result<Operation> {
 		let Some(op_val) = self.get("op") else {
@@ -246,34 +255,7 @@ impl Object {
 			})),
 		}
 	}
-}
-
-impl Object {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		let mut x = BTreeMap::new();
-		for (k, v) in self.iter() {
-			let v = v.compute(stk, ctx, opt, doc).await?;
-			x.insert(k.clone(), v);
-		}
-		Ok(Value::Object(Object(x)))
-	}
-
-	/// Checks whether all object values are static values
-	pub(crate) fn is_static(&self) -> bool {
-		self.values().all(Value::is_static)
-	}
-
-	/// Validate that a Object contains only computed Values
-	pub(crate) fn validate_computed(&self) -> Result<()> {
-		self.values().try_for_each(|v| v.validate_computed())
-	}
+	*/
 }
 
 impl std::ops::Add for Object {
@@ -326,7 +308,7 @@ mod no_nul_bytes_in_keys {
 	};
 	use std::{collections::BTreeMap, fmt};
 
-	use crate::expr::Value;
+	use crate::val::Value;
 
 	pub(crate) fn serialize<S>(
 		m: &BTreeMap<String, Value>,

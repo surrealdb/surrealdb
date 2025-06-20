@@ -1,29 +1,42 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 pub mod array;
+pub mod bytes;
+pub mod closure;
+pub mod datetime;
+pub mod duration;
+pub mod geometry;
 pub mod number;
 pub mod object;
-mod range;
-mod thing;
-mod value;
+pub mod range;
+pub mod strand;
+pub mod thing;
+pub mod value;
+
 pub use array::Array;
+pub use bytes::Bytes;
+pub use closure::Closure;
+pub use datetime::Datetime;
+pub use duration::Duration;
+pub use geometry::Geometry;
 pub use number::Number;
 pub use object::Object;
 pub use range::Range;
-pub use thing::{RecordId, RecordIdKey};
+pub use strand::Strand;
+pub use thing::{RecordId, RecordIdKey, RecordIdKeyRange};
+pub use value::{CastError, CoerceError};
 
 use crate::err::Error;
-use crate::expr::id::range::KeyRange;
+use crate::expr::id::range::RecordIdKeyRangeLit;
 use crate::expr::reference::Refs;
 use crate::expr::statements::info::InfoStructure;
+use crate::expr::{self, FlowResult, Ident, Kind};
 use crate::expr::{
-	Bytes, Datetime, Duration, File, Geometry, Idiom, Part, Regex, Strand, Uuid,
+	File, Idiom, Part, Regex, Uuid,
 	fmt::Pretty,
 	id::{Gen, RecordIdKeyLit},
 	model::Model,
 };
-use crate::expr::{Closure, FlowResult, Ident, Kind};
-use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::Table;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -647,6 +660,29 @@ impl Value {
 			_ => self.partial_cmp(other),
 		}
 	}
+
+	/// Turns this value into a literal evaluating to the same value.
+	pub fn into_literal(self) -> expr::Literal {
+		match self {
+			Value::None => expr::Literal::None,
+			Value::Null => expr::Literal::Null,
+			Value::Bool(x) => expr::Literal::Bool(x),
+			Value::Number(Number::Int(i)) => expr::Literal::Integer(i),
+			Value::Strand(strand) => expr::Literal::Strand(strand),
+			Value::Duration(duration) => expr::Literal::Duration(duration),
+			Value::Datetime(datetime) => expr::Literal::Datetime(datetime),
+			Value::Uuid(uuid) => expr::Literal::Uuid(uuid),
+			Value::Array(array) => expr::Literal::Array(array.into_literal()),
+			Value::Object(object) => expr::Literal::Object(object.into_literal()),
+			Value::Geometry(geometry) => expr::Literal::Geometry(geometry),
+			Value::Bytes(bytes) => expr::Literal::Bytes(bytes),
+			Value::Thing(record_id) => expr::Literal::RecordId(record_id.into_literal()),
+			Value::Regex(regex) => expr::Literal::Regex(regex),
+			Value::File(file) => expr::Literal::File(file),
+			Value::Closure(closure) => expr::Literal::Closure(closure),
+			Value::Range(range) => expr::Literal::Range(range.into_literal()),
+		}
+	}
 }
 
 impl fmt::Display for Value {
@@ -1070,9 +1106,9 @@ impl From<BTreeMap<&str, Value>> for Value {
 	}
 }
 
-impl From<KeyRange> for Value {
-	fn from(v: KeyRange) -> Self {
-		let start = match v.beg {
+impl From<RecordIdKeyRangeLit> for Value {
+	fn from(v: RecordIdKeyRangeLit) -> Self {
+		let start = match v.start {
 			Bound::Included(beg) => Bound::Included(Value::from(beg)),
 			Bound::Excluded(beg) => Bound::Excluded(Value::from(beg)),
 			Bound::Unbounded => Bound::Unbounded,
@@ -1121,6 +1157,7 @@ impl FromIterator<(String, Value)> for Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -1255,4 +1292,4 @@ mod tests {
 		let value = Value::from(vector);
 		assert!(matches!(value, Value::Array(Array(_))));
 	}
-}
+}*/

@@ -1,6 +1,5 @@
-use crate::expr::{
-	Duration, Ident, RecordIdKeyLit, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes,
-};
+use crate::expr::{Ident, RecordIdKeyLit, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes};
+use crate::val::Duration;
 use crate::val::RecordId;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

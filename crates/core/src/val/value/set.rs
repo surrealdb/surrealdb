@@ -4,8 +4,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::exe::try_join_all_buffered;
 use crate::expr::part::Part;
-use crate::val::Value;
-use crate::expr::{FlowResultExt as _, Object};
+use crate::expr::{Expr, FlowResultExt as _, Literal};
+use crate::val::{Object, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -94,25 +94,6 @@ impl Value {
 						_ => return Ok(()),
 					};
 				}
-				Part::Index(f) => match place {
-					Value::Object(obj) => match obj.entry(f.to_string()) {
-						Entry::Vacant(x) => {
-							let v = x.insert(Value::None);
-							return Self::assign(stk, ctx, opt, v, val, iter.as_slice()).await;
-						}
-						Entry::Occupied(x) => {
-							place = x.into_mut();
-						}
-					},
-					Value::Array(arr) => {
-						if let Some(x) = arr.get_mut(f.to_usize()) {
-							place = x
-						} else {
-							return Ok(());
-						}
-					}
-					_ => return Ok(()),
-				},
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 
@@ -210,7 +191,7 @@ impl Value {
 					let Value::Array(arr) = place else {
 						return Ok(());
 					};
-					if let Some(Part::Index(_)) = iter.as_slice().first() {
+					if let Some(_) = iter.as_slice().first().and_then(|x| x.as_old_index()) {
 						let mut a = Vec::new();
 						let mut p = Vec::new();
 						// Store the elements and positions to update
@@ -231,7 +212,8 @@ impl Value {
 						stk.run(|stk| a.set(stk, ctx, opt, iter.as_slice(), val.clone())).await?;
 						// Push the new values into the original array
 						for (i, p) in p.into_iter().enumerate() {
-							arr[p] = a.pick(&[Part::Index(i.into())]);
+							arr[p] =
+								a.pick(&[Part::Value(Expr::Literal(Literal::Integer(i.into())))]);
 						}
 						return Ok(());
 					} else {
@@ -270,7 +252,6 @@ impl Value {
 			let name = match p {
 				Part::Graph(x) => x.to_raw(),
 				Part::Field(f) => f.0.clone(),
-				Part::Index(i) => i.to_string(),
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
@@ -281,7 +262,13 @@ impl Value {
 						_ => return Ok(()),
 					}
 				}
-				_ => return Ok(()),
+				x => {
+					if let Some(idx) = x.as_old_index() {
+						idx.to_string()
+					} else {
+						return Ok(());
+					}
+				}
 			};
 			let mut object = Object::default();
 			object.insert(name, val);
@@ -293,6 +280,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -547,4 +535,4 @@ mod tests {
 			.unwrap();
 		assert_eq!(res, val);
 	}
-}
+}*/

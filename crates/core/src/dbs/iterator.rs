@@ -7,7 +7,7 @@ use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
 use crate::doc::{Document, IgnoreError};
 use crate::err::Error;
-use crate::expr::{Fields, KeyRange, RecordIdKeyLit, Table};
+use crate::expr::{Fields, RecordIdKeyLit, RecordIdKeyRangeLit, Table};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
@@ -48,7 +48,7 @@ pub(crate) enum Iterable {
 	Table(Table, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	Range(String, KeyRange, RecordStrategy, ScanDirection),
+	Range(String, RecordIdKeyRangeLit, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value

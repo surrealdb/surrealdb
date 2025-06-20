@@ -3,8 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, filter::Filter, tokenizer::Tokenizer};
+use crate::expr::{Base, Ident, Value, filter::Filter, tokenizer::Tokenizer};
 use crate::iam::{Action, ResourceKind};
+use crate::val::Strand;
 use anyhow::{Result, bail};
 
 use revision::revisioned;

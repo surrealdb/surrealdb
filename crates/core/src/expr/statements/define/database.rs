@@ -3,9 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, changefeed::ChangeFeed};
+use crate::expr::{Base, Ident, changefeed::ChangeFeed};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -88,11 +88,10 @@ impl DefineDatabaseStatement {
 impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE DATABASE")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {

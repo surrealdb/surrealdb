@@ -3,8 +3,9 @@ use crate::api::path::Path;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::{Fmt, pretty_indent};
-use crate::expr::{Base, Expr, FlowResultExt as _, Strand, Value};
+use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::val::Strand;
 use crate::{ctx::Context, expr::statements::info::InfoStructure};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -89,11 +90,10 @@ impl DefineApiStatement {
 impl Display for DefineApiStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE API")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
@@ -153,8 +153,7 @@ pub struct ApiDefinition {
 impl From<ApiDefinition> for DefineApiStatement {
 	fn from(value: ApiDefinition) -> Self {
 		DefineApiStatement {
-			if_not_exists: false,
-			overwrite: false,
+			kind: DefineKind::Default,
 			path: value.path.to_string().into(),
 			actions: value.actions,
 			fallback: value.fallback,

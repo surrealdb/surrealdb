@@ -1,8 +1,9 @@
 use crate::buc::{self, BucketConnectionKey};
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Ident, Permission, Strand, Value};
+use crate::expr::{Base, Expr, FlowResultExt, Ident, Permission};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 use crate::{ctx::Context, expr::statements::info::InfoStructure};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -98,11 +99,10 @@ impl DefineBucketStatement {
 impl Display for DefineBucketStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE BUCKET")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 
@@ -153,8 +153,7 @@ pub struct BucketDefinition {
 impl From<BucketDefinition> for DefineBucketStatement {
 	fn from(value: BucketDefinition) -> Self {
 		DefineBucketStatement {
-			if_not_exists: false,
-			overwrite: false,
+			kind: DefineKind::Default,
 			name: value.name,
 			backend: value.backend.map(|v| v.into()),
 			permissions: value.permissions,

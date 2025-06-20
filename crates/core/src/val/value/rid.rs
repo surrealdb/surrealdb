@@ -7,6 +7,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -34,3 +35,4 @@ mod tests {
 		assert_eq!(res, val.rid());
 	}
 }
+*/

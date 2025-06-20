@@ -33,7 +33,7 @@ impl Fields {
 	pub(crate) fn value_id() -> Self {
 		Self(
 			vec![Field::Single {
-				expr: Value::Idiom(Idiom(ID.to_vec())),
+				expr: Expr::Idiom(Idiom(ID.to_vec())),
 				alias: None,
 			}],
 			true,

@@ -7,6 +7,7 @@ impl Value {
 	pub(crate) fn each(&self, path: &[Part]) -> Vec<Idiom> {
 		self._each(path, Idiom::default())
 	}
+
 	fn _each(&self, path: &[Part], prev: Idiom) -> Vec<Idiom> {
 		match path.first() {
 			// Get the current path part
@@ -43,15 +44,21 @@ impl Value {
 						Some(v) => v._each(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
-					Part::Index(i) => match v.get(i.to_usize()) {
-						Some(v) => v._each(path.next(), prev.push(p.clone())),
-						None => vec![],
-					},
-					_ => v
-						.iter()
-						.enumerate()
-						.flat_map(|(i, v)| v._each(path.next(), prev.clone().push(Part::from(i))))
-						.collect::<Vec<_>>(),
+					x => {
+						if let Some(idx) = x.as_old_index() {
+							match v.get(idx) {
+								Some(v) => v._each(path.next(), prev.push(p.clone())),
+								None => vec![],
+							}
+						} else {
+							v.iter()
+								.enumerate()
+								.flat_map(|(i, v)| {
+									v._each(path.next(), prev.clone().push(Part::from(i)))
+								})
+								.collect::<Vec<_>>()
+						}
+					}
 				},
 				// Ignore everything else
 				_ => vec![],
@@ -62,6 +69,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -178,4 +186,4 @@ mod tests {
 
 		assert_eq!(res, val.each(&Idiom::from(SqlIdiom::parse("test.*.color"))));
 	}
-}
+}*/

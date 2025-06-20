@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Base;
 use crate::expr::ident::Ident;
-use crate::expr::value::Value;
+use crate::expr::{Base, statements::define::DefineKind};
 use crate::iam::{Action, ResourceKind};
+use crate::val::Value;
 use anyhow::Result;
 
 use reblessive::tree::Stk;
@@ -24,8 +24,8 @@ pub enum RebuildStatement {
 
 impl RebuildStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
+	pub(crate) fn read_only(&self) -> bool {
+		false
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -84,9 +84,8 @@ impl RebuildIndexStatement {
 			}
 		};
 		let mut ix = ix.as_ref().clone();
+		ix.kind = DefineKind::Overwrite;
 
-		ix.overwrite = true;
-		ix.if_not_exists = false;
 		// Rebuild the index
 		ix.compute(stk, ctx, opt, doc).await?;
 		// Ok all good

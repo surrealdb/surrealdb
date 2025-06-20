@@ -2,9 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Explain, Expr, FlowResultExt as _, Output, Timeout, Value, Values, With};
+use crate::expr::{Cond, Explain, Expr, FlowResultExt as _, Output, Timeout, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::val::Value;
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -29,8 +28,8 @@ pub struct DeleteStatement {
 
 impl DeleteStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
+	pub(crate) fn read_only(&self) -> bool {
+		false
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(

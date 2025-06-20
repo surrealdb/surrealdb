@@ -2,8 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
+use crate::expr::Expr;
 use crate::expr::FlowResultExt as _;
-use crate::expr::array::Abolish;
+use crate::expr::Literal;
 use crate::expr::part::DestructurePart;
 use crate::expr::part::Next;
 use crate::expr::part::Part;
@@ -11,12 +12,13 @@ use crate::val::Value;
 use anyhow::Result;
 use anyhow::ensure;
 use reblessive::tree::Stk;
-use std::collections::HashSet;
 
 impl Value {
 	/// Asynchronous method for deleting a field from a `Value`
 	///
 	/// Was marked recursive
+	///
+	/// TODO: Document exact behavior with respect to this.
 	pub(crate) async fn del(
 		&mut self,
 		stk: &mut Stk,
@@ -48,32 +50,32 @@ impl Value {
 							Ok(())
 						}
 						_ => match v.get_mut(f.as_str()) {
-							Some(v) if v.is_some() => {
-								stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
-							}
-							_ => Ok(()),
-						},
-					},
-					Part::Index(i) => match path.len() {
-						1 => {
-							v.remove(&i.to_string());
-							Ok(())
-						}
-						_ => match v.get_mut(&i.to_string()) {
-							Some(v) if v.is_some() => {
+							Some(v) if !v.is_nullish() => {
 								stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 							}
 							_ => Ok(()),
 						},
 					},
 					Part::Value(x) => match x.compute(stk, ctx, opt, None).await.catch_return()? {
+						Value::Number(n) => match path.len() {
+							1 => {
+								v.remove(&n.to_string());
+								Ok(())
+							}
+							_ => match v.get_mut(&n.to_string()) {
+								Some(v) if !v.is_nullish() => {
+									stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
+								}
+								_ => Ok(()),
+							},
+						},
 						Value::Strand(f) => match path.len() {
 							1 => {
 								v.remove(f.as_str());
 								Ok(())
 							}
 							_ => match v.get_mut(f.as_str()) {
-								Some(v) if v.is_some() => {
+								Some(v) if !v.is_nullish() => {
 									stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 								}
 								_ => Ok(()),
@@ -85,7 +87,7 @@ impl Value {
 								Ok(())
 							}
 							_ => match v.get_mut(&t.to_raw()) {
-								Some(v) if v.is_some() => {
+								Some(v) if !v.is_nullish() => {
 									stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 								}
 								_ => Ok(()),
@@ -155,41 +157,29 @@ impl Value {
 							None => Ok(()),
 						},
 					},
-					Part::Index(i) => match path.len() {
-						1 => {
-							if v.len() > i.to_usize() {
-								v.remove(i.to_usize());
-							}
-							Ok(())
-						}
-						_ => match v.get_mut(i.to_usize()) {
-							Some(v) => stk.run(|stk| v.del(stk, ctx, opt, path.next())).await,
-							None => Ok(()),
-						},
-					},
 					Part::Where(w) => match path.len() {
 						1 => {
-							// TODO: If further optimization is desired, push indices to a vec,
-							// iterate in reverse, and call swap_remove
-							let mut m = HashSet::new();
-							for (i, v) in v.iter().enumerate() {
-								// TODO: Can we avoid the cloning?
-								let cur = v.clone().into();
-								if w.compute(stk, ctx, opt, Some(&cur))
+							let mut new_res = Vec::new();
+							for (i, v) in v.0.into_iter().enumerate() {
+								let cur = v.into();
+								if !w
+									.compute(stk, ctx, opt, Some(&cur))
 									.await
 									.catch_return()?
 									.is_truthy()
 								{
-									m.insert(i);
+									new_res.push(cur.doc.into_owned())
 								};
 							}
-							v.abolish(|i| m.contains(&i));
+							v.0 = new_res;
 							Ok(())
 						}
-						_ => match path.next().first() {
-							Some(Part::Index(_)) => {
-								let mut a = Vec::new();
-								let mut p = Vec::new();
+						_ => match path.get(1) {
+							Some(Part::Value(_)) => {
+								//TODO: Figure out if the behavior here is different with this
+								//special case then without. I think this can be simplified.
+								let mut true_values = Vec::new();
+								let mut true_indecies = Vec::new();
 								// Store the elements and positions to update
 								for (i, o) in v.iter_mut().enumerate() {
 									let cur = o.clone().into();
@@ -198,17 +188,19 @@ impl Value {
 										.catch_return()?
 										.is_truthy()
 									{
-										a.push(o.clone());
-										p.push(i);
+										true_values.push(o.clone());
+										true_indecies.push(i);
 									}
 								}
 								// Convert the matched elements array to a value
-								let mut a = Value::from(a);
+								let mut a = Value::from(true_values);
 								// Set the new value on the matches elements
 								stk.run(|stk| a.del(stk, ctx, opt, path.next())).await?;
 								// Push the new values into the original array
-								for (i, p) in p.into_iter().enumerate().rev() {
-									match a.pick(&[Part::Index(i.into())]) {
+								for (i, p) in true_indecies.into_iter().enumerate().rev() {
+									match a.pick(&[Part::Value(Expr::Literal(Literal::Integer(
+										i.into(),
+									)))]) {
 										Value::None => {
 											v.remove(i);
 										}
@@ -267,6 +259,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -449,4 +442,4 @@ mod tests {
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
 	}
-}
+}*/

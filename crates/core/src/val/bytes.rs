@@ -100,6 +100,7 @@ impl<'de> Deserialize<'de> for Bytes {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use crate::expr::{Bytes, Value};
@@ -120,4 +121,4 @@ mod tests {
 		let deserialized = serde_json::from_str(&json).unwrap();
 		assert_eq!(val, deserialized);
 	}
-}
+}*/

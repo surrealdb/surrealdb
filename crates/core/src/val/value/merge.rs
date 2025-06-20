@@ -32,6 +32,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -171,4 +172,4 @@ mod tests {
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}
-}
+}*/

@@ -7,11 +7,11 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
-use crate::expr::{Expr, Part};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permissions};
 use crate::expr::{Relation, TableType};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail, ensure};
 
 use revision::revisioned;
@@ -26,6 +26,7 @@ use super::DefineKind;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DefineDefault {
+	#[default]
 	None,
 	Always(Expr),
 	Set(Expr),
@@ -417,11 +418,10 @@ impl DefineFieldStatement {
 impl Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FIELD")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
 		if self.flex {

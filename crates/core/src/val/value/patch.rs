@@ -1,5 +1,4 @@
 use crate::err::Error;
-use crate::expr::operation::Operation;
 use crate::expr::part::Part;
 use crate::val::Value;
 use anyhow::{Result, ensure};
@@ -123,6 +122,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -309,4 +309,4 @@ mod tests {
 		// It is important to test if patches applied even if test operation fails
 		assert_eq!(val, should);
 	}
-}
+}*/

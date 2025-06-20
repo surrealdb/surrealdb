@@ -4,8 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Permission, Strand, Value};
+use crate::expr::{Base, Ident, Permission};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -78,11 +79,10 @@ impl DefineModelStatement {
 impl fmt::Display for DefineModelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "DEFINE MODEL")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {

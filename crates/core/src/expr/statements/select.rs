@@ -5,10 +5,11 @@ use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::{
 	Cond, Explain, Expr, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout,
-	Value, Values, Version, With,
+	Version, With,
 	order::{OldOrders, Order, OrderList, Ordering},
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
+use crate::val::Value;
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -110,7 +111,7 @@ impl SelectStatement {
 		i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit
 		ensure!(
-			!self.only || i.is_limit_one_or_zero() || self.what.0.len() <= 1,
+			!self.only || i.is_limit_one_or_zero() || self.what.len() <= 1,
 			Error::SingleOnlyOutput
 		);
 		// Check if there is a timeout

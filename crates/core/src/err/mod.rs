@@ -2,12 +2,11 @@ use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
 use crate::expr::idiom::Idiom;
 use crate::expr::index::Distance;
-use crate::expr::value::{CastError, CoerceError};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
 use crate::syn::error::RenderedError as RenderedParserError;
-use crate::val::{RecordId, Value};
+use crate::val::{CastError, CoerceError, RecordId, Value};
 use crate::vs::VersionStampError;
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
@@ -157,7 +156,7 @@ pub enum Error {
 	/// The FETCH clause accepts idioms, strings and fields.
 	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
 	InvalidFetch {
-		value: Value,
+		value: Expr,
 	},
 
 	#[error(

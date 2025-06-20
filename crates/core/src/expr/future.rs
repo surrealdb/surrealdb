@@ -1,7 +1,7 @@
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::block::Block;
-use crate::expr::value::Value;
+use crate::val::Value;
 use crate::{ctx::Context, dbs::Futures};
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -27,6 +27,10 @@ impl From<Value> for Future {
 }
 
 impl Future {
+	pub fn read_only(&self) -> bool {
+		self.0.read_only()
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

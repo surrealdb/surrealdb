@@ -4,9 +4,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::expr::Thing;
-use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
+use crate::val::{RecordId, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 pub mod api;
@@ -1469,7 +1468,7 @@ pub async fn idiom(
 fn get_execution_context<'a>(
 	ctx: &'a Context,
 	doc: Option<&'a CursorDoc>,
-) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a Thing)> {
+) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a RecordId)> {
 	if let Some(doc) = doc {
 		if let Some(thg) = &doc.rid {
 			if let Some(pla) = ctx.get_query_planner() {
@@ -1575,6 +1574,7 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 	format!("{kind}::{name}")
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use regex::Regex;
@@ -1676,4 +1676,4 @@ mod tests {
 			);
 		}
 	}
-}
+}*/

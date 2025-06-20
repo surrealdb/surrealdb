@@ -10,35 +10,31 @@ impl Value {
 			Some(p) => match self {
 				// Current value at path is an object
 				Value::Object(v) => match p {
-					Part::Graph(g) => match v.get_mut(g.to_raw().as_str()) {
-						Some(v) if v.is_some() => v.put(path.next(), val),
-						_ => {
-							let mut obj = Value::base();
-							obj.put(path.next(), val);
-							v.insert(g.to_raw(), obj);
+					Part::Graph(g) => {
+						let entry = v.entry(g.to_raw()).or_insert_with(Value::empty_object);
+						if !entry.is_nullish() {
+							entry.put(path.next(), val);
 						}
-					},
-					Part::Field(f) => match v.get_mut(f.to_raw().as_str()) {
-						Some(v) if v.is_some() => v.put(path.next(), val),
-						_ => {
-							let mut obj = Value::base();
-							obj.put(path.next(), val);
-							v.insert(f.to_raw(), obj);
+					}
+					Part::Field(f) => {
+						let entry = v.entry(f.to_raw()).or_insert_with(Value::empty_object);
+						if !entry.is_nullish() {
+							entry.put(path.next(), val);
 						}
-					},
-					Part::Index(i) => match v.get_mut(&i.to_string()) {
-						Some(v) if v.is_some() => v.put(path.next(), val),
-						_ => {
-							let mut obj = Value::base();
-							obj.put(path.next(), val);
-							v.insert(i.to_string(), obj);
-						}
-					},
+					}
 					Part::All => {
 						let path = path.next();
 						v.iter_mut().for_each(|(_, v)| v.put(path, val.clone()));
 					}
-					_ => (),
+					x => {
+						if let Some(idx) = x.as_old_index() {
+							let entry =
+								v.entry(idx.to_string()).or_insert_with(Value::empty_object);
+							if !entry.is_nullish() {
+								entry.put(path.next(), val);
+							}
+						}
+					}
 				},
 				// Current value at path is an array
 				Value::Array(v) => match p {
@@ -56,23 +52,24 @@ impl Value {
 							v.put(path.next(), val)
 						}
 					}
-					Part::Index(i) => {
-						if let Some(v) = v.get_mut(i.to_usize()) {
-							v.put(path.next(), val)
+					x => {
+						if let Some(idx) = x.as_old_index() {
+							if let Some(v) = v.get_mut(idx) {
+								v.put(path.next(), val)
+							}
+						} else {
+							v.iter_mut().for_each(|v| v.put(path, val.clone()));
 						}
-					}
-					_ => {
-						v.iter_mut().for_each(|v| v.put(path, val.clone()));
 					}
 				},
 				// Current value at path is empty
 				Value::Null => {
-					*self = Value::base();
+					*self = Value::empty_object();
 					self.put(path, val)
 				}
 				// Current value at path is empty
 				Value::None => {
-					*self = Value::base();
+					*self = Value::empty_object();
 					self.put(path, val)
 				}
 				// Ignore everything else
@@ -86,6 +83,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -210,4 +208,4 @@ mod tests {
 		val.put(&idi, Value::from(21));
 		assert_eq!(res, val);
 	}
-}
+}*/

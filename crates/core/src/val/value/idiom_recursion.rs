@@ -1,14 +1,14 @@
 use crate::{
-	val::Value,
 	cnf::IDIOM_RECURSION_LIMIT,
 	ctx::Context,
 	dbs::Options,
 	doc::CursorDoc,
 	err::Error,
 	expr::{
-		Array, FlowResultExt as _, Part,
+		FlowResultExt as _, Part,
 		part::{RecurseInstruction, RecursionPlan},
 	},
+	val::{Array, Value},
 };
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;

@@ -7,15 +7,14 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::expr::edges::Edges;
+//use crate::expr::edges::Edges;
 use crate::expr::field::{Field, Fields};
-use crate::expr::id::RecordIdKeyLit;
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, SplitByRepeatRecurse};
 use crate::expr::part::{Part, Skip};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, FlowResult, FlowResultExt as _, Function};
+use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Function};
 use crate::fnc::idiom;
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, RecordIdKey, Value};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
@@ -191,14 +190,14 @@ impl Value {
 					// If requesting an `id` field, check if it is a complex Record ID
 					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f.as_str()) {
 						Some(Value::Thing(RecordId {
-							key: RecordIdKeyLit::Object(v),
+							key: RecordIdKey::Object(v),
 							..
 						})) => {
 							let v = Value::Object(v.clone());
 							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 						}
 						Some(Value::Thing(RecordId {
-							key: RecordIdKeyLit::Array(v),
+							key: RecordIdKey::Array(v),
 							..
 						})) => {
 							let v = Value::Array(v.clone());
@@ -224,17 +223,18 @@ impl Value {
 							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
 						}
 					},
-					Part::Index(i) => match v.get(&i.to_string()) {
-						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => {
-							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
-						}
-					},
 					Part::Value(x) => match stk
 						.run(|stk| x.compute(stk, ctx, opt, doc))
 						.await
 						.catch_return()?
 					{
+						Value::Number(n) => match v.get(&n.to_string()) {
+							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
+							None => {
+								stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next()))
+									.await
+							}
+						},
 						Value::Strand(f) => match v.get(f.as_str()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
@@ -273,6 +273,7 @@ impl Value {
 								)
 							})
 							.await?;
+
 						let res = stk
 							.run(|stk| {
 								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
@@ -284,7 +285,7 @@ impl Value {
 							Err(e) => {
 								if matches!(e.downcast_ref(), Some(Error::InvalidFunction { .. })) {
 									if let Some(v) = v.get(name) {
-										let fnc = Function::Anonymous(v.clone(), args, true);
+										let fnc = Expr::FunctionCall(v.clone(), args, true);
 										match stk
 											.run(|stk| fnc.compute(stk, ctx, opt, doc))
 											.await
@@ -343,12 +344,6 @@ impl Value {
 							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
 						}
 					},
-					Part::Index(i) => match v.get(i.to_usize()) {
-						Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
-						None => {
-							stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next())).await
-						}
-					},
 					Part::Where(w) => {
 						let mut a = Vec::new();
 						for v in v.iter() {
@@ -370,6 +365,7 @@ impl Value {
 						.await
 						.catch_return()?
 					{
+						// TODO: Remove to_usize()
 						Value::Number(i) => match v.get(i.to_usize()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
@@ -430,6 +426,7 @@ impl Value {
 					}
 				},
 				// Current value at path is an edges
+				/* TODO: Figure out where this is used ans see if we can fix the issue.
 				Value::Edges(v) => {
 					// Clone the thing
 					let val = v.clone();
@@ -453,6 +450,7 @@ impl Value {
 						}
 					}
 				}
+				*/
 				// Current value at path is a thing
 				Value::Thing(v) => {
 					// Clone the thing
@@ -478,7 +476,7 @@ impl Value {
 										from: val,
 										dir: g.dir.clone(),
 										what: g.what.clone().compute(stk, ctx, opt, doc).await?,
-									})]),
+									})],
 									cond: g.cond.clone(),
 									limit: g.limit.clone(),
 									order: g.order.clone(),
@@ -534,7 +532,7 @@ impl Value {
 							_ => {
 								let stm = SelectStatement {
 									expr: Fields(vec![Field::All], false),
-									what: vec![Value::from(val)],
+									what: vec![Expr::Literal(val.into_literal())],
 									..SelectStatement::default()
 								};
 								let v =

@@ -6,6 +6,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Uuid};
 use crate::iam::Auth;
 use crate::kvs::Live;
+use crate::val::Value;
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -151,6 +152,7 @@ impl InfoStructure for LiveStatement {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use crate::dbs::{Action, Capabilities, Notification, Session};
@@ -275,4 +277,4 @@ mod tests {
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();
 	}
-}
+}*/

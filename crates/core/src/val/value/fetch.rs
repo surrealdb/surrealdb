@@ -1,6 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::FlowResultExt as _;
+use crate::expr::{Expr, FlowResultExt as _, Literal};
 //use crate::expr::edges::Edges;
 use crate::expr::field::{Field, Fields};
 use crate::expr::part::Next;
@@ -43,11 +43,11 @@ impl Value {
 					Value::Thing(x) => {
 						let stm = SelectStatement {
 							expr: g.expr.clone().unwrap_or(Fields::all()),
-							what: Values(vec![Value::from(Edges {
+							what: vec![Value::from(Edges {
 								from: x.clone(),
 								dir: g.dir.clone(),
 								what: g.what.clone(),
-							})]),
+							})],
 							cond: g.cond.clone(),
 							limit: g.limit.clone(),
 							order: g.order.clone(),
@@ -96,21 +96,6 @@ impl Value {
 						})
 						.await?;
 						return Ok(());
-					}
-					_ => break,
-				},
-				Part::Index(i) => match this {
-					Value::Object(v) => {
-						let Some(x) = v.get_mut(&i.to_string()) else {
-							return Ok(());
-						};
-						this = x;
-					}
-					Value::Array(v) => {
-						let Some(x) = v.get_mut(i.to_usize()) else {
-							return Ok(());
-						};
-						this = x;
 					}
 					_ => break,
 				},
@@ -254,7 +239,7 @@ impl Value {
 				// Fetch the remote embedded record
 				let stm = SelectStatement {
 					expr: Fields(vec![Field::All], false),
-					what: Values(vec![Value::from(val)]),
+					what: vec![Expr::Literal(Literal::RecordId(val.into_literal()))],
 					..SelectStatement::default()
 				};
 				*this = stm.compute(stk, ctx, opt, None).await?.first();

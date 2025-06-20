@@ -1,16 +1,19 @@
+use geo::Point;
+use rust_decimal::Decimal;
 use std::{
 	collections::{BTreeMap, HashMap},
 	fmt::{self},
 	hash::BuildHasher,
 };
 
-use geo::Point;
-use rust_decimal::Decimal;
-
-use crate::expr::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Kind, LiteralKind, Number,
-	Object, Range, Regex, Strand, Table, Thing, Uuid, Value, array::Uniq, kind::HasKind,
-	value::Null,
+use crate::val::{Array, Bytes, Number, Object, Range, Value, array::Uniq};
+use crate::{
+	expr::{
+		File, Ident, Kind, Regex, Table, Uuid,
+		kind::{HasKind, KindLiteral},
+		value::Null,
+	},
+	val::{Closure, Datetime, Duration, Geometry, RecordId, Strand},
 };
 
 #[derive(Clone, Debug)]
@@ -412,7 +415,7 @@ impl_direct! {
 	Bytes => Bytes,
 	Object => Object,
 	Array => Array,
-	Thing => Thing,
+	Thing => RecordId,
 	Strand => Strand,
 	Geometry => Geometry,
 	Regex => Regex,
@@ -453,7 +456,7 @@ impl Value {
 			},
 			Kind::Record(t) => {
 				if t.is_empty() {
-					self.can_coerce_to::<Thing>()
+					self.can_coerce_to::<RecordId>()
 				} else {
 					self.can_coerce_to_record(t)
 				}
@@ -509,7 +512,7 @@ impl Value {
 		self.is_geometry_type(val)
 	}
 
-	fn can_coerce_to_literal(&self, val: &LiteralKind) -> bool {
+	fn can_coerce_to_literal(&self, val: &KindLiteral) -> bool {
 		val.validate_value(self)
 	}
 
@@ -556,14 +559,20 @@ impl Value {
 				Some(l) => self.coerce_to_array_type_len(t, *l).map(Value::from),
 				None => self.coerce_to_array_type(t).map(Value::from),
 			},
-			Kind::Record(t) => match t.is_empty() {
-				true => self.coerce_to::<Thing>().map(Value::from),
-				false => self.coerce_to_record_kind(t).map(Value::from),
-			},
-			Kind::Geometry(t) => match t.is_empty() {
-				true => self.coerce_to::<Geometry>().map(Value::from),
-				false => self.coerce_to_geometry_kind(t).map(Value::from),
-			},
+			Kind::Record(t) => {
+				if t.is_empty() {
+					self.coerce_to::<RecordId>().map(Value::from)
+				} else {
+					self.coerce_to_record_kind(t).map(Value::from)
+				}
+			}
+			Kind::Geometry(t) => {
+				if t.is_empty() {
+					self.coerce_to::<Geometry>().map(Value::from)
+				} else {
+					self.coerce_to_geometry_kind(t).map(Value::from)
+				}
+			}
 			Kind::Option(k) => match self {
 				Self::None => Ok(Self::None),
 				v => v.coerce_to_kind(k),
@@ -597,7 +606,7 @@ impl Value {
 	}
 
 	/// Try to coerce this value to a Literal, returns a `Value` with the coerced value
-	pub(crate) fn coerce_to_literal(self, literal: &LiteralKind) -> Result<Value, CoerceError> {
+	pub(crate) fn coerce_to_literal(self, literal: &KindLiteral) -> Result<Value, CoerceError> {
 		if literal.validate_value(&self) {
 			Ok(self)
 		} else {
@@ -609,7 +618,7 @@ impl Value {
 	}
 
 	/// Try to coerce this value to a Record of a certain type
-	pub(crate) fn coerce_to_record_kind(self, val: &[Table]) -> Result<Thing, CoerceError> {
+	pub(crate) fn coerce_to_record_kind(self, val: &[Table]) -> Result<RecordId, CoerceError> {
 		match self {
 			// Records are allowed if correct type
 			Value::Thing(v) if v.is_record_type(val) => Ok(v),

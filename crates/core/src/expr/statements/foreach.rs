@@ -2,8 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::range::TypedRange;
-use crate::expr::{Block, Param, Value, block::Entry};
+use crate::expr::{Block, Param, Value};
 use crate::expr::{ControlFlow, Expr, FlowResult};
 
 use reblessive::tree::Stk;
@@ -39,8 +38,8 @@ impl Iterator for ForeachIter {
 
 impl ForeachStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.range.writeable() || self.block.writeable()
+	pub(crate) fn read_only(&self) -> bool {
+		self.range.read_only() && self.block.read_only()
 	}
 	/// Process this type returning a computed simple Value
 	///

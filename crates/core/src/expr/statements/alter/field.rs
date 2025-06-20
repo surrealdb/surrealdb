@@ -4,9 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, Expr, Ident, Permissions, Strand, Value};
-use crate::expr::{Idiom, Kind};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Permissions};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 
 use anyhow::Result;
 use reblessive::tree::Stk;

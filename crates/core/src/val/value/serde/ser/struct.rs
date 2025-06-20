@@ -1,6 +1,5 @@
 use super::Content;
-use crate::expr;
-use crate::expr::Value;
+use crate::val::{self, Value};
 use anyhow::Result;
 use serde::Deserialize;
 use serde::de::IntoDeserializer;
@@ -9,15 +8,7 @@ use serde_content::{Data, Expected, Unexpected};
 pub(super) fn to_value(content: Content) -> Result<Value> {
 	match content {
 		Content::Struct(v) => match v.name.as_ref() {
-			expr::strand::TOKEN => {
-				expr::Strand::deserialize(Content::Struct(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
-			expr::model::TOKEN => expr::Model::deserialize(Content::Struct(v).into_deserializer())
-				.map(Into::into)
-				.map_err(Into::into),
-			expr::query::TOKEN => expr::Query::deserialize(Content::Struct(v).into_deserializer())
+			val::strand::TOKEN => val::Strand::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
 			expr::future::TOKEN => {
@@ -25,60 +16,43 @@ pub(super) fn to_value(content: Content) -> Result<Value> {
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::edges::TOKEN => expr::Edges::deserialize(Content::Struct(v).into_deserializer())
+			val::range::TOKEN => val::Range::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::range::TOKEN => expr::Range::deserialize(Content::Struct(v).into_deserializer())
+			val::regex::TOKEN => val::Regex::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::block::TOKEN => expr::Block::deserialize(Content::Struct(v).into_deserializer())
+			val::table::TOKEN => expr::Table::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::cast::TOKEN => expr::Cast::deserialize(Content::Struct(v).into_deserializer())
+			val::thing::TOKEN => val::RecordId::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::regex::TOKEN => expr::Regex::deserialize(Content::Struct(v).into_deserializer())
+			val::object::TOKEN => val::Object::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::table::TOKEN => expr::Table::deserialize(Content::Struct(v).into_deserializer())
+			val::array::TOKEN => val::Array::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::idiom::TOKEN => expr::Idiom::deserialize(Content::Struct(v).into_deserializer())
+			val::uuid::TOKEN => val::Uuid::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			expr::param::TOKEN => expr::Param::deserialize(Content::Struct(v).into_deserializer())
-				.map(Into::into)
-				.map_err(Into::into),
-			expr::thing::TOKEN => expr::Thing::deserialize(Content::Struct(v).into_deserializer())
-				.map(Into::into)
-				.map_err(Into::into),
-			expr::object::TOKEN => {
-				expr::Object::deserialize(Content::Struct(v).into_deserializer())
+			val::datetime::TOKEN => {
+				val::Datetime::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::array::TOKEN => expr::Array::deserialize(Content::Struct(v).into_deserializer())
-				.map(Into::into)
-				.map_err(Into::into),
-			expr::uuid::TOKEN => expr::Uuid::deserialize(Content::Struct(v).into_deserializer())
-				.map(Into::into)
-				.map_err(Into::into),
-			expr::datetime::TOKEN => {
-				expr::Datetime::deserialize(Content::Struct(v).into_deserializer())
+			val::duration::TOKEN => {
+				val::Duration::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::duration::TOKEN => {
-				expr::Duration::deserialize(Content::Struct(v).into_deserializer())
+			val::closure::TOKEN => {
+				val::Closure::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			expr::closure::TOKEN => {
-				expr::Closure::deserialize(Content::Struct(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
-			expr::file::TOKEN => expr::File::deserialize(Content::Struct(v).into_deserializer())
+			val::file::TOKEN => val::File::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
 			_ => match v.data {

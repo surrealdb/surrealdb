@@ -78,10 +78,10 @@ impl TryFrom<SqlValue> for IdRange {
 	}
 }
 
-impl From<IdRange> for crate::expr::KeyRange {
+impl From<IdRange> for crate::expr::RecordIdKeyRangeLit {
 	fn from(v: IdRange) -> Self {
 		Self {
-			beg: match v.beg {
+			start: match v.beg {
 				Bound::Included(v) => Bound::Included(v.into()),
 				Bound::Excluded(v) => Bound::Excluded(v.into()),
 				Bound::Unbounded => Bound::Unbounded,
@@ -95,10 +95,10 @@ impl From<IdRange> for crate::expr::KeyRange {
 	}
 }
 
-impl From<crate::expr::KeyRange> for IdRange {
-	fn from(v: crate::expr::KeyRange) -> Self {
+impl From<crate::expr::RecordIdKeyRangeLit> for IdRange {
+	fn from(v: crate::expr::RecordIdKeyRangeLit) -> Self {
 		Self {
-			beg: match v.beg {
+			beg: match v.start {
 				Bound::Included(v) => Bound::Included(v.into()),
 				Bound::Excluded(v) => Bound::Excluded(v.into()),
 				Bound::Unbounded => Bound::Unbounded,

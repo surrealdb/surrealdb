@@ -3,11 +3,12 @@ use std::{fmt, ops::Bound, str::FromStr as _};
 use geo::Point;
 use rust_decimal::Decimal;
 
-use crate::expr::{
-	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Ident, Kind,
-	LiteralKind, Number, Object, Range, Regex, Strand, Table, Thing, Uuid, Value, array::Uniq as _,
-	kind::HasKind, value::Null,
+use crate::expr::kind::KindLiteral;
+use crate::expr::{File, Ident, Kind, Regex, Table, Uuid, kind::HasKind, value::Null};
+use crate::val::{
+	Array, Closure, Datetime, Duration, Geometry, Object, Range, Strand, Value, array::Uniq,
 };
+use crate::val::{Bytes, Number, RecordId};
 
 #[derive(Clone, Debug)]
 pub enum CastError {
@@ -558,7 +559,7 @@ impl Cast for Box<Range> {
 				let end = iter.next().unwrap();
 
 				Ok(Box::new(Range {
-					beg: Bound::Included(beg),
+					start: Bound::Included(beg),
 					end: Bound::Excluded(end),
 				}))
 			}
@@ -613,11 +614,11 @@ impl Cast for Point<f64> {
 	}
 }
 
-impl Cast for Thing {
+impl Cast for RecordId {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Thing(_) => true,
-			Value::Strand(x) => Thing::from_str(x).is_ok(),
+			Value::Strand(x) => todo!(),
 			_ => false,
 		}
 	}
@@ -625,7 +626,7 @@ impl Cast for Thing {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Thing(x) => Ok(x),
-			Value::Strand(x) => match Thing::from_str(x.as_ref()) {
+			Value::Strand(x) => match todo!() {
 				Ok(x) => Ok(x),
 				Err(_) => Err(CastError::InvalidKind {
 					from: Value::Strand(x),
@@ -713,7 +714,7 @@ impl Value {
 			},
 			Kind::Record(t) => {
 				if t.is_empty() {
-					self.can_cast_to::<Thing>()
+					self.can_cast_to::<RecordId>()
 				} else {
 					self.can_cast_to_record(t)
 				}
@@ -767,7 +768,7 @@ impl Value {
 		self.is_geometry_type(val)
 	}
 
-	fn can_cast_to_literal(&self, val: &LiteralKind) -> bool {
+	fn can_cast_to_literal(&self, val: &KindLiteral) -> bool {
 		val.validate_value(self)
 	}
 
@@ -809,7 +810,7 @@ impl Value {
 				None => self.cast_to_array(t).map(Value::from),
 			},
 			Kind::Record(t) => match t.is_empty() {
-				true => self.cast_to::<Thing>().map(Value::from),
+				true => self.cast_to::<RecordId>().map(Value::from),
 				false => self.cast_to_record(t).map(Value::from),
 			},
 			Kind::Geometry(t) => match t.is_empty() {
@@ -848,7 +849,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Literal, returns a `Value` with the coerced value
-	pub(crate) fn cast_to_literal(self, literal: &LiteralKind) -> Result<Value, CastError> {
+	pub(crate) fn cast_to_literal(self, literal: &KindLiteral) -> Result<Value, CastError> {
 		if literal.validate_value(&self) {
 			Ok(self)
 		} else {
@@ -860,10 +861,10 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Record of a certain type
-	fn cast_to_record(self, val: &[Table]) -> Result<Thing, CastError> {
+	fn cast_to_record(self, val: &[Table]) -> Result<RecordId, CastError> {
 		match self {
 			Value::Thing(v) if v.is_record_type(val) => Ok(v),
-			Value::Strand(v) => match Thing::from_str(v.as_str()) {
+			Value::Strand(v) => match todo!() /*Thing::from_str(v.as_str())*/ {
 				Ok(x) if x.is_record_type(val) => Ok(x),
 				_ => {
 					let mut kind = "record<".to_string();

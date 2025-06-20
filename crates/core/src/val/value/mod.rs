@@ -1,9 +1,4 @@
-pub use self::value::*;
-
 pub(super) mod serde;
-
-#[expect(clippy::module_inception)]
-mod value;
 
 mod all;
 mod changed;
@@ -37,5 +32,5 @@ mod set;
 mod walk;
 
 mod convert;
-pub(crate) use convert::cast::{Cast, CastError};
-pub(crate) use convert::coerce::{Coerce, CoerceError, CoerceErrorExt};
+pub use convert::cast::{Cast, CastError};
+pub use convert::coerce::{Coerce, CoerceError, CoerceErrorExt};

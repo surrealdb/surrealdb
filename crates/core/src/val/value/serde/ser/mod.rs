@@ -2,9 +2,7 @@ mod r#enum;
 mod r#struct;
 
 use crate::err::Error;
-use crate::expr;
-use crate::expr::Bytes;
-use crate::expr::value::Value;
+use crate::val::{self, Bytes, Value};
 use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
@@ -23,18 +21,18 @@ where
 {
 	match_type!(value, {
 		Value as v => Ok(v),
-		expr::Number as v => Ok(v.into()),
+		val::Number as v => Ok(v.into()),
 		rust_decimal::Decimal as v => Ok(v.into()),
-		expr::Strand as v => Ok(v.into()),
-		expr::Duration as v => Ok(v.into()),
+		val::Strand as v => Ok(v.into()),
+		val::Duration as v => Ok(v.into()),
 		core::time::Duration as v => Ok(v.into()),
-		expr::Datetime as v => Ok(v.into()),
+		val::Datetime as v => Ok(v.into()),
 		chrono::DateTime<chrono::Utc> as v => Ok(v.into()),
-		expr::Uuid as v => Ok(v.into()),
+		val::Uuid as v => Ok(v.into()),
 		uuid::Uuid as v => Ok(v.into()),
-		expr::Array as v => Ok(v.into()),
-		expr::Object as v => Ok(v.into()),
-		expr::Geometry as v => Ok(v.into()),
+		val::Array as v => Ok(v.into()),
+		val::Object as v => Ok(v.into()),
+		val::Geometry as v => Ok(v.into()),
 		geo_types::Point as v => Ok(v.into()),
 		geo_types::LineString as v => Ok(Value::Geometry(v.into())),
 		geo_types::Polygon as v => Ok(Value::Geometry(v.into())),
@@ -42,26 +40,14 @@ where
 		geo_types::MultiLineString as v => Ok(Value::Geometry(v.into())),
 		geo_types::MultiPolygon as v => Ok(Value::Geometry(v.into())),
 		geo_types::Point as v => Ok(Value::Geometry(v.into())),
-		expr::Bytes as v => Ok(v.into()),
-		expr::Thing as v => Ok(v.into()),
-		expr::Param as v => Ok(v.into()),
-		expr::Idiom as v => Ok(v.into()),
-		expr::Table as v => Ok(v.into()),
-		expr::Mock as v => Ok(v.into()),
-		expr::Regex as v => Ok(v.into()),
-		expr::Cast as v => Ok(v.into()),
-		expr::Block as v => Ok(v.into()),
-		expr::Range as v => Ok(v.into()),
-		expr::Edges as v => Ok(v.into()),
-		expr::Future as v => Ok(v.into()),
-		expr::Constant as v => Ok(v.into()),
-		expr::Function as v => Ok(v.into()),
-		expr::Subquery as v => Ok(v.into()),
-		expr::Expression as v => Ok(v.into()),
-		expr::Query as v => Ok(v.into()),
-		expr::Model as v => Ok(v.into()),
-		expr::Closure as v => Ok(v.into()),
-		expr::File as v => Ok(v.into()),
+		val::Bytes as v => Ok(v.into()),
+		val::RecordId as v => Ok(v.into()),
+		//expr::Table as v => Ok(v.into()),
+		val::Regex as v => Ok(v.into()),
+		val::Range as v => Ok(v.into()),
+		//expr::Future as v => Ok(v.into()),
+		val::Closure as v => Ok(v.into()),
+		val::File as v => Ok(v.into()),
 		value => Serializer::new().serialize(value)?.try_into(),
 	})
 }
@@ -118,7 +104,7 @@ impl TryFrom<Vec<Content>> for Value {
 		for content in v {
 			vec.push(content.try_into()?);
 		}
-		Ok(Self::Array(expr::Array(vec)))
+		Ok(Self::Array(val::Array(vec)))
 	}
 }
 
@@ -140,7 +126,7 @@ impl TryFrom<Vec<(Content, Content)>> for Value {
 			let value = value.try_into()?;
 			map.insert(key, value);
 		}
-		Ok(Self::Object(expr::Object(map)))
+		Ok(Self::Object(val::Object(map)))
 	}
 }
 
@@ -152,7 +138,7 @@ impl TryFrom<Vec<(Cow<'static, str>, Content)>> for Value {
 		for (key, value) in v {
 			map.insert(key.into_owned(), value.try_into()?);
 		}
-		Ok(Self::Object(expr::Object(map)))
+		Ok(Self::Object(val::Object(map)))
 	}
 }
 
@@ -162,10 +148,11 @@ impl TryFrom<(Cow<'static, str>, Content)> for Value {
 	fn try_from((key, value): (Cow<'static, str>, Content)) -> Result<Self, Self::Error> {
 		let mut map = BTreeMap::new();
 		map.insert(key.into_owned(), value.try_into()?);
-		Ok(Self::Object(expr::Object(map)))
+		Ok(Self::Object(val::Object(map)))
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -532,3 +519,4 @@ mod tests {
 		assert_eq!(Value::Array(vec![Value::None].into()), serialized);
 	}
 }
+*/

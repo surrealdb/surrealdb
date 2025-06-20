@@ -2,14 +2,15 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{
-	BinaryOperator, Block, Closure, Constant, FlowResult, FunctionCall, Future, Idiom, Literal,
-	Mock, Model, Param, PrefixOperator, Table, Value,
+	BinaryOperator, Block, Constant, FlowResult, FunctionCall, Future, Idiom, Literal, Mock, Model,
+	Param, PrefixOperator, Table, Value,
 	statements::{
 		AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
 		IfelseStatement, InfoStatement, InsertStatement, RebuildStatement, RelateStatement,
 		RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
 	},
 };
+use crate::val::Closure;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -76,12 +77,12 @@ impl Expr {
 	/// Check if this expression does only reads.
 	pub(crate) fn read_only(&self) -> bool {
 		match self {
-			Expr::Literal(literal)
+			Expr::Literal(_)
 			| Expr::Param(_)
 			| Expr::Idiom(_)
 			| Expr::Table(_)
 			| Expr::Mock(_)
-			| Expr::Constant(constant)
+			| Expr::Constant(_)
 			| Expr::Break
 			| Expr::Continue
 			| Expr::Info(_) => true,
@@ -102,7 +103,7 @@ impl Expr {
 				..
 			} => left.read_only() && right.read_only(),
 			Expr::Model(model) => model.read_only(),
-			Expr::Function(function) => function.read_only(),
+			Expr::FunctionCall(function) => function.read_only(),
 			Expr::Return(expr) => expr.read_only(),
 			Expr::Throw(expr) => expr.read_only(),
 			Expr::IfElse(s) => s.read_only(),

@@ -7,12 +7,12 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{
-	Base, Ident, Output, Permissions, Strand, Value, Values, View, changefeed::ChangeFeed,
-	statements::UpdateStatement,
+	Base, Ident, Output, Permissions, View, changefeed::ChangeFeed, statements::UpdateStatement,
 };
 use crate::expr::{Idiom, Kind, TableType};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -229,11 +229,10 @@ impl DefineTableStatement {
 impl Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE TABLE")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;

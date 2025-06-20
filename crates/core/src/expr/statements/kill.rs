@@ -3,6 +3,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Expr;
 use crate::kvs::Live;
+use crate::val::Value;
 use crate::{ctx::Context, expr::FlowResultExt as _, expr::Uuid};
 use anyhow::{Result, bail};
 

@@ -2,17 +2,13 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::try_join_all_buffered;
-use crate::expr::cond::Cond;
-use crate::expr::dir::Dir;
-use crate::expr::field::Fields;
-use crate::expr::group::Groups;
-use crate::expr::idiom::Idiom;
-use crate::expr::limit::Limit;
-use crate::expr::order::{OldOrders, Order, OrderList, Ordering};
-use crate::expr::split::Splits;
+use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::table::Tables;
+use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyLit, Splits, Table};
+use crate::iam::ResourceKind;
 use crate::kvs::KeyEncode;
+use crate::val::{RecordId, RecordIdKey};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -20,29 +16,20 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Bound, Deref};
 
+use super::RecordIdKeyRangeLit;
 use super::fmt::Fmt;
-use super::{KeyRange, RecordIdKeyLit, Table, Thing};
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Graph {
 	pub dir: Dir,
-	#[revision(end = 3, convert_fn = "convert_old_expr")]
-	pub old_expr: Fields,
-	#[revision(start = 3)]
 	pub expr: Option<Fields>,
-	#[revision(end = 4, convert_fn = "convert_old_what")]
-	pub _what: Tables,
-	#[revision(start = 4)]
 	pub what: GraphSubjects,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
-	#[revision(end = 2, convert_fn = "convert_old_orders")]
-	pub old_order: Option<OldOrders>,
-	#[revision(start = 2)]
 	pub order: Option<Ordering>,
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
@@ -50,48 +37,6 @@ pub struct Graph {
 }
 
 impl Graph {
-	fn convert_old_orders(
-		&mut self,
-		_rev: u16,
-		old_value: Option<OldOrders>,
-	) -> Result<(), revision::Error> {
-		let Some(x) = old_value else {
-			// nothing to do.
-			return Ok(());
-		};
-
-		if x.0.iter().any(|x| x.random) {
-			self.order = Some(Ordering::Random);
-			return Ok(());
-		}
-
-		let new_ord =
-			x.0.into_iter()
-				.map(|x| Order {
-					value: x.order,
-					collate: x.collate,
-					numeric: x.numeric,
-					direction: x.direction,
-				})
-				.collect();
-
-		self.order = Some(Ordering::Order(OrderList(new_ord)));
-
-		Ok(())
-	}
-
-	fn convert_old_what(&mut self, _rev: u16, old: Tables) -> Result<(), revision::Error> {
-		self.what = old.into();
-		Ok(())
-	}
-
-	fn convert_old_expr(&mut self, _rev: u16, _old_value: Fields) -> Result<(), revision::Error> {
-		// Before this change, users would not have been able to set the value of the `expr` field, it's always `Fields(vec![Field::All], false)`.
-		// None is the new default value, mimmicking that behaviour.
-		self.expr = None;
-		Ok(())
-	}
-
 	/// Convert the graph edge to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
@@ -144,6 +89,7 @@ impl Display for Graph {
 		}
 	}
 }
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -156,11 +102,13 @@ impl From<Tables> for GraphSubjects {
 	}
 }
 
+/*
 impl From<Table> for GraphSubjects {
 	fn from(v: Table) -> Self {
 		GraphSubjects(vec![GraphSubject::Table(v)])
 	}
 }
+*/
 
 impl Deref for GraphSubjects {
 	type Target = Vec<GraphSubject>;
@@ -198,7 +146,10 @@ impl Display for GraphSubjects {
 #[non_exhaustive]
 pub enum GraphSubject {
 	Table(Table),
-	Range(Table, KeyRange),
+	Range {
+		table: Table,
+		range: RecordIdKeyRangeLit,
+	},
 }
 
 impl GraphSubject {
@@ -222,7 +173,7 @@ impl GraphSubject {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &RecordIdKeyLit,
+		id: &RecordIdKey,
 		dir: &Dir,
 	) -> (Result<Vec<u8>>, Result<Vec<u8>>) {
 		match self {
@@ -231,7 +182,7 @@ impl GraphSubject {
 				crate::key::graph::ftsuffix(ns, db, tb, id, dir, &t.0),
 			),
 			Self::Range(t, r) => {
-				let beg = match &r.beg {
+				let beg = match &r.start {
 					Bound::Unbounded => crate::key::graph::ftprefix(ns, db, tb, id, dir, &t.0),
 					Bound::Included(v) => crate::key::graph::new(
 						ns,
@@ -239,9 +190,9 @@ impl GraphSubject {
 						tb,
 						id,
 						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
+						&RecordId {
+							table: t.0.clone(),
+							key: v.to_owned(),
 						},
 					)
 					.encode(),
@@ -251,9 +202,9 @@ impl GraphSubject {
 						tb,
 						id,
 						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
+						&RecordId {
+							table: t.0.clone(),
+							key: v.to_owned(),
 						},
 					)
 					.encode()
@@ -271,9 +222,9 @@ impl GraphSubject {
 						tb,
 						id,
 						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
+						&RecordId {
+							table: t.0.clone(),
+							key: v.to_owned(),
 						},
 					)
 					.encode(),
@@ -283,9 +234,9 @@ impl GraphSubject {
 						tb,
 						id,
 						dir,
-						&Thing {
-							tb: t.0.clone(),
-							id: v.to_owned(),
+						&RecordId {
+							table: t.0.clone(),
+							key: v.to_owned(),
 						},
 					)
 					.encode()

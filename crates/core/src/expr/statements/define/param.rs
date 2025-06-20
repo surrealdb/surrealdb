@@ -4,8 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Permission, Strand, Value};
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Permission};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -91,11 +92,10 @@ impl DefineParamStatement {
 impl Display for DefineParamStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE PARAM")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ${} VALUE {}", self.name, self.value)?;
 		if let Some(ref v) = self.comment {

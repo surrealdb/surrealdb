@@ -1203,7 +1203,7 @@ pub mod convert_expr {
 		}
 	}
 
-	impl TryFrom<CborData> for expr::id::range::KeyRange {
+	impl TryFrom<CborData> for expr::id::range::RecordIdKeyRangeLit {
 		type Error = &'static str;
 		fn try_from(val: CborData) -> Result<Self, &'static str> {
 			fn decode_bound(v: CborData) -> Result<Bound<expr::RecordIdKeyLit>, &'static str> {
@@ -1224,7 +1224,7 @@ pub mod convert_expr {
 					let mut v = v;
 					let beg = decode_bound(v.remove(0).clone())?;
 					let end = decode_bound(v.remove(0).clone())?;
-					Ok(expr::id::range::KeyRange::try_from((beg, end))
+					Ok(expr::id::range::RecordIdKeyRangeLit::try_from((beg, end))
 						.map_err(|_| "Found an invalid range with ranges as bounds")?)
 				}
 				_ => Err("Expected a CBOR array with 2 bounds"),
@@ -1232,9 +1232,9 @@ pub mod convert_expr {
 		}
 	}
 
-	impl TryFrom<expr::id::range::KeyRange> for CborData {
+	impl TryFrom<expr::id::range::RecordIdKeyRangeLit> for CborData {
 		type Error = &'static str;
-		fn try_from(r: expr::id::range::KeyRange) -> Result<CborData, &'static str> {
+		fn try_from(r: expr::id::range::RecordIdKeyRangeLit) -> Result<CborData, &'static str> {
 			fn encode(b: Bound<expr::RecordIdKeyLit>) -> Result<CborData, &'static str> {
 				match b {
 					Bound::Included(v) => {
@@ -1247,7 +1247,7 @@ pub mod convert_expr {
 				}
 			}
 
-			Ok(CborData::Array(vec![encode(r.beg)?, encode(r.end)?]))
+			Ok(CborData::Array(vec![encode(r.start)?, encode(r.end)?]))
 		}
 	}
 
@@ -1260,7 +1260,7 @@ pub mod convert_expr {
 				CborData::Array(v) => Ok(expr::RecordIdKeyLit::Array(v.try_into()?)),
 				CborData::Map(v) => Ok(expr::RecordIdKeyLit::Object(v.try_into()?)),
 				CborData::Tag(TAG_RANGE, v) => Ok(expr::RecordIdKeyLit::Range(Box::new(
-					expr::id::range::KeyRange::try_from(*v)?,
+					expr::id::range::RecordIdKeyRangeLit::try_from(*v)?,
 				))),
 				CborData::Tag(TAG_STRING_UUID, v) => {
 					v.deref().to_owned().try_into().map(expr::RecordIdKeyLit::Uuid)

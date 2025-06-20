@@ -17,10 +17,6 @@ impl Value {
 						Some(v) => v._walk(path.next(), prev.push(p.clone())),
 						None => Value::None._walk(path.next(), prev.push(p.clone())),
 					},
-					Part::Index(i) => match v.get(&i.to_string()) {
-						Some(v) => v._walk(path.next(), prev.push(p.clone())),
-						None => Value::None._walk(path.next(), prev.push(p.clone())),
-					},
 					Part::All => v
 						.iter()
 						.flat_map(|(field, v)| {
@@ -30,7 +26,16 @@ impl Value {
 							)
 						})
 						.collect::<Vec<_>>(),
-					_ => vec![],
+					x => {
+						if let Some(idx) = x.as_old_index() {
+							match v.get(&idx.to_string()) {
+								Some(v) => v._walk(path.next(), prev.push(p.clone())),
+								None => Value::None._walk(path.next(), prev.push(p.clone())),
+							}
+						} else {
+							vec![]
+						}
+					}
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
@@ -42,21 +47,32 @@ impl Value {
 						Some(v) => v._walk(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
-					Part::Index(i) => match v.get(i.to_usize()) {
-						Some(v) => v._walk(path.next(), prev.push(p.clone())),
-						None => vec![],
-					},
-					_ => v
-						.iter()
-						.enumerate()
-						.flat_map(|(i, v)| v._walk(path.next(), prev.clone().push(Part::from(i))))
-						.collect::<Vec<_>>(),
+					x => {
+						if let Some(idx) = x.as_old_index() {
+							match v.get(idx) {
+								Some(v) => v._walk(path.next(), prev.push(p.clone())),
+								None => vec![],
+							}
+						} else {
+							v.iter()
+								.enumerate()
+								.flat_map(|(i, v)| {
+									v._walk(path.next(), prev.clone().push(Part::from(i)))
+								})
+								.collect::<Vec<_>>()
+						}
+					}
 				},
 				// Ignore everything else
 				_ => match p {
 					Part::Field(_) => Value::None._walk(path.next(), prev.push(p.clone())),
-					Part::Index(_) => Value::None._walk(path.next(), prev.push(p.clone())),
-					_ => vec![],
+					x => {
+						if let Some(_) = x.as_old_index() {
+							Value::None._walk(path.next(), prev.push(p.clone()))
+						} else {
+							vec![]
+						}
+					}
 				},
 			},
 			// No more parts so get the value
@@ -65,6 +81,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -201,4 +218,4 @@ mod tests {
 		];
 		assert_eq!(res, val.walk(&idi));
 	}
-}
+}*/

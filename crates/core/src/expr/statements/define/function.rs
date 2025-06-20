@@ -4,8 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Block, Ident, Kind, Permission, Strand, Value};
+use crate::expr::{Base, Block, Ident, Kind, Permission};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -14,7 +15,7 @@ use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -81,11 +82,10 @@ impl DefineFunctionStatement {
 impl fmt::Display for DefineFunctionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FUNCTION")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " fn::{}(", self.name.0)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {

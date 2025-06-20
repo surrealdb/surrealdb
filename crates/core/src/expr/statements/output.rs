@@ -3,6 +3,7 @@ use crate::doc::CursorDoc;
 use crate::expr::ControlFlow;
 use crate::expr::Expr;
 use crate::expr::fetch::Fetchs;
+use crate::val::Value;
 use crate::{ctx::Context, expr::FlowResult};
 
 use reblessive::tree::Stk;
@@ -21,8 +22,8 @@ pub struct OutputStatement {
 
 impl OutputStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.what.writeable()
+	pub(crate) fn read_only(&self) -> bool {
+		self.what.read_only()
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(

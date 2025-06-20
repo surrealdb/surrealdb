@@ -1,4 +1,5 @@
-use crate::expr::{Closure, Datetime, Duration, Expr, File, Geometry, RecordIdLit, Regex, Uuid};
+use crate::expr::{Expr, File, RecordIdLit, Regex, Uuid};
+use crate::val::{Bytes, Closure, Datetime, Duration, Geometry, Strand};
 use revision::revisioned;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,8 @@ pub enum Literal {
 	Integer(i64),
 	//TODO: Possibly remove wrapper.
 	Decimal(Decimal),
+	Strand(Strand),
+	Bytes(Bytes),
 	//TODO: Possibly remove wrapper.
 	Regex(Regex),
 	RecordId(RecordIdLit),
@@ -29,6 +32,6 @@ pub enum Literal {
 }
 
 pub struct ObjectEntry {
-	key: String,
-	value: Expr,
+	pub key: String,
+	pub value: Expr,
 }

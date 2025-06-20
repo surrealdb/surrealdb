@@ -35,8 +35,9 @@ pub enum Part {
 	Where(Expr),
 	Graph(Graph),
 	Value(Expr),
+	/// TODO: Remove, start and move it out of part to elimite invalid state.
 	Start(Expr),
-	Method(#[serde(with = "no_nul_bytes")] String, Vec<Expr>),
+	Method(String, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
 	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
@@ -45,78 +46,36 @@ pub enum Part {
 }
 
 impl Part {
-	fn convert_recurse_add_instruction(
-		fields: OldRecurseFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(Part::Recurse(fields.0, fields.1, None))
-	}
-}
-
-impl From<i32> for Part {
-	fn from(v: i32) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<isize> for Part {
-	fn from(v: isize) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<usize> for Part {
-	fn from(v: usize) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<String> for Part {
-	fn from(v: String) -> Self {
-		Self::Field(v.into())
-	}
-}
-
-impl From<Number> for Part {
-	fn from(v: Number) -> Self {
-		Self::Index(v)
-	}
-}
-
-impl From<Ident> for Part {
-	fn from(v: Ident) -> Self {
-		Self::Field(v)
-	}
-}
-
-impl From<Graph> for Part {
-	fn from(v: Graph) -> Self {
-		Self::Graph(v)
-	}
-}
-
-impl From<&str> for Part {
-	fn from(v: &str) -> Self {
-		match v.parse::<isize>() {
-			Ok(v) => Self::from(v),
-			_ => Self::from(v.to_owned()),
-		}
-	}
-}
-
-impl Part {
 	pub(crate) fn is_index(&self) -> bool {
 		matches!(self, Part::Index(_) | Part::First | Part::Last)
 	}
 
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
+	/// Returns the idex if this part would have been `Part::Index(x)` before that field was
+	/// removed.
+	///
+	/// TODO: Remove this method once we work out the kinks with removing `Part::Index(x)` and only
+	/// having `Part::Value(x)`
+	#[deprecated(since = "3.0.0")]
+	pub(crate) fn as_old_index(&self) -> Option<usize> {
 		match self {
-			Part::Start(v) => v.writeable(),
-			Part::Where(v) => v.writeable(),
-			Part::Value(v) => v.writeable(),
-			Part::Method(_, v) => v.iter().any(Value::writeable),
-			_ => false,
+			Part::Value(Expr::Literal(l)) => match l {
+				crate::expr::Literal::Integer(i) => Some(*i as usize),
+				crate::expr::Literal::Float(f) => Some(*f as usize),
+				crate::expr::Literal::Decimal(d) => Some(d.try_into().unwrap_or_default()),
+				_ => None,
+			},
+			_ => None,
+		}
+	}
+
+	/// Check if we require a writeable transaction
+	pub(crate) fn read_only(&self) -> bool {
+		match self {
+			Part::Start(v) => v.read_only(),
+			Part::Where(v) => v.read_only(),
+			Part::Value(v) => v.read_only(),
+			Part::Method(_, v) => v.iter().all(Expr::read_only),
+			_ => true,
 		}
 	}
 	/// Returns a yield if an alias is specified

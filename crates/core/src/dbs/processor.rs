@@ -4,7 +4,7 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::expr::dir::Dir;
-use crate::expr::id::range::KeyRange;
+use crate::expr::id::range::RecordIdKeyRangeLit;
 use crate::expr::{Edges, Table, Thing, Value};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
@@ -672,13 +672,13 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		opt: &Options,
 		tb: &str,
-		r: KeyRange,
+		r: RecordIdKeyRangeLit,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
 		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
 		// Prepare the range start key
-		let beg = match &r.beg {
+		let beg = match &r.start {
 			Bound::Unbounded => thing::prefix(ns, db, tb)?,
 			Bound::Included(v) => thing::new(ns, db, tb, v).encode()?,
 			Bound::Excluded(v) => {
@@ -705,7 +705,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: KeyRange,
+		r: RecordIdKeyRangeLit,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -744,7 +744,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: KeyRange,
+		r: RecordIdKeyRangeLit,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -782,7 +782,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: KeyRange,
+		r: RecordIdKeyRangeLit,
 	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();

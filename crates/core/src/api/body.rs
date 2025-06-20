@@ -12,10 +12,10 @@ use http::header::CONTENT_TYPE;
 use crate::err::Error;
 use crate::expr;
 use crate::expr::Bytesize;
-use crate::expr::Value;
 use crate::rpc::format::cbor;
 use crate::rpc::format::json;
 use crate::rpc::format::revision;
+use crate::val::Value;
 
 use super::context::InvocationContext;
 use super::err::ApiError;

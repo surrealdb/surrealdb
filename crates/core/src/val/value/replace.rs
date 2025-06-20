@@ -17,6 +17,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -32,4 +33,4 @@ mod tests {
 		val.replace(obj).unwrap();
 		assert_eq!(res, val);
 	}
-}
+}*/

@@ -6,12 +6,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-#[cfg(target_family = "wasm")]
-use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Ident, Idioms, Index, Part, Strand, Value};
-#[cfg(target_family = "wasm")]
-use crate::expr::{Output, Values};
+use crate::expr::{Base, Ident, Idioms, Index, Part};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -20,6 +17,11 @@ use std::fmt::{self, Display};
 #[cfg(target_family = "wasm")]
 use std::sync::Arc;
 use uuid::Uuid;
+
+#[cfg(target_family = "wasm")]
+use crate::expr::Output;
+#[cfg(target_family = "wasm")]
+use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 
 use super::DefineKind;
 
@@ -191,11 +193,10 @@ impl DefineIndexStatement {
 impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
 		if Index::Idx != self.index {

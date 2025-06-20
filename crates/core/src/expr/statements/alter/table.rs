@@ -4,9 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Ident, Permissions, Strand, Value};
-use crate::expr::{Kind, TableType};
+use crate::expr::{Base, ChangeFeed, Ident, Kind, Permissions, TableType};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 use anyhow::Result;
 
 use reblessive::tree::Stk;

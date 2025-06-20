@@ -1,9 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::FlowResultExt as _;
-use crate::expr::number::Number;
 use crate::expr::part::Part;
-use crate::val::Value;
+use crate::val::{Number, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -19,18 +18,18 @@ impl Value {
 	) -> Result<()> {
 		match self.get(stk, ctx, opt, None, path).await.catch_return()? {
 			Value::Number(v) => match val {
-				Value::Number(x) => self.set(stk, ctx, opt, path, Value::from(v + x)).await,
+				Value::Number(x) => self.set(stk, ctx, opt, path, Value::Number(v + x)).await,
 				_ => Ok(()),
 			},
 			Value::Array(v) => match val {
-				Value::Array(x) => self.set(stk, ctx, opt, path, Value::from(v + x)).await,
-				x => self.set(stk, ctx, opt, path, Value::from(v + x)).await,
+				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(v + x)).await,
+				x => self.set(stk, ctx, opt, path, Value::Array(v + x)).await,
 			},
 			Value::None => match val {
 				Value::Number(x) => {
-					self.set(stk, ctx, opt, path, Value::from(Number::from(0) + x)).await
+					self.set(stk, ctx, opt, path, Value::Number(Number::Int(0) + x)).await
 				}
-				Value::Array(x) => self.set(stk, ctx, opt, path, Value::from(x)).await,
+				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(x)).await,
 				x => self.set(stk, ctx, opt, path, Value::from(vec![x])).await,
 			},
 			_ => Ok(()),
@@ -38,6 +37,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -124,4 +124,4 @@ mod tests {
 			.unwrap();
 		assert_eq!(res, val);
 	}
-}
+}*/

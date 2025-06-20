@@ -1,4 +1,4 @@
-use crate::expr::{Array, KeyRange, Object, id::Gen, id::RecordIdKeyLit as NewId};
+use crate::expr::{Array, Object, RecordIdKeyRangeLit, id::Gen, id::RecordIdKeyLit as NewId};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ pub enum Id {
 	Array(Array),
 	Object(Object),
 	Generate(Gen),
-	Range(Box<KeyRange>),
+	Range(Box<RecordIdKeyRangeLit>),
 }
 
 impl Id {

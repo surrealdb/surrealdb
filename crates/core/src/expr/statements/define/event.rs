@@ -4,8 +4,9 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, Ident, Strand, Value, Values};
+use crate::expr::{Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -96,11 +97,10 @@ impl DefineEventStatement {
 impl Display for DefineEventStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE EVENT",)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} ON {} WHEN {} THEN {}", self.name, self.what, self.when, self.then)?;
 		if let Some(ref v) = self.comment {

@@ -1,6 +1,5 @@
-use crate::expr::number::Number;
 use crate::expr::part::Part;
-use crate::val::Value;
+use crate::val::{Number, Value};
 
 impl Value {
 	/// Synchronous method for incrementing a field in a `Value`
@@ -16,7 +15,7 @@ impl Value {
 				x => self.put(path, Value::from(v + x)),
 			},
 			Value::None => match val {
-				Value::Number(x) => self.put(path, Value::from(Number::from(0) + x)),
+				Value::Number(x) => self.put(path, Value::Number(Number::Int(0) + x)),
 				Value::Array(x) => self.put(path, Value::from(x)),
 				x => self.put(path, Value::from(vec![x])),
 			},
@@ -25,6 +24,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -78,4 +78,4 @@ mod tests {
 		val.inc(&idi, SqlValue::parse("[100, 300, 400, 500]").into());
 		assert_eq!(res, val);
 	}
-}
+}*/

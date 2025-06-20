@@ -1,6 +1,5 @@
-use crate::expr::Value;
-use crate::expr::duration::Duration;
 use crate::expr::statements::info::InfoStructure;
+use crate::val::{Duration, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

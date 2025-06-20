@@ -5,9 +5,10 @@ use crate::err::Error;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::{
-	Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Table, Thing, Timeout, Value, Version,
+	Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Table, Timeout, Value, Version,
 };
 use crate::idx::planner::RecordStrategy;
+use crate::val::RecordId;
 use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
@@ -33,8 +34,8 @@ pub struct InsertStatement {
 
 impl InsertStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
+	pub(crate) fn read_only(&self) -> bool {
+		false
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -82,7 +83,7 @@ impl InsertStatement {
 			Data::ValuesExpression(v) => {
 				for v in v {
 					// Create a new empty base object
-					let mut o = Value::base();
+					let mut o = Value::empty_object();
 					// Set each field from the expression
 					for (k, v) in v.iter() {
 						let v = v.compute(stk, &ctx, opt, None).await.catch_return()?;
@@ -164,7 +165,7 @@ impl fmt::Display for InsertStatement {
 	}
 }
 
-fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable> {
+fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 	match relation {
 		false => Ok(Iterable::Mergeable(id, v)),
 		true => {
@@ -189,12 +190,13 @@ fn iterable(id: Thing, v: Value, relation: bool) -> Result<Iterable> {
 	}
 }
 
-fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing> {
+/*
+fn gen_id(v: &Value, into: &Option<Table>) -> Result<RecordId> {
 	match into {
 		Some(into) => v.rid().generate(into, true),
 		None => match v.rid() {
 			Value::Thing(v) => match v {
-				Thing {
+				RecordId{
 					id: RecordIdKeyLit::Generate(_),
 					..
 				} => Err(anyhow::Error::new(Error::InsertStatementId {
@@ -207,4 +209,4 @@ fn gen_id(v: &Value, into: &Option<Table>) -> Result<Thing> {
 			})),
 		},
 	}
-}
+}*/

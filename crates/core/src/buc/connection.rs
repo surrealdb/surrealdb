@@ -5,7 +5,7 @@ use crate::{
 use dashmap::DashMap;
 use std::sync::Arc;
 
-use super::store::{ObjectKey, ObjectStore, prefixed::PrefixedStore};
+use super::store::{prefixed::PrefixedStore, ObjectKey, ObjectStore};
 
 // Helper type to represent how bucket connections are persisted
 pub(crate) type BucketConnections = DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>;

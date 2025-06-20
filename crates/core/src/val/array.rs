@@ -2,10 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{
-	Value,
-	fmt::{Fmt, Pretty, pretty_indent},
-};
+use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
+use crate::expr::{Expr, Literal};
+use crate::val::Value;
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -92,37 +91,15 @@ impl Array {
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
 	}
+
+	pub fn into_literal(self) -> Vec<Expr> {
+		self.into_iter().map(|x| Expr::Literal(x.into_literal())).collect()
+	}
 }
 
 impl Array {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		let mut x = Self::with_capacity(self.len());
-		for v in self.iter() {
-			let v = v.compute(stk, ctx, opt, doc).await?;
-			x.push(v);
-		}
-		Ok(Value::Array(x))
-	}
-
 	pub(crate) fn is_all_none_or_null(&self) -> bool {
-		self.0.iter().all(|v| v.is_none_or_null())
-	}
-
-	/// Checks whether all array values are static values
-	pub(crate) fn is_static(&self) -> bool {
-		self.iter().all(Value::is_static)
-	}
-
-	/// Validate that an Array contains only computed Values
-	pub fn validate_computed(&self) -> Result<()> {
-		self.iter().try_for_each(|v| v.validate_computed())
+		self.0.iter().all(|v| v.is_nullish())
 	}
 }
 

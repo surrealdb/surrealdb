@@ -1,8 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Base, Duration, Value};
+use crate::expr::Base;
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Duration, Value};
 use anyhow::Result;
 
 use revision::revisioned;

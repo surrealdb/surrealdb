@@ -16,16 +16,20 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					Part::Value(Expr::Literal(Literal::Integer(i))) => {
-						match v.get(&i.to_string()) {
-							Some(v) => v.pick(path.next()),
-							None => Value::None,
-						}
-					}
+					Part::Value(Expr::Literal(Literal::Integer(i))) => {}
 					Part::All => {
 						v.iter().map(|(_, v)| v.pick(path.next())).collect::<Vec<_>>().into()
 					}
-					_ => Value::None,
+					x => {
+						if let Some(idx) = x.as_old_index() {
+							match v.get(&idx.to_string()) {
+								Some(v) => v.pick(path.next()),
+								None => Value::None,
+							}
+						} else {
+							Value::None
+						}
+					}
 				},
 				// Current value at path is an array
 				Value::Array(v) => match p {
@@ -38,11 +42,16 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					Part::Index(i) => match v.get(i.to_usize()) {
-						Some(v) => v.pick(path.next()),
-						None => Value::None,
-					},
-					_ => v.iter().map(|v| v.pick(path)).collect::<Vec<_>>().into(),
+					x => {
+						if let Some(idx) = x.as_old_index() {
+							match v.get(idx) {
+								Some(v) => v.pick(path.next()),
+								None => Value::None,
+							}
+						} else {
+							v.iter().map(|v| v.pick(path)).collect::<Vec<_>>().into()
+						}
+					}
 				},
 				// Ignore everything else
 				_ => Value::None,

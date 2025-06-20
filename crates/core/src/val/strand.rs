@@ -1,4 +1,6 @@
 use crate::err::Error;
+use crate::expr::escape::QuoteStr;
+use crate::val::TryAdd;
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -6,9 +8,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::ops::{self};
 use std::str;
-
-use super::escape::QuoteStr;
-use super::value::TryAdd;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 

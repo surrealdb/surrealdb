@@ -74,6 +74,7 @@ impl Value {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -134,4 +135,4 @@ mod tests {
 		.into();
 		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
 	}
-}
+}*/

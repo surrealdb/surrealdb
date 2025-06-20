@@ -3,16 +3,15 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Idiom, Value};
+use crate::expr::{Expr, Idiom, Literal};
 use crate::syn;
+use crate::val::{Array, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
-
-use super::Array;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -47,14 +46,11 @@ impl InfoStructure for Fetchs {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Fetch(
-	#[revision(end = 2, convert_fn = "convert_fetch_idiom")] pub Idiom,
-	#[revision(start = 2)] pub Value,
-);
+pub struct Fetch(#[revision(start = 1)] pub Expr);
 
 impl Fetch {
 	fn convert_fetch_idiom(&mut self, _revision: u16, old: Idiom) -> Result<(), revision::Error> {
@@ -74,26 +70,26 @@ impl Fetch {
 		idioms: &mut Vec<Idiom>,
 	) -> Result<()> {
 		let strand_or_idiom = |v: Value| match v {
-			Value::Strand(s) => Ok(Idiom::from(s.0)),
-			Value::Idiom(i) => Ok(i.clone()),
+			Expr::Literal(Literal::Strand(s)) => Ok(Idiom::from(s.0)),
+			Expr::Idiom(i) => Ok(i.clone()),
 			v => Err(Error::InvalidFetch {
 				value: v,
 			}),
 		};
 		match &self.0 {
-			Value::Idiom(idiom) => {
+			Expr::Idiom(idiom) => {
 				idioms.push(idiom.to_owned());
 				Ok(())
 			}
-			Value::Param(param) => {
+			Expr::Param(param) => {
 				let v = param.compute(stk, ctx, opt, None).await?;
 				idioms.push(strand_or_idiom(v)?);
 				Ok(())
 			}
-			Value::Function(f) => {
+			Expr::FunctionCall(f) => {
 				if f.name() == Some("type::field") {
 					let v = match f.args().first().unwrap() {
-						Value::Param(v) => v.compute(stk, ctx, opt, None).await?,
+						Expr::Param(v) => v.compute(stk, ctx, opt, None).await?,
 						v => v.to_owned(),
 					};
 					idioms.push(strand_or_idiom(v)?);
@@ -101,7 +97,7 @@ impl Fetch {
 				} else if f.name() == Some("type::fields") {
 					// Get the first argument which is guaranteed to exist
 					let args = match f.args().first().unwrap() {
-						Value::Param(v) => v.compute(stk, ctx, opt, None).await?,
+						Expr::Param(v) => v.compute(stk, ctx, opt, None).await?,
 						v => v.to_owned(),
 					};
 					// This value is always an array, so we can convert it
@@ -109,11 +105,11 @@ impl Fetch {
 					// This value is always an array, so we can convert it
 					for v in args.into_iter() {
 						let i = match v {
-							Value::Param(v) => {
+							Expr::Param(v) => {
 								strand_or_idiom(v.compute(stk, ctx, opt, None).await?)?
 							}
-							Value::Strand(s) => syn::idiom(s.as_str())?.into(),
-							Value::Idiom(i) => i,
+							Expr::Literal(Literal::Strand(s)) => syn::idiom(s.as_str())?.into(),
+							Expr::Idiom(i) => i,
 							v => {
 								bail!(Error::InvalidFetch {
 									value: v,

@@ -1,8 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Base, Datetime, Table, Value};
+use crate::expr::{Base, Table, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::val::Datetime;
 use crate::vs::VersionStamp;
 use anyhow::Result;
 

@@ -1,6 +1,6 @@
 use crate::ctx::MutableContext;
 use crate::expr::{Expr, FlowResultExt, Ident, Kind};
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, expr::value::Value};
+use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, val::Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;

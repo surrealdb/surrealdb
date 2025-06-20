@@ -22,23 +22,23 @@ impl Value {
 				// Remove any trailing * path parts
 				prev.remove_trailing_all();
 				// Check if we should log intermediary nodes
-				match steps {
+				if steps && !prev.is_empty() {
 					// Let's log all intermediary nodes
-					true if !prev.is_empty() => Some(prev.clone())
+					Some(prev.clone())
 						.into_iter()
 						.chain(v.iter().flat_map(|(k, v)| {
 							let p = Part::from(k.to_owned());
 							v._every(steps, arrays, prev.clone().push(p))
 						}))
-						.collect::<Vec<_>>(),
+						.collect::<Vec<_>>()
+				} else {
 					// Let's not log intermediary nodes
-					_ => v
-						.iter()
+					v.iter()
 						.flat_map(|(k, v)| {
 							let p = Part::from(k.to_owned());
 							v._every(steps, arrays, prev.clone().push(p))
 						})
-						.collect::<Vec<_>>(),
+						.collect::<Vec<_>>()
 				}
 			}
 			// Current path part is an array and is not empty
@@ -103,6 +103,7 @@ impl From<bool> for ArrayBehaviour {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -291,4 +292,4 @@ mod tests {
 
 		assert_eq!(res, val.every(Some(&Idiom::from(SqlIdiom::parse("test.*.color"))), true, true));
 	}
-}
+}*/

@@ -3,9 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{AccessType, Base, Expr, Ident, Strand, access::AccessDuration};
+use crate::expr::{AccessType, Base, Expr, Ident, access::AccessDuration};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use rand::Rng;
@@ -74,7 +74,7 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if access method already exists
 				if txn.get_root_access(&self.name).await.is_ok() {
-					match self.access_type {
+					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::AccessRootAlreadyExists {
@@ -188,11 +188,10 @@ impl DefineAccessStatement {
 impl Display for DefineAccessStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE ACCESS",)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::Default => {}
 		}
 		// The specific access method definition is displayed by AccessType
 		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
