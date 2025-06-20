@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use crate::iam::{Auth, Level};
 use crate::rpc::Method;
 use ipnet::IpNet;
-#[cfg(feature = "http")]
+#[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
 use url::Url;
 
@@ -188,7 +188,7 @@ pub enum NetTarget {
 	IPNet(IpNet),
 }
 
-#[cfg(feature = "http")]
+#[cfg(all(not(target_family = "wasm"), feature = "http"))]
 impl NetTarget {
 	/// Resolves a `NetTarget` to its associated IP address representations.
 	///
@@ -200,7 +200,7 @@ impl NetTarget {
 	///
 	/// # Returns
 	/// - On success, this function returns a `Vec<Self>` where each resolved `NetTarget::Host` is
-	/// transformed into a `NetTarget::IPNet`.
+	///   transformed into a `NetTarget::IPNet`.
 	/// - On error, it returns a `std::io::Error` indicating the issue during resolution.
 	///
 	/// # Variants
