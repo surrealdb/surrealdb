@@ -214,7 +214,6 @@ pub async fn generate_schema(
 		let mut relations = Vec::new();
 
 		trace!("Processing table: {} with type: {:?}", tb_name, tb.kind);
-		println!("🔍 Processing table: {} with type: {:?}", tb_name, tb.kind);
 
 		// Get all fields for this table
 		let fds = tx.all_tb_fields(ns, db, &tb.name.0, None).await?;
@@ -244,15 +243,14 @@ pub async fn generate_schema(
 			// For relation tables, we'll add reverse relations to connected tables
 			if let (Some(Kind::Record(from_tables)), Some(Kind::Record(to_tables))) = (&rel.from, &rel.to) {
 				trace!("Processing relation table {} with from_tables: {:?}, to_tables: {:?}", tb_name, from_tables, to_tables);
-				println!("📊 Processing relation table {} with from_tables: {:?}, to_tables: {:?}", tb_name, from_tables, to_tables);
 				// Add outgoing relations from 'from' tables
 				for from_table in from_tables {
 					let from_table_name = from_table.0.clone();
 					let relation_info = RelationInfo {
 						field_name: tb_name.clone(),
-						target_table: tb_name.clone(), // Return the relation table records
+						target_table: tb_name.clone(),
 						relation_type: RelationType::OutgoingRelation { relation_table: tb_name.clone() },
-						is_list: true, // Relation tables typically return lists
+						is_list: true,
 					};
 					trace!("Adding outgoing relation to {}: {:?}", from_table_name, relation_info);
 					println!("➡️  Adding outgoing relation to {}: {:?}", from_table_name, relation_info);
@@ -264,9 +262,9 @@ pub async fn generate_schema(
 					let to_table_name = to_table.0.clone();
 					let relation_info = RelationInfo {
 						field_name: format!("{}_in", tb_name),
-						target_table: tb_name.clone(), // Return the relation table records
+						target_table: tb_name.clone(),
 						relation_type: RelationType::IncomingRelation { relation_table: tb_name.clone() },
-						is_list: true, // Relation tables typically return lists
+						is_list: true,
 					};
 					trace!("Adding incoming relation to {}: {:?}", to_table_name, relation_info);
 					println!("⬅️  Adding incoming relation to {}: {:?}", to_table_name, relation_info);
@@ -313,7 +311,6 @@ pub async fn generate_schema(
 		let mut table_where = InputObject::new(&table_where_name);
 		table_where = table_where
 			.field(InputValue::new("id", TypeRef::named("_where_id")))
-			.field(InputValue::new("and", TypeRef::named_nn_list(&table_where_name)))
 			.field(InputValue::new("or", TypeRef::named_nn_list(&table_where_name)))
 			.field(InputValue::new("not", TypeRef::named(&table_where_name)));
 		types.push(Type::InputObject(where_id()));
@@ -421,7 +418,6 @@ pub async fn generate_schema(
 										expr: SqlValue::Idiom(Idiom::from("id")),
 										alias: None,
 									}],
-									// this means the `value` keyword
 									true,
 								),
 								order: orders.map(IntoExt::intox),
@@ -643,7 +639,6 @@ pub async fn generate_schema(
 										Ok(Some(field_val_erase_owned(erased)))
 									}
 									Some(SqlValue::Object(ref obj)) => {
-										// Handle array containing object
 										if let Some(SqlValue::Thing(t)) = obj.get("id") {
 											let erased: ErasedRecord = (gtx, t.clone());
 											Ok(Some(field_val_erase_owned(erased)))
@@ -1382,16 +1377,13 @@ pub async fn generate_schema(
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
 }
 
-// Helper function to extract variable names from SIGNIN clause
 fn extract_signin_variables(signin_value: &SqlValue) -> Vec<String> {
 	let mut variables = HashSet::new();
 	extract_variables_recursive(signin_value, &mut variables);
 
-	// Filter out system parameters that are automatically provided
 	let filtered_vars: Vec<String> = variables
 		.into_iter()
 		.filter(|var| {
-			// Exclude system parameters that are automatically set by the GraphQL context
 			!matches!(var.to_uppercase().as_str(), "NS" | "DB" | "AC")
 		})
 		.collect();
@@ -1401,7 +1393,6 @@ fn extract_signin_variables(signin_value: &SqlValue) -> Vec<String> {
 	sorted_vars
 }
 
-// Recursively extract parameter variables from SQL Value
 fn extract_variables_recursive(value: &SqlValue, variables: &mut HashSet<String>) {
 	match value {
 		SqlValue::Param(param) => {
@@ -1728,7 +1719,7 @@ async fn make_relation_field_resolver(
 				what: vec![SqlValue::Table(relation_table.clone().intox())].into(),
 				expr: Fields(
 					vec![sql::Field::All],
-					false, // Don't use VALUE keyword to get full records
+					false,
 				),
 				cond: final_cond,
 				order: orders.map(IntoExt::intox),
@@ -1784,12 +1775,10 @@ async fn make_relation_field_resolver(
 	let res_vec = match res {
 		SqlValue::Array(a) => a,
 		v => {
-			// Single result, wrap in array
 			crate::sql::Array(vec![v])
 		}
 	};
 
-	// Create the appropriate GQLTx for field resolution
 	let gtx_clone = if let Some(ref v) = version {
 		GQLTx::new_with_version(&kvs, &sess, Some(v.to_u64())).await?
 	} else {
