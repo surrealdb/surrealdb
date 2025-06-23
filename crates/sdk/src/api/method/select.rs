@@ -1,3 +1,4 @@
+use crate::opt::RangeableResource;
 use crate::Surreal;
 
 use crate::api::Connection;
@@ -17,19 +18,20 @@ use std::marker::PhantomData;
 /// A select future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Select<'r, C: Connection, R, T = ()> {
+pub struct Select<'r, C: Connection, R: Resource, RT, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
-	pub(super) response_type: PhantomData<R>,
+	pub(super) resource: R,
+	pub(super) response_type: PhantomData<RT>,
 	pub(super) query_type: PhantomData<T>,
 }
 
-impl<C, R, T> Select<'_, C, R, T>
+impl<C, R, RT, T> Select<'_, C, R, RT, T>
 where
 	C: Connection,
+	R: Resource,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Select<'static, C, R, T> {
+	pub fn into_owned(self) -> Select<'static, C, R, RT, T> {
 		Select {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -49,7 +51,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Select {
-						what: resource?,
+						what: resource.into_values(),
 					})
 					.await
 			})
@@ -57,9 +59,10 @@ macro_rules! into_future {
 	};
 }
 
-impl<'r, Client> IntoFuture for Select<'r, Client, Value>
+impl<'r, Client, R> IntoFuture for Select<'r, Client, R, Value>
 where
 	Client: Connection,
+	R: Resource,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -67,54 +70,59 @@ where
 	into_future! {execute_value}
 }
 
-impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>>
+impl<'r, Client, R, RT> IntoFuture for Select<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Option<R>>;
+	type Output = Result<Option<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
 
-impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>>
+impl<'r, Client, R, RT> IntoFuture for Select<'r, Client, R, Vec<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Vec<R>>;
+	type Output = Result<Vec<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }
 
-impl<C> Select<'_, C, Value>
+impl<C, R> Select<'_, C, R, Value>
 where
 	C: Connection,
+	R: RangeableResource,
 {
 	/// Restricts the records selected to those in the specified range
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
+		self.resource = self.resource.with_range(range.into());
 		self
 	}
 }
 
-impl<C, R> Select<'_, C, Vec<R>>
+impl<C, R, RT> Select<'_, C, R, Vec<RT>>
 where
 	C: Connection,
+	R: RangeableResource,
 {
 	/// Restricts the records selected to those in the specified range
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
+		self.resource = self.resource.with_range(range.into());
 		self
 	}
 }
 
-impl<'r, C, R> Select<'r, C, R>
+impl<'r, C, R, RT> Select<'r, C, R, RT>
 where
 	C: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
 	/// Turns a normal select query into a live query
 	///
@@ -163,7 +171,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn live(self) -> Select<'r, C, R, Live> {
+	pub fn live(self) -> Select<'r, C, R, RT, Live> {
 		Select {
 			client: self.client,
 			resource: self.resource,

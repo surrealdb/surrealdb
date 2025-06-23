@@ -9,7 +9,10 @@ use crate::api::opt::IntoEndpoint;
 use crate::api::opt::auth;
 use crate::api::opt::auth::IntoAccessCredentials;
 use crate::api::opt::auth::Jwt;
+use crate::opt::CreatableResource;
+use crate::opt::InsertableResource;
 use crate::opt::IntoExportDestination;
+use crate::opt::Resource;
 use crate::opt::WaitFor;
 use serde::Serialize;
 use surrealdb_core::dbs::Variables;
@@ -98,9 +101,6 @@ pub use upsert::Upsert;
 pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
-
-use super::opt::IntoCreateResource;
-use super::opt::IntoResource;
 
 /// A alias for an often used type of future returned by async methods in this library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
@@ -570,7 +570,7 @@ where
 		Signin {
 			client: Cow::Borrowed(self),
 			params: SigninParams {
-				access_method: Some(credentials.into_access_method()),
+				access_method: credentials.into_access_method(),
 			},
 		}
 	}
@@ -728,10 +728,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
+	pub fn select<R, RT>(&self, resource: R) -> Select<C, R, RT>
+	where
+		R: Resource,
+	{
 		Select {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
+			resource: resource,
 			response_type: PhantomData,
 			query_type: PhantomData,
 		}
@@ -783,10 +786,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl IntoCreateResource<R>) -> anyhow::Result<Create<C, R>> {
+	pub fn create<R, RT>(&self, resource: R) -> anyhow::Result<Create<C, R, RT>>
+	where
+		R: CreatableResource,
+	{
 		Ok(Create {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource()?,
+			resource,
 			response_type: PhantomData,
 		})
 	}
@@ -928,10 +934,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
+	pub fn insert<R, RT>(&self, resource: R) -> Insert<C, R, RT>
+	where
+		R: InsertableResource,
+	{
 		Insert {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
+			resource,
 			response_type: PhantomData,
 		}
 	}
@@ -1086,10 +1095,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
+	pub fn upsert<R, RT>(&self, resource: R) -> Upsert<C, R, RT>
+	where 
+		R: Resource
+	{
 		Upsert {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
+			resource,
 			response_type: PhantomData,
 		}
 	}
@@ -1244,10 +1256,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
+	pub fn update<R, RT>(&self, resource: R) -> Update<C, R, RT>
+	where 
+		R: Resource,
+	{
 		Update {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
+			resource,
 			response_type: PhantomData,
 		}
 	}
@@ -1276,10 +1291,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
+	pub fn delete<R, RT>(&self, resource: R) -> Delete<C, R, RT> {
 		Delete {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
+			resource,
 			response_type: PhantomData,
 		}
 	}

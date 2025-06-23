@@ -1,10 +1,9 @@
 use crate::{
-	RecordIdKey,
-	api::{Result, err::Error},
+	api::{conn::LiveQueryParams, err::Error, Result}, RecordIdKey
 };
 use std::ops::{self, Bound};
 use surrealdb_core::expr::{
-	Array, Edges as Edges, Id as Id, IdRange as IdRange, Object, Table as CoreTable, Thing as RecordId, Value
+	Array, Edges as Edges, Id as Id, IdRange as IdRange, Object, Table as CoreTable, Thing as RecordId, Value, Values
 };
 use surrealdb_core::sql::Table as SqlTable;
 
@@ -57,142 +56,298 @@ transparent_wrapper!(
 /// A database resource
 ///
 /// A resource is a location, or a range of locations, from which data can be fetched.
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub enum Resource {
-	/// Table name
-	Table(String),
-	/// Record ID
-	RecordId(RecordId),
-	/// An object
-	Object(Object),
-	/// An array
-	Array(Vec<Value>),
-	/// Edges
-	Edge(Edge),
-	/// A range of id's on a table.
-	Range(QueryRange),
-	/// Unspecified resource
-	Unspecified,
+// #[derive(Debug, Clone, PartialEq)]
+// #[non_exhaustive]
+// pub enum Resource {
+// 	/// Table name
+// 	Table(String),
+// 	/// Record ID
+// 	RecordId(RecordId),
+// 	/// An object
+// 	Object(Object),
+// 	/// An array
+// 	Array(Vec<Value>),
+// 	/// Edges
+// 	Edge(Edge),
+// 	/// A range of id's on a table.
+// 	Range(QueryRange),
+// 	/// Unspecified resource
+// 	Unspecified,
+// }
+pub trait Resource: Send + Sync + resource::Sealed {
+	fn kind(&self) -> &'static str;
+	fn into_values(self) -> Values;
 }
 
-impl Resource {
+mod resource {
+	pub trait Sealed {}
+}
+
+pub trait RangeableResource: Resource {
 	/// Add a range to the resource, this only works if the resource is a table.
-	pub fn with_range(self, range: KeyRange) -> Result<Self> {
-		match self {
-			Resource::Table(table) => Ok(Resource::Range(Table(table).with_range(range))),
-			Resource::RecordId(_) => Err(Error::InvalidRangeOnResource("RecordId".to_string()).into()),
-			Resource::Object(_) => Err(Error::InvalidRangeOnResource("Object".to_string()).into()),
-			Resource::Array(_) => Err(Error::InvalidRangeOnResource("Array".to_string()).into()),
-			Resource::Edge(_) => Err(Error::InvalidRangeOnResource("Edge".to_string()).into()),
-			Resource::Range(_) => Err(Error::InvalidRangeOnResource("Range".to_string()).into()),
-			Resource::Unspecified => Err(Error::InvalidRangeOnResource("Unspecified".to_string()).into()),
+	fn with_range<RT>(self, range: KeyRange) -> RT
+	where
+		RT: Resource;
+}
+
+pub trait InsertableResource: Resource {
+	fn table_name(&self) -> &str;
+	fn default_content(&self) -> Option<Value>;
+}
+
+pub trait CreatableResource: Resource {
+	fn into_create_params(self) -> Values;
+}
+
+pub trait SubscribableResource: Resource {
+	/// Converts the resource into a live query parameters
+	fn into_live_query_params(self) -> LiveQueryParams;
+}
+
+// pub(crate) fn resource_to_values(r: Resource) -> Values {
+// 	let mut res = Values::default();
+// 	match r {
+// 		Resource::Table(x) => {
+// 			res.0 = vec![Table(x).into_core().into()];
+// 		}
+// 		Resource::RecordId(x) => res.0 = vec![x.into()],
+// 		Resource::Object(x) => res.0 = vec![x.into()],
+// 		Resource::Array(x) => res.0 = x,
+// 		Resource::Edge(x) => res.0 = vec![x.into_inner().into()],
+// 		Resource::Range(x) => res.0 = vec![x.into_inner().into()],
+// 		Resource::Unspecified => {}
+// 	}
+// 	res
+// }
+
+macro_rules! impl_resource_for_table_type {
+	($type:ty) => {
+		impl resource::Sealed for $type {}
+		impl Resource for $type {
+			fn kind(&self) -> &'static str {
+				"table"
+			}
+
+			fn into_values(self) -> Values {
+				vec![Value::from(CoreTable::from(self))]
+			}
 		}
-	}
 
-	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-	pub(crate) fn into_value(self) -> Value {
-
-		match self {
-			Resource::Table(x) => CoreTable(x).into(),
-			Resource::RecordId(x) => x.into(),
-			Resource::Object(x) => x.into(),
-			Resource::Array(x) => Value::Array(Array(x)),
-			Resource::Edge(x) => x.into_inner().into(),
-			Resource::Range(x) => x.into_inner().into(),
-			Resource::Unspecified => Value::None,
+		impl RangeableResource for $type {
+			fn with_range<RT>(self, range: KeyRange) -> RT
+			where
+				RT: Resource,
+			 {
+				let range = KeyRange::from(range);
+				let res = IdRange {
+					beg: range.start.map(RecordIdKey::into_inner),
+					end: range.end.map(RecordIdKey::into_inner),
+				};
+				RecordId::from((self, res))
+			}
 		}
-	}
-	pub fn is_single_recordid(&self) -> bool {
-		match self {
-			Resource::RecordId(rid) => !matches!(rid.into_inner_ref().id, Id::Range(_)),
-			_ => false,
+
+		impl InsertableResource for $type {
+			fn table_name(&self) -> &str {
+				self.as_str()
+			}
+
+			fn default_content(&self) -> Option<Value> {
+				None
+			}
 		}
+	};
+}
+
+impl_resource_for_table_type!(String);
+impl_resource_for_table_type!(&str);
+impl_resource_for_table_type!(CoreTable);
+
+impl resource::Sealed for RecordId {}
+impl Resource for RecordId {
+	fn kind(&self) -> &'static str {
+		"record_id"
+	}
+
+	fn into_values(self) -> Values {
+		Values(vec![Value::from(self)])
 	}
 }
 
-impl From<RecordId> for Resource {
-	fn from(thing: RecordId) -> Self {
-		Self::RecordId(thing)
+impl InsertableResource for RecordId {
+	fn table_name(&self) -> &str {
+		self.tb.as_str()
+	}
+
+	fn default_content(&self) -> Option<Value> {
+		let mut map = Object::default();
+		map.insert("id".to_string(), self.id.clone().into());
+		Some(Value::Object(map))
 	}
 }
 
-impl From<&RecordId> for Resource {
-	fn from(thing: &RecordId) -> Self {
-		Self::RecordId(thing.clone())
+impl resource::Sealed for Object {}
+impl Resource for Object {
+	fn kind(&self) -> &'static str {
+		"object"
+	}
+
+	fn into_values(self) -> Values {
+		Values(vec![Value::from(self)])
 	}
 }
 
-impl From<Object> for Resource {
-	fn from(object: Object) -> Self {
-		Self::Object(object)
+impl resource::Sealed for Vec<Value> {}
+impl Resource for Vec<Value> {
+	fn kind(&self) -> &'static str {
+		"array"
+	}
+
+	fn into_values(self) -> Values {
+		Values(self)
 	}
 }
 
-impl From<&Object> for Resource {
-	fn from(object: &Object) -> Self {
-		Self::Object(object.clone())
+impl resource::Sealed for Edge {}
+impl Resource for Edge {
+	fn kind(&self) -> &'static str {
+		"edge"
+	}
+
+	fn into_values(self) -> Values {
+		Values(vec![Value::from(self.into_inner())])
 	}
 }
 
-impl From<Vec<Value>> for Resource {
-	fn from(array: Vec<Value>) -> Self {
-		Self::Array(array)
-	}
-}
+// impl resource::Sealed for QueryRange {}
+// impl Resource for QueryRange {
+// 	fn kind(&self) -> &'static str {
+// 		"range"
+// 	}
 
-impl From<&[Value]> for Resource {
-	fn from(array: &[Value]) -> Self {
-		Self::Array(array.to_vec())
-	}
-}
+// 	fn into_values(self) -> Values {
+// 		vec![Value::from(self)]
+// 	}
+// }
 
-impl From<&str> for Resource {
-	fn from(s: &str) -> Self {
-		Resource::from(s.to_string())
-	}
-}
 
-impl From<&String> for Resource {
-	fn from(s: &String) -> Self {
-		Self::from(s.as_str())
-	}
-}
+// impl Resource {
+// 	/// Add a range to the resource, this only works if the resource is a table.
+// 	pub fn with_range(self, range: KeyRange) -> Result<Self> {
+// 		match self {
+// 			Resource::Table(table) => Ok(Resource::Range(Table(table).with_range(range))),
+// 			Resource::RecordId(_) => Err(Error::InvalidRangeOnResource("RecordId".to_string()).into()),
+// 			Resource::Object(_) => Err(Error::InvalidRangeOnResource("Object".to_string()).into()),
+// 			Resource::Array(_) => Err(Error::InvalidRangeOnResource("Array".to_string()).into()),
+// 			Resource::Edge(_) => Err(Error::InvalidRangeOnResource("Edge".to_string()).into()),
+// 			Resource::Range(_) => Err(Error::InvalidRangeOnResource("Range".to_string()).into()),
+// 			Resource::Unspecified => Err(Error::InvalidRangeOnResource("Unspecified".to_string()).into()),
+// 		}
+// 	}
 
-impl From<String> for Resource {
-	fn from(s: String) -> Self {
-		Resource::Table(s)
-	}
-}
+// 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+// 	pub(crate) fn into_value(self) -> Value {
 
-impl From<Edge> for Resource {
-	fn from(value: Edge) -> Self {
-		Resource::Edge(value)
-	}
-}
+// 		match self {
+// 			Resource::Table(x) => CoreTable(x).into(),
+// 			Resource::RecordId(x) => x.into(),
+// 			Resource::Object(x) => x.into(),
+// 			Resource::Array(x) => Value::Array(Array(x)),
+// 			Resource::Edge(x) => x.into_inner().into(),
+// 			Resource::Range(x) => x.into_inner().into(),
+// 			Resource::Unspecified => Value::None,
+// 		}
+// 	}
+// 	pub fn is_single_recordid(&self) -> bool {
+// 		match self {
+// 			Resource::RecordId(rid) => !matches!(rid.into_inner_ref().id, Id::Range(_)),
+// 			_ => false,
+// 		}
+// 	}
+// }
 
-impl From<QueryRange> for Resource {
-	fn from(value: QueryRange) -> Self {
-		Resource::Range(value)
-	}
-}
+// impl From<RecordId> for Resource {
+// 	fn from(thing: RecordId) -> Self {
+// 		Self::RecordId(thing)
+// 	}
+// }
 
-impl<T, I> From<(T, I)> for Resource
-where
-	T: Into<String>,
-	I: Into<RecordIdKey>,
-{
-	fn from((table, id): (T, I)) -> Self {
-		let record_id = RecordId::from_table_key(table, id);
-		Self::RecordId(record_id)
-	}
-}
+// impl From<&RecordId> for Resource {
+// 	fn from(thing: &RecordId) -> Self {
+// 		Self::RecordId(thing.clone())
+// 	}
+// }
 
-impl From<()> for Resource {
-	fn from(_value: ()) -> Self {
-		Self::Unspecified
-	}
-}
+// impl From<Object> for Resource {
+// 	fn from(object: Object) -> Self {
+// 		Self::Object(object)
+// 	}
+// }
+
+// impl From<&Object> for Resource {
+// 	fn from(object: &Object) -> Self {
+// 		Self::Object(object.clone())
+// 	}
+// }
+
+// impl From<Vec<Value>> for Resource {
+// 	fn from(array: Vec<Value>) -> Self {
+// 		Self::Array(array)
+// 	}
+// }
+
+// impl From<&[Value]> for Resource {
+// 	fn from(array: &[Value]) -> Self {
+// 		Self::Array(array.to_vec())
+// 	}
+// }
+
+// impl From<&str> for Resource {
+// 	fn from(s: &str) -> Self {
+// 		Resource::from(s.to_string())
+// 	}
+// }
+
+// impl From<&String> for Resource {
+// 	fn from(s: &String) -> Self {
+// 		Self::from(s.as_str())
+// 	}
+// }
+
+// impl From<String> for Resource {
+// 	fn from(s: String) -> Self {
+// 		Resource::Table(s)
+// 	}
+// }
+
+// impl From<Edge> for Resource {
+// 	fn from(value: Edge) -> Self {
+// 		Resource::Edge(value)
+// 	}
+// }
+
+// impl From<QueryRange> for Resource {
+// 	fn from(value: QueryRange) -> Self {
+// 		Resource::Range(value)
+// 	}
+// }
+
+// impl<T, I> From<(T, I)> for Resource
+// where
+// 	T: Into<String>,
+// 	I: Into<RecordIdKey>,
+// {
+// 	fn from((table, id): (T, I)) -> Self {
+// 		let record_id = RecordId::from_table_key(table, id);
+// 		Self::RecordId(record_id)
+// 	}
+// }
+
+// impl From<()> for Resource {
+// 	fn from(_value: ()) -> Self {
+// 		Self::Unspecified
+// 	}
+// }
 
 /// Holds the `start` and `end` bounds of a range query
 #[derive(Debug, PartialEq, Clone)]
@@ -308,24 +463,6 @@ impl From<ops::RangeFull> for KeyRange {
 	}
 }
 
-/// A trait for types which can be used as a resource selection for a query.
-pub trait IntoResource<Output>: into_resource::Sealed<Output> {}
-
-mod into_resource {
-	pub trait Sealed<Output> {
-		fn into_resource(self) -> super::Result<super::Resource>;
-	}
-}
-
-/// A trait for types which can be used as a resource selection for a query that returns an `Option`.
-pub trait IntoCreateResource<Output>: create_resource::Sealed<Output> {}
-
-mod create_resource {
-	pub trait Sealed<Output> {
-		fn into_resource(self) -> super::Result<super::Resource>;
-	}
-}
-
 fn no_colon(a: &str) -> Result<()> {
 	if a.contains(':') {
 		return Err(Error::TableColonId {
@@ -334,194 +471,4 @@ fn no_colon(a: &str) -> Result<()> {
 		.into());
 	}
 	Ok(())
-}
-
-// IntoResource
-
-impl IntoResource<Value> for Resource {}
-impl into_resource::Sealed<Value> for Resource {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self)
-	}
-}
-
-impl<R> IntoResource<Option<R>> for Object {}
-impl<R> into_resource::Sealed<Option<R>> for Object {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Option<R>> for RecordId {}
-impl<R> into_resource::Sealed<Option<R>> for RecordId {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Option<R>> for &RecordId {}
-impl<R> into_resource::Sealed<Option<R>> for &RecordId {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.clone().into())
-	}
-}
-
-impl<R, T, I> IntoResource<Option<R>> for (T, I)
-where
-	T: Into<String>,
-	I: Into<RecordIdKey>,
-{
-}
-impl<R, T, I> into_resource::Sealed<Option<R>> for (T, I)
-where
-	T: Into<String>,
-	I: Into<RecordIdKey>,
-{
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for Vec<Value> {}
-impl<R> into_resource::Sealed<Vec<R>> for Vec<Value> {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for Edge {}
-impl<R> into_resource::Sealed<Vec<R>> for Edge {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for QueryRange {}
-impl<R> into_resource::Sealed<Vec<R>> for QueryRange {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<T, R> IntoResource<Vec<R>> for Table<T> where T: Into<String> {}
-impl<T, R> into_resource::Sealed<Vec<R>> for Table<T>
-where
-	T: Into<String>,
-{
-	fn into_resource(self) -> Result<Resource> {
-		let t = self.0.into();
-		Ok(t.into())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for &str {}
-impl<R> into_resource::Sealed<Vec<R>> for &str {
-	fn into_resource(self) -> Result<Resource> {
-		no_colon(self)?;
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for String {}
-impl<R> into_resource::Sealed<Vec<R>> for String {
-	fn into_resource(self) -> Result<Resource> {
-		no_colon(&self)?;
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for &String {}
-impl<R> into_resource::Sealed<Vec<R>> for &String {
-	fn into_resource(self) -> Result<Resource> {
-		no_colon(self)?;
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for () {}
-impl<R> into_resource::Sealed<Vec<R>> for () {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Unspecified)
-	}
-}
-
-// CreateResource
-
-impl IntoCreateResource<Value> for Resource {}
-impl create_resource::Sealed<Value> for Resource {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self)
-	}
-}
-
-impl<R> IntoCreateResource<Option<R>> for Object {}
-impl<R> create_resource::Sealed<Option<R>> for Object {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoCreateResource<Option<R>> for RecordId {}
-impl<R> create_resource::Sealed<Option<R>> for RecordId {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoCreateResource<Option<R>> for &RecordId {}
-impl<R> create_resource::Sealed<Option<R>> for &RecordId {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.clone().into())
-	}
-}
-
-impl<R, T, I> IntoCreateResource<Option<R>> for (T, I)
-where
-	T: Into<String>,
-	I: Into<RecordIdKey>,
-{
-}
-impl<R, T, I> create_resource::Sealed<Option<R>> for (T, I)
-where
-	T: Into<String>,
-	I: Into<RecordIdKey>,
-{
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<T, R> IntoCreateResource<Option<R>> for Table<T> where T: Into<String> {}
-impl<T, R> create_resource::Sealed<Option<R>> for Table<T>
-where
-	T: Into<String>,
-{
-	fn into_resource(self) -> Result<Resource> {
-		let t = self.0.into();
-		Ok(t.into())
-	}
-}
-
-impl<R> IntoCreateResource<Option<R>> for &str {}
-impl<R> create_resource::Sealed<Option<R>> for &str {
-	fn into_resource(self) -> Result<Resource> {
-		no_colon(self)?;
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoCreateResource<Option<R>> for String {}
-impl<R> create_resource::Sealed<Option<R>> for String {
-	fn into_resource(self) -> Result<Resource> {
-		no_colon(&self)?;
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoCreateResource<Option<R>> for &String {}
-impl<R> create_resource::Sealed<Option<R>> for &String {
-	fn into_resource(self) -> Result<Resource> {
-		no_colon(self)?;
-		Ok(self.into())
-	}
 }

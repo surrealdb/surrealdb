@@ -1,13 +1,8 @@
 use crate::Surreal;
 use crate::api::Connection;
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
-use crate::method::OnceLockExt;
-use crate::method::ensure_values_are_objects;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -18,20 +13,21 @@ use surrealdb_core::expr::TryFromValue;
 /// A merge future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Merge<'r, C: Connection, R> {
+pub struct Merge<'r, C: Connection, R: Resource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
+	pub(super) resource: R,
 	pub(super) content: Data,
 	pub(super) upsert: bool,
-	pub(super) response_type: PhantomData<R>,
+	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R> Merge<'_, C, R>
+impl<C, R, RT> Merge<'_, C, R, RT>
 where
 	C: Connection,
+	R: Resource,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Merge<'static, C, R> {
+	pub fn into_owned(self) -> Merge<'static, C, R, RT> {
 		Merge {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -80,9 +76,10 @@ macro_rules! into_future {
 	};
 }
 
-impl<'r, Client> IntoFuture for Merge<'r, Client, Value>
+impl<'r, Client, R> IntoFuture for Merge<'r, Client, R, Value>
 where
 	Client: Connection,
+	R: Resource,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -90,21 +87,23 @@ where
 	into_future! {}
 }
 
-impl<'r, Client, R> IntoFuture for Merge<'r, Client, Option<R>>
+impl<'r, Client, R, RT> IntoFuture for Merge<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Option<R>>;
+	type Output = Result<Option<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {}
 }
 
-impl<'r, Client, R> IntoFuture for Merge<'r, Client, Vec<R>>
+impl<'r, Client, R, RT> IntoFuture for Merge<'r, Client, R, Vec<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;

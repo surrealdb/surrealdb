@@ -1,4 +1,5 @@
 use crate::Surreal;
+use crate::opt::CreatableResource;
 
 use crate::api::Connection;
 use crate::api::Result;
@@ -6,32 +7,30 @@ use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::method::OnceLockExt;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::expr::{Value as Value, to_value as to_core_value};
+use surrealdb_core::expr::{Value, to_value as to_core_value};
 
 use super::Content;
-use super::ensure_values_are_objects;
 
 /// A record create future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Create<'r, C: Connection, R> {
+pub struct Create<'r, C: Connection, R: CreatableResource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Resource,
-	pub(super) response_type: PhantomData<R>,
+	pub(super) resource: R,
+	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R> Create<'_, C, R>
+impl<C, R, RT> Create<'_, C, R, RT>
 where
 	C: Connection,
+	R: CreatableResource,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Create<'static, C, R> {
+	pub fn into_owned(self) -> Create<'static, C, R, RT> {
 		Create {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -47,10 +46,14 @@ macro_rules! into_future {
 				resource,
 				..
 			} = self;
+
+			let what = resource.into_create_params();
+
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
+
 				let cmd = Command::Create {
-					what: resource,
+					what,
 					data: None,
 				};
 				router.$method(cmd).await
@@ -59,9 +62,10 @@ macro_rules! into_future {
 	};
 }
 
-impl<'r, Client> IntoFuture for Create<'r, Client, Value>
+impl<'r, Client, R> IntoFuture for Create<'r, Client, R, Value>
 where
 	Client: Connection,
+	R: CreatableResource,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -69,28 +73,26 @@ where
 	into_future! {execute_value}
 }
 
-impl<'r, Client, R> IntoFuture for Create<'r, Client, Option<R>>
+impl<'r, Client, R, RT> IntoFuture for Create<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: CreatableResource,
+	RT: TryFromValue,
 {
-	type Output = Result<Option<R>>;
+	type Output = Result<Option<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
 
-impl<'r, C> Create<'r, C, Value>
+impl<'r, C, R> Create<'r, C, R, Value>
 where
 	C: Connection,
+	R: CreatableResource,
 {
 	/// Sets content of a record
-	pub fn content(self, data: impl Into<Value>) -> anyhow::Result<Content<'r, C, Value>> {
+	pub fn content(self, data: impl Into<Value>) -> Content<'r, C, Value> {
 		let content = data.into();
-
-		ensure_values_are_objects(
-			&content,
-		)?;
 
 		let data = match content {
 			Value::None | Value::Null => None,
@@ -98,26 +100,22 @@ where
 		};
 
 		let command = Command::Create {
-			what: self.resource,
+			what: self.resource.into_create_params(),
 			data,
 		};
 
-		Ok(Content::new(self.client, command))
+		Content::new(self.client, command)
 	}
 }
 
-impl<'r, C, R> Create<'r, C, Option<R>>
+impl<'r, C, R, RT> Create<'r, C, R, Option<RT>>
 where
 	C: Connection,
+	R: CreatableResource,
 {
 	/// Sets content of a record
-	pub fn content(self, data: impl Into<Value>) -> anyhow::Result<Content<'r, C, Option<R>>>
-	{
+	pub fn content(self, data: impl Into<Value>) -> Content<'r, C, Option<RT>> {
 		let content = data.into();
-
-		ensure_values_are_objects(
-			&content,
-		)?;
 
 		let data = match content {
 			Value::None | Value::Null => None,
@@ -125,10 +123,10 @@ where
 		};
 
 		let command = Command::Create {
-			what: self.resource,
+			what: self.resource.into_create_params(),
 			data,
 		};
 
-		Ok(Content::new(self.client, command))
+		Content::new(self.client, command)
 	}
 }

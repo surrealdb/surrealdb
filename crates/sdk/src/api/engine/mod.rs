@@ -52,23 +52,23 @@ use super::opt::Table;
 // 	res
 // }
 
-// used in http and all local engines.
-#[allow(dead_code)]
-pub(crate) fn resource_to_values(r: Resource) -> Values {
-	let mut res = Values::default();
-	match r {
-		Resource::Table(x) => {
-			res.0 = vec![Table(x).into_core().into()];
-		}
-		Resource::RecordId(x) => res.0 = vec![x.into()],
-		Resource::Object(x) => res.0 = vec![x.into()],
-		Resource::Array(x) => res.0 = x,
-		Resource::Edge(x) => res.0 = vec![x.into_inner().into()],
-		Resource::Range(x) => res.0 = vec![x.into_inner().into()],
-		Resource::Unspecified => {}
-	}
-	res
-}
+// // used in http and all local engines.
+// #[allow(dead_code)]
+// pub(crate) fn resource_to_values(r: Resource) -> Values {
+// 	let mut res = Values::default();
+// 	match r {
+// 		Resource::Table(x) => {
+// 			res.0 = vec![Table(x).into_core().into()];
+// 		}
+// 		Resource::RecordId(x) => res.0 = vec![x.into()],
+// 		Resource::Object(x) => res.0 = vec![x.into()],
+// 		Resource::Array(x) => res.0 = x,
+// 		Resource::Edge(x) => res.0 = vec![x.into_inner().into()],
+// 		Resource::Range(x) => res.0 = vec![x.into_inner().into()],
+// 		Resource::Unspecified => {}
+// 	}
+// 	res
+// }
 
 struct IntervalStream {
 	inner: Interval,

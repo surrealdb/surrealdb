@@ -16,20 +16,21 @@ use surrealdb_core::expr::TryFromValue;
 /// A patch future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Patch<'r, C: Connection, R> {
+pub struct Patch<'r, C: Connection, R: Resource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
+	pub(super) resource: R,
 	pub(super) patches: PatchOps,
 	pub(super) upsert: bool,
-	pub(super) response_type: PhantomData<R>,
+	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R> Patch<'_, C, R>
+impl<C, R, RT> Patch<'_, C, R, RT>
 where
 	C: Connection,
+	R: Resource,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Patch<'static, C, R> {
+	pub fn into_owned(self) -> Patch<'static, C, R, RT> {
 		Patch {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -55,7 +56,7 @@ macro_rules! into_future {
 				}
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Upsert {
-					what: resource?,
+					what: resource.into_values(),
 					data: Some(Data::PatchExpression(Value::Array(Array(vec)))),
 				};
 
@@ -67,9 +68,10 @@ macro_rules! into_future {
 	};
 }
 
-impl<'r, Client> IntoFuture for Patch<'r, Client, Value>
+impl<'r, Client, R> IntoFuture for Patch<'r, Client, R, Value>
 where
 	Client: Connection,
+	R: Resource,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -77,34 +79,37 @@ where
 	into_future! {}
 }
 
-impl<'r, Client, R> IntoFuture for Patch<'r, Client, Option<R>>
+impl<'r, Client, R, RT> IntoFuture for Patch<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Option<R>>;
+	type Output = Result<Option<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {}
 }
 
-impl<'r, Client, R> IntoFuture for Patch<'r, Client, Vec<R>>
+impl<'r, Client, R, RT> IntoFuture for Patch<'r, Client, R, Vec<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Vec<R>>;
+	type Output = Result<Vec<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {}
 }
 
-impl<'r, C, R> Patch<'r, C, R>
+impl<'r, C, R, RT> Patch<'r, C, R, RT>
 where
 	C: Connection,
+	R: Resource,
 {
 	/// Applies JSON Patch changes to all records, or a specific record, in the database.
-	pub fn patch(mut self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
+	pub fn patch(mut self, patch: impl Into<PatchOp>) -> Patch<'r, C, R, RT> {
 		self.patches.push(patch.into());
 		self
 	}

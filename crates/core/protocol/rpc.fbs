@@ -96,8 +96,8 @@ table KillParams {
 }
 
 table LiveParams {
-    expr: SurrealDB.Protocol.Expr.Fields (id: 0);
-    what: SurrealDB.Protocol.Expr.Value (id: 1);
+    what: SurrealDB.Protocol.Expr.Value (id: 0);
+    expr: SurrealDB.Protocol.Expr.Fields (id: 1);
     cond: SurrealDB.Protocol.Expr.Value (id: 2);
     fetch: SurrealDB.Protocol.Expr.Value (id: 3);
 }

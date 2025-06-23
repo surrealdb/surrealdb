@@ -16,7 +16,7 @@ use crate::expr::{
 	id::{Gen, Id},
 	model::Model,
 };
-use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::expr::{from_value, to_value, Closure, ControlFlow, FlowResult, Ident, Kind};
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -25,6 +25,7 @@ use geo::Point;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -38,16 +39,6 @@ pub trait TryFromValue: Sized {
 	/// Try to convert a Value into this type
 	fn try_from_value(value: Value) -> Result<Self>;
 }
-
-// impl<T> TryFromValue for T
-// where
-// 	T: TryFrom<Value>,
-// 	T::Error: Into<anyhow::Error>,
-// {
-// 	fn try_from_value(value: Value) -> Result<Self> {
-// 		T::try_from(value).map_err(Into::into)
-// 	}
-// }
 
 impl<T> TryFromValue for Option<T>
 where
@@ -84,6 +75,80 @@ impl TryFromValue for String {
 	}
 }
 
+impl TryFromValue for uuid::Uuid {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Uuid(u) => Ok(u.0),
+			unexpected => Err(Error::UnexpectedType {
+				expected: "uuid",
+				actual: unexpected.kindof(),
+			}.into()),
+		}
+	}
+}
+
+macro_rules! impl_try_from_value_for_int {
+	($t:ty) => {
+		impl TryFromValue for $t {
+			#[inline]
+			fn try_from_value(value: Value) -> Result<Self> {
+				match value {
+					Value::Number(Number::Int(v)) => Ok(v as Self),
+					Value::Number(Number::Float(v)) => Ok(v as Self),
+					Value::Number(Number::Decimal(v)) => Ok(v.to_i64().unwrap() as Self),
+					v => Err(Error::UnexpectedType {
+						expected: stringify!($t),
+						actual: v.kindof(),
+					}.into()),
+				}
+			}
+		}
+	};
+	($($t:ty),+ $(,)?) => {
+		$(impl_try_from_value_for_int!($t);)+
+	};
+}
+
+macro_rules! impl_try_from_value_for_float {
+	($t:ty) => {
+		impl TryFromValue for $t {
+			#[inline]
+			fn try_from_value(value: Value) -> Result<Self> {
+				match value {
+					Value::Number(Number::Float(v)) => Ok(v as Self),
+					Value::Number(Number::Int(v)) => Ok(v as Self),
+					Value::Number(Number::Decimal(v)) => Ok(v.to_f64().unwrap() as Self),
+					v => Err(Error::UnexpectedType {
+						expected: stringify!($t),
+						actual: v.kindof(),
+					}.into()),
+				}
+			}
+		}
+	};
+	($($t:ty),+ $(,)?) => {
+		$(impl_try_from_value_for_float!($t);)+
+	};
+}
+
+impl TryFromValue for bool {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Bool(b) => Ok(b),
+			v => Err(Error::UnexpectedType {
+				expected: "bool",
+				actual: v.kindof(),
+			}.into()),
+		}
+	}
+}
+
+impl_try_from_value_for_int!(i8, i16, i32, i64, isize);
+impl_try_from_value_for_int!(u8, u16, u32, u64, usize);
+impl_try_from_value_for_float!(f32, f64);
+
 impl TryFromValue for () {
 	#[inline]
 	fn try_from_value(value: Value) -> Result<Self> {
@@ -111,10 +176,34 @@ where
 	}
 }
 
+pub trait TryFromValueContent: Sized {
+	fn try_from_value_content(value: Value) -> Result<Self>;
+}
+
+impl<T> TryFromValueContent for T
+where
+	T: DeserializeOwned,
+{
+	fn try_from_value_content(value: Value) -> Result<Self> {
+		from_value(value)
+	}
+}
+
+// impl<T> TryFromValueContent for T
+// where
+// 	T: DeserializeOwned,
+// 	{
+// 	fn try_from_value(value: Value) -> Result<Self> {
+// 		let content = value.into_content()?;
+// 		let deserializer = Deserializer::new(content).coerce_numbers();
+// 		T::deserialize(deserializer).map_err(Into::into)
+
+// 	}
+// }
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Values(pub Vec<Value>);
 
 impl<V> From<V> for Values

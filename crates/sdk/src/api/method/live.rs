@@ -1,3 +1,4 @@
+use crate::opt::SubscribableResource;
 use crate::Action;
 use crate::Surreal;
 use crate::api::Connection;
@@ -23,11 +24,9 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
-use surrealdb_core::expr::Value as Value;
-use surrealdb_core::sql::Statement;
-use surrealdb_core::sql::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, SqlValue as SqlValue, Table,
-	Thing as SqlThing, statements::LiveStatement,
+use surrealdb_core::expr::{
+	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, Value, Table,
+	Thing, statements::LiveStatement,
 };
 use uuid::Uuid;
 use surrealdb_core::expr::TryFromValue;
@@ -40,15 +39,19 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 const ID: &str = "id";
 
-fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
+fn into_future<C, R, RT>(this: Select<C, R, RT, Live>) -> BoxFuture<Result<Stream<RT>>>
 where
 	C: Connection,
+	R: SubscribableResource,
 {
 	let Select {
 		client,
 		resource,
 		..
 	} = this;
+
+	let live_query_params = resource.into_live_query_params();
+
 	Box::pin(async move {
 		let router = client.inner.router.extract()?;
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
@@ -58,50 +61,47 @@ where
 		fields.0 = vec![Field::All];
 		let mut stmt = LiveStatement::new(fields);
 		let mut table = Table::default();
-		match resource? {
-			Resource::Table(table) => {
-				let mut core_table = Table::default();
-				core_table.0 = table;
-				stmt.what = core_table.into()
-			}
-			Resource::RecordId(record) => {
-				let record: SqlThing = record.into();
-				table.0.clone_from(&record.tb);
-				stmt.what = table.into();
-				let mut ident = Ident::default();
-				ID.clone_into(&mut ident.0);
-				let mut idiom = Idiom::default();
-				idiom.0 = vec![Part::from(ident)];
-				let mut cond = Cond::default();
-				cond.0 = SqlValue::Expression(Box::new(Expression::new(
-					idiom.into(),
-					Operator::Equal,
-					record.into(),
-				)));
-				stmt.cond = Some(cond);
-			}
-			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
-			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
-			Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
-			Resource::Range(range) => {
-				let range = range.into_inner();
-				table.0.clone_from(&range.tb);
-				stmt.what = table.into();
-				stmt.cond = range.to_cond().map(Into::into);
-			}
-			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
-		}
-		todo!("STU: Fix all of this");
-		// let query =
-		// 	Query::normal(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
-		// let Value::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
-		// 	return Err(Error::InternalError(
-		// 		"successufull live query didn't return a uuid".to_string(),
-		// 	)
-		// 	.into());
-		// };
-		// let rx = register(router, *id).await?;
-		// Ok(Stream::new(client.inner.clone().into(), *id, Some(rx)))
+
+		
+
+		// match resource? {
+		// 	Resource::Table(table) => {
+		// 		let mut core_table = Table::default();
+		// 		core_table.0 = table;
+		// 		stmt.what = core_table.into()
+		// 	}
+		// 	Resource::RecordId(record) => {
+		// 		let record: SqlThing = record.into();
+		// 		table.0.clone_from(&record.tb);
+		// 		stmt.what = table.into();
+		// 		let mut ident = Ident::default();
+		// 		ID.clone_into(&mut ident.0);
+		// 		let mut idiom = Idiom::default();
+		// 		idiom.0 = vec![Part::from(ident)];
+		// 		let mut cond = Cond::default();
+		// 		cond.0 = SqlValue::Expression(Box::new(Expression::new(
+		// 			idiom.into(),
+		// 			Operator::Equal,
+		// 			record.into(),
+		// 		)));
+		// 		stmt.cond = Some(cond);
+		// 	}
+		// 	Resource::Object(_) => return Err(Error::LiveOnObject.into()),
+		// 	Resource::Array(_) => return Err(Error::LiveOnArray.into()),
+		// 	Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
+		// 	Resource::Range(range) => {
+		// 		let range = range.into_inner();
+		// 		table.0.clone_from(&range.tb);
+		// 		stmt.what = table.into();
+		// 		stmt.cond = range.to_cond().map(Into::into);
+		// 	}
+		// 	Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
+		// }
+
+		let live_query_id: Uuid = router.execute(Command::LiveQuery(live_query_params)).await?;
+
+		let rx = register(router, live_query_id).await?;
+		Ok(Stream::new(client.inner.clone().into(), live_query_id, Some(rx)))
 	})
 }
 
@@ -116,9 +116,10 @@ pub(crate) async fn register(router: &Router, id: Uuid) -> Result<Receiver<CoreN
 	Ok(rx)
 }
 
-impl<'r, Client> IntoFuture for Select<'r, Client, Value, Live>
+impl<'r, Client, R> IntoFuture for Select<'r, Client, R, Value, Live>
 where
 	Client: Connection,
+	R: SubscribableResource,
 {
 	type Output = Result<Stream<Value>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -128,12 +129,13 @@ where
 	}
 }
 
-impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>, Live>
+impl<'r, Client, R, RT> IntoFuture for Select<'r, Client, R, Option<RT>, Live>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: SubscribableResource,
+	RT: TryFromValue,
 {
-	type Output = Result<Stream<Option<R>>>;
+	type Output = Result<Stream<Option<RT>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
@@ -141,12 +143,13 @@ where
 	}
 }
 
-impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>, Live>
+impl<'r, Client, R, RT> IntoFuture for Select<'r, Client, R, Vec<RT>, Live>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: SubscribableResource,
+	RT: TryFromValue,
 {
-	type Output = Result<Stream<Vec<R>>>;
+	type Output = Result<Stream<Vec<RT>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {

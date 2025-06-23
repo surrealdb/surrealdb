@@ -2,6 +2,7 @@ use crate::method::merge::Merge;
 use crate::method::patch::Patch;
 use crate::opt::PatchOp;
 use crate::opt::PatchOps;
+use crate::opt::RangeableResource;
 use crate::Surreal;
 
 use crate::api::Connection;
@@ -20,23 +21,22 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{Value as Value, to_value as to_core_value};
 
-use super::ensure_values_are_objects;
-
 /// An update future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Update<'r, C: Connection, R> {
+pub struct Update<'r, C: Connection, R: Resource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Resource,
-	pub(super) response_type: PhantomData<R>,
+	pub(super) resource: R,
+	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R> Update<'_, C, R>
+impl<C, R, RT> Update<'_, C, R, RT>
 where
 	C: Connection,
+	R: Resource,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Update<'static, C, R> {
+	pub fn into_owned(self) -> Update<'static, C, R, RT> {
 		Update {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -56,7 +56,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Update {
-						what: resource,
+						what: resource.into_values(),
 						data: None,
 					})
 					.await
@@ -65,9 +65,10 @@ macro_rules! into_future {
 	};
 }
 
-impl<'r, Client> IntoFuture for Update<'r, Client, Value>
+impl<'r, Client, R> IntoFuture for Update<'r, Client, R, Value>
 where
 	Client: Connection,
+	R: Resource,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -75,31 +76,34 @@ where
 	into_future! {execute_value}
 }
 
-impl<'r, Client, R> IntoFuture for Update<'r, Client, Option<R>>
+impl<'r, Client, R, RT> IntoFuture for Update<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Option<R>>;
+	type Output = Result<Option<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
 
-impl<'r, Client, R> IntoFuture for Update<'r, Client, Vec<R>>
+impl<'r, Client, R, RT> IntoFuture for Update<'r, Client, R, Vec<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Vec<R>>;
+	type Output = Result<Vec<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }
 
-impl<C> Update<'_, C, Value>
+impl<C, R> Update<'_, C, R, Value>
 where
 	C: Connection,
+	R: RangeableResource,
 {
 	/// Restricts the records to update to those in the specified range
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
@@ -108,9 +112,10 @@ where
 	}
 }
 
-impl<C, R> Update<'_, C, Vec<R>>
+impl<C, R, RT> Update<'_, C, R, Vec<RT>>
 where
 	C: Connection,
+	R: RangeableResource,
 {
 	/// Restricts the records to update to those in the specified range
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
@@ -119,18 +124,15 @@ where
 	}
 }
 
-impl<'r, C, R> Update<'r, C, R>
+impl<'r, C, R, RT> Update<'r, C, R, RT>
 where
 	C: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content(self, data: Value) -> Content<'r, C, R> {
-		ensure_values_are_objects(
-			&data,
-		)?;
-
-		let what = self.resource;
+	pub fn content(self, data: Value) -> Content<'r, C, RT> {
+		let what = self.resource.into_values();
 
 		let data = match data {
 			Value::None => None,
@@ -146,19 +148,19 @@ where
 	}
 
 	/// Merges the current document / record data with the specified data
-	pub fn merge(self, data: Value) -> Merge<'r, C, R>
+	pub fn merge(self, data: Value) -> Merge<'r, C, R, RT>
 	{
 		Merge {
 			client: self.client,
 			resource: self.resource,
-			content: data,
+			content: Data::MergeExpression(data),
 			upsert: false,
 			response_type: PhantomData,
 		}
 	}
 
 	/// Patches the current document / record data with the specified JSON Patch data
-	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
+	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R, RT> {
 		Patch {
 			patches: PatchOps(vec![patch.into()]),
 			client: self.client,

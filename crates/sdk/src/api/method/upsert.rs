@@ -2,6 +2,7 @@ use crate::method::merge::Merge;
 use crate::method::patch::Patch;
 use crate::opt::PatchOp;
 use crate::opt::PatchOps;
+use crate::opt::RangeableResource;
 use crate::Surreal;
 
 use crate::api::Connection;
@@ -19,23 +20,23 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{Value as Value, to_value as to_core_value};
 
-use super::ensure_values_are_objects;
 
 /// An upsert future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Upsert<'r, C: Connection, R> {
+pub struct Upsert<'r, C: Connection, R: Resource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
-	pub(super) response_type: PhantomData<R>,
+	pub(super) resource: R,
+	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R> Upsert<'_, C, R>
+impl<C, R, RT> Upsert<'_, C, R, RT>
 where
 	C: Connection,
+	R: Resource,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Upsert<'static, C, R> {
+	pub fn into_owned(self) -> Upsert<'static, C, R, RT> {
 		Upsert {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -55,7 +56,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Upsert {
-						what: resource?,
+						what: resource.into_values(),
 						data: None,
 					})
 					.await
@@ -64,9 +65,10 @@ macro_rules! into_future {
 	};
 }
 
-impl<'r, Client> IntoFuture for Upsert<'r, Client, Value>
+impl<'r, Client, R> IntoFuture for Upsert<'r, Client, R, Value>
 where
 	Client: Connection,
+	R: Resource,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -74,77 +76,78 @@ where
 	into_future! {execute_value}
 }
 
-impl<'r, Client, R> IntoFuture for Upsert<'r, Client, Option<R>>
+impl<'r, Client, R, RT> IntoFuture for Upsert<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Option<R>>;
+	type Output = Result<Option<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
 
-impl<'r, Client, R> IntoFuture for Upsert<'r, Client, Vec<R>>
+impl<'r, Client, R, RT> IntoFuture for Upsert<'r, Client, R, Vec<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Vec<R>>;
+	type Output = Result<Vec<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }
 
-impl<C> Upsert<'_, C, Value>
+impl<C, R> Upsert<'_, C, R, Value>
 where
 	C: Connection,
+	R: RangeableResource,
 {
 	/// Restricts the records to upsert to those in the specified range
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
+		self.resource = self.resource.with_range(range.into());
 		self
 	}
 }
 
-impl<C, R> Upsert<'_, C, Vec<R>>
+impl<C, R, RT> Upsert<'_, C, R, Vec<RT>>
 where
 	C: Connection,
+	R: RangeableResource,
 {
 	/// Restricts the records to upsert to those in the specified range
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
+		self.resource = self.resource.with_range(range.into());
 		self
 	}
 }
 
-impl<'r, C, R> Upsert<'r, C, R>
+impl<'r, C, R, RT> Upsert<'r, C, R, RT>
 where
 	C: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content(self, data: impl Into<Value>) -> Result<Content<'r, C, R>> {
+	pub fn content(self, data: impl Into<Value>) -> Content<'r, C, RT> {
 		let data = data.into();
 
-		ensure_values_are_objects(
-			&data,
-		)?;
-
 		let command = Command::Upsert {
-			what: self.resource?,
+			what: self.resource.into_values(),
 			data: match data {
 				Value::None => None,
-				content => Some(content),
+				content => Some(Data::ContentExpression(content)),
 			}
 		};
 
-		Ok(Content::new(self.client, command))
+		Content::new(self.client, command)
 	}
 
 
 	/// Merges the current document / record data with the specified data
-	pub fn merge(self, data: Value) -> Merge<'r, C, R>
+	pub fn merge(self, data: Value) -> Merge<'r, C, R, RT>
 	{
 		Merge {
 			client: self.client,
@@ -156,7 +159,7 @@ where
 	}
 
 	/// Patches the current document / record data with the specified JSON Patch data
-	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
+	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R, RT> {
 		Patch {
 			patches: PatchOps(vec![patch.into()]),
 			client: self.client,

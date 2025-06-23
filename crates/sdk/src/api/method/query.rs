@@ -586,6 +586,7 @@ mod tests {
 	use super::*;
 	use serde::Deserialize;
 	use surrealdb_core::expr::Value as Value;
+	use surrealdb_core::expr::to_value;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {
@@ -660,21 +661,21 @@ mod tests {
 		let scalar = 265;
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![dbs::QueryResult::ok(scalar.into())]),
 			..QueryResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), Value::from(scalar));
+		assert_eq!(value, Value::from(scalar));
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![dbs::QueryResult::ok(scalar.into())]),
 			..QueryResults::new()
 		};
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![dbs::QueryResult::ok(scalar.into())]),
 			..QueryResults::new()
 		};
 		let vec: Vec<i64> = response.take(0).unwrap();
@@ -683,21 +684,21 @@ mod tests {
 		let scalar = true;
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![dbs::QueryResult::ok(scalar.into())]),
 			..QueryResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), Value::from(scalar));
+		assert_eq!(value, Value::from(scalar));
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![dbs::QueryResult::ok(scalar.into())]),
 			..QueryResults::new()
 		};
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(scalar.into())]),
+			results: to_map(vec![dbs::QueryResult::ok(scalar.into())]),
 			..QueryResults::new()
 		};
 		let vec: Vec<bool> = response.take(0).unwrap();
@@ -708,14 +709,14 @@ mod tests {
 	fn take_preserves_order() {
 		let mut response = QueryResults {
 			results: to_map(vec![
-				Ok(0.into()),
-				Ok(1.into()),
-				Ok(2.into()),
-				Ok(3.into()),
-				Ok(4.into()),
-				Ok(5.into()),
-				Ok(6.into()),
-				Ok(7.into()),
+				dbs::QueryResult::ok(0.into()),
+				dbs::QueryResult::ok(1.into()),
+				dbs::QueryResult::ok(2.into()),
+				dbs::QueryResult::ok(3.into()),
+				dbs::QueryResult::ok(4.into()),
+				dbs::QueryResult::ok(5.into()),
+				dbs::QueryResult::ok(6.into()),
+				dbs::QueryResult::ok(7.into()),
 			]),
 			..QueryResults::new()
 		};
@@ -732,7 +733,7 @@ mod tests {
 		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
-		assert_eq!(one.into_inner(), Value::from(1));
+		assert_eq!(one, Value::from(1));
 	}
 
 	#[test]
@@ -740,17 +741,17 @@ mod tests {
 		let summary = Summary {
 			title: "Lorem Ipsum".to_owned(),
 		};
-		let value = Value::try_from(summary.clone()).unwrap();
+		let value = to_value(summary.clone()).unwrap();
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
+			results: to_map(vec![dbs::QueryResult::ok(value.clone())]),
 			..QueryResults::new()
 		};
 		let title: Value = response.take("title").unwrap();
-		assert_eq!(title.into_inner(), Value::from(summary.title.as_str()));
+		assert_eq!(title, Value::from(summary.title.as_str()));
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
+			results: to_map(vec![dbs::QueryResult::ok(value.clone())]),
 			..QueryResults::new()
 		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
@@ -759,7 +760,7 @@ mod tests {
 		assert_eq!(title, summary.title);
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(value.into_inner())]),
+			results: to_map(vec![dbs::QueryResult::ok(value)]),
 			..QueryResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
@@ -769,10 +770,10 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
-		let value: Value = article.try_into().unwrap();
+		let value: Value = to_value(article).unwrap();
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
+			results: to_map(vec![dbs::QueryResult::ok(value.clone())]),
 			..QueryResults::new()
 		};
 		let Some(title): Option<String> = response.take("title").unwrap() else {
@@ -785,18 +786,18 @@ mod tests {
 		assert_eq!(body, article.body);
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
+			results: to_map(vec![dbs::QueryResult::ok(value.clone())]),
 			..QueryResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![article.title.clone()]);
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(value.into_inner())]),
+			results: to_map(vec![dbs::QueryResult::ok(value)]),
 			..QueryResults::new()
 		};
 		let value: Value = response.take("title").unwrap();
-		assert_eq!(value.into_inner(), Value::from(article.title));
+		assert_eq!(value, Value::from(article.title));
 	}
 
 	#[test]
@@ -805,10 +806,10 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
-		let value: Value = article.try_into().unwrap();
+		let value: Value = to_value(article).unwrap();
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
+			results: to_map(vec![dbs::QueryResult::ok(value.clone())]),
 			..QueryResults::new()
 		};
 		let title: Vec<String> = response.take("title").unwrap();
@@ -817,7 +818,7 @@ mod tests {
 		assert_eq!(body, vec![article.body]);
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(value.clone().into_inner())]),
+			results: to_map(vec![dbs::QueryResult::ok(value.clone())]),
 			..QueryResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();
@@ -827,21 +828,21 @@ mod tests {
 	#[test]
 	fn take_partial_records() {
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(vec![true, false].into())]),
+			results: to_map(vec![dbs::QueryResult::ok(vec![true, false].into())]),
 			..QueryResults::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), vec![Value::from(true), Value::from(false)].into());
+		assert_eq!(value, vec![Value::from(true), Value::from(false)].into());
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(vec![true, false].into())]),
+			results: to_map(vec![dbs::QueryResult::ok(vec![true, false].into())]),
 			..QueryResults::new()
 		};
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
 
 		let mut response = QueryResults {
-			results: to_map(vec![Ok(vec![true, false].into())]),
+			results: to_map(vec![dbs::QueryResult::ok(vec![true, false].into())]),
 			..QueryResults::new()
 		};
 
@@ -856,24 +857,24 @@ mod tests {
 			panic!("silently dropping records not allowed");
 		};
 
-		let records = map.swap_remove(&0).unwrap().1.unwrap();
+		let records = map.swap_remove(&0).unwrap().result.unwrap();
 		assert_eq!(records, vec![true, false].into());
 	}
 
 	#[test]
 	fn check_returns_the_first_error() {
 		let response = vec![
-			Ok(0.into()),
-			Ok(1.into()),
-			Ok(2.into()),
-			Err(Error::ConnectionUninitialised.into()),
-			Ok(3.into()),
-			Ok(4.into()),
-			Ok(5.into()),
-			Err(Error::BackupsNotSupported.into()),
-			Ok(6.into()),
-			Ok(7.into()),
-			Err(Error::DuplicateRequestId(0).into()),
+			dbs::QueryResult::ok(0.into()),
+			dbs::QueryResult::ok(1.into()),
+			dbs::QueryResult::ok(2.into()),
+			dbs::QueryResult::err(Error::ConnectionUninitialised.into()),
+			dbs::QueryResult::ok(3.into()),
+			dbs::QueryResult::ok(4.into()),
+			dbs::QueryResult::ok(5.into()),
+			dbs::QueryResult::err(Error::BackupsNotSupported.into()),
+			dbs::QueryResult::ok(6.into()),
+			dbs::QueryResult::ok(7.into()),
+			dbs::QueryResult::err(Error::DuplicateRequestId("0".to_string()).into()),
 		];
 		let response = QueryResults {
 			results: to_map(response),
@@ -888,17 +889,17 @@ mod tests {
 	#[test]
 	fn take_errors() {
 		let response = vec![
-			Ok(0.into()),
-			Ok(1.into()),
-			Ok(2.into()),
-			Err(Error::ConnectionUninitialised.into()),
-			Ok(3.into()),
-			Ok(4.into()),
-			Ok(5.into()),
-			Err(Error::BackupsNotSupported.into()),
-			Ok(6.into()),
-			Ok(7.into()),
-			Err(Error::DuplicateRequestId(0).into()),
+			dbs::QueryResult::ok(0.into()),
+			dbs::QueryResult::ok(1.into()),
+			dbs::QueryResult::ok(2.into()),
+			dbs::QueryResult::err(Error::ConnectionUninitialised.into()),
+			dbs::QueryResult::ok(3.into()),
+			dbs::QueryResult::ok(4.into()),
+			dbs::QueryResult::ok(5.into()),
+			dbs::QueryResult::err(Error::BackupsNotSupported.into()),
+			dbs::QueryResult::ok(6.into()),
+			dbs::QueryResult::ok(7.into()),
+			dbs::QueryResult::err(Error::DuplicateRequestId("0".to_string()).into()),
 		];
 		let mut response = QueryResults {
 			results: to_map(response),
@@ -907,9 +908,10 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		let Some(Error::DuplicateRequestId(0)) = errors[&10].downcast_ref() else {
+		let Some(Error::DuplicateRequestId(duplicate_id)) = errors[&10].downcast_ref() else {
 			panic!("index `10` is not `DuplicateRequestId`");
 		};
+		assert_eq!(duplicate_id, "0");
 		let Some(Error::BackupsNotSupported) = errors[&7].downcast_ref() else {
 			panic!("index `7` is not `BackupsNotSupported`");
 		};
@@ -921,6 +923,6 @@ mod tests {
 		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
-		assert_eq!(value.into_inner(), Value::from(3));
+		assert_eq!(value, Value::from(3));
 	}
 }

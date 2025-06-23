@@ -144,6 +144,7 @@
 //! }
 //! ```
 
+use crate::api::conn::LiveQueryParams;
 use crate::api::err::Error;
 use crate::{
 	Result,
@@ -174,11 +175,10 @@ use std::{
 	mem,
 	sync::Arc,
 };
-use surrealdb_core::expr::Function;
+use surrealdb_core::expr::{Cond, Function};
 use surrealdb_core::expr::LogicalPlan;
 use surrealdb_core::expr::statements::{
-	CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
-	UpdateStatement, UpsertStatement,
+	CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement, SelectStatement, UpdateStatement, UpsertStatement
 };
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
@@ -215,8 +215,6 @@ use surrealdb_core::{
 	ml::storage::surml_file::SurMlFile,
 	sql::statements::{DefineModelStatement, DefineStatement},
 };
-
-use super::resource_to_values;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -645,7 +643,7 @@ async fn router(
 			data,
 		} => {
 			let mut create_plan = CreateStatement::default();
-			create_plan.what = resource_to_values(what);
+			create_plan.what = what;
 			create_plan.data = data.map(Data::ContentExpression);
 			create_plan.output = Some(Output::After);
 			let plan = LogicalPlan::Create(create_plan);
@@ -660,37 +658,34 @@ async fn router(
 			what,
 			data,
 		} => {
-			let one = what.is_single_recordid();
+
 			let upsert_plan = {
 				let mut stmt = UpsertStatement::default();
-				stmt.what = resource_to_values(what);
+				stmt.what = what;
 				stmt.data = data;
 				stmt.output = Some(Output::After);
 				stmt
 			};
 			let plan = LogicalPlan::Upsert(upsert_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			let value = take(one, response).await?;
-			Ok(QueryResultData::new_from_value(value))
+			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
+			Ok(QueryResultData::Results(results))
 		}
 		Command::Update {
 			what,
 			data,
 		} => {
-			let one = what.is_single_recordid();
 			let update_plan = {
 				let mut stmt = UpdateStatement::default();
-				stmt.what = resource_to_values(what);
+				stmt.what = what;
 				stmt.data = data;
 				stmt.output = Some(Output::After);
 				stmt
 			};
 			let plan = LogicalPlan::Update(update_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			let value = take(one, response).await?;
-			Ok(QueryResultData::new_from_value(value))
+			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
+			Ok(QueryResultData::Results(results))
 		}
 		Command::Insert {
 			what,
@@ -706,41 +701,36 @@ async fn router(
 			};
 			let plan = LogicalPlan::Insert(insert_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			let value = take(one, response).await?;
-			Ok(QueryResultData::new_from_value(value))
+			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
+			Ok(QueryResultData::Results(results))
 		}
 		Command::Select {
 			what,
 		} => {
-			let one = what.is_single_recordid();
 			let select_plan = {
 				let mut stmt = SelectStatement::default();
-				stmt.what = resource_to_values(what);
+				stmt.what = what;
 				stmt.expr.0 = vec![Field::All];
 				stmt
 			};
 			let plan = LogicalPlan::Select(select_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			let value = take(one, response).await?;
-			Ok(QueryResultData::new_from_value(value))
+			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
+			Ok(QueryResultData::Results(results))
 		}
 		Command::Delete {
 			what,
 		} => {
-			let one = what.is_single_recordid();
 			let delete_plan = {
 				let mut stmt = DeleteStatement::default();
-				stmt.what = resource_to_values(what);
+				stmt.what = what;
 				stmt.output = Some(Output::Before);
 				stmt
 			};
 			let plan = LogicalPlan::Delete(delete_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-			let response = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			let value = take(one, response).await?;
-			Ok(QueryResultData::new_from_value(value))
+			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
+			Ok(QueryResultData::Results(results))
 		}
 		Command::Query {
 			query,
@@ -748,22 +738,31 @@ async fn router(
 		} => {
 			let mut vars = vars.read().await.clone();
 			vars.append(&mut variables);
-			let response = kvs.execute(&query, &*session.read().await, vars).await?;
-			let response = process(response);
-			todo!("STU: Finish this");
-			// Ok(response)
+			let results = kvs.execute(&query, &*session.read().await, vars).await?;
+			Ok(QueryResultData::Results(results))
 		}
 		Command::MultiQuery { queries, variables } => {
 			let mut vars = vars.read().await.clone();
 			vars.extend(variables);
-			let mut responses = Vec::with_capacity(queries.len());
+			let mut results = Vec::with_capacity(queries.len());
 			for query in queries {
-				let response = kvs.execute(&query, &*session.read().await, vars.clone()).await?;
-				responses.extend(response);
+				let query_results = kvs.execute(&query, &*session.read().await, vars.clone()).await?;
+				results.extend(query_results);
 			}
-			let response = process(responses);
-			todo!("STU: Finish this");
-			// Ok(response)
+			Ok(QueryResultData::Results(results))
+		}
+		Command::LiveQuery(LiveQueryParams { what, cond, fields }) => {
+
+			let plan = {
+				let mut stmt = LiveStatement::new(fields);
+				stmt.what = what;
+				stmt.cond = cond.map(Cond);
+				LogicalPlan::Live(stmt)
+			};
+
+			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
+			Ok(QueryResultData::Results(results))
 		}
 
 		#[cfg(target_family = "wasm")]

@@ -38,6 +38,22 @@ pub struct QueryResult {
 	pub result: Result<Value>,
 }
 
+impl QueryResult {
+	pub fn ok(value: Value) -> Self {
+		Self {
+			stats: QueryStats::default(),
+			result: Ok(value),
+		}
+	}
+
+	pub fn err(err: anyhow::Error) -> Self {
+		Self {
+			stats: QueryStats::default(),
+			result: Err(err),
+		}
+	}
+}
+
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct QueryStats {

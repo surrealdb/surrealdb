@@ -1,3 +1,4 @@
+use crate::opt::RangeableResource;
 use crate::Surreal;
 
 use crate::api::Connection;
@@ -17,18 +18,19 @@ use surrealdb_core::expr::TryFromValue;
 /// A record delete future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Delete<'r, C: Connection, R> {
+pub struct Delete<'r, C: Connection, R, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
-	pub(super) response_type: PhantomData<R>,
+	pub(super) resource: R,
+	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R> Delete<'_, C, R>
+impl<C, R, RT> Delete<'_, C, R, RT>
 where
 	C: Connection,
+	R: Resource,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Delete<'static, C, R> {
+	pub fn into_owned(self) -> Delete<'static, C, R, RT> {
 		Delete {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -44,11 +46,12 @@ macro_rules! into_future {
 				resource,
 				..
 			} = self;
+			let what = resource.into_values();
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Delete {
-						what: resource?,
+						what,
 					})
 					.await
 			})
@@ -56,9 +59,10 @@ macro_rules! into_future {
 	};
 }
 
-impl<'r, Client> IntoFuture for Delete<'r, Client, Value>
+impl<'r, Client, R> IntoFuture for Delete<'r, Client, R, Value>
 where
 	Client: Connection,
+	R: Resource,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -66,46 +70,50 @@ where
 	into_future! {execute_value}
 }
 
-impl<'r, Client, R> IntoFuture for Delete<'r, Client, Option<R>>
+impl<'r, Client, R, RT> IntoFuture for Delete<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Option<R>>;
+	type Output = Result<Option<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_opt}
 }
 
-impl<'r, Client, R> IntoFuture for Delete<'r, Client, Vec<R>>
+impl<'r, Client, R, RT> IntoFuture for Delete<'r, Client, R, Vec<RT>>
 where
 	Client: Connection,
-	R: TryFromValue,
+	R: Resource,
+	RT: TryFromValue,
 {
-	type Output = Result<Vec<R>>;
+	type Output = Result<Vec<RT>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	into_future! {execute_vec}
 }
 
-impl<C> Delete<'_, C, Value>
+impl<C, R> Delete<'_, C, R, Value>
 where
 	C: Connection,
+	R: RangeableResource,
 {
 	/// Restricts a range of records to delete
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
+		self.resource = self.resource.with_range(range.into());
 		self
 	}
 }
 
-impl<C, R> Delete<'_, C, Vec<R>>
+impl<C, R, RT> Delete<'_, C, R, Vec<RT>>
 where
 	C: Connection,
+	R: RangeableResource,
 {
 	/// Restricts a range of records to delete
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
+		self.resource = self.resource.with_range(range.into());
 		self
 	}
 }

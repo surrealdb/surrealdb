@@ -6,9 +6,9 @@ use revision::Revisioned;
 use semver::Op;
 use serde::{Serialize, ser::SerializeMap as _};
 use surrealdb_core::dbs::Variables;
-use surrealdb_core::expr::Data;
+use surrealdb_core::expr::{Data, Fields, Values};
 use surrealdb_core::iam::{SigninParams, SignupParams};
-use surrealdb_core::protocol::ToFlatbuffers;
+use surrealdb_core::protocol::{FromFlatbuffers, ToFlatbuffers};
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
@@ -71,6 +71,40 @@ impl ToFlatbuffers for Request {
 }
 
 #[derive(Debug, Clone)]
+pub struct LiveQueryParams {
+	pub what: Value,
+	pub cond: Option<Value>,
+	pub fields: Fields,
+}
+
+// impl ToFlatbuffers for LiveQueryParams {
+// 	type Output<'a> = flatbuffers::WIPOffset<rpc_fb::LiveQueryParams<'a>>;
+// 	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
+// 		let what = self.what.to_fb(fbb);
+// 		let cond = self.cond.as_ref().map(|c| c.to_fb(fbb));
+
+// 		rpc_fb::LiveQueryParams::create(
+// 			fbb,
+// 			&rpc_fb::LiveQueryParamsArgs {
+// 				what: Some(what),
+// 				cond,
+// 			},
+// 		)
+// 	}
+// }
+
+// impl FromFlatbuffers for LiveQueryParams {
+// 	type Input<'a> = rpc_fb::LiveQueryParams<'a>;
+
+// 	fn from_fb(input: &Self::Input<'_>) -> Self {
+// 		let what = Values::from_fb(input.what().unwrap());
+// 		let cond = input.cond().map(Value::from_fb);
+
+// 		Self { what, cond }
+// 	}
+// }
+
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) enum Command {
 	Use {
@@ -84,15 +118,15 @@ pub(crate) enum Command {
 	},
 	Invalidate,
 	Create {
-		what: Resource,
+		what: Values,
 		data: Option<Value>,
 	},
 	Upsert {
-		what: Resource,
+		what: Values,
 		data: Option<Data>,
 	},
 	Update {
-		what: Resource,
+		what: Values,
 		data: Option<Data>,
 	},
 	Insert {
@@ -101,10 +135,10 @@ pub(crate) enum Command {
 		data: Value,
 	},
 	Select {
-		what: Resource,
+		what: Values,
 	},
 	Delete {
-		what: Resource,
+		what: Values,
 	},
 	Query {
 		query: Cow<'static, str>,
@@ -114,6 +148,7 @@ pub(crate) enum Command {
 		queries: Vec<Cow<'static, str>>,
 		variables: Variables,
 	},
+	LiveQuery(LiveQueryParams),
 	ExportFile {
 		path: PathBuf,
 		config: Option<DbExportConfig>,
@@ -176,7 +211,7 @@ impl Command {
 			}
 			| Command::Delete {
 				what,
-			} => matches!(what, Resource::RecordId(_)),
+			} => matches!(what, Value::Thing(_)),
 			Command::Insert {
 				data,
 				..

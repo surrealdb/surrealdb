@@ -24,8 +24,7 @@ pub use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc::Reques
 pub use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc::Response as ResponseFb;
 
 mod cmd;
-pub(crate) use cmd::Command;
-pub(crate) use cmd::Request;
+pub(crate) use cmd::{Command, Request, LiveQueryParams};
 #[cfg(feature = "protocol-http")]
 pub(crate) use cmd::RouterRequest;
 
