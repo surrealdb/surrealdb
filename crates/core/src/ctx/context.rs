@@ -537,21 +537,26 @@ impl MutableContext {
 	///
 	#[cfg(feature = "http")]
 	pub(crate) async fn check_allowed_net(&self, url: &Url) -> Result<()> {
-		let is_allowed = |target| {
-			if !self.capabilities.allows_network_target(target) {
-				warn!(
-					"Capabilities denied outgoing network connection attempt, target: '{target}'"
-				);
-				bail!(Error::NetTargetNotAllowed(target.to_string()));
+		let match_any_deny_net = |t| {
+			if self.capabilities.matches_any_deny_net(t) {
+				warn!("Capabilities denied outgoing network connection attempt, target: '{t}'");
+				bail!(Error::NetTargetNotAllowed(t.to_string()));
 			}
-			trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 			Ok(())
 		};
 		match url.host() {
 			Some(host) => {
 				let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
 				// Check the domain name (if any)
-				is_allowed(&target)?;
+				let host_allowed = self.capabilities.matches_any_allow_net(&target);
+				if !host_allowed {
+					warn!(
+						"Capabilities denied outgoing network connection attempt, target: '{target}'"
+					);
+					bail!(Error::NetTargetNotAllowed(target.to_string()));
+				}
+				// Check against the deny list
+				match_any_deny_net(&target)?;
 				// Resolve the domain name to a vector of IP addresses
 				#[cfg(not(target_family = "wasm"))]
 				let targets = target.resolve().await?;
@@ -559,8 +564,9 @@ impl MutableContext {
 				let targets = target.resolve()?;
 				for t in &targets {
 					// For each IP address resolved, check it is allowed
-					is_allowed(t)?;
+					match_any_deny_net(t)?;
 				}
+				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 				Ok(())
 			}
 			_ => bail!(Error::InvalidUrl(url.to_string())),

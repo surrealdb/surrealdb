@@ -815,6 +815,14 @@ impl Capabilities {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
 	}
 
+	pub(crate) fn matches_any_allow_net(&self, target: &NetTarget) -> bool {
+		self.allow_net.matches(target)
+	}
+
+	pub(crate) fn matches_any_deny_net(&self, target: &NetTarget) -> bool {
+		self.deny_net.matches(target)
+	}
+
 	pub fn allows_rpc_method(&self, target: &MethodTarget) -> bool {
 		self.allow_rpc.matches(target) && !self.deny_rpc.matches(target)
 	}

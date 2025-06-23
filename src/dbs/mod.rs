@@ -644,7 +644,7 @@ mod tests {
 		)
 	}
 
-	#[test(tokio::test)]
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_capabilities() {
 		let server1 = {
 			let s = MockServer::start().await;
@@ -921,11 +921,11 @@ mod tests {
 				),
 				Session::owner(),
 				format!("RETURN http::get('{}')", server2.uri()),
-				false,
-				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
+				true,
+				"SUCCESS".to_string(),
 			),
 			(
-				// Ensure redirect fails
+				// 15 - Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
@@ -939,10 +939,13 @@ mod tests {
 				Session::owner(),
 				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
-				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
+				format!(
+					"There was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
+					server3.uri()
+				),
 			),
 			(
-				// Ensure connecting via localhost succeeds
+				// 16 - Ensure connecting via localhost succeeds
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
@@ -953,7 +956,7 @@ mod tests {
 				true,
 				"SUCCESS".to_string(),
 			),
-			// - 15
+			// - 17
 			(
 				// Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -968,6 +971,41 @@ mod tests {
 				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
 				false,
 				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
+			),
+			// 18 - Ensure redirect succeed
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str("blog.manel.in").unwrap()].into(),
+						))
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[
+								NetTarget::from_str("0.0.0.0/8").unwrap(),
+								NetTarget::from_str("10.0.0.0/8").unwrap(),
+								NetTarget::from_str("10.18.0.0/16").unwrap(),
+								NetTarget::from_str("10.2.0.0/16").unwrap(),
+								NetTarget::from_str("100.64.0.0/10").unwrap(),
+								NetTarget::from_str("127.0.0.0/8").unwrap(),
+								NetTarget::from_str("169.254.0.0/16").unwrap(),
+								NetTarget::from_str("172.16.0.0/12").unwrap(),
+								NetTarget::from_str("172.20.0.0/16").unwrap(),
+								NetTarget::from_str("192.0.0.0/24").unwrap(),
+								NetTarget::from_str("192.168.0.0/16").unwrap(),
+								NetTarget::from_str("192.88.99.0/24").unwrap(),
+								NetTarget::from_str("198.18.0.0/15").unwrap(),
+								NetTarget::from_str("::1/128").unwrap(),
+								NetTarget::from_str("fc00::/7").unwrap(),
+								NetTarget::from_str("fc00::/8").unwrap(),
+							]
+							.into(),
+						)),
+				),
+				Session::owner(),
+				"RETURN http::get('https://blog.manel.in/')".to_string(),
+				true,
+				"<!DOCTYPE html>".to_string(),
 			),
 		];
 
