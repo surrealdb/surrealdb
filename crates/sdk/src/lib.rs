@@ -24,6 +24,8 @@ extern crate tracing;
 #[doc(hidden)]
 pub use surrealdb_core::*;
 
+pub use surrealdb_core::expr::Value;
+
 #[expect(hidden_glob_reexports)]
 mod api;
 
@@ -48,9 +50,9 @@ pub use crate::api::headers;
 
 #[doc(inline)]
 pub use crate::api::{
-	Connect, Connection, Response, Surreal, engine, method, opt,
+	Connect, Connection, QueryResults, Surreal, engine, method, opt,
 	value::{
-		self, Action, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value,
+		self, Action, RecordIdKey, Notification,
 	},
 };
 

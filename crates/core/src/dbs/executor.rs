@@ -1,9 +1,9 @@
 use crate::ctx::Context;
-use crate::ctx::reason::Reason;
+use crate::ctx::reason::DoneReason;
 use crate::dbs::Force;
 use crate::dbs::Options;
-use crate::dbs::QueryType;
-use crate::dbs::response::Response;
+use crate::dbs::QueryResult;
+use crate::dbs::QueryStats;
 use crate::err;
 use crate::err::Error;
 use crate::expr::Base;
@@ -23,6 +23,7 @@ use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::statements::{OptionStatement, UseStatement};
 use anyhow::{Result, anyhow, bail};
+use chrono::Utc;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
 use std::pin::{Pin, pin};
@@ -39,7 +40,7 @@ const TARGET: &str = "surrealdb::core::dbs";
 
 pub struct Executor {
 	stack: TreeStack,
-	results: Vec<Response>,
+	results: Vec<QueryResult>,
 	opt: Options,
 	ctx: Context,
 }
@@ -167,10 +168,10 @@ impl Executor {
 		// Catch cancellation during running.
 		match self.ctx.done(true)? {
 			None => {}
-			Some(Reason::Timedout) => {
+			Some(DoneReason::Timedout) => {
 				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout)));
 			}
-			Some(Reason::Canceled) => {
+			Some(DoneReason::Canceled) => {
 				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryCancelled)));
 			}
 		}
@@ -183,10 +184,10 @@ impl Executor {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
 			None => {}
-			Some(Reason::Timedout) => {
+			Some(DoneReason::Timedout) => {
 				bail!(Error::QueryTimedout);
 			}
-			Some(Reason::Canceled) => {
+			Some(DoneReason::Canceled) => {
 				bail!(Error::QueryCancelled);
 			}
 		}
@@ -283,10 +284,9 @@ impl Executor {
 					return Ok(());
 				}
 
-				self.results.push(Response {
-					time: Duration::ZERO,
+				self.results.push(QueryResult {
+					stats: QueryStats::default(),
 					result: Err(anyhow!(Error::QueryNotExecuted)),
-					query_type: QueryType::Other,
 				});
 			}
 
@@ -326,7 +326,6 @@ impl Executor {
 				let _ = txn.cancel().await;
 
 				for res in &mut self.results[start_results..] {
-					res.query_type = QueryType::Other;
 					res.result = Err(anyhow!(Error::QueryCancelled));
 				}
 
@@ -337,13 +336,12 @@ impl Executor {
 						return Ok(());
 					}
 
-					self.results.push(Response {
-						time: Duration::ZERO,
+					self.results.push(QueryResult {
+						stats: QueryStats::default(),
 						result: Err(match done {
-							Reason::Timedout => anyhow!(Error::QueryTimedout),
-							Reason::Canceled => anyhow!(Error::QueryCancelled),
+							DoneReason::Timedout => anyhow!(Error::QueryTimedout),
+							DoneReason::Canceled => anyhow!(Error::QueryCancelled),
 						}),
-						query_type: QueryType::Other,
 					});
 				}
 
@@ -357,31 +355,23 @@ impl Executor {
 
 			trace!(target: TARGET, statement = %stmt, "Executing statement");
 
-			let query_type = match stmt {
-				Statement::Live(_) => QueryType::Live,
-				Statement::Kill(_) => QueryType::Kill,
-				_ => QueryType::Other,
-			};
-
-			let before = Instant::now();
+			let started_at = Utc::now();
 			let value = match stmt {
 				Statement::Begin(_) => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
 
 					for res in &mut self.results[start_results..] {
-						res.query_type = QueryType::Other;
 						res.result = Err(anyhow!(Error::QueryNotExecuted));
 					}
 
-					self.results.push(Response {
-						time: Duration::ZERO,
+					self.results.push(QueryResult {
+						stats: QueryStats::default(),
 						result: Err(anyhow!(Error::QueryNotExecutedDetail {
 							message:
 								"Tried to start a transaction while another transaction was open"
 									.to_string(),
 						})),
-						query_type: QueryType::Other,
 					});
 
 					self.opt.sender = None;
@@ -393,10 +383,9 @@ impl Executor {
 							return Ok(());
 						}
 
-						self.results.push(Response {
-							time: Duration::ZERO,
+						self.results.push(QueryResult {
+							stats: QueryStats::default(),
 							result: Err(anyhow!(Error::QueryNotExecuted)),
-							query_type: QueryType::Other,
 						});
 					}
 
@@ -408,7 +397,6 @@ impl Executor {
 
 					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
-						res.query_type = QueryType::Other;
 						res.result = Err(anyhow!(Error::QueryCancelled));
 					}
 
@@ -448,7 +436,6 @@ impl Executor {
 
 					// failed to commit
 					for res in &mut self.results[start_results..] {
-						res.query_type = QueryType::Other;
 						res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
 							message: e.to_string(),
 						}));
@@ -484,15 +471,13 @@ impl Executor {
 						}
 						Err(ControlFlow::Err(e)) => {
 							for res in &mut self.results[start_results..] {
-								res.query_type = QueryType::Other;
 								res.result = Err(anyhow!(Error::QueryNotExecuted));
 							}
 
 							// statement return an error. Consume all the other statement until we hit a cancel or commit.
-							self.results.push(Response {
-								time: before.elapsed(),
+							self.results.push(QueryResult {
+								stats: QueryStats::from_start_time(started_at),
 								result: Err(e),
-								query_type,
 							});
 
 							let _ = txn.cancel().await;
@@ -506,10 +491,9 @@ impl Executor {
 									return Ok(());
 								}
 
-								self.results.push(Response {
-									time: Duration::ZERO,
+								self.results.push(QueryResult {
+									stats: QueryStats::default(),
 									result: Err(anyhow!(Error::QueryNotExecuted)),
-									query_type: QueryType::Other,
 								});
 							}
 
@@ -529,10 +513,9 @@ impl Executor {
 				}
 			};
 
-			self.results.push(Response {
-				time: before.elapsed(),
+			self.results.push(QueryResult {
+				stats: QueryStats::from_start_time(started_at),
 				result: value,
-				query_type,
 			});
 		}
 
@@ -541,7 +524,6 @@ impl Executor {
 		let _ = txn.cancel().await;
 
 		for res in &mut self.results[start_results..] {
-			res.query_type = QueryType::Other;
 			res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
 				message: "Missing COMMIT statement".to_string(),
 			}));
@@ -558,7 +540,7 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		qry: Query,
-	) -> Result<Vec<Response>> {
+	) -> Result<Vec<QueryResult>> {
 		let stream = futures::stream::iter(qry.into_iter().map(Ok));
 		Self::execute_stream(kvs, ctx, opt, stream).await
 	}
@@ -568,22 +550,15 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		plan: LogicalPlan,
-	) -> Result<Vec<Response>> {
+	) -> Result<Vec<QueryResult>> {
 		let mut this = Executor::new(ctx, opt);
 
-		let query_type = match &plan {
-			LogicalPlan::Live(_) => QueryType::Live,
-			LogicalPlan::Kill(_) => QueryType::Kill,
-			_ => QueryType::Other,
-		};
-
-		let now = Instant::now();
+		let started_at = Utc::now();
 		let result = this.execute_plan_impl(kvs, plan).await;
 
-		Ok(vec![Response {
-			time: now.elapsed(),
+		Ok(vec![QueryResult {
+			stats: QueryStats::from_start_time(started_at.into()),
 			result,
-			query_type,
 		}])
 	}
 
@@ -593,7 +568,7 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		stream: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Statement>>,
 	{
@@ -605,10 +580,9 @@ impl Executor {
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
-					this.results.push(Response {
-						time: Duration::ZERO,
+					this.results.push(QueryResult {
+						stats: QueryStats::default(),
 						result: Err(e),
-						query_type: QueryType::Other,
 					});
 
 					return Ok(this.results);
@@ -620,24 +594,21 @@ impl Executor {
 				// handle option here because it doesn't produce a result.
 				Statement::Begin(_) => {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
-						this.results.push(Response {
-							time: Duration::ZERO,
+						this.results.push(QueryResult {
+							stats: QueryStats::default(),
 							result: Err(e),
-							query_type: QueryType::Other,
 						});
 
 						return Ok(this.results);
 					}
 				}
 				stmt => {
-					let query_type: QueryType = (&stmt).into();
 
-					let now = Instant::now();
+					let started_at = Utc::now();
 					let result = this.execute_bare_statement(kvs, stmt).await;
-					this.results.push(Response {
-						time: now.elapsed(),
+					this.results.push(QueryResult {
+						stats: QueryStats::from_start_time(started_at),
 						result,
-						query_type,
 					});
 				}
 			}
@@ -648,7 +619,7 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
-	use crate::{dbs::Session, iam::Role, kvs::Datastore};
+	use crate::{dbs::{Session, Variables}, iam::Role, kvs::Datastore};
 
 	#[tokio::test]
 	async fn check_execute_option_permissions() {
@@ -748,7 +719,7 @@ mod tests {
 			{
 				let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
-				let res = ds.execute(statement, session, None).await;
+				let res = ds.execute(statement, session, Variables::default()).await;
 
 				if *should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
@@ -769,7 +740,7 @@ mod tests {
 			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
 			let res =
-				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
 
 			let err = res.unwrap_err().to_string();
 			assert!(
@@ -784,7 +755,7 @@ mod tests {
 			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(false);
 
 			let res =
-				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
 
 			assert!(
 				res.is_ok(),
@@ -800,21 +771,21 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 2s";
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
 			assert!(res.is_ok(), "Failed to execute statement with small timeout: {:?}", res);
 		}
 		// With large timeout
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 31540000s"; // 1 year
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
 			assert!(res.is_ok(), "Failed to execute statement with large timeout: {:?}", res);
 		}
 		// With very large timeout
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
 			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
 			let err = res.unwrap()[0].result.as_ref().unwrap_err().to_string();
 			assert!(

@@ -1,3 +1,4 @@
+use crate::dbs::QueryResultData;
 #[cfg(not(target_family = "wasm"))]
 use crate::gql::SchemaCache;
 use crate::protocol::flatbuffers::surreal_db::protocol::rpc::Command;
@@ -6,7 +7,6 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-use super::Data;
 use super::Method;
 use super::RpcError;
 use super::RpcProtocolV3;
@@ -25,7 +25,7 @@ pub trait RpcContext {
 	/// Mutable access to the current session for this RPC context
 	fn set_session(&self, session: Arc<Session>);
 	/// The version information for this RPC context
-	fn version_data(&self) -> Data;
+	fn version_data(&self) -> QueryResultData;
 
 	// ------------------------------
 	// Realtime
@@ -70,7 +70,7 @@ pub trait RpcContext {
 		&'rpc self,
 		version: Option<u8>,
 		command: Request<'rpc>,
-	) -> Result<Data, RpcError>
+	) -> Result<QueryResultData, RpcError>
 	where
 		Self: RpcProtocolV3,
 	{

@@ -153,7 +153,7 @@ impl InfoStructure for LiveStatement {
 
 #[cfg(test)]
 mod tests {
-	use crate::dbs::{Action, Capabilities, Notification, Session};
+	use crate::dbs::{Action, Capabilities, Notification, Session, Variables};
 	use crate::expr::Thing;
 	use crate::expr::Value;
 	use crate::kvs::Datastore;
@@ -184,7 +184,7 @@ mod tests {
 
 		// Initiate a live query statement
 		let lq_stmt = format!("LIVE SELECT * FROM {}", tb);
-		let live_query_response = &mut dbs.execute(&lq_stmt, &ses, None).await.unwrap();
+		let live_query_response = &mut dbs.execute(&lq_stmt, &ses, Variables::default()).await.unwrap();
 
 		let live_id = live_query_response.remove(0).result.unwrap();
 		let live_id = match live_id {
@@ -201,7 +201,7 @@ mod tests {
 
 		// Initiate a Create record
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
-		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
+		let create_response = &mut dbs.execute(&create_statement, &ses, Variables::default()).await.unwrap();
 		assert_eq!(create_response.len(), 1);
 		let expected_record: Value = SqlValue::parse(&format!(
 			"[{{
@@ -255,7 +255,7 @@ mod tests {
 
 		// Initiate a Create record
 		let create_statement = format!("CREATE {}:test_true SET condition = true", tb);
-		dbs.execute(&create_statement, &ses, None).await.unwrap();
+		dbs.execute(&create_statement, &ses, Variables::default()).await.unwrap();
 
 		// Create a new transaction and confirm that a new table is created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
@@ -266,7 +266,7 @@ mod tests {
 
 		// Initiate a live query statement
 		let lq_stmt = format!("LIVE SELECT * FROM {}", tb);
-		dbs.execute(&lq_stmt, &ses, None).await.unwrap();
+		dbs.execute(&lq_stmt, &ses, Variables::default()).await.unwrap();
 
 		// Verify that the old table definition was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();

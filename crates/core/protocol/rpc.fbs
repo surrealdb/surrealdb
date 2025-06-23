@@ -4,25 +4,32 @@ namespace SurrealDB.Protocol.Rpc;
 
 table HealthParams {
 }
+
 table VersionParams {
 }
+
 table PingParams {
 }
+
 table InfoParams {
 }
+
 table UseParams {
     namespace: string (id: 0);
     database: string (id: 1);
 }
+
 table RootUserCredentials {
     username: string (id: 0);
     password: string (id: 1);
 }
+
 table NamespaceAccessCredentials {
     namespace: string (id: 0);
     access: string (id: 1);
     key: string (id: 2);
 }
+
 table DatabaseAccessCredentials {
     namespace: string (id: 0);
     database: string (id: 1);
@@ -30,11 +37,13 @@ table DatabaseAccessCredentials {
     key: string (id: 3);
     refresh: string (id: 4);
 }
+
 table NamespaceUserCredentials {
     namespace: string (id: 0);
     username: string (id: 1);
     password: string (id: 2);
 }
+
 table DatabaseUserCredentials {
     namespace: string (id: 0);
     database: string (id: 1);
@@ -42,7 +51,7 @@ table DatabaseUserCredentials {
     password: string (id: 3);
 }
 
-union Access {
+union AccessMethod {
     Root: RootUserCredentials (id: 1),
     Namespace: NamespaceAccessCredentials (id: 2),
     Database: DatabaseAccessCredentials (id: 3),
@@ -53,17 +62,21 @@ union Access {
 table SignupParams {
     namespace: string (id: 0);
     database: string (id: 1);
-    access: string (id: 2);
-    access_params: SurrealDB.Protocol.Expr.Variables (id: 3);
+    access_name: string (id: 2);
+    variables: SurrealDB.Protocol.Expr.Variables (id: 3);
 }
+
 table SigninParams {
-    access: Access (id: 1);
+    access_method: AccessMethod (id: 1);
 }
+
 table AuthenticateParams {
     token: string (id: 0);
 }
+
 table InvalidateParams {
 }
+
 table CreateParams {
     only: bool = null (id: 0);
     what: SurrealDB.Protocol.Expr.Value (id: 1);
@@ -73,25 +86,31 @@ table CreateParams {
     parallel: bool = null (id: 5);
     version: SurrealDB.Protocol.Expr.Value (id: 6);
 }
+
 table ResetParams {
     // no parameters
 }
+
 table KillParams {
     live_uuid: string (id: 0);
 }
+
 table LiveParams {
     expr: SurrealDB.Protocol.Expr.Fields (id: 0);
     what: SurrealDB.Protocol.Expr.Value (id: 1);
     cond: SurrealDB.Protocol.Expr.Value (id: 2);
     fetch: SurrealDB.Protocol.Expr.Value (id: 3);
 }
+
 table SetParams {
     key: string (id: 0);
     value: SurrealDB.Protocol.Expr.Value (id: 1);
 }
+
 table UnsetParams {
     key: string (id: 0);
 }
+
 table SelectParams {
     expr: SurrealDB.Protocol.Expr.Fields (id: 0);
     omit: SurrealDB.Protocol.Expr.Value (id: 1);
@@ -102,15 +121,17 @@ table SelectParams {
     split: SurrealDB.Protocol.Expr.Value (id: 6);
     group: SurrealDB.Protocol.Expr.Value (id: 7);
     order: SurrealDB.Protocol.Expr.Value (id: 8);
-    limit: SurrealDB.Protocol.Expr.Value (id: 9);
-    start: SurrealDB.Protocol.Expr.Value (id: 10);
-    fetch: SurrealDB.Protocol.Expr.Value (id: 11);
+    start: uint64 = null (id: 9);
+    limit: uint64 = null (id: 10);
+    fetch: [SurrealDB.Protocol.Expr.Value] (id: 11);
     version: SurrealDB.Protocol.Expr.Value (id: 12);
     timeout: SurrealDB.Protocol.Common.Duration (id: 13);
     parallel: bool = null (id: 14);
     explain: SurrealDB.Protocol.Expr.Value (id: 15);
     tempfiles: bool = null (id: 16);
+    variables: SurrealDB.Protocol.Expr.Variables (id: 17);
 }
+
 table InsertParams {
     into: SurrealDB.Protocol.Expr.Value (id: 0);
     data: SurrealDB.Protocol.Expr.Value (id: 1);
@@ -122,28 +143,31 @@ table InsertParams {
     relation: bool = null (id: 7);
     version: SurrealDB.Protocol.Expr.Value (id: 8);
 }
+
 table UpsertParams {
     only: bool = null (id: 0);
     what: SurrealDB.Protocol.Expr.Value (id: 1);
     with: SurrealDB.Protocol.Expr.Value (id: 2);
-    data: SurrealDB.Protocol.Expr.Value (id: 3);
+    data: SurrealDB.Protocol.Expr.Data (id: 3);
     cond: SurrealDB.Protocol.Expr.Value (id: 4);
     output: SurrealDB.Protocol.Expr.Value (id: 5);
     timeout: SurrealDB.Protocol.Common.Duration (id: 6);
     parallel: bool = null (id: 7);
     explain: SurrealDB.Protocol.Expr.Value (id: 8);
 }
+
 table UpdateParams {
     only: bool = null (id: 0);
     what: SurrealDB.Protocol.Expr.Value (id: 1);
     with: SurrealDB.Protocol.Expr.Value (id: 2);
-    data: SurrealDB.Protocol.Expr.Value (id: 3);
+    data: SurrealDB.Protocol.Expr.Data (id: 3);
     cond: SurrealDB.Protocol.Expr.Value (id: 4);
     output: SurrealDB.Protocol.Expr.Value (id: 5);
     timeout: SurrealDB.Protocol.Common.Duration (id: 6);
     parallel: bool = null (id: 7);
     explain: SurrealDB.Protocol.Expr.Value (id: 8);
 }
+
 table DeleteParams {
     only: bool = null (id: 0);
     what: SurrealDB.Protocol.Expr.Value (id: 1);
@@ -154,6 +178,7 @@ table DeleteParams {
     parallel: bool = null (id: 6);
     explain: SurrealDB.Protocol.Expr.Value (id: 7);
 }
+
 table QueryParams {
     query: string (id: 0);
     variables: SurrealDB.Protocol.Expr.Variables (id: 1);
@@ -170,11 +195,13 @@ table RelateParams {
     timeout: SurrealDB.Protocol.Common.Duration (id: 7);
     parallel: bool = null (id: 8);
 }
+
 table RunParams {
     name: string (id: 0);
     version: string (id: 1);
     args: [SurrealDB.Protocol.Expr.Value] (id: 2);
 }
+
 table GraphQlParams {
     query: string (id: 0);
     variables: SurrealDB.Protocol.Expr.Variables (id: 1);
@@ -209,29 +236,55 @@ union Command {
 
 table Request {
     id: string (id: 0);
-    rpc_version: uint32 (id: 1);
-
-    command: Command (id: 3);
+    command: Command (id: 2);
 }
 
+enum Action: ubyte {
+    Create = 0,
+    Update = 1,
+    Delete = 2,
+    Killed = 3,
+}
 
-table QueryResponse {
-    index: uint64 (id: 0);
+table LiveNotification {
+    id: string (id: 0);
+    action: Action (id: 1);
+    record: SurrealDB.Protocol.Expr.Value (id: 2);
+    result: SurrealDB.Protocol.Expr.Value (id: 3);
+}
+
+table QueryResultError {
+    code: int64 (id: 0);
+    message: string (id: 1);
+}
+
+union QueryResultData {
+    Data: SurrealDB.Protocol.Expr.Value (id: 0),
+    Error: QueryResultError (id: 1),
+}
+
+table QueryResult {
+    index: uint32 (id: 0);
     stats: QueryStats (id: 1);
+    result: QueryResultData (id: 3);
+}
 
-    result: SurrealDB.Protocol.Expr.Value (id: 2);
+table QueryResults {
+    results: [QueryResult] (id: 0);
+}
+
+union QueryResponseType {
+    Value: SurrealDB.Protocol.Expr.Value (id: 1),
+    Results: QueryResults (id: 2),
+    Notification: LiveNotification (id: 3),
 }
 
 table Response {
     id: string (id: 0);
-    results: [QueryResponse] (id: 1);
+    response_type: QueryResponseType (id: 2);
 }
 
 table QueryStats {
     start_time: SurrealDB.Protocol.Common.Timestamp (id: 0);
     execution_duration: SurrealDB.Protocol.Common.Duration (id: 1);
-}
-table Error {
-    code: int64 (id: 0);
-    message: string (id: 1);
 }

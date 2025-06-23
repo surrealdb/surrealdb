@@ -77,7 +77,7 @@ macro_rules! impl_serialize_wrapper {
 	($ty:ty) => {
 		impl ::revision::Revisioned for $ty {
 			fn revision() -> u16 {
-				CoreValue::revision()
+				Value::revision()
 			}
 
 			fn serialize_revisioned<W: std::io::Write>(
@@ -133,7 +133,7 @@ use self::opt::Endpoint;
 use self::opt::EndpointKind;
 use self::opt::WaitFor;
 
-pub use method::query::Response;
+pub use method::query::QueryResults;
 
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);

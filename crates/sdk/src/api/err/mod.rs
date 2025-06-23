@@ -1,8 +1,8 @@
-use crate::{Value, api::Response};
+use crate::{api::QueryResults};
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
-use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
+use surrealdb_core::{dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError}, expr::Value};
 use thiserror::Error;
 
 /// An error originating from a remote SurrealDB database
@@ -38,28 +38,8 @@ pub enum Error {
 	InvalidBindings(Value),
 
 	/// Tried to use a range query on a record ID
-	#[error("Tried to add a range to an record-id resource")]
-	RangeOnRecordId,
-
-	/// Tried to use a range query on an object
-	#[error("Tried to add a range to an object resource")]
-	RangeOnObject,
-
-	/// Tried to use a range query on an array
-	#[error("Tried to add a range to an array resource")]
-	RangeOnArray,
-
-	/// Tried to use a range query on an edge or edges
-	#[error("Tried to add a range to an edge resource")]
-	RangeOnEdges,
-
-	/// Tried to use a range query on an existing range
-	#[error("Tried to add a range to a resource which was already a range")]
-	RangeOnRange,
-
-	/// Tried to use a range query on an unspecified resource
-	#[error("Tried to add a range to an unspecified resource")]
-	RangeOnUnspecified,
+	#[error("Tried to add a range to an resource which does not support it: {0}")]
+	InvalidRangeOnResource(String),
 
 	/// Tried to use `table:id` syntax as a method parameter when `(table, id)` should be used instead
 	#[error(
@@ -71,7 +51,7 @@ pub enum Error {
 
 	/// Duplicate request ID
 	#[error("Duplicate request ID: {0}")]
-	DuplicateRequestId(i64),
+	DuplicateRequestId(String),
 
 	/// Invalid request
 	#[error("Invalid request: {0}")]
@@ -149,7 +129,7 @@ pub enum Error {
 
 	/// Tried to take only a single result when the query returned multiple records
 	#[error("Tried to take only a single result from a query that contains multiple")]
-	LossyTake(Response),
+	LossyTake(QueryResults),
 
 	/// The protocol or storage engine being used does not support backups on the architecture
 	/// it's running on
@@ -207,25 +187,9 @@ pub enum Error {
 	#[error("Tried to take a query response that has already been taken")]
 	ResponseAlreadyTaken,
 
-	/// Tried to insert on an object
-	#[error("Insert queries on objects are not supported")]
-	InsertOnObject,
-
 	/// Tried to insert on an array
-	#[error("Insert queries on arrays are not supported")]
-	InsertOnArray,
-
-	/// Tried to insert on an edge or edges
-	#[error("Insert queries on edges are not supported")]
-	InsertOnEdges,
-
-	/// Tried to insert on an edge or edges
-	#[error("Insert queries on ranges are not supported")]
-	InsertOnRange,
-
-	/// Tried to insert on an unspecified resource with no data
-	#[error("Insert queries on unspecified resource with no data are not supported")]
-	InsertOnUnspecified,
+	#[error("Insert queries on arrays are not supported: {0}")]
+	InvalidInsertionResource(String),
 
 	#[error("Crendentials for signin and signup should be an object")]
 	CrendentialsNotObject,

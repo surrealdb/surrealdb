@@ -1,31 +1,33 @@
+use crate::method::merge::Merge;
+use crate::method::patch::Patch;
+use crate::opt::PatchOp;
+use crate::opt::PatchOps;
 use crate::Surreal;
-use crate::Value;
+
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::method::Content;
-use crate::api::method::Merge;
-use crate::api::method::Patch;
-use crate::api::opt::PatchOp;
 use crate::api::opt::Resource;
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_core::expr::Data;
+use surrealdb_core::expr::TryFromValue;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::expr::{Value as Value, to_value as to_core_value};
 
-use super::validate_data;
+use super::ensure_values_are_objects;
 
 /// An update future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Update<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
+	pub(super) resource: Resource,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -54,7 +56,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Update {
-						what: resource?,
+						what: resource,
 						data: None,
 					})
 					.await
@@ -76,7 +78,7 @@ where
 impl<'r, Client, R> IntoFuture for Update<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -87,7 +89,7 @@ where
 impl<'r, Client, R> IntoFuture for Update<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -101,7 +103,7 @@ where
 {
 	/// Restricts the records to update to those in the specified range
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
+		self.resource = self.resource.with_range(range.into());
 		self
 	}
 }
@@ -112,7 +114,7 @@ where
 {
 	/// Restricts the records to update to those in the specified range
 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
+		self.resource = self.resource.with_range(range.into());
 		self
 	}
 }
@@ -120,39 +122,31 @@ where
 impl<'r, C, R> Update<'r, C, R>
 where
 	C: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content<D>(self, data: D) -> Content<'r, C, R>
-	where
-		D: Serialize + 'static,
-	{
-		Content::from_closure(self.client, || {
-			let data = to_core_value(data)?;
+	pub fn content(self, data: Value) -> Content<'r, C, R> {
+		ensure_values_are_objects(
+			&data,
+		)?;
 
-			validate_data(
-				&data,
-				"Tried to update non-object-like data as content, only structs and objects are supported",
-			)?;
+		let what = self.resource;
 
-			let what = self.resource?;
+		let data = match data {
+			Value::None => None,
+			content => Some(Data::ContentExpression(content)),
+		};
 
-			let data = match data {
-				CoreValue::None => None,
-				content => Some(content),
-			};
+		let cmd = Command::Update {
+			what,
+			data,
+		};
 
-			Ok(Command::Update {
-				what,
-				data,
-			})
-		})
+		Content::new(self.client, cmd)
 	}
 
 	/// Merges the current document / record data with the specified data
-	pub fn merge<D>(self, data: D) -> Merge<'r, C, D, R>
-	where
-		D: Serialize,
+	pub fn merge(self, data: Value) -> Merge<'r, C, R>
 	{
 		Merge {
 			client: self.client,
@@ -165,14 +159,8 @@ where
 
 	/// Patches the current document / record data with the specified JSON Patch data
 	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
-		let PatchOp(result) = patch.into();
-		let patches = match result {
-			Ok(serde_content::Value::Seq(values)) => values.into_iter().map(Ok).collect(),
-			Ok(value) => vec![Ok(value)],
-			Err(error) => vec![Err(error)],
-		};
 		Patch {
-			patches,
+			patches: PatchOps(vec![patch.into()]),
 			client: self.client,
 			resource: self.resource,
 			upsert: false,

@@ -6,18 +6,13 @@ use opentelemetry::Context as TelemetryContext;
 use revision::revisioned;
 use serde::Serialize;
 use std::sync::Arc;
-use surrealdb::rpc::Data;
+use surrealdb::rpc::QueryResultData;
 use surrealdb::rpc::format::Format;
 use surrealdb_core::expr::Value;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize)]
-pub struct Response {
-	id: Option<Value>,
-	result: Result<Data, Failure>,
-}
+
 
 impl Response {
 	#[inline]
@@ -74,7 +69,7 @@ impl From<Response> for Value {
 }
 
 /// Create a JSON RPC result response
-pub fn success<T: Into<Data>>(id: Option<Value>, data: T) -> Response {
+pub fn success<T: Into<QueryResultData>>(id: Option<Value>, data: T) -> Response {
 	Response {
 		id,
 		result: Ok(data.into()),
@@ -95,7 +90,7 @@ pub trait IntoRpcResponse {
 
 impl<T, E> IntoRpcResponse for Result<T, E>
 where
-	T: Into<Data>,
+	T: Into<QueryResultData>,
 	E: Into<Failure>,
 {
 	fn into_response(self, id: Option<Value>) -> Response {

@@ -1,32 +1,74 @@
 use super::MlExportConfig;
-use super::{CommandProto, RequestProto};
 use crate::{Result, opt::Resource};
 use async_channel::Sender;
 use bincode::Options;
 use revision::Revisioned;
+use semver::Op;
 use serde::{Serialize, ser::SerializeMap as _};
+use surrealdb_core::dbs::Variables;
+use surrealdb_core::expr::Data;
+use surrealdb_core::iam::{SigninParams, SignupParams};
+use surrealdb_core::protocol::ToFlatbuffers;
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
 #[allow(unused_imports)]
 use surrealdb_core::expr::{
-	Array as CoreArray, Object as CoreObject, Query as CoreQuery, Value as CoreValue,
+	Array as Array, Object as Object, Query as Query, Value as Value,
 };
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::protocol::surrealdb::rpc::UseParams;
 #[allow(unused_imports)]
 use surrealdb_core::sql::{
-	Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
+	Object as SqlObject, Query as SqlQuery, SqlValue as SqlValue,
 };
 use surrealdb_core::{
 	dbs::Notification,
-	protocol::surrealdb::rpc::{SigninParams, SignupParams},
-	protocol::surrealdb::value::{Array as ArrayProto, Value as ValueProto},
 };
+use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
 use uuid::Uuid;
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::expr::Table as CoreTable;
+use surrealdb_core::expr::Table as Table;
+
+#[derive(Debug, Clone)]
+pub(crate) struct Request {
+	pub(crate) id: String,
+	pub(crate) command: Command,
+}
+
+impl Request {
+	pub(crate) fn new(command: Command) -> Self {
+		Self {
+			id: Uuid::new_v4().to_string(),
+			command,
+		}
+	}
+
+	pub(crate) fn new_with_id(id: String, command: Command) -> Self {
+		Self { id, command }
+	}
+
+	pub(crate) fn with_id(mut self, id: String) -> Self {
+		self.id = id;
+		self
+	}
+}
+
+impl ToFlatbuffers for Request {
+	type Output<'a> = flatbuffers::WIPOffset<rpc_fb::Request<'a>>;
+	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
+		let id = fbb.create_string(&self.id);
+		let command = self.command.to_fb(fbb);
+
+		rpc_fb::Request::create(
+			fbb,
+			&rpc_fb::RequestArgs {
+				id: Some(id),
+				command: Some(command),
+			},
+		)
+	}
+}
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -43,20 +85,20 @@ pub(crate) enum Command {
 	Invalidate,
 	Create {
 		what: Resource,
-		data: Option<CoreValue>,
+		data: Option<Value>,
 	},
 	Upsert {
 		what: Resource,
-		data: Option<CoreValue>,
+		data: Option<Data>,
 	},
 	Update {
 		what: Resource,
-		data: Option<CoreValue>,
+		data: Option<Data>,
 	},
 	Insert {
 		// inserts can only be on a table.
 		what: Option<String>,
-		data: CoreValue,
+		data: Value,
 	},
 	Select {
 		what: Resource,
@@ -66,7 +108,11 @@ pub(crate) enum Command {
 	},
 	Query {
 		query: Cow<'static, str>,
-		variables: CoreObject,
+		variables: Variables,
+	},
+	MultiQuery {
+		queries: Vec<Cow<'static, str>>,
+		variables: Variables,
 	},
 	ExportFile {
 		path: PathBuf,
@@ -94,7 +140,7 @@ pub(crate) enum Command {
 	Version,
 	Set {
 		key: String,
-		value: CoreValue,
+		value: Value,
 	},
 	Unset {
 		key: String,
@@ -109,328 +155,11 @@ pub(crate) enum Command {
 	Run {
 		name: String,
 		version: Option<String>,
-		args: CoreArray,
+		args: Array,
 	},
 }
 
 impl Command {
-	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RequestProto> {
-		use crate::api::engine::resource_to_sql_values;
-		use surrealdb_core::{
-			protocol::surrealdb::rpc::{AuthenticateParams, InvalidateParams},
-			sql::{
-				Data, Output,
-				statements::{UpdateStatement, UpsertStatement},
-			},
-		};
-
-		let cmd = match self {
-			Command::Use {
-				namespace,
-				database,
-			} => CommandProto::Use(UseParams {
-				namespace,
-				database,
-			}),
-			Command::Signup(params) => CommandProto::Signup(params),
-			Command::Signin(params) => CommandProto::Signin(params),
-			Command::Authenticate {
-				token,
-			} => CommandProto::Authenticate(AuthenticateParams {
-				token,
-			}),
-			Command::Invalidate => CommandProto::Invalidate(InvalidateParams {}),
-			Command::Create {
-				what,
-				data,
-			} => {
-				use surrealdb_core::protocol::surrealdb::rpc::CreateParams;
-
-				CommandProto::Create(CreateParams {})
-				// let mut params = vec![what.into_core_value()];
-				// if let Some(data) = data {
-				// 	params.push(data);
-				// }
-
-				// RouterRequest {
-				// 	id,
-				// 	method: "create",
-				// 	params: Some(params.into()),
-				// }
-			}
-			Command::Upsert {
-				what,
-				data,
-				..
-			} => {
-				// let mut params = vec![what.into_core_value()];
-				// if let Some(data) = data {
-				// 	params.push(data);
-				// }
-
-				// RouterRequest {
-				// 	id,
-				// 	method: "upsert",
-				// 	params: Some(params.into()),
-				// }
-				use surrealdb_core::protocol::surrealdb::rpc::UpsertParams;
-
-				CommandProto::Upsert(UpsertParams {})
-			}
-			Command::Update {
-				what,
-				data,
-				..
-			} => {
-				// let mut params = vec![what.into_core_value()];
-
-				// if let Some(data) = data {
-				// 	params.push(data);
-				// }
-
-				// RouterRequest {
-				// 	id,
-				// 	method: "update",
-				// 	params: Some(params.into()),
-				// }
-				use surrealdb_core::protocol::surrealdb::rpc::UpdateParams;
-
-				CommandProto::Update(UpdateParams {})
-			}
-			Command::Insert {
-				what,
-				data,
-			} => {
-				// let table = match what {
-				// 	Some(w) => {
-				// 		let mut table = CoreTable::default();
-				// 		table.0.clone_from(&w);
-				// 		CoreValue::from(table)
-				// 	}
-				// 	None => CoreValue::None,
-				// };
-
-				// let params = vec![table, data];
-
-				// RouterRequest {
-				// 	id,
-				// 	method: "insert",
-				// 	params: Some(params.into()),
-				// }
-
-				use surrealdb_core::protocol::surrealdb::rpc::InsertParams;
-
-				CommandProto::Insert(InsertParams {})
-			}
-			Command::InsertRelation {
-				what,
-				data,
-			} => {
-				// let table = match what {
-				// 	Some(w) => {
-				// 		let mut tmp = CoreTable::default();
-				// 		tmp.0.clone_from(&w);
-				// 		CoreValue::from(tmp)
-				// 	}
-				// 	None => CoreValue::None,
-				// };
-				// let params = vec![table, data];
-
-				// RouterRequest {
-				// 	id,
-				// 	method: "insert_relation",
-				// 	params: Some(params.into()),
-				// }
-				use surrealdb_core::protocol::surrealdb::rpc::InsertRelationParams;
-				CommandProto::InsertRelation(InsertRelationParams {})
-			}
-			Command::Patch {
-				what,
-				data,
-				upsert,
-				..
-			} => {
-				// let query = if upsert {
-				// 	let mut stmt = UpsertStatement::default();
-				// 	stmt.what = resource_to_sql_values(what);
-				// 	stmt.data = data.map(|d| Data::PatchExpression(d.into()));
-				// 	stmt.output = Some(Output::After);
-				// 	CoreSqlQuery::from(stmt)
-				// } else {
-				// 	let mut stmt = UpdateStatement::default();
-				// 	stmt.what = resource_to_sql_values(what);
-				// 	stmt.data = data.map(|d| Data::PatchExpression(d.into()));
-				// 	stmt.output = Some(Output::After);
-				// 	CoreSqlQuery::from(stmt)
-				// };
-
-				// let variables = CoreSqlObject::default();
-				// let params: Vec<CoreValue> =
-				// 	vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
-
-				// RouterRequest {
-				// 	id,
-				// 	method: "query",
-				// 	params: Some(params.into()),
-				// }
-
-				use surrealdb_core::protocol::surrealdb::rpc::PatchParams;
-
-				CommandProto::Patch(PatchParams {})
-			}
-			Command::Merge {
-				what,
-				data,
-				upsert,
-				..
-			} => {
-				// let query = if upsert {
-				// 	let mut stmt = UpsertStatement::default();
-				// 	stmt.what = resource_to_sql_values(what);
-				// 	stmt.data = data.map(|d| Data::MergeExpression(d.into()));
-				// 	stmt.output = Some(Output::After);
-				// 	CoreSqlQuery::from(stmt)
-				// } else {
-				// 	let mut stmt = UpdateStatement::default();
-				// 	stmt.what = resource_to_sql_values(what);
-				// 	stmt.data = data.map(|d| Data::MergeExpression(d.into()));
-				// 	stmt.output = Some(Output::After);
-				// 	CoreSqlQuery::from(stmt)
-				// };
-
-				// let variables = CoreSqlObject::default();
-				// let params: Vec<CoreValue> =
-				// 	vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
-
-				// RouterRequest {
-				// 	id,
-				// 	method: "query",
-				// 	params: Some(params.into()),
-				// }
-				use surrealdb_core::protocol::surrealdb::rpc::MergeParams;
-				CommandProto::Merge(MergeParams {})
-			}
-			Command::Select {
-				what,
-				..
-			} => {
-				// RouterRequest {
-				// 	id,
-				// 	method: "select",
-				// 	params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
-				// }
-
-				use surrealdb_core::protocol::surrealdb::rpc::SelectParams;
-
-				CommandProto::Select(SelectParams {
-					what: Some(what.try_into()?),
-					options: None,
-				})
-			}
-			Command::Delete {
-				what,
-				..
-			} => RouterRequest {
-				id,
-				method: "delete",
-				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
-			},
-			Command::Query {
-				query,
-				variables,
-			} => {
-				let params: Vec<CoreValue> = vec![CoreQuery::from(query).into(), variables.into()];
-				RouterRequest {
-					id,
-					method: "query",
-					params: Some(params.into()),
-				}
-			}
-			Command::RawQuery {
-				query,
-				variables,
-			} => {
-				let params: Vec<CoreValue> = vec![query.into_owned().into(), variables.into()];
-				RouterRequest {
-					id,
-					method: "query",
-					params: Some(params.into()),
-				}
-			}
-			Command::ExportFile {
-				..
-			}
-			| Command::ExportBytes {
-				..
-			}
-			| Command::ImportFile {
-				..
-			}
-			| Command::ExportBytesMl {
-				..
-			}
-			| Command::ExportMl {
-				..
-			}
-			| Command::ImportMl {
-				..
-			} => return None,
-			Command::Health => RouterRequest {
-				id,
-				method: "ping",
-				params: None,
-			},
-			Command::Version => RouterRequest {
-				id,
-				method: "version",
-				params: None,
-			},
-			Command::Set {
-				key,
-				value,
-			} => RouterRequest {
-				id,
-				method: "let",
-				params: Some(CoreValue::from(vec![CoreValue::from(key), value])),
-			},
-			Command::Unset {
-				key,
-			} => RouterRequest {
-				id,
-				method: "unset",
-				params: Some(CoreValue::from(vec![CoreValue::from(key)])),
-			},
-			Command::SubscribeLive {
-				..
-			} => return None,
-			Command::Kill {
-				uuid,
-			} => RouterRequest {
-				id,
-				method: "kill",
-				params: Some(CoreValue::from(vec![CoreValue::from(uuid)])),
-			},
-			Command::Run {
-				name,
-				version,
-				args,
-			} => RouterRequest {
-				id,
-				method: "run",
-				params: Some(
-					vec![CoreValue::from(name), CoreValue::from(version), CoreValue::Array(args)]
-						.into(),
-				),
-			},
-		};
-		Some(RequestProto {
-			id,
-			rpc_version: 3,
-			command: cmd,
-		})
-	}
-
 	#[cfg(feature = "protocol-http")]
 	pub(crate) fn needs_flatten(&self) -> bool {
 		match self {
@@ -439,14 +168,6 @@ impl Command {
 				..
 			}
 			| Command::Update {
-				what,
-				..
-			}
-			| Command::Patch {
-				what,
-				..
-			}
-			| Command::Merge {
 				what,
 				..
 			}
@@ -472,14 +193,14 @@ impl Command {
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
 	method: &'static str,
-	params: Option<CoreValue>,
+	params: Option<Value>,
 }
 
 #[cfg(feature = "protocol-ws")]
-fn stringify_queries(value: CoreValue) -> CoreValue {
+fn stringify_queries(value: Value) -> Value {
 	match value {
-		CoreValue::Query(query) => CoreValue::Strand(query.to_string().into()),
-		CoreValue::Array(array) => CoreValue::Array(CoreArray::from(
+		Value::Query(query) => Value::Strand(query.to_string().into()),
+		Value::Array(array) => Value::Array(Array::from(
 			array.0.into_iter().map(stringify_queries).collect::<Vec<_>>(),
 		)),
 		_ => value,

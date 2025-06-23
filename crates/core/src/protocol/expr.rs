@@ -1,537 +1,24 @@
+use crate::dbs::Variables;
+use crate::expr::graph::{GraphSubject, GraphSubjects};
+use crate::expr::order::{OrderList, Ordering};
+use crate::expr::part::{DestructurePart, Recurse, RecurseInstruction};
 use crate::protocol::{FromCapnp, FromFlatbuffers, ToCapnp, ToFlatbuffers};
 
 use crate::expr::{
-	Array, Datetime, Duration, File, Geometry, Id, Number, Object, Strand, Thing, Uuid, Value,
+	self, table, Array, Cond, Datetime, Dir, Duration, Fetch, Fetchs, Field, Fields, File, Geometry, Graph, Group, Groups, Id, IdRange, Ident, Idiom, Limit, Number, Object, Order, Part, Split, Splits, Start, Strand, Table, Thing, Uuid, Value
 };
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
+use num_traits::AsPrimitive;
 use core::panic;
+use std::ops::Bound;
 use geo::Point;
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 
 use crate::protocol::flatbuffers::surreal_db::protocol::common as common_fb;
-use crate::protocol::flatbuffers::surreal_db::protocol::expr as expr_fb;
+use crate::protocol::flatbuffers::surreal_db::protocol::expr::{self as expr_fb, FileArgs};
 
-// impl ToCapnp for Value {
-//     type Builder<'a> = expr_capnp::value::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         match self {
-//             Value::Null => builder.set_null(()),
-//             Value::Bool(b) => builder.set_bool(*b),
-//             Value::Number(n) => {
-//                 match n {
-//                     crate::expr::Number::Int(i) => builder.set_int64(*i),
-//                     crate::expr::Number::Float(f) => builder.set_float64(*f),
-//                     crate::expr::Number::Decimal(d) => builder.set_decimal(d.to_string().as_str()),
-//                 }
-//             }
-//             Value::Strand(s) => builder.set_string(s.as_str()),
-//             Value::Bytes(b) => builder.set_bytes(b.as_slice()),
-//             Value::Thing(thing) => {
-//                 let record_id_builder = builder.init_record_id();
-//                 thing.to_capnp(record_id_builder);
-//             }
-//             Value::Duration(d) => {
-//                 let duration_builder = builder.init_duration();
-//                 d.to_capnp(duration_builder);
-//             }
-//             Value::Datetime(dt) => {
-//                 let datetime_builder = builder.init_datetime();
-//                 dt.to_capnp(datetime_builder);
-//             }
-//             Value::Uuid(uuid) => {
-//                 let uuid_builder = builder.init_uuid();
-//                 uuid.to_capnp(uuid_builder);
-//             }
-//             Value::Object(obj) => {
-//                 let object_builder = builder.init_object();
-//                 obj.to_capnp(object_builder);
-//             }
-//             Value::Array(arr) => {
-//                 let array_builder = builder.init_array();
-//                 arr.to_capnp(array_builder);
-//             },
-//             _ => {
-//                 // TODO: DO NOT PANIC, we just need to modify the Value enum which Mees is currently working on.
-//                 panic!("Unsupported value type for Cap'n Proto serialization: {:?}", self);
-//             }
-//         }
-//     }
-// }
-
-// impl FromCapnp for Value {
-//     type Reader<'a> = expr_capnp::value::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         match reader.which()? {
-//             expr_capnp::value::Which::Null(()) => Ok(Value::Null),
-//             expr_capnp::value::Which::Bool(b) => Ok(Value::Bool(b)),
-//             expr_capnp::value::Which::Int64(i) => Ok(Value::Number(Number::Int(i))),
-//             expr_capnp::value::Which::Float64(f) => Ok(Value::Number(Number::Float(f))),
-//             expr_capnp::value::Which::Decimal(d) => {
-//                 // TODO: Do not send decimals as strings so that we can avoid parsing.
-//                 let decimal = d?.to_string()?.as_str().parse::<Decimal>()
-//                     .map_err(|_| ::capnp::Error::failed("Invalid decimal format".to_string()))?;
-
-//                 Ok(Value::Number(Number::Decimal(decimal)))
-//             }
-//             expr_capnp::value::Which::String(s) => Ok(Value::Strand(Strand(s?.to_string()?))),
-//             expr_capnp::value::Which::Bytes(b) => Ok(Value::Bytes(crate::expr::Bytes(b?.to_vec()))),
-//             expr_capnp::value::Which::Duration(d) => Ok(Value::Duration(Duration::from_capnp(d?)?)),
-//             expr_capnp::value::Which::Datetime(t) => Ok(Value::Datetime(Datetime(DateTime::<Utc>::from_capnp(t?)?))),
-//             expr_capnp::value::Which::RecordId(t) => Ok(Value::Thing(Thing::from_capnp(t?)?)),
-//             expr_capnp::value::Which::File(f) => Ok(Value::File(File::from_capnp(f?)?)),
-//             expr_capnp::value::Which::Uuid(u) => Ok(Value::Uuid(Uuid::from_capnp(u?)?)),
-//             expr_capnp::value::Which::Object(o) => Ok(Value::Object(Object::from_capnp(o?)?)),
-//             expr_capnp::value::Which::Array(a) => Ok(Value::Array(Array::from_capnp(a?)?)),
-//             expr_capnp::value::Which::Geometry(geometry) => Ok(Value::Geometry(Geometry::from_capnp(geometry?)?)),
-//         }
-//     }
-// }
-
-// impl ToCapnp for Duration {
-//     type Builder<'a> = expr_capnp::duration::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         builder.set_seconds(self.as_secs());
-//         builder.set_nanos(self.subsec_nanos());
-//     }
-// }
-
-// impl FromCapnp for Duration {
-//     type Reader<'a> = expr_capnp::duration::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let seconds = reader.get_seconds();
-//         let nanos = reader.get_nanos();
-//         Ok(Duration::new(seconds as u64, nanos as u32))
-//     }
-// }
-
-// impl ToCapnp for DateTime<Utc> {
-//     type Builder<'a> = expr_capnp::timestamp::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         builder.set_seconds(self.timestamp());
-//         builder.set_nanos(self.timestamp_subsec_nanos());
-//     }
-// }
-
-// impl FromCapnp for DateTime<Utc> {
-//     type Reader<'a> = expr_capnp::timestamp::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let seconds = reader.get_seconds();
-//         let nanos = reader.get_nanos() as u32;
-//         let dt = DateTime::<Utc>::from_timestamp(seconds, nanos)
-//             .ok_or_else(|| ::capnp::Error::failed("Invalid timestamp".to_string()))?;
-//         Ok(dt)
-//     }
-// }
-
-// impl ToCapnp for Uuid {
-//     type Builder<'a> = expr_capnp::uuid::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         builder.set_bytes(self.as_bytes());
-//     }
-// }
-
-// impl FromCapnp for Uuid {
-//     type Reader<'a> = expr_capnp::uuid::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let bytes = reader.get_bytes()?;
-//         Uuid::from_slice(bytes).map_err(|_| ::capnp::Error::failed("Invalid UUID".to_string()))
-//     }
-// }
-
-// impl ToCapnp for Thing {
-//     type Builder<'a> = expr_capnp::record_id::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         builder.set_table(self.tb.as_str());
-//         let id_builder = builder.init_id();
-//         self.id.to_capnp(id_builder);
-//     }
-// }
-
-// impl FromCapnp for Thing {
-//     type Reader<'a> = expr_capnp::record_id::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let table = reader.get_table()?.to_string()?;
-//         let id_reader = reader.get_id()?;
-//         let id = Id::from_capnp(id_reader)?;
-//         Ok(Thing {
-//             tb: table,
-//             id,
-//         })
-//     }
-// }
-
-// impl ToCapnp for Id {
-//     type Builder<'a> = expr_capnp::id::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         match self {
-//             Self::Number(n) => builder.set_number(*n),
-//             Self::String(s) => builder.set_string(s.as_str()),
-//             Self::Uuid(uuid) => {
-//                 let uuid_builder = builder.init_uuid();
-//                 uuid.to_capnp(uuid_builder);
-//             }
-//             Self::Array(arr) => {
-//                 let array_builder = builder.init_array();
-//                 arr.to_capnp(array_builder);
-//             }
-//             _ => {
-//                 // TODO: DO NOT PANIC, we just need to modify the Id enum.
-//                 panic!("Unsupported Id type for Cap'n Proto serialization: {:?}", self);
-//             }
-//         }
-//     }
-// }
-
-// impl FromCapnp for Id {
-//     type Reader<'a> = expr_capnp::id::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         match reader.which()? {
-//             expr_capnp::id::Which::Number(n) => Ok(Id::Number(n)),
-//             expr_capnp::id::Which::String(s) => Ok(Id::String(s?.to_string()?)),
-//             expr_capnp::id::Which::Uuid(u) => {
-//                 let uuid = Uuid::from_capnp(u?)?;
-//                 Ok(Id::Uuid(uuid))
-//             }
-//             expr_capnp::id::Which::Array(a) => {
-//                 let array = Array::from_capnp(a?)?;
-//                 Ok(Id::Array(array))
-//             }
-//             _ => Err(::capnp::Error::failed("Unsupported Id type".to_string())),
-//         }
-//     }
-// }
-
-// impl ToCapnp for File {
-//     type Builder<'a> = expr_capnp::file::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         builder.set_bucket(self.bucket.as_str());
-//         builder.set_key(self.key.as_str());
-//     }
-// }
-
-// impl FromCapnp for File {
-//     type Reader<'a> = expr_capnp::file::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let bucket = reader.get_bucket()?.to_string()?;
-//         let key = reader.get_key()?.to_string()?;
-//         Ok(File { bucket, key })
-//     }
-// }
-
-// impl ToCapnp for BTreeMap<String, Value> {
-//     type Builder<'a> = expr_capnp::btree_value_map::Builder<'a>;
-
-//     fn to_capnp(&self, builder: Self::Builder<'_>) {
-//         let mut items_builder = builder.init_items(self.len() as u32);
-//         for (index, (key, value)) in self.iter().enumerate() {
-//             let mut entry_builder = items_builder.reborrow().get(index as u32);
-//             entry_builder.set_key(key.as_str());
-//             let value_builder = entry_builder.init_value();
-//             value.to_capnp(value_builder);
-//         }
-//     }
-// }
-
-// impl FromCapnp for BTreeMap<String, Value> {
-//     type Reader<'a> = expr_capnp::btree_value_map::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let mut map = BTreeMap::new();
-//         for entry in reader.get_items()? {
-//             let key = entry.get_key()?.to_string()?;
-//             let value = Value::from_capnp(entry.get_value()?)?;
-//             map.insert(key, value);
-//         }
-//         Ok(map)
-//     }
-// }
-
-// impl ToCapnp for Object {
-//     type Builder<'a> = expr_capnp::object::Builder<'a>;
-
-//     fn to_capnp(&self, builder: Self::Builder<'_>) {
-//         let mut btree_map_builder = builder.init_map();
-//         self.0.to_capnp(btree_map_builder);
-//     }
-// }
-
-// impl FromCapnp for Object {
-//     type Reader<'a> = expr_capnp::object::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let btree_map_reader = reader.get_map()?;
-//         let map = BTreeMap::from_capnp(btree_map_reader)?;
-//         Ok(Object(map))
-//     }
-// }
-
-// impl ToCapnp for Array {
-//     type Builder<'a> = expr_capnp::array::Builder<'a>;
-
-//     fn to_capnp(&self, builder: Self::Builder<'_>) {
-//         let mut list_builder = builder.init_values(self.0.len() as u32);
-//         for (index, value) in self.0.iter().enumerate() {
-//             let item_builder = list_builder.reborrow().get(index as u32);
-//             value.to_capnp(item_builder);
-//         }
-//     }
-// }
-
-// impl FromCapnp for Array {
-//     type Reader<'a> = expr_capnp::array::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let mut vec = Vec::new();
-
-//         for item in reader.get_values()? {
-//             vec.push(Value::from_capnp(item)?);
-//         }
-//         Ok(Array(vec))
-//     }
-// }
-
-// impl ToCapnp for Geometry {
-//     type Builder<'a> = expr_capnp::geometry::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         match self {
-//             Geometry::Point(point) => {
-//                 let point_builder = builder.init_point();
-//                 point.to_capnp(point_builder);
-//             }
-//             Geometry::Line(line_string) => {
-//                 let line_string_builder = builder.init_line();
-//                 line_string.to_capnp(line_string_builder);
-//             }
-//             Geometry::Polygon(polygon) => {
-//                 let polygon_builder = builder.init_polygon();
-//                 polygon.to_capnp(polygon_builder);
-//             }
-//             Geometry::MultiPoint(multi_point) => {
-//                 let multi_point_builder = builder.init_multi_point();
-//                 multi_point.to_capnp(multi_point_builder);
-//             }
-//             Geometry::MultiLine(multi_line_string) => {
-//                 let multi_line_string_builder = builder.init_multi_line();
-//                 multi_line_string.to_capnp(multi_line_string_builder);
-//             }
-//             Geometry::MultiPolygon(multi_polygon) => {
-//                 let multi_polygon_builder = builder.init_multi_polygon();
-//                 multi_polygon.to_capnp(multi_polygon_builder);
-//             }
-//             Geometry::Collection(geometries) => {
-//                 let geometry_collection_builder = builder.init_collection();
-//                 let mut geometries_builder = geometry_collection_builder.init_geometries(geometries.len() as u32);
-//                 for (index, geometry) in geometries.iter().enumerate() {
-//                     let geometry_builder = geometries_builder.reborrow().get(index as u32);
-//                     geometry.to_capnp(geometry_builder);
-//                 }
-//             }
-//         }
-//     }
-// }
-
-// impl FromCapnp for Geometry {
-//     type Reader<'a> = expr_capnp::geometry::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         match reader.which()? {
-//             expr_capnp::geometry::Which::Point(point) => Ok(Geometry::Point(geo::Point::from_capnp(point?)?)),
-//             expr_capnp::geometry::Which::Line(line_string) => Ok(Geometry::Line(geo::LineString::from_capnp(line_string?)?)),
-//             expr_capnp::geometry::Which::Polygon(polygon) => Ok(Geometry::Polygon(geo::Polygon::from_capnp(polygon?)?)),
-//             expr_capnp::geometry::Which::MultiPoint(multi_point) => Ok(Geometry::MultiPoint(geo::MultiPoint::from_capnp(multi_point?)?)),
-//             expr_capnp::geometry::Which::MultiLine(multi_line_string) => Ok(Geometry::MultiLine(geo::MultiLineString::from_capnp(multi_line_string?)?)),
-//             expr_capnp::geometry::Which::MultiPolygon(multi_polygon) => Ok(Geometry::MultiPolygon(geo::MultiPolygon::from_capnp(multi_polygon?)?)),
-//             expr_capnp::geometry::Which::Collection(geometry_collection) => {
-//                 let geometry_collection = geometry_collection?;
-//                 let geometries_reader = geometry_collection.get_geometries()?;
-//                 let mut geometries = Vec::with_capacity(geometries_reader.len() as usize);
-//                 for geometry in geometries_reader {
-//                     geometries.push(Geometry::from_capnp(geometry)?);
-//                 }
-//                 Ok(Geometry::Collection(geometries))
-//             }
-//         }
-//     }
-// }
-
-// impl ToCapnp for geo::Point {
-//     type Builder<'a> = expr_capnp::geometry::point::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         builder.set_x(self.x());
-//         builder.set_y(self.y());
-//     }
-// }
-
-// impl FromCapnp for geo::Point {
-//     type Reader<'a> = expr_capnp::geometry::point::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let x = reader.get_x();
-//         let y = reader.get_y();
-//         Ok(Self::new(x, y))
-//     }
-// }
-
-// impl ToCapnp for geo::Coord {
-//     type Builder<'a> = expr_capnp::geometry::point::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         builder.set_x(self.x);
-//         builder.set_y(self.y);
-//     }
-// }
-// impl FromCapnp for geo::Coord {
-//     type Reader<'a> = expr_capnp::geometry::point::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let x = reader.get_x();
-//         let y = reader.get_y();
-//         Ok(Self { x, y })
-//     }
-// }
-
-// impl ToCapnp for geo::LineString {
-//     type Builder<'a> = expr_capnp::geometry::line_string::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         let mut points_builder = builder.init_points(self.0.len() as u32);
-//         for (index, point) in self.0.iter().enumerate() {
-//             let point_builder = points_builder.reborrow().get(index as u32);
-//             point.to_capnp(point_builder);
-//         }
-//     }
-// }
-
-// impl FromCapnp for geo::LineString {
-//     type Reader<'a> = expr_capnp::geometry::line_string::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let mut points = Vec::new();
-//         for point in reader.get_points()? {
-//             points.push(geo::Coord::from_capnp(point)?);
-//         }
-//         Ok(Self(points))
-//     }
-// }
-
-// impl ToCapnp for geo::Polygon {
-//     type Builder<'a> = expr_capnp::geometry::polygon::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         let mut exterior_builder = builder.reborrow().init_exterior();
-//         self.exterior().to_capnp(exterior_builder);
-
-//         let interiors = self.interiors();
-//         let mut interiors_builder = builder.reborrow().init_interiors(interiors.len() as u32);
-//         for (index, interior) in interiors.iter().enumerate() {
-//             let interior_builder = interiors_builder.reborrow().get(index as u32);
-//             interior.to_capnp(interior_builder);
-//         }
-//     }
-// }
-
-// impl FromCapnp for geo::Polygon {
-//     type Reader<'a> = expr_capnp::geometry::polygon::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let exterior = reader.get_exterior()?;
-//         let exterior = geo::LineString::from_capnp(exterior)?;
-
-//         let mut interiors = Vec::new();
-//         for interior in reader.get_interiors()? {
-//             interiors.push(geo::LineString::from_capnp(interior)?);
-//         }
-
-//         Ok(Self::new(exterior, interiors))
-//     }
-// }
-
-// impl ToCapnp for geo::MultiPoint {
-//     type Builder<'a> = expr_capnp::geometry::multi_point::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         let mut points_builder = builder.init_points(self.0.len() as u32);
-//         for (index, point) in self.0.iter().enumerate() {
-//             let point_builder = points_builder.reborrow().get(index as u32);
-//             point.to_capnp(point_builder);
-//         }
-//     }
-// }
-// impl FromCapnp for geo::MultiPoint {
-//     type Reader<'a> = expr_capnp::geometry::multi_point::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let mut points = Vec::new();
-//         for point in reader.get_points()? {
-//             points.push(geo::Point::from_capnp(point)?);
-//         }
-//         Ok(Self(points))
-//     }
-// }
-// impl ToCapnp for geo::MultiLineString {
-//     type Builder<'a> = expr_capnp::geometry::multi_line_string::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         let mut lines_builder = builder.init_lines(self.0.len() as u32);
-//         for (index, line) in self.0.iter().enumerate() {
-//             let line_builder = lines_builder.reborrow().get(index as u32);
-//             line.to_capnp(line_builder);
-//         }
-//     }
-// }
-// impl FromCapnp for geo::MultiLineString {
-//     type Reader<'a> = expr_capnp::geometry::multi_line_string::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let mut lines = Vec::new();
-//         for line in reader.get_lines()? {
-//             lines.push(geo::LineString::from_capnp(line)?);
-//         }
-//         Ok(Self(lines))
-//     }
-// }
-// impl ToCapnp for geo::MultiPolygon {
-//     type Builder<'a> = expr_capnp::geometry::multi_polygon::Builder<'a>;
-
-//     fn to_capnp(&self, mut builder: Self::Builder<'_>) {
-//         let mut polygons_builder = builder.init_polygons(self.0.len() as u32);
-//         for (index, polygon) in self.0.iter().enumerate() {
-//             let polygon_builder = polygons_builder.reborrow().get(index as u32);
-//             polygon.to_capnp(polygon_builder);
-//         }
-//     }
-// }
-// impl FromCapnp for geo::MultiPolygon {
-//     type Reader<'a> = expr_capnp::geometry::multi_polygon::Reader<'a>;
-
-//     fn from_capnp(reader: Self::Reader<'_>) -> ::capnp::Result<Self> {
-//         let mut polygons = Vec::new();
-//         for polygon in reader.get_polygons()? {
-//             polygons.push(geo::Polygon::from_capnp(polygon)?);
-//         }
-//         Ok(Self(polygons))
-//     }
-// }
-
-/// Flatbuffer conversions
 
 impl ToFlatbuffers for Value {
 	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Value<'bldr>>;
@@ -1532,6 +1019,1290 @@ impl FromFlatbuffers for geo::MultiPolygon {
 			polygons.push(geo::Polygon::from_fb(polygon)?);
 		}
 		Ok(Self(polygons))
+	}
+}
+
+impl ToFlatbuffers for Idiom {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Idiom<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let mut parts = Vec::with_capacity(self.0.len());
+		for part in &self.0 {
+			parts.push(part.to_fb(builder));
+		}
+		let parts_vector = builder.create_vector(&parts);
+		expr_fb::Idiom::create(
+			builder,
+			&expr_fb::IdiomArgs {
+				parts: Some(parts_vector),
+			},
+		)
+	}
+}
+
+impl FromFlatbuffers for Idiom {
+	type Input<'a> = expr_fb::Idiom<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let mut parts = Vec::new();
+		let parts_reader = input.parts().context("Parts is not set")?;
+		for part in parts_reader {
+			parts.push(Part::from_fb(part)?);
+		}
+		Ok(Idiom(parts))
+	}
+}
+
+impl ToFlatbuffers for Part {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Part<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let args = match self {
+			Self::All => {
+				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::All,
+					part: Some(null.as_union_value()),
+				}
+			},
+			Self::Flatten => {
+				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Flatten,
+					part: Some(null.as_union_value()),
+				}
+			},
+			Self::Last => {
+				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Last,
+					part: Some(null.as_union_value()),
+				}
+			},
+			Self::First => {
+				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::First,
+					part: Some(null.as_union_value()),
+				}
+			},
+			Self::Field(ident) => {
+				let ident = ident.to_fb(builder);
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Field,
+					part: Some(ident.as_union_value()),
+				}
+			},
+			Self::Index(index) => {
+				let index: i64 = index.as_int();
+				let index_value = index.to_fb(builder);
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Index,
+					part: Some(index_value.as_union_value()),
+				}
+			},
+			Self::Where(value) => {
+				let value_fb = value.to_fb(builder).as_union_value();
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Where,
+					part: Some(value_fb),
+				}
+			},
+			Self::Graph(graph) => {
+				let graph_fb = graph.to_fb(builder).as_union_value();
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Graph,
+					part: Some(graph_fb),
+				}
+			},
+			Self::Value(value) => {
+				let value_fb = value.to_fb(builder).as_union_value();
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Value,
+					part: Some(value_fb),
+				}
+			},
+			Self::Start(value) => {
+				let value_fb = value.to_fb(builder).as_union_value();
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Start,
+					part: Some(value_fb),
+				}
+			},
+			Self::Method(name, args) => {
+				
+				let name = builder.create_string(name);
+				let mut args_vec = Vec::with_capacity(args.len());
+				for arg in args {
+					args_vec.push(arg.to_fb(builder));
+				}
+				let args = builder.create_vector(&args_vec);
+
+				let method = expr_fb::MethodPart::create(
+					builder,
+					&expr_fb::MethodPartArgs {
+						name: Some(name),
+						args: Some(args),
+					},
+				);
+
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Method,
+					part: Some(method.as_union_value()),
+				}
+			},
+			Self::Destructure(parts) => {
+				
+				let mut parts_vec = Vec::with_capacity(parts.len());
+				for part in parts {
+					parts_vec.push(part.to_fb(builder));
+				}
+				let parts = builder.create_vector(&parts_vec);
+
+
+				let part = expr_fb::DestructureParts::create(
+					builder,
+					&expr_fb::DestructurePartsArgs {
+						parts: Some(parts),
+					},
+				);
+
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Destructure,
+					part: Some(part.as_union_value()),
+				}
+			},
+			Self::Optional => {
+				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Optional,
+					part: Some(null.as_union_value()),
+				}
+			},
+			Self::Recurse(recurse, idiom, instruction) => {
+				
+				let spec = recurse.to_fb(builder);
+				let idiom = idiom.as_ref().map(|i| i.to_fb(builder));
+				let recurse_operation = instruction.as_ref().map(|op| op.to_fb(builder));
+
+				let recurse_fb = expr_fb::RecursePart::create(
+					builder,
+					&expr_fb::RecursePartArgs {
+						spec: Some(spec),
+						idiom,
+						recurse_operation,
+					},
+				);
+
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Recurse,
+					part: Some(recurse_fb.as_union_value()),
+				}
+			},
+			Self::Doc => {
+				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::Doc,
+					part: Some(null.as_union_value()),
+				}
+			}
+			Self::RepeatRecurse => {
+				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+				expr_fb::PartArgs {
+					part_type: expr_fb::PartType::RepeatRecurse,
+					part: Some(null.as_union_value()),
+				}
+			}
+		};
+
+		expr_fb::Part::create(
+			builder,
+			&args,
+		)
+	}
+}
+
+impl FromFlatbuffers for Part {
+	type Input<'a> = expr_fb::Part<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input.part_type() {
+			expr_fb::PartType::All => Ok(Self::All),
+			expr_fb::PartType::Flatten => Ok(Self::Flatten),
+			expr_fb::PartType::Last => Ok(Self::Last),
+			expr_fb::PartType::First => Ok(Self::First),
+			expr_fb::PartType::Field => {
+				let ident = input.part_as_field().ok_or_else(|| anyhow::anyhow!("Expected Field part"))?;
+				let ident = ident.value().ok_or_else(|| anyhow::anyhow!("Missing value in Field part"))?;
+				Ok(Self::Field(Ident(ident.to_string())))
+			}
+			expr_fb::PartType::Index => {
+				let index = input.part_as_index().ok_or_else(|| anyhow::anyhow!("Expected Index part"))?;
+				let index = index.value();
+				Ok(Self::Index(Number::Int(index)))
+			}
+			expr_fb::PartType::Where => {
+				let value = input.part_as_where().ok_or_else(|| anyhow::anyhow!("Expected Where part"))?;
+				Ok(Self::Where(Value::from_fb(value)?))
+			}
+			expr_fb::PartType::Graph => {
+				let graph = input.part_as_graph().ok_or_else(|| anyhow::anyhow!("Expected Graph part"))?;
+				Ok(Self::Graph(Graph::from_fb(graph)?))
+			}
+			expr_fb::PartType::Value => {
+				let value = input.part_as_value().ok_or_else(|| anyhow::anyhow!("Expected Value part"))?;
+				Ok(Self::Value(Value::from_fb(value)?))
+			}
+			expr_fb::PartType::Start => {
+				let value = input.part_as_start().ok_or_else(|| anyhow::anyhow!("Expected Start part"))?;
+				Ok(Self::Start(Value::from_fb(value)?))
+			}
+			expr_fb::PartType::Method => {
+				let method_part = input.part_as_method().ok_or_else(|| anyhow::anyhow!("Expected Method part"))?;
+				let name = method_part.name().context("Missing name in Method part")?.to_string();
+				let args_reader = method_part.args().context("Missing args in Method part")?;
+				let mut args = Vec::new();
+				for arg in args_reader {
+					args.push(Value::from_fb(arg)?);
+				}
+				Ok(Self::Method(name, args))
+			},
+			expr_fb::PartType::Destructure => {
+				let destructure_parts = input.part_as_destructure().ok_or_else(|| anyhow::anyhow!("Expected Destructure part"))?;
+				let parts_reader = destructure_parts.parts().context("Missing parts in Destructure part")?;
+				let mut parts = Vec::<DestructurePart>::new();
+				for part in parts_reader {
+					parts.push(DestructurePart::from_fb(part)?);
+				}
+				Ok(Self::Destructure(parts))
+			},
+			expr_fb::PartType::Optional => Ok(Self::Optional),
+			expr_fb::PartType::Recurse => {
+				let recurse_part = input.part_as_recurse().ok_or_else(|| anyhow::anyhow!("Expected Recurse part"))?;
+				let spec = recurse_part.spec().ok_or_else(|| anyhow::anyhow!("Missing spec in Recurse part"))?;
+				let recurse = Recurse::from_fb(spec)?;
+				let idiom = recurse_part.idiom().map(Idiom::from_fb).transpose()?;
+				let instruction = recurse_part.recurse_operation().map(RecurseInstruction::from_fb).transpose()?;
+				Ok(Self::Recurse(recurse, idiom, instruction))
+			},
+			expr_fb::PartType::Doc => Ok(Self::Doc),
+			expr_fb::PartType::RepeatRecurse => Ok(Self::RepeatRecurse),
+			_ => Err(anyhow::anyhow!(
+				"Unsupported Part type for FlatBuffers deserialization: {:?}",
+				input.part_type()
+			)),
+		}
+	}
+}
+
+impl ToFlatbuffers for Ident {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Ident<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let value = builder.create_string(&self.0);
+		expr_fb::Ident::create(
+			builder,
+			&expr_fb::IdentArgs {
+				value: Some(value),
+			},
+		)
+	}
+}
+
+impl FromFlatbuffers for Ident {
+	type Input<'a> = expr_fb::Ident<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let value = input.value().ok_or_else(|| anyhow::anyhow!("Missing value in Ident"))?;
+		Ok(Ident(value.to_string()))
+	}
+}
+
+impl ToFlatbuffers for Recurse {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::RecurseSpec<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let args = match self {
+			Self::Fixed(fixed) => {
+				let fixed_value = expr_fb::FixedSpec::create(
+					builder,
+					&expr_fb::FixedSpecArgs {
+						value: *fixed
+					},
+				);
+
+				expr_fb::RecurseSpecArgs {
+					spec_type: expr_fb::RecurseSpecType::Fixed,
+					spec: Some(fixed_value.as_union_value()),
+				}
+			},
+			Self::Range(start, end) => {
+				let range_value = expr_fb::RangeSpec::create(
+					builder,
+					&expr_fb::RangeSpecArgs {
+						start: start.clone(),
+						end: end.clone(),
+					},
+				);
+
+				expr_fb::RecurseSpecArgs {
+					spec_type: expr_fb::RecurseSpecType::Range,
+					spec: Some(range_value.as_union_value()),
+				}
+			}
+		};
+
+		expr_fb::RecurseSpec::create(
+			builder,
+			&args,
+		)
+	}
+}
+
+impl FromFlatbuffers for Recurse {
+	type Input<'a> = expr_fb::RecurseSpec<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input.spec_type() {
+			expr_fb::RecurseSpecType::Fixed => {
+				let fixed = input.spec_as_fixed().ok_or_else(|| anyhow::anyhow!("Expected Fixed spec"))?;
+				Ok(Self::Fixed(fixed.value()))
+			}
+			expr_fb::RecurseSpecType::Range => {
+				let range = input.spec_as_range().ok_or_else(|| anyhow::anyhow!("Expected Range spec"))?;
+				Ok(Self::Range(range.start(), range.end()))
+			}
+			_ => Err(anyhow::anyhow!(
+				"Unsupported Recurse spec type for FlatBuffers deserialization: {:?}",
+				input.spec_type()
+			)),
+		}
+	}
+}
+
+impl ToFlatbuffers for RecurseInstruction {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::RecurseOperation<'bldr>>;
+
+	fn to_fb<'bldr>(
+			&self,
+			builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+		) -> Self::Output<'bldr> {
+		let args = match self {
+			Self::Path { inclusive } => {
+				let operation = expr_fb::RecursePath::create(
+					builder,
+					&expr_fb::RecursePathArgs {
+						inclusive: *inclusive,
+					},
+				);
+
+				expr_fb::RecurseOperationArgs {
+					operation_type: expr_fb::RecurseOperationType::Path,
+					operation: Some(operation.as_union_value()),
+				}
+			},
+			Self::Collect { inclusive } => {
+				let operation = expr_fb::RecurseCollect::create(
+					builder,
+					&expr_fb::RecurseCollectArgs {
+						inclusive: *inclusive,
+					},
+				);
+
+				expr_fb::RecurseOperationArgs {
+					operation_type: expr_fb::RecurseOperationType::Collect,
+					operation: Some(operation.as_union_value()),
+				}
+			},
+			Self::Shortest { expects, inclusive } => {
+				let expects_value = expects.to_fb(builder);
+				let operation = expr_fb::RecurseShortest::create(
+					builder,
+					&expr_fb::RecurseShortestArgs {
+						expects: Some(expects_value),
+						inclusive: *inclusive,
+					},
+				);
+
+				expr_fb::RecurseOperationArgs {
+					operation_type: expr_fb::RecurseOperationType::Shortest,
+					operation: Some(operation.as_union_value()),
+				}
+			}
+		};
+
+		expr_fb::RecurseOperation::create(
+			builder,
+			&args,
+		)
+	}
+}
+
+impl FromFlatbuffers for RecurseInstruction {
+	type Input<'a> = expr_fb::RecurseOperation<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input.operation_type() {
+			expr_fb::RecurseOperationType::Path => {
+				let path = input.operation_as_path().ok_or_else(|| anyhow::anyhow!("Expected Path operation"))?;
+				Ok(Self::Path { inclusive: path.inclusive() })
+			}
+			expr_fb::RecurseOperationType::Collect => {
+				let collect = input.operation_as_collect().ok_or_else(|| anyhow::anyhow!("Expected Collect operation"))?;
+				Ok(Self::Collect { inclusive: collect.inclusive() })
+			}
+			expr_fb::RecurseOperationType::Shortest => {
+				let shortest = input.operation_as_shortest().ok_or_else(|| anyhow::anyhow!("Expected Shortest operation"))?;
+				let expects = Value::from_fb(shortest.expects().context("Missing expects in Shortest operation")?)?;
+				Ok(Self::Shortest { expects, inclusive: shortest.inclusive() })
+			}
+			_ => Err(anyhow::anyhow!(
+				"Unsupported RecurseOperation type for FlatBuffers deserialization: {:?}",
+				input.operation_type()
+			)),
+		}
+	}
+}
+
+impl ToFlatbuffers for DestructurePart {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::DestructurePart<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let args = match self {
+			Self::All(ident) => {
+				let ident = ident.to_fb(builder);
+				expr_fb::DestructurePartArgs {
+					part_type: expr_fb::DestructurePartType::All,
+					part: Some(ident.as_union_value()),
+				}
+			},
+			Self::Field(ident) => {
+				let ident = ident.to_fb(builder);
+				expr_fb::DestructurePartArgs {
+					part_type: expr_fb::DestructurePartType::Field,
+					part: Some(ident.as_union_value()),
+				}
+			},
+			Self::Aliased(ident, idiom) => {
+				let value = builder.create_string(&ident.0);
+				let alias = idiom.to_fb(builder);
+				let alias = expr_fb::Alias::create(
+					builder,
+					&expr_fb::AliasArgs {
+						value: Some(value),
+						alias: Some(alias),
+					},
+				);
+
+				expr_fb::DestructurePartArgs {
+					part_type: expr_fb::DestructurePartType::Aliased,
+					part: Some(alias.as_union_value()),
+				}
+			},
+			Self::Destructure(name, parts) => {
+				let name = builder.create_string(&name.0);
+				let mut parts_vec = Vec::with_capacity(parts.len());
+				for part in parts {
+					parts_vec.push(part.to_fb(builder));
+				}
+				let parts_vector = builder.create_vector(&parts_vec);
+				let destructure_ident_parts = expr_fb::DestructureIdentParts::create(
+					builder,
+					&expr_fb::DestructureIdentPartsArgs {
+						name: Some(name),
+						parts: Some(parts_vector),
+					},
+				);
+				expr_fb::DestructurePartArgs {
+					part_type: expr_fb::DestructurePartType::Destructure,
+					part: Some(destructure_ident_parts.as_union_value()),
+				}
+			}
+		};
+
+		expr_fb::DestructurePart::create(
+			builder,
+			&args,
+		)
+	}
+}
+
+impl FromFlatbuffers for DestructurePart {
+	type Input<'a> = expr_fb::DestructurePart<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input.part_type() {
+			expr_fb::DestructurePartType::All => {
+				let ident = input.part_as_all().ok_or_else(|| anyhow::anyhow!("Expected All part"))?;
+				Ok(Self::All(Ident::from_fb(ident)?))
+			}
+			expr_fb::DestructurePartType::Field => {
+				let ident = input.part_as_field().ok_or_else(|| anyhow::anyhow!("Expected Field part"))?;
+				Ok(Self::Field(Ident::from_fb(ident)?))
+			}
+			expr_fb::DestructurePartType::Aliased => {
+				let alias = input.part_as_aliased().ok_or_else(|| anyhow::anyhow!("Expected Aliased part"))?;
+				let value = alias.value().context("Missing value in Aliased part")?.to_string();
+				let idiom = Idiom::from_fb(alias.alias().context("Missing alias in Aliased part")?)?;
+				Ok(Self::Aliased(Ident(value), idiom))
+			}
+			expr_fb::DestructurePartType::Destructure => {
+				let destructure_parts = input.part_as_destructure().ok_or_else(|| anyhow::anyhow!("Expected Destructure part"))?;
+				let name = destructure_parts.name().context("Missing name in Destructure part")?.to_string();
+				let parts_reader = destructure_parts.parts().context("Missing parts in Destructure part")?;
+				let mut parts = Vec::<DestructurePart>::new();
+				for part in parts_reader {
+					parts.push(DestructurePart::from_fb(part)?);
+				}
+				Ok(Self::Destructure(Ident(name), parts))
+			}
+			_ => Err(anyhow::anyhow!(
+				"Unsupported DestructurePart type for FlatBuffers deserialization: {:?}",
+				input.part_type()
+			)),
+		}
+	}
+}
+
+impl ToFlatbuffers for Graph {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Graph<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		
+		let dir = self.dir.to_fb(builder);
+		let expr = self.expr.as_ref().map(|e| e.to_fb(builder));
+		let what = self.what.to_fb(builder);
+		let cond = self.cond.as_ref().map(|c| c.to_fb(builder));
+		let split = self.split.as_ref().map(|s| s.to_fb(builder));
+		let group = self.group.as_ref().map(|g| g.to_fb(builder));
+		let order = self.order.as_ref().map(|o| o.to_fb(builder));
+		let limit = match &self.limit {
+			Some(limit) => {
+				match limit.0 {
+					Value::Number(num) => {
+						Some(num.as_int() as u64)
+					},
+					_ => {
+						panic!("Limit must be a number")
+					}
+				}
+			},
+			None => None,
+		};
+		let start = self.start.as_ref().map(|s| match s.0 {
+			Value::Number(num) => num.as_int() as u64,
+			_ => panic!("Start must be a number"),
+		});
+		let alias = self.alias.as_ref().map(|a| a.to_fb(builder));
+
+		expr_fb::Graph::create(
+			builder,
+			&expr_fb::GraphArgs {
+				dir,
+				expr,
+				what: Some(what),
+				cond,
+				split,
+				group,
+				order,
+				limit,
+				start,
+				alias,
+			},
+		)
+	}
+}
+
+impl FromFlatbuffers for Graph {
+	type Input<'a> = expr_fb::Graph<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let dir = Dir::from_fb(input.dir())?;
+		let expr = input.expr().map(Fields::from_fb).transpose()?;
+		let what = GraphSubjects::from_fb(input.what().context("Missing what in Graph")?)?;
+		let cond = input.cond().map(Value::from_fb).transpose()?.map(Cond);
+		let split = input.split().map(Splits::from_fb).transpose()?;
+		let group = input.group().map(Groups::from_fb).transpose()?;
+		let order = input.order().map(Ordering::from_fb).transpose()?;
+		let limit = input.limit();
+		let start = input.start();
+		let alias = input.alias().map(Idiom::from_fb).transpose()?;
+
+		Ok(Self {
+			dir,
+			expr,
+			what,
+			cond,
+			split,
+			group,
+			order,
+			limit: limit.map(|l| Limit(Value::Number(Number::Int(l as i64)))),
+			start: start.map(|s| Start(Value::Number(Number::Int(s as i64)))),
+			alias,
+		})
+	}
+}
+
+impl ToFlatbuffers for Splits {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Splits<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let mut splits = Vec::with_capacity(self.0.len());
+		for split in &self.0 {
+			splits.push(split.to_fb(builder));
+		}
+		let splits_vector = builder.create_vector(&splits);
+		expr_fb::Splits::create(
+			builder,
+			&expr_fb::SplitsArgs {
+				splits: Some(splits_vector),
+			},
+		)
+	}
+}
+
+impl FromFlatbuffers for Splits {
+	type Input<'a> = expr_fb::Splits<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let mut splits = Vec::new();
+		let splits_reader = input.splits().context("Splits is not set")?;
+		for split in splits_reader {
+			splits.push(Split::from_fb(split)?);
+		}
+		Ok(Self(splits))
+	}
+}
+
+impl ToFlatbuffers for Split {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Idiom<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		self.0.to_fb(builder)
+	}
+}
+
+impl FromFlatbuffers for Split {
+	type Input<'a> = expr_fb::Idiom<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let idiom = Idiom::from_fb(input)?;
+		Ok(Self(idiom))
+	}
+}
+
+impl ToFlatbuffers for Groups {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Groups<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let mut groups = Vec::with_capacity(self.0.len());
+		for group in &self.0 {
+			groups.push(group.to_fb(builder));
+		}
+		let groups_vector = builder.create_vector(&groups);
+		expr_fb::Groups::create(
+			builder,
+			&expr_fb::GroupsArgs {
+				groups: Some(groups_vector),
+			},
+		)
+	}
+}
+
+impl FromFlatbuffers for Groups {
+	type Input<'a> = expr_fb::Groups<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let mut groups = Vec::new();
+		let groups_reader = input.groups().context("Groups is not set")?;
+		for group in groups_reader {
+			groups.push(Group::from_fb(group)?);
+		}
+		Ok(Self(groups))
+	}
+}
+
+impl ToFlatbuffers for Group {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Idiom<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		self.0.to_fb(builder)
+	}
+}
+
+impl FromFlatbuffers for Group {
+	type Input<'a> = expr_fb::Idiom<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let idiom = Idiom::from_fb(input)?;
+		Ok(Self(idiom))
+	}
+}
+
+impl ToFlatbuffers for Ordering {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::OrderingSpec<'bldr>>;
+
+	fn to_fb<'bldr>(
+			&self,
+			builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+		) -> Self::Output<'bldr> {
+		
+		let args = match self {
+			Self::Random => {
+				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+				expr_fb::OrderingSpecArgs {
+					ordering_type: expr_fb::OrderingType::Random,
+					ordering: Some(null.as_union_value()),
+				}
+			},
+			Self::Order(order_list) => {
+				let order_list = order_list.to_fb(builder);
+				expr_fb::OrderingSpecArgs {
+					ordering_type: expr_fb::OrderingType::Ordered,
+					ordering: Some(order_list.as_union_value()),
+				}
+			}
+		};
+
+		expr_fb::OrderingSpec::create(
+			builder,
+			&args
+		)
+	}
+}
+
+impl FromFlatbuffers for Ordering {
+	type Input<'a> = expr_fb::OrderingSpec<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input.ordering_type() {
+			expr_fb::OrderingType::Random => Ok(Self::Random),
+			expr_fb::OrderingType::Ordered => {
+				let order_list = input.ordering_as_ordered().ok_or_else(|| anyhow::anyhow!("Expected Ordered ordering"))?;
+				let order_list = OrderList::from_fb(order_list)?;
+				Ok(Self::Order(order_list))
+			}
+			_ => Err(anyhow::anyhow!(
+				"Unsupported OrderingSpec type for FlatBuffers deserialization: {:?}",
+				input.ordering_type()
+			)),
+		}
+	}
+}
+
+impl ToFlatbuffers for OrderList {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::OrderList<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let mut orders = Vec::with_capacity(self.0.len());
+		for order in &self.0 {
+			orders.push(order.to_fb(builder));
+		}
+		let orders_vector = builder.create_vector(&orders);
+		expr_fb::OrderList::create(
+			builder,
+			&expr_fb::OrderListArgs {
+				orders: Some(orders_vector),
+			},
+		)
+	}
+}
+
+impl FromFlatbuffers for OrderList {
+	type Input<'a> = expr_fb::OrderList<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let orders_reader = input.orders().context("Orders is not set")?;
+		let mut orders = Vec::new();
+		for order in orders_reader {
+			orders.push(Order::from_fb(order)?);
+		}
+		Ok(Self(orders))
+	}
+}
+
+impl ToFlatbuffers for Order {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Order<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let value = self.value.to_fb(builder);
+
+		expr_fb::Order::create(
+			builder,
+			&expr_fb::OrderArgs {
+				value: Some(value),
+				collate: self.collate,
+				numeric: self.numeric,
+				ascending: self.direction,
+			}
+		)
+	}
+}
+
+impl FromFlatbuffers for Order {
+	type Input<'a> = expr_fb::Order<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let value = Idiom::from_fb(input.value().context("Missing value in Order")?)?;
+		let collate = input.collate();
+		let numeric = input.numeric();
+		let direction = input.ascending();
+
+		Ok(Self {
+			value,
+			collate,
+			numeric,
+			direction,
+		})
+	}
+}
+
+impl ToFlatbuffers for Dir {
+	type Output<'bldr> = expr_fb::GraphDirection;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		match self {
+			Dir::In => expr_fb::GraphDirection::In,
+			Dir::Out => expr_fb::GraphDirection::Out,
+			Dir::Both => expr_fb::GraphDirection::Both,
+		}
+	}
+}
+
+impl FromFlatbuffers for Dir {
+	type Input<'a> = expr_fb::GraphDirection;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input {
+			expr_fb::GraphDirection::In => Ok(Dir::In),
+			expr_fb::GraphDirection::Out => Ok(Dir::Out),
+			expr_fb::GraphDirection::Both => Ok(Dir::Both),
+			_ => Err(anyhow::anyhow!("Unsupported GraphDirection type for FlatBuffers deserialization: {:?}", input)),
+		}
+	}
+}
+
+impl ToFlatbuffers for GraphSubjects {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::GraphSubjects<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let mut subjects = Vec::with_capacity(self.0.len());
+		for subject in &self.0 {
+			subjects.push(subject.to_fb(builder));
+		}
+		let subjects_vector = builder.create_vector(&subjects);
+		expr_fb::GraphSubjects::create(
+			builder,
+			&expr_fb::GraphSubjectsArgs {
+				subjects: Some(subjects_vector),
+			},
+		)
+	}
+}
+
+impl FromFlatbuffers for GraphSubjects {
+	type Input<'a> = expr_fb::GraphSubjects<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let subjects_reader = input.subjects().context("Missing subjects in GraphSubjects")?;
+		let mut subjects = Vec::new();
+		for subject in subjects_reader {
+			subjects.push(GraphSubject::from_fb(subject)?);
+		}
+		Ok(GraphSubjects(subjects))
+	}
+}
+
+impl ToFlatbuffers for GraphSubject {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::GraphSubject<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let args = match self {
+			Self::Table(table) => {
+				let table = builder.create_string(&table.0);
+				let table_fb = expr_fb::Table::create(
+					builder,
+					&expr_fb::TableArgs {
+						name: Some(table),
+					},
+				);
+				expr_fb::GraphSubjectArgs {
+					subject_type: expr_fb::GraphSubjectType::Table,
+					subject: Some(table_fb.as_union_value()),
+				}
+			},
+			Self::Range(table, id_range) => {
+				let table = builder.create_string(&table.0);
+				let start = id_range.beg.to_fb(builder);
+				let end = id_range.end.to_fb(builder);
+				let range_fb = expr_fb::TableIdRange::create(
+					builder,
+					&expr_fb::TableIdRangeArgs {
+						table: Some(table),
+						start: Some(start),
+						end: Some(end),
+					},
+				);
+
+				expr_fb::GraphSubjectArgs {
+					subject_type: expr_fb::GraphSubjectType::Range,
+					subject: Some(range_fb.as_union_value()),
+				}
+			}
+		};
+
+		expr_fb::GraphSubject::create(
+			builder,
+			&args,
+		)
+	}
+}
+
+impl FromFlatbuffers for GraphSubject {
+	type Input<'a> = expr_fb::GraphSubject<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input.subject_type() {
+			expr_fb::GraphSubjectType::Table => {
+				let table = input.subject_as_table().context("Expected Table subject")?;
+				let name = table.name().context("Missing name in Table subject")?.to_string();
+				Ok(GraphSubject::Table(Table(name)))
+			}
+			expr_fb::GraphSubjectType::Range => {
+				let range = input.subject_as_range().context("Expected Range subject")?;
+				let table_name = range.table().context("Missing table in Range subject")?.to_string();
+				let start = Bound::from_fb(range.start().context("Missing start in Range subject")?)?;
+				let end = Bound::from_fb(range.end().context("Missing end in Range subject")?)?;
+				Ok(GraphSubject::Range(Table(table_name), IdRange { beg: start, end }))
+			}
+			_ => Err(anyhow::anyhow!(
+				"Unsupported GraphSubject type for FlatBuffers deserialization: {:?}",
+				input.subject_type()
+			)),
+		}
+	}
+}
+
+impl ToFlatbuffers for Bound<Id> {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::IdBound<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let args = match self {
+			Bound::Included(id) => {
+				let id_value = id.to_fb(builder);
+				expr_fb::IdBoundArgs {
+					id: Some(id_value),
+					inclusive: true
+				}
+			}
+			Bound::Excluded(id) => {
+				let id_value = id.to_fb(builder);
+				expr_fb::IdBoundArgs {
+					id: Some(id_value),
+					inclusive: false
+				}
+			}
+			Bound::Unbounded => {
+				expr_fb::IdBoundArgs {
+					id: None,
+					inclusive: false
+				}
+			}
+		};
+
+		expr_fb::IdBound::create(
+			builder,
+			&args,
+		)
+	}
+}
+
+impl FromFlatbuffers for Bound<Id> {
+	type Input<'a> = expr_fb::IdBound<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		if let Some(id) = input.id() {
+			let id_value = Id::from_fb(id)?;
+			if input.inclusive() {
+				Ok(Bound::Included(id_value))
+			} else {
+				Ok(Bound::Excluded(id_value))
+			}
+		} else {
+			Ok(Bound::Unbounded)
+		}
+	}
+}
+
+impl ToFlatbuffers for Field {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Field<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let args = match self {
+			Field::All => {
+				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+				expr_fb::FieldArgs {
+					field_type: expr_fb::FieldType::All,
+					field: Some(null.as_union_value()),
+				}
+			}
+			Field::Single {
+				expr,
+				alias,
+			} => {
+				let expr = expr.to_fb(builder);
+				let alias = match alias {
+					Some(a) => Some(a.to_fb(builder)),
+					None => None,
+				};
+				let single_field = expr_fb::SingleField::create(
+					builder,
+					&expr_fb::SingleFieldArgs {
+						expr: Some(expr),
+						alias,
+					},
+				);
+
+				expr_fb::FieldArgs {
+					field_type: expr_fb::FieldType::Single,
+					field: Some(single_field.as_union_value()),
+				}
+			}
+		};
+
+		expr_fb::Field::create(builder, &args)
+	}
+}
+
+impl FromFlatbuffers for Field {
+	type Input<'a> = expr_fb::Field<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		match input.field_type() {
+			expr_fb::FieldType::All => Ok(Field::All),
+			expr_fb::FieldType::Single => {
+				let single_field = input.field_as_single().context("Expected SingleField")?;
+				let expr =
+					Value::from_fb(single_field.expr().context("Missing expr in SingleField")?)?;
+				let alias = single_field.alias().map(|a| Idiom::from_fb(a)).transpose()?;
+				Ok(Field::Single {
+					expr,
+					alias,
+				})
+			}
+			_ => Err(anyhow::anyhow!(
+				"Unsupported field type for FlatBuffers deserialization: {:?}",
+				input.field_type()
+			)),
+		}
+	}
+}
+
+impl ToFlatbuffers for Fields {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Fields<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let mut fields = Vec::with_capacity(self.0.len());
+		for field in &self.0 {
+			let args = match field {
+				Field::All => {
+					let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
+					expr_fb::FieldArgs {
+						field_type: expr_fb::FieldType::All,
+						field: Some(null.as_union_value()),
+					}
+				},
+				Field::Single { expr, alias } => {
+					let expr = expr.to_fb(builder);
+					let alias = alias.as_ref().map(|a| a.to_fb(builder));
+					let single_field = expr_fb::SingleField::create(
+						builder,
+						&expr_fb::SingleFieldArgs {
+							expr: Some(expr),
+							alias,
+						},
+					);
+					expr_fb::FieldArgs {
+						field_type: expr_fb::FieldType::Single,
+						field: Some(single_field.as_union_value()),
+					}
+				}
+			};
+
+			let field_item = expr_fb::Field::create(builder, &args);
+
+			fields.push(field_item);
+		}
+		let fields_vector = builder.create_vector(&fields);
+		expr_fb::Fields::create(
+			builder,
+			&expr_fb::FieldsArgs {
+				single: self.1,
+				fields: Some(fields_vector),
+			},
+		)
+	}
+}
+
+impl FromFlatbuffers for Fields {
+	type Input<'a> = expr_fb::Fields<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let single = input.single();
+		let mut fields = Vec::new();
+		let fields_reader = input.fields().context("Fields is not set")?;
+		for field in fields_reader {
+			fields.push(Field::from_fb(field)?);
+		}
+		Ok(Fields(fields, single))
+	}
+}
+
+impl ToFlatbuffers for Fetch {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Value<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		self.0.to_fb(builder)
+	}
+}
+
+impl FromFlatbuffers for Fetch {
+	type Input<'a> = expr_fb::Value<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let value = Value::from_fb(input)?;
+		Ok(Fetch(value))
+	}
+}
+
+impl ToFlatbuffers for Fetchs {
+	type Output<'bldr> = flatbuffers::WIPOffset<
+		::flatbuffers::Vector<'bldr, ::flatbuffers::ForwardsUOffset<expr_fb::Value<'bldr>>>,
+	>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let mut values = Vec::with_capacity(self.0.len());
+		for value in &self.0 {
+			values.push(value.to_fb(builder));
+		}
+		builder.create_vector(&values)
+	}
+}
+
+impl FromFlatbuffers for Fetchs {
+	type Input<'a> = flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<expr_fb::Value<'a>>>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let mut fetchs = Vec::new();
+		for value in input {
+			fetchs.push(Fetch(Value::from_fb(value)?));
+		}
+		Ok(Fetchs(fetchs))
+	}
+}
+
+impl ToFlatbuffers for Variables {
+	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Variables<'bldr>>;
+
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
+		let mut vars = Vec::with_capacity(self.len());
+		for (key, value) in self.iter() {
+			let key_str = builder.create_string(key);
+			let value_fb = value.to_fb(builder);
+			let var = expr_fb::Variable::create(
+				builder,
+				&expr_fb::VariableArgs {
+					key: Some(key_str),
+					value: Some(value_fb),
+				},
+			);
+			vars.push(var);
+		}
+		let vars_vector = builder.create_vector(&vars);
+		expr_fb::Variables::create(
+			builder,
+			&expr_fb::VariablesArgs {
+				items: Some(vars_vector),
+			},
+		)
+	}
+}
+
+impl FromFlatbuffers for Variables {
+	type Input<'a> = expr_fb::Variables<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let items_reader = input.items().context("Variables is not set")?;
+		let mut vars = BTreeMap::new();
+		for item in items_reader {
+			let key = item.key().context("Missing key in Variable")?.to_string();
+			let value = Value::from_fb(item.value().context("Missing value in Variable")?)?;
+			vars.insert(key, value);
+		}
+		Ok(vars)
 	}
 }
 

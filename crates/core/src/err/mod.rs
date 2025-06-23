@@ -43,6 +43,14 @@ pub enum Error {
 	#[error("An error occurred: {0}")]
 	Thrown(String),
 
+	#[error("Unexpected type: expected {expected}, but got {actual}")]
+	UnexpectedType {
+		/// The expected type
+		expected: &'static str,
+		/// The actual type
+		actual: &'static str,
+	},
+
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
 	Ds(String),

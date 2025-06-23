@@ -1,11 +1,13 @@
 use crate::Surreal;
-use crate::Value;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::method::OnceLockExt;
 use serde::de::DeserializeOwned;
+use surrealdb_core::dbs::QueryResultData;
+use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::Value;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -17,7 +19,7 @@ use std::marker::PhantomData;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Content<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) command: Result<Command>,
+	pub(super) command: Command,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -25,9 +27,17 @@ impl<'r, C, R> Content<'r, C, R>
 where
 	C: Connection,
 {
+	pub(crate) fn new(client: Cow<'r, Surreal<C>>, command: Command) -> Self {
+		Content {
+			client,
+			command,
+			response_type: PhantomData,
+		}
+	}
+
 	pub(crate) fn from_closure<F>(client: Cow<'r, Surreal<C>>, f: F) -> Self
 	where
-		F: FnOnce() -> Result<Command>,
+		F: FnOnce() -> Command,
 	{
 		Content {
 			client,
@@ -55,7 +65,7 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
-				router.$method(command?).await
+				router.$method(command).await
 			})
 		}
 	};
@@ -74,7 +84,7 @@ where
 impl<'r, Client, R> IntoFuture for Content<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -85,7 +95,7 @@ where
 impl<'r, Client, R> IntoFuture for Content<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;

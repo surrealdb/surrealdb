@@ -2,29 +2,17 @@
 
 use serde::Deserialize;
 use serde::Serialize;
+use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::Value;
+use surrealdb_core::iam::AccessMethod;
+use surrealdb_core::iam::SignupParams;
+use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::expr as expr_fb;
 use std::collections::BTreeMap;
 use std::fmt;
-use surrealdb_core::protocol::surrealdb::rpc::QueryResult;
-use surrealdb_core::protocol::surrealdb::rpc::Response;
-use surrealdb_core::protocol::surrealdb::rpc::SignupParams;
-use surrealdb_core::protocol::surrealdb::rpc::query_result;
-use surrealdb_core::protocol::surrealdb::value::value;
-
-use surrealdb_core::protocol::surrealdb::rpc::Access as AccessProto;
-use surrealdb_core::protocol::surrealdb::rpc::access::Inner as AccessInnerProto;
-use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
-
-/// A signup action
-#[derive(Debug)]
-pub struct Signup;
-
-/// A signin action
-#[derive(Debug)]
-pub struct Signin;
 
 /// Credentials for authenticating with the server
-pub trait IntoCredentials {
-	fn into_access(self) -> AccessProto;
+pub trait IntoAccessCredentials {
+	fn into_access_method(self) -> AccessMethod;
 }
 
 /// Credentials for the root user
@@ -38,15 +26,11 @@ pub struct Root<'a> {
 	pub password: &'a str,
 }
 
-impl IntoCredentials for Root<'_> {
-	fn into_access(self) -> AccessProto {
-		AccessProto {
-			inner: Some(AccessInnerProto::RootUser(
-				surrealdb_core::protocol::surrealdb::rpc::RootUserCredentials {
-					username: self.username.to_string(),
-					password: self.password.to_string(),
-				},
-			)),
+impl IntoAccessCredentials for Root<'_> {
+	fn into_access_method(self) -> AccessMethod {
+		AccessMethod::RootUser {
+			username: self.username.to_string(),
+			password: self.password.to_string(),
 		}
 	}
 }
@@ -65,16 +49,12 @@ pub struct Namespace<'a> {
 	pub password: &'a str,
 }
 
-impl IntoCredentials for Namespace<'_> {
-	fn into_access(self) -> AccessProto {
-		AccessProto {
-			inner: Some(AccessInnerProto::NamespaceUser(
-				surrealdb_core::protocol::surrealdb::rpc::NamespaceUserCredentials {
-					namespace: self.namespace.to_string(),
-					username: self.username.to_string(),
-					password: self.password.to_string(),
-				},
-			)),
+impl IntoAccessCredentials for Namespace<'_> {
+	fn into_access_method(self) -> AccessMethod {
+		AccessMethod::NamespaceUser {
+			namespace: self.namespace.to_string(),
+			username: self.username.to_string(),
+			password: self.password.to_string(),
 		}
 	}
 }
@@ -96,17 +76,13 @@ pub struct Database<'a> {
 	pub password: &'a str,
 }
 
-impl IntoCredentials for Database<'_> {
-	fn into_access(self) -> AccessProto {
-		AccessProto {
-			inner: Some(AccessInnerProto::DatabaseUser(
-				surrealdb_core::protocol::surrealdb::rpc::DatabaseUserCredentials {
-					namespace: self.namespace.to_string(),
-					database: self.database.to_string(),
-					username: self.username.to_string(),
-					password: self.password.to_string(),
-				},
-			)),
+impl IntoAccessCredentials for Database<'_> {
+	fn into_access_method(self) -> AccessMethod {
+		AccessMethod::DatabaseUser {
+			namespace: self.namespace.to_string(),
+			database: self.database.to_string(),
+			username: self.username.to_string(),
+			password: self.password.to_string(),
 		}
 	}
 }
@@ -127,10 +103,10 @@ pub struct RecordCredentials<'a> {
 	pub params: BTreeMap<String, String>,
 }
 
-impl IntoCredentials for RecordCredentials<'_> {
-	fn into_access(self) -> AccessProto {
+impl IntoAccessCredentials for RecordCredentials<'_> {
+	fn into_access_method(self) -> AccessMethod {
 		todo!("STU: TODO this");
-		// AccessProto::Namespace(surrealdb_core::proto::surrealdb::rpc::Namespace {
+		// AccessMethod::Namespace(surrealdb_core::proto::surrealdb::rpc::Namespace {
 		// 	namespace: self.namespace.to_string(),
 		// 	db: self.database.to_string(),
 		// 	ac: self.access.to_string(),
@@ -203,21 +179,31 @@ impl<'a> From<&'a str> for Jwt {
 	}
 }
 
+impl TryFromValue for Jwt {
+	fn try_from_value(value: Value) -> anyhow::Result<Self> {
+		match value {
+			Value::Strand(s) => Ok(Jwt(s.0)),
+			_ => Err(anyhow::anyhow!("Expected a string value, got {:?}", value.value_type())),
+		}
+	}
+}
+
 impl fmt::Debug for Jwt {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "Jwt(REDACTED)")
 	}
 }
 
-impl TryFrom<ValueProto> for Jwt {
+impl TryFrom<expr_fb::Value<'_>> for Jwt {
 	type Error = anyhow::Error;
 
-	fn try_from(value: ValueProto) -> Result<Self, Self::Error> {
-		if let Some(value::Inner::Strand(str)) = value.inner {
-			Ok(Jwt(str.to_owned()))
-		} else {
-			Err(anyhow::anyhow!("Expected a string value, got {:?}", value.inner))
-		}
+	fn try_from(value: expr_fb::Value<'_>) -> Result<Self, Self::Error> {
+		let value_str = value.value_as_string()
+			.ok_or_else(|| anyhow::anyhow!("Expected a string value, got {:?}", value.value_type()))?;
+
+		let value_str = value_str.value()
+			.ok_or_else(|| anyhow::anyhow!("Expected a string value, got {:?}", value.value_type()))?;
+		Ok(Jwt(value_str.to_string()))
 	}
 }
 

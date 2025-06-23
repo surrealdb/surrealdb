@@ -1,7 +1,8 @@
 //! The different options and types for use in API functions
 
 use serde::Serialize;
-use std::borrow::Cow;
+use surrealdb_core::expr::Value;
+use std::{borrow::Cow, collections::BTreeMap};
 
 pub mod auth;
 pub mod capabilities;
@@ -18,44 +19,29 @@ pub use endpoint::*;
 pub use export::*;
 pub use query::*;
 pub use resource::*;
-use serde_content::Serializer;
-use serde_content::Value as Content;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
 
-type UnitOp<'a> = InnerOp<'a, ()>;
-
+/// A patch operation.
 #[derive(Debug, Serialize)]
 #[serde(tag = "op", rename_all = "lowercase")]
-enum InnerOp<'a, T> {
+pub enum PatchOp {
 	Add {
-		path: &'a str,
-		value: T,
+		path: String,
+		value: Value,
 	},
 	Remove {
-		path: &'a str,
+		path: String,
 	},
 	Replace {
-		path: &'a str,
-		value: T,
+		path: String,
+		value: Value,
 	},
 	Change {
-		path: &'a str,
-		value: String,
+		path: String,
+		value: Value,
 	},
 }
-
-/// A [JSON Patch] operation
-///
-/// From the official website:
-///
-/// > JSON Patch is a format for describing changes to a JSON document.
-/// > It can be used to avoid sending a whole document when only a part has changed.
-///
-/// [JSON Patch]: https://jsonpatch.com/
-#[derive(Debug)]
-#[must_use]
-pub struct PatchOp(pub(crate) serde_content::Result<Content<'static>>);
 
 impl PatchOp {
 	/// Adds a value to an object or inserts it into an array.
@@ -71,14 +57,11 @@ impl PatchOp {
 	/// PatchOp::add("/biscuits/1", json!({ "name": "Ginger Nut" }))
 	/// # ;
 	/// ```
-	pub fn add<T>(path: &str, value: T) -> Self
-	where
-		T: Serialize,
-	{
-		Self(Serializer::new().serialize(InnerOp::Add {
-			path,
+	pub fn add<T>(path: impl Into<String>, value: Value) -> Self {
+		Self::Add {
+			path: path.into(),
 			value,
-		}))
+		}
 	}
 
 	/// Removes a value from an object or array.
@@ -99,10 +82,10 @@ impl PatchOp {
 	/// PatchOp::remove("/biscuits/0")
 	/// # ;
 	/// ```
-	pub fn remove(path: &str) -> Self {
-		Self(Serializer::new().serialize(UnitOp::Remove {
-			path,
-		}))
+	pub fn remove(path: impl Into<String>) -> Self {
+		Self::Remove {
+			path: path.into(),
+		}
 	}
 
 	/// Replaces a value.
@@ -116,46 +99,82 @@ impl PatchOp {
 	/// PatchOp::replace("/biscuits/0/name", "Chocolate Digestive")
 	/// # ;
 	/// ```
-	pub fn replace<T>(path: &str, value: T) -> Self
-	where
-		T: Serialize,
-	{
-		Self(Serializer::new().serialize(InnerOp::Replace {
-			path,
+	pub fn replace(path: impl Into<String>, value: Value) -> Self {
+		Self::Replace {
+			path: path.into(),
 			value,
-		}))
+		}
 	}
 
 	/// Changes a value
-	pub fn change(path: &str, diff: String) -> Self {
-		Self(Serializer::new().serialize(UnitOp::Change {
-			path,
+	pub fn change(path: impl Into<String>, diff: Value) -> Self {
+		Self::Change {
+			path: path.into(),
 			value: diff,
-		}))
+		}
+	}
+}
+
+impl TryFrom<PatchOp> for Value {
+	type Error = anyhow::Error;
+
+	fn try_from(op: PatchOp) -> Result<Self, Self::Error> {
+		// Convert the PatchOp into a Value
+		let value = match op {
+			PatchOp::Add { path, value } => {
+				let mut map = BTreeMap::new();
+				map.insert("op".to_string(), "add".into());
+				map.insert("path".to_string(), path.into());
+				map.insert("value".to_string(), value);
+				Value::Object(map)
+			},
+			PatchOp::Remove { path } => {
+				let mut map = BTreeMap::new();
+				map.insert("op".to_string(), "remove".into());
+				map.insert("path".to_string(), path.into());
+				Value::Object(map)
+			},
+			PatchOp::Replace { path, value } => {
+				let mut map = BTreeMap::new();
+				map.insert("op".to_string(), "replace".into());
+				map.insert("path".to_string(), path.into());
+				map.insert("value".to_string(), value);
+				Value::Object(map)
+			},
+			PatchOp::Change { path, value } => {
+				let mut map = BTreeMap::new();
+				map.insert("op".to_string(), "change".into());
+				map.insert("path".to_string(), path.into());
+				map.insert("value".to_string(), value);
+				Value::Object(map)
+			},
+		};
+		Ok(value)
 	}
 }
 
 /// Multiple patch operations
 #[derive(Debug, Default)]
 #[must_use]
-pub struct PatchOps(Vec<PatchOp>);
+pub struct PatchOps(pub Vec<PatchOp>);
 
 impl From<PatchOps> for PatchOp {
 	fn from(ops: PatchOps) -> Self {
-		let mut merged = PatchOp(Ok(Content::Seq(Vec::with_capacity(ops.0.len()))));
-		for PatchOp(result) in ops.0 {
-			if let Ok(Content::Seq(value)) = &mut merged.0 {
-				match result {
-					Ok(op) => value.push(op),
-					Err(error) => {
-						merged.0 = Err(error);
-						// This operation produced an error, no need to continue
-						break;
-					}
-				}
-			}
-		}
-		merged
+		todo!("STU: What is going on here?")
+		// let mut merged = PatchOp(Ok(Content::Seq(Vec::with_capacity(ops.0.len()))));
+		// for PatchOp(result) in ops.0 {
+		// 	if let Ok(Content::Seq(value)) = &mut merged.0 {
+		// 		match result {
+		// 			Ok(op) => value.push(op),
+		// 			Err(error) => {
+		// 				merged.0 = Err(error);
+		// 				// This operation produced an error, no need to continue
+		// 				break;
+		// 			}
+		// 		}
+		// 	}
+		// }
+		// merged
 	}
 }
 
@@ -232,6 +251,25 @@ impl PatchOps {
 	pub fn change(mut self, path: &str, diff: String) -> Self {
 		self.0.push(PatchOp::change(path, diff));
 		self
+	}
+
+	pub fn push(&mut self, op: PatchOp) {
+		self.0.push(op);
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+
+	pub fn iter(&self) -> impl Iterator<Item = &PatchOp> {
+		self.0.iter()
+	}
+	pub fn into_iter(self) -> impl Iterator<Item = PatchOp> {
+		self.0.into_iter()
 	}
 }
 

@@ -1,6 +1,5 @@
 use crate::Action;
 use crate::Surreal;
-use crate::Value;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -24,13 +23,14 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::Value as Value;
 use surrealdb_core::sql::Statement;
 use surrealdb_core::sql::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, SqlValue as CoreSqlValue, Table,
+	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, SqlValue as SqlValue, Table,
 	Thing as SqlThing, statements::LiveStatement,
 };
 use uuid::Uuid;
+use surrealdb_core::expr::TryFromValue;
 
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -65,7 +65,7 @@ where
 				stmt.what = core_table.into()
 			}
 			Resource::RecordId(record) => {
-				let record: SqlThing = record.into_inner().into();
+				let record: SqlThing = record.into();
 				table.0.clone_from(&record.tb);
 				stmt.what = table.into();
 				let mut ident = Ident::default();
@@ -73,7 +73,7 @@ where
 				let mut idiom = Idiom::default();
 				idiom.0 = vec![Part::from(ident)];
 				let mut cond = Cond::default();
-				cond.0 = CoreSqlValue::Expression(Box::new(Expression::new(
+				cond.0 = SqlValue::Expression(Box::new(Expression::new(
 					idiom.into(),
 					Operator::Equal,
 					record.into(),
@@ -91,16 +91,17 @@ where
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
-		let query =
-			Query::normal(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
-		let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
-			return Err(Error::InternalError(
-				"successufull live query didn't return a uuid".to_string(),
-			)
-			.into());
-		};
-		let rx = register(router, *id).await?;
-		Ok(Stream::new(client.inner.clone().into(), *id, Some(rx)))
+		todo!("STU: Fix all of this");
+		// let query =
+		// 	Query::normal(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
+		// let Value::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
+		// 	return Err(Error::InternalError(
+		// 		"successufull live query didn't return a uuid".to_string(),
+		// 	)
+		// 	.into());
+		// };
+		// let rx = register(router, *id).await?;
+		// Ok(Stream::new(client.inner.clone().into(), *id, Some(rx)))
 	})
 }
 
@@ -130,7 +131,7 @@ where
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>, Live>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Stream<Option<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -143,7 +144,7 @@ where
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>, Live>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Stream<Vec<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -205,7 +206,7 @@ impl futures::Stream for Stream<Value> {
 				action => Poll::Ready(Some(Notification {
 					query_id: *notification.id,
 					action: Action::from_core(action),
-					data: Value::from_inner(notification.result),
+					data: notification.result,
 				})),
 			}
 		}
@@ -226,7 +227,7 @@ macro_rules! poll_next_and_convert {
 
 impl<R> futures::Stream for Stream<Option<R>>
 where
-	R: DeserializeOwned + Unpin,
+	R: TryFromValue,
 {
 	type Item = Result<Notification<R>>;
 
@@ -235,7 +236,7 @@ where
 
 impl<R> futures::Stream for Stream<Vec<R>>
 where
-	R: DeserializeOwned + Unpin,
+	R: TryFromValue,
 {
 	type Item = Result<Notification<R>>;
 
@@ -244,7 +245,7 @@ where
 
 impl<R> futures::Stream for Stream<Notification<R>>
 where
-	R: DeserializeOwned + Unpin,
+	R: TryFromValue,
 {
 	type Item = Result<Notification<R>>;
 
@@ -281,13 +282,13 @@ impl<R> Drop for Stream<R> {
 
 fn deserialize<R>(notification: CoreNotification) -> Option<Result<crate::Notification<R>>>
 where
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	let query_id = *notification.id;
 	let action = notification.action;
 	match action {
 		CoreAction::Killed => None,
-		action => match surrealdb_core::expr::from_value(notification.result) {
+		action => match R::try_from_value(notification.result) {
 			Ok(data) => Some(Ok(Notification {
 				query_id,
 				data,

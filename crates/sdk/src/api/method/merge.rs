@@ -1,4 +1,3 @@
-use super::validate_data;
 use crate::Surreal;
 use crate::api::Connection;
 use crate::api::Result;
@@ -6,31 +5,33 @@ use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::method::OnceLockExt;
-use crate::value::Value;
+use crate::method::ensure_values_are_objects;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::expr::Data;
+use surrealdb_core::expr::Value;
+use surrealdb_core::expr::TryFromValue;
 
 /// A merge future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Merge<'r, C: Connection, D, R> {
+pub struct Merge<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) content: D,
+	pub(super) content: Data,
 	pub(super) upsert: bool,
 	pub(super) response_type: PhantomData<R>,
 }
 
-impl<C, D, R> Merge<'_, C, D, R>
+impl<C, R> Merge<'_, C, R>
 where
 	C: Connection,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Merge<'static, C, D, R> {
+	pub fn into_owned(self) -> Merge<'static, C, R> {
 		Merge {
 			client: Cow::Owned(self.client.into_owned()),
 			..self
@@ -48,35 +49,40 @@ macro_rules! into_future {
 				upsert,
 				..
 			} = self;
-			let content = to_core_value(content);
 			Box::pin(async move {
-				let content = match content? {
-					CoreValue::None | CoreValue::Null => None,
-					data => {
-						validate_data(
-							&data,
-							"Tried to merge non-object-like data, only structs and objects are supported",
-						)?;
-						Some(data)
-					}
-				};
+				todo!("STU: Implement Merge with content handling");
+				// let content = match content {
+				// 	Value::None | Value::Null => None,
+				// 	data => {
+				// 		ensure_values_are_objects(
+				// 			&data,
+				// 			"Tried to merge non-object-like data, only structs and objects are supported",
+				// 		)?;
+				// 		Some(data)
+				// 	}
+				// };
 
-				let router = client.inner.router.extract()?;
-				let cmd = Command::Merge {
-					upsert,
-					what: resource?,
-					data: content,
-				};
-				router.execute_query(cmd).await?.take(0)
+				// let router = client.inner.router.extract()?;
+				// let cmd = if upsert {
+				// 	Command::Upsert {
+				// 		what: resource?,
+				// 		data: Some(content),
+				// 	}
+				// } else {
+				// 	Command::Update {
+				// 		what: resource?,
+				// 		data: Some(content),
+				// 	}
+				// };
+				// router.execute_query(cmd).await?.take(0)
 			})
 		}
 	};
 }
 
-impl<'r, Client, D> IntoFuture for Merge<'r, Client, D, Value>
+impl<'r, Client> IntoFuture for Merge<'r, Client, Value>
 where
 	Client: Connection,
-	D: Serialize + 'static,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -84,11 +90,10 @@ where
 	into_future! {}
 }
 
-impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
+impl<'r, Client, R> IntoFuture for Merge<'r, Client, Option<R>>
 where
 	Client: Connection,
-	D: Serialize + 'static,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -96,11 +101,10 @@ where
 	into_future! {}
 }
 
-impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
+impl<'r, Client, R> IntoFuture for Merge<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	D: Serialize + 'static,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;

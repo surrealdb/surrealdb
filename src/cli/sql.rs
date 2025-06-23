@@ -17,7 +17,7 @@ use surrealdb::engine::any::{self, connect};
 use surrealdb::expr::{Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
-use surrealdb::{Notification, Response, Value};
+use surrealdb::{Notification, QueryResults, Value};
 use surrealdb_core::sql::{Param, SqlValue as CoreSqlValue, Statement};
 
 #[derive(Args, Debug)]
@@ -276,7 +276,7 @@ pub async fn init(
 fn process(
 	pretty: bool,
 	json: bool,
-	res: surrealdb::Result<WithStats<Response>>,
+	res: surrealdb::Result<WithStats<QueryResults>>,
 ) -> Result<String> {
 	// Check query response for an error
 	let mut response = res?;

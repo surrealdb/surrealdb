@@ -11,24 +11,12 @@ use std::{
 use surrealdb_core::{
 	dbs::Action as CoreAction,
 	expr::{
-		Array as CoreArray, Datetime as CoreDatetime, Id as CoreId, Number as CoreNumber,
-		Thing as CoreThing, Value as CoreValue,
+		Array as Array, Datetime as Datetime, Id as Id, Number as Number, Object, Thing as RecordId, TryFromValue, Value as Value
 	},
-	sql::SqlValue as CoreSqlValue,
+	sql::SqlValue as SqlValue,
 	syn,
 };
 use uuid::Uuid;
-
-mod obj;
-pub use obj::{IntoIter, Iter, IterMut, Object};
-
-pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
-	surrealdb_core::expr::from_value(value.0)
-}
-
-pub fn to_value<T: Serialize + 'static>(value: T) -> Result<Value> {
-	Ok(Value(surrealdb_core::expr::to_value(value)?))
-}
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
 // instead of a plain Vec<u8>.
@@ -77,28 +65,16 @@ impl From<Vec<u8>> for Bytes {
 }
 
 transparent_wrapper!(
-	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
-	pub struct Datetime(CoreDatetime)
-);
-impl_serialize_wrapper!(Datetime);
-
-impl From<DateTime<Utc>> for Datetime {
-	fn from(v: DateTime<Utc>) -> Self {
-		Self(v.into())
-	}
-}
-
-transparent_wrapper!(
 	/// The key of a [`RecordId`].
 	#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 	#[non_exhaustive]
-	pub struct RecordIdKey(CoreId)
+	pub struct RecordIdKey(Id)
 );
 impl_serialize_wrapper!(RecordIdKey);
 
 impl From<Object> for RecordIdKey {
-	fn from(value: Object) -> Self {
-		Self::from_inner(CoreId::Object(value.into_inner()))
+	fn from(object: Object) -> Self {
+		Self::from_inner(Id::Object(object))
 	}
 }
 
@@ -106,8 +82,8 @@ impl TryFrom<RecordIdKey> for Object {
 	type Error = anyhow::Error;
 
 	fn try_from(value: RecordIdKey) -> Result<Self> {
-		if let CoreId::Object(x) = value.0 {
-			Ok(Object::from_inner(x))
+		if let Id::Object(object) = value.0 {
+			Ok(object)
 		} else {
 			Err(anyhow::Error::new(ApiError::FromValue {
 				value: value.into(),
@@ -119,7 +95,7 @@ impl TryFrom<RecordIdKey> for Object {
 
 impl From<String> for RecordIdKey {
 	fn from(value: String) -> Self {
-		Self(CoreId::String(value))
+		Self(Id::String(value))
 	}
 }
 
@@ -127,7 +103,7 @@ impl TryFrom<RecordIdKey> for String {
 	type Error = anyhow::Error;
 
 	fn try_from(value: RecordIdKey) -> Result<Self> {
-		if let CoreId::String(x) = value.0 {
+		if let Id::String(x) = value.0 {
 			Ok(x)
 		} else {
 			Err(anyhow::Error::new(ApiError::FromValue {
@@ -140,19 +116,19 @@ impl TryFrom<RecordIdKey> for String {
 
 impl From<&String> for RecordIdKey {
 	fn from(value: &String) -> Self {
-		Self(CoreId::String(value.clone()))
+		Self(Id::String(value.clone()))
 	}
 }
 
 impl From<&str> for RecordIdKey {
 	fn from(value: &str) -> Self {
-		Self(CoreId::String(value.to_owned()))
+		Self(Id::String(value.to_owned()))
 	}
 }
 
 impl From<i64> for RecordIdKey {
 	fn from(value: i64) -> Self {
-		Self(CoreId::Number(value))
+		Self(Id::Number(value))
 	}
 }
 
@@ -160,7 +136,7 @@ impl TryFrom<RecordIdKey> for i64 {
 	type Error = anyhow::Error;
 
 	fn try_from(value: RecordIdKey) -> Result<Self> {
-		if let CoreId::Number(x) = value.0 {
+		if let Id::Number(x) = value.0 {
 			Ok(x)
 		} else {
 			Err(anyhow::Error::new(ApiError::FromValue {
@@ -173,7 +149,7 @@ impl TryFrom<RecordIdKey> for i64 {
 
 impl From<Uuid> for RecordIdKey {
 	fn from(value: Uuid) -> Self {
-		Self(CoreId::Uuid(value.into()))
+		Self(Id::Uuid(value.into()))
 	}
 }
 
@@ -181,7 +157,7 @@ impl TryFrom<RecordIdKey> for Uuid {
 	type Error = anyhow::Error;
 
 	fn try_from(value: RecordIdKey) -> Result<Self> {
-		if let CoreId::Uuid(x) = value.0 {
+		if let Id::Uuid(x) = value.0 {
 			Ok(*x)
 		} else {
 			Err(anyhow::Error::new(ApiError::FromValue {
@@ -193,11 +169,11 @@ impl TryFrom<RecordIdKey> for Uuid {
 }
 
 impl From<Vec<Value>> for RecordIdKey {
-	fn from(value: Vec<Value>) -> Self {
-		let res = Value::array_to_core(value);
-		let mut array = CoreArray::default();
+	fn from(values: Vec<Value>) -> Self {
+		let res = Value::Array(Array(values));
+		let mut array = Array::default();
 		array.0 = res;
-		Self(CoreId::Array(array))
+		Self(Id::Array(array))
 	}
 }
 
@@ -205,27 +181,13 @@ impl From<Vec<Value>> for RecordIdKey {
 impl From<RecordIdKey> for Value {
 	fn from(key: RecordIdKey) -> Self {
 		match key.0 {
-			CoreId::String(x) => Value::from_inner(CoreValue::from(x)),
-			CoreId::Number(x) => Value::from_inner(CoreValue::from(x)),
-			CoreId::Object(x) => Value::from_inner(CoreValue::from(x)),
-			CoreId::Array(x) => Value::from_inner(CoreValue::from(x)),
-			CoreId::Uuid(x) => Value::from_inner(CoreValue::from(x)),
+			Id::String(x) => Value::from(x),
+			Id::Number(x) => Value::from(x),
+			Id::Object(x) => Value::from(x),
+			Id::Array(x) => Value::from(x),
+			Id::Uuid(x) => Value::from(x),
 			_ => panic!("lib recieved generate variant of record id"),
 		}
-	}
-}
-
-impl From<RecordId> for Value {
-	fn from(key: RecordId) -> Self {
-		Value::from_inner(CoreValue::Thing(key.0))
-	}
-}
-
-impl FromStr for Value {
-	type Err = anyhow::Error;
-
-	fn from_str(s: &str) -> Result<Self> {
-		Ok(Value::from_inner(surrealdb_core::syn::value(s)?.into()))
 	}
 }
 
@@ -241,308 +203,18 @@ impl fmt::Display for RecordIdKeyFromValueError {
 	}
 }
 
-impl TryFrom<Value> for RecordIdKey {
-	type Error = RecordIdKeyFromValueError;
-
-	fn try_from(key: Value) -> std::result::Result<Self, Self::Error> {
+impl TryFromValue for RecordIdKey {
+	fn try_from_value(key: Value) -> std::result::Result<Self, anyhow::Error> {
 		match key.0 {
-			CoreValue::Strand(x) => Ok(RecordIdKey::from_inner(CoreId::String(x.0))),
-			CoreValue::Number(CoreNumber::Int(x)) => Ok(RecordIdKey::from_inner(CoreId::Number(x))),
-			CoreValue::Object(x) => Ok(RecordIdKey::from_inner(CoreId::Object(x))),
-			CoreValue::Array(x) => Ok(RecordIdKey::from_inner(CoreId::Array(x))),
+			Value::Strand(x) => Ok(RecordIdKey::from_inner(Id::String(x.0))),
+			Value::Number(Number::Int(x)) => Ok(RecordIdKey::from_inner(Id::Number(x))),
+			Value::Object(x) => Ok(RecordIdKey::from_inner(Id::Object(x))),
+			Value::Array(x) => Ok(RecordIdKey::from_inner(Id::Array(x))),
 			_ => Err(RecordIdKeyFromValueError(())),
 		}
 	}
 }
 
-transparent_wrapper!(
-	/// Struct representing a record id.
-	///
-	/// Record id's consist of a table name and a key.
-	/// For example the record id `user:tkwse1j5o0anqjxonvzx` has the table `user` and the key `tkwse1j5o0anqjxonvzx`.
-	#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-	pub struct RecordId(CoreThing)
-);
-impl_serialize_wrapper!(RecordId);
-
-impl RecordId {
-	pub fn from_table_key<S, K>(table: S, key: K) -> Self
-	where
-		S: Into<String>,
-		K: Into<RecordIdKey>,
-	{
-		let tb = table.into();
-		let key = key.into();
-		Self(CoreThing::from((tb, key.0)))
-	}
-
-	pub fn table(&self) -> &str {
-		&self.0.tb
-	}
-
-	pub fn key(&self) -> &RecordIdKey {
-		RecordIdKey::from_inner_ref(&self.0.id)
-	}
-}
-
-impl FromStr for RecordId {
-	type Err = anyhow::Error;
-
-	fn from_str(s: &str) -> Result<Self> {
-		syn::thing(s).map(|thing| RecordId::from_inner(CoreThing::from(thing)))
-	}
-}
-
-impl<S, I> From<(S, I)> for RecordId
-where
-	S: Into<String>,
-	RecordIdKey: From<I>,
-{
-	fn from(value: (S, I)) -> Self {
-		Self::from_table_key(value.0, value.1)
-	}
-}
-
-transparent_wrapper!(
-	/// The number type of surrealql.
-	/// Can contain either a 64 bit float, 64 bit integer or a decimal.
-	#[derive( Clone, PartialEq, PartialOrd)]
-	pub struct Number(CoreNumber)
-);
-impl_serialize_wrapper!(Number);
-
-transparent_wrapper!(
-	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
-	pub struct Value(pub(crate) CoreValue)
-);
-impl_serialize_wrapper!(Value);
-
-impl Value {
-	#[expect(dead_code)]
-	pub(crate) fn core_to_array(v: Vec<CoreValue>) -> Vec<Value> {
-		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<Vec<CoreValue>, Vec<Value>>(v)
-		}
-	}
-
-	#[expect(dead_code)]
-	pub(crate) fn core_to_array_ref(v: &Vec<CoreValue>) -> &Vec<Value> {
-		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<&Vec<CoreValue>, &Vec<Value>>(v)
-		}
-	}
-
-	#[expect(dead_code)]
-	pub(crate) fn core_to_array_mut(v: &mut Vec<CoreValue>) -> &mut Vec<Value> {
-		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<&mut Vec<CoreValue>, &mut Vec<Value>>(v)
-		}
-	}
-
-	pub(crate) fn array_to_core(v: Vec<Value>) -> Vec<CoreValue> {
-		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<Vec<Value>, Vec<CoreValue>>(v)
-		}
-	}
-
-	#[expect(dead_code)]
-	pub(crate) fn array_to_core_ref(v: &Vec<Value>) -> &Vec<CoreValue> {
-		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<&Vec<Value>, &Vec<CoreValue>>(v)
-		}
-	}
-
-	#[expect(dead_code)]
-	pub(crate) fn array_to_core_mut(v: &mut Vec<Value>) -> &mut Vec<CoreValue> {
-		unsafe {
-			// SAFETY: Because Value is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<&mut Vec<Value>, &mut Vec<CoreValue>>(v)
-		}
-	}
-}
-
-impl Index<usize> for Value {
-	type Output = Self;
-
-	fn index(&self, index: usize) -> &Self::Output {
-		match &self.0 {
-			CoreValue::Array(map) => {
-				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
-			}
-			_ => &Value(CoreValue::None),
-		}
-	}
-}
-
-impl Index<&str> for Value {
-	type Output = Self;
-
-	fn index(&self, index: &str) -> &Self::Output {
-		match &self.0 {
-			CoreValue::Object(map) => {
-				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&Value(CoreValue::None))
-			}
-			_ => &Value(CoreValue::None),
-		}
-	}
-}
-
-impl Value {
-	/// Accesses the value found at a certain field
-	/// if an object, and a certain index if an array.
-	/// Will not err if no value is found at this point,
-	/// instead returning a Value::None. If an Option<&Value>
-	/// is desired, the .into_option() method can be used
-	/// to perform the conversion.
-	pub fn get<Idx>(&self, index: Idx) -> &Value
-	where
-		Value: Index<Idx, Output = Value>,
-	{
-		self.index(index)
-	}
-
-	/// Converts a Value into an Option<&Value>, returning
-	/// a Some in all cases except Value::None.
-	pub fn into_option(&self) -> Option<&Value> {
-		match self {
-			Value(CoreValue::None) => None,
-			v => Some(v),
-		}
-	}
-
-	/// Checks to see if a Value is a Value::None.
-	pub fn is_none(&self) -> bool {
-		matches!(&self, Value(CoreValue::None))
-	}
-}
-
-transparent_wrapper!(
-	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
-	pub struct SqlValue(pub(crate) CoreSqlValue)
-);
-impl_serialize_wrapper!(SqlValue);
-
-impl SqlValue {
-	#[expect(dead_code)]
-	pub(crate) fn core_to_array(v: Vec<CoreSqlValue>) -> Vec<SqlValue> {
-		unsafe {
-			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<Vec<CoreSqlValue>, Vec<SqlValue>>(v)
-		}
-	}
-
-	#[expect(dead_code)]
-	pub(crate) fn core_to_array_ref(v: &Vec<CoreSqlValue>) -> &Vec<SqlValue> {
-		unsafe {
-			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<&Vec<CoreSqlValue>, &Vec<SqlValue>>(v)
-		}
-	}
-
-	#[expect(dead_code)]
-	pub(crate) fn core_to_array_mut(v: &mut Vec<CoreSqlValue>) -> &mut Vec<SqlValue> {
-		unsafe {
-			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<&mut Vec<CoreSqlValue>, &mut Vec<SqlValue>>(v)
-		}
-	}
-
-	#[expect(dead_code)]
-	pub(crate) fn array_to_core(v: Vec<SqlValue>) -> Vec<CoreSqlValue> {
-		unsafe {
-			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<Vec<SqlValue>, Vec<CoreSqlValue>>(v)
-		}
-	}
-
-	#[expect(dead_code)]
-	pub(crate) fn array_to_core_ref(v: &Vec<SqlValue>) -> &Vec<CoreSqlValue> {
-		unsafe {
-			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<&Vec<SqlValue>, &Vec<CoreSqlValue>>(v)
-		}
-	}
-
-	#[expect(dead_code)]
-	pub(crate) fn array_to_core_mut(v: &mut Vec<SqlValue>) -> &mut Vec<CoreSqlValue> {
-		unsafe {
-			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
-			// is safe.
-			std::mem::transmute::<&mut Vec<SqlValue>, &mut Vec<CoreSqlValue>>(v)
-		}
-	}
-}
-
-impl Index<usize> for SqlValue {
-	type Output = Self;
-
-	fn index(&self, index: usize) -> &Self::Output {
-		match &self.0 {
-			CoreSqlValue::Array(map) => {
-				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&SqlValue(CoreSqlValue::None))
-			}
-			_ => &SqlValue(CoreSqlValue::None),
-		}
-	}
-}
-
-impl Index<&str> for SqlValue {
-	type Output = Self;
-
-	fn index(&self, index: &str) -> &Self::Output {
-		match &self.0 {
-			CoreSqlValue::Object(map) => {
-				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&SqlValue(CoreSqlValue::None))
-			}
-			_ => &SqlValue(CoreSqlValue::None),
-		}
-	}
-}
-
-impl SqlValue {
-	/// Accesses the value found at a certain field
-	/// if an object, and a certain index if an array.
-	/// Will not err if no value is found at this point,
-	/// instead returning a SqlValue::None. If an Option<&SqlValue>
-	/// is desired, the .into_option() method can be used
-	/// to perform the conversion.
-	pub fn get<Idx>(&self, index: Idx) -> &SqlValue
-	where
-		SqlValue: Index<Idx, Output = SqlValue>,
-	{
-		self.index(index)
-	}
-
-	/// Converts a SqlValue into an Option<&SqlValue>, returning
-	/// a Some in all cases except SqlValue::None.
-	pub fn into_option(&self) -> Option<&SqlValue> {
-		match self {
-			SqlValue(CoreSqlValue::None) => None,
-			v => Some(v),
-		}
-	}
-
-	/// Checks to see if a SqlValue is a SqlValue::None.
-	pub fn is_none(&self) -> bool {
-		matches!(&self, SqlValue(CoreSqlValue::None))
-	}
-}
 
 pub struct ConversionError {
 	from: &'static str,

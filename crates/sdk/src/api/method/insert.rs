@@ -1,5 +1,5 @@
 use crate::Surreal;
-use crate::Value;
+
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::conn::Command;
@@ -8,15 +8,14 @@ use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::opt::Resource;
 use crate::method::OnceLockExt;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_core::expr::TryFromValue;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::expr::{Object as Object, Value as Value, to_value as to_core_value};
 
 use super::insert_relation::InsertRelation;
-use super::validate_data;
+use super::ensure_values_are_objects;
 
 /// An insert future
 #[derive(Debug)]
@@ -50,22 +49,21 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let (table, data) = match resource? {
-					Resource::Table(table) => (table.into(), CoreObject::default()),
+					Resource::Table(table) => (table.into(), Object::default()),
 					Resource::RecordId(record_id) => {
-						let record_id = record_id.into_inner();
-						let mut map = CoreObject::default();
+						let mut map = Object::default();
 						map.insert("id".to_string(), record_id.id.into());
 						(record_id.tb, map)
 					}
-					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
-					Resource::Array(_) => return Err(Error::InsertOnArray.into()),
+					Resource::Object(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Object".to_string()).into()),
+					Resource::Array(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Array".to_string()).into()),
 					Resource::Edge {
 						..
-					} => return Err(Error::InsertOnEdges.into()),
+					} => return Err(Error::InvalidInsertionResource("Attempted to insert on Edge".to_string()).into()),
 					Resource::Range {
 						..
-					} => return Err(Error::InsertOnRange.into()),
-					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
+					} => return Err(Error::InvalidInsertionResource("Attempted to insert on Range".to_string()).into()),
+					Resource::Unspecified => return Err(Error::InvalidInsertionResource("Attempted to insert on Unspecified".to_string()).into()),
 				};
 				let cmd = Command::Insert {
 					what: Some(table.to_string()),
@@ -92,7 +90,7 @@ where
 impl<'r, Client, R> IntoFuture for Insert<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -103,7 +101,7 @@ where
 impl<'r, Client, R> IntoFuture for Insert<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -114,103 +112,93 @@ where
 impl<'r, C, R> Insert<'r, C, R>
 where
 	C: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	/// Specifies the data to insert into the table
-	pub fn content<D>(self, data: D) -> Content<'r, C, R>
-	where
-		D: Serialize + 'static,
-	{
-		Content::from_closure(self.client, || {
-			let mut data = to_core_value(data)?;
-			validate_data(
-				&data,
-				"Tried to insert non-object-like data as content, only structs and objects are supported",
-			)?;
-			match self.resource? {
-				Resource::Table(table) => Ok(Command::Insert {
-					what: Some(table),
-					data,
-				}),
-				Resource::RecordId(thing) => {
-					if data.is_array() {
-						Err(Error::InvalidParams(
-							"Tried to insert multiple records on a record ID".to_owned(),
-						)
-						.into())
-					} else {
-						let thing = thing.into_inner();
-						if let CoreValue::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.id.into());
-						}
-
-						Ok(Command::Insert {
-							what: Some(thing.tb),
-							data,
-						})
-					}
+	pub fn content(self, mut data: Value) -> Result<Content<'r, C, R>> {
+		ensure_values_are_objects(
+			&data,
+		)?;
+		let cmd = match self.resource? {
+			Resource::Table(table) => Command::Insert {
+				what: Some(table),
+				data,
+			},
+			Resource::RecordId(thing) => {
+				if data.is_array() {
+					return Err(Error::InvalidParams(
+						"Tried to insert multiple records on a record ID".to_owned(),
+					)
+					.into())
 				}
-				Resource::Object(_) => Err(Error::InsertOnObject.into()),
-				Resource::Array(_) => Err(Error::InsertOnArray.into()),
-				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
-				Resource::Range(_) => Err(Error::InsertOnRange.into()),
-				Resource::Unspecified => Ok(Command::Insert {
-					what: None,
+
+				if let Value::Object(ref mut x) = data {
+					x.insert("id".to_string(), thing.id.into());
+				}
+
+				Command::Insert {
+					what: Some(thing.tb),
 					data,
-				}),
+				}
 			}
-		})
+			Resource::Object(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Object".to_string()).into()),
+			Resource::Array(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Array".to_string()).into()),
+			Resource::Edge(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Edge".to_string()).into()),
+			Resource::Range(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Range".to_string()).into()),
+			Resource::Unspecified => Command::Insert {
+				what: None,
+				data,
+			},
+		};
+
+		Ok(Content::new(self.client, cmd))
 	}
 }
 
 impl<'r, C, R> Insert<'r, C, R>
 where
 	C: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	/// Specifies the data to insert into the table
-	pub fn relation<D>(self, data: D) -> InsertRelation<'r, C, R>
-	where
-		D: Serialize + 'static,
+	pub fn relation(self, data: Value) -> InsertRelation<'r, C, R>
 	{
 		InsertRelation::from_closure(self.client, || {
-			let mut data = to_core_value(data)?;
-			validate_data(
+			ensure_values_are_objects(
 				&data,
-				"Tried to insert non-object-like data as relation data, only structs and objects are supported",
 			)?;
-			match self.resource? {
-				Resource::Table(table) => Ok(Command::InsertRelation {
-					what: Some(table),
-					data,
-				}),
-				Resource::RecordId(thing) => {
-					if data.is_array() {
-						Err(Error::InvalidParams(
-							"Tried to insert multiple records on a record ID".to_owned(),
-						)
-						.into())
-					} else {
-						let thing = thing.into_inner();
-						if let CoreValue::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.id.into());
-						}
+			todo!("STU: Implement InsertRelation for Insert");
+			// match self.resource? {
+			// 	Resource::Table(table) => Ok(Command::InsertRelation {
+			// 		what: Some(table),
+			// 		data,
+			// 	}),
+			// 	Resource::RecordId(thing) => {
+			// 		if data.is_array() {
+			// 			Err(Error::InvalidParams(
+			// 				"Tried to insert multiple records on a record ID".to_owned(),
+			// 			)
+			// 			.into())
+			// 		} else {
+			// 			if let Value::Object(ref mut x) = data {
+			// 				x.insert("id".to_string(), thing.id.into());
+			// 			}
 
-						Ok(Command::InsertRelation {
-							what: Some(thing.tb),
-							data,
-						})
-					}
-				}
-				Resource::Unspecified => Ok(Command::InsertRelation {
-					what: None,
-					data,
-				}),
-				Resource::Object(_) => Err(Error::InsertOnObject.into()),
-				Resource::Array(_) => Err(Error::InsertOnArray.into()),
-				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
-				Resource::Range(_) => Err(Error::InsertOnRange.into()),
-			}
+			// 			Ok(Command::InsertRelation {
+			// 				what: Some(thing.tb),
+			// 				data,
+			// 			})
+			// 		}
+			// 	}
+			// 	Resource::Unspecified => Ok(Command::InsertRelation {
+			// 		what: None,
+			// 		data,
+			// 	}),
+			// 	Resource::Object(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Object".to_string()).into()),
+			// 	Resource::Array(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Array".to_string()).into()),
+			// 	Resource::Edge(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Edge".to_string()).into()),
+			// 	Resource::Range(_) => return Err(Error::InvalidInsertionResource("Attempted to insert on Range".to_string()).into()),
+			// }
 		})
 	}
 }

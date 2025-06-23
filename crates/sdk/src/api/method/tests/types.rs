@@ -1,6 +1,9 @@
+use anyhow::Context;
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb_core::protocol::surrealdb::value::{Value as ValueProto, value};
+use surrealdb_core::expr::Object;
+use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::expr::Value as ValueFb;
+use surrealdb_core::protocol::FromFlatbuffers;
 
 pub const USER: &str = "user";
 
@@ -10,24 +13,25 @@ pub struct User {
 	pub name: String,
 }
 
-impl TryFrom<ValueProto> for User {
+impl<'rpc> TryFrom<ValueFb<'rpc>> for User {
 	type Error = anyhow::Error;
 
-	fn try_from(value: ValueProto) -> Result<Self, Self::Error> {
-		let Some(value::Inner::Object(obj)) = value.inner else {
-			return Err(anyhow::anyhow!("Expected an object value, got {:?}", value.inner));
-		};
+	fn try_from(value: ValueFb<'rpc>) -> Result<Self, Self::Error> {
+		
+		let object = value.value_as_object()
+			.ok_or_else(|| anyhow::anyhow!("Expected an object value, got {:?}", value.value_type()))?;
 
-		let id = obj
-			.get("id")
-			.and_then(|v| v.downcast_str())
-			.ok_or_else(|| anyhow::anyhow!("Missing or invalid 'id' field"))?
-			.to_owned();
-		let name = obj
-			.get("name")
-			.and_then(|v| v.downcast_str())
-			.ok_or_else(|| anyhow::anyhow!("Missing or invalid 'name' field"))?
-			.to_owned();
+		let objet = Object::from_fb(object)
+			.map_err(|e| anyhow::anyhow!("Failed to convert from flatbuffers object: {}", e))?;
+
+		let id = objet.get("id")
+			.context("Missing 'id' field in User object")?
+			.as_string();
+
+		let name = objet.get("name")
+			.context("Missing 'name' field in User object")?
+			.as_string();
+
 		Ok(User {
 			id,
 			name,

@@ -4,18 +4,16 @@ use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
-use crate::api::conn::{self, Command, DbResponse, RequestData};
-use crate::api::engine::remote::Response;
+use crate::api::conn::{self, Command, Request};
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::PING_INTERVAL;
-use crate::api::engine::remote::{deserialize_proto, serialize_proto};
+use crate::api::engine::remote::{deserialize_flatbuffers, serialize_flatbuffers};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::engine::IntervalStream;
-use crate::engine::remote::Data;
 use crate::opt::WaitFor;
 use async_channel::Receiver;
 use futures::SinkExt;
@@ -24,12 +22,12 @@ use futures::stream::{SplitSink, SplitStream};
 use prost::Message as _;
 use revision::revisioned;
 use serde::Deserialize;
+use surrealdb_core::dbs::QueryResultData;
+use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
-use surrealdb_core::expr::Value as CoreValue;
-use surrealdb_core::protocol::surrealdb::rpc::Request as RequestProto;
-use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
+use surrealdb_core::expr::Value as Value;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -155,13 +153,13 @@ async fn router_handle_route(
 	state: &mut RouterState,
 	endpoint: &Endpoint,
 ) -> HandleResult {
-	let RequestData {
+	let Request {
 		id,
 		command,
 	} = request;
 
 	// We probably shouldn't be sending duplicate id requests.
-	let entry = state.pending_requests.entry(id);
+	let entry = state.pending_requests.entry(id.clone());
 	let Entry::Vacant(entry) = entry else {
 		let error = Error::DuplicateRequestId(id);
 		if response.send(Err(error.into())).await.is_err() {
@@ -199,7 +197,7 @@ async fn router_handle_route(
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.clone().send(Ok(DbResponse::Other(CoreValue::None))).await.is_err() {
+			if response.clone().send(Ok(QueryResultData::new_from_value(Value::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -237,13 +235,10 @@ async fn router_handle_route(
 	}
 
 	let message = {
-		let Some(request) = command.into_router_request(Some(id)) else {
-			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
-			return HandleResult::Ok;
-		};
+		let request = Request::new_with_id(id, command);
 		trace!("Request {:?}", request);
-		let payload = serialize_proto(&request).unwrap();
-		Message::Binary(payload)
+		let payload = serialize_flatbuffers(&request).unwrap();
+		Message::Binary(payload.to_vec())
 	};
 
 	match state.sink.send(message).await {
@@ -266,7 +261,7 @@ async fn router_handle_route(
 }
 
 async fn router_handle_response(bytes: Vec<u8>, state: &mut RouterState) -> HandleResult {
-	let response = match ResponseProto::decode(bytes.as_slice()) {
+	let response = match flatbuffers::root::<rpc_fb::Response<'_>>(&bytes) {
 		Ok(response) => response,
 		Err(error) => {
 			trace!("Failed to decode response; {error}");
@@ -290,30 +285,25 @@ async fn router_reconnect(
 				let (new_sink, new_stream) = s.split();
 				state.sink = new_sink;
 				state.stream = new_stream;
-				for commands in state.replay.values() {
-					let request = commands
-						.clone()
-						.into_router_request(None)
-						.expect("replay commands should always convert to route requests");
+				for command in state.replay.values() {
+					let request = Request::new(command.clone());
 
-					let message = serialize_proto(&request).unwrap();
+					let message = serialize_flatbuffers(&request).unwrap();
 
-					if let Err(error) = state.sink.send(Message::Binary(message)).await {
+					if let Err(error) = state.sink.send(Message::Binary(message.to_vec())).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
 						continue;
 					}
 				}
 				for (key, value) in &state.vars {
-					let request = Command::Set {
+					let request = Request::new(Command::Set {
 						key: key.as_str().into(),
 						value: value.clone(),
-					}
-					.into_router_request(None)
-					.unwrap();
+					});
 					trace!("Request {:?}", request);
-					let payload = serialize_proto(&request).unwrap();
-					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
+					let payload = serialize_flatbuffers(&request).unwrap();
+					if let Err(error) = state.sink.send(Message::Binary(payload.to_vec())).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
 						continue;
@@ -339,9 +329,9 @@ pub(crate) async fn run_router(
 	route_rx: Receiver<Route>,
 ) {
 	let ping = {
-		let request = Command::Health.into_router_request(None).unwrap();
-		let value = serialize_proto(&request).unwrap();
-		Message::Binary(value)
+		let request = Request::new(Command::Health);
+		let value = serialize_flatbuffers(&request).unwrap();
+		Message::Binary(value.to_vec())
 	};
 
 	let (socket_sink, socket_stream) = socket.split();
@@ -482,7 +472,7 @@ pub(crate) async fn run_router(
 
 #[cfg(test)]
 mod tests {
-	use super::serialize_proto;
+	use super::serialize_flatbuffers;
 	use bincode::Options;
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
@@ -490,7 +480,6 @@ mod tests {
 	use std::io::Write;
 	use std::time::SystemTime;
 	use surrealdb_core::expr::{Array, Value};
-	use surrealdb_core::rpc::format::cbor::Cbor;
 
 	// #[test_log::test]
 	// fn large_vector_serialisation_bench() {

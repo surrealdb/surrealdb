@@ -132,13 +132,13 @@ table Resource {
 
 // Field types
 table SingleField {
-    name: string (id: 0);
-    alias: string (id: 1);
+    expr: Value (id: 0);
+    alias: Idiom (id: 1);
 }
 
 union FieldType {
-    NullValue (id: 1),
-    SingleField (id: 2),
+    All: NullValue (id: 1),
+    Single: SingleField (id: 2),
 }
 
 table Field {
@@ -147,9 +147,10 @@ table Field {
 
 table Fields {
     single: bool (id: 0);
-    fields:[Field] (id: 1);
+    fields: [Field] (id: 1);
 }
 
+// Variables
 table Variable {
     key: string (id: 0);
     value: Value (id: 1);
@@ -157,4 +158,358 @@ table Variable {
 
 table Variables {
     items: [Variable] (id: 0);
+}
+
+// Idioms
+
+table MethodPart {
+    name: string (id: 0);
+    args: [Value] (id: 1);
+}
+
+table Ident {
+    value: string (id: 0);
+}
+
+table Alias {
+    value: string (id: 0);
+    alias: Idiom (id: 1);
+}
+
+table DestructureIdentParts {
+    name: string (id: 0);
+    parts: [DestructurePart] (id: 1);
+}
+
+union DestructurePartType {
+    All: Ident (id: 1),
+    Field: Ident (id: 2),
+    Aliased: Alias (id: 3),
+    Destructure: DestructureIdentParts (id: 4),
+}
+
+table DestructurePart {
+    part: DestructurePartType (id: 1);
+}
+
+table DestructureParts {
+    parts: [DestructurePart] (id: 0);
+}
+
+table FixedSpec {
+    value: uint32 (id: 0);
+}
+
+table RangeSpec {
+    start: uint32 = null (id: 0);
+    end: uint32 = null (id: 1);
+}
+
+union RecurseSpecType {
+    Fixed: FixedSpec (id: 1),
+    Range: RangeSpec (id: 2),
+}
+
+table RecurseSpec {
+    spec: RecurseSpecType (id: 1);
+}
+
+table RecursePath {
+    inclusive: bool (id: 0);
+}
+
+table RecurseCollect {
+    inclusive: bool (id: 0);
+}
+
+table RecurseShortest {
+    expects: Value (id: 0);
+    inclusive: bool (id: 1);
+}
+
+union RecurseOperationType {
+    Path: RecursePath (id: 1),
+    Collect: RecurseCollect (id: 2),
+    Shortest: RecurseShortest (id: 3),
+}
+
+table RecurseOperation {
+    operation: RecurseOperationType (id: 1);
+}
+
+table RecursePart {
+    spec: RecurseSpec (id: 0);
+    idiom: Idiom (id: 1);
+    recurse_operation: RecurseOperation (id: 2);
+}
+
+union PartType {
+    /// Represents `[*]`
+    All: NullValue (id: 1),
+    /// Represents `...`
+    Flatten: NullValue (id: 2),
+    /// Represents `[$]`
+    Last: NullValue (id: 3),
+    /// Represents `[0]`
+    First: NullValue (id: 4),
+    /// Represents `<start>`, which is the first part.
+    Start: Value (id: 5),
+    /// Represents `start.<field>`
+    Field: StringValue (id: 6),
+    /// Represents `[<index>]`
+    Index: Int64Value (id: 7),
+    /// Represents `[WHERE <value>]`
+    Where: Value (id: 8),
+    /// Represents a graph traversal; e.g., `->`, `<-`, or `<->`
+    Graph (id: 9),
+    /// Represents a value, which can be a literal or an expression.
+    Value: Value (id: 10),
+    /// Represents a method call, e.g., `a.b.c.<method>(args)`
+    Method: MethodPart (id: 11),
+    /// Represents a destructure operation, e.g., `a.b.c.{field1, field2}`
+    Destructure: DestructureParts (id: 12),
+    /// Represents an optional part, e.g., `a.b.c?`
+    Optional: NullValue (id: 13),
+    /// Represents a recursive operation.
+    Recurse: RecursePart (id: 15),
+    /// Represents a docuemnt, e.g., `@`
+    Doc: NullValue (id: 16),
+    /// Represents a repeat operation, e.g., `.@`
+    RepeatRecurse: NullValue (id: 17),
+}
+
+
+table Part {
+    part: PartType (id: 1);
+}
+
+table Idiom {
+    parts: [Part] (id: 0);
+}
+
+// Graph
+// pub struct Graph {
+// 	pub dir: Dir,
+// 	#[revision(end = 3, convert_fn = "convert_old_expr")]
+// 	pub old_expr: Fields,
+// 	#[revision(start = 3)]
+// 	pub expr: Option<Fields>,
+// 	#[revision(end = 4, convert_fn = "convert_old_what")]
+// 	pub _what: Tables,
+// 	#[revision(start = 4)]
+// 	pub what: GraphSubjects,
+// 	pub cond: Option<Cond>,
+// 	pub split: Option<Splits>,
+// 	pub group: Option<Groups>,
+// 	#[revision(end = 2, convert_fn = "convert_old_orders")]
+// 	pub old_order: Option<OldOrders>,
+// 	#[revision(start = 2)]
+// 	pub order: Option<Ordering>,
+// 	pub limit: Option<Limit>,
+// 	pub start: Option<Start>,
+// 	pub alias: Option<Idiom>,
+// }
+
+enum GraphDirection: ubyte {
+    In (id: 1),
+    Out (id: 2),
+    Both (id: 3),
+}
+
+table Table {
+    name: string (id: 0);
+}
+
+table IdBound {
+    // If this is null, it means no bound is set.
+    id: Id (id: 0);
+    inclusive: bool = true (id: 1); // Whether the bound is inclusive
+}
+
+table TableIdRange {
+    table: string (id: 0);
+    start: IdBound (id: 1);
+    end: IdBound (id: 2); // Optional end ID for range
+}
+
+union GraphSubjectType {
+    Table (id: 0),
+    Range: TableIdRange (id: 1),
+}
+
+table GraphSubject {
+    subject: GraphSubjectType (id: 1);
+}
+
+table GraphSubjects {
+    subjects: [GraphSubject] (id: 0);
+}
+
+table Splits {
+    splits: [Idiom] (id: 0);
+}
+
+table Groups {
+    groups: [Idiom] (id: 0);
+}
+
+table Order {
+    value: Idiom (id: 0);
+    collate: bool (id: 1);
+    numeric: bool (id: 2);
+    ascending: bool (id: 3);
+}
+
+table OrderList {
+    orders: [Order] (id: 0);
+}
+
+union OrderingType {
+    Random: NullValue (id: 1),
+    Ordered: OrderList (id: 2),
+}
+
+// This cannot be named `Ordering` as it conflicts with the generated Rust code.
+table OrderingSpec {
+    ordering: OrderingType (id: 1);
+}
+
+table Graph {
+    dir: GraphDirection (id: 0);
+    expr: Fields (id: 1);
+    what: GraphSubjects (id: 2);
+    cond: Value (id: 3);
+    split: Splits (id: 4);
+    group: Groups (id: 5);
+    order: OrderingSpec (id: 6);
+    limit: uint64 = null (id: 7);
+    start: uint64 = null (id: 8);
+    alias: Idiom (id: 9);
+}
+
+// pub enum Operator {
+// 	//
+// 	Neg, // -
+// 	Not, // !
+// 	//
+// 	Or,  // ||
+// 	And, // &&
+// 	Tco, // ?: Ternary conditional operator
+// 	Nco, // ?? Null coalescing operator
+// 	//
+// 	Add, // +
+// 	Sub, // -
+// 	Mul, // *
+// 	Div, // /
+// 	Pow, // **
+// 	Inc, // +=
+// 	Dec, // -=
+// 	Ext, // +?=
+// 	//
+// 	Equal,    // =
+// 	Exact,    // ==
+// 	NotEqual, // !=
+// 	AllEqual, // *=
+// 	AnyEqual, // ?=
+// 	//
+// 	Like,                      // ~
+// 	NotLike,                   // !~
+// 	AllLike,                   // *~
+// 	AnyLike,                   // ?~
+// 	Matches(Option<MatchRef>), // @{ref}@
+// 	//
+// 	LessThan,        // <
+// 	LessThanOrEqual, // <=
+// 	MoreThan,        // >
+// 	MoreThanOrEqual, // >=
+// 	//
+// 	Contain,     // ∋
+// 	NotContain,  // ∌
+// 	ContainAll,  // ⊇
+// 	ContainAny,  // ⊃
+// 	ContainNone, // ⊅
+// 	Inside,      // ∈
+// 	NotInside,   // ∉
+// 	AllInside,   // ⊆
+// 	AnyInside,   // ⊂
+// 	NoneInside,  // ⊄
+// 	//
+// 	Outside,
+// 	Intersects,
+// 	//
+// 	Knn(u32, Option<Distance>), // <|{k}[,{dist}]|>
+// 	#[revision(start = 2)]
+// 	Ann(u32, u32), // <|{k},{ef}|>
+// 	//
+// 	Rem, // %
+// }
+
+enum Operator: ubyte {
+    Neg (id: 1), // -
+    Not (id: 2), // !
+    Or (id: 3), // ||
+    And (id: 4), // &&
+    Tco (id: 5), // ?:
+    Nco (id: 6), // ??
+    Add (id: 7), // +
+    Sub (id: 8), // -
+    Mul (id: 9), // *
+    Div (id: 10), // /
+    Rem (id: 11), // %
+    Pow (id: 12), // **
+    Inc (id: 13), // +=
+    Dec (id: 14), // -=
+    Ext (id: 15), // +?=
+    Equal (id: 16), // =
+    Exact (id: 17), // ==
+    NotEqual (id: 18), // !=
+    AllEqual (id: 19), // *=
+    AnyEqual (id: 20), // ?=
+    Like (id: 21), // ~
+    NotLike (id: 22), // !~
+    AllLike (id: 23), // *~
+    AnyLike (id: 24), // ?~
+    LessThan (id: 25),        // <
+    LessThanOrEqual (id: 26), // <=
+    GreaterThan (id: 27),        // >
+    GreaterThanOrEqual (id: 28), // >=
+    Contain (id: 29),     // ∋
+    NotContain (id: 30),  // ∌
+    ContainAll (id: 31),  // ⊇
+    ContainAny (id: 32),  // ⊃
+    ContainNone (id: 33), // ⊅
+    Inside (id: 34),      // ∈
+    NotInside (id: 35),   // ∉
+    AllInside (id: 36),   // ⊆
+    AnyInside (id: 37),   // ⊂
+    NoneInside (id: 38),   // ⊄
+    Outside (id: 39), // Outside
+    Intersects (id: 40), // Intersects
+}
+
+table SetExpr {
+    idiom: Idiom (id: 0);
+    operator: Operator (id: 1); // e.g., "=", "+=", "-=", etc.
+    value: Value (id: 2);
+}
+
+table UnsetExpr {
+    idiom: Idiom (id: 0);
+}
+
+union DataContents {
+    Empty: NullValue (id: 1),
+    Set: SetExpr (id: 2),
+    Unset: UnsetExpr (id: 3),
+    Update: Value (id: 4),
+    Patch: Value (id: 5),
+    Merge: Value (id: 6),
+    Replace: Value (id: 7),
+    Content: Value (id: 8),
+    Values: Array (id: 9),
+    Value: Value (id: 10),
+}
+
+table Data {
+    contents: DataContents (id: 1);
 }

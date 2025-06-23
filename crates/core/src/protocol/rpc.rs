@@ -3,127 +3,114 @@ use anyhow::anyhow;
 use std::{collections::BTreeMap, fmt::Display};
 use uuid::Uuid;
 
+use crate::dbs::Variables;
+use crate::iam::AccessMethod;
+use crate::iam::SigninParams;
+use crate::iam::SignupParams;
 use crate::{
 	expr::access,
 	protocol::{FromFlatbuffers, ToFlatbuffers},
 };
+use crate::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
+use crate::protocol::flatbuffers::surreal_db::protocol::expr as expr_fb;
 
-// impl super::surrealdb::rpc::Request {
-//     pub fn new(command: super::surrealdb::rpc::request::Command) -> Self {
-//         super::surrealdb::rpc::Request {
-//             id: Uuid::new_v4().to_string(),
-//             rpc_version: Some(3),
-//             command: Some(command),
-//         }
-//     }
-// }
 
-// impl super::surrealdb::rpc::Response {
-//     pub fn into_results(self) -> impl Iterator<Item = anyhow::Result<super::surrealdb::value::Value>> {
+impl ToFlatbuffers for SignupParams {
+	type Output<'a> = flatbuffers::WIPOffset<rpc_fb::SignupParams<'a>>;
+	
+	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
+		let namespace = fbb.create_string(&self.namespace);
+		let database = fbb.create_string(&self.database);
+		let access_name = fbb.create_string(&self.access_name);
+		let variables = self.variables.to_fb(fbb);
 
-//         self.results.into_iter().filter_map(|result| {
-//             let result = result.result?;
-//             Some(match result {
-//                 super::surrealdb::rpc::query_result::Result::Error(err) => Err(anyhow!("{:?}", err)),
-//                 super::surrealdb::rpc::query_result::Result::Value(value) => Ok(value),
-//             })
-//         })
-//     }
-// }
+		rpc_fb::SignupParams::create(
+			fbb,
+			&rpc_fb::SignupParamsArgs {
+				namespace: Some(namespace),
+				database: Some(database),
+				access_name: Some(access_name),
+				variables: Some(variables),
+			},
+		)
+	}
+}
 
-// // impl From<super::surrealdb::rpc::Response> for super::surrealdb::value::Value {}
-
-// impl super::surrealdb::rpc::QueryParams {
-//     pub fn extend_vars(&mut self, vars: &BTreeMap<String, super::surrealdb::value::Value>) {
-//         for (k, v) in vars {
-//             self.variables.insert(k.clone(), v.clone());
-//         }
-//     }
-// }
-
-// impl super::surrealdb::rpc::Request {
-//     pub fn method(&self) -> &str {
-//         use crate::protocol::surrealdb::rpc::request::Command;
-
-//         match &self.command {
-//             Some(Command::Health(_)) => "health",
-//             Some(Command::Version(_)) => "version",
-//             Some(Command::Info(_)) => "info",
-//             Some(Command::Use(_)) => "use",
-//             Some(Command::Signup(_)) => "signup",
-//             Some(Command::Signin(_)) => "signin",
-//             Some(Command::Authenticate(_)) => "authenticate",
-//             Some(Command::Invalidate(_)) => "invalidate",
-//             Some(Command::Reset(_)) => "reset",
-//             Some(Command::Kill(_)) => "kill",
-//             Some(Command::Live(_)) => "live",
-//             Some(Command::Set(_)) => "set",
-//             Some(Command::Unset(_)) => "unset",
-//             Some(Command::Select(_)) => "select",
-//             Some(Command::Insert(_)) => "insert",
-//             Some(Command::Create(_)) => "create",
-//             Some(Command::Upsert(_)) => "upsert",
-//             Some(Command::Update(_)) => "update",
-//             Some(Command::Merge(_)) => "merge",
-//             Some(Command::Patch(_)) => "patch",
-//             Some(Command::Delete(_)) => "delete",
-//             Some(Command::Query(_)) => "query",
-//             Some(Command::RawQuery(_)) => "raw_query",
-//             Some(Command::Relate(_)) => "relate",
-//             Some(Command::Run(_)) => "run",
-//             Some(Command::Graphql(_)) => "graphql",
-//             Some(Command::InsertRelation(_)) => "insert_relation",
-//             None => "unknown",
-//         }
-//     }
-// }
-
-// impl Display for super::surrealdb::rpc::Error {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(
-//             f,
-//             "Error {}: {}",
-//             self.code,
-//             self.message,
-//         )
-//     }
-// }
-
-// pub trait RpcCommand {
-//     type Response;
-
-//     fn into_command(self) -> super::surrealdb::rpc::request::Command;
-
-//     fn response_from_proto(response: super::surrealdb::rpc::Response) -> anyhow::Result<Self::Response>;
-// }
-
-// impl RpcCommand for super::surrealdb::rpc::SigninParams {
-//     type Response = super::surrealdb::rpc::SigninResponse;
-
-//     fn into_command(self) -> super::surrealdb::rpc::request::Command {
-//         super::surrealdb::rpc::request::Command::Signin(self)
-//     }
-
-//     fn response_from_proto(response: super::surrealdb::rpc::Response) -> anyhow::Result<Self::Response> {
-
-//     }
-
-// }
-
-impl FromFlatbuffers for BTreeMap<String, crate::expr::Value> {
-	type Input<'a> = crate::protocol::flatbuffers::surreal_db::protocol::expr::Variables<'a>;
+impl FromFlatbuffers for SignupParams {
+	type Input<'a> = rpc_fb::SignupParams<'a>;
 
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self>
 	where
 		Self: Sized,
 	{
-		let mut map = BTreeMap::new();
-		let items = input.items().context("Failed to get entries from BTreeMap")?;
-		for item in items {
-			let key = item.key().ok_or_else(|| anyhow!("Missing key in BTreeMap"))?;
-			let value = item.value().ok_or_else(|| anyhow!("Missing value in BTreeMap"))?;
-			map.insert(key.to_string(), crate::expr::Value::from_fb(value)?);
-		}
-		Ok(map)
+		let namespace = input.namespace().context("Missing namespace")?
+			.to_string();
+		let database = input.database().context("Missing database")?
+			.to_string();
+		let access_name = input.access_name().context("Missing access name")?
+			.to_string();
+		let variables = input.variables().context("Failed to get variables")?;
+		let variables = Variables::from_fb(variables)?;
+
+		Ok(SignupParams {
+			namespace,
+			database,
+			access_name,
+			variables,
+		})
+	}
+}
+
+impl ToFlatbuffers for SigninParams {
+	type Output<'a> = flatbuffers::WIPOffset<rpc_fb::SigninParams<'a>>;
+
+	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
+		let args = match &self.access_method {
+			AccessMethod::RootUser { username, password } => {
+				let username = fbb.create_string(username);
+				let password = fbb.create_string(password);
+				let root_user = rpc_fb::RootUserCredentials::create(
+					fbb,
+					&rpc_fb::RootUserCredentialsArgs {
+						username: Some(username),
+						password: Some(password),
+					},
+				);
+				rpc_fb::SigninParamsArgs {
+					access_method_type: rpc_fb::AccessMethod::Root,
+					access_method: Some(root_user.as_union_value()),
+				}
+			},
+			_ => todo!("STU: Implement other access methods"),
+		};
+
+		rpc_fb::SigninParams::create(
+			fbb,
+			&args,
+		)
+	}
+}
+
+impl FromFlatbuffers for SigninParams {
+	type Input<'a> = rpc_fb::SigninParams<'a>;
+
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self>
+	where
+		Self: Sized,
+	{
+		let access_method = match input.access_method_type() {
+			rpc_fb::AccessMethod::Root => {
+				let root_user = input.access_method_as_root().context("Missing root user credentials")?;
+				let username = root_user.username().context("Missing username")?.to_string();
+				let password = root_user.password().context("Missing password")?.to_string();
+				AccessMethod::RootUser {
+					username,
+					password,
+				}
+			},
+			_ => todo!("STU: Implement other access methods"),
+		};
+
+		Ok(SigninParams { access_method })
 	}
 }

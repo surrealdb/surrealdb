@@ -34,6 +34,83 @@ use std::ops::{Bound, Deref};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
+pub trait TryFromValue: Sized {
+	/// Try to convert a Value into this type
+	fn try_from_value(value: Value) -> Result<Self>;
+}
+
+// impl<T> TryFromValue for T
+// where
+// 	T: TryFrom<Value>,
+// 	T::Error: Into<anyhow::Error>,
+// {
+// 	fn try_from_value(value: Value) -> Result<Self> {
+// 		T::try_from(value).map_err(Into::into)
+// 	}
+// }
+
+impl<T> TryFromValue for Option<T>
+where
+	T: TryFromValue,
+{
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::None | Value::Null => Ok(None),
+			v => T::try_from_value(v).map(Some),
+		}
+	}
+}
+
+impl TryFromValue for Value {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		Ok(value)
+	}
+}
+
+impl TryFromValue for String {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Strand(s) => Ok(s.0),
+			Value::Uuid(u) => Ok(u.to_raw()),
+			Value::Datetime(d) => Ok(d.to_raw()),
+			v => Err(Error::UnexpectedType {
+				expected: "string",
+				actual: v.kindof(),
+			}.into()),
+		}
+	}
+}
+
+impl TryFromValue for () {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::None | Value::Null => Ok(()),
+			v => Err(Error::UnexpectedType {
+				expected: "unit",
+				actual: v.kindof(),
+			}.into()),
+		}
+	}
+}
+
+impl<T> TryFromValue for Vec<T>
+where
+	T: TryFromValue,
+{
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Array(arr) => arr.into_iter().map(T::try_from_value).collect::<Result<Vec<_>>>(),
+			Value::None | Value::Null => Ok(Vec::new()),
+			v => Ok(vec![T::try_from_value(v)?]),
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

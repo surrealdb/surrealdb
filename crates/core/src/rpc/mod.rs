@@ -13,6 +13,6 @@ pub use context::RpcContext;
 pub use error::RpcError;
 pub use method::Method;
 pub use request::Request;
-pub use response::Data;
+pub use response::{Failure, Response};
 
 pub use protocol::v3::RpcProtocolV3;

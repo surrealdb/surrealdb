@@ -1,58 +1,30 @@
-use crate::dbs;
+use std::borrow::Cow;
+
+use crate::dbs::{self, QueryResultData};
 use crate::dbs::Notification;
 use crate::expr;
 use crate::expr::Value;
 use revision::revisioned;
 use serde::Serialize;
+use std::error::Error;
+use std::fmt;
 
-/// The data returned by the database
-// The variants here should be in exactly the same order as `crate::engine::remote::ws::Data`
-// In future, they will possibly be merged to avoid having to keep them in sync.
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize)]
-#[non_exhaustive]
-pub enum Data {
-	/// Generally methods return a `expr::Value`
-	Other(Value),
-	/// The query methods, `query` and `query_with` return a `Vec` of responses
-	Query(Vec<dbs::Response>),
-	/// Live queries return a notification
-	Live(Notification),
-	// Add new variants here
+#[derive(Debug)]
+pub struct Response {
+	pub id: String,
+	pub result: Result<QueryResultData, Failure>,
 }
 
-impl From<Value> for Data {
-	fn from(v: Value) -> Self {
-		Data::Other(v)
-	}
+#[derive(Clone, Debug, Serialize)]
+pub struct Failure {
+	pub(crate) code: i64,
+	pub(crate) message: Cow<'static, str>,
 }
 
-impl From<String> for Data {
-	fn from(v: String) -> Self {
-		Data::Other(Value::from(v))
-	}
-}
+impl Error for Failure {}
 
-impl From<Notification> for Data {
-	fn from(n: Notification) -> Self {
-		Data::Live(n)
-	}
-}
-
-impl From<Vec<dbs::Response>> for Data {
-	fn from(v: Vec<dbs::Response>) -> Self {
-		Data::Query(v)
-	}
-}
-
-impl TryFrom<Data> for Value {
-	type Error = anyhow::Error;
-
-	fn try_from(val: Data) -> Result<Self, Self::Error> {
-		match val {
-			Data::Query(v) => expr::to_value(v),
-			Data::Live(v) => expr::to_value(v),
-			Data::Other(v) => Ok(v),
-		}
+impl fmt::Display for Failure {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "Failure ({}): {}", self.code, self.message)
 	}
 }

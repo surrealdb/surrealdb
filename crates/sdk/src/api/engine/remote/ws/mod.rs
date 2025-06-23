@@ -9,7 +9,7 @@ use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::conn::Command;
-use crate::api::conn::DbResponse;
+use crate::dbs::QueryResultData;
 use crate::opt::IntoEndpoint;
 use async_channel::Sender;
 use indexmap::IndexMap;
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Duration;
 use surrealdb_core::dbs::Notification;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::Value as Value;
 use trice::Instant;
 use uuid::Uuid;
 
@@ -29,7 +29,7 @@ enum RequestEffect {
 	/// Completing this request sets a variable to a give value.
 	Set {
 		key: String,
-		value: CoreValue,
+		value: Value,
 	},
 	/// Completing this request sets a variable to a give value.
 	Clear {
@@ -54,18 +54,18 @@ struct PendingRequest {
 	// Does resolving this request has some effects.
 	effect: RequestEffect,
 	// The channel to send the result of the request into.
-	response_channel: Sender<Result<DbResponse>>,
+	response_channel: Sender<Result<QueryResultData>>,
 }
 
 struct RouterState<Sink, Stream> {
 	/// Vars currently set by the set method,
-	vars: IndexMap<String, CoreValue>,
+	vars: IndexMap<String, Value>,
 	/// Messages which aught to be replayed on a reconnect.
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
 	live_queries: HashMap<Uuid, async_channel::Sender<Notification>>,
 	/// Send requests which are still awaiting an awnser.
-	pending_requests: HashMap<i64, PendingRequest>,
+	pending_requests: HashMap<String, PendingRequest>,
 	/// The last time a message was recieved from the server.
 	last_activity: Instant,
 	/// The sink into which messages are send to surrealdb

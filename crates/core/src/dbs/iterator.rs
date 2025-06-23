@@ -4,7 +4,7 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
-use crate::dbs::result::Results;
+
 use crate::doc::{Document, IgnoreError};
 use crate::err::Error;
 use crate::expr::array::Array;
@@ -24,6 +24,10 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::mem;
 use std::sync::Arc;
+
+pub(in crate::dbs) mod results;
+
+pub(in crate::dbs) use results::Results;
 
 const TARGET: &str = "surrealdb::core::dbs";
 

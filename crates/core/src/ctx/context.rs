@@ -2,7 +2,7 @@ use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
-use crate::ctx::reason::Reason;
+use crate::ctx::reason::DoneReason;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
@@ -387,12 +387,12 @@ impl MutableContext {
 	/// We may not want to check for the deadline on every call.
 	/// An iteration loop may want to check it every 10 or 100 calls.
 	/// Eg.: ctx.done(count % 100 == 0)
-	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>> {
+	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<DoneReason>> {
 		match self.deadline {
 			Some(deadline) if deep_check && deadline <= Instant::now() => {
-				Ok(Some(Reason::Timedout))
+				Ok(Some(DoneReason::Timedout))
 			}
-			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
+			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(DoneReason::Canceled)),
 			_ => {
 				if deep_check && ALLOC.is_beyond_threshold() {
 					bail!(Error::QueryBeyondMemoryThreshold);
@@ -427,7 +427,7 @@ impl MutableContext {
 	/// Check if the context is not ok to continue, because it timed out.
 	pub(crate) async fn is_timedout(&self) -> Result<bool> {
 		yield_now!();
-		Ok(matches!(self.done(true)?, Some(Reason::Timedout)))
+		Ok(matches!(self.done(true)?, Some(DoneReason::Timedout)))
 	}
 
 	#[cfg(storage)]

@@ -19,6 +19,8 @@ pub mod signup;
 pub mod token;
 pub mod verify;
 
+use crate::dbs::Variables;
+
 pub use self::auth::*;
 pub use self::entities::*;
 
@@ -55,4 +57,51 @@ pub fn is_allowed(
 			Err(err)
 		}
 	}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignupParams {
+	pub namespace: String,
+	pub database: String,
+	pub access_name: String,
+	pub variables: Variables,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SigninParams {
+	pub access_method: AccessMethod,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccessMethod {
+	RootUser {
+		username: String,
+		password: String,
+	},
+	NamespaceAccess {
+		namespace: String,
+		access_name: String,
+		key: String,
+	},
+	DatabaseAccess {
+		namespace: String,
+		database: String,
+		access_name: String,
+		key: String,
+		refresh_token: Option<String>,
+	},
+	NamespaceUser {
+		namespace: String,
+		username: String,
+		password: String,
+	},
+	DatabaseUser {
+		namespace: String,
+		database: String,
+		username: String,
+		password: String,
+	},
+	AccessToken {
+		token: String,
+	},
 }

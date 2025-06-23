@@ -338,7 +338,7 @@ mod tests {
 		let users: Value = res.take("users").unwrap();
 
 		assert_eq!(
-			users.into_inner(),
+			users,
 			Object::default().into(),
 			"there should be no users in the system"
 		);

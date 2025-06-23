@@ -11,34 +11,6 @@ pub struct Failure {
 	pub(crate) message: Cow<'static, str>,
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Serialize)]
-struct Inner {
-	code: i64,
-	message: String,
-}
-
-impl Revisioned for Failure {
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		let inner = Inner {
-			code: self.code,
-			message: self.message.as_ref().to_owned(),
-		};
-		inner.serialize_revisioned(writer)
-	}
-
-	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
-		unreachable!("deserialization not supported for this type")
-	}
-
-	fn revision() -> u16 {
-		1
-	}
-}
-
 impl From<&str> for Failure {
 	fn from(err: &str) -> Self {
 		Failure::custom(err.to_string())

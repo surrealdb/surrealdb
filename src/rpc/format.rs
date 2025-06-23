@@ -9,7 +9,7 @@ use http::header::{CONTENT_TYPE, HeaderValue};
 use surrealdb::rpc::RpcError;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::request::Request;
-use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
+use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::expr::Value as ValueProto;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {

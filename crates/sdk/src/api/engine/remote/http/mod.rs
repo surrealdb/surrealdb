@@ -1,20 +1,18 @@
 //! HTTP engine
-use crate::Value;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::api::conn::Command;
-use crate::api::conn::DbResponse;
-use crate::api::conn::RequestData;
-use crate::api::conn::{RequestProto, RouterRequest};
-use crate::api::engine::remote::{deserialize_proto, serialize_proto};
+use crate::api::conn::{Request, Command};
+use crate::api::engine::remote::{deserialize_flatbuffers, serialize_flatbuffers};
 use crate::api::err::Error;
+use crate::dbs::QueryResultData;
 
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
 use crate::headers::NS;
 use crate::opt::IntoEndpoint;
+use anyhow::Context;
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::RequestBuilder;
@@ -24,14 +22,17 @@ use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
+use surrealdb_core::dbs::QueryResult;
+use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
+use surrealdb_core::protocol::ToFlatbuffers;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
-	Object as CoreObject, Value as CoreValue, from_value as from_core_value,
+	Object, Value, from_value as from_core_value,
 };
 use surrealdb_core::iam::access;
 use surrealdb_core::sql::Statement;
 use surrealdb_core::sql::statements::OutputStatement;
-use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue};
+use surrealdb_core::sql::{Param, Query, SqlValue as SqlValue};
 use url::Url;
 
 #[cfg(not(target_family = "wasm"))]
@@ -220,7 +221,6 @@ async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()
 
 #[cfg(not(target_family = "wasm"))]
 async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
-	use crate::engine::proto::{QueryMethodResponse, Status};
 
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
@@ -251,13 +251,22 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 			}
 		}
 	} else {
-		let response: ResponseProto = deserialize_proto(&res.bytes().await?)?;
-		for res in response.results {
-			let Some(result) = res.result else {
-				continue;
-			};
-			if let ResultProto::Error(err) = result {
-				return Err(Error::Query(err.to_string()).into());
+		let bytes = res.bytes().await?;
+		let response = deserialize_flatbuffers::<rpc_fb::Response<'_>>(&bytes)?;
+
+		let query_results = response.response_type_as_results()
+			.ok_or_else(|| Error::InternalError("No results in response".to_string()))?;
+		let results = query_results.results()
+			.ok_or_else(|| Error::InternalError("No results in response".to_string()))?;
+		if results.is_empty() {
+			return Err(Error::InternalError("No results in response".to_string()).into());
+		}
+
+		for query_result in results {
+			if let Some(err) = query_result.result_as_error() {
+				let code = err.code();
+				let message = err.message().unwrap_or("Unknown error").to_string();
+				return Err(Error::Query(format!("({code}): {message}")).into());
 			}
 		}
 	}
@@ -271,65 +280,64 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
 }
 
 async fn send_request(
-	req: RequestProto,
+	req: impl for<'a> ToFlatbuffers<Output<'a> = ::flatbuffers::WIPOffset<rpc_fb::Request<'a>>>,
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &HeaderMap,
 	auth: &Option<Auth>,
-) -> Result<DbResponse> {
+) -> Result<QueryResultData> {
 	let url = base_url.join(RPC_PATH).unwrap();
 	let http_req =
-		client.post(url).headers(headers.clone()).auth(auth).body(serialize_proto(&req)?);
+		client.post(url).headers(headers.clone()).auth(auth).body(serialize_flatbuffers(&req)?);
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 
-	let response: ResponseProto = deserialize_proto(&bytes)?;
+	let response = deserialize_flatbuffers::<rpc_fb::Response<'_>>(&bytes)?;
 	todo!("STU: FIX THIS");
-	// DbResponse::from_server_result(response.results)
+	// QueryResultData::from_server_result(response.results)
 }
 
-fn flatten_dbresponse_array(res: DbResponse) -> DbResponse {
-	match res {
-		DbResponse::Other(CoreValue::Array(array)) if array.len() == 1 => {
-			let v = array.into_iter().next().unwrap();
-			DbResponse::Other(v)
-		}
-		x => x,
-	}
-}
+// fn flatten_response_array(res: QueryResultData) -> QueryResultData {
+// 	match res {
+// 		QueryResultData::Results(results) if results.len() == 1 => {
+// 			let query_result = results.into_iter().take(1).next().expect("There must be one result in the vec");
+// 			match query_result.result
+// 			let v = array.into_iter().next().unwrap();
+// 			QueryResultData::new_from_value(v)
+// 		}
+// 		x => x,
+// 	}
+// }
 
 async fn router(
-	req: RequestData,
+	req: Request,
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &mut HeaderMap,
-	vars: &mut IndexMap<String, CoreValue>,
+	vars: &mut IndexMap<String, Value>,
 	auth: &mut Option<Auth>,
-) -> Result<DbResponse> {
+) -> Result<QueryResultData> {
 	match req.command {
 		Command::Query {
 			query,
 			mut variables,
 		} => {
 			variables.extend(vars.clone());
-			let req = Command::Query {
+			let req = Request::new(Command::Query {
 				query,
 				variables,
-			}
-			.into_router_request(None)
-			.expect("query should be valid request");
+			});
+
 			send_request(req, base_url, client, headers, auth).await
 		}
 		Command::Use {
 			namespace,
 			database,
 		} => {
-			let req = Command::Use {
+			let req = Request::new(Command::Use {
 				namespace: namespace.clone(),
 				database: database.clone(),
-			}
-			.into_router_request(None)
-			.unwrap();
+			});
 			// process request to check permissions
 			let out = send_request(req, base_url, client, headers, auth).await?;
 			if let Some(ns) = namespace {
@@ -346,127 +354,117 @@ async fn router(
 			Ok(out)
 		}
 		Command::Signin(params) => {
-			let req = Command::Signin(params.clone())
-				.into_router_request(None)
-				.expect("signin should be a valid router request");
+			todo!("STU: FIX THIS");
+			// let req = Request::new(Command::Signin(params.clone()));
 
-			let DbResponse::Other(value) =
-				send_request(req, base_url, client, headers, auth).await?
-			else {
-				return Err(Error::InternalError(
-					"recieved invalid result from server".to_string(),
-				)
-				.into());
-			};
+			// let QueryResultData::new_from_value(value) =
+			// 	send_request(req, base_url, client, headers, auth).await?
+			// else {
+			// 	return Err(Error::InternalError(
+			// 		"recieved invalid result from server".to_string(),
+			// 	)
+			// 	.into());
+			// };
 
-			let Some(access) = params.access else {
-				return Err(
-					Error::InvalidRequest(format!("missing access in signin command")).into()
-				);
-			};
+			// let Some(access) = params.access else {
+			// 	return Err(
+			// 		Error::InvalidRequest(format!("missing access in signin command")).into()
+			// 	);
+			// };
 
-			use surrealdb_core::protocol::surrealdb::rpc::access::Inner as AccessInnerProto;
-			match access.inner {
-				Some(AccessInnerProto::RootUser(RootUserCredentials {
-					username,
-					password,
-				})) => {
-					*auth = Some(Auth::Basic {
-						ns: None,
-						db: None,
-						user: username,
-						pass: password,
-					});
-				}
-				Some(AccessInnerProto::Namespace(NamespaceAccessCredentials {
-					namespace,
-					access,
-					key,
-				})) => {
-					*auth = Some(Auth::Bearer {
-						token: value.to_raw_string(),
-					});
-				}
-				Some(AccessInnerProto::Database(DatabaseAccessCredentials {
-					namespace,
-					database,
-					access,
-					key,
-					refresh,
-				})) => {
-					*auth = Some(Auth::Bearer {
-						token: value.to_raw_string(),
-					})
-				}
-				Some(AccessInnerProto::NamespaceUser(NamespaceUserCredentials {
-					namespace,
-					username,
-					password,
-				})) => {
-					*auth = Some(Auth::Basic {
-						ns: Some(namespace),
-						db: None,
-						user: username,
-						pass: password,
-					});
-				}
-				Some(AccessInnerProto::DatabaseUser(DatabaseUserCredentials {
-					namespace,
-					database,
-					username,
-					password,
-				})) => {
-					*auth = Some(Auth::Basic {
-						ns: Some(namespace),
-						db: Some(database),
-						user: username,
-						pass: password,
-					});
-				}
-				None => {
-					*auth = Some(Auth::Bearer {
-						token: value.to_raw_string(),
-					});
-				}
-			}
 
-			Ok(DbResponse::Other(value))
+			// match access.inner {
+			// 	Some(AccessInnerProto::RootUser(RootUserCredentials {
+			// 		username,
+			// 		password,
+			// 	})) => {
+			// 		*auth = Some(Auth::Basic {
+			// 			ns: None,
+			// 			db: None,
+			// 			user: username,
+			// 			pass: password,
+			// 		});
+			// 	}
+			// 	Some(AccessInnerProto::Namespace(NamespaceAccessCredentials {
+			// 		namespace,
+			// 		access,
+			// 		key,
+			// 	})) => {
+			// 		*auth = Some(Auth::Bearer {
+			// 			token: value.to_raw_string(),
+			// 		});
+			// 	}
+			// 	Some(AccessInnerProto::Database(DatabaseAccessCredentials {
+			// 		namespace,
+			// 		database,
+			// 		access,
+			// 		key,
+			// 		refresh,
+			// 	})) => {
+			// 		*auth = Some(Auth::Bearer {
+			// 			token: value.to_raw_string(),
+			// 		})
+			// 	}
+			// 	Some(AccessInnerProto::NamespaceUser(NamespaceUserCredentials {
+			// 		namespace,
+			// 		username,
+			// 		password,
+			// 	})) => {
+			// 		*auth = Some(Auth::Basic {
+			// 			ns: Some(namespace),
+			// 			db: None,
+			// 			user: username,
+			// 			pass: password,
+			// 		});
+			// 	}
+			// 	Some(AccessInnerProto::DatabaseUser(DatabaseUserCredentials {
+			// 		namespace,
+			// 		database,
+			// 		username,
+			// 		password,
+			// 	})) => {
+			// 		*auth = Some(Auth::Basic {
+			// 			ns: Some(namespace),
+			// 			db: Some(database),
+			// 			user: username,
+			// 			pass: password,
+			// 		});
+			// 	}
+			// 	None => {
+			// 		*auth = Some(Auth::Bearer {
+			// 			token: value.to_raw_string(),
+			// 		});
+			// 	}
+			// }
+
+			// Ok(QueryResultData::new_from_value(value))
 		}
 		Command::Authenticate {
 			token,
 		} => {
-			let req = Command::Authenticate {
+			let req = Request::new(Command::Authenticate {
 				token: token.clone(),
-			}
-			.into_router_request(None)
-			.expect("authenticate should be a valid router request");
+			});
 			send_request(req, base_url, client, headers, auth).await?;
 
 			*auth = Some(Auth::Bearer {
 				token,
 			});
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		Command::Invalidate => {
 			*auth = None;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		Command::Set {
 			key,
 			value,
 		} => {
-			let mut output_stmt = OutputStatement::default();
-			output_stmt.what = CoreSqlValue::Param(Param::from(key.clone()));
-			let query = Query::from(Statement::Output(output_stmt));
-			let mut variables = CoreObject::default();
-			variables.insert(key.clone(), value);
-			let req = Command::Query {
-				query,
-				variables,
-			}
-			.into_router_request(None)
-			.expect("query is valid request");
-			let DbResponse::Query(mut res) =
+			let req = Request::new(Command::Set {
+				key: key.clone(),
+				value,
+			});
+			let QueryResultData::Results(mut res) =
 				send_request(req, base_url, client, headers, auth).await?
 			else {
 				return Err(Error::InternalError(
@@ -475,15 +473,18 @@ async fn router(
 				.into());
 			};
 
-			let val: Value = res.take(0)?;
-			vars.insert(key, val.0);
-			Ok(DbResponse::Other(CoreValue::None))
+			let result: QueryResult = res.into_iter().next().context("Expected one item in result")?;
+			let value = result.result?;
+			vars.insert(key, value);
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		Command::Unset {
 			key,
 		} => {
+
+
 			vars.shift_remove(&key);
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		#[cfg(target_family = "wasm")]
 		Command::ExportFile {
@@ -509,7 +510,7 @@ async fn router(
 		} => {
 			let req_path = base_url.join("export")?;
 			let config = config.unwrap_or_default();
-			let config_value: CoreValue = config.into();
+			let config_value: Value = config.into();
 			let request = client
 				.post(req_path)
 				.body(config_value.into_json().to_string())
@@ -518,7 +519,7 @@ async fn router(
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		Command::ExportBytes {
 			bytes,
@@ -526,7 +527,7 @@ async fn router(
 		} => {
 			let req_path = base_url.join("export")?;
 			let config = config.unwrap_or_default();
-			let config_value: CoreValue = config.into();
+			let config_value: Value = config.into();
 			let request = client
 				.post(req_path)
 				.body(config_value.into_json().to_string())
@@ -535,7 +536,7 @@ async fn router(
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportMl {
@@ -550,7 +551,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		Command::ExportBytesMl {
 			bytes,
@@ -564,7 +565,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
@@ -577,7 +578,7 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportMl {
@@ -590,18 +591,18 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(DbResponse::Other(CoreValue::None))
+			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		Command::SubscribeLive {
 			..
 		} => Err(Error::LiveQueriesNotSupported.into()),
 		cmd => {
-			let needs_flatten = cmd.needs_flatten();
-			let req = cmd.into_router_request(None).unwrap();
+			// let needs_flatten = cmd.needs_flatten();
+			let req = Request::new(cmd);
 			let mut res = send_request(req, base_url, client, headers, auth).await?;
-			if needs_flatten {
-				res = flatten_dbresponse_array(res);
-			}
+			// if needs_flatten {
+			// 	res = flatten_response_array(res);
+			// }
 			Ok(res)
 		}
 	}

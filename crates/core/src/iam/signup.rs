@@ -12,7 +12,7 @@ use crate::iam::token::Claims;
 use crate::iam::{Actor, Level};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::protocol::FromFlatbuffers;
-use crate::protocol::flatbuffers::surreal_db::protocol::rpc::SignupParams;
+use super::SignupParams;
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
@@ -47,26 +47,22 @@ impl From<SignupData> for Value {
 pub async fn signup(
 	kvs: &Datastore,
 	session: &mut Session,
-	params: SignupParams<'_>,
+	SignupParams {
+		namespace,
+		database,
+		access_name,
+		variables,
+	}: SignupParams,
 ) -> Result<SignupData> {
 	// Attempt to signup using specified access method
 	// Currently, signup is only supported at the database level
-
-	let namespace = params.namespace().context("Namespace is required for signup")?;
-	let database = params.database().context("Database is required for signup")?;
-	let access = params.access().context("Access method is required for signup")?;
-	let access_params =
-		params.access_params().context("Access parameters are required for signup")?;
-	let access_params = BTreeMap::<String, Value>::from_fb(access_params)
-		.context("Failed to convert access parameters from flatbuffers")?;
-
 	super::signup::db_access(
 		kvs,
 		session,
-		namespace.to_string(),
-		database.to_string(),
-		access.to_string(),
-		access_params,
+		namespace,
+		database,
+		access_name,
+		variables,
 	)
 	.await
 }
@@ -77,7 +73,7 @@ pub async fn db_access(
 	namespace: String,
 	database: String,
 	access: String,
-	access_params: BTreeMap<String, Value>,
+	variables: BTreeMap<String, Value>,
 ) -> Result<SignupData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
@@ -106,7 +102,7 @@ pub async fn db_access(
 	sess.ip.clone_from(&session.ip);
 	sess.or.clone_from(&session.or);
 	// Compute the value with the params
-	match kvs.evaluate(val, &sess, Some(access_params)).await {
+	match kvs.evaluate(val, &sess, variables).await {
 		// The signup value succeeded
 		Ok(val) => {
 			// There is a record returned

@@ -36,7 +36,6 @@ impl Display for Tables {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord)]
 #[serde(rename = "$surrealdb::private::sql::Table")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Table(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Table {

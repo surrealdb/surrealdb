@@ -10,13 +10,11 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::expr::statements::{AccessGrant, DefineAccessStatement, access};
 use crate::expr::{AccessType, Datetime, Object, Value, access_type};
-use crate::iam::Auth;
+use crate::iam::{AccessMethod, Auth};
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::protocol::flatbuffers::surreal_db::protocol::rpc::{Access, SigninParams};
-// use crate::protocol::surrealdb::rpc::{DatabaseAccessCredentials, DatabaseUserCredentials, NamespaceAccessCredentials, NamespaceUserCredentials, RootUserCredentials};
-// use crate::protocol::surrealdb::rpc::SigninParams;
+use super::SigninParams;
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::Utc;
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -52,76 +50,35 @@ impl From<SigninData> for Value {
 pub async fn signin(
 	kvs: &Datastore,
 	session: &mut Session,
-	params: SigninParams<'_>,
+	SigninParams {
+		access_method,
+	}: SigninParams,
 ) -> Result<SigninData> {
-	match params.access_type() {
-		Access::Root => {
-			let root_access = params
-				.access_as_root()
-				.expect("Access type is Root, so access should be RootUserCredentials");
-			let user = root_access.username().context("Missing username for root user signin")?;
-			let pass = root_access.password().context("Missing password for root user signin")?;
-			super::signin::root_user(kvs, session, user.to_string(), pass.to_string()).await
+	match access_method {
+		AccessMethod::RootUser { username, password } => {
+			super::signin::root_user(kvs, session, username, password).await
 		}
-		Access::Namespace => {
-			let ns_access = params
-				.access_as_namespace()
-				.expect("Access type is Namespace, so access should be NamespaceAccessCredentials");
-			let ns =
-				ns_access.namespace().context("Missing namespace for namespace access signin")?;
-			let ac = ns_access.access().context("Missing access for namespace access signin")?;
-			let key = ns_access.key().context("Missing key for namespace access signin")?;
-			super::signin::ns_access(kvs, session, ns.to_string(), ac.to_string(), key.to_string())
+		AccessMethod::NamespaceAccess { namespace, access_name, key } => {
+			super::signin::ns_access(kvs, session, namespace, access_name, key)
 				.await
 		}
-		Access::Database => {
-			let db_access = params
-				.access_as_database()
-				.expect("Access type is Database, so access should be DatabaseAccessCredentials");
-			let ns =
-				db_access.namespace().context("Missing namespace for database access signin")?;
-			let db = db_access.database().context("Missing database for database access signin")?;
-			let ac = db_access.access().context("Missing access for database access signin")?;
-			let key = db_access.key().context("Missing key for database access signin")?;
-			let refresh = db_access.refresh().map(|r| r.to_string());
+		AccessMethod::DatabaseAccess { namespace, database, access_name, key, refresh_token } => {
 			super::signin::db_access(
 				kvs,
 				session,
-				ns.to_string(),
-				db.to_string(),
-				ac.to_string(),
-				key.to_string(),
-				refresh,
+				namespace,
+				database,
+				access_name,
+				key,
+				refresh_token,
 			)
 			.await
 		}
-		Access::NamespaceUser => {
-			let ns_user = params.access_as_namespace_user().expect(
-				"Access type is NamespaceUser, so access should be NamespaceUserCredentials",
-			);
-			let ns = ns_user.namespace().context("Missing namespace for namespace user signin")?;
-			let user = ns_user.username().context("Missing username for namespace user signin")?;
-			let pass = ns_user.password().context("Missing password for namespace user signin")?;
-			super::signin::ns_user(kvs, session, ns.to_string(), user.to_string(), pass.to_string())
-				.await
+		AccessMethod::NamespaceUser { namespace, username, password } => {
+			super::signin::ns_user(kvs, session, namespace, username, password).await
 		}
-		Access::DatabaseUser => {
-			let db_user = params
-				.access_as_database_user()
-				.expect("Access type is DatabaseUser, so access should be DatabaseUserCredentials");
-			let ns = db_user.namespace().context("Missing namespace for database user signin")?;
-			let db = db_user.database().context("Missing database for database user signin")?;
-			let user = db_user.username().context("Missing username for database user signin")?;
-			let pass = db_user.password().context("Missing password for database user signin")?;
-			super::signin::db_user(
-				kvs,
-				session,
-				ns.to_string(),
-				db.to_string(),
-				user.to_string(),
-				pass.to_string(),
-			)
-			.await
+		AccessMethod::DatabaseUser { namespace, database, username, password } => {
+			super::signin::db_user(kvs, session, namespace, database, username, password).await
 		}
 		unexpected => {
 			return Err(anyhow!("Unexpected access type identifier: {:?}", unexpected));
@@ -214,9 +171,9 @@ pub async fn db_access(
 						// This record access allows signin
 						Some(val) => {
 							// Setup the query params
-							let vars = Some(map! {
+							let vars = map! {
 								"key".to_string() => key.into(),
-							});
+							};
 							// Setup the system session for finding the signin record
 							let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 							sess.ip.clone_from(&session.ip);

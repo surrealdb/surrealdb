@@ -1,10 +1,10 @@
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
 use crate::api::ExtraFeatures;
 use crate::api::Surreal;
-use crate::api::conn::DbResponse;
+use crate::api::conn::QueryResultData;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
-use crate::api::conn::{self, Command, RequestData};
+use crate::api::conn::{self, Command, Request};
 use crate::api::engine::remote::Response;
 use crate::api::engine::remote::ws::Client;
 use crate::api::engine::remote::ws::PING_INTERVAL;
@@ -32,7 +32,7 @@ use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
 use std::time::Duration;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::Value as Value;
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -91,7 +91,7 @@ async fn router_handle_request(
 	state: &mut RouterState,
 	endpoint: &Endpoint,
 ) -> HandleResult {
-	let RequestData {
+	let Request {
 		id,
 		command,
 	} = request;
@@ -135,7 +135,7 @@ async fn router_handle_request(
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.send(Ok(DbResponse::Other(CoreValue::None))).await.is_err() {
+			if response.send(Ok(QueryResultData::new_from_value(Value::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -227,13 +227,13 @@ async fn router_handle_response(
 									RequestEffect::None => {}
 									RequestEffect::Insert => {
 										// For insert, we need to flatten single responses in an array
-										if let Ok(Data::Other(CoreValue::Array(value))) =
+										if let Ok(Data::Other(Value::Array(value))) =
 											response.result
 										{
 											if value.len() == 1 {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from_server_result(Ok(
+													.send(QueryResultData::from_server_result(Ok(
 														Data::Other(
 															value.into_iter().next().unwrap(),
 														),
@@ -242,8 +242,8 @@ async fn router_handle_response(
 											} else {
 												let _ = pending
 													.response_channel
-													.send(DbResponse::from_server_result(Ok(
-														Data::Other(CoreValue::Array(value)),
+													.send(QueryResultData::from_server_result(Ok(
+														Data::Other(Value::Array(value)),
 													)))
 													.await;
 											}
@@ -264,7 +264,7 @@ async fn router_handle_response(
 								}
 								let _res = pending
 									.response_channel
-									.send(DbResponse::from_server_result(response.result))
+									.send(QueryResultData::from_server_result(response.result))
 									.await;
 							} else {
 								warn!(
@@ -309,7 +309,7 @@ async fn router_handle_response(
 			#[derive(Deserialize)]
 			#[revisioned(revision = 1)]
 			struct Response {
-				id: Option<CoreValue>,
+				id: Option<Value>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
@@ -319,7 +319,7 @@ async fn router_handle_response(
 				}) = deserialize(&mut &binary[..], true)
 				{
 					// Return an error if an ID was returned
-					if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
+					if let Some(Ok(id)) = id.map(Value::coerce_to) {
 						if let Some(req) = state.pending_requests.remove(&id) {
 							let _res = req.response_channel.send(Err(error)).await;
 						} else {
@@ -435,7 +435,7 @@ pub(crate) async fn run_router(
 	let ping = {
 		let mut request = BTreeMap::new();
 		request.insert("method".to_owned(), "ping".into());
-		let value = CoreValue::from(request);
+		let value = Value::from(request);
 		let value = serialize(&value, true).unwrap();
 		Message::Binary(value)
 	};

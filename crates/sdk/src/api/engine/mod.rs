@@ -10,19 +10,18 @@ pub mod any;
 	feature = "kv-surrealkv",
 ))]
 pub mod local;
-pub(crate) mod proto;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 pub mod remote;
 #[doc(hidden)]
 pub mod tasks;
 
 use futures::Stream;
+use surrealdb_core::expr::Array;
+use surrealdb_core::expr::Value;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::expr::Values as CoreValues;
-use surrealdb_core::sql::SqlValues as CoreSqlValues;
-use surrealdb_core::sql::{Edges as CoreSqlEdges, Object as CoreSqlObject, Thing as CoreSqlThing};
+use surrealdb_core::expr::Values as Values;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
@@ -32,40 +31,38 @@ use wasmtimer::std::Instant;
 #[cfg(target_family = "wasm")]
 use wasmtimer::tokio::Interval;
 
-use crate::Value;
-
 use super::opt::Resource;
 use super::opt::Table;
 
-// used in http and all local engines.
-#[allow(dead_code)]
-pub(crate) fn resource_to_sql_values(r: Resource) -> CoreSqlValues {
-	let mut res = CoreSqlValues::default();
-	match r {
-		Resource::Table(x) => {
-			res.0 = vec![Table(x).into_core_sql().into()];
-		}
-		Resource::RecordId(x) => res.0 = vec![CoreSqlThing::from(x.into_inner()).into()],
-		Resource::Object(x) => res.0 = vec![CoreSqlObject::from(x.into_inner()).into()],
-		Resource::Array(x) => res.0 = Value::array_to_core(x).into_iter().map(Into::into).collect(),
-		Resource::Edge(x) => res.0 = vec![CoreSqlEdges::from(x.into_inner()).into()],
-		Resource::Range(x) => res.0 = vec![CoreSqlThing::from(x.into_inner()).into()],
-		Resource::Unspecified => {}
-	}
-	res
-}
+// // used in http and all local engines.
+// #[allow(dead_code)]
+// pub(crate) fn resource_to_sql_values(r: Resource) -> SqlValues {
+// 	let mut res = SqlValues::default();
+// 	match r {
+// 		Resource::Table(x) => {
+// 			res.0 = vec![Table(x).into_core().into()];
+// 		}
+// 		Resource::RecordId(x) => res.0 = vec![SqlThing::from(x).into()],
+// 		Resource::Object(x) => res.0 = vec![SqlObject::from(x).into()],
+// 		Resource::Array(x) => res.0 = Value::Array(Array(x)),
+// 		Resource::Edge(x) => res.0 = vec![SqlEdges::from(x.into_inner()).into()],
+// 		Resource::Range(x) => res.0 = vec![SqlThing::from(x.into_inner()).into()],
+// 		Resource::Unspecified => {}
+// 	}
+// 	res
+// }
 
 // used in http and all local engines.
 #[allow(dead_code)]
-pub(crate) fn resource_to_values(r: Resource) -> CoreValues {
-	let mut res = CoreValues::default();
+pub(crate) fn resource_to_values(r: Resource) -> Values {
+	let mut res = Values::default();
 	match r {
 		Resource::Table(x) => {
 			res.0 = vec![Table(x).into_core().into()];
 		}
-		Resource::RecordId(x) => res.0 = vec![x.into_inner().into()],
-		Resource::Object(x) => res.0 = vec![x.into_inner().into()],
-		Resource::Array(x) => res.0 = Value::array_to_core(x),
+		Resource::RecordId(x) => res.0 = vec![x.into()],
+		Resource::Object(x) => res.0 = vec![x.into()],
+		Resource::Array(x) => res.0 = x,
 		Resource::Edge(x) => res.0 = vec![x.into_inner().into()],
 		Resource::Range(x) => res.0 = vec![x.into_inner().into()],
 		Resource::Unspecified => {}

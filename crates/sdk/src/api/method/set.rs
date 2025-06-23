@@ -6,7 +6,7 @@ use crate::api::method::BoxFuture;
 use crate::method::OnceLockExt;
 use std::borrow::Cow;
 use std::future::IntoFuture;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::Value as Value;
 
 /// A set future
 #[derive(Debug)]
@@ -14,7 +14,7 @@ use surrealdb_core::expr::Value as CoreValue;
 pub struct Set<'r, C: Connection> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) key: String,
-	pub(super) value: Result<CoreValue>,
+	pub(super) value: Result<Value>,
 }
 
 impl<C> Set<'_, C>

@@ -3,21 +3,12 @@ use crate::api::Connection;
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::expr::Value;
 use crate::method::OnceLockExt;
-use crate::method::TryFromResponseProto;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use serde_content::Serializer;
-use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::Array;
-use surrealdb_core::expr::Array as CoreArray;
-use surrealdb_core::expr::to_value;
-use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
-use surrealdb_core::protocol::surrealdb::value::Array as ArrayProto;
+use surrealdb_core::expr::Array as Array;
+use surrealdb_core::expr::TryFromValue;
 
 /// A run future
 #[derive(Debug)]
@@ -25,7 +16,7 @@ use surrealdb_core::protocol::surrealdb::value::Array as ArrayProto;
 pub struct Run<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) function: Result<(String, Option<String>)>,
-	pub(super) args: CoreArray,
+	pub(super) args: Array,
 	pub(super) response_type: PhantomData<R>,
 }
 impl<C, R> Run<'_, C, R>
@@ -44,7 +35,7 @@ where
 impl<'r, Client, R> IntoFuture for Run<'r, Client, R>
 where
 	Client: Connection,
-	R: TryFromResponseProto,
+	R: TryFromValue,
 {
 	type Output = Result<R>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -61,7 +52,7 @@ where
 			let router = client.inner.router.extract()?;
 			let (name, version) = function?;
 
-			let response = router
+			let value = router
 				.execute(Command::Run {
 					name,
 					version,
@@ -69,7 +60,7 @@ where
 				})
 				.await?;
 
-			TryFromResponseProto::try_from_response_results(response.into_results())
+			Ok(value)
 		})
 	}
 }
@@ -79,7 +70,7 @@ where
 	Client: Connection,
 {
 	/// Supply arguments to the function being run.
-	pub fn args(mut self, args: impl Into<CoreArray>) -> Self {
+	pub fn args(mut self, args: impl Into<Array>) -> Self {
 		self.args = args.into();
 		self
 	}

@@ -4,34 +4,34 @@ use std::io;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 #[non_exhaustive]
-pub enum Reason {
+pub enum DoneReason {
 	Timedout,
 	Canceled,
 }
 
-impl fmt::Display for Reason {
+impl fmt::Display for DoneReason {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
-			Reason::Timedout => write!(f, "Context timedout"),
-			Reason::Canceled => write!(f, "Context canceled"),
+			DoneReason::Timedout => write!(f, "Context timedout"),
+			DoneReason::Canceled => write!(f, "Context canceled"),
 		}
 	}
 }
 
-impl From<Reason> for Error {
-	fn from(reason: Reason) -> Self {
+impl From<DoneReason> for Error {
+	fn from(reason: DoneReason) -> Self {
 		match reason {
-			Reason::Timedout => Error::QueryTimedout,
-			Reason::Canceled => Error::QueryCancelled,
+			DoneReason::Timedout => Error::QueryTimedout,
+			DoneReason::Canceled => Error::QueryCancelled,
 		}
 	}
 }
 
-impl From<Reason> for io::Error {
-	fn from(reason: Reason) -> Self {
+impl From<DoneReason> for io::Error {
+	fn from(reason: DoneReason) -> Self {
 		let kind = match reason {
-			Reason::Timedout => io::ErrorKind::TimedOut,
-			Reason::Canceled => io::ErrorKind::Other,
+			DoneReason::Timedout => io::ErrorKind::TimedOut,
+			DoneReason::Canceled => io::ErrorKind::Other,
 		};
 		io::Error::new(kind, reason.to_string())
 	}

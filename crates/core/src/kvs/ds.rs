@@ -12,7 +12,7 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
-	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
+	Attach, Capabilities, Executor, Notification, Options, QueryResult, Session, Variables
 };
 use crate::err::Error;
 use crate::expr::LogicalPlan;
@@ -776,12 +776,12 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute(
 		&self,
-		txt: &str,
+		sql: &str,
 		sess: &Session,
 		vars: Variables,
-	) -> Result<Vec<Response>> {
+	) -> Result<Vec<QueryResult>> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
+		let ast = syn::parse_with_capabilities(sql, &self.capabilities)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -792,7 +792,7 @@ impl Datastore {
 		sess: &Session,
 		vars: Variables,
 		query: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -918,7 +918,7 @@ impl Datastore {
 		ast: Query,
 		sess: &Session,
 		vars: Variables,
-	) -> Result<Vec<Response>> {
+	) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -949,7 +949,7 @@ impl Datastore {
 		plan: LogicalPlan,
 		sess: &Session,
 		vars: Variables,
-	) -> Result<Vec<Response>> {
+	) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1140,23 +1140,23 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
-		self.execute(sql, sess, None).await
+		self.execute(sql, sess, Variables::default()).await
 	}
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<Response>>
+	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
-		self.execute_import(sess, None, stream).await
+		self.execute_import(sess, Variables::default(), stream).await
 	}
 
 	/// Performs a full database export as SQL

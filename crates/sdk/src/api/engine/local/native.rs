@@ -152,16 +152,10 @@ pub(crate) async fn run_router(
 					break
 				};
 				tokio::spawn(async move {
-					match super::router(route.request, &kvs, &session, &vars, &live_queries)
-						.await
-					{
-						Ok(value) => {
-							route.response.send(Ok(value)).await.ok();
-						}
-						Err(error) => {
-							route.response.send(Err(error)).await.ok();
-						}
-					}
+					let result = super::router(route.request, &kvs, &session, &vars, &live_queries)
+						.await;
+
+					route.response.send(result).await.ok();
 				});
 			}
 			notification = notification_stream.next() => {

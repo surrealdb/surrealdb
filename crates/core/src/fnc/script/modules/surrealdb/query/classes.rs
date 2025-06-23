@@ -15,7 +15,7 @@ pub struct Query {
 	#[qjs(skip_trace)]
 	pub(crate) query: SurValue,
 	#[qjs(skip_trace)]
-	pub(crate) vars: Option<BTreeMap<String, SurValue>>,
+	pub(crate) vars: BTreeMap<String, SurValue>,
 }
 
 #[derive(Default, Clone)]
@@ -102,7 +102,7 @@ impl Query {
 				Exception::throw_type(&ctx, &error_text)
 			})?
 			.into();
-		let vars = variables.into_inner().map(|x| x.0);
+		let vars = variables.into_inner().map(|x| x.0).unwrap_or_default();
 		Ok(Query {
 			query,
 			vars,
@@ -115,6 +115,6 @@ impl Query {
 	}
 
 	pub fn bind(&mut self, key: Coerced<String>, value: SurValue) {
-		self.vars.get_or_insert_with(BTreeMap::new).insert(key.0, value);
+		self.vars.insert(key.0, value);
 	}
 }

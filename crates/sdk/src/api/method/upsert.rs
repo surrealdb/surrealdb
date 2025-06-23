@@ -1,24 +1,25 @@
+use crate::method::merge::Merge;
+use crate::method::patch::Patch;
+use crate::opt::PatchOp;
+use crate::opt::PatchOps;
 use crate::Surreal;
-use crate::Value;
+
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::method::Content;
-use crate::api::method::Merge;
-use crate::api::method::Patch;
-use crate::api::opt::PatchOp;
 use crate::api::opt::Resource;
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::Data;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::expr::{Value as Value, to_value as to_core_value};
 
-use super::validate_data;
+use super::ensure_values_are_objects;
 
 /// An upsert future
 #[derive(Debug)]
@@ -76,7 +77,7 @@ where
 impl<'r, Client, R> IntoFuture for Upsert<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -87,7 +88,7 @@ where
 impl<'r, Client, R> IntoFuture for Upsert<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -120,42 +121,35 @@ where
 impl<'r, C, R> Upsert<'r, C, R>
 where
 	C: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content<D>(self, data: D) -> Content<'r, C, R>
-	where
-		D: Serialize + 'static,
-	{
-		Content::from_closure(self.client, || {
-			let data = to_core_value(data)?;
+	pub fn content(self, data: impl Into<Value>) -> Result<Content<'r, C, R>> {
+		let data = data.into();
 
-			validate_data(
-				&data,
-				"Tried to upsert non-object-like data as content, only structs and objects are supported",
-			)?;
+		ensure_values_are_objects(
+			&data,
+		)?;
 
-			let data = match data {
-				CoreValue::None => None,
+		let command = Command::Upsert {
+			what: self.resource?,
+			data: match data {
+				Value::None => None,
 				content => Some(content),
-			};
+			}
+		};
 
-			Ok(Command::Upsert {
-				what: self.resource?,
-				data,
-			})
-		})
+		Ok(Content::new(self.client, command))
 	}
 
+
 	/// Merges the current document / record data with the specified data
-	pub fn merge<D>(self, data: D) -> Merge<'r, C, D, R>
-	where
-		D: Serialize,
+	pub fn merge(self, data: Value) -> Merge<'r, C, R>
 	{
 		Merge {
 			client: self.client,
 			resource: self.resource,
-			content: data,
+			content: Data::MergeExpression(data),
 			upsert: true,
 			response_type: PhantomData,
 		}
@@ -163,14 +157,8 @@ where
 
 	/// Patches the current document / record data with the specified JSON Patch data
 	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
-		let PatchOp(result) = patch.into();
-		let patches = match result {
-			Ok(serde_content::Value::Seq(values)) => values.into_iter().map(Ok).collect(),
-			Ok(value) => vec![Ok(value)],
-			Err(error) => vec![Err(error)],
-		};
 		Patch {
-			patches,
+			patches: PatchOps(vec![patch.into()]),
 			client: self.client,
 			resource: self.resource,
 			upsert: true,

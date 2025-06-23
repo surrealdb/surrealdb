@@ -6,7 +6,7 @@ use crate::protocol::FromFlatbuffers;
 use anyhow::Result;
 use std::collections::BTreeMap;
 
-pub(crate) type Variables = Option<BTreeMap<String, Value>>;
+pub type Variables = BTreeMap<String, Value>;
 
 pub(crate) trait Attach {
 	fn attach(self, ctx: &mut MutableContext) -> Result<(), Error>;
@@ -14,27 +14,18 @@ pub(crate) trait Attach {
 
 impl Attach for Variables {
 	fn attach(self, ctx: &mut MutableContext) -> Result<(), Error> {
-		match self {
-			Some(m) => {
-				for (key, val) in m {
-					// Check if the variable is a protected variable
-					if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
-						// The user tried to set a protected variable
-						return Err(Error::InvalidParam {
-							name: key,
-						});
-					}
-
-					// The variable isn't protected and can be stored
-					ctx.add_value(key, val.into());
-				}
-				Ok(())
+		for (key, val) in self {
+			// Check if the variable is a protected variable
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				// The user tried to set a protected variable
+				return Err(Error::InvalidParam {
+					name: key,
+				});
 			}
-			None => Ok(()),
+
+			// The variable isn't protected and can be stored
+			ctx.add_value(key, val.into());
 		}
+		Ok(())
 	}
 }
-
-// impl FromFlatbuffers for Variables {
-
-// }

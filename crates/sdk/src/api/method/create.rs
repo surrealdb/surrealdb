@@ -1,5 +1,5 @@
 use crate::Surreal;
-use crate::Value;
+
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::conn::Command;
@@ -11,17 +11,18 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::{Value as Value, to_value as to_core_value};
 
 use super::Content;
-use super::validate_data;
+use super::ensure_values_are_objects;
 
 /// A record create future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Create<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
+	pub(super) resource: Resource,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -49,7 +50,7 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Create {
-					what: resource?,
+					what: resource,
 					data: None,
 				};
 				router.$method(cmd).await
@@ -71,7 +72,7 @@ where
 impl<'r, Client, R> IntoFuture for Create<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -84,28 +85,24 @@ where
 	C: Connection,
 {
 	/// Sets content of a record
-	pub fn content<D>(self, data: D) -> Content<'r, C, Value>
-	where
-		D: Serialize + 'static,
-	{
-		Content::from_closure(self.client, || {
-			let content = to_core_value(data)?;
+	pub fn content(self, data: impl Into<Value>) -> anyhow::Result<Content<'r, C, Value>> {
+		let content = data.into();
 
-			validate_data(
-				&content,
-				"Tried to create non-object-like data as content, only structs and objects are supported",
-			)?;
+		ensure_values_are_objects(
+			&content,
+		)?;
 
-			let data = match content {
-				CoreValue::None | CoreValue::Null => None,
-				content => Some(content),
-			};
+		let data = match content {
+			Value::None | Value::Null => None,
+			content => Some(content),
+		};
 
-			Ok(Command::Create {
-				what: self.resource?,
-				data,
-			})
-		})
+		let command = Command::Create {
+			what: self.resource,
+			data,
+		};
+
+		Ok(Content::new(self.client, command))
 	}
 }
 
@@ -114,27 +111,24 @@ where
 	C: Connection,
 {
 	/// Sets content of a record
-	pub fn content<D>(self, data: D) -> Content<'r, C, Option<R>>
-	where
-		D: Serialize + 'static,
+	pub fn content(self, data: impl Into<Value>) -> anyhow::Result<Content<'r, C, Option<R>>>
 	{
-		Content::from_closure(self.client, || {
-			let content = to_core_value(data)?;
+		let content = data.into();
 
-			validate_data(
-				&content,
-				"Tried to create non-object-like data as content, only structs and objects are supported",
-			)?;
+		ensure_values_are_objects(
+			&content,
+		)?;
 
-			let data = match content {
-				CoreValue::None | CoreValue::Null => None,
-				content => Some(content),
-			};
+		let data = match content {
+			Value::None | Value::Null => None,
+			content => Some(content),
+		};
 
-			Ok(Command::Create {
-				what: self.resource?,
-				data,
-			})
-		})
+		let command = Command::Create {
+			what: self.resource,
+			data,
+		};
+
+		Ok(Content::new(self.client, command))
 	}
 }

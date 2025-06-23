@@ -5,7 +5,6 @@ mod protocol;
 mod server;
 mod types;
 
-use crate::api::Response as QueryResponse;
 use crate::api::Surreal;
 use crate::api::method::tests::types::AuthParams;
 use crate::api::opt::PatchOp;
@@ -14,6 +13,7 @@ use crate::api::opt::auth::Jwt;
 use crate::api::opt::auth::Namespace;
 use crate::api::opt::auth::RecordCredentials;
 use crate::api::opt::auth::Root;
+use crate::QueryResults;
 use protocol::Client;
 use protocol::Test;
 use semver::Version;
@@ -90,10 +90,10 @@ async fn api() {
 	let _: () = DB.authenticate(Jwt(String::new())).await.unwrap();
 
 	// query
-	let _: QueryResponse = DB.query("SELECT * FROM user").await.unwrap();
-	let _: QueryResponse =
+	let _: QueryResults = DB.query("SELECT * FROM user").await.unwrap();
+	let _: QueryResults =
 		DB.query("CREATE user:john SET name = $name").bind(("name", "John Doe")).await.unwrap();
-	let _: QueryResponse = DB
+	let _: QueryResults = DB
 		.query("CREATE user:john SET name = $name")
 		.bind(User {
 			id: "john".to_owned(),
@@ -101,7 +101,7 @@ async fn api() {
 		})
 		.await
 		.unwrap();
-	let _: QueryResponse = DB
+	let _: QueryResults = DB
 		.query(BeginStatement::default())
 		.query("CREATE account:one SET balance = 135605.16")
 		.query("CREATE account:two SET balance = 91031.31")

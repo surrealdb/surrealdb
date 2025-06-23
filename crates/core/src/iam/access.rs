@@ -1,6 +1,6 @@
 use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::ctx::MutableContext;
-use crate::dbs::Session;
+use crate::dbs::{Session, Variables};
 use crate::err::Error;
 use crate::expr::statements::access;
 use crate::expr::{Base, Ident, Thing, Value};
@@ -14,7 +14,7 @@ pub async fn authenticate_record(
 	session: &Session,
 	authenticate: &Value,
 ) -> Result<Thing> {
-	match kvs.evaluate(authenticate, session, None).await {
+	match kvs.evaluate(authenticate, session, Variables::default()).await {
 		Ok(val) => match val.record() {
 			// If the AUTHENTICATE clause returns a record, authentication continues with that record
 			Some(id) => Ok(id),
@@ -56,7 +56,7 @@ pub async fn authenticate_generic(
 	session: &Session,
 	authenticate: &Value,
 ) -> Result<()> {
-	match kvs.evaluate(authenticate, session, None).await {
+	match kvs.evaluate(authenticate, session, Variables::default()).await {
 		Ok(val) => {
 			match val {
 				// If the AUTHENTICATE clause returns nothing, authentication continues

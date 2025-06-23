@@ -24,7 +24,7 @@ use surrealdb::dbs::Session;
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
-use surrealdb::rpc::Data;
+use surrealdb::rpc::QueryResultData;
 use surrealdb::rpc::Method;
 use surrealdb::rpc::RpcContext;
 use surrealdb::rpc::format::Format;
@@ -410,7 +410,7 @@ impl Websocket {
 		version: Option<u8>,
 		method: Method,
 		params: Array,
-	) -> Result<Data, Failure> {
+	) -> Result<QueryResultData, Failure> {
 		debug!("Process RPC request");
 		// Check that the method is a valid method
 		if !method.is_valid() {
@@ -459,7 +459,7 @@ impl RpcContext for Websocket {
 		self.session.store(session);
 	}
 	/// The version information for this RPC context
-	fn version_data(&self) -> Data {
+	fn version_data(&self) -> QueryResultData {
 		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
 	}
 

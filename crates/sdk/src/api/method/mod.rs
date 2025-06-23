@@ -7,11 +7,14 @@ use crate::api::conn::Command;
 use crate::api::opt;
 use crate::api::opt::IntoEndpoint;
 use crate::api::opt::auth;
-use crate::api::opt::auth::IntoCredentials;
+use crate::api::opt::auth::IntoAccessCredentials;
 use crate::api::opt::auth::Jwt;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use serde::Serialize;
+use surrealdb_core::dbs::Variables;
+use surrealdb_core::iam::SigninParams;
+use surrealdb_core::iam::SignupParams;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -19,15 +22,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use surrealdb_core::expr::Array as CoreArray;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::Array as Array;
+use surrealdb_core::expr::Value as Value;
 use surrealdb_core::expr::to_value as to_core_value;
-use surrealdb_core::protocol::surrealdb::rpc::QueryResult;
-use surrealdb_core::protocol::surrealdb::rpc::Response as ResponseProto;
-use surrealdb_core::protocol::surrealdb::rpc::SigninParams;
-use surrealdb_core::protocol::surrealdb::rpc::SignupParams;
-use surrealdb_core::protocol::surrealdb::rpc::request::Command as CommandProto;
-use surrealdb_core::protocol::surrealdb::value::Value as ValueProto;
 use surrealdb_core::syn;
 
 pub(crate) mod live;
@@ -86,14 +83,11 @@ pub use import::Import;
 pub use insert::Insert;
 pub use invalidate::Invalidate;
 pub use live::Stream;
-pub use merge::Merge;
-pub use patch::Patch;
 pub use query::Query;
 pub use query::QueryStream;
 pub use run::IntoFn;
 pub use run::Run;
 pub use select::Select;
-use serde_content::Serializer;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
@@ -105,7 +99,7 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
-use super::opt::CreateResource;
+use super::opt::IntoCreateResource;
 use super::opt::IntoResource;
 
 /// A alias for an often used type of future returned by async methods in this library.
@@ -131,6 +125,7 @@ pub struct Live;
 /// Responses returned with statistics
 #[derive(Debug)]
 pub struct WithStats<T>(pub T);
+
 
 // pub trait TryFromResponseProto: Sized {
 // 	/// Converts a response proto to the type
@@ -452,7 +447,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R: TryFrom<Vec<QueryResult>>>(
+	pub fn signup<R>(
 		&self,
 		params: impl Into<SignupParams>,
 	) -> Signup<C> {
@@ -571,11 +566,11 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signin(&self, credentials: impl IntoCredentials) -> Signin<C> {
+	pub fn signin(&self, credentials: impl IntoAccessCredentials) -> Signin<C> {
 		Signin {
 			client: Cow::Borrowed(self),
 			params: SigninParams {
-				access: Some(credentials.into_access()),
+				access_method: Some(credentials.into_access_method()),
 			},
 		}
 	}
@@ -615,6 +610,25 @@ where
 		Authenticate {
 			client: Cow::Borrowed(self),
 			token: token.into(),
+		}
+	}
+
+
+	pub fn begin(&self) -> Begin<C> {
+		Begin {
+			client: Cow::Borrowed(self),
+		}
+	}
+
+	pub fn commit(&self) -> Commit<C> {
+		Commit {
+			client: Cow::Borrowed(self),
+		}
+	}
+
+	pub fn cancel(&self) -> Cancel<C> {
+		Cancel {
+			client: Cow::Borrowed(self),
 		}
 	}
 
@@ -668,16 +682,9 @@ where
 	/// # }
 	/// ```
 	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
-		let result = match query.as_str() {
-			Some(surql) => self.inner.router.extract().and_then(|router| {
-				let capabilities = &router.config.capabilities;
-				syn::parse_with_capabilities(surql, capabilities)
-					.map(opt::into_query::Sealed::into_query)
-			}),
-			None => Ok(query.into_query()),
-		};
 		Query {
-			inner: result.map(|x| x.0),
+			queries: vec![query.into_query()],
+			variables: Variables::default(),
 			client: Cow::Borrowed(self),
 		}
 	}
@@ -776,12 +783,12 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
-		Create {
+	pub fn create<R>(&self, resource: impl IntoCreateResource<R>) -> anyhow::Result<Create<C, R>> {
+		Ok(Create {
 			client: Cow::Borrowed(self),
-			resource: resource.into_resource(),
+			resource: resource.into_resource()?,
 			response_type: PhantomData,
-		}
+		})
 	}
 
 	/// Insert a record or records into a table
@@ -1320,7 +1327,7 @@ where
 		Run {
 			client: Cow::Borrowed(self),
 			function: function.into_fn(),
-			args: CoreArray::new(),
+			args: Array::new(),
 			response_type: PhantomData,
 		}
 	}
@@ -1435,10 +1442,10 @@ where
 	}
 }
 
-fn validate_data(data: &CoreValue, error_message: &str) -> crate::Result<()> {
+fn ensure_values_are_objects(data: &Value) -> crate::Result<()> {
 	match data {
-		CoreValue::Object(_) => Ok(()),
-		CoreValue::Array(v) if v.iter().all(CoreValue::is_object) => Ok(()),
-		_ => Err(crate::api::err::Error::InvalidParams(error_message.to_owned()).into()),
+		Value::Object(_) => Ok(()),
+		Value::Array(v) if v.iter().all(Value::is_object) => Ok(()),
+		_ => Err(crate::api::err::Error::InvalidParams("Tried to create non-object-like data as content, only structs and objects are supported".to_owned()).into()),
 	}
 }

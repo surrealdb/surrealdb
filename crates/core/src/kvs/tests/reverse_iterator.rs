@@ -1,12 +1,12 @@
 use crate::dbs::node::Timestamp;
-use crate::dbs::{Response, Session};
+use crate::dbs::{QueryResult, Session, Variables};
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
 use crate::sql::SqlValue;
 use std::sync::Arc;
 use uuid::Uuid;
 
-async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
+async fn test(new_ds: impl CreateDs, index: &str) -> Vec<QueryResult> {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("056804f2-b379-4397-9ceb-af8ebd527beb").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
@@ -23,7 +23,7 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 		SELECT v FROM i ORDER BY v DESC;"
 	);
 
-	let mut r = ds.execute(&sql, &Session::owner(), None).await.unwrap();
+	let mut r = ds.execute(&sql, &Session::owner(), Variables::default()).await.unwrap();
 	assert_eq!(r.len(), 8);
 	// Check the first statements are successful
 	for _ in 0..4 {
@@ -32,7 +32,7 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 	r
 }
 
-fn check(r: &mut Vec<Response>, tmp: &str) {
+fn check(r: &mut Vec<QueryResult>, tmp: &str) {
 	let tmp = SqlValue::parse(tmp);
 	let val = match r.remove(0).result {
 		Ok(v) => v,
@@ -163,7 +163,7 @@ pub async fn range(new_ds: impl CreateDs) {
 		SELECT * FROM t:[500]..[550] ORDER BY id DESC LIMIT 3;
 		SELECT * FROM t:[500]..=[550] ORDER BY id DESC LIMIT 3 EXPLAIN;
 	";
-	let mut r = ds.execute(sql, &Session::owner(), None).await.unwrap();
+	let mut r = ds.execute(sql, &Session::owner(), Variables::default()).await.unwrap();
 	//Check the result
 	for _ in 0..3 {
 		check(&mut r, "NONE");

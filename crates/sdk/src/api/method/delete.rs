@@ -1,5 +1,5 @@
 use crate::Surreal;
-use crate::Value;
+
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::conn::Command;
@@ -8,9 +8,11 @@ use crate::api::opt::Resource;
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
 use serde::de::DeserializeOwned;
+use surrealdb_core::expr::Value;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::expr::TryFromValue;
 
 /// A record delete future
 #[derive(Debug)]
@@ -67,7 +69,7 @@ where
 impl<'r, Client, R> IntoFuture for Delete<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -78,7 +80,7 @@ where
 impl<'r, Client, R> IntoFuture for Delete<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
