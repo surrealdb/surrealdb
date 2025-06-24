@@ -16,12 +16,12 @@ pub mod remote;
 pub mod tasks;
 
 use futures::Stream;
-use surrealdb_core::expr::Array;
-use surrealdb_core::expr::Value;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::expr::Values as Values;
+use surrealdb_core::expr::Array;
+use surrealdb_core::expr::Value;
+use surrealdb_core::expr::Values;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]

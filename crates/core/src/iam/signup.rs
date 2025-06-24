@@ -1,3 +1,4 @@
+use super::SignupParams;
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
@@ -12,7 +13,6 @@ use crate::iam::token::Claims;
 use crate::iam::{Actor, Level};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::protocol::FromFlatbuffers;
-use super::SignupParams;
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
@@ -56,15 +56,7 @@ pub async fn signup(
 ) -> Result<SignupData> {
 	// Attempt to signup using specified access method
 	// Currently, signup is only supported at the database level
-	super::signup::db_access(
-		kvs,
-		session,
-		namespace,
-		database,
-		access_name,
-		variables,
-	)
-	.await
+	super::signup::db_access(kvs, session, namespace, database, access_name, variables).await
 }
 
 pub async fn db_access(

@@ -5,6 +5,7 @@ mod protocol;
 mod server;
 mod types;
 
+use crate::QueryResults;
 use crate::api::Surreal;
 use crate::api::method::tests::types::AuthParams;
 use crate::api::opt::PatchOp;
@@ -13,7 +14,6 @@ use crate::api::opt::auth::Jwt;
 use crate::api::opt::auth::Namespace;
 use crate::api::opt::auth::RecordCredentials;
 use crate::api::opt::auth::Root;
-use crate::QueryResults;
 use protocol::Client;
 use protocol::Test;
 use semver::Version;

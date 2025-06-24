@@ -1,3 +1,4 @@
+use super::SigninParams;
 use super::access::{
 	authenticate_generic, authenticate_record, create_refresh_token_record,
 	revoke_refresh_token_record,
@@ -10,11 +11,10 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::expr::statements::{AccessGrant, DefineAccessStatement, access};
 use crate::expr::{AccessType, Datetime, Object, Value, access_type};
-use crate::iam::{AccessMethod, Auth};
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
+use crate::iam::{AccessMethod, Auth};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use super::SigninParams;
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use chrono::Utc;
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -55,14 +55,22 @@ pub async fn signin(
 	}: SigninParams,
 ) -> Result<SigninData> {
 	match access_method {
-		AccessMethod::RootUser { username, password } => {
-			super::signin::root_user(kvs, session, username, password).await
-		}
-		AccessMethod::NamespaceAccess { namespace, access_name, key } => {
-			super::signin::ns_access(kvs, session, namespace, access_name, key)
-				.await
-		}
-		AccessMethod::DatabaseAccess { namespace, database, access_name, key, refresh_token } => {
+		AccessMethod::RootUser {
+			username,
+			password,
+		} => super::signin::root_user(kvs, session, username, password).await,
+		AccessMethod::NamespaceAccess {
+			namespace,
+			access_name,
+			key,
+		} => super::signin::ns_access(kvs, session, namespace, access_name, key).await,
+		AccessMethod::DatabaseAccess {
+			namespace,
+			database,
+			access_name,
+			key,
+			refresh_token,
+		} => {
 			super::signin::db_access(
 				kvs,
 				session,
@@ -74,12 +82,17 @@ pub async fn signin(
 			)
 			.await
 		}
-		AccessMethod::NamespaceUser { namespace, username, password } => {
-			super::signin::ns_user(kvs, session, namespace, username, password).await
-		}
-		AccessMethod::DatabaseUser { namespace, database, username, password } => {
-			super::signin::db_user(kvs, session, namespace, database, username, password).await
-		}
+		AccessMethod::NamespaceUser {
+			namespace,
+			username,
+			password,
+		} => super::signin::ns_user(kvs, session, namespace, username, password).await,
+		AccessMethod::DatabaseUser {
+			namespace,
+			database,
+			username,
+			password,
+		} => super::signin::db_user(kvs, session, namespace, database, username, password).await,
 		unexpected => {
 			return Err(anyhow!("Unexpected access type identifier: {:?}", unexpected));
 		}

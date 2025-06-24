@@ -11,7 +11,6 @@ use serde::Serialize;
 use serde::ser::SerializeStruct;
 use std::time::Duration;
 
-
 /// The data returned from a query execution.
 #[derive(Debug)]
 pub enum QueryResultData {
@@ -29,7 +28,6 @@ impl QueryResultData {
 		}])
 	}
 }
-
 
 #[derive(Debug)]
 pub struct QueryResult {
@@ -80,7 +78,10 @@ pub struct QueryStats {
 impl QueryStats {
 	pub fn from_start_time(start_time: DateTime<Utc>) -> Self {
 		Self {
-			execution_duration: Utc::now().signed_duration_since(&start_time).to_std().expect("Duration should not be negative"),
+			execution_duration: Utc::now()
+				.signed_duration_since(&start_time)
+				.to_std()
+				.expect("Duration should not be negative"),
 			start_time,
 		}
 	}

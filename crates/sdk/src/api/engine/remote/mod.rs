@@ -102,10 +102,10 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use anyhow::Context;
 use crate::api::{self, Result, err::Error};
 use crate::dbs::{self};
 use crate::method::Stats;
+use anyhow::Context;
 use indexmap::IndexMap;
 use revision::Revisioned;
 use revision::revisioned;
@@ -113,9 +113,9 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use surrealdb_core::protocol::{FromFlatbuffers, ToFlatbuffers};
 use std::time::Duration;
-use surrealdb_core::expr::Value as Value;
+use surrealdb_core::expr::Value;
+use surrealdb_core::protocol::{FromFlatbuffers, ToFlatbuffers};
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;
@@ -223,7 +223,6 @@ where
 	T: 'buf + flatbuffers::Follow<'buf> + flatbuffers::Verifiable,
 {
 	let fb = flatbuffers::root::<T>(&bytes).context("Failed to deserialize FlatBuffer")?;
-
 
 	Ok(fb)
 }

@@ -5,20 +5,21 @@ use crate::expr::part::{DestructurePart, Recurse, RecurseInstruction};
 use crate::protocol::{FromCapnp, FromFlatbuffers, ToCapnp, ToFlatbuffers};
 
 use crate::expr::{
-	self, table, Array, Cond, Datetime, Dir, Duration, Fetch, Fetchs, Field, Fields, File, Geometry, Graph, Group, Groups, Id, IdRange, Ident, Idiom, Limit, Number, Object, Order, Part, Split, Splits, Start, Strand, Table, Thing, Uuid, Value
+	self, Array, Cond, Datetime, Dir, Duration, Fetch, Fetchs, Field, Fields, File, Geometry,
+	Graph, Group, Groups, Id, IdRange, Ident, Idiom, Limit, Number, Object, Order, Part, Split,
+	Splits, Start, Strand, Table, Thing, Uuid, Value, table,
 };
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
-use num_traits::AsPrimitive;
 use core::panic;
-use std::ops::Bound;
 use geo::Point;
+use num_traits::AsPrimitive;
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
+use std::ops::Bound;
 
 use crate::protocol::flatbuffers::surreal_db::protocol::common as common_fb;
 use crate::protocol::flatbuffers::surreal_db::protocol::expr::{self as expr_fb, FileArgs};
-
 
 impl ToFlatbuffers for Value {
 	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Value<'bldr>>;
@@ -1070,35 +1071,35 @@ impl ToFlatbuffers for Part {
 					part_type: expr_fb::PartType::All,
 					part: Some(null.as_union_value()),
 				}
-			},
+			}
 			Self::Flatten => {
 				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
 				expr_fb::PartArgs {
 					part_type: expr_fb::PartType::Flatten,
 					part: Some(null.as_union_value()),
 				}
-			},
+			}
 			Self::Last => {
 				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
 				expr_fb::PartArgs {
 					part_type: expr_fb::PartType::Last,
 					part: Some(null.as_union_value()),
 				}
-			},
+			}
 			Self::First => {
 				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
 				expr_fb::PartArgs {
 					part_type: expr_fb::PartType::First,
 					part: Some(null.as_union_value()),
 				}
-			},
+			}
 			Self::Field(ident) => {
 				let ident = ident.to_fb(builder);
 				expr_fb::PartArgs {
 					part_type: expr_fb::PartType::Field,
 					part: Some(ident.as_union_value()),
 				}
-			},
+			}
 			Self::Index(index) => {
 				let index: i64 = index.as_int();
 				let index_value = index.to_fb(builder);
@@ -1106,37 +1107,36 @@ impl ToFlatbuffers for Part {
 					part_type: expr_fb::PartType::Index,
 					part: Some(index_value.as_union_value()),
 				}
-			},
+			}
 			Self::Where(value) => {
 				let value_fb = value.to_fb(builder).as_union_value();
 				expr_fb::PartArgs {
 					part_type: expr_fb::PartType::Where,
 					part: Some(value_fb),
 				}
-			},
+			}
 			Self::Graph(graph) => {
 				let graph_fb = graph.to_fb(builder).as_union_value();
 				expr_fb::PartArgs {
 					part_type: expr_fb::PartType::Graph,
 					part: Some(graph_fb),
 				}
-			},
+			}
 			Self::Value(value) => {
 				let value_fb = value.to_fb(builder).as_union_value();
 				expr_fb::PartArgs {
 					part_type: expr_fb::PartType::Value,
 					part: Some(value_fb),
 				}
-			},
+			}
 			Self::Start(value) => {
 				let value_fb = value.to_fb(builder).as_union_value();
 				expr_fb::PartArgs {
 					part_type: expr_fb::PartType::Start,
 					part: Some(value_fb),
 				}
-			},
+			}
 			Self::Method(name, args) => {
-				
 				let name = builder.create_string(name);
 				let mut args_vec = Vec::with_capacity(args.len());
 				for arg in args {
@@ -1156,15 +1156,13 @@ impl ToFlatbuffers for Part {
 					part_type: expr_fb::PartType::Method,
 					part: Some(method.as_union_value()),
 				}
-			},
+			}
 			Self::Destructure(parts) => {
-				
 				let mut parts_vec = Vec::with_capacity(parts.len());
 				for part in parts {
 					parts_vec.push(part.to_fb(builder));
 				}
 				let parts = builder.create_vector(&parts_vec);
-
 
 				let part = expr_fb::DestructureParts::create(
 					builder,
@@ -1177,16 +1175,15 @@ impl ToFlatbuffers for Part {
 					part_type: expr_fb::PartType::Destructure,
 					part: Some(part.as_union_value()),
 				}
-			},
+			}
 			Self::Optional => {
 				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
 				expr_fb::PartArgs {
 					part_type: expr_fb::PartType::Optional,
 					part: Some(null.as_union_value()),
 				}
-			},
+			}
 			Self::Recurse(recurse, idiom, instruction) => {
-				
 				let spec = recurse.to_fb(builder);
 				let idiom = idiom.as_ref().map(|i| i.to_fb(builder));
 				let recurse_operation = instruction.as_ref().map(|op| op.to_fb(builder));
@@ -1204,7 +1201,7 @@ impl ToFlatbuffers for Part {
 					part_type: expr_fb::PartType::Recurse,
 					part: Some(recurse_fb.as_union_value()),
 				}
-			},
+			}
 			Self::Doc => {
 				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
 				expr_fb::PartArgs {
@@ -1221,10 +1218,7 @@ impl ToFlatbuffers for Part {
 			}
 		};
 
-		expr_fb::Part::create(
-			builder,
-			&args,
-		)
+		expr_fb::Part::create(builder, &args)
 	}
 }
 
@@ -1238,33 +1232,42 @@ impl FromFlatbuffers for Part {
 			expr_fb::PartType::Last => Ok(Self::Last),
 			expr_fb::PartType::First => Ok(Self::First),
 			expr_fb::PartType::Field => {
-				let ident = input.part_as_field().ok_or_else(|| anyhow::anyhow!("Expected Field part"))?;
-				let ident = ident.value().ok_or_else(|| anyhow::anyhow!("Missing value in Field part"))?;
+				let ident =
+					input.part_as_field().ok_or_else(|| anyhow::anyhow!("Expected Field part"))?;
+				let ident =
+					ident.value().ok_or_else(|| anyhow::anyhow!("Missing value in Field part"))?;
 				Ok(Self::Field(Ident(ident.to_string())))
 			}
 			expr_fb::PartType::Index => {
-				let index = input.part_as_index().ok_or_else(|| anyhow::anyhow!("Expected Index part"))?;
+				let index =
+					input.part_as_index().ok_or_else(|| anyhow::anyhow!("Expected Index part"))?;
 				let index = index.value();
 				Ok(Self::Index(Number::Int(index)))
 			}
 			expr_fb::PartType::Where => {
-				let value = input.part_as_where().ok_or_else(|| anyhow::anyhow!("Expected Where part"))?;
+				let value =
+					input.part_as_where().ok_or_else(|| anyhow::anyhow!("Expected Where part"))?;
 				Ok(Self::Where(Value::from_fb(value)?))
 			}
 			expr_fb::PartType::Graph => {
-				let graph = input.part_as_graph().ok_or_else(|| anyhow::anyhow!("Expected Graph part"))?;
+				let graph =
+					input.part_as_graph().ok_or_else(|| anyhow::anyhow!("Expected Graph part"))?;
 				Ok(Self::Graph(Graph::from_fb(graph)?))
 			}
 			expr_fb::PartType::Value => {
-				let value = input.part_as_value().ok_or_else(|| anyhow::anyhow!("Expected Value part"))?;
+				let value =
+					input.part_as_value().ok_or_else(|| anyhow::anyhow!("Expected Value part"))?;
 				Ok(Self::Value(Value::from_fb(value)?))
 			}
 			expr_fb::PartType::Start => {
-				let value = input.part_as_start().ok_or_else(|| anyhow::anyhow!("Expected Start part"))?;
+				let value =
+					input.part_as_start().ok_or_else(|| anyhow::anyhow!("Expected Start part"))?;
 				Ok(Self::Start(Value::from_fb(value)?))
 			}
 			expr_fb::PartType::Method => {
-				let method_part = input.part_as_method().ok_or_else(|| anyhow::anyhow!("Expected Method part"))?;
+				let method_part = input
+					.part_as_method()
+					.ok_or_else(|| anyhow::anyhow!("Expected Method part"))?;
 				let name = method_part.name().context("Missing name in Method part")?.to_string();
 				let args_reader = method_part.args().context("Missing args in Method part")?;
 				let mut args = Vec::new();
@@ -1272,25 +1275,35 @@ impl FromFlatbuffers for Part {
 					args.push(Value::from_fb(arg)?);
 				}
 				Ok(Self::Method(name, args))
-			},
+			}
 			expr_fb::PartType::Destructure => {
-				let destructure_parts = input.part_as_destructure().ok_or_else(|| anyhow::anyhow!("Expected Destructure part"))?;
-				let parts_reader = destructure_parts.parts().context("Missing parts in Destructure part")?;
+				let destructure_parts = input
+					.part_as_destructure()
+					.ok_or_else(|| anyhow::anyhow!("Expected Destructure part"))?;
+				let parts_reader =
+					destructure_parts.parts().context("Missing parts in Destructure part")?;
 				let mut parts = Vec::<DestructurePart>::new();
 				for part in parts_reader {
 					parts.push(DestructurePart::from_fb(part)?);
 				}
 				Ok(Self::Destructure(parts))
-			},
+			}
 			expr_fb::PartType::Optional => Ok(Self::Optional),
 			expr_fb::PartType::Recurse => {
-				let recurse_part = input.part_as_recurse().ok_or_else(|| anyhow::anyhow!("Expected Recurse part"))?;
-				let spec = recurse_part.spec().ok_or_else(|| anyhow::anyhow!("Missing spec in Recurse part"))?;
+				let recurse_part = input
+					.part_as_recurse()
+					.ok_or_else(|| anyhow::anyhow!("Expected Recurse part"))?;
+				let spec = recurse_part
+					.spec()
+					.ok_or_else(|| anyhow::anyhow!("Missing spec in Recurse part"))?;
 				let recurse = Recurse::from_fb(spec)?;
 				let idiom = recurse_part.idiom().map(Idiom::from_fb).transpose()?;
-				let instruction = recurse_part.recurse_operation().map(RecurseInstruction::from_fb).transpose()?;
+				let instruction = recurse_part
+					.recurse_operation()
+					.map(RecurseInstruction::from_fb)
+					.transpose()?;
 				Ok(Self::Recurse(recurse, idiom, instruction))
-			},
+			}
 			expr_fb::PartType::Doc => Ok(Self::Doc),
 			expr_fb::PartType::RepeatRecurse => Ok(Self::RepeatRecurse),
 			_ => Err(anyhow::anyhow!(
@@ -1339,7 +1352,7 @@ impl ToFlatbuffers for Recurse {
 				let fixed_value = expr_fb::FixedSpec::create(
 					builder,
 					&expr_fb::FixedSpecArgs {
-						value: *fixed
+						value: *fixed,
 					},
 				);
 
@@ -1347,7 +1360,7 @@ impl ToFlatbuffers for Recurse {
 					spec_type: expr_fb::RecurseSpecType::Fixed,
 					spec: Some(fixed_value.as_union_value()),
 				}
-			},
+			}
 			Self::Range(start, end) => {
 				let range_value = expr_fb::RangeSpec::create(
 					builder,
@@ -1364,10 +1377,7 @@ impl ToFlatbuffers for Recurse {
 			}
 		};
 
-		expr_fb::RecurseSpec::create(
-			builder,
-			&args,
-		)
+		expr_fb::RecurseSpec::create(builder, &args)
 	}
 }
 
@@ -1377,11 +1387,13 @@ impl FromFlatbuffers for Recurse {
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.spec_type() {
 			expr_fb::RecurseSpecType::Fixed => {
-				let fixed = input.spec_as_fixed().ok_or_else(|| anyhow::anyhow!("Expected Fixed spec"))?;
+				let fixed =
+					input.spec_as_fixed().ok_or_else(|| anyhow::anyhow!("Expected Fixed spec"))?;
 				Ok(Self::Fixed(fixed.value()))
 			}
 			expr_fb::RecurseSpecType::Range => {
-				let range = input.spec_as_range().ok_or_else(|| anyhow::anyhow!("Expected Range spec"))?;
+				let range =
+					input.spec_as_range().ok_or_else(|| anyhow::anyhow!("Expected Range spec"))?;
 				Ok(Self::Range(range.start(), range.end()))
 			}
 			_ => Err(anyhow::anyhow!(
@@ -1396,11 +1408,13 @@ impl ToFlatbuffers for RecurseInstruction {
 	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::RecurseOperation<'bldr>>;
 
 	fn to_fb<'bldr>(
-			&self,
-			builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-		) -> Self::Output<'bldr> {
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
 		let args = match self {
-			Self::Path { inclusive } => {
+			Self::Path {
+				inclusive,
+			} => {
 				let operation = expr_fb::RecursePath::create(
 					builder,
 					&expr_fb::RecursePathArgs {
@@ -1412,8 +1426,10 @@ impl ToFlatbuffers for RecurseInstruction {
 					operation_type: expr_fb::RecurseOperationType::Path,
 					operation: Some(operation.as_union_value()),
 				}
-			},
-			Self::Collect { inclusive } => {
+			}
+			Self::Collect {
+				inclusive,
+			} => {
 				let operation = expr_fb::RecurseCollect::create(
 					builder,
 					&expr_fb::RecurseCollectArgs {
@@ -1425,8 +1441,11 @@ impl ToFlatbuffers for RecurseInstruction {
 					operation_type: expr_fb::RecurseOperationType::Collect,
 					operation: Some(operation.as_union_value()),
 				}
-			},
-			Self::Shortest { expects, inclusive } => {
+			}
+			Self::Shortest {
+				expects,
+				inclusive,
+			} => {
 				let expects_value = expects.to_fb(builder);
 				let operation = expr_fb::RecurseShortest::create(
 					builder,
@@ -1443,10 +1462,7 @@ impl ToFlatbuffers for RecurseInstruction {
 			}
 		};
 
-		expr_fb::RecurseOperation::create(
-			builder,
-			&args,
-		)
+		expr_fb::RecurseOperation::create(builder, &args)
 	}
 }
 
@@ -1456,17 +1472,32 @@ impl FromFlatbuffers for RecurseInstruction {
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.operation_type() {
 			expr_fb::RecurseOperationType::Path => {
-				let path = input.operation_as_path().ok_or_else(|| anyhow::anyhow!("Expected Path operation"))?;
-				Ok(Self::Path { inclusive: path.inclusive() })
+				let path = input
+					.operation_as_path()
+					.ok_or_else(|| anyhow::anyhow!("Expected Path operation"))?;
+				Ok(Self::Path {
+					inclusive: path.inclusive(),
+				})
 			}
 			expr_fb::RecurseOperationType::Collect => {
-				let collect = input.operation_as_collect().ok_or_else(|| anyhow::anyhow!("Expected Collect operation"))?;
-				Ok(Self::Collect { inclusive: collect.inclusive() })
+				let collect = input
+					.operation_as_collect()
+					.ok_or_else(|| anyhow::anyhow!("Expected Collect operation"))?;
+				Ok(Self::Collect {
+					inclusive: collect.inclusive(),
+				})
 			}
 			expr_fb::RecurseOperationType::Shortest => {
-				let shortest = input.operation_as_shortest().ok_or_else(|| anyhow::anyhow!("Expected Shortest operation"))?;
-				let expects = Value::from_fb(shortest.expects().context("Missing expects in Shortest operation")?)?;
-				Ok(Self::Shortest { expects, inclusive: shortest.inclusive() })
+				let shortest = input
+					.operation_as_shortest()
+					.ok_or_else(|| anyhow::anyhow!("Expected Shortest operation"))?;
+				let expects = Value::from_fb(
+					shortest.expects().context("Missing expects in Shortest operation")?,
+				)?;
+				Ok(Self::Shortest {
+					expects,
+					inclusive: shortest.inclusive(),
+				})
 			}
 			_ => Err(anyhow::anyhow!(
 				"Unsupported RecurseOperation type for FlatBuffers deserialization: {:?}",
@@ -1490,14 +1521,14 @@ impl ToFlatbuffers for DestructurePart {
 					part_type: expr_fb::DestructurePartType::All,
 					part: Some(ident.as_union_value()),
 				}
-			},
+			}
 			Self::Field(ident) => {
 				let ident = ident.to_fb(builder);
 				expr_fb::DestructurePartArgs {
 					part_type: expr_fb::DestructurePartType::Field,
 					part: Some(ident.as_union_value()),
 				}
-			},
+			}
 			Self::Aliased(ident, idiom) => {
 				let value = builder.create_string(&ident.0);
 				let alias = idiom.to_fb(builder);
@@ -1513,7 +1544,7 @@ impl ToFlatbuffers for DestructurePart {
 					part_type: expr_fb::DestructurePartType::Aliased,
 					part: Some(alias.as_union_value()),
 				}
-			},
+			}
 			Self::Destructure(name, parts) => {
 				let name = builder.create_string(&name.0);
 				let mut parts_vec = Vec::with_capacity(parts.len());
@@ -1535,10 +1566,7 @@ impl ToFlatbuffers for DestructurePart {
 			}
 		};
 
-		expr_fb::DestructurePart::create(
-			builder,
-			&args,
-		)
+		expr_fb::DestructurePart::create(builder, &args)
 	}
 }
 
@@ -1548,23 +1576,34 @@ impl FromFlatbuffers for DestructurePart {
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.part_type() {
 			expr_fb::DestructurePartType::All => {
-				let ident = input.part_as_all().ok_or_else(|| anyhow::anyhow!("Expected All part"))?;
+				let ident =
+					input.part_as_all().ok_or_else(|| anyhow::anyhow!("Expected All part"))?;
 				Ok(Self::All(Ident::from_fb(ident)?))
 			}
 			expr_fb::DestructurePartType::Field => {
-				let ident = input.part_as_field().ok_or_else(|| anyhow::anyhow!("Expected Field part"))?;
+				let ident =
+					input.part_as_field().ok_or_else(|| anyhow::anyhow!("Expected Field part"))?;
 				Ok(Self::Field(Ident::from_fb(ident)?))
 			}
 			expr_fb::DestructurePartType::Aliased => {
-				let alias = input.part_as_aliased().ok_or_else(|| anyhow::anyhow!("Expected Aliased part"))?;
+				let alias = input
+					.part_as_aliased()
+					.ok_or_else(|| anyhow::anyhow!("Expected Aliased part"))?;
 				let value = alias.value().context("Missing value in Aliased part")?.to_string();
-				let idiom = Idiom::from_fb(alias.alias().context("Missing alias in Aliased part")?)?;
+				let idiom =
+					Idiom::from_fb(alias.alias().context("Missing alias in Aliased part")?)?;
 				Ok(Self::Aliased(Ident(value), idiom))
 			}
 			expr_fb::DestructurePartType::Destructure => {
-				let destructure_parts = input.part_as_destructure().ok_or_else(|| anyhow::anyhow!("Expected Destructure part"))?;
-				let name = destructure_parts.name().context("Missing name in Destructure part")?.to_string();
-				let parts_reader = destructure_parts.parts().context("Missing parts in Destructure part")?;
+				let destructure_parts = input
+					.part_as_destructure()
+					.ok_or_else(|| anyhow::anyhow!("Expected Destructure part"))?;
+				let name = destructure_parts
+					.name()
+					.context("Missing name in Destructure part")?
+					.to_string();
+				let parts_reader =
+					destructure_parts.parts().context("Missing parts in Destructure part")?;
 				let mut parts = Vec::<DestructurePart>::new();
 				for part in parts_reader {
 					parts.push(DestructurePart::from_fb(part)?);
@@ -1586,7 +1625,6 @@ impl ToFlatbuffers for Graph {
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
-		
 		let dir = self.dir.to_fb(builder);
 		let expr = self.expr.as_ref().map(|e| e.to_fb(builder));
 		let what = self.what.to_fb(builder);
@@ -1595,14 +1633,10 @@ impl ToFlatbuffers for Graph {
 		let group = self.group.as_ref().map(|g| g.to_fb(builder));
 		let order = self.order.as_ref().map(|o| o.to_fb(builder));
 		let limit = match &self.limit {
-			Some(limit) => {
-				match limit.0 {
-					Value::Number(num) => {
-						Some(num.as_int() as u64)
-					},
-					_ => {
-						panic!("Limit must be a number")
-					}
+			Some(limit) => match limit.0 {
+				Value::Number(num) => Some(num.as_int() as u64),
+				_ => {
+					panic!("Limit must be a number")
 				}
 			},
 			None => None,
@@ -1773,10 +1807,9 @@ impl ToFlatbuffers for Ordering {
 	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::OrderingSpec<'bldr>>;
 
 	fn to_fb<'bldr>(
-			&self,
-			builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-		) -> Self::Output<'bldr> {
-		
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> Self::Output<'bldr> {
 		let args = match self {
 			Self::Random => {
 				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
@@ -1784,7 +1817,7 @@ impl ToFlatbuffers for Ordering {
 					ordering_type: expr_fb::OrderingType::Random,
 					ordering: Some(null.as_union_value()),
 				}
-			},
+			}
 			Self::Order(order_list) => {
 				let order_list = order_list.to_fb(builder);
 				expr_fb::OrderingSpecArgs {
@@ -1794,10 +1827,7 @@ impl ToFlatbuffers for Ordering {
 			}
 		};
 
-		expr_fb::OrderingSpec::create(
-			builder,
-			&args
-		)
+		expr_fb::OrderingSpec::create(builder, &args)
 	}
 }
 
@@ -1808,7 +1838,9 @@ impl FromFlatbuffers for Ordering {
 		match input.ordering_type() {
 			expr_fb::OrderingType::Random => Ok(Self::Random),
 			expr_fb::OrderingType::Ordered => {
-				let order_list = input.ordering_as_ordered().ok_or_else(|| anyhow::anyhow!("Expected Ordered ordering"))?;
+				let order_list = input
+					.ordering_as_ordered()
+					.ok_or_else(|| anyhow::anyhow!("Expected Ordered ordering"))?;
 				let order_list = OrderList::from_fb(order_list)?;
 				Ok(Self::Order(order_list))
 			}
@@ -1870,7 +1902,7 @@ impl ToFlatbuffers for Order {
 				collate: self.collate,
 				numeric: self.numeric,
 				ascending: self.direction,
-			}
+			},
 		)
 	}
 }
@@ -1916,7 +1948,10 @@ impl FromFlatbuffers for Dir {
 			expr_fb::GraphDirection::In => Ok(Dir::In),
 			expr_fb::GraphDirection::Out => Ok(Dir::Out),
 			expr_fb::GraphDirection::Both => Ok(Dir::Both),
-			_ => Err(anyhow::anyhow!("Unsupported GraphDirection type for FlatBuffers deserialization: {:?}", input)),
+			_ => Err(anyhow::anyhow!(
+				"Unsupported GraphDirection type for FlatBuffers deserialization: {:?}",
+				input
+			)),
 		}
 	}
 }
@@ -1975,7 +2010,7 @@ impl ToFlatbuffers for GraphSubject {
 					subject_type: expr_fb::GraphSubjectType::Table,
 					subject: Some(table_fb.as_union_value()),
 				}
-			},
+			}
 			Self::Range(table, id_range) => {
 				let table = builder.create_string(&table.0);
 				let start = id_range.beg.to_fb(builder);
@@ -1996,10 +2031,7 @@ impl ToFlatbuffers for GraphSubject {
 			}
 		};
 
-		expr_fb::GraphSubject::create(
-			builder,
-			&args,
-		)
+		expr_fb::GraphSubject::create(builder, &args)
 	}
 }
 
@@ -2015,10 +2047,18 @@ impl FromFlatbuffers for GraphSubject {
 			}
 			expr_fb::GraphSubjectType::Range => {
 				let range = input.subject_as_range().context("Expected Range subject")?;
-				let table_name = range.table().context("Missing table in Range subject")?.to_string();
-				let start = Bound::from_fb(range.start().context("Missing start in Range subject")?)?;
+				let table_name =
+					range.table().context("Missing table in Range subject")?.to_string();
+				let start =
+					Bound::from_fb(range.start().context("Missing start in Range subject")?)?;
 				let end = Bound::from_fb(range.end().context("Missing end in Range subject")?)?;
-				Ok(GraphSubject::Range(Table(table_name), IdRange { beg: start, end }))
+				Ok(GraphSubject::Range(
+					Table(table_name),
+					IdRange {
+						beg: start,
+						end,
+					},
+				))
 			}
 			_ => Err(anyhow::anyhow!(
 				"Unsupported GraphSubject type for FlatBuffers deserialization: {:?}",
@@ -2040,28 +2080,23 @@ impl ToFlatbuffers for Bound<Id> {
 				let id_value = id.to_fb(builder);
 				expr_fb::IdBoundArgs {
 					id: Some(id_value),
-					inclusive: true
+					inclusive: true,
 				}
 			}
 			Bound::Excluded(id) => {
 				let id_value = id.to_fb(builder);
 				expr_fb::IdBoundArgs {
 					id: Some(id_value),
-					inclusive: false
+					inclusive: false,
 				}
 			}
-			Bound::Unbounded => {
-				expr_fb::IdBoundArgs {
-					id: None,
-					inclusive: false
-				}
-			}
+			Bound::Unbounded => expr_fb::IdBoundArgs {
+				id: None,
+				inclusive: false,
+			},
 		};
 
-		expr_fb::IdBound::create(
-			builder,
-			&args,
-		)
+		expr_fb::IdBound::create(builder, &args)
 	}
 }
 
@@ -2165,8 +2200,11 @@ impl ToFlatbuffers for Fields {
 						field_type: expr_fb::FieldType::All,
 						field: Some(null.as_union_value()),
 					}
-				},
-				Field::Single { expr, alias } => {
+				}
+				Field::Single {
+					expr,
+					alias,
+				} => {
 					let expr = expr.to_fb(builder);
 					let alias = alias.as_ref().map(|a| a.to_fb(builder));
 					let single_field = expr_fb::SingleField::create(

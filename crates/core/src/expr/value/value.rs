@@ -16,7 +16,7 @@ use crate::expr::{
 	id::{Gen, Id},
 	model::Model,
 };
-use crate::expr::{from_value, to_value, Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind, from_value, to_value};
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -70,7 +70,8 @@ impl TryFromValue for String {
 			v => Err(Error::UnexpectedType {
 				expected: "string",
 				actual: v.kindof(),
-			}.into()),
+			}
+			.into()),
 		}
 	}
 }
@@ -83,7 +84,8 @@ impl TryFromValue for uuid::Uuid {
 			unexpected => Err(Error::UnexpectedType {
 				expected: "uuid",
 				actual: unexpected.kindof(),
-			}.into()),
+			}
+			.into()),
 		}
 	}
 }
@@ -140,7 +142,8 @@ impl TryFromValue for bool {
 			v => Err(Error::UnexpectedType {
 				expected: "bool",
 				actual: v.kindof(),
-			}.into()),
+			}
+			.into()),
 		}
 	}
 }
@@ -157,7 +160,8 @@ impl TryFromValue for () {
 			v => Err(Error::UnexpectedType {
 				expected: "unit",
 				actual: v.kindof(),
-			}.into()),
+			}
+			.into()),
 		}
 	}
 }

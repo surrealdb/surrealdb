@@ -5,12 +5,12 @@ use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::method::OnceLockExt;
 use serde::de::DeserializeOwned;
-use surrealdb_core::dbs::QueryResultData;
-use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::expr::Value;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::dbs::QueryResultData;
+use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::Value;
 
 /// A content future
 ///

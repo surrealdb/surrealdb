@@ -1,9 +1,9 @@
+use crate::Surreal;
 use crate::method::merge::Merge;
 use crate::method::patch::Patch;
 use crate::opt::PatchOp;
 use crate::opt::PatchOps;
 use crate::opt::RangeableResource;
-use crate::Surreal;
 
 use crate::api::Connection;
 use crate::api::Result;
@@ -14,12 +14,12 @@ use crate::api::opt::Resource;
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
 use serde::Serialize;
-use surrealdb_core::expr::Data;
-use surrealdb_core::expr::TryFromValue;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as Value, to_value as to_core_value};
+use surrealdb_core::expr::Data;
+use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::{Value, to_value as to_core_value};
 
 /// An update future
 #[derive(Debug)]
@@ -148,8 +148,7 @@ where
 	}
 
 	/// Merges the current document / record data with the specified data
-	pub fn merge(self, data: Value) -> Merge<'r, C, R, RT>
-	{
+	pub fn merge(self, data: Value) -> Merge<'r, C, R, RT> {
 		Merge {
 			client: self.client,
 			resource: self.resource,

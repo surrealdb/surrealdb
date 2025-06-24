@@ -1,4 +1,3 @@
-use crate::opt::PatchOps;
 use crate::Surreal;
 use crate::api::Connection;
 use crate::api::Result;
@@ -7,11 +6,12 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::PatchOp;
 use crate::api::opt::Resource;
 use crate::method::OnceLockExt;
+use crate::opt::PatchOps;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value, Array, Data};
 use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::{Array, Data, Value};
 
 /// A patch future
 #[derive(Debug)]

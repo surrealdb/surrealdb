@@ -144,7 +144,8 @@ mod tests {
 
 		// Initiate a live query statement
 		let lq_stmt = format!("LIVE SELECT * FROM {}", tb);
-		let live_query_response = &mut dbs.execute(&lq_stmt, &ses, Variables::default()).await.unwrap();
+		let live_query_response =
+			&mut dbs.execute(&lq_stmt, &ses, Variables::default()).await.unwrap();
 
 		let live_id = live_query_response.remove(0).result.unwrap();
 		let live_id = match live_id {
@@ -161,7 +162,8 @@ mod tests {
 
 		// Initiate a Create record
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
-		let create_response = &mut dbs.execute(&create_statement, &ses, Variables::default()).await.unwrap();
+		let create_response =
+			&mut dbs.execute(&create_statement, &ses, Variables::default()).await.unwrap();
 		assert_eq!(create_response.len(), 1);
 		let expected_record: Value = SqlValue::parse(&format!(
 			"[{{

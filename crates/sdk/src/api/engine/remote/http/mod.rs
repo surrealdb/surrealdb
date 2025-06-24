@@ -2,7 +2,7 @@
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::api::conn::{Request, Command};
+use crate::api::conn::{Command, Request};
 use crate::api::engine::remote::{deserialize_flatbuffers, serialize_flatbuffers};
 use crate::api::err::Error;
 use crate::dbs::QueryResultData;
@@ -22,17 +22,15 @@ use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb_core::dbs::QueryResult;
-use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
-use surrealdb_core::protocol::ToFlatbuffers;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{
-	Object, Value, from_value as from_core_value,
-};
+use surrealdb_core::dbs::QueryResult;
+use surrealdb_core::expr::{Object, Value, from_value as from_core_value};
 use surrealdb_core::iam::access;
+use surrealdb_core::protocol::ToFlatbuffers;
+use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
 use surrealdb_core::sql::Statement;
 use surrealdb_core::sql::statements::OutputStatement;
-use surrealdb_core::sql::{Param, Query, SqlValue as SqlValue};
+use surrealdb_core::sql::{Param, Query, SqlValue};
 use url::Url;
 
 #[cfg(not(target_family = "wasm"))]
@@ -221,7 +219,6 @@ async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()
 
 #[cfg(not(target_family = "wasm"))]
 async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
-
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
@@ -254,9 +251,11 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		let bytes = res.bytes().await?;
 		let response = deserialize_flatbuffers::<rpc_fb::Response<'_>>(&bytes)?;
 
-		let query_results = response.response_type_as_results()
+		let query_results = response
+			.response_type_as_results()
 			.ok_or_else(|| Error::InternalError("No results in response".to_string()))?;
-		let results = query_results.results()
+		let results = query_results
+			.results()
 			.ok_or_else(|| Error::InternalError("No results in response".to_string()))?;
 		if results.is_empty() {
 			return Err(Error::InternalError("No results in response".to_string()).into());
@@ -372,7 +371,6 @@ async fn router(
 			// 	);
 			// };
 
-
 			// match access.inner {
 			// 	Some(AccessInnerProto::RootUser(RootUserCredentials {
 			// 		username,
@@ -473,7 +471,8 @@ async fn router(
 				.into());
 			};
 
-			let result: QueryResult = res.into_iter().next().context("Expected one item in result")?;
+			let result: QueryResult =
+				res.into_iter().next().context("Expected one item in result")?;
 			let value = result.result?;
 			vars.insert(key, value);
 			Ok(QueryResultData::new_from_value(Value::None))
@@ -481,8 +480,6 @@ async fn router(
 		Command::Unset {
 			key,
 		} => {
-
-
 			vars.shift_remove(&key);
 			Ok(QueryResultData::new_from_value(Value::None))
 		}

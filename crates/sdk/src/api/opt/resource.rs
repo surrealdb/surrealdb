@@ -1,9 +1,10 @@
 use crate::{
-	api::{conn::LiveQueryParams, err::Error, Result}, RecordIdKey
+	RecordIdKey,
+	api::{Result, conn::LiveQueryParams, err::Error},
 };
 use std::ops::{self, Bound};
 use surrealdb_core::expr::{
-	Array, Edges as Edges, Id as Id, IdRange as IdRange, Object, Table as CoreTable, Thing as RecordId, Value, Values
+	Array, Edges, Id, IdRange, Object, Table as CoreTable, Thing as RecordId, Value, Values,
 };
 use surrealdb_core::sql::Table as SqlTable;
 
@@ -100,7 +101,6 @@ pub trait SubscribableResource: Resource {
 	fn into_live_query_params(self) -> LiveQueryParams;
 }
 
-
 macro_rules! impl_resource_for_table_type {
 	($type:ty) => {
 		impl resource::Sealed for $type {}
@@ -119,7 +119,6 @@ macro_rules! impl_resource_for_table_type {
 impl_resource_for_table_type!(String);
 impl_resource_for_table_type!(&str);
 impl_resource_for_table_type!(CoreTable);
-
 
 impl CreatableResource for String {}
 impl CreatableResource for &str {}
@@ -188,7 +187,6 @@ impl RangeableResource for CoreTable {
 	}
 }
 
-
 impl resource::Sealed for RecordId {}
 impl Resource for RecordId {
 	fn kind(&self) -> &'static str {
@@ -255,7 +253,6 @@ impl Resource for Edge {
 // 		vec![Value::from(self)]
 // 	}
 // }
-
 
 // impl Resource {
 // 	/// Add a range to the resource, this only works if the resource is a table.

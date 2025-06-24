@@ -8,11 +8,14 @@ use anyhow::bail;
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::de::DeserializeOwned;
-use std::{borrow::Cow, marker::PhantomData};
 use std::mem;
-use surrealdb_core::{dbs::{QueryStats, Variables}, expr::{TryFromValue, Value}};
+use std::{borrow::Cow, marker::PhantomData};
 use surrealdb_core::expr::from_value as from_core_value;
 use surrealdb_core::sql::{self, Statement, Statements, statements::*};
+use surrealdb_core::{
+	dbs::{QueryStats, Variables},
+	expr::{TryFromValue, Value},
+};
 
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery {
@@ -50,8 +53,7 @@ impl IntoVariables for (&str, &str) {
 }
 
 /// Represents a way to take a single query result from a list of responses
-pub trait QueryAccessor<R>: query_accessor::Sealed<R> {
-}
+pub trait QueryAccessor<R>: query_accessor::Sealed<R> {}
 
 mod query_accessor {
 	pub trait Sealed<R> {
@@ -69,9 +71,7 @@ impl QueryAccessor<Value> for usize {}
 impl query_accessor::Sealed<Value> for usize {
 	fn query_result(self, results: &mut QueryResults) -> Result<Value> {
 		match results.results.swap_remove(&self) {
-			Some(query_result) => {
-				query_result.result
-			},
+			Some(query_result) => query_result.result,
 			None => Ok(Value::None),
 		}
 	}
@@ -234,9 +234,7 @@ where
 				return Ok(vec![]);
 			}
 		};
-		vec.into_iter()
-			.map(T::try_from_value)
-			.collect::<Result<Vec<T>>>()
+		vec.into_iter().map(T::try_from_value).collect::<Result<Vec<T>>>()
 	}
 
 	fn stats(&self, results: &QueryResults) -> Option<QueryStats> {
@@ -246,8 +244,8 @@ where
 
 impl<T> QueryAccessor<Vec<T>> for (usize, &str) where T: TryFromValue {}
 impl<T> query_accessor::Sealed<Vec<T>> for (usize, &str)
-	where
-	T: TryFromValue
+where
+	T: TryFromValue,
 {
 	fn query_result(self, results: &mut QueryResults) -> Result<Vec<T>> {
 		let (index, key) = self;

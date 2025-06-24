@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use crate::dbs::{self, QueryResultData};
 use crate::dbs::Notification;
+use crate::dbs::{self, QueryResultData};
 use crate::expr;
 use crate::expr::Value;
 use revision::revisioned;

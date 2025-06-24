@@ -1,4 +1,5 @@
 use super::{Stream, live};
+use crate::Surreal;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -12,27 +13,26 @@ use crate::method::Stats;
 use crate::method::WithStats;
 use crate::opt::IntoVariables;
 use crate::value::Notification;
-use crate::{Surreal};
-use anyhow::{anyhow, Context as AnyhowContext};
 use anyhow::bail;
+use anyhow::{Context as AnyhowContext, anyhow};
 use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use surrealdb_core::dbs;
-use surrealdb_core::dbs::QueryResultData;
-use surrealdb_core::dbs::Variables;
-use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::rpc;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::expr::{Object as Object, Value as Value, to_value as to_core_value};
+use surrealdb_core::dbs;
+use surrealdb_core::dbs::QueryResultData;
+use surrealdb_core::dbs::Variables;
+use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::{Object, Value, to_value as to_core_value};
+use surrealdb_core::rpc;
 use surrealdb_core::sql;
 use surrealdb_core::sql::Statement;
 
@@ -121,7 +121,7 @@ where
 		let client = self.client.clone();
 
 		let surql = surql.into();
-		
+
 		self.queries.push(Cow::Owned(surql));
 
 		self
@@ -131,7 +131,6 @@ where
 	pub const fn with_stats(self) -> WithStats<Self> {
 		WithStats(self)
 	}
-
 
 	pub fn commit(self) -> Commit<'req, C> {
 		Commit {
@@ -185,7 +184,6 @@ where
 		self
 	}
 }
-
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
@@ -500,7 +498,7 @@ impl WithStats<QueryResults> {
 	/// ```
 	pub fn take<R>(&mut self, index: impl opt::QueryAccessor<R>) -> Option<QueryResult<R>>
 	where
-		R: TryFromValue
+		R: TryFromValue,
 	{
 		let stats = index.stats(&self.0)?;
 		let result = index.query_result(&mut self.0);
@@ -593,7 +591,7 @@ impl WithStats<QueryResults> {
 mod tests {
 	use super::*;
 	use serde::Deserialize;
-	use surrealdb_core::expr::Value as Value;
+	use surrealdb_core::expr::Value;
 	use surrealdb_core::expr::to_value;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
@@ -608,9 +606,7 @@ mod tests {
 	}
 
 	fn to_map(vec: Vec<dbs::QueryResult>) -> IndexMap<usize, dbs::QueryResult> {
-		vec.into_iter()
-			.enumerate()
-			.collect()
+		vec.into_iter().enumerate().collect()
 	}
 
 	#[test]
@@ -633,7 +629,7 @@ mod tests {
 		let mut response = QueryResults {
 			results: to_map(vec![dbs::QueryResult {
 				stats: dbs::QueryStats::default(),
-				result: Err(Error::ConnectionUninitialised.into())
+				result: Err(Error::ConnectionUninitialised.into()),
 			}]),
 			..QueryResults::new()
 		};

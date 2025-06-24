@@ -11,10 +11,8 @@ use std::{
 };
 use surrealdb_core::{
 	dbs::Action as CoreAction,
-	expr::{
-		Array as Array, Datetime as Datetime, Id as Id, Number as Number, Object, Thing as RecordId, TryFromValue, Value as Value
-	},
-	sql::SqlValue as SqlValue,
+	expr::{Array, Datetime, Id, Number, Object, Thing as RecordId, TryFromValue, Value},
+	sql::SqlValue,
 	syn,
 };
 use uuid::Uuid;
@@ -212,7 +210,6 @@ impl TryFromValue for RecordIdKey {
 		}
 	}
 }
-
 
 pub struct ConversionError {
 	from: &'static str,

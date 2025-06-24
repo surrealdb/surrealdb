@@ -698,7 +698,10 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{dbs::Variables, iam::token::{Audience, HEADER}};
+	use crate::{
+		dbs::Variables,
+		iam::token::{Audience, HEADER},
+	};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{EncodingKey, encode};
@@ -900,9 +903,13 @@ mod tests {
 			};
 
 			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, Variables::default())
-				.await
-				.unwrap();
+			ds.process(
+				Statement::Define(DefineStatement::User(user)).into(),
+				&sess,
+				Variables::default(),
+			)
+			.await
+			.unwrap();
 
 			let mut sess = Session {
 				ns: level.ns.map(String::from),

@@ -6,7 +6,7 @@ use crate::api::method::BoxFuture;
 use crate::method::OnceLockExt;
 use std::borrow::Cow;
 use std::future::IntoFuture;
-use surrealdb_core::expr::Value as Value;
+use surrealdb_core::expr::Value;
 
 /// A set future
 #[derive(Debug)]

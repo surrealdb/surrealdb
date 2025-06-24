@@ -7,7 +7,8 @@ use wiremock::{
 
 use crate::{
 	dbs::{
-		capabilities::{NetTarget, Targets}, Capabilities, Session, Variables
+		Capabilities, Session, Variables,
+		capabilities::{NetTarget, Targets},
 	},
 	kvs::Datastore,
 };

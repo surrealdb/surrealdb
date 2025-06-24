@@ -337,11 +337,7 @@ mod tests {
 		let mut res = db.query("INFO FOR ROOT").await.unwrap();
 		let users: Value = res.take("users").unwrap();
 
-		assert_eq!(
-			users,
-			Object::default().into(),
-			"there should be no users in the system"
-		);
+		assert_eq!(users, Object::default().into(), "there should be no users in the system");
 	}
 
 	#[tokio::test]

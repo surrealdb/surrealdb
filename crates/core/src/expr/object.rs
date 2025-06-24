@@ -176,7 +176,6 @@ impl TryInto<HeaderMap> for Object {
 }
 
 impl Object {
-
 	pub fn new(object: BTreeMap<String, Value>) -> Self {
 		Self(object)
 	}

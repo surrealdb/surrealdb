@@ -32,7 +32,7 @@ use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
 use std::time::Duration;
-use surrealdb_core::expr::Value as Value;
+use surrealdb_core::expr::Value;
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;

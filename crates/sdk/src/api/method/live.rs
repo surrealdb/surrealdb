@@ -1,4 +1,3 @@
-use crate::opt::SubscribableResource;
 use crate::Action;
 use crate::Surreal;
 use crate::api::Connection;
@@ -14,6 +13,7 @@ use crate::method::OnceLockExt;
 use crate::method::Query;
 use crate::method::Select;
 use crate::opt::Resource;
+use crate::opt::SubscribableResource;
 use crate::value::Notification;
 use async_channel::Receiver;
 use futures::StreamExt;
@@ -24,12 +24,12 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
+use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, Value, Table,
-	Thing, statements::LiveStatement,
+	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, Table, Thing, Value,
+	statements::LiveStatement,
 };
 use uuid::Uuid;
-use surrealdb_core::expr::TryFromValue;
 
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -61,8 +61,6 @@ where
 		fields.0 = vec![Field::All];
 		let mut stmt = LiveStatement::new(fields);
 		let mut table = Table::default();
-
-		
 
 		// match resource? {
 		// 	Resource::Table(table) => {

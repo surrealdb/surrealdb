@@ -2,13 +2,13 @@
 
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
+use std::fmt;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
 use surrealdb_core::iam::AccessMethod;
 use surrealdb_core::iam::SignupParams;
 use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::expr as expr_fb;
-use std::collections::BTreeMap;
-use std::fmt;
 
 /// Credentials for authenticating with the server
 pub trait IntoAccessCredentials {
@@ -122,7 +122,9 @@ impl<'a> From<RecordCredentials<'a>> for SignupParams {
 			namespace: credentials.namespace.to_string(),
 			database: credentials.database.to_string(),
 			access_name: credentials.access.to_string(),
-			variables: credentials.params.into_iter()
+			variables: credentials
+				.params
+				.into_iter()
 				.map(|(k, v)| (k, Value::Strand(v.into())))
 				.collect(),
 		}
@@ -200,11 +202,13 @@ impl TryFrom<expr_fb::Value<'_>> for Jwt {
 	type Error = anyhow::Error;
 
 	fn try_from(value: expr_fb::Value<'_>) -> Result<Self, Self::Error> {
-		let value_str = value.value_as_string()
-			.ok_or_else(|| anyhow::anyhow!("Expected a string value, got {:?}", value.value_type()))?;
+		let value_str = value.value_as_string().ok_or_else(|| {
+			anyhow::anyhow!("Expected a string value, got {:?}", value.value_type())
+		})?;
 
-		let value_str = value_str.value()
-			.ok_or_else(|| anyhow::anyhow!("Expected a string value, got {:?}", value.value_type()))?;
+		let value_str = value_str.value().ok_or_else(|| {
+			anyhow::anyhow!("Expected a string value, got {:?}", value.value_type())
+		})?;
 		Ok(Jwt(value_str.to_string()))
 	}
 }

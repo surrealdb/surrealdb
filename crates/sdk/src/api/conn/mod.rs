@@ -1,32 +1,31 @@
-
+use crate::QueryResults;
 use crate::api;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::err::Error;
-use crate::rpc::Response;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
-use crate::QueryResults;
+use crate::rpc::Response;
 use async_channel::Receiver;
 use async_channel::Sender;
 use chrono::DateTime;
 use chrono::Utc;
 use serde::de::DeserializeOwned;
-use surrealdb_core::dbs::QueryResultData;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
+use surrealdb_core::dbs::QueryResultData;
 use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::expr::{Value as Value, from_value as from_core_value};
+use surrealdb_core::expr::{Value, from_value as from_core_value};
 
 pub use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc::Request as RequestProto;
 pub use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc::Response as ResponseFb;
 
 mod cmd;
-pub(crate) use cmd::{Command, Request, LiveQueryParams};
 #[cfg(feature = "protocol-http")]
 pub(crate) use cmd::RouterRequest;
+pub(crate) use cmd::{Command, LiveQueryParams, Request};
 
 use super::opt::Config;
 
@@ -53,7 +52,10 @@ impl Router {
 		self.last_id.fetch_add(1, Ordering::SeqCst)
 	}
 
-	pub(crate) fn send(&self, command: Command) -> BoxFuture<'_, Result<Receiver<QueryResultData>>> {
+	pub(crate) fn send(
+		&self,
+		command: Command,
+	) -> BoxFuture<'_, Result<Receiver<QueryResultData>>> {
 		Box::pin(async move {
 			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);
@@ -73,12 +75,18 @@ impl Router {
 		let results = match query_result_data {
 			QueryResultData::Results(results) => results,
 			QueryResultData::Notification(_) => {
-				return Err(Error::InternalError("Received a notification instead of query results".to_owned()).into());
+				return Err(Error::InternalError(
+					"Received a notification instead of query results".to_owned(),
+				)
+				.into());
 			}
 		};
 
 		if results.is_empty() {
-			return Err(Error::InternalError("Expected at least one result, but received none".to_string()).into());
+			return Err(Error::InternalError(
+				"Expected at least one result, but received none".to_string(),
+			)
+			.into());
 		}
 
 		if results.len() > 1 {
@@ -88,7 +96,10 @@ impl Router {
 		}
 
 		let Some(query_result) = results.into_iter().next() else {
-			return Err(Error::InternalError("Expected a single result, but received none".to_string()).into());
+			return Err(Error::InternalError(
+				"Expected a single result, but received none".to_string(),
+			)
+			.into());
 		};
 
 		let result_value = query_result.result?;
@@ -139,7 +150,9 @@ impl Router {
 
 			match value {
 				Value::None | Value::Null => return Ok(Vec::new()),
-				Value::Array(array) => Ok(array.0.into_iter().map(R::try_from_value).collect::<Result<Vec<_>>>()?),
+				Value::Array(array) => {
+					Ok(array.0.into_iter().map(R::try_from_value).collect::<Result<Vec<_>>>()?)
+				}
 				value => Ok(vec![R::try_from_value(value)?]),
 			}
 		})
@@ -185,7 +198,10 @@ impl Router {
 					query_results.results = results.into_iter().enumerate().collect();
 				}
 				QueryResultData::Notification(_) => {
-					return Err(Error::InternalError("Received a notification instead of query results".to_owned()).into());
+					return Err(Error::InternalError(
+						"Received a notification instead of query results".to_owned(),
+					)
+					.into());
 				}
 			}
 

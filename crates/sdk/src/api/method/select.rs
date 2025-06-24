@@ -1,5 +1,5 @@
-use crate::opt::RangeableResource;
 use crate::Surreal;
+use crate::opt::RangeableResource;
 
 use crate::api::Connection;
 use crate::api::Result;
@@ -9,11 +9,11 @@ use crate::api::method::OnceLockExt;
 use crate::api::opt::Resource;
 use crate::method::Live;
 use crate::opt::KeyRange;
-use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::expr::Value;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::Value;
 
 /// A select future
 #[derive(Debug)]

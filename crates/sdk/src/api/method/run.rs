@@ -7,7 +7,7 @@ use crate::method::OnceLockExt;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::Array as Array;
+use surrealdb_core::expr::Array;
 use surrealdb_core::expr::TryFromValue;
 
 /// A run future

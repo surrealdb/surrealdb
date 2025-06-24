@@ -1,8 +1,11 @@
-use crate::{api::QueryResults};
+use crate::api::QueryResults;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;
-use surrealdb_core::{dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError}, expr::Value};
+use surrealdb_core::{
+	dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError},
+	expr::Value,
+};
 use thiserror::Error;
 
 /// An error originating from a remote SurrealDB database

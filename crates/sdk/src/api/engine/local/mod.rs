@@ -164,7 +164,6 @@ use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
-use surrealdb_core::dbs::{QueryResult, QueryResultData};
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
 #[cfg(not(target_family = "wasm"))]
@@ -175,16 +174,18 @@ use std::{
 	mem,
 	sync::Arc,
 };
-use surrealdb_core::expr::{Cond, Function};
+use surrealdb_core::dbs::{QueryResult, QueryResultData};
 use surrealdb_core::expr::LogicalPlan;
 use surrealdb_core::expr::statements::{
-	CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement, SelectStatement, UpdateStatement, UpsertStatement
+	CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
+	SelectStatement, UpdateStatement, UpsertStatement,
 };
+use surrealdb_core::expr::{Cond, Function};
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::{
 	dbs::{Notification, Session},
-	expr::{Data, Field, Output, Value as Value},
+	expr::{Data, Field, Output, Value},
 	iam,
 	kvs::Datastore,
 };
@@ -613,8 +614,7 @@ async fn router(
 			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		Command::Signup(params) => {
-			let response =
-				iam::signup::signup(kvs, &mut *session.write().await, params).await?;
+			let response = iam::signup::signup(kvs, &mut *session.write().await, params).await?;
 
 			let value = match response.token {
 				Some(token) => Value::Strand(token.into()),
@@ -648,9 +648,8 @@ async fn router(
 			create_plan.output = Some(Output::After);
 			let plan = LogicalPlan::Create(create_plan);
 
-			let response = kvs
-				.process_plan(plan, &*session.read().await, vars.read().await.clone())
-				.await?;
+			let response =
+				kvs.process_plan(plan, &*session.read().await, vars.read().await.clone()).await?;
 			let value = take(true, response).await?;
 			Ok(QueryResultData::new_from_value(value))
 		}
@@ -658,7 +657,6 @@ async fn router(
 			what,
 			data,
 		} => {
-
 			let upsert_plan = {
 				let mut stmt = UpsertStatement::default();
 				stmt.what = what;
@@ -741,18 +739,25 @@ async fn router(
 			let results = kvs.execute(&query, &*session.read().await, vars).await?;
 			Ok(QueryResultData::Results(results))
 		}
-		Command::MultiQuery { queries, variables } => {
+		Command::MultiQuery {
+			queries,
+			variables,
+		} => {
 			let mut vars = vars.read().await.clone();
 			vars.extend(variables);
 			let mut results = Vec::with_capacity(queries.len());
 			for query in queries {
-				let query_results = kvs.execute(&query, &*session.read().await, vars.clone()).await?;
+				let query_results =
+					kvs.execute(&query, &*session.read().await, vars.clone()).await?;
 				results.extend(query_results);
 			}
 			Ok(QueryResultData::Results(results))
 		}
-		Command::LiveQuery(LiveQueryParams { what, cond, fields }) => {
-
+		Command::LiveQuery(LiveQueryParams {
+			what,
+			cond,
+			fields,
+		}) => {
 			let plan = {
 				let mut stmt = LiveStatement::new(fields);
 				stmt.what = what;
@@ -973,7 +978,9 @@ async fn router(
 					Ok(0) => Poll::Ready(None),
 					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
 					Err(e) => {
-						let error = anyhow::Error::new(surrealdb_core::err::Error::QueryStream(e.to_string()));
+						let error = anyhow::Error::new(surrealdb_core::err::Error::QueryStream(
+							e.to_string(),
+						));
 						Poll::Ready(Some(Err(error)))
 					}
 				}
@@ -1055,9 +1062,9 @@ async fn router(
 			Ok(QueryResultData::new_from_value(Value::None))
 		}
 		Command::Health => Ok(QueryResultData::new_from_value(Value::None)),
-		Command::Version => {
-			Ok(QueryResultData::new_from_value(Value::from(surrealdb_core::env::VERSION.to_string())))
-		}
+		Command::Version => Ok(QueryResultData::new_from_value(Value::from(
+			surrealdb_core::env::VERSION.to_string(),
+		))),
 		Command::Set {
 			key,
 			value,
@@ -1127,9 +1134,8 @@ async fn router(
 
 			let plan = LogicalPlan::Value(func);
 
-			let response = kvs
-				.process_plan(plan, &*session.read().await, vars.read().await.clone())
-				.await?;
+			let response =
+				kvs.process_plan(plan, &*session.read().await, vars.read().await.clone()).await?;
 			let value = take(true, response).await?;
 
 			Ok(QueryResultData::new_from_value(value))

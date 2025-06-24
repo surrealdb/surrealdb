@@ -5,30 +5,24 @@ use bincode::Options;
 use revision::Revisioned;
 use semver::Op;
 use serde::{Serialize, ser::SerializeMap as _};
-use surrealdb_core::dbs::Variables;
-use surrealdb_core::expr::{Data, Fields, Values};
-use surrealdb_core::iam::{SigninParams, SignupParams};
-use surrealdb_core::protocol::{FromFlatbuffers, ToFlatbuffers};
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
+use surrealdb_core::dbs::Notification;
+use surrealdb_core::dbs::Variables;
 #[allow(unused_imports)]
-use surrealdb_core::expr::{
-	Array as Array, Object as Object, Query as Query, Value as Value,
-};
+use surrealdb_core::expr::{Array, Object, Query, Value};
+use surrealdb_core::expr::{Data, Fields, Values};
+use surrealdb_core::iam::{SigninParams, SignupParams};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-#[allow(unused_imports)]
-use surrealdb_core::sql::{
-	Object as SqlObject, Query as SqlQuery, SqlValue as SqlValue,
-};
-use surrealdb_core::{
-	dbs::Notification,
-};
 use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
+use surrealdb_core::protocol::{FromFlatbuffers, ToFlatbuffers};
+#[allow(unused_imports)]
+use surrealdb_core::sql::{Object as SqlObject, Query as SqlQuery, SqlValue};
 use uuid::Uuid;
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::expr::Table as Table;
+use surrealdb_core::expr::Table;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Request {
@@ -45,7 +39,10 @@ impl Request {
 	}
 
 	pub(crate) fn new_with_id(id: String, command: Command) -> Self {
-		Self { id, command }
+		Self {
+			id,
+			command,
+		}
 	}
 
 	pub(crate) fn with_id(mut self, id: String) -> Self {

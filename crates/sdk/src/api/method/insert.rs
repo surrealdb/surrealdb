@@ -1,5 +1,5 @@
-use crate::opt::InsertableResource;
 use crate::Surreal;
+use crate::opt::InsertableResource;
 
 use crate::api::Connection;
 use crate::api::Result;
@@ -9,11 +9,11 @@ use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::opt::Resource;
 use crate::method::OnceLockExt;
-use surrealdb_core::expr::TryFromValue;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Object as Object, Value as Value, to_value as to_core_value};
+use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::{Object, Value, to_value as to_core_value};
 
 use super::insert_relation::InsertRelation;
 
@@ -108,10 +108,13 @@ where
 	pub fn content(self, data: Value) -> Content<'r, C, RT> {
 		let table = self.resource.table_name();
 
-		Content::new(self.client, Command::Insert {
-			what: Some(table.into()),
-			data,
-		})
+		Content::new(
+			self.client,
+			Command::Insert {
+				what: Some(table.into()),
+				data,
+			},
+		)
 	}
 }
 
@@ -122,8 +125,7 @@ where
 	RT: TryFromValue,
 {
 	/// Specifies the data to insert into the table
-	pub fn relation(self, data: Value) -> InsertRelation<'r, C, RT>
-	{
+	pub fn relation(self, data: Value) -> InsertRelation<'r, C, RT> {
 		InsertRelation::from_closure(self.client, || {
 			todo!("STU: Implement InsertRelation for Insert");
 			// match self.resource? {

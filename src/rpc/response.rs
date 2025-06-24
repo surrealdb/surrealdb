@@ -12,8 +12,6 @@ use surrealdb_core::expr::Value;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
 
-
-
 impl Response {
 	#[inline]
 	pub fn into_value(self) -> Value {

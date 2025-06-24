@@ -3,31 +3,31 @@ use async_graphql::BatchRequest;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::dbs::QueryResultData;
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{QueryResult, Variables};
 use crate::err::Error;
 use crate::expr::{Cond, Duration, Fetchs, Limit, LogicalPlan, Number, Start, Timeout, Version};
 use crate::iam::{AccessMethod, SigninParams, SignupParams};
+use crate::protocol::FromFlatbuffers;
 use crate::protocol::flatbuffers::surreal_db::protocol::expr::Variable;
 #[cfg(not(target_family = "wasm"))]
 use crate::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
-use crate::protocol::FromFlatbuffers;
-use crate::dbs::QueryResultData;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
 use crate::sql::Uuid;
 use crate::{
-	dbs::{capabilities::MethodTarget},
-	rpc::args::Take,
+	dbs::capabilities::MethodTarget,
 	expr::{
-		Array, Fields, Function, Model, Output, Query, Value, Strand,
+		Array, Fields, Function, Model, Output, Query, Strand, Value,
 		statements::{
 			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 		},
 	},
+	rpc::args::Take,
 };
 use anyhow::Result;
 
@@ -38,7 +38,10 @@ pub trait RpcProtocolV3: RpcContext {
 	// ------------------------------
 
 	/// Executes a method on this RPC implementation
-	async fn execute<'rpc>(&'rpc self, request: rpc_fb::Request<'rpc>) -> Result<QueryResultData, RpcError> {
+	async fn execute<'rpc>(
+		&'rpc self,
+		request: rpc_fb::Request<'rpc>,
+	) -> Result<QueryResultData, RpcError> {
 		// Check if capabilities allow executing the requested RPC method
 		// TODO(STU): DO NOT MERGE: Put this back.
 		// if !self.kvs().allows_rpc_method(&MethodTarget {
@@ -52,77 +55,96 @@ pub trait RpcProtocolV3: RpcContext {
 		match request.command_type() {
 			rpc_fb::Command::Health => Ok(QueryResultData::new_from_value(Value::None)),
 			rpc_fb::Command::Version => {
-				let params = request.command_as_version().expect("Version command should have parameters");
-				self.version(params).await},
+				let params =
+					request.command_as_version().expect("Version command should have parameters");
+				self.version(params).await
+			}
 			rpc_fb::Command::Info => self.info().await,
-			rpc_fb::Command::Use => self.yuse(request.command_as_use().expect("Variant must contain UseParams")).await,
+			rpc_fb::Command::Use => {
+				self.yuse(request.command_as_use().expect("Variant must contain UseParams")).await
+			}
 			rpc_fb::Command::Signup => {
-				let params = request.command_as_signup().expect("Variant must contain SignupParams");
-				self.signup(params).await},
+				let params =
+					request.command_as_signup().expect("Variant must contain SignupParams");
+				self.signup(params).await
+			}
 			rpc_fb::Command::Signin => {
-				let params = request.command_as_signin().expect("Variant must contain SigninParams");
-				self.signin(params).await},
+				let params =
+					request.command_as_signin().expect("Variant must contain SigninParams");
+				self.signin(params).await
+			}
 			rpc_fb::Command::Authenticate => {
-				let params = request.command_as_authenticate().expect("Variant must contain AuthenticateParams");
-				self.authenticate(params).await},
+				let params = request
+					.command_as_authenticate()
+					.expect("Variant must contain AuthenticateParams");
+				self.authenticate(params).await
+			}
 			rpc_fb::Command::Invalidate => self.invalidate().await,
 			rpc_fb::Command::Reset => self.reset().await,
 			rpc_fb::Command::Kill => {
 				let params = request.command_as_kill().expect("Variant must contain KillParams");
 				self.kill(params).await
-			},
+			}
 			rpc_fb::Command::Live => {
 				let params = request.command_as_live().expect("Variant must contain LiveParams");
 				self.live(params).await
-			},
+			}
 			rpc_fb::Command::Set => {
 				let params = request.command_as_set().expect("Variant must contain SetParams");
 				self.set(params).await
-			},
+			}
 			rpc_fb::Command::Unset => {
 				let params = request.command_as_unset().expect("Variant must contain UnsetParams");
 				self.unset(params).await
-			},
+			}
 			rpc_fb::Command::Select => {
-				let params = request.command_as_select().expect("Variant must contain SelectParams");
+				let params =
+					request.command_as_select().expect("Variant must contain SelectParams");
 				self.select(params).await
-			},
+			}
 			rpc_fb::Command::Insert => {
-				let params = request.command_as_insert().expect("Variant must contain InsertParams");
+				let params =
+					request.command_as_insert().expect("Variant must contain InsertParams");
 				self.insert(params).await
-			},
+			}
 			rpc_fb::Command::Create => {
-				let params = request.command_as_create().expect("Variant must contain CreateParams");
+				let params =
+					request.command_as_create().expect("Variant must contain CreateParams");
 				self.create(params).await
-			},
+			}
 			rpc_fb::Command::Upsert => {
-				let params = request.command_as_upsert().expect("Variant must contain UpsertParams");
+				let params =
+					request.command_as_upsert().expect("Variant must contain UpsertParams");
 				self.upsert(params).await
-			},
+			}
 			rpc_fb::Command::Update => {
-				let params = request.command_as_update().expect("Variant must contain UpdateParams");
+				let params =
+					request.command_as_update().expect("Variant must contain UpdateParams");
 				self.update(params).await
-			},
+			}
 			rpc_fb::Command::Delete => {
-				let params = request.command_as_delete().expect("Variant must contain DeleteParams");
+				let params =
+					request.command_as_delete().expect("Variant must contain DeleteParams");
 				self.delete(params).await
-			},
+			}
 			rpc_fb::Command::Query => {
 				let params = request.command_as_query().expect("Variant must contain QueryParams");
 				self.query(params).await
-			},
+			}
 			rpc_fb::Command::Relate => {
-				let params = request.command_as_relate().expect("Variant must contain RelateParams");
+				let params =
+					request.command_as_relate().expect("Variant must contain RelateParams");
 				self.relate(params).await
-			},
+			}
 			rpc_fb::Command::Run => {
 				let params = request.command_as_run().expect("Variant must contain RunParams");
 				self.run(params).await
-			},
+			}
 			rpc_fb::Command::GraphQl => {
-				let params = request.command_as_graph_ql().expect("Variant must contain GraphqlParams");
+				let params =
+					request.command_as_graph_ql().expect("Variant must contain GraphqlParams");
 				self.graphql(params).await
-			},
+			}
 			_ => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -131,7 +153,10 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for authentication
 	// ------------------------------
 
-	async fn yuse<'rpc>(&'rpc self, params: rpc_fb::UseParams<'rpc>) -> Result<QueryResultData, RpcError> {
+	async fn yuse<'rpc>(
+		&'rpc self,
+		params: rpc_fb::UseParams<'rpc>,
+	) -> Result<QueryResultData, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -184,18 +209,12 @@ pub trait RpcProtocolV3: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 
-		let namespace = params.namespace()
-			.ok_or_else(|| RpcError::InvalidParams)?
-			.to_string();
-		let database = params.database()
-			.ok_or_else(|| RpcError::InvalidParams)?
-			.to_string();
-		let access_name = params.access_name()
-			.ok_or_else(|| RpcError::InvalidParams)?
-			.to_string();
-		let variables = Variables::from_fb(params.variables()
-			.ok_or_else(|| RpcError::InvalidParams)?)
-			.map_err(|_| RpcError::InvalidParams)?;
+		let namespace = params.namespace().ok_or_else(|| RpcError::InvalidParams)?.to_string();
+		let database = params.database().ok_or_else(|| RpcError::InvalidParams)?.to_string();
+		let access_name = params.access_name().ok_or_else(|| RpcError::InvalidParams)?.to_string();
+		let variables =
+			Variables::from_fb(params.variables().ok_or_else(|| RpcError::InvalidParams)?)
+				.map_err(|_| RpcError::InvalidParams)?;
 
 		let params = SignupParams {
 			namespace,
@@ -206,9 +225,7 @@ pub trait RpcProtocolV3: RpcContext {
 
 		// Attempt signup, mutating the session
 		let out: Result<Value> =
-			crate::iam::signup::signup(self.kvs(), &mut session, params)
-				.await
-				.map(Value::from);
+			crate::iam::signup::signup(self.kvs(), &mut session, params).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -228,15 +245,11 @@ pub trait RpcProtocolV3: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 
-
-		let params = SigninParams::from_fb(params)
-			.map_err(|_| RpcError::InvalidParams)?;
+		let params = SigninParams::from_fb(params).map_err(|_| RpcError::InvalidParams)?;
 
 		// Attempt signin, mutating the session
 		let out: Result<Value> =
-			crate::iam::signin::signin(self.kvs(), &mut session, params)
-				.await
-				.map(Value::from);
+			crate::iam::signin::signin(self.kvs(), &mut session, params).await.map(Value::from);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -248,7 +261,10 @@ pub trait RpcProtocolV3: RpcContext {
 		}
 	}
 
-	async fn authenticate(&self, params: rpc_fb::AuthenticateParams<'_>) -> Result<QueryResultData, RpcError> {
+	async fn authenticate(
+		&self,
+		params: rpc_fb::AuthenticateParams<'_>,
+	) -> Result<QueryResultData, RpcError> {
 		let token = params.token().ok_or_else(|| RpcError::InvalidParams)?;
 
 		// Get the context lock
@@ -258,9 +274,8 @@ pub trait RpcProtocolV3: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Attempt authentication, mutating the session
-		let out: Result<Value> = crate::iam::verify::token(self.kvs(), &mut session, token)
-			.await
-			.map(|_| Value::None);
+		let out: Result<Value> =
+			crate::iam::verify::token(self.kvs(), &mut session, token).await.map(|_| Value::None);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -477,9 +492,7 @@ pub trait RpcProtocolV3: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 
-		let what = Value::from_fb(params
-			.what()
-			.ok_or_else(|| RpcError::InvalidParams)?)
+		let what = Value::from_fb(params.what().ok_or_else(|| RpcError::InvalidParams)?)
 			.map_err(|e| RpcError::InvalidParams)?
 			.could_be_table();
 
@@ -489,11 +502,9 @@ pub trait RpcProtocolV3: RpcContext {
 			.transpose()?
 			.unwrap_or_else(Fields::all);
 
-		let start = params.start()
-			.map(|s| Start(Value::Number(Number::Int(s as i64))));
-			
-		let limit = params.limit()
-			.map(|l| Limit(Value::Number(Number::Int(l as i64))));
+		let start = params.start().map(|s| Start(Value::Number(Number::Int(s as i64))));
+
+		let limit = params.limit().map(|l| Limit(Value::Number(Number::Int(l as i64))));
 
 		let cond = params
 			.cond()
@@ -515,19 +526,15 @@ pub trait RpcProtocolV3: RpcContext {
 
 		let fetch = params
 			.fetch()
-			.map(|fs| {
-				Fetchs::from_fb(fs)
-					.map_err(|_| RpcError::InvalidParams)
-			})
+			.map(|fs| Fetchs::from_fb(fs).map_err(|_| RpcError::InvalidParams))
 			.transpose()?;
 
-
-
-		let mut variables = Variables::from_fb(params.variables().ok_or_else(|| RpcError::InvalidParams)?)
-			.map_err(|_| RpcError::InvalidParams)?;
+		let mut variables =
+			Variables::from_fb(params.variables().ok_or_else(|| RpcError::InvalidParams)?)
+				.map_err(|_| RpcError::InvalidParams)?;
 
 		variables.extend(self.session().parameters.clone());
-		
+
 		// Specify the SQL query string
 		let plan = LogicalPlan::Select(SelectStatement {
 			only: params.only().unwrap_or_default(),
@@ -824,7 +831,10 @@ pub trait RpcProtocolV3: RpcContext {
 	// Methods for getting info
 	// ------------------------------
 
-	async fn version(&self, params: rpc_fb::VersionParams<'_>) -> Result<QueryResultData, RpcError> {
+	async fn version(
+		&self,
+		params: rpc_fb::VersionParams<'_>,
+	) -> Result<QueryResultData, RpcError> {
 		Ok(self.version_data())
 	}
 
@@ -910,7 +920,10 @@ pub trait RpcProtocolV3: RpcContext {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	async fn graphql(&self, params: rpc_fb::GraphQlParams<'_>) -> Result<QueryResultData, RpcError> {
+	async fn graphql(
+		&self,
+		params: rpc_fb::GraphQlParams<'_>,
+	) -> Result<QueryResultData, RpcError> {
 		todo!("STU: Implement graphql in v3 protocol");
 		// // Check if the user is allowed to query
 		// if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {

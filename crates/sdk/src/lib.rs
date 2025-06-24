@@ -51,9 +51,7 @@ pub use crate::api::headers;
 #[doc(inline)]
 pub use crate::api::{
 	Connect, Connection, QueryResults, Surreal, engine, method, opt,
-	value::{
-		self, Action, RecordIdKey, Notification,
-	},
+	value::{self, Action, Notification, RecordIdKey},
 };
 
 /// A specialized `Result` type

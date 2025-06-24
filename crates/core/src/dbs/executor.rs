@@ -603,7 +603,6 @@ impl Executor {
 					}
 				}
 				stmt => {
-
 					let started_at = Utc::now();
 					let result = this.execute_bare_statement(kvs, stmt).await;
 					this.results.push(QueryResult {
@@ -619,7 +618,11 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
-	use crate::{dbs::{Session, Variables}, iam::Role, kvs::Datastore};
+	use crate::{
+		dbs::{Session, Variables},
+		iam::Role,
+		kvs::Datastore,
+	};
 
 	#[tokio::test]
 	async fn check_execute_option_permissions() {
@@ -739,8 +742,13 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
-			let res =
-				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
+			let res = ds
+				.execute(
+					statement,
+					&Session::default().with_ns("NS").with_db("DB"),
+					Variables::default(),
+				)
+				.await;
 
 			let err = res.unwrap_err().to_string();
 			assert!(
@@ -754,8 +762,13 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(false);
 
-			let res =
-				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
+			let res = ds
+				.execute(
+					statement,
+					&Session::default().with_ns("NS").with_db("DB"),
+					Variables::default(),
+				)
+				.await;
 
 			assert!(
 				res.is_ok(),
@@ -771,21 +784,39 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 2s";
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
+			let res = ds
+				.execute(
+					stmt,
+					&Session::default().with_ns("NS").with_db("DB"),
+					Variables::default(),
+				)
+				.await;
 			assert!(res.is_ok(), "Failed to execute statement with small timeout: {:?}", res);
 		}
 		// With large timeout
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 31540000s"; // 1 year
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
+			let res = ds
+				.execute(
+					stmt,
+					&Session::default().with_ns("NS").with_db("DB"),
+					Variables::default(),
+				)
+				.await;
 			assert!(res.is_ok(), "Failed to execute statement with large timeout: {:?}", res);
 		}
 		// With very large timeout
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), Variables::default()).await;
+			let res = ds
+				.execute(
+					stmt,
+					&Session::default().with_ns("NS").with_db("DB"),
+					Variables::default(),
+				)
+				.await;
 			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
 			let err = res.unwrap()[0].result.as_ref().unwrap_err().to_string();
 			assert!(

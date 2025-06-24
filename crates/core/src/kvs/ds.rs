@@ -12,7 +12,7 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::node::Timestamp;
 use crate::dbs::{
-	Attach, Capabilities, Executor, Notification, Options, QueryResult, Session, Variables
+	Attach, Capabilities, Executor, Notification, Options, QueryResult, Session, Variables,
 };
 use crate::err::Error;
 use crate::expr::LogicalPlan;

@@ -7,8 +7,8 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
-use surrealdb_core::expr::Value;
 use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::Value;
 
 /// A merge future
 #[derive(Debug)]

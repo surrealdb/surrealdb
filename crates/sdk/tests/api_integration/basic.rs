@@ -6,8 +6,8 @@ use serde_json::json;
 use std::borrow::Cow;
 use std::ops::Bound;
 use std::time::Duration;
-use surrealdb::RecordId;
 use surrealdb::QueryResults;
+use surrealdb::RecordId;
 use surrealdb::Value;
 use surrealdb::opt::Raw;
 use surrealdb::opt::Resource;
@@ -18,7 +18,7 @@ use surrealdb::opt::{PatchOp, PatchOps};
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
 use surrealdb::{error::Api as ApiError, error::Db as DbError};
-use surrealdb_core::expr::{Id, Value as Value};
+use surrealdb_core::expr::{Id, Value};
 use ulid::Ulid;
 
 use crate::api_integration::NS;

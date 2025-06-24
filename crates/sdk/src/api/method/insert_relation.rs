@@ -5,11 +5,11 @@ use crate::api::Result;
 use crate::api::conn::Command;
 use crate::method::OnceLockExt;
 use serde::de::DeserializeOwned;
-use surrealdb_core::expr::Value;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::Value;
 
 use super::BoxFuture;
 

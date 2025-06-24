@@ -15,9 +15,6 @@ use crate::opt::IntoExportDestination;
 use crate::opt::Resource;
 use crate::opt::WaitFor;
 use serde::Serialize;
-use surrealdb_core::dbs::Variables;
-use surrealdb_core::iam::SigninParams;
-use surrealdb_core::iam::SignupParams;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -25,9 +22,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use surrealdb_core::expr::Array as Array;
-use surrealdb_core::expr::Value as Value;
+use surrealdb_core::dbs::Variables;
+use surrealdb_core::expr::Array;
+use surrealdb_core::expr::Value;
 use surrealdb_core::expr::to_value as to_core_value;
+use surrealdb_core::iam::SigninParams;
+use surrealdb_core::iam::SignupParams;
 use surrealdb_core::syn;
 
 pub(crate) mod live;
@@ -125,7 +125,6 @@ pub struct Live;
 /// Responses returned with statistics
 #[derive(Debug)]
 pub struct WithStats<T>(pub T);
-
 
 // pub trait TryFromResponseProto: Sized {
 // 	/// Converts a response proto to the type
@@ -447,10 +446,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(
-		&self,
-		params: impl Into<SignupParams>,
-	) -> Signup<C> {
+	pub fn signup<R>(&self, params: impl Into<SignupParams>) -> Signup<C> {
 		Signup {
 			client: Cow::Borrowed(self),
 			params: params.into(),
@@ -613,7 +609,6 @@ where
 		}
 	}
 
-
 	pub fn begin(&self) -> Begin<C> {
 		Begin {
 			client: Cow::Borrowed(self),
@@ -734,7 +729,7 @@ where
 	{
 		Select {
 			client: Cow::Borrowed(self),
-			resource: resource,
+			resource,
 			response_type: PhantomData,
 			query_type: PhantomData,
 		}
@@ -1096,8 +1091,8 @@ where
 	/// # }
 	/// ```
 	pub fn upsert<R, RT>(&self, resource: R) -> Upsert<C, R, RT>
-	where 
-		R: Resource
+	where
+		R: Resource,
 	{
 		Upsert {
 			client: Cow::Borrowed(self),
@@ -1257,7 +1252,7 @@ where
 	/// # }
 	/// ```
 	pub fn update<R, RT>(&self, resource: R) -> Update<C, R, RT>
-	where 
+	where
 		R: Resource,
 	{
 		Update {

@@ -1,8 +1,8 @@
 //! The different options and types for use in API functions
 
 use serde::Serialize;
-use surrealdb_core::expr::{Object, Value};
 use std::{borrow::Cow, collections::BTreeMap};
+use surrealdb_core::expr::{Object, Value};
 
 pub mod auth;
 pub mod capabilities;
@@ -121,33 +121,44 @@ impl TryFrom<PatchOp> for Value {
 	fn try_from(op: PatchOp) -> Result<Self, Self::Error> {
 		// Convert the PatchOp into a Value
 		let value = match op {
-			PatchOp::Add { path, value } => {
+			PatchOp::Add {
+				path,
+				value,
+			} => {
 				let mut map = BTreeMap::new();
 				map.insert("op".to_string(), "add".into());
 				map.insert("path".to_string(), path.into());
 				map.insert("value".to_string(), value);
 				Value::Object(Object::new(map))
-			},
-			PatchOp::Remove { path } => {
+			}
+			PatchOp::Remove {
+				path,
+			} => {
 				let mut map = BTreeMap::new();
 				map.insert("op".to_string(), "remove".into());
 				map.insert("path".to_string(), path.into());
 				Value::Object(Object::new(map))
-			},
-			PatchOp::Replace { path, value } => {
+			}
+			PatchOp::Replace {
+				path,
+				value,
+			} => {
 				let mut map = BTreeMap::new();
 				map.insert("op".to_string(), "replace".into());
 				map.insert("path".to_string(), path.into());
 				map.insert("value".to_string(), value);
 				Value::Object(Object::new(map))
-			},
-			PatchOp::Change { path, value } => {
+			}
+			PatchOp::Change {
+				path,
+				value,
+			} => {
 				let mut map = BTreeMap::new();
 				map.insert("op".to_string(), "change".into());
 				map.insert("path".to_string(), path.into());
 				map.insert("value".to_string(), value);
 				Value::Object(Object::new(map))
-			},
+			}
 		};
 		Ok(value)
 	}
@@ -197,8 +208,7 @@ impl PatchOps {
 	/// PatchOps::new().add("/biscuits/1", json!({ "name": "Ginger Nut" }))
 	/// # ;
 	/// ```
-	pub fn add(mut self, path: &str, value: Value) -> Self
-	{
+	pub fn add(mut self, path: &str, value: Value) -> Self {
 		self.0.push(PatchOp::add(path, value));
 		self
 	}
@@ -237,8 +247,7 @@ impl PatchOps {
 	/// PatchOps::new().replace("/biscuits/0/name", "Chocolate Digestive")
 	/// # ;
 	/// ```
-	pub fn replace<T>(mut self, path: &str, value: Value) -> Self
-	{
+	pub fn replace<T>(mut self, path: &str, value: Value) -> Self {
 		self.0.push(PatchOp::replace(path, value));
 		self
 	}

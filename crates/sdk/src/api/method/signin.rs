@@ -10,7 +10,6 @@ use crate::opt::auth::Jwt;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
-
 /// A signin future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]

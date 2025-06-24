@@ -4,10 +4,9 @@ use crate::api::conn::{Command, Route};
 use crate::opt::Resource;
 use async_channel::Receiver;
 use surrealdb_core::dbs::{QueryResult, QueryResultData};
-use surrealdb_core::expr::{Value as Value, to_value};
+use surrealdb_core::expr::{Value, to_value};
 use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc::{
-	CreateParams, DeleteParams, InsertParams, SelectParams, UpdateParams,
-	UpsertParams,
+	CreateParams, DeleteParams, InsertParams, SelectParams, UpdateParams, UpsertParams,
 };
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
@@ -20,7 +19,9 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 			let cmd = request.command;
 
 			let result = match cmd {
-				Command::Invalidate | Command::Health => Ok(QueryResultData::new_from_value(Value::None)),
+				Command::Invalidate | Command::Health => {
+					Ok(QueryResultData::new_from_value(Value::None))
+				}
 				Command::Authenticate {
 					..
 				}
@@ -32,7 +33,9 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				} => Ok(QueryResultData::new_from_value(Value::None)),
 				Command::SubscribeLive {
 					..
-				} => Ok(QueryResultData::new_from_value("c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into())),
+				} => Ok(QueryResultData::new_from_value(
+					"c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into(),
+				)),
 				Command::Version => Ok(QueryResultData::new_from_value("1.0.0".into())),
 				Command::Use {
 					..
@@ -71,13 +74,15 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 								results.push(QueryResult::default());
 							}
 							Value::Thing(..) => {
-								results.push(QueryResult::new_from_value(to_value(User::default()).unwrap()));
+								results.push(QueryResult::new_from_value(
+									to_value(User::default()).unwrap(),
+								));
 							}
 							_ => unreachable!(),
 						}
 					}
 					Ok(QueryResultData::Results(results))
-				},
+				}
 				Command::Upsert {
 					what,
 					..
@@ -93,13 +98,15 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 								results.push(QueryResult::default());
 							}
 							Value::Thing(..) => {
-								results.push(QueryResult::new_from_value(to_value(User::default()).unwrap()));
+								results.push(QueryResult::new_from_value(
+									to_value(User::default()).unwrap(),
+								));
 							}
 							_ => unreachable!(),
 						}
 					}
 					Ok(QueryResultData::Results(results))
-				},
+				}
 				Command::Insert {
 					data,
 					..
