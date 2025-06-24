@@ -239,6 +239,7 @@ axum-extra = { version = "0.9.3", features = [
     "typed-header",
 ] }
 axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
+console-subscriber = "0.4.1"
 clap = { version = "4.4.11", features = [
     "env",
     "derive",

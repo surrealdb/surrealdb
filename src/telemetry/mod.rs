@@ -1,3 +1,4 @@
+mod console;
 mod logs;
 pub mod metrics;
 pub mod traces;
@@ -174,12 +175,16 @@ impl Builder {
 		// Create the otel destination layer
 		let telemetry_filter = self.otel_filter.clone().unwrap_or_else(|| self.filter.clone());
 		let telemetry_layer = traces::new(telemetry_filter)?;
+		// Create the Tokio Console destination layer
+		let console_layer = console::new();
 		// Setup a registry for composing layers
 		let registry = tracing_subscriber::registry();
 		// Setup output layer
 		let registry = registry.with(output_layer);
 		// Setup telemetry layer
 		let registry = registry.with(telemetry_layer);
+		// Setup the Tokio Console layer
+		let registry = registry.with(console_layer);
 		// Setup file logging if enabled
 		Ok(if self.log_file_enabled {
 			// Create the file appender based on rotation setting
