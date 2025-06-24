@@ -1,15 +1,11 @@
-use crate::{
-	cnf::IDIOM_RECURSION_LIMIT,
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	expr::{
-		FlowResultExt as _, Part,
-		part::{RecurseInstruction, RecursionPlan},
-	},
-	val::{Array, Value},
-};
+use crate::cnf::IDIOM_RECURSION_LIMIT;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::part::{RecurseInstruction, RecursionPlan};
+use crate::expr::{FlowResultExt as _, Part};
+use crate::val::{Array, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 

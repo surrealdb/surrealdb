@@ -1,4 +1,5 @@
-use crate::sql::{Duration, escape::EscapeIdent};
+use crate::sql::Duration;
+use crate::sql::escape::EscapeIdent;
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]

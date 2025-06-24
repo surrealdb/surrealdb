@@ -1,22 +1,16 @@
-use std::{
-	borrow::Cow,
-	num::{ParseFloatError, ParseIntError},
-	str::FromStr,
-	time::Duration,
-};
+use std::borrow::Cow;
+use std::num::{ParseFloatError, ParseIntError};
+use std::str::FromStr;
+use std::time::Duration;
 
 use rust_decimal::Decimal;
 
-use crate::{
-	sql::duration::{
-		SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
-	},
-	syn::{
-		error::{SyntaxError, bail, syntax_error},
-		lexer::Lexer,
-		token::{Span, Token, TokenKind, t},
-	},
+use crate::sql::duration::{
+	SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
 };
+use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Span, Token, TokenKind, t};
 
 pub enum Numeric {
 	Float(f64),

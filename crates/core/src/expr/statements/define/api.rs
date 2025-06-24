@@ -1,12 +1,13 @@
 use crate::api::method::Method;
 use crate::api::path::Path;
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::{Fmt, pretty_indent};
+use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Strand;
-use crate::{ctx::Context, expr::statements::info::InfoStructure};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -183,7 +184,7 @@ impl Display for ApiDefinition {
 #[non_exhaustive]
 pub struct ApiAction {
 	pub methods: Vec<Method>,
-	pub action: Value,
+	pub action: Expr,
 	pub config: Option<ApiConfig>,
 }
 

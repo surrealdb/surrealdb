@@ -1,10 +1,6 @@
-use crate::ctx::Context;
-use crate::ctx::MutableContext;
-use crate::dbs::Options;
-use crate::dbs::Workable;
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::{Options, Workable};
 use crate::err::Error;
-use crate::expr::Base;
-use crate::expr::FlowResultExt as _;
 use crate::expr::permission::Permission;
 use crate::expr::statements::define::{
 	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineIndexStatement,
@@ -12,8 +8,8 @@ use crate::expr::statements::define::{
 };
 use crate::expr::statements::live::LiveStatement;
 use crate::expr::table::Table;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
+use crate::expr::{Base, FlowResultExt as _};
+use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
@@ -256,7 +252,7 @@ impl Document {
 	}
 
 	/// Update the document for a retry to update after an insert failed.
-	pub fn modify_for_update_retry(&mut self, id: Thing, value: Arc<Value>) {
+	pub fn modify_for_update_retry(&mut self, id: RecordId, value: Arc<Value>) {
 		let retry = Arc::new(id);
 		self.id = Some(retry.clone());
 		self.r#gen = None;
@@ -365,7 +361,7 @@ impl Document {
 	}
 
 	/// Retrieve the record id for this document
-	pub fn id(&self) -> Result<Arc<Thing>> {
+	pub fn id(&self) -> Result<Arc<RecordId>> {
 		match self.id.clone() {
 			Some(id) => Ok(id),
 			_ => fail!("Expected a document id to be present"),
@@ -373,7 +369,7 @@ impl Document {
 	}
 
 	/// Retrieve the record id for this document
-	pub fn inner_id(&self) -> Result<Thing> {
+	pub fn inner_id(&self) -> Result<RecordId> {
 		match self.id.clone() {
 			Some(id) => Ok(Arc::unwrap_or_clone(id)),
 			_ => fail!("Expected a document id to be present"),
@@ -422,19 +418,19 @@ impl Document {
 			// A cache is present on the context
 			Some(cache) if txn.local() => {
 				// Get the cache entry key
-				let key = cache::ds::Lookup::Tb(ns, db, &id.tb);
+				let key = cache::ds::Lookup::Tb(ns, db, &id.table);
 				// Get or update the cache entry
 				match cache.get(&key) {
 					Some(val) => val,
 					None => {
-						let val = match txn.get_tb(ns, db, &id.tb).await {
+						let val = match txn.get_tb(ns, db, &id.table).await {
 							Err(e) => {
 								// The table doesn't exist
 								if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
 									// Allowed to run?
 									opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 									// We can create the table automatically
-									txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+									txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
 								} else {
 									// There was an error
 									Err(e)
@@ -460,7 +456,7 @@ impl Document {
 							// Allowed to run?
 							opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 							// We can create the table automatically
-							txn.ensure_ns_db_tb(ns, db, &id.tb, opt.strict).await
+							txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
 						} else {
 							// There was an error
 							Err(e)

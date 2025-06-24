@@ -4,23 +4,18 @@ use std::sync::Arc;
 use crate::dbs::Session;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
-use crate::expr::{self, Table};
-use crate::expr::{Cond, Fields};
-use crate::expr::{Expression, Value as SqlValue};
-use crate::expr::{Idiom, Kind};
-use crate::expr::{LogicalPlan, Thing};
+use crate::expr::{self, Cond, Expr, Fields, Idiom, Kind, LogicalPlan, Table};
 use crate::gql::ext::TryAsExt;
 use crate::gql::schema::{kind_to_type, unwrap_type};
 use crate::kvs::{Datastore, Transaction};
-use async_graphql::Name;
-use async_graphql::Value as GqlValue;
-use async_graphql::dynamic::FieldFuture;
-use async_graphql::dynamic::InputValue;
-use async_graphql::dynamic::TypeRef;
+use crate::sql::BinaryOperator;
+use crate::val::{RecordId, Value as SqlValue};
 use async_graphql::dynamic::indexmap::IndexMap;
-use async_graphql::dynamic::{Enum, FieldValue, Type};
-use async_graphql::dynamic::{Field, ResolverContext};
-use async_graphql::dynamic::{InputObject, Object};
+use async_graphql::dynamic::{
+	Enum, Field, FieldFuture, FieldValue, InputObject, InputValue, Object, ResolverContext, Type,
+	TypeRef,
+};
+use async_graphql::{Name, Value as GqlValue};
 
 use super::error::{GqlError, resolver_error};
 use super::ext::IntoExt;
@@ -273,7 +268,10 @@ pub async fn process_tbs(
 							};
 							let thing = match id.clone().try_into() {
 								Ok(t) => t,
-								Err(_) => Thing::from((tb_name, id)),
+								Err(_) => RecordId {
+									table: tb_name,
+									key: id,
+								},
 							};
 
 							match gtx.get_record_field(thing, "id").await? {
@@ -371,7 +369,7 @@ pub async fn process_tbs(
 						}
 					};
 
-					let thing: Thing = match id.clone().try_into() {
+					let thing: RecordId = match id.clone().try_into() {
 						Ok(t) => t,
 						Err(_) => return Err(resolver_error(format!("invalid id: {id}")).into()),
 					};
@@ -512,7 +510,7 @@ fn cond_from_filter(
 fn val_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[DefineFieldStatement],
-) -> Result<SqlValue, GqlError> {
+) -> Result<Expr, GqlError> {
 	if filter.len() != 1 {
 		return Err(resolver_error("Table Filter must have one item"));
 	}
@@ -529,23 +527,22 @@ fn val_from_filter(
 	cond
 }
 
-fn parse_op(name: impl AsRef<str>) -> Result<expr::Operator, GqlError> {
+fn parse_op(name: impl AsRef<str>) -> Result<expr::BinaryOperator, GqlError> {
 	match name.as_ref() {
-		"eq" => Ok(expr::Operator::Equal),
-		"ne" => Ok(expr::Operator::NotEqual),
+		"eq" => Ok(expr::BinaryOperator::Equal),
+		"ne" => Ok(expr::BinaryOperator::NotEqual),
 		op => Err(resolver_error(format!("Unsupported op: {op}"))),
 	}
 }
 
-fn negate(filter: &GqlValue, fds: &[DefineFieldStatement]) -> Result<SqlValue, GqlError> {
+fn negate(filter: &GqlValue, fds: &[DefineFieldStatement]) -> Result<Expr, GqlError> {
 	let obj = filter.as_object().ok_or(resolver_error("Value of NOT must be object"))?;
 	let inner_cond = val_from_filter(obj, fds)?;
 
-	Ok(Expression::Unary {
-		o: expr::Operator::Not,
-		v: inner_cond,
-	}
-	.into())
+	Ok(Expr::Prefix {
+		op: expr::PrefixOperator::Not,
+		expr: inner_cond,
+	})
 }
 
 enum AggregateOp {
@@ -557,14 +554,14 @@ fn aggregate(
 	filter: &GqlValue,
 	op: AggregateOp,
 	fds: &[DefineFieldStatement],
-) -> Result<SqlValue, GqlError> {
+) -> Result<Expr, GqlError> {
 	let op_str = match op {
 		AggregateOp::And => "AND",
 		AggregateOp::Or => "OR",
 	};
 	let op = match op {
-		AggregateOp::And => expr::Operator::And,
-		AggregateOp::Or => expr::Operator::Or,
+		AggregateOp::And => BinaryOperator::And,
+		AggregateOp::Or => BinaryOperator::Or,
 	};
 	let list =
 		filter.as_list().ok_or(resolver_error(format!("Value of {op_str} should be a list")))?;
@@ -581,22 +578,17 @@ fn aggregate(
 		.ok_or(resolver_error(format!("List of {op_str} should contain at least one object")))?;
 
 	for clause in iter {
-		cond = Expression::Binary {
-			l: clause,
-			o: op.clone(),
-			r: cond,
+		cond = Expr::Binary {
+			left: clause,
+			op: op.clone(),
+			right: Box::new(cond),
 		}
-		.into();
 	}
 
 	Ok(cond)
 }
 
-fn binop(
-	field_name: &str,
-	val: &GqlValue,
-	fds: &[DefineFieldStatement],
-) -> Result<SqlValue, GqlError> {
+fn binop(field_name: &str, val: &GqlValue, fds: &[DefineFieldStatement]) -> Result<Expr, GqlError> {
 	let obj = val.as_object().ok_or(resolver_error("Field filter should be object"))?;
 
 	let Some(fd) = fds.iter().find(|fd| fd.name.to_string() == field_name) else {
@@ -607,17 +599,17 @@ fn binop(
 		return Err(resolver_error("Field Filter must have one item"));
 	}
 
-	let lhs = expr::Value::Idiom(field_name.intox());
+	let lhs = Expr::Idiom(field_name.intox());
 
 	let (k, v) = obj.iter().next().unwrap();
 	let op = parse_op(k)?;
 
 	let rhs = gql_to_sql_kind(v, fd.kind.clone().unwrap_or_default())?;
 
-	let expr = expr::Expression::Binary {
-		l: lhs,
-		o: op,
-		r: rhs,
+	let expr = Expr::Binary {
+		left: Box::new(lhs),
+		op,
+		right: Box::new(rhs),
 	};
 
 	Ok(expr.into())

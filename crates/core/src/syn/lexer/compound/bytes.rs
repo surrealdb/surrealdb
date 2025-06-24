@@ -1,11 +1,7 @@
-use crate::{
-	sql::Bytes,
-	syn::{
-		error::{SyntaxError, bail},
-		lexer::Lexer,
-		token::{Token, t},
-	},
-};
+use crate::sql::Bytes;
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, t};
 
 pub fn bytes(lexer: &mut Lexer, start: Token) -> Result<Bytes, SyntaxError> {
 	let close_char = match start.kind {

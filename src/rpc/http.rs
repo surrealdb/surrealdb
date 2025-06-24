@@ -2,11 +2,7 @@ use crate::cnf::{PKG_NAME, PKG_VERSION};
 use std::sync::Arc;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::rpc::Data;
-use surrealdb_core::rpc::RpcContext;
-use surrealdb_core::rpc::RpcError;
-use surrealdb_core::rpc::RpcProtocolV1;
-use surrealdb_core::rpc::RpcProtocolV2;
+use surrealdb_core::rpc::{Data, RpcContext, RpcError, RpcProtocolV1, RpcProtocolV2};
 use surrealdb_core::sql::Array;
 use tokio::sync::Semaphore;
 

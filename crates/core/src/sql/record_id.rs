@@ -1,4 +1,5 @@
-use crate::sql::{escape::EscapeRid, id::RecordIdKeyLit};
+use crate::sql::escape::EscapeRid;
+use crate::sql::id::RecordIdKeyLit;
 use std::fmt;
 
 /// A record id literal, needs to be evaluated to get the actual record id.

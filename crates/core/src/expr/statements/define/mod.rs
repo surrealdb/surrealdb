@@ -32,15 +32,14 @@ pub use sequence::DefineSequenceStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;
 
-pub use api::ApiAction;
-pub use api::ApiDefinition;
-pub use api::FindApi;
+pub use api::{ApiAction, ApiDefinition, FindApi};
 
 pub use bucket::BucketDefinition;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::val::Value;
 use anyhow::Result;
 
 use reblessive::tree::Stk;

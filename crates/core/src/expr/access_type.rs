@@ -1,11 +1,11 @@
 use super::Value;
 use crate::err::Error;
+use crate::expr::escape::QuoteStr;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Algorithm, escape::QuoteStr};
+use crate::expr::{Algorithm, Expr};
 use anyhow::Result;
-use revision::Error as RevisionError;
-use revision::revisioned;
+use revision::{Error as RevisionError, revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
@@ -306,8 +306,8 @@ pub struct JwtAccessVerifyJwks {
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
-	pub signup: Option<Value>,
-	pub signin: Option<Value>,
+	pub signup: Option<Expr>,
+	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
 	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
 	pub authenticate: Option<Value>,

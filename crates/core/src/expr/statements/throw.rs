@@ -1,8 +1,8 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{ControlFlow, Expr, Value};
-use crate::{ctx::Context, expr::FlowResult};
+use crate::expr::{ControlFlow, Expr, FlowResult, Value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

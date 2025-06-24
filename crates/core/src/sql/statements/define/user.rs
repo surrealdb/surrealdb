@@ -1,5 +1,8 @@
 use super::DefineKind;
-use crate::sql::{Base, Duration, Ident, Strand, escape::QuoteStr, fmt::Fmt, user::UserDuration};
+use crate::sql::escape::QuoteStr;
+use crate::sql::fmt::Fmt;
+use crate::sql::user::UserDuration;
+use crate::sql::{Base, Duration, Ident, Strand};
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

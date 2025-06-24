@@ -3687,10 +3687,8 @@ async fn function_vector_distance_chebyshev() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_head() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("HEAD"))
@@ -3711,10 +3709,8 @@ pub async fn function_http_head() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_get() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))
@@ -3740,10 +3736,8 @@ pub async fn function_http_get() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_put() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("PUT"))
@@ -3768,10 +3762,8 @@ pub async fn function_http_put() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_post() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("POST"))
@@ -3798,10 +3790,8 @@ pub async fn function_http_post() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_patch() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("PATCH"))
@@ -3828,10 +3818,8 @@ pub async fn function_http_patch() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_delete() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("DELETE"))
@@ -3857,10 +3845,8 @@ pub async fn function_http_delete() -> Result<()> {
 #[cfg(feature = "http")]
 #[tokio::test]
 pub async fn function_http_error() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))
@@ -3889,10 +3875,8 @@ pub async fn function_http_error() -> Result<()> {
 #[cfg(all(feature = "http", feature = "scripting"))]
 #[tokio::test]
 pub async fn function_http_get_from_script() -> Result<()> {
-	use wiremock::{
-		Mock, ResponseTemplate,
-		matchers::{header, method, path},
-	};
+	use wiremock::matchers::{header, method, path};
+	use wiremock::{Mock, ResponseTemplate};
 
 	let server = wiremock::MockServer::start().await;
 	Mock::given(method("GET"))

@@ -1,11 +1,11 @@
 use crate::err::Error;
-use crate::expr::{Array, Idiom, Object, Value};
+use crate::expr::Idiom;
 use crate::idx::ft::offsets::{Offset, Position};
+use crate::val::{Array, Object, Value};
 use anyhow::{Result, ensure};
-use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::collections::btree_map::Entry as BEntry;
 use std::collections::hash_map::Entry as HEntry;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::result;
 

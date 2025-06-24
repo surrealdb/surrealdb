@@ -20,8 +20,8 @@ impl Iterator for IntoIter {
 				if self.index < *c {
 					self.index += 1;
 					Some(RecordId {
-						tb: tb.to_string(),
-						id: RecordIdKey::rand(),
+						table: tb.to_string(),
+						key: RecordIdKey::rand(),
 					})
 				} else {
 					None
@@ -33,9 +33,9 @@ impl Iterator for IntoIter {
 				}
 				if self.index < *e {
 					self.index += 1;
-					Some(Thing {
-						tb: tb.to_string(),
-						id: RecordIdKey::from(self.index),
+					Some(RecordId {
+						table: tb.to_string(),
+						key: RecordIdKey::from(self.index),
 					})
 				} else {
 					None
@@ -57,7 +57,7 @@ pub enum Mock {
 }
 
 impl IntoIterator for Mock {
-	type Item = Thing;
+	type Item = RecordId;
 	type IntoIter = IntoIter;
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {

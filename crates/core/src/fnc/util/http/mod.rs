@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::expr::{Bytes, Object, Strand, Value};
 use crate::syn;
+use crate::val::{Bytes, Object, Strand, Value};
 
 use anyhow::{Context as _, Result, bail};
 use reqwest::header::CONTENT_TYPE;

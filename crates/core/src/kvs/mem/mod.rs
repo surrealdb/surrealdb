@@ -7,9 +7,7 @@ use crate::kvs::{Key, Val, Version};
 use anyhow::{Result, bail, ensure};
 use std::ops::Range;
 use std::sync::OnceLock;
-use surrealkv::Options;
-use surrealkv::Store;
-use surrealkv::Transaction as Tx;
+use surrealkv::{Options, Store, Transaction as Tx};
 
 use super::{Check, KeyEncode};
 

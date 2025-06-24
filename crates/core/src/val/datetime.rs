@@ -3,14 +3,14 @@ use crate::expr::escape::QuoteStr;
 use crate::syn;
 use crate::val::{Duration, Strand, TrySub};
 use anyhow::Result;
-use chrono::{DateTime, SecondsFormat, TimeZone, Utc, offset::LocalResult};
+use chrono::offset::LocalResult;
+use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::ops;
 use std::ops::Deref;
-use std::str;
 use std::str::FromStr;
+use std::{ops, str};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 

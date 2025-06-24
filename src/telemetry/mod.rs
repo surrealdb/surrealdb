@@ -4,8 +4,7 @@ pub mod traces;
 
 use crate::cli::validator::parser::env_filter::CustomEnvFilter;
 use anyhow::Result;
-use opentelemetry::KeyValue;
-use opentelemetry::global;
+use opentelemetry::{KeyValue, global};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
@@ -13,8 +12,7 @@ use opentelemetry_sdk::resource::{
 use std::sync::LazyLock;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
-use tracing_appender::non_blocking::NonBlockingBuilder;
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::ParseError;
 use tracing_subscriber::prelude::*;
@@ -151,7 +149,8 @@ pub fn filter_from_value(v: &str) -> std::result::Result<EnvFilter, ParseError> 
 
 #[cfg(test)]
 mod tests {
-	use std::{ffi::OsString, sync::Mutex};
+	use std::ffi::OsString;
+	use std::sync::Mutex;
 
 	use opentelemetry::global::shutdown_tracer_provider;
 	use tracing::{Level, span};

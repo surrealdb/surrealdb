@@ -4,10 +4,7 @@ use crate::{
 	expr::{
 		AccessType, Ident,
 		access_type::{JwtAccessVerify, JwtAccessVerifyKey},
-		statements::{
-			DefineAccessStatement,
-			define::{DefineScopeStatement, DefineTokenStatement},
-		},
+		statements::{DefineAccessStatement, define::DefineScopeStatement},
 	},
 	kvs::{KeyEncode as _, Transaction},
 };

@@ -1,8 +1,6 @@
 use crate::dbs::node::Timestamp;
-use crate::expr;
-use expr::Duration;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use crate::val::{self, Duration};
+use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(target_family = "wasm")]

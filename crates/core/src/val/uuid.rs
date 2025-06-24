@@ -1,4 +1,5 @@
-use crate::expr::{escape::QuoteStr, strand::Strand};
+use crate::expr::escape::QuoteStr;
+use crate::val::Strand;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

@@ -1,8 +1,9 @@
 use crate::expr::idiom::Idiom;
-use crate::expr::value::Value;
+use crate::val::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+/// A type representing an delta change to a value.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(tag = "op")]

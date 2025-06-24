@@ -4,10 +4,7 @@ use crate::val::{
 };
 use anyhow::Result;
 use serde::de::DeserializeOwned;
-use serde_content::Deserializer;
-use serde_content::Number;
-use serde_content::Serializer;
-use serde_content::Value as Content;
+use serde_content::{Deserializer, Number, Serializer, Value as Content};
 use std::borrow::Cow;
 
 impl Value {

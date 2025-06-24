@@ -1,12 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::{Force, Statement};
+use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::array::Array;
 use crate::expr::index::{HnswParams, Index, MTreeParams, SearchParams};
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{FlowResultExt as _, Part, Thing, Value};
+use crate::expr::{FlowResultExt as _, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::FtIndex;
 use crate::idx::trees::mtree::MTreeIndex;
@@ -14,8 +12,10 @@ use crate::key;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::ConsumeResult;
 use crate::kvs::TransactionType;
+use crate::val::{Array, RecordId, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use tracing::span::Record;
 
 impl Document {
 	pub(super) async fn store_index_data(
@@ -70,7 +70,7 @@ impl Document {
 		ix: &DefineIndexStatement,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<()> {
 		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
@@ -268,7 +268,7 @@ struct IndexOperation<'a> {
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
 	n: Option<Vec<Value>>,
-	rid: &'a Thing,
+	rid: &'a RecordId,
 }
 
 impl<'a> IndexOperation<'a> {
@@ -277,7 +277,7 @@ impl<'a> IndexOperation<'a> {
 		ix: &'a DefineIndexStatement,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
-		rid: &'a Thing,
+		rid: &'a RecordId,
 	) -> Self {
 		Self {
 			opt,
@@ -329,7 +329,7 @@ impl<'a> IndexOperation<'a> {
 					if txn.putc(key, revision::to_vec(self.rid)?, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
 						let val = txn.get(key, None).await?.unwrap();
-						let rid: Thing = revision::from_slice(&val)?;
+						let rid: RecordId = revision::from_slice(&val)?;
 						return self.err_index_exists(rid, n);
 					}
 				}
@@ -368,7 +368,7 @@ impl<'a> IndexOperation<'a> {
 				if txn.putc(key, revision::to_vec(self.rid)?, None).await.is_err() {
 					let key = self.get_non_unique_index_key(&n)?;
 					let val = txn.get(key, None).await?.unwrap();
-					let rid: Thing = revision::from_slice(&val)?;
+					let rid: RecordId = revision::from_slice(&val)?;
 					return self.err_index_exists(rid, n);
 				}
 			}
@@ -376,7 +376,7 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<()> {
+	fn err_index_exists(&self, rid: RecordId, n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),

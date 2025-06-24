@@ -3,9 +3,7 @@ use crate::val::{self, Object, Value};
 use anyhow::Result;
 use serde::Deserialize;
 use serde::de::IntoDeserializer;
-use serde_content::Data;
-use serde_content::Expected;
-use serde_content::Unexpected;
+use serde_content::{Data, Expected, Unexpected};
 use std::collections::BTreeMap;
 
 pub(super) fn to_value(content: Content) -> Result<Value> {

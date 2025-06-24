@@ -2,20 +2,16 @@ use std::mem;
 
 use rust_decimal::Decimal;
 
-use crate::{
-	sql::{
-		Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid,
-		language::Language,
-	},
-	syn::{
-		error::syntax_error,
-		lexer::compound::{self, NumberKind},
-		parser::{ParseResult, Parser, mac::unexpected},
-		token::{self, TokenKind, t},
-	},
-};
+use crate::sql::language::Language;
+use crate::sql::{Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid};
+use crate::syn::error::syntax_error;
+use crate::syn::lexer::compound::{self, NumberKind};
+use crate::syn::parser::mac::unexpected;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{self, TokenKind, t};
 
-use super::{GluedValue, mac::pop_glued};
+use super::GluedValue;
+use super::mac::pop_glued;
 
 mod number;
 
@@ -120,7 +116,8 @@ impl TokenValue for Strand {
 			t!("\"") | t!("'") => {
 				parser.pop_peek();
 				let v = parser.lexer.lex_compound(token, compound::strand)?.value;
-				Ok(Strand(v))
+				// Safety: The lexer ensures that no null bytes can be present in the string.
+				Ok(unsafe { Strand::new_unchecked(v) })
 			}
 			_ => unexpected!(parser, token, "a strand"),
 		}

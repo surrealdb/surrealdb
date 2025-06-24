@@ -1,8 +1,6 @@
-use std::{
-	borrow::Borrow,
-	collections::btree_map::{IntoIter as BIntoIter, Iter as BIter, IterMut as BIterMut},
-	iter::FusedIterator,
-};
+use std::borrow::Borrow;
+use std::collections::btree_map::{IntoIter as BIntoIter, Iter as BIter, IterMut as BIterMut};
+use std::iter::FusedIterator;
 use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue};
 
 use super::Value;

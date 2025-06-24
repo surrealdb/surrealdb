@@ -1,8 +1,7 @@
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::ops::Deref;
-use std::time;
+use std::{fmt, time};
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
@@ -31,14 +30,14 @@ impl From<Duration> for time::Duration {
 	}
 }
 
-impl From<Duration> for crate::expr::Duration {
+impl From<Duration> for crate::val::Duration {
 	fn from(v: Duration) -> Self {
-		crate::expr::Duration(v.0)
+		crate::val::Duration(v.0)
 	}
 }
 
-impl From<crate::expr::Duration> for Duration {
-	fn from(v: crate::expr::Duration) -> Self {
+impl From<crate::val::Duration> for Duration {
+	fn from(v: crate::val::Duration) -> Self {
 		Self(v.0)
 	}
 }
@@ -52,62 +51,6 @@ impl Deref for Duration {
 
 impl fmt::Display for Duration {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		// Split up the duration
-		let secs = self.0.as_secs();
-		let nano = self.0.subsec_nanos();
-		// Ensure no empty output
-		if secs == 0 && nano == 0 {
-			return write!(f, "0ns");
-		}
-		// Calculate the total years
-		let year = secs / SECONDS_PER_YEAR;
-		let secs = secs % SECONDS_PER_YEAR;
-		// Calculate the total weeks
-		let week = secs / SECONDS_PER_WEEK;
-		let secs = secs % SECONDS_PER_WEEK;
-		// Calculate the total days
-		let days = secs / SECONDS_PER_DAY;
-		let secs = secs % SECONDS_PER_DAY;
-		// Calculate the total hours
-		let hour = secs / SECONDS_PER_HOUR;
-		let secs = secs % SECONDS_PER_HOUR;
-		// Calculate the total minutes
-		let mins = secs / SECONDS_PER_MINUTE;
-		let secs = secs % SECONDS_PER_MINUTE;
-		// Calculate the total milliseconds
-		let msec = nano / NANOSECONDS_PER_MILLISECOND;
-		let nano = nano % NANOSECONDS_PER_MILLISECOND;
-		// Calculate the total microseconds
-		let usec = nano / NANOSECONDS_PER_MICROSECOND;
-		let nano = nano % NANOSECONDS_PER_MICROSECOND;
-		// Write the different parts
-		if year > 0 {
-			write!(f, "{year}y")?;
-		}
-		if week > 0 {
-			write!(f, "{week}w")?;
-		}
-		if days > 0 {
-			write!(f, "{days}d")?;
-		}
-		if hour > 0 {
-			write!(f, "{hour}h")?;
-		}
-		if mins > 0 {
-			write!(f, "{mins}m")?;
-		}
-		if secs > 0 {
-			write!(f, "{secs}s")?;
-		}
-		if msec > 0 {
-			write!(f, "{msec}ms")?;
-		}
-		if usec > 0 {
-			write!(f, "{usec}µs")?;
-		}
-		if nano > 0 {
-			write!(f, "{nano}ns")?;
-		}
-		Ok(())
+		crate::val::Duration(self.0).fmt(f)
 	}
 }

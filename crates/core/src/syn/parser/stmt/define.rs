@@ -2,43 +2,32 @@ use reblessive::Stk;
 
 use crate::api::method::Method;
 use crate::sql::access_type::JwtAccessVerify;
-use crate::sql::index::{HnswParams, MTreeParams};
-use crate::sql::statements::DefineApiStatement;
-use crate::sql::statements::define::config::ConfigInner;
+use crate::sql::base::Base;
+use crate::sql::filter::Filter;
+use crate::sql::index::{Distance, HnswParams, MTreeParams, VectorType};
 use crate::sql::statements::define::config::api::{ApiConfig, RequestMiddleware};
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
+use crate::sql::statements::define::config::{ConfigInner, graphql};
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
 	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineKind,
 	DefineSequenceStatement,
 };
-use crate::sql::{Expr, Literal};
-use crate::syn::error::bail;
-use crate::syn::token::Token;
-use crate::{
-	sql::{
-		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand, TableType,
-		access_type,
-		base::Base,
-		filter::Filter,
-		index::{Distance, VectorType},
-		statements::{
-			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-			DefineTableStatement, DefineUserStatement, define::config::graphql,
-		},
-		table_type,
-		tokenizer::Tokenizer,
-	},
-	syn::{
-		parser::{
-			ParseResult, Parser,
-			mac::{expected, unexpected},
-		},
-		token::{Keyword, TokenKind, t},
-	},
+use crate::sql::statements::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
+	DefineUserStatement,
 };
+use crate::sql::tokenizer::Tokenizer;
+use crate::sql::{
+	AccessType, Expr, Ident, Idioms, Index, Kind, Literal, Param, Permissions, Scoring, Strand,
+	TableType, access_type, table_type,
+};
+use crate::syn::error::bail;
+use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{Keyword, Token, TokenKind, t};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -631,20 +620,20 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineAccessStatement> {
-		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
+		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
-			(true, false)
+			DefineKind::IfNotExists
 		} else if self.eat(t!("OVERWRITE")) {
-			(false, true)
+			DefineKind::Overwrite
 		} else {
-			(false, false)
+			DefineKind::Default
 		};
 		let name = self.next_token_value()?;
 		let mut res = DefineAccessStatement {
 			name,
 			base: Base::Db,
-			access_type: kind,
+			kind,
 			..Default::default()
 		};
 		let mut ac = access_type::RecordAccess {
@@ -774,7 +763,7 @@ impl Parser<'_> {
 					res.full = true;
 					// TODO: Move logic out of parser.
 					if !set_table_type {
-						table_type = TableType::Normal;
+						res.table_type = TableType::Normal;
 					}
 				}
 				t!("PERMISSIONS") => {

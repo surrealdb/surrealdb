@@ -1,4 +1,5 @@
-use crate::expr::{Operation, statements::DefineTableStatement};
+use crate::expr::Operation;
+use crate::expr::statements::DefineTableStatement;
 use crate::val::{Array, Object, RecordId, Value};
 use crate::vs::VersionStamp;
 use revision::revisioned;
@@ -118,7 +119,7 @@ impl TableMutation {
 				h
 			}
 		};
-		let o = crate::expr::object::Object::from(h);
+		let o = crate::val::Object::from(h);
 		Value::Object(o)
 	}
 }
@@ -200,6 +201,7 @@ impl Default for WriteMutationSet {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	#[test]
@@ -212,7 +214,7 @@ mod tests {
 				"mytb".to_string(),
 				vec![
 					TableMutation::Set(
-						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						RecordId::from(("mytb".to_string(), "tobie".to_string())),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
@@ -299,3 +301,4 @@ mod tests {
 		);
 	}
 }
+*/

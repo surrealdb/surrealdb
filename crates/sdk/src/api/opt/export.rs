@@ -1,7 +1,6 @@
 #![cfg_attr(docsrs, doc(cfg(not(target_family = "wasm"))))]
 
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 #[non_exhaustive]

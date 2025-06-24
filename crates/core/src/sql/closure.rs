@@ -37,7 +37,7 @@ impl fmt::Display for Closure {
 	}
 }
 
-impl From<Closure> for crate::expr::Closure {
+impl From<Closure> for crate::val::Closure {
 	fn from(v: Closure) -> Self {
 		Self {
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
@@ -47,8 +47,8 @@ impl From<Closure> for crate::expr::Closure {
 	}
 }
 
-impl From<crate::expr::Closure> for Closure {
-	fn from(v: crate::expr::Closure) -> Self {
+impl From<crate::val::Closure> for Closure {
+	fn from(v: crate::val::Closure) -> Self {
 		Self {
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			returns: v.returns.map(Into::into),

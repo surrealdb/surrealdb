@@ -1,6 +1,7 @@
+use crate::sql::fmt::Fmt;
 use crate::sql::order::Ordering;
 use crate::sql::{
-	Cond, Dir, Fields, Groups, IdRange, Idiom, Limit, Splits, Start, Table, fmt::Fmt,
+	Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start, Table,
 };
 use std::fmt::{self, Display, Formatter, Write};
 
@@ -124,7 +125,7 @@ impl Display for GraphSubjects {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum GraphSubject {
 	Table(Table),
-	Range(Table, IdRange),
+	Range(Table, RecordIdKeyRangeLit),
 }
 
 impl Display for GraphSubject {

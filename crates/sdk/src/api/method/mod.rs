@@ -1,25 +1,16 @@
 //! Methods to use when interacting with a SurrealDB instance
-use crate::api::Connect;
-use crate::api::Connection;
-use crate::api::OnceLockExt;
-use crate::api::Surreal;
-use crate::api::opt;
-use crate::api::opt::IntoEndpoint;
-use crate::api::opt::auth;
-use crate::api::opt::auth::Credentials;
-use crate::api::opt::auth::Jwt;
-use crate::opt::IntoExportDestination;
-use crate::opt::WaitFor;
+use crate::api::opt::auth::{Credentials, Jwt};
+use crate::api::opt::{IntoEndpoint, auth};
+use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
+use crate::opt::{IntoExportDestination, WaitFor};
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use surrealdb_core::expr::Value as CoreValue;
-use surrealdb_core::expr::to_value as to_core_value;
+use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
 use surrealdb_core::syn;
 
 pub(crate) mod live;
@@ -72,10 +63,8 @@ pub use invalidate::Invalidate;
 pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
-pub use query::Query;
-pub use query::QueryStream;
-pub use run::IntoFn;
-pub use run::Run;
+pub use query::{Query, QueryStream};
+pub use run::{IntoFn, Run};
 pub use select::Select;
 use serde_content::Serializer;
 pub use set::Set;
@@ -90,8 +79,7 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
-use super::opt::CreateResource;
-use super::opt::IntoResource;
+use super::opt::{CreateResource, IntoResource};
 
 /// A alias for an often used type of future returned by async methods in this library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;

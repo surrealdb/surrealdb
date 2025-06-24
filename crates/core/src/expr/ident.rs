@@ -1,5 +1,7 @@
+use crate::expr::Value;
+use crate::expr::escape::EscapeIdent;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Value, escape::EscapeIdent, strand::no_nul_bytes};
+use crate::val::strand::no_nul_bytes;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

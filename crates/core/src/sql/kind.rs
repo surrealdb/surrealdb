@@ -1,10 +1,8 @@
 use super::escape::EscapeKey;
 use super::{Duration, Ident, Idiom, Strand};
 
-use crate::sql::{
-	Table,
-	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
-};
+use crate::sql::Table;
+use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};

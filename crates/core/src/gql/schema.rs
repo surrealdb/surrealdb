@@ -2,22 +2,18 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::dbs::Session;
-use crate::expr;
-use crate::expr::Geometry;
 use crate::expr::Kind;
-use crate::expr::kind::LiteralKind;
+use crate::expr::kind::KindLiteral;
 use crate::expr::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
+use crate::expr::{self, Expr};
 use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
 use crate::kvs::Datastore;
-use async_graphql::Name;
-use async_graphql::Value as GqlValue;
-use async_graphql::dynamic::Interface;
-use async_graphql::dynamic::InterfaceField;
-use async_graphql::dynamic::Object;
-use async_graphql::dynamic::Schema;
-use async_graphql::dynamic::{Enum, Type, Union};
-use async_graphql::dynamic::{Scalar, TypeRef};
+use crate::val::{Geometry, Value as SurValue};
+use async_graphql::dynamic::{
+	Enum, Interface, InterfaceField, Object, Scalar, Schema, Type, TypeRef, Union,
+};
+use async_graphql::{Name, Value as GqlValue};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
@@ -25,11 +21,9 @@ use serde_json::Number;
 use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
-use crate::expr::Value as SurValue;
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::ext::NamedContainer;
-use crate::kvs::LockType;
-use crate::kvs::TransactionType;
+use crate::kvs::{LockType, TransactionType};
 
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
@@ -394,7 +388,7 @@ macro_rules! any_try_kinds {
 	};
 }
 
-pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError> {
+pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<Expr, GqlError> {
 	use crate::syn;
 	match kind {
 		Kind::Any => match val {
@@ -435,11 +429,11 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Decimal => match val {
 			GqlValue::Number(n) => {
 				if let Some(int) = n.as_i64() {
-					Ok(SurValue::Number(expr::Number::Decimal(int.into())))
+					Ok(Expr::Literal(expr::Literal::Decimal(int.into())))
 				} else if let Some(d) = n.as_f64().and_then(Decimal::from_f64) {
-					Ok(SurValue::Number(expr::Number::Decimal(d)))
+					Ok(Expr::Literal(expr::Literal::Decimal(d)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(SurValue::Number(expr::Number::Decimal(uint.into())))
+					Ok(Expr::Literal(expr::Literal::Decimal(uint.into())))
 				} else {
 					Err(type_error(kind, val))
 				}

@@ -1,14 +1,14 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::statements::{
+	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
+	IfelseStatement, InfoStatement, InsertStatement, RebuildStatement, RelateStatement,
+	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
+};
 use crate::expr::{
 	BinaryOperator, Block, Constant, FlowResult, FunctionCall, Future, Idiom, Literal, Mock, Model,
 	Param, PrefixOperator, Table, Value,
-	statements::{
-		AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
-		IfelseStatement, InfoStatement, InsertStatement, RebuildStatement, RelateStatement,
-		RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
-	},
 };
 use crate::val::Closure;
 use reblessive::tree::Stk;
@@ -19,7 +19,7 @@ use std::fmt;
 use super::PostfixOperator;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Expr {
@@ -45,7 +45,6 @@ pub enum Expr {
 		op: BinaryOperator,
 		right: Box<Expr>,
 	},
-	Model(Box<Model>),
 	// TODO: Factor out the call from the function expression.
 	FunctionCall(Box<FunctionCall>),
 
@@ -110,6 +109,7 @@ impl Expr {
 			Expr::Select(s) => s.read_only(),
 			Expr::Let(s) => s.read_only(),
 			Expr::Forach(s) => s.read_only(),
+			Expr::Closure(s) => s.read_only(),
 			Expr::Create(_)
 			| Expr::Update(_)
 			| Expr::Delete(_)

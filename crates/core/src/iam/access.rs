@@ -3,17 +3,21 @@ use crate::ctx::MutableContext;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::statements::access;
-use crate::expr::{Base, Ident, Thing, Value};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::expr::{Base, Expr, Ident};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::val::{RecordId, Value};
 use anyhow::Result;
 use reblessive;
+use surrealkv::Record;
 
 // Execute the AUTHENTICATE clause for a record access method
 pub async fn authenticate_record(
 	kvs: &Datastore,
 	session: &Session,
-	authenticate: &Value,
-) -> Result<Thing> {
+	authenticate: &Expr,
+) -> Result<RecordId> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => match val.record() {
 			// If the AUTHENTICATE clause returns a record, authentication continues with that record
@@ -54,7 +58,7 @@ pub async fn authenticate_record(
 pub async fn authenticate_generic(
 	kvs: &Datastore,
 	session: &Session,
-	authenticate: &Value,
+	authenticate: &Expr,
 ) -> Result<()> {
 	match kvs.evaluate(authenticate, session, None).await {
 		Ok(val) => {
@@ -100,7 +104,7 @@ pub async fn create_refresh_token_record(
 	ac: Ident,
 	ns: &str,
 	db: &str,
-	rid: Thing,
+	rid: RecordId,
 ) -> Result<String> {
 	let stmt = access::AccessStatementGrant {
 		ac,

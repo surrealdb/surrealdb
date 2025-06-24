@@ -5,8 +5,9 @@ use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
-use std::ops::{self};
+use std::ops::{
+	Deref, {self},
+};
 use std::str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
@@ -113,10 +114,8 @@ impl TryAdd for Strand {
 
 // serde(with = no_nul_bytes) will (de)serialize with no NUL bytes.
 pub(crate) mod no_nul_bytes {
-	use serde::{
-		Deserializer, Serializer,
-		de::{self, Visitor},
-	};
+	use serde::de::{self, Visitor};
+	use serde::{Deserializer, Serializer};
 	use std::fmt;
 
 	pub(crate) fn serialize<S>(s: &str, serializer: S) -> Result<S::Ok, S::Error>

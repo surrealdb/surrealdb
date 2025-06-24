@@ -1,36 +1,23 @@
 //! HTTP engine
 use crate::Value;
-use crate::api::Connect;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::api::conn::Command;
-use crate::api::conn::DbResponse;
-use crate::api::conn::RequestData;
-use crate::api::conn::RouterRequest;
+use crate::api::conn::{Command, DbResponse, RequestData, RouterRequest};
 use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
+use crate::api::{Connect, Result, Surreal};
 use crate::engine::remote::Response;
-use crate::headers::AUTH_DB;
-use crate::headers::AUTH_NS;
-use crate::headers::DB;
-use crate::headers::NS;
+use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
 use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::RequestBuilder;
-use reqwest::header::ACCEPT;
-use reqwest::header::CONTENT_TYPE;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
-use serde::Deserialize;
-use serde::Serialize;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use surrealdb_core::expr::{
 	Object as CoreObject, Value as CoreValue, from_value as from_core_value,
 };
-use surrealdb_core::sql::Statement;
 use surrealdb_core::sql::statements::OutputStatement;
-use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue};
+use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue, Statement};
 use url::Url;
 
 #[cfg(not(target_family = "wasm"))]

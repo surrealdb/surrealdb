@@ -2,8 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Block, Param, Value};
-use crate::expr::{ControlFlow, Expr, FlowResult};
+use crate::expr::{Block, ControlFlow, Expr, FlowResult, Param, Value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

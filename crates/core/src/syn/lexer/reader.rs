@@ -1,6 +1,7 @@
 use thiserror::Error;
 
-use crate::syn::{error::SyntaxError, token::Span};
+use crate::syn::error::SyntaxError;
+use crate::syn::token::Span;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]

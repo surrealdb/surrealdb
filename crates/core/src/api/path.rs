@@ -1,20 +1,15 @@
-use std::{
-	fmt::{self, Display, Formatter},
-	ops::Deref,
-	str::FromStr,
-};
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+use std::str::FromStr;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-	err::Error,
-	expr::{
-		Kind, Object, Value,
-		fmt::{Fmt, fmt_separated_by},
-	},
-	syn,
-};
+use crate::err::Error;
+use crate::expr::Kind;
+use crate::expr::fmt::{Fmt, fmt_separated_by};
+use crate::syn;
+use crate::val::{Object, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

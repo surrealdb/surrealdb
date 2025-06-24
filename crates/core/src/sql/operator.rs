@@ -1,5 +1,6 @@
 use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Kind, index::Distance};
+use crate::sql::index::Distance;
+use crate::sql::{Expr, Kind};
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -189,7 +190,7 @@ impl From<BinaryOperator> for crate::expr::BinaryOperator {
 			BinaryOperator::Add => crate::expr::BinaryOperator::Add,
 			BinaryOperator::Multiply => crate::expr::BinaryOperator::Multiply,
 			BinaryOperator::Divide => crate::expr::BinaryOperator::Divide,
-			BinaryOperator::Modulo => crate::expr::BinaryOperator::Modulo,
+			BinaryOperator::Modulo => crate::expr::BinaryOperator::Remainder,
 			BinaryOperator::Power => crate::expr::BinaryOperator::Power,
 			BinaryOperator::Equal => crate::expr::BinaryOperator::Equal,
 			BinaryOperator::ExactEqual => crate::expr::BinaryOperator::ExactEqual,
@@ -234,7 +235,7 @@ impl From<crate::expr::BinaryOperator> for BinaryOperator {
 			crate::expr::BinaryOperator::Add => BinaryOperator::Add,
 			crate::expr::BinaryOperator::Multiply => BinaryOperator::Multiply,
 			crate::expr::BinaryOperator::Divide => BinaryOperator::Divide,
-			crate::expr::BinaryOperator::Modulo => BinaryOperator::Modulo,
+			crate::expr::BinaryOperator::Remainder => BinaryOperator::Modulo,
 			crate::expr::BinaryOperator::Power => BinaryOperator::Power,
 			crate::expr::BinaryOperator::Equal => BinaryOperator::Equal,
 			crate::expr::BinaryOperator::ExactEqual => BinaryOperator::ExactEqual,

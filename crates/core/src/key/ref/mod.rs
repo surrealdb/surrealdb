@@ -1,9 +1,8 @@
 //! Stores a graph edge pointer
 use crate::expr::id::RecordIdKeyLit;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::KeyEncode;
-use crate::kvs::impl_key;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::{KeyEncode, impl_key};
+use crate::val::RecordIdKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -126,10 +125,10 @@ pub struct Ref<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: RecordIdKeyLit,
+	pub id: RecordIdKey,
 	pub ft: &'a str,
 	pub ff: &'a str,
-	pub fk: RecordIdKeyLit,
+	pub fk: RecordIdKey,
 }
 impl_key!(Ref<'a>);
 

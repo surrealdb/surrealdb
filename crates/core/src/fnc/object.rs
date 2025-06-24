@@ -1,6 +1,5 @@
 use crate::err::Error;
-use crate::expr::value::Value;
-use crate::expr::{Array, Object, Strand};
+use crate::val::{Array, Object, Strand, Value};
 use anyhow::{Result, bail};
 use std::collections::BTreeMap;
 

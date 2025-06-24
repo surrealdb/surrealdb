@@ -2,15 +2,11 @@ use std::collections::BTreeMap;
 
 use reblessive::Stk;
 
-use crate::{
-	sql::{Duration, Strand},
-	syn::{
-		lexer::compound::{self, Numeric},
-		parser::mac::{expected, pop_glued},
-		token::{Glued, Span, TokenKind, t},
-	},
-	val::{Array, Number, Object, Value},
-};
+use crate::sql::{Duration, Strand};
+use crate::syn::lexer::compound::{self, Numeric};
+use crate::syn::parser::mac::{expected, pop_glued};
+use crate::syn::token::{Glued, Span, TokenKind, t};
+use crate::val::{Array, Number, Object, Value};
 
 use super::{ParseResult, Parser};
 

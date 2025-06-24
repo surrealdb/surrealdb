@@ -3,10 +3,11 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Uuid};
+use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
+
 use crate::iam::Auth;
 use crate::kvs::Live;
-use crate::val::Value;
+use crate::val::{Uuid, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;

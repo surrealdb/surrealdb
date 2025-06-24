@@ -1,6 +1,8 @@
-use crate::expr::{Ident, RecordIdKeyLit, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes};
-use crate::val::Duration;
-use crate::val::RecordId;
+use crate::expr::escape::EscapeIdent;
+use crate::expr::fmt::Fmt;
+use crate::expr::{Ident, RecordIdKeyLit};
+use crate::val::strand::no_nul_bytes;
+use crate::val::{Duration, RecordId};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

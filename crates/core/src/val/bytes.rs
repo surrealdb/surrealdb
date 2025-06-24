@@ -1,10 +1,7 @@
 use hex;
 use revision::revisioned;
-use serde::de::SeqAccess;
-use serde::{
-	Deserialize, Serialize,
-	de::{self, Visitor},
-};
+use serde::de::{self, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 

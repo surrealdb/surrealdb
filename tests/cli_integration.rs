@@ -4,8 +4,7 @@ mod common;
 mod cli_integration {
 	use crate::remove_debug_info;
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
-	use chrono::Duration as ChronoDuration;
-	use chrono::Utc;
+	use chrono::{Duration as ChronoDuration, Utc};
 	#[cfg(unix)]
 	use common::Format;
 	#[cfg(unix)]

@@ -1,14 +1,8 @@
 //! Implements token gluing logic.
-
-use crate::{
-	sql::{Datetime, Duration, Strand, Uuid},
-	syn::{
-		lexer::compound,
-		token::{Glued, Token, TokenKind, t},
-	},
-};
-
 use super::{GluedValue, ParseResult, Parser};
+use crate::sql::{Datetime, Duration, Strand, Uuid};
+use crate::syn::lexer::compound;
+use crate::syn::token::{Glued, Token, TokenKind, t};
 
 impl Parser<'_> {
 	/// Glues the next token and returns the token after.

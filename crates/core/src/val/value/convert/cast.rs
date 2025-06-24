@@ -1,14 +1,17 @@
-use std::{fmt, ops::Bound, str::FromStr as _};
+use std::fmt;
+use std::ops::Bound;
+use std::str::FromStr as _;
 
 use geo::Point;
 use rust_decimal::Decimal;
 
-use crate::expr::kind::KindLiteral;
-use crate::expr::{File, Ident, Kind, Regex, Table, Uuid, kind::HasKind, value::Null};
+use crate::expr::kind::{HasKind, KindLiteral};
+use crate::expr::{File, Ident, Kind, Regex, Table, Uuid};
+use crate::val::array::Uniq;
 use crate::val::{
-	Array, Closure, Datetime, Duration, Geometry, Object, Range, Strand, Value, array::Uniq,
+	Array, Bytes, Closure, Datetime, Duration, Geometry, Number, Object, Range, RecordId, Strand,
+	Value,
 };
-use crate::val::{Bytes, Number, RecordId};
 
 #[derive(Clone, Debug)]
 pub enum CastError {

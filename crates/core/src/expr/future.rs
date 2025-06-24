@@ -1,8 +1,8 @@
-use crate::dbs::Options;
+use crate::ctx::Context;
+use crate::dbs::{Futures, Options};
 use crate::doc::CursorDoc;
 use crate::expr::block::Block;
 use crate::val::Value;
-use crate::{ctx::Context, dbs::Futures};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;

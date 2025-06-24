@@ -1,20 +1,8 @@
 use super::classes;
-use crate::expr::Bytes;
-use crate::expr::Geometry;
-use crate::expr::RecordIdKeyLit;
-use crate::expr::Strand;
-use crate::expr::array::Array;
-use crate::expr::datetime::Datetime;
-use crate::expr::object::Object;
-use crate::expr::value::Value;
+use crate::val::{Array, Bytes, Datetime, Geometry, Object, RecordIdKey, Strand, Value};
 use chrono::{TimeZone, Utc};
-use js::Coerced;
-use js::Ctx;
-use js::Error;
-use js::Exception;
-use js::FromAtom;
-use js::FromJs;
 use js::prelude::This;
+use js::{Coerced, Ctx, Error, Exception, FromAtom, FromJs};
 use rust_decimal::Decimal;
 
 fn check_nul(s: &str) -> Result<(), Error> {
@@ -120,8 +108,8 @@ impl<'js> FromJs<'js> for Value {
 				if let Some(v) = v.as_class::<classes::record::Record>() {
 					let borrow = v.borrow();
 					let v: &classes::record::Record = &borrow;
-					check_nul(&v.value.tb)?;
-					if let RecordIdKeyLit::String(s) = &v.value.id {
+					check_nul(&v.value.table)?;
+					if let RecordIdKey::String(s) = &v.value.key {
 						check_nul(s)?;
 					}
 					return Ok(v.value.clone().into());

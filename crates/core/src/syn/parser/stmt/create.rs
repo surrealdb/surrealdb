@@ -1,12 +1,8 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::statements::CreateStatement,
-	syn::{
-		parser::{ParseResult, Parser},
-		token::t,
-	},
-};
+use crate::sql::statements::CreateStatement;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::t;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_create_stmt(

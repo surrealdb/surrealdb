@@ -1,5 +1,5 @@
 use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Model, Script, operator::BindingPower};
+use crate::sql::{Expr, Model, Script};
 use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
@@ -46,8 +46,8 @@ pub struct FunctionCall {
 impl From<FunctionCall> for crate::expr::FunctionCall {
 	fn from(value: FunctionCall) -> Self {
 		crate::expr::FunctionCall {
-			receiver: self.receiver.into(),
-			arguments: self.arguments.into_iter().map(Into::into).collect(),
+			receiver: value.receiver.into(),
+			arguments: value.arguments.into_iter().map(Into::into).collect(),
 		}
 	}
 }
@@ -55,8 +55,8 @@ impl From<FunctionCall> for crate::expr::FunctionCall {
 impl From<crate::expr::FunctionCall> for FunctionCall {
 	fn from(value: crate::expr::FunctionCall) -> Self {
 		FunctionCall {
-			receiver: self.receiver.into(),
-			arguments: self.arguments.into_iter().map(Into::into).collect(),
+			receiver: value.receiver.into(),
+			arguments: value.arguments.into_iter().map(Into::into).collect(),
 		}
 	}
 }
@@ -70,7 +70,7 @@ impl fmt::Display for FunctionCall {
 				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments))
 			}
 			Function::Model(m) => {
-				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments))
+				write!(f, "{m}({})", Fmt::comma_separated(self.arguments))
 			}
 		}
 	}

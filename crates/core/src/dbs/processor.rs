@@ -5,11 +5,12 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::expr::dir::Dir;
 use crate::expr::id::range::RecordIdKeyRangeLit;
-use crate::expr::{Edges, Table, Thing, Value};
+use crate::expr::{Edges, Table};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
 use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
+use crate::val::{RecordId, Value};
 use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
@@ -73,16 +74,16 @@ pub(super) enum Collected {
 	RangeKey(Key),
 	TableKey(Key),
 	Relatable {
-		f: Thing,
-		v: Thing,
-		w: Thing,
+		f: RecordId,
+		v: RecordId,
+		w: RecordId,
 		o: Option<Value>,
 	},
-	Thing(Thing),
+	RecordId(RecordId),
 	Yield(Table),
 	Value(Value),
-	Defer(Thing),
-	Mergeable(Thing, Value),
+	Defer(RecordId),
+	Mergeable(RecordId, Value),
 	KeyVal(Key, Val),
 	Count(usize),
 	IndexItem(IndexItemRecord),
@@ -133,7 +134,10 @@ impl Collected {
 			let (ns, db) = opt.ns_db()?;
 			txn.get_record(ns, db, gra.ft, &gra.fk, None).await?
 		};
-		let rid = Thing::from((gra.ft, gra.fk));
+		let rid = RecordId {
+			table: gra.ft.to_owned(),
+			key: gra.fk,
+		};
 		// Parse the data from the store
 		let val = Operable::Value(val);
 		// Process the record
@@ -149,7 +153,10 @@ impl Collected {
 	async fn process_range_key(key: Key) -> Result<Processed> {
 		let key = thing::Thing::decode(&key)?;
 		let val = Value::Null;
-		let rid = Thing::from((key.tb, key.id));
+		let rid = RecordId {
+			table: key.tb.to_owned(),
+			key: key.id,
+		};
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
@@ -165,7 +172,10 @@ impl Collected {
 
 	async fn process_table_key(key: Key) -> Result<Processed> {
 		let key = thing::Thing::decode(&key)?;
-		let rid = Thing::from((key.tb, key.id));
+		let rid = RecordId {
+			table: key.tb.to_owned(),
+			key: key.id,
+		};
 		// Process the record
 		let pro = Processed {
 			rs: RecordStrategy::KeysOnly,
@@ -180,9 +190,9 @@ impl Collected {
 	async fn process_relatable(
 		opt: &Options,
 		txn: &Transaction,
-		f: Thing,
-		v: Thing,
-		w: Thing,
+		f: RecordId,
+		v: RecordId,
+		w: RecordId,
 		o: Option<Value>,
 		rid_only: bool,
 	) -> Result<Processed> {
@@ -212,7 +222,7 @@ impl Collected {
 	async fn process_thing(
 		opt: &Options,
 		txn: &Transaction,
-		v: Thing,
+		v: RecordId,
 		rid_only: bool,
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
@@ -276,7 +286,7 @@ impl Collected {
 	async fn process_defer(
 		opt: &Options,
 		txn: &Transaction,
-		v: Thing,
+		v: RecordId,
 		rid_only: bool,
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
@@ -299,7 +309,7 @@ impl Collected {
 	async fn process_mergeable(
 		opt: &Options,
 		txn: &Transaction,
-		v: Thing,
+		v: RecordId,
 		o: Value,
 		rid_only: bool,
 	) -> Result<Processed> {
@@ -324,7 +334,10 @@ impl Collected {
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
 		let key = thing::Thing::decode(&key)?;
 		let mut val: Value = revision::from_slice(&val)?;
-		let rid = Thing::from((key.tb, key.id));
+		let rid = RecordId {
+			table: key.tb.to_owned(),
+			key: key.id,
+		};
 		// Inject the id field into the document
 		val.def(&rid);
 		// Create a new operable value
@@ -468,7 +481,7 @@ pub(super) trait Collector {
 		if ctx.is_ok(true).await? {
 			match iterable {
 				Iterable::Value(v) => {
-					if v.is_some() {
+					if !v.is_nullish() {
 						return self.collect(Collected::Value(v)).await;
 					}
 				}
@@ -969,7 +982,7 @@ impl Iterable {
 	pub(crate) async fn fetch_thing(
 		txn: &Transaction,
 		opt: &Options,
-		thg: &Thing,
+		thg: &RecordId,
 	) -> Result<Arc<Value>> {
 		// Fetch and parse the data from the store
 		let (ns, db) = opt.ns_db()?;

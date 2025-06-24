@@ -1,8 +1,8 @@
 //! Stores a record document
 use crate::expr::RecordIdKeyLit;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::{KeyEncode, impl_key};
+use crate::val::RecordIdKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -17,11 +17,11 @@ pub struct Thing<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: RecordIdKeyLit,
+	pub id: RecordIdKey,
 }
 impl_key!(Thing<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKeyLit) -> Thing<'a> {
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey) -> Thing<'a> {
 	Thing::new(ns, db, tb, id.to_owned())
 }
 
@@ -44,7 +44,7 @@ impl Categorise for Thing<'_> {
 }
 
 impl<'a> Thing<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: RecordIdKeyLit) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

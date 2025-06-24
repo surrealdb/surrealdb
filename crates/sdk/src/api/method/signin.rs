@@ -1,8 +1,7 @@
 use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
+use crate::api::{Connection, Result};
 use crate::error::Api;
 use crate::expr::to_value;
 use crate::method::OnceLockExt;

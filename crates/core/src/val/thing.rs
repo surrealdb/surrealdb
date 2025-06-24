@@ -45,6 +45,10 @@ impl RecordIdKey {
 		Self::Uuid(Uuid::new_v7())
 	}
 
+	pub fn is_range(&self) -> bool {
+		matches!(self, RecordIdKey::Range(_))
+	}
+
 	pub fn into_literal(self) -> expr::RecordIdKeyLit {
 		match self {
 			RecordIdKey::Number(n) => expr::RecordIdKeyLit::Number(n),

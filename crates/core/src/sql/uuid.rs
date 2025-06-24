@@ -1,4 +1,5 @@
-use crate::sql::{escape::QuoteStr, strand::Strand};
+use crate::sql::escape::QuoteStr;
+use crate::sql::strand::Strand;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
@@ -10,14 +11,14 @@ use super::Datetime;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Uuid(pub uuid::Uuid);
 
-impl From<Uuid> for crate::expr::Uuid {
+impl From<Uuid> for crate::val::Uuid {
 	fn from(v: Uuid) -> Self {
-		crate::expr::Uuid(v.0)
+		crate::val::Uuid(v.0)
 	}
 }
 
-impl From<crate::expr::Uuid> for Uuid {
-	fn from(v: crate::expr::Uuid) -> Self {
+impl From<crate::val::Uuid> for Uuid {
+	fn from(v: crate::val::Uuid) -> Self {
 		Self(v.0)
 	}
 }

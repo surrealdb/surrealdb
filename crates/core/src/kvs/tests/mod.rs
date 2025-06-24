@@ -9,7 +9,8 @@
 
 use super::Datastore;
 use crate::kvs::clock::SizedClock;
-use std::{future::Future, sync::Arc};
+use std::future::Future;
+use std::sync::Arc;
 use uuid::Uuid;
 
 macro_rules! include_tests {

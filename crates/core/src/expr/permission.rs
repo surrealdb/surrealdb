@@ -4,8 +4,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::val::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::str;
 
 #[revisioned(revision = 1)]

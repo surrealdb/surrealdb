@@ -1,23 +1,15 @@
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
-use crate::dbs::Force;
-use crate::dbs::Options;
-use crate::dbs::QueryType;
 use crate::dbs::response::Response;
+use crate::dbs::{Force, Options, QueryType};
 use crate::err;
 use crate::err::Error;
-use crate::expr::Expr;
-use crate::expr::TopLevelExpr;
-use crate::expr::paths::DB;
-use crate::expr::paths::NS;
+use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::{OptionStatement, UseStatement};
-use crate::expr::{Base, ControlFlow, FlowResult};
-use crate::iam::Action;
-use crate::iam::ResourceKind;
-use crate::kvs::Datastore;
-use crate::kvs::TransactionType;
-use crate::kvs::{LockType, Transaction};
+use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
+use crate::iam::{Action, ResourceKind};
+use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::sql::planner::SqlToLogical;
 use crate::val::Value;
 use anyhow::{Result, anyhow, bail};
@@ -197,10 +189,10 @@ impl Executor {
 			// These statements don't need a transaction.
 			TopLevelExpr::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 			stmt => {
-				let planner = SqlToLogical::new();
-				let plan = planner.statement_to_logical(stmt)?;
+				//let planner = SqlToLogical::new();
+				//let plan = planner.statement_to_logical(stmt)?;
 
-				self.execute_plan_impl(kvs, plan).await
+				self.execute_plan_impl(kvs, stmt).await
 			}
 		}
 	}
@@ -225,7 +217,7 @@ impl Executor {
 				// non-writable transactions might return an error on commit.
 				// So cancel them instead. This is fine since a non-writable transaction
 				// has nothing to commit anyway.
-				if !writeable {
+				if let TransactionType::Read = transaction_type {
 					let _ = lock.cancel().await;
 					return Ok(value);
 				}
@@ -476,8 +468,9 @@ impl Executor {
 				stmt => {
 					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
 
-					let planner = SqlToLogical::new();
-					let plan = planner.statement_to_logical(stmt)?;
+					let plan = stmt;
+					//let planner = SqlToLogical::new();
+					//let plan = planner.statement_to_logical(stmt)?;
 
 					let r = match self.execute_plan_in_transaction(txn.clone(), plan).await {
 						Ok(x) => Ok(x),
@@ -636,7 +629,7 @@ impl Executor {
 					}
 				}
 				stmt => {
-					let query_type: QueryType = (&stmt).into();
+					let query_type: QueryType = QueryType::for_toplevel_expr(&stmt);
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, stmt).await;
@@ -657,11 +650,9 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
-	use crate::{
-		dbs::Session,
-		iam::{Level, Role},
-		kvs::Datastore,
-	};
+	use crate::dbs::Session;
+	use crate::iam::{Level, Role};
+	use crate::kvs::Datastore;
 
 	#[tokio::test]
 	async fn check_execute_option_permissions() {

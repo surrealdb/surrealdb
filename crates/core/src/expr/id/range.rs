@@ -1,16 +1,16 @@
 use super::RecordIdKeyLit;
-use crate::{
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	val::{RecordIdKeyRange, Value},
-};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::val::{RecordIdKeyRange, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt, ops::Bound};
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::Bound;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]

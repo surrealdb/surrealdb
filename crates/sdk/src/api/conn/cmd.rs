@@ -1,9 +1,11 @@
 use super::MlExportConfig;
-use crate::{Result, opt::Resource};
+use crate::Result;
+use crate::opt::Resource;
 use async_channel::Sender;
 use bincode::Options;
 use revision::Revisioned;
-use serde::{Serialize, ser::SerializeMap as _};
+use serde::Serialize;
+use serde::ser::SerializeMap as _;
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
@@ -144,10 +146,8 @@ impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		use crate::api::engine::resource_to_sql_values;
-		use surrealdb_core::sql::{
-			Data, Output,
-			statements::{UpdateStatement, UpsertStatement},
-		};
+		use surrealdb_core::sql::statements::{UpdateStatement, UpsertStatement};
+		use surrealdb_core::sql::{Data, Output};
 
 		let res = match self {
 			Command::Use {

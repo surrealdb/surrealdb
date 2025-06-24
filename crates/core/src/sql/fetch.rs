@@ -36,17 +36,6 @@ impl From<crate::expr::Fetchs> for Fetchs {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Fetch(pub Expr);
 
-impl Fetch {
-	fn convert_fetch_idiom(&mut self, _revision: u16, old: Idiom) -> Result<(), revision::Error> {
-		self.0 = if old.is_empty() {
-			SqlValue::None
-		} else {
-			SqlValue::Idiom(old)
-		};
-		Ok(())
-	}
-}
-
 impl Display for Fetch {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)

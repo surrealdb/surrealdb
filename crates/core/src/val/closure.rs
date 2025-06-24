@@ -1,6 +1,9 @@
-use crate::ctx::MutableContext;
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
 use crate::expr::{Expr, FlowResultExt, Ident, Kind};
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, val::Value};
+use crate::val::Value;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -21,6 +24,10 @@ pub struct Closure {
 }
 
 impl Closure {
+	pub fn read_only(&self) -> bool {
+		self.body.read_only()
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

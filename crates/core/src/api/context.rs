@@ -1,9 +1,11 @@
 use http::HeaderMap;
 
-use crate::expr::{Bytesize, Duration};
+use crate::expr::Bytesize;
+use crate::val::Duration;
 use anyhow::Result;
 
-use super::middleware::{CollectedMiddleware, invoke::InvokeMiddleware};
+use super::middleware::CollectedMiddleware;
+use super::middleware::invoke::InvokeMiddleware;
 
 #[derive(Default, Debug)]
 pub struct InvocationContext {

@@ -1,6 +1,5 @@
 //! Stores the next and available freed IDs for documents
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 

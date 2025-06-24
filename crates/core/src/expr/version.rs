@@ -1,6 +1,10 @@
 use super::FlowResultExt;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
 use crate::expr::Expr;
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, expr::datetime::Datetime};
+use crate::val::Datetime;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;

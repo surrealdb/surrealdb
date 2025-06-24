@@ -9,10 +9,10 @@ pub(crate) mod terms;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::expr::Idiom;
 use crate::expr::index::SearchParams;
 use crate::expr::scoring::Scoring;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{Idiom, Object, Thing, Value};
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::doclength::DocLengths;
@@ -25,8 +25,8 @@ use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::Transaction;
-use crate::kvs::{Key, TransactionType};
+use crate::kvs::{Key, Transaction, TransactionType};
+use crate::val::{Object, RecordId, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -188,7 +188,7 @@ impl FtIndex {
 		self.analyzer.clone()
 	}
 
-	pub(crate) async fn remove_document(&mut self, ctx: &Context, rid: &Thing) -> Result<()> {
+	pub(crate) async fn remove_document(&mut self, ctx: &Context, rid: &RecordId) -> Result<()> {
 		let tx = ctx.tx();
 		// Extract and remove the doc_id (if any)
 		let mut doc_ids = self.doc_ids.write().await;
@@ -241,7 +241,7 @@ impl FtIndex {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		rid: &Thing,
+		rid: &RecordId,
 		content: Vec<Value>,
 	) -> Result<()> {
 		// Resolve the doc_id
@@ -418,7 +418,7 @@ impl FtIndex {
 	pub(super) async fn highlight(
 		&self,
 		tx: &Transaction,
-		thg: &Thing,
+		thg: &RecordId,
 		terms: &[Option<(TermId, TermLen)>],
 		hlp: HighlightParams,
 		idiom: &Idiom,
@@ -444,7 +444,7 @@ impl FtIndex {
 	pub(super) async fn extract_offsets(
 		&self,
 		tx: &Transaction,
-		thg: &Thing,
+		thg: &RecordId,
 		terms: &[Option<(TermId, u32)>],
 		partial: bool,
 	) -> Result<Value> {
@@ -508,7 +508,7 @@ impl HitsIterator {
 		self.iter.size_hint().0
 	}
 
-	pub(crate) async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>> {
+	pub(crate) async fn next(&mut self, tx: &Transaction) -> Result<Option<(RecordId, DocId)>> {
 		let di = self.doc_ids.read().await;
 		for doc_id in self.iter.by_ref() {
 			if let Some(doc_key) = di.get_doc_key(tx, doc_id).await? {
@@ -527,13 +527,14 @@ mod tests {
 	use crate::dbs::Options;
 	use crate::expr::index::SearchParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
-	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
-	use crate::kvs::{Datastore, LockType::*, TransactionType};
-	use crate::sql::{Statement, statements::DefineStatement};
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, TransactionType};
+	use crate::sql::statements::DefineStatement;
 	use crate::syn;
+	use crate::val::{Array, RecordId, Value};
 	use reblessive::tree::Stk;
 	use std::collections::HashMap;
 	use std::sync::Arc;
@@ -543,7 +544,7 @@ mod tests {
 		ctx: &Context,
 		hits: Option<HitsIterator>,
 		scr: BM25Scorer,
-		e: Vec<(&Thing, Option<Score>)>,
+		e: Vec<(&RecordId, Option<Score>)>,
 	) {
 		let tx = ctx.tx();
 		if let Some(mut hits) = hits {
@@ -633,9 +634,9 @@ mod tests {
 
 		let btree_order = 5;
 
-		let doc1: Thing = ("t", "doc1").into();
-		let doc2: Thing = ("t", "doc2").into();
-		let doc3: Thing = ("t", "doc3").into();
+		let doc1: RecordId = ("t", "doc1").into();
+		let doc2: RecordId = ("t", "doc2").into();
+		let doc3: RecordId = ("t", "doc3").into();
 
 		stack
 			.enter(|stk| async {
@@ -770,10 +771,10 @@ mod tests {
 			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 			let mut stack = reblessive::TreeStack::new();
 
-			let doc1: Thing = ("t", "doc1").into();
-			let doc2: Thing = ("t", "doc2").into();
-			let doc3: Thing = ("t", "doc3").into();
-			let doc4: Thing = ("t", "doc4").into();
+			let doc1: RecordId = ("t", "doc1").into();
+			let doc2: RecordId = ("t", "doc2").into();
+			let doc3: RecordId = ("t", "doc3").into();
+			let doc4: RecordId = ("t", "doc4").into();
 
 			let btree_order = 5;
 			stack
@@ -897,7 +898,7 @@ mod tests {
 
 	async fn concurrent_task(ds: Arc<Datastore>, az: Arc<DefineAnalyzerStatement>) {
 		let btree_order = 5;
-		let doc1: Thing = ("t", "doc1").into();
+		let doc1: RecordId = ("t", "doc1").into();
 		let content1 = Value::from(Array::from(vec![
 			"Enter a search term",
 			"Welcome",
@@ -959,7 +960,7 @@ mod tests {
 		ds: &Datastore,
 		az: Arc<DefineAnalyzerStatement>,
 		btree_order: u32,
-		rid: &Thing,
+		rid: &RecordId,
 		content: &Value,
 	) {
 		let (ctx, opt, mut fti) = tx_fti(ds, TransactionType::Write, az, btree_order, false).await;
@@ -977,7 +978,7 @@ mod tests {
 			panic!()
 		};
 		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
-		let doc: Thing = ("t", "doc1").into();
+		let doc: RecordId = ("t", "doc1").into();
 		let content = Value::from(Array::from(vec![
 			"Enter a search term",
 			"Welcome",

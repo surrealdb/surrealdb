@@ -1,20 +1,14 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Workable;
+use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
-use crate::expr::paths::ID;
-use crate::expr::paths::IN;
-use crate::expr::paths::OUT;
+use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::permission::Permission;
-use crate::expr::value::Value;
 use crate::iam::Action;
-use anyhow::Result;
-use anyhow::bail;
-use anyhow::ensure;
+use crate::val::Value;
+use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
@@ -42,7 +36,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.kind.to_string(),
+						target_type: tb.table_type.to_string(),
 					}
 				);
 			}
@@ -52,7 +46,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.kind.to_string(),
+						target_type: tb.table_type.to_string(),
 					}
 				);
 			}
@@ -62,7 +56,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: true,
-						target_type: tb.kind.to_string(),
+						target_type: tb.table_type.to_string(),
 					}
 				);
 			}
@@ -73,7 +67,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: true,
-							target_type: tb.kind.to_string(),
+							target_type: tb.table_type.to_string(),
 						}
 					);
 				}
@@ -83,7 +77,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: false,
-							target_type: tb.kind.to_string(),
+							target_type: tb.table_type.to_string(),
 						}
 					);
 				}
@@ -183,7 +177,7 @@ impl Document {
 						// The id field is a match, so don't error
 						Value::Thing(v) if v.eq(&rid) => (),
 						// The id is a match, so don't error
-						v if rid.id.is(&v) => (),
+						v if rid.key.is(&v) => (),
 						// There was no id field specified
 						v if v.is_none() => (),
 						// The id field does not match

@@ -1,5 +1,6 @@
+use crate::sql::changefeed::ChangeFeed;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Ident, Kind, Permissions, Strand, TableType, View, changefeed::ChangeFeed};
+use crate::sql::{Ident, Kind, Permissions, Strand, TableType, View};
 use std::fmt::{self, Display, Write};
 use uuid::Uuid;
 

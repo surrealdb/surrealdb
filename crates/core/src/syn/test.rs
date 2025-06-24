@@ -1,9 +1,8 @@
 use reblessive::Stack;
 
-use super::Parse;
 use super::lexer::Lexer;
-use super::parse;
 use super::parser::Parser;
+use super::{Parse, parse};
 use crate::err::Error;
 use crate::sql::{Ident, Idiom, Param, Script};
 use crate::syn::token::{TokenKind, t};

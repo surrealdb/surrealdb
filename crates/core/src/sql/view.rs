@@ -1,4 +1,5 @@
-use crate::sql::{Cond, Fields, Groups, Table, fmt::Fmt};
+use crate::sql::fmt::Fmt;
+use crate::sql::{Cond, Fields, Groups, Table};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]

@@ -3,21 +3,19 @@ use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::changefeed::ChangeFeed;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::paths::{IN, OUT};
+use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{
-	Base, Ident, Output, Permissions, View, changefeed::ChangeFeed, statements::UpdateStatement,
-};
-use crate::expr::{Idiom, Kind, TableType};
+use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, Permissions, TableType, View};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
-use revision::Error as RevisionError;
-use revision::revisioned;
+use revision::{Error as RevisionError, revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
@@ -143,7 +141,7 @@ impl DefineTableStatement {
 				txn.clear();
 				// Process the view data
 				let stm = UpdateStatement {
-					what: Values(vec![Value::Table(ft.clone())]),
+					what: vec![Expr::Table(ft.clone())],
 					output: Some(Output::None),
 					..UpdateStatement::default()
 				};

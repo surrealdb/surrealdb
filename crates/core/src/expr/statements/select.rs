@@ -2,11 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::FlowResultExt as _;
+use crate::expr::order::{OldOrders, Order, OrderList, Ordering};
 use crate::expr::{
-	Cond, Explain, Expr, Fetchs, Field, Fields, Groups, Idioms, Limit, Splits, Start, Timeout,
-	Version, With,
-	order::{OldOrders, Order, OrderList, Ordering},
+	Cond, Explain, Expr, Fetchs, Field, Fields, FlowResultExt as _, Groups, Idioms, Limit, Splits,
+	Start, Timeout, Version, With,
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;

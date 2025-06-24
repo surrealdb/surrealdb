@@ -2,15 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::expr::Expr;
-use crate::expr::FlowResultExt as _;
-use crate::expr::Literal;
-use crate::expr::part::DestructurePart;
-use crate::expr::part::Next;
-use crate::expr::part::Part;
+use crate::expr::part::{DestructurePart, Next, Part};
+use crate::expr::{Expr, FlowResultExt as _, Literal};
 use crate::val::Value;
-use anyhow::Result;
-use anyhow::ensure;
+use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
 impl Value {

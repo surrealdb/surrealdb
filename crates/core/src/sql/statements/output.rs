@@ -1,4 +1,5 @@
-use crate::sql::{Expr, fetch::Fetchs};
+use crate::sql::Expr;
+use crate::sql::fetch::Fetchs;
 
 use std::fmt;
 

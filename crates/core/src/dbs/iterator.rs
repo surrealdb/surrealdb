@@ -1,13 +1,11 @@
-use crate::ctx::Context;
-use crate::ctx::{Canceller, MutableContext};
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
+use crate::dbs::{Options, Statement};
 use crate::doc::{Document, IgnoreError};
 use crate::err::Error;
-use crate::expr::{Fields, RecordIdKeyLit, RecordIdKeyRangeLit, Table};
+use crate::expr::{Expr, Fields, RecordIdKeyLit, RecordIdKeyRangeLit, Table};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
@@ -78,7 +76,7 @@ pub(crate) enum Operable {
 #[derive(Debug)]
 pub(crate) enum Workable {
 	Normal,
-	Insert(Arc<Value>),
+	Insert(Arc<Expr>),
 	Relate(RecordId, RecordId, Option<Arc<Value>>),
 }
 

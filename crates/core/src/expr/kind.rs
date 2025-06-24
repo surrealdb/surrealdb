@@ -1,12 +1,11 @@
 use super::escape::EscapeKey;
+use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{
-	Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Part, Regex, Strand, Table,
-	Uuid, Value,
-	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
+use crate::expr::{Expr, Ident, Idiom, Literal, Part, Regex, Table, Value};
+use crate::val::{
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
+	Strand, Uuid,
 };
-use crate::sql::{Expr, Literal};
-use crate::val::{Array, Number, Object, Range, RecordId};
 
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;

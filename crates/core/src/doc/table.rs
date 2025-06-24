@@ -1,30 +1,25 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::{Force, Statement};
+use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::data::Data;
-use crate::expr::expression::Expression;
-use crate::expr::field::{Field, Fields};
-use crate::expr::idiom::Idiom;
-use crate::expr::number::Number;
-use crate::expr::operator::Operator;
-use crate::expr::part::Part;
 use crate::expr::paths::ID;
 use crate::expr::statements::delete::DeleteStatement;
 use crate::expr::statements::ifelse::IfelseStatement;
 use crate::expr::statements::upsert::UpsertStatement;
 use crate::expr::statements::{DefineTableStatement, SelectStatement};
-use crate::expr::subquery::Subquery;
-use crate::expr::thing::Thing;
-use crate::expr::value::{Value, Values};
-use crate::expr::{Cond, FlowResultExt as _, Function, Groups, View};
+use crate::expr::{
+	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
+	FunctionCall, Groups, Idiom, Literal, Part, View,
+};
+use crate::val::{Number, RecordId, Value};
 use anyhow::{Result, bail};
 use futures::future::try_join_all;
+use js::prelude::Func;
+use md5::digest::typenum::Exp;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 
-type Ops = Vec<(Idiom, Operator, Value)>;
+type Ops = Vec<(Idiom, BinaryOperator, Expr)>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Action {
@@ -109,6 +104,7 @@ impl Document {
 							// What do we do with the initial value on UPDATE and DELETE?
 							if !targeted_force
 								&& act != Action::Create && cond
+								.0
 								.compute(stk, ctx, opt, Some(&self.initial))
 								.await
 								.catch_return()?
@@ -135,6 +131,7 @@ impl Document {
 							// What do we do with the current value on CREATE and UPDATE?
 							if act != Action::Delete
 								&& cond
+									.0
 									.compute(stk, ctx, opt, Some(&self.current))
 									.await
 									.catch_return()?
@@ -205,15 +202,16 @@ impl Document {
 				// No GROUP BY clause is specified
 				None => {
 					// Set the current record id
-					let rid = Thing {
-						tb: ft.name.to_raw(),
-						id: rid.id.clone(),
+					let rid = RecordId {
+						table: ft.name.to_raw(),
+						key: rid.key.clone(),
 					};
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
 							match cond
+								.0
 								.compute(stk, ctx, opt, Some(&self.current))
 								.await
 								.catch_return()?
@@ -224,7 +222,7 @@ impl Document {
 										// Delete the value in the table
 										Action::Delete => {
 											let stm = DeleteStatement {
-												what: Values(vec![Value::from(rid)]),
+												what: vec![Value::from(rid)],
 												..DeleteStatement::default()
 											};
 											// Execute the statement
@@ -233,7 +231,7 @@ impl Document {
 										// Update the value in the table
 										_ => {
 											let stm = UpsertStatement {
-												what: Values(vec![Value::from(rid)]),
+												what: vec![Value::from(rid)],
 												data: Some(
 													self.full(stk, ctx, opt, &tb.expr).await?,
 												),
@@ -247,7 +245,7 @@ impl Document {
 								_ => {
 									// Delete the value in the table
 									let stm = DeleteStatement {
-										what: Values(vec![Value::from(rid)]),
+										what: vec![Value::from(rid)],
 										..DeleteStatement::default()
 									};
 									// Execute the statement
@@ -262,7 +260,7 @@ impl Document {
 								// Delete the value in the table
 								Action::Delete => {
 									let stm = DeleteStatement {
-										what: Values(vec![Value::from(rid)]),
+										what: vec![Value::from(rid)],
 										..DeleteStatement::default()
 									};
 									// Execute the statement
@@ -271,7 +269,7 @@ impl Document {
 								// Update the value in the table
 								_ => {
 									let stm = UpsertStatement {
-										what: Values(vec![Value::from(rid)]),
+										what: vec![Value::from(rid)],
 										data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
 										..UpsertStatement::default()
 									};
@@ -314,7 +312,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		exp: &Fields,
+		exp: &[Field],
 	) -> Result<Data> {
 		let mut data = exp.compute(stk, ctx, opt, Some(&self.current), false).await?;
 		data.cut(ID.as_ref());
@@ -331,11 +329,11 @@ impl Document {
 		//
 		let (set_ops, del_ops) = self.fields(stk, ctx, opt, &fdc).await?;
 		//
-		let thg = Thing {
-			tb: fdc.ft.name.to_raw(),
-			id: fdc.group_ids.into(),
+		let thg = RecordId {
+			table: fdc.ft.name.to_raw(),
+			key: fdc.group_ids.into(),
 		};
-		let what = Values(vec![Value::from(thg.clone())]);
+		let what = vec![Value::from(thg.clone())];
 		let stm = UpsertStatement {
 			what,
 			data: Some(Data::SetExpression(set_ops)),
@@ -345,25 +343,25 @@ impl Document {
 
 		if !del_ops.is_empty() {
 			let mut iter = del_ops.into_iter();
-			if let Some((i, o, v)) = iter.next() {
-				let mut root = Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(i),
-					o,
-					r: v,
-				}));
+			if let Some((i, op, v)) = iter.next() {
+				let mut root = Expr::Binary {
+					left: Box::new(Expr::Idiom(i)),
+					op,
+					right: Box::new(v),
+				};
 				for (i, o, v) in iter {
-					let exp = Value::Expression(Box::new(Expression::Binary {
-						l: Value::Idiom(i),
-						o,
-						r: v,
-					}));
-					root = Value::Expression(Box::new(Expression::Binary {
-						l: root,
-						o: Operator::Or,
-						r: exp,
-					}));
+					let exp = Expr::Binary {
+						left: Box::new(Expr::Idiom(i)),
+						op,
+						right: Box::new(v),
+					};
+					root = Expr::Binary {
+						left: Box::new(root),
+						op: BinaryOperator::Or,
+						right: Box::new(exp),
+					};
 				}
-				let what = Values(vec![Value::from(thg)]);
+				let what = vec![Value::from(thg)];
 				let stm = DeleteStatement {
 					what,
 					cond: Some(Cond(root)),
@@ -400,14 +398,14 @@ impl Document {
 				}
 				// Process the field projection
 				match expr {
-					Value::Function(f) if f.is_rolling() => match f.name() {
-						Some("count") => {
+					Expr::FunctionCall(f) if f.is_rolling() => match f.receiver {
+						Function::Normal(x) if x == "count" => {
 							let val =
 								f.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						Some(name) if name == "time::min" => {
-							let val = f.args()[0]
+						Function::Normal(name) if name == "time::min" => {
+							let val = f.arguments[0]
 								.compute(stk, ctx, opt, Some(fdc.doc))
 								.await
 								.catch_return()?;
@@ -425,8 +423,8 @@ impl Document {
 							};
 							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some(name) if name == "time::max" => {
-							let val = f.args()[0]
+						Function::Normal(name) if name == "time::max" => {
+							let val = f.arguments[0]
 								.compute(stk, ctx, opt, Some(fdc.doc))
 								.await
 								.catch_return()?;
@@ -444,8 +442,8 @@ impl Document {
 							};
 							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some(name) if name == "math::sum" => {
-							let val = f.args()[0]
+						Function::Normal(name) if name == "math::sum" => {
+							let val = f.arguments[0]
 								.compute(stk, ctx, opt, Some(fdc.doc))
 								.await
 								.catch_return()?;
@@ -463,8 +461,8 @@ impl Document {
 							};
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						Some(name) if name == "math::min" => {
-							let val = f.args()[0]
+						Function::Normal(name) if name == "math::min" => {
+							let val = f.arguments[0]
 								.compute(stk, ctx, opt, Some(fdc.doc))
 								.await
 								.catch_return()?;
@@ -482,8 +480,8 @@ impl Document {
 							};
 							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some(name) if name == "math::max" => {
-							let val = f.args()[0]
+						Function::Normal(name) if name == "math::max" => {
+							let val = f.arguments[0]
 								.compute(stk, ctx, opt, Some(fdc.doc))
 								.await
 								.catch_return()?;
@@ -501,8 +499,8 @@ impl Document {
 							};
 							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some(name) if name == "math::mean" => {
-							let val = f.args()[0]
+						Function::Normal(name) if name == "math::mean" => {
+							let val = f.arguments[0]
 								.compute(stk, ctx, opt, Some(fdc.doc))
 								.await
 								.catch_return()?;
@@ -535,7 +533,7 @@ impl Document {
 
 	/// Set the field in the foreign table
 	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) -> Result<()> {
-		ops.push((key, Operator::Equal, val));
+		ops.push((key, BinaryOperator::Equal, val));
 		// Everything ok
 		Ok(())
 	}
@@ -550,12 +548,12 @@ impl Document {
 	) -> Result<()> {
 		match act {
 			FieldAction::Add => {
-				set_ops.push((key.clone(), Operator::Inc, val));
+				set_ops.push((key.clone(), AssignOperator::Add, val));
 			}
 			FieldAction::Sub => {
-				set_ops.push((key.clone(), Operator::Dec, val));
+				set_ops.push((key.clone(), AssignOperator::Subtract, val));
 				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key, Operator::Equal, Value::from(0)));
+				del_ops.push((key, AssignOperator::Assign, Value::from(0)));
 			}
 		}
 		// Everything ok
@@ -580,39 +578,39 @@ impl Document {
 			FieldAction::Add => {
 				set_ops.push((
 					key.clone(),
-					Operator::Equal,
-					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+					AssignOperator::Assign,
+					Expr::IfElse(IfelseStatement {
 						exprs: vec![(
-							Value::Expression(Box::new(Expression::Binary {
-								l: Value::Expression(Box::new(Expression::Binary {
-									l: Value::Idiom(key.clone()),
-									o: Operator::Exact,
-									r: Value::None,
-								})),
-								o: Operator::Or,
-								r: Value::Expression(Box::new(Expression::Binary {
-									l: Value::Idiom(key.clone()),
-									o: Operator::MoreThan,
-									r: val.clone(),
-								})),
-							})),
+							Box::new(Expr::Binary {
+								left: Box::new(Expr::Binary {
+									left: Box::new(Expr::Idiom(key.clone())),
+									op: BinaryOperator::ExactEqual,
+									right: Box::new(Expr::Literal(Literal::None)),
+								}),
+								op: BinaryOperator::Or,
+								right: Box::new(Expr::Binary {
+									left: Box::new(Expr::Idiom(key.clone())),
+									op: BinaryOperator::MoreThan,
+									right: val.clone(),
+								}),
+							}),
 							val,
 						)],
-						close: Some(Value::Idiom(key)),
-					}))),
+						close: Some(Expr::Idiom(key)),
+					}),
 				));
-				set_ops.push((key_c, Operator::Inc, Value::from(1)))
+				set_ops.push((key_c, AssignOperator::Add, Expr::Literal(Literal::Integer(1))))
 			}
 			FieldAction::Sub => {
 				// If it is equal to the previous MIN value,
 				// as we can't know what was the previous MIN value,
 				// we have to recompute it
 				let subquery = Self::one_group_query(fdc, field, &key, val)?;
-				set_ops.push((key.clone(), Operator::Equal, subquery));
+				set_ops.push((key.clone(), AssignOperator::Assign, subquery));
 				//  Decrement the number of values
-				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				set_ops.push((key_c.clone(), AssignOperator::Subtract, Value::from(1)));
 				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+				del_ops.push((key_c, AssignOperator::Assign, Value::from(0)));
 			}
 		}
 		// Everything ok
@@ -637,39 +635,39 @@ impl Document {
 			FieldAction::Add => {
 				set_ops.push((
 					key.clone(),
-					Operator::Equal,
-					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+					AssignOperator::Assign,
+					Expr::IfElse(Box::new(IfelseStatement {
 						exprs: vec![(
-							Value::Expression(Box::new(Expression::Binary {
-								l: Value::Expression(Box::new(Expression::Binary {
-									l: Value::Idiom(key.clone()),
-									o: Operator::Exact,
-									r: Value::None,
-								})),
-								o: Operator::Or,
-								r: Value::Expression(Box::new(Expression::Binary {
-									l: Value::Idiom(key.clone()),
-									o: Operator::LessThan,
-									r: val.clone(),
-								})),
-							})),
+							Expr::Binary {
+								left: Expr::Binary {
+									left: Box::new(Expr::Idiom(key.clone())),
+									op: BinaryOperator::ExactEqual,
+									right: Box::new(Expr::Literal(Literal::None)),
+								},
+								op: BinaryOperator::Or,
+								right: Expr::Binary {
+									left: Box::new(Expr::Idiom(key.clone())),
+									op: BinaryOperator::LessThan,
+									right: Box::new(val),
+								},
+							},
 							val,
 						)],
-						close: Some(Value::Idiom(key)),
-					}))),
+						close: Some(Expr::Idiom(key)),
+					})),
 				));
-				set_ops.push((key_c, Operator::Inc, Value::from(1)))
+				set_ops.push((key_c, AssignOperator::Add, Value::from(1)))
 			}
 			FieldAction::Sub => {
 				// If it is equal to the previous MAX value,
 				// as we can't know what was the previous MAX value,
 				// we have to recompute the MAX
 				let subquery = Self::one_group_query(fdc, field, &key, val)?;
-				set_ops.push((key.clone(), Operator::Equal, subquery));
+				set_ops.push((key.clone(), AssignOperator::Assign, subquery));
 				//  Decrement the number of values
-				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				set_ops.push((key_c.clone(), AssignOperator::Subtract, Value::from(1)));
 				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+				del_ops.push((key_c, AssignOperator::Assign, Value::from(0)));
 			}
 		}
 		// Everything ok
@@ -692,63 +690,51 @@ impl Document {
 		//
 		set_ops.push((
 			key.clone(),
-			Operator::Equal,
-			Value::Expression(Box::new(Expression::Binary {
-				l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression::Binary {
-						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression::Binary {
-								l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression::Binary {
-										l: Value::Idiom(key),
-										o: Operator::Nco,
-										r: Value::Number(Number::Int(0)),
-									}),
-								)))),
-								o: Operator::Mul,
-								r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression::Binary {
-										l: Value::Idiom(key_c.clone()),
-										o: Operator::Nco,
-										r: Value::Number(Number::Int(0)),
-									}),
-								)))),
-							},
-						))))),
-						o: match act {
-							FieldAction::Sub => Operator::Sub,
-							FieldAction::Add => Operator::Add,
-						},
-						r: val,
+			AssignOperator::Assign,
+			Expr::Binary {
+				left: Box::new(Expr::Binary {
+					left: Box::new(Expr::Binary {
+						left: Box::new(Expr::Binary {
+							left: Expr::Idiom(key),
+							op: BinaryOperator::NullCoalescing,
+							right: Expr::Literal(Literal::Integer(0)),
+						}),
+						op: BinaryOperator::Multiply,
+						right: Box::new(Expr::Binary {
+							left: Expr::Idiom(key_c.clone()),
+							op: BinaryOperator::NullCoalescing,
+							right: Expr::Literal(Literal::Integer(0)),
+						}),
+					}),
+					op: match act {
+						FieldAction::Sub => BinaryOperator::Sub,
+						FieldAction::Add => BinaryOperator::Add,
 					},
-				))))),
-				o: Operator::Div,
-				r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression::Binary {
-						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression::Binary {
-								l: Value::Idiom(key_c.clone()),
-								o: Operator::Nco,
-								r: Value::Number(Number::Int(0)),
-							},
-						))))),
-						o: match act {
-							FieldAction::Sub => Operator::Sub,
-							FieldAction::Add => Operator::Add,
-						},
-						r: Value::from(1),
+					right: val,
+				}),
+				op: BinaryOperator::Divide,
+				right: Box::new(Expr::Binary {
+					left: Box::new(Expr::Binary {
+						left: Box::new(Expr::Idiom(key_c.clone())),
+						op: BinaryOperator::NullCoalescing,
+						right: Expr::Literal(Literal::Integer(0)),
+					}),
+					op: match act {
+						FieldAction::Sub => BinaryOperator::Subtract,
+						FieldAction::Add => BinaryOperator::Add,
 					},
-				))))),
-			})),
+					right: Expr::Literal(Literal::Integer(1)),
+				}),
+			},
 		));
 		match act {
 			//  Increment the number of values
-			FieldAction::Add => set_ops.push((key_c, Operator::Inc, Value::from(1))),
+			FieldAction::Add => set_ops.push((key_c, AssignOperator::Add, Value::from(1))),
 			FieldAction::Sub => {
 				//  Decrement the number of values
-				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				set_ops.push((key_c.clone(), AssignOperator::Subtract, Value::from(1)));
 				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+				del_ops.push((key_c, AssignOperator::Assign, Value::from(0)));
 			}
 		}
 		// Everything ok
@@ -765,46 +751,46 @@ impl Document {
 		// Build the condition merging the optional user provided condition and the group
 		let mut iter = fdc.groups.0.iter().enumerate();
 		let cond = if let Some((i, g)) = iter.next() {
-			let mut root = Value::Expression(Box::new(Expression::Binary {
-				l: Value::Idiom(g.0.clone()),
-				o: Operator::Equal,
-				r: fdc.group_ids[i].clone(),
-			}));
+			let mut root = Expr::Binary {
+				left: Box::new(Expr::Idiom(g.0.clone())),
+				op: BinaryOperator::Equal,
+				right: fdc.group_ids[i].clone(),
+			};
 			for (i, g) in iter {
-				let exp = Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(g.0.clone()),
-					o: Operator::Equal,
-					r: fdc.group_ids[i].clone(),
-				}));
-				root = Value::Expression(Box::new(Expression::Binary {
-					l: root,
-					o: Operator::And,
-					r: exp,
-				}));
+				let exp = Expr::Binary {
+					left: Box::new(Expr::Idiom(g.0.clone())),
+					op: BinaryOperator::Equal,
+					right: fdc.group_ids[i].clone(),
+				};
+				root = Expr::Binary {
+					left: Box::new(root),
+					op: BinaryOperator::And,
+					right: Box::new(exp),
+				};
 			}
 			if let Some(c) = &fdc.view.cond {
-				root = Value::Expression(Box::new(Expression::Binary {
-					l: root,
-					o: Operator::And,
-					r: c.0.clone(),
-				}));
+				root = Expr::Binary {
+					left: Box::new(root),
+					op: BinaryOperator::And,
+					right: Box::new(c.0.clone()),
+				};
 			}
 			Some(Cond(root))
 		} else {
 			fdc.view.cond.clone()
 		};
 
-		let group_select = Value::Subquery(Box::new(Subquery::Select(SelectStatement {
+		let group_select = Expr::Select(SelectStatement {
 			expr: Fields(vec![field.clone()], false),
 			cond,
 			what: (&fdc.view.what).into(),
 			group: Some(fdc.groups.clone()),
 			..SelectStatement::default()
-		})));
-		let array_first = Value::Function(Box::new(Function::Normal(
-			"array::first".to_string(),
-			vec![group_select],
-		)));
+		});
+		let array_first = Expr::FunctionCall(Box::new(FunctionCall {
+			receiver: Function::Normal("array::first".to_string()),
+			arguments: vec![group_select],
+		}));
 		let ident = match field {
 			Field::Single {
 				alias: Some(alias),
@@ -815,17 +801,17 @@ impl Document {
 			},
 			f => fail!("Unexpected field type encountered: {f:?}"),
 		};
-		let compute_query = Value::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
-		Ok(Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+		let compute_query = Expr::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
+		Ok(Expr::IfElse(Box::new(IfelseStatement {
 			exprs: vec![(
-				Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(key.clone()),
-					o: Operator::Equal,
-					r: val.clone(),
-				})),
+				Expr::Binary {
+					left: Box::new(Expr::Idiom(key.clone())),
+					op: BinaryOperator::Equal,
+					right: val.clone(),
+				},
 				compute_query,
 			)],
-			close: Some(Value::Idiom(key.clone())),
-		}))))
+			close: Some(Expr::Idiom(key.clone())),
+		})))
 	}
 }

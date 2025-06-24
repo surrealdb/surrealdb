@@ -1,6 +1,7 @@
+use crate::sql::order::Ordering;
 use crate::sql::{
 	Cond, Explain, Expr, Fetchs, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Version,
-	With, order::Ordering,
+	With,
 };
 use std::fmt;
 

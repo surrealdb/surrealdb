@@ -1,8 +1,8 @@
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::expr::Regex;
-use crate::expr::value::Value;
 use crate::fnc::util::string;
+use crate::val::Value;
 use anyhow::{Result, ensure};
 
 use super::args::{Any, Cast, Optional};
@@ -185,7 +185,7 @@ pub fn words((string,): (String,)) -> Result<Value> {
 pub mod distance {
 
 	use crate::err::Error;
-	use crate::expr::Value;
+	use crate::val::Value;
 	use anyhow::Result;
 
 	use strsim;
@@ -237,7 +237,7 @@ pub mod distance {
 }
 
 pub mod html {
-	use crate::expr::value::Value;
+	use crate::val::Value;
 	use anyhow::Result;
 
 	pub fn encode((arg,): (String,)) -> Result<Value> {
@@ -251,9 +251,8 @@ pub mod html {
 
 pub mod is {
 	use crate::err::Error;
-	use crate::expr::value::Value;
-	use crate::expr::{Datetime, Thing};
 	use crate::fnc::args::Optional;
+	use crate::val::{Datetime, RecordId, Value};
 	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;
 	use regex::Regex;
@@ -340,7 +339,8 @@ pub mod is {
 	}
 
 	pub fn record((arg, Optional(tb)): (String, Optional<Value>)) -> Result<Value> {
-		let res = match Thing::try_from(arg) {
+		// TODO: Fix once implemeted in parser.
+		let res = match RecordId::try_from(arg) {
 			Ok(t) => match tb {
 				Some(Value::Strand(tb)) => t.tb == *tb,
 				Some(Value::Table(tb)) => t.tb == tb.0,
@@ -363,8 +363,8 @@ pub mod is {
 
 pub mod similarity {
 
-	use crate::expr::Value;
 	use crate::fnc::util::string::fuzzy::Fuzzy;
+	use crate::val::Value;
 	use anyhow::Result;
 
 	use strsim;
@@ -522,10 +522,8 @@ pub mod semver {
 #[cfg(test)]
 mod tests {
 	use super::{contains, matches, replace, slice};
-	use crate::{
-		expr::Value,
-		fnc::args::{Cast, Optional},
-	};
+	use crate::expr::Value;
+	use crate::fnc::args::{Cast, Optional};
 
 	#[test]
 	fn string_slice() {

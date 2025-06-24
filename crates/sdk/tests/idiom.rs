@@ -2,7 +2,8 @@ mod helpers;
 mod parse;
 use helpers::Test;
 use surrealdb::Result;
-use surrealdb::{err::Error, syn::error::RenderedError};
+use surrealdb::err::Error;
+use surrealdb::syn::error::RenderedError;
 
 #[tokio::test]
 async fn idiom_chain_part_optional() -> Result<()> {

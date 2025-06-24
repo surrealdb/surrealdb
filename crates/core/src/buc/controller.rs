@@ -1,12 +1,11 @@
-use crate::{
-	ctx::{Context, MutableContext},
-	dbs::Options,
-	doc::CursorDoc,
-	err,
-	expr::{Bytes, File, FlowResultExt, Permission, statements::define::BucketDefinition},
-	iam::Action,
-	val::Value,
-};
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err;
+use crate::expr::statements::define::BucketDefinition;
+use crate::expr::{File, FlowResultExt, Permission};
+use crate::iam::Action;
+use crate::val::{Bytes, Value};
 use anyhow::{Result, bail, ensure};
 use core::fmt;
 use reblessive::tree::Stk;

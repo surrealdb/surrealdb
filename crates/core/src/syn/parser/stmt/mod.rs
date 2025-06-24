@@ -1,30 +1,28 @@
 use reblessive::Stk;
 
 use crate::sql::data::Assignment;
+use crate::sql::statements::access::{
+	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+	AccessStatementShow, Subject,
+};
+use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
-	KillStatement, LiveStatement, OptionStatement, RebuildStatement, SetStatement, ShowStatement,
-	SleepStatement, ThrowStatement,
-	access::{
-		AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-		AccessStatementShow, Subject,
-	},
+	BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
+	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
+	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
+	UseStatement,
 };
 use crate::sql::{AssignOperator, Duration, Expr, Fields, Ident, Param, TopLevelExpr};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
+use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{Glued, TokenKind, t};
-use crate::{
-	sql::statements::{
-		BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
-		ForeachStatement, InfoStatement, OutputStatement, UseStatement, analyze::AnalyzeStatement,
-	},
-	syn::parser::mac::unexpected,
-};
 
-use super::{ParseResult, Parser, mac::expected};
+use super::mac::expected;
+use super::{ParseResult, Parser};
 
 mod alter;
 mod create;

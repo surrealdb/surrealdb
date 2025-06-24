@@ -4,9 +4,8 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::paths::ID;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
-use crate::expr::{Array, FlowResultExt as _, Idiom, Kind, LiteralKind, Part, Table};
+use crate::expr::{FlowResultExt as _, Idiom, Kind, Part, Table, kind::KindLiteral};
+use crate::val::{Array, RecordId, Value};
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
@@ -14,7 +13,7 @@ use super::args::Optional;
 
 pub async fn exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(arg,): (Thing,),
+	(arg,): (RecordId,),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
 		let v = Value::Thing(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()?;
@@ -24,17 +23,17 @@ pub async fn exists(
 	}
 }
 
-pub fn id((arg,): (Thing,)) -> Result<Value> {
+pub fn id((arg,): (RecordId,)) -> Result<Value> {
 	Ok(arg.id.into())
 }
 
-pub fn tb((arg,): (Thing,)) -> Result<Value> {
+pub fn tb((arg,): (RecordId,)) -> Result<Value> {
 	Ok(arg.tb.into())
 }
 
 pub async fn refs(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
-	(id, Optional(ft), Optional(ff)): (Thing, Optional<String>, Optional<String>),
+	(id, Optional(ft), Optional(ff)): (RecordId, Optional<String>, Optional<String>),
 ) -> Result<Value> {
 	ensure!(
 		ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences),

@@ -246,8 +246,9 @@ impl Resolved {
 mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::{DocIds, Resolved};
+	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::*;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
+	use crate::kvs::{Datastore, Transaction, TransactionType};
 
 	const BTREE_ORDER: u32 = 7;
 

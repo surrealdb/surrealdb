@@ -1,3 +1,4 @@
+use crate::sql::Expr;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

@@ -1,14 +1,14 @@
-use std::{mem, num::ParseIntError, str::FromStr};
+use std::mem;
+use std::num::ParseIntError;
+use std::str::FromStr;
 
 use rust_decimal::Decimal;
 
-use crate::syn::lexer::compound::Numeric;
-use crate::syn::{
-	error::{bail, syntax_error},
-	lexer::compound::{self, NumberKind},
-	parser::{GluedValue, ParseResult, Parser, mac::unexpected},
-	token::{self, TokenKind, t},
-};
+use crate::syn::error::{bail, syntax_error};
+use crate::syn::lexer::compound::{self, NumberKind, Numeric};
+use crate::syn::parser::mac::unexpected;
+use crate::syn::parser::{GluedValue, ParseResult, Parser};
+use crate::syn::token::{self, TokenKind, t};
 
 use super::TokenValue;
 

@@ -35,7 +35,6 @@ pub enum Expr {
 		op: BinaryOperator,
 		right: Box<Expr>,
 	},
-	Model(Box<Model>),
 	// TODO: Factor out the call from the function expression.
 	FunctionCall(Box<FunctionCall>),
 	// TODO: Factor out the call from the function expression.
@@ -104,7 +103,6 @@ impl From<Expr> for crate::expr::Expr {
 				op: op.into(),
 				right: right.into(),
 			},
-			Expr::Model(m) => crate::expr::Expr::Model(m.into()),
 			Expr::FunctionCall(f) => crate::expr::Expr::FunctionCall(f.into()),
 			Expr::Closure(s) => crate::expr::Expr::Closure(s.into()),
 			Expr::Break => crate::expr::Expr::Break,
@@ -165,7 +163,6 @@ impl From<crate::expr::Expr> for Expr {
 				op: op.into(),
 				right: right.into(),
 			},
-			crate::expr::Expr::Model(m) => Expr::Model(m.into()),
 			crate::expr::Expr::FunctionCall(f) => Expr::FunctionCall(f.into()),
 			crate::expr::Expr::Closure(s) => Expr::Closure(s.into()),
 			crate::expr::Expr::Break => Expr::Break,

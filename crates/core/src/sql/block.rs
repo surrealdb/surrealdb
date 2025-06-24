@@ -20,11 +20,11 @@ impl From<crate::expr::Block> for Block {
 impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
-		match (self.len(), self.first()) {
+		match (self.0.len(), self.0.first()) {
 			(0, _) => f.write_str("{}"),
-			(1, Some(Entry::Value(v))) => {
+			/*(1, Some(Entry::Value(v))) => {
 				write!(f, "{{ {v} }}")
-			}
+			}*/
 			(l, _) => {
 				f.write_char('{')?;
 				if l > 1 {

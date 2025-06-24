@@ -1,16 +1,38 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
+use crate::err::Error;
+use crate::expr::fmt::Pretty;
+use crate::expr::id::range::RecordIdKeyRangeLit;
+use crate::expr::id::{Gen, RecordIdKeyLit};
+use crate::expr::model::Model;
+use crate::expr::reference::Refs;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{self, FlowResult, Ident, Idiom, Kind, Part, Regex};
+use crate::sql::Table;
+use anyhow::{Result, bail};
+use chrono::{DateTime, Utc};
+use geo::Point;
+use revision::revisioned;
+use rust_decimal::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self, Write};
+use std::ops::{Bound, Deref};
+
 pub mod array;
 pub mod bytes;
 pub mod closure;
 pub mod datetime;
 pub mod duration;
+pub mod file;
 pub mod geometry;
 pub mod number;
 pub mod object;
 pub mod range;
 pub mod strand;
 pub mod thing;
+pub mod uuid;
 pub mod value;
 
 pub use array::Array;
@@ -18,38 +40,15 @@ pub use bytes::Bytes;
 pub use closure::Closure;
 pub use datetime::Datetime;
 pub use duration::Duration;
+pub use file::File;
 pub use geometry::Geometry;
 pub use number::Number;
 pub use object::Object;
 pub use range::Range;
 pub use strand::Strand;
 pub use thing::{RecordId, RecordIdKey, RecordIdKeyRange};
+pub use uuid::Uuid;
 pub use value::{CastError, CoerceError};
-
-use crate::err::Error;
-use crate::expr::id::range::RecordIdKeyRangeLit;
-use crate::expr::reference::Refs;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, FlowResult, Ident, Kind};
-use crate::expr::{
-	File, Idiom, Part, Regex, Uuid,
-	fmt::Pretty,
-	id::{Gen, RecordIdKeyLit},
-	model::Model,
-};
-use crate::sql::Table;
-use anyhow::{Result, bail};
-use chrono::{DateTime, Utc};
-
-use geo::Point;
-use revision::revisioned;
-use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::fmt::{self, Write};
-use std::ops::{Bound, Deref};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 

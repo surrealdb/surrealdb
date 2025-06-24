@@ -4,16 +4,13 @@ use super::GqlError;
 use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
 use super::utils::field_val_erase_owned;
 use crate::dbs::Session;
+use crate::expr::Kind;
 use crate::expr::statements::DefineFunctionStatement;
-use crate::expr::{Kind, Value as SqlValue};
 use crate::gql::schema::kind_to_type;
 use crate::gql::utils::GQLTx;
 use crate::kvs::Datastore;
-use async_graphql::dynamic::FieldFuture;
-use async_graphql::dynamic::InputValue;
-use async_graphql::dynamic::Object;
-use async_graphql::dynamic::Type;
-use async_graphql::dynamic::{Field, FieldValue};
+use crate::val::Value as SqlValue;
+use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, Type};
 
 pub async fn process_fns(
 	fns: Arc<[DefineFunctionStatement]>,

@@ -2,10 +2,12 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::filter::Filter;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Value, filter::Filter, tokenizer::Tokenizer};
+use crate::expr::tokenizer::Tokenizer;
+use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Strand;
+use crate::val::{Array, Strand};
 use anyhow::{Result, bail};
 
 use revision::revisioned;

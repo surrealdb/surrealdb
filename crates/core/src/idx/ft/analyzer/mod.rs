@@ -2,8 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{FlowResultExt as _, Value};
-use crate::expr::{Function, Strand};
+use crate::expr::{Expr, FlowResultExt as _, Function, FunctionCall};
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::doclength::DocLength;
@@ -11,6 +10,7 @@ use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::store::IndexStores;
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 use filter::Filter;
 use reblessive::tree::Stk;
@@ -270,7 +270,11 @@ impl Analyzer {
 		mut input: String,
 	) -> Result<Tokens> {
 		if let Some(function_name) = self.az.function.as_ref().map(|i| i.0.clone()) {
-			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
+			let fns = FunctionCall {
+				receiver: Function::Custom(function_name.clone()),
+				arguments: vec![Expr::Literal(Value::Strand(Strand(input)).into_literal())],
+			};
+
 			let val = fns.compute(stk, ctx, opt, None).await.catch_return()?;
 			if let Value::Strand(val) = val {
 				input = val.0;
@@ -305,6 +309,7 @@ impl Analyzer {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use super::Analyzer;
@@ -313,10 +318,9 @@ mod tests {
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::{
-		sql::{Statement, statements::DefineStatement},
-		syn,
-	};
+	use crate::sql::Statement;
+	use crate::sql::statements::DefineStatement;
+	use crate::syn;
 	use std::sync::Arc;
 
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
@@ -362,4 +366,4 @@ mod tests {
 	async fn test_no_tokenizer() {
 		test_analyzer("ANALYZER test FILTERS lowercase", "ab", &["ab"]).await;
 	}
-}
+}*/

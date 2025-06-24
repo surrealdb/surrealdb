@@ -1,3 +1,4 @@
+use crate::sql::Ident;
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd)]
@@ -37,7 +38,7 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 		.collect::<String>()
 }
 
-impl From<File> for crate::expr::File {
+impl From<File> for crate::val::File {
 	fn from(v: File) -> Self {
 		Self {
 			bucket: v.bucket,
@@ -45,8 +46,8 @@ impl From<File> for crate::expr::File {
 		}
 	}
 }
-impl From<crate::expr::File> for File {
-	fn from(v: crate::expr::File) -> Self {
+impl From<crate::val::File> for File {
+	fn from(v: crate::val::File) -> Self {
 		Self {
 			bucket: v.bucket,
 			key: v.key,

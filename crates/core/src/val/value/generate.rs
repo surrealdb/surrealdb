@@ -1,8 +1,7 @@
 use crate::err::Error;
 use crate::expr::id::RecordIdKeyLit;
 use crate::expr::table::Table;
-use crate::val::RecordId;
-use crate::val::Value;
+use crate::val::{RecordId, RecordIdKey, Value};
 use anyhow::Result;
 
 impl Value {
@@ -41,7 +40,7 @@ impl Value {
 			// There is no record id field
 			Value::None => Ok(RecordId {
 				table: tb.0.to_string(),
-				key: RecordIdKeyLit::rand(),
+				key: RecordIdKey::rand(),
 			}),
 			// There is a record id defined
 			Value::Thing(id) => {

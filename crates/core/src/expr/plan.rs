@@ -2,16 +2,14 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::rebuild::RebuildStatement;
-use crate::expr::{
-	Expr, Value,
-	statements::{InfoStatement, KillStatement, LiveStatement, OptionStatement, UseStatement},
+use crate::expr::statements::{
+	InfoStatement, KillStatement, LiveStatement, OptionStatement, UseStatement,
 };
+use crate::expr::{Expr, Value};
 
 use reblessive::tree::Stk;
-use std::{
-	fmt::{self, Display, Formatter, Write},
-	ops::Deref,
-};
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::Deref;
 
 use super::{ControlFlow, FlowResult};
 

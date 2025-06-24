@@ -1,35 +1,35 @@
 // Specify the imports
-use crate::expr::value::Value;
-use js::{Ctx, Object, Result, prelude::Rest};
+use js::prelude::Rest;
+use js::{Coerced, Ctx, Object, Result};
 /// Log the input values as INFO
 #[js::function]
-pub fn log(args: Rest<Value>) {
-	info!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn log(args: Rest<Coerced<String>>) {
+	info!("{}", args.0.join(" "));
 }
 /// Log the input values as INFO
 #[js::function]
-pub fn info(args: Rest<Value>) {
-	info!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn info(args: Rest<Coerced<String>>) {
+	info!("{}", args.0.join(" "));
 }
 /// Log the input values as WARN
 #[js::function]
-pub fn warn(args: Rest<Value>) {
-	warn!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn warn(args: Rest<Coerced<String>>) {
+	warn!("{}", args.0.join(" "));
 }
 /// Log the input values as ERROR
 #[js::function]
-pub fn error(args: Rest<Value>) {
-	error!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn error(args: Rest<Coerced<String>>) {
+	error!("{}", args.0.join(" "));
 }
 /// Log the input values as DEBUG
 #[js::function]
-pub fn debug(args: Rest<Value>) {
-	debug!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn debug(args: Rest<Coerced<String>>) {
+	debug!("{}", args.0.join(" "));
 }
 /// Log the input values as TRACE
 #[js::function]
-pub fn trace(args: Rest<Value>) {
-	trace!("{}", args.iter().map(|v| v.to_raw_string()).collect::<Vec<String>>().join(" "));
+pub fn trace(args: Rest<Coerced<String>>) {
+	trace!("{}", args.0.join(" "));
 }
 
 pub fn console<'js>(ctx: &Ctx<'js>) -> Result<Object<'js>> {

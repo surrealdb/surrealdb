@@ -1,5 +1,4 @@
-use crate::expr::part::Next;
-use crate::expr::part::Part;
+use crate::expr::part::{Next, Part};
 use crate::val::Value;
 
 impl Value {

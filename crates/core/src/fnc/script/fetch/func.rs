@@ -1,20 +1,16 @@
 //! Contains the actual fetch function.
 
-use crate::fnc::script::{
-	fetch::{
-		RequestError,
-		body::{Body, BodyData, BodyKind},
-		classes::{self, Request, RequestInit, Response, ResponseInit, ResponseType},
-	},
-	modules::surrealdb::query::QueryContext,
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::body::{Body, BodyData, BodyKind};
+use crate::fnc::script::fetch::classes::{
+	self, Request, RequestInit, Response, ResponseInit, ResponseType,
 };
+use crate::fnc::script::modules::surrealdb::query::QueryContext;
 use futures::TryStreamExt;
-use js::{Class, Ctx, Exception, Result, Value, function::Opt};
-use reqwest::{
-	Body as ReqBody,
-	header::{CONTENT_TYPE, HeaderValue},
-	redirect,
-};
+use js::function::Opt;
+use js::{Class, Ctx, Exception, Result, Value};
+use reqwest::header::{CONTENT_TYPE, HeaderValue};
+use reqwest::{Body as ReqBody, redirect};
 use std::sync::Arc;
 
 use super::classes::Headers;

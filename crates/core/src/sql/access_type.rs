@@ -1,7 +1,8 @@
 use crate::err::Error;
 use crate::sql::statements::DefineAccessStatement;
 
-use crate::sql::{Algorithm, escape::QuoteStr};
+use crate::sql::Algorithm;
+use crate::sql::escape::QuoteStr;
 use anyhow::Result;
 use std::fmt;
 use std::fmt::Display;

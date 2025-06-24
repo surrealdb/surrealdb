@@ -54,14 +54,11 @@
 //! we encountered a leading token of a compound token it will result in the 'default' compound token.
 
 use self::token_buffer::TokenBuffer;
-use crate::{
-	sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid},
-	syn::{
-		error::{SyntaxError, bail},
-		lexer::{Lexer, compound::NumberKind},
-		token::{Span, Token, TokenKind, t},
-	},
-};
+use crate::sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid};
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::lexer::Lexer;
+use crate::syn::lexer::compound::NumberKind;
+use crate::syn::token::{Span, Token, TokenKind, t};
 use bytes::BytesMut;
 use reblessive::{Stack, Stk};
 
@@ -386,7 +383,9 @@ impl<'a> Parser<'a> {
 	/// This is the primary entry point of the parser.
 	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<sql::Ast> {
 		let statements = self.parse_stmt_list(ctx).await?;
-		Ok(sql::Query(statements))
+		Ok(sql::Ast {
+			statements,
+		})
 	}
 
 	/// Parse a single statement.

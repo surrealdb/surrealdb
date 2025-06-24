@@ -1,4 +1,5 @@
-use crate::expr::{escape::EscapeRid, id::RecordIdKeyLit};
+use crate::expr::escape::EscapeRid;
+use crate::expr::id::RecordIdKeyLit;
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]

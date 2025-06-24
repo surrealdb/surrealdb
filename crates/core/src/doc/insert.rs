@@ -1,11 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err;
 use crate::err::Error;
 use crate::expr::statements::InsertStatement;
-use crate::expr::value::Value;
+use crate::val::Value;
 use anyhow::Result;
 use reblessive::tree::Stk;
 

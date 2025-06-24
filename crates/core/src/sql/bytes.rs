@@ -1,10 +1,7 @@
 use hex;
 use revision::revisioned;
-use serde::de::SeqAccess;
-use serde::{
-	Deserialize, Serialize,
-	de::{self, Visitor},
-};
+use serde::de::{self, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
@@ -12,14 +9,14 @@ use std::ops::Deref;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Bytes(pub(crate) Vec<u8>);
 
-impl From<Bytes> for crate::expr::Bytes {
+impl From<Bytes> for crate::val::Bytes {
 	fn from(v: Bytes) -> Self {
-		crate::expr::Bytes(v.0)
+		crate::val::Bytes(v.0)
 	}
 }
 
-impl From<crate::expr::Bytes> for Bytes {
-	fn from(v: crate::expr::Bytes) -> Self {
+impl From<crate::val::Bytes> for Bytes {
+	fn from(v: crate::val::Bytes) -> Self {
 		Bytes(v.0)
 	}
 }

@@ -2,8 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::FlowResultExt as _;
 use crate::expr::part::Part;
-use crate::val::Number;
-use crate::val::Value;
+use crate::val::{Number, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 

@@ -1,20 +1,16 @@
 use crate::err::Error;
 use crate::expr::Expr;
+use crate::expr::escape::EscapeKey;
+use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
-use crate::expr::{
-	escape::EscapeKey,
-	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
-};
 use crate::val::{RecordId, Value};
 use anyhow::Result;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 
 use super::FlowResult;
 
@@ -301,12 +297,11 @@ impl Display for Object {
 }
 
 mod no_nul_bytes_in_keys {
-	use serde::{
-		Deserializer, Serializer,
-		de::{self, Visitor},
-		ser::SerializeMap,
-	};
-	use std::{collections::BTreeMap, fmt};
+	use serde::de::{self, Visitor};
+	use serde::ser::SerializeMap;
+	use serde::{Deserializer, Serializer};
+	use std::collections::BTreeMap;
+	use std::fmt;
 
 	use crate::val::Value;
 

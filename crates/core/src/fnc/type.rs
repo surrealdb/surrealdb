@@ -4,14 +4,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::table::Table;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
-use crate::expr::{
-	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Idiom, Kind, Number,
-	Range, Strand, Uuid,
-};
+use crate::expr::{FlowResultExt as _, Idiom, Kind, Table};
 use crate::syn;
+use crate::val::{
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, Strand, Uuid, Value,
+};
 use anyhow::{Result, bail, ensure};
 use geo::Point;
 use reblessive::tree::Stk;
@@ -152,9 +149,9 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 		}),
 
 		// Handle second argument
-		(arg1, Some(arg2)) => Ok(Value::Thing(Thing {
-			id: match arg2 {
-				Value::Thing(v) => v.id,
+		(arg1, Some(arg2)) => Ok(Value::Thing(RecordId {
+			key: match arg2 {
+				Value::Thing(v) => v.key,
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
 				Value::Number(v) => v.into(),
@@ -171,11 +168,11 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 					s.into()
 				}
 			},
-			tb: arg1.as_string(),
+			table: arg1.as_string(),
 		})),
 
 		(arg1, None) => arg1
-			.cast_to::<Thing>()
+			.cast_to::<RecordId>()
 			.map(Value::from)
 			.map_err(Error::from)
 			.map_err(anyhow::Error::new),
@@ -187,10 +184,9 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 }
 
 pub mod is {
-	use crate::expr::Geometry;
 	use crate::expr::table::Table;
-	use crate::expr::value::Value;
 	use crate::fnc::args::Optional;
+	use crate::val::{Geometry, Value};
 	use anyhow::Result;
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
@@ -296,8 +292,8 @@ pub mod is {
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;
-	use crate::expr::value::Value;
 	use crate::fnc::args::Optional;
+	use crate::val::Value;
 
 	#[test]
 	fn is_array() {

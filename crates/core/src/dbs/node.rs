@@ -1,7 +1,6 @@
-use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
-use revision::Error;
-use revision::revisioned;
+use crate::val::Value;
+use revision::{Error, revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::ops::{Add, Sub};

@@ -1,8 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, FlowResultExt as _, Idiom, Part, fmt::Fmt};
+use crate::expr::{Expr, FlowResultExt as _, Idiom, Part};
 use crate::syn;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -14,6 +15,7 @@ use std::ops::Deref;
 
 use super::paths::ID;
 
+/// TODO: Convert this to a struct and document what the boolean does.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

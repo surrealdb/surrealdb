@@ -1,21 +1,14 @@
 use crate::dbs::node::Node;
 use crate::expr::Value;
-use crate::expr::statements::AccessGrant;
-use crate::expr::statements::DefineAccessStatement;
-use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::statements::DefineDatabaseStatement;
-use crate::expr::statements::DefineEventStatement;
-use crate::expr::statements::DefineFieldStatement;
-use crate::expr::statements::DefineFunctionStatement;
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::statements::DefineModelStatement;
-use crate::expr::statements::DefineNamespaceStatement;
-use crate::expr::statements::DefineParamStatement;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::statements::DefineUserStatement;
-use crate::expr::statements::LiveStatement;
-use crate::expr::statements::define::DefineConfigStatement;
-use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
+use crate::expr::statements::define::{
+	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
+};
+use crate::expr::statements::{
+	AccessGrant, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineTableStatement,
+	DefineUserStatement, LiveStatement,
+};
 use anyhow::Result;
 use std::any::Any;
 use std::sync::Arc;

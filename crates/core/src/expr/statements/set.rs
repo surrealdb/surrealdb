@@ -1,9 +1,9 @@
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{ControlFlow, Expr, FlowResult, Value};
-use crate::{cnf::PROTECTED_PARAM_NAMES, expr::Kind};
+use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

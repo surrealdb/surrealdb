@@ -3,8 +3,7 @@ use crate::val::{Duration, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::str;
-use std::time;
+use std::{str, time};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

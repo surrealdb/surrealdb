@@ -1,11 +1,8 @@
-use crate::api::Endpoint;
-use crate::api::Result;
-use crate::api::engine::remote::ws::Client;
-use crate::api::engine::remote::ws::Ws;
-use crate::api::engine::remote::ws::Wss;
+use crate::api::engine::remote::ws::{Client, Ws, Wss};
 use crate::api::err::Error;
 use crate::api::opt::IntoEndpoint;
 use crate::api::opt::endpoint::into_endpoint;
+use crate::api::{Endpoint, Result};
 use crate::opt::Config;
 use std::net::SocketAddr;
 use url::Url;

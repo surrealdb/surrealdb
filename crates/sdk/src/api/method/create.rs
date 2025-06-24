@@ -1,12 +1,10 @@
 use super::transaction::WithTransaction;
-use crate::Surreal;
-use crate::Value;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
+use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
+use crate::{Surreal, Value};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
@@ -15,8 +13,7 @@ use std::marker::PhantomData;
 use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
 use uuid::Uuid;
 
-use super::Content;
-use super::validate_data;
+use super::{Content, validate_data};
 
 /// A record create future
 #[derive(Debug)]

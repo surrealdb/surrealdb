@@ -1,17 +1,15 @@
 use crate::err::Error;
-use crate::expr::strand::Strand;
 use crate::fnc::util::math::ToFloat;
+use crate::val::{Strand, TryAdd, TryDiv, TryMul, TryPow, TryRem, TrySub};
 use anyhow::{Result, bail};
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::f64::consts::PI;
-use std::fmt::Debug;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash;
-use std::iter::Product;
-use std::iter::Sum;
+use std::iter::{Product, Sum};
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
@@ -1021,9 +1019,8 @@ impl ToFloat for Number {
 mod tests {
 	use std::cmp::Ordering;
 
-	use rand::Rng;
 	use rand::seq::SliceRandom;
-	use rand::thread_rng;
+	use rand::{Rng, thread_rng};
 	use rust_decimal::Decimal;
 
 	use super::*;

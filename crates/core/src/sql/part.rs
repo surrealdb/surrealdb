@@ -1,4 +1,5 @@
-use crate::sql::{Expr, Graph, Ident, Idiom, fmt::Fmt};
+use crate::sql::fmt::Fmt;
+use crate::sql::{Expr, Graph, Ident, Idiom};
 use std::fmt;
 use std::fmt::Write;
 
@@ -62,13 +63,12 @@ impl From<crate::expr::Part> for Part {
 			crate::expr::Part::Last => Self::Last,
 			crate::expr::Part::First => Self::First,
 			crate::expr::Part::Field(ident) => Self::Field(ident.into()),
-			crate::expr::Part::Index(number) => Self::Index(number.into()),
 			crate::expr::Part::Where(value) => Self::Where(value.into()),
 			crate::expr::Part::Graph(graph) => Self::Graph(graph.into()),
 			crate::expr::Part::Value(value) => Self::Value(value.into()),
 			crate::expr::Part::Start(value) => Self::Start(value.into()),
 			crate::expr::Part::Method(method, values) => {
-				Self::Method(method, values.into_iter().map(Into::<SqlValue>::into).collect())
+				Self::Method(method, values.into_iter().map(Into::into).collect())
 			}
 			crate::expr::Part::Destructure(parts) => {
 				Self::Destructure(parts.into_iter().map(Into::<DestructurePart>::into).collect())

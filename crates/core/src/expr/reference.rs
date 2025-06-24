@@ -1,17 +1,18 @@
 use crate::expr::Expr;
+use crate::val::RecordId;
 use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::{
-	ctx::Context,
-	dbs::{Options, capabilities::ExperimentalTarget},
-	doc::CursorDoc,
-	err::Error,
-};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
+use crate::doc::CursorDoc;
+use crate::err::Error;
 
-use super::{Idiom, Table, Value, statements::info::InfoStructure};
+use super::statements::info::InfoStructure;
+use super::{Idiom, Table, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -99,7 +100,7 @@ impl Refs {
 					},
 				};
 
-				let mut ids: Vec<Thing> = Vec::new();
+				let mut ids: Vec<RecordId> = Vec::new();
 
 				// Map over all input pairs
 				for (ft, ff) in self.0.iter() {

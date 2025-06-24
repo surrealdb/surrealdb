@@ -1,7 +1,5 @@
-use js::{
-	Result,
-	module::{Declarations, Exports, ModuleDef},
-};
+use js::Result;
+use js::module::{Declarations, Exports, ModuleDef};
 
 /// Get the target system architecture
 #[js::function]

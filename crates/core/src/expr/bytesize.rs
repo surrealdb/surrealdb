@@ -1,17 +1,13 @@
 use crate::err::Error;
-use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
+use crate::val::{TryAdd, TrySub};
 use anyhow::{Result, bail, ensure};
 use num_traits::CheckedAdd;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::iter::{Peekable, Sum};
-use std::ops;
 use std::str::{Chars, FromStr};
-
-use super::Strand;
-use super::value::{TryAdd, TrySub};
+use std::{fmt, ops};
 
 #[revisioned(revision = 1)]
 #[derive(

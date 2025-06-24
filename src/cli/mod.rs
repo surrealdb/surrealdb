@@ -17,8 +17,7 @@ pub(crate) mod validator;
 mod version;
 mod version_client;
 
-use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::cli::validator::parser::env_filter::CustomEnvFilterParser;
+use crate::cli::validator::parser::env_filter::{CustomEnvFilter, CustomEnvFilterParser};
 use crate::cli::version_client::VersionClient;
 #[cfg(debug_assertions)]
 use crate::cnf::DEBUG_BUILD_WARNING;

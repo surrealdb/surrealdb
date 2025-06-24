@@ -2,13 +2,10 @@ use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 use quick_cache::sync::{Cache, GuardResult};
 use regex::RegexBuilder;
 use revision::revisioned;
-use serde::{
-	Deserialize, Deserializer, Serialize, Serializer,
-	de::{self, Visitor},
-};
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
-use std::fmt::Debug;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str;
 use std::str::FromStr;

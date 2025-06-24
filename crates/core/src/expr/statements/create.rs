@@ -61,7 +61,7 @@ impl CreateStatement {
 		let mut planner = QueryPlanner::new();
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the create targets
-		for w in self.what.0.iter() {
+		for w in self.what.iter() {
 			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
 			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| {
 				// double match to avoid allocation

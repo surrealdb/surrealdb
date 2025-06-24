@@ -1,11 +1,7 @@
-use crate::{
-	sql::File,
-	syn::{
-		error::{SyntaxError, bail},
-		lexer::Lexer,
-		token::{Token, t},
-	},
-};
+use crate::sql::File;
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, t};
 
 use std::mem;
 

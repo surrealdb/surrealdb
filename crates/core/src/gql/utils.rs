@@ -1,23 +1,19 @@
 use std::sync::Arc;
 
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Session;
+use crate::dbs::{Options, Session};
 use crate::err::Error;
 use crate::expr;
-use crate::expr::FlowResultExt;
-use crate::expr::Function;
-use crate::expr::LogicalPlan;
 use crate::expr::part::Part;
-use crate::expr::{Thing, Value as SqlValue};
+use crate::expr::{FlowResultExt, Function, LogicalPlan};
 use crate::iam::Error as IamError;
-use crate::kvs::Datastore;
-use crate::kvs::LockType;
-use crate::kvs::TransactionType;
+use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::val::{RecordId, Value as SqlValue};
 use anyhow::Result;
 
 use async_graphql::dynamic::FieldValue;
-use async_graphql::{Name, Value as GqlValue, dynamic::indexmap::IndexMap};
+use async_graphql::dynamic::indexmap::IndexMap;
+use async_graphql::{Name, Value as GqlValue};
 use reblessive::TreeStack;
 
 use super::error::GqlError;
@@ -94,7 +90,7 @@ impl GQLTx {
 
 	pub async fn get_record_field(
 		&self,
-		rid: Thing,
+		rid: RecordId,
 		field: impl Into<Part>,
 	) -> Result<SqlValue, GqlError> {
 		let mut stack = TreeStack::new();
@@ -135,7 +131,7 @@ impl GQLTx {
 	}
 }
 
-pub type ErasedRecord = (GQLTx, Thing);
+pub type ErasedRecord = (GQLTx, RecordId);
 
 pub fn field_val_erase_owned(val: ErasedRecord) -> FieldValue<'static> {
 	FieldValue::owned_any(val)

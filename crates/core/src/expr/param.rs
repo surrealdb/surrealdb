@@ -1,16 +1,16 @@
-use crate::{
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	expr::{Permission, ident::Ident},
-	iam::Action,
-};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::Permission;
+use crate::expr::ident::Ident;
+use crate::iam::Action;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::{fmt, ops::Deref, str};
+use std::ops::Deref;
+use std::{fmt, str};
 
 use super::FlowResultExt as _;
 

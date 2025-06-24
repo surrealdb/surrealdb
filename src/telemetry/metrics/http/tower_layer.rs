@@ -1,14 +1,13 @@
 use crate::cnf::TELEMETRY_NAMESPACE;
 use axum::extract::MatchedPath;
-use opentelemetry::{KeyValue, metrics::MetricsError};
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::MetricsError;
 use pin_project_lite::pin_project;
-use std::{
-	cell::Cell,
-	fmt,
-	pin::Pin,
-	task::{Context, Poll},
-	time::{Duration, Instant},
-};
+use std::cell::Cell;
+use std::fmt;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 use futures::Future;
 use http::{Request, Response, StatusCode, Version};

@@ -1,8 +1,10 @@
-use crate::sql::{Expr, Uuid, escape::EscapeRid, literal::ObjectEntry};
+use crate::sql::escape::EscapeRid;
+use crate::sql::literal::ObjectEntry;
+use crate::sql::{Expr, Uuid};
 use std::fmt::{self, Display, Formatter};
 
 pub mod range;
-pub use range::IdRange;
+pub use range::RecordIdKeyRangeLit;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -21,7 +23,35 @@ pub enum RecordIdKeyLit {
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
 	Generate(Gen),
-	Range(Box<IdRange>),
+	Range(Box<RecordIdKeyRangeLit>),
+}
+
+impl From<RecordIdKeyLit> for crate::expr::RecordIdKeyLit {
+	fn from(value: RecordIdKeyLit) -> Self {
+		match value {
+			RecordIdKeyLit::Number(x) => crate::expr::RecordIdKeyLit::Number(x),
+			RecordIdKeyLit::String(x) => crate::expr::RecordIdKeyLit::String(x),
+			RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(x),
+			RecordIdKeyLit::Array(x) => crate::expr::RecordIdKeyLit::Array(x),
+			RecordIdKeyLit::Object(x) => crate::expr::RecordIdKeyLit::Object(x),
+			RecordIdKeyLit::Generate(x) => crate::expr::RecordIdKeyLit::Generate(x),
+			RecordIdKeyLit::Range(x) => crate::expr::RecordIdKeyLit::Range(x.into()),
+		}
+	}
+}
+
+impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
+	fn from(value: RecordIdKeyLit) -> Self {
+		match value {
+			crate::expr::RecordIdKeyLit::Number(x) => RecordIdKeyLit::Number(x),
+			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x),
+			crate::expr::RecordIdKeyLit::Uuid(uuid) => RecordIdKeyLit::Uuid(uuid),
+			crate::expr::RecordIdKeyLit::Array(exprs) => RecordIdKeyLit::Array(exprs),
+			crate::expr::RecordIdKeyLit::Object(items) => RecordIdKeyLit::Object(items),
+			crate::expr::RecordIdKeyLit::Generate(x) => RecordIdKeyLit::Generate(x),
+			crate::expr::RecordIdKeyLit::Range(x) => RecordIdKeyLit::Range(x.into()),
+		}
+	}
 }
 
 impl Display for RecordIdKeyLit {

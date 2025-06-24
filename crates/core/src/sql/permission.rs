@@ -1,10 +1,7 @@
 use crate::sql::Expr;
-use crate::sql::fmt::is_pretty;
-use crate::sql::fmt::pretty_indent;
-use crate::sql::fmt::pretty_sequence_item;
+use crate::sql::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
 
-use std::fmt::Write;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]

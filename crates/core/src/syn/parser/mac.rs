@@ -162,12 +162,10 @@ macro_rules! enter_query_recursion {
 	}};
 }
 
-pub(crate) use enter_object_recursion;
-pub(crate) use enter_query_recursion;
-pub(crate) use expected;
-pub(crate) use expected_whitespace;
-pub(crate) use pop_glued;
-pub(crate) use unexpected;
+pub(crate) use {
+	enter_object_recursion, enter_query_recursion, expected, expected_whitespace, pop_glued,
+	unexpected,
+};
 
 #[cfg(test)]
 pub(crate) use test_parse;

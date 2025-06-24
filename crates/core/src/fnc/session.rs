@@ -1,13 +1,6 @@
 use crate::ctx::Context;
-use crate::expr::paths::AC;
-use crate::expr::paths::DB;
-use crate::expr::paths::ID;
-use crate::expr::paths::IP;
-use crate::expr::paths::NS;
-use crate::expr::paths::OR;
-use crate::expr::paths::RD;
-use crate::expr::paths::TK;
-use crate::expr::value::Value;
+use crate::expr::paths::{AC, DB, ID, IP, NS, OR, RD, TK};
+use crate::val::Value;
 use anyhow::Result;
 
 pub fn ac(ctx: &Context, _: ()) -> Result<Value> {

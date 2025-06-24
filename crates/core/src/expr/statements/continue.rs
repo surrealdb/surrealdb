@@ -1,7 +1,7 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{ControlFlow, Value};
-use crate::{ctx::Context, expr::FlowResult};
+use crate::expr::{ControlFlow, FlowResult, Value};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

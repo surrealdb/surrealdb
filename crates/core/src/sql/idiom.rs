@@ -1,7 +1,5 @@
-use crate::sql::{
-	Part,
-	fmt::{Fmt, fmt_separated_by},
-};
+use crate::sql::Part;
+use crate::sql::fmt::{Fmt, fmt_separated_by};
 use revision::revisioned;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;

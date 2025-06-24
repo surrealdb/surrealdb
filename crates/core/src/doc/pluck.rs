@@ -1,6 +1,5 @@
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::dbs::Statement;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::expr::FlowResultExt as _;
@@ -8,8 +7,8 @@ use crate::expr::idiom::Idiom;
 use crate::expr::output::Output;
 use crate::expr::paths::META;
 use crate::expr::permission::Permission;
-use crate::expr::value::Value;
 use crate::iam::Action;
+use crate::val::Value;
 use reblessive::tree::Stk;
 use std::sync::Arc;
 

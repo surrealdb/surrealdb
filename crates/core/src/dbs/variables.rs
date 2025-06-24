@@ -1,7 +1,7 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::MutableContext;
 use crate::err::Error;
-use crate::expr::value::Value;
+use crate::val::Value;
 use anyhow::Result;
 use std::collections::BTreeMap;
 

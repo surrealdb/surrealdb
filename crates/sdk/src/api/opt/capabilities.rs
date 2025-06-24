@@ -1,6 +1,7 @@
 //! The capabilities that can be enabled for a database instance
 
-use std::{collections::HashSet, mem};
+use std::collections::HashSet;
+use std::mem;
 
 use surrealdb_core::dbs::capabilities::{
 	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,

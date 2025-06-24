@@ -2,8 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{ControlFlow, Expr, FlowResult};
-use crate::val::Value;
+use crate::expr::{ControlFlow, Expr, FlowResult, Permission};
+use crate::iam::Action;
+use crate::val::{Value, value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -49,7 +50,7 @@ impl fmt::Display for Model {
 }
 
 impl Model {
-	//#[cfg(feature = "ml")]
+	#[cfg(feature = "ml")]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -58,7 +59,8 @@ impl Model {
 		doc: Option<&CursorDoc>,
 		args: &[Expr],
 	) -> FlowResult<Value> {
-		use crate::expr::{FlowResultExt, value::CoerceError};
+		use crate::expr::FlowResultExt;
+		use crate::val::CoerceError;
 
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -222,6 +224,7 @@ impl Model {
 		_ctx: &Context,
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
+		_args: &[Expr],
 	) -> FlowResult<Value> {
 		Err(ControlFlow::from(anyhow::Error::new(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),

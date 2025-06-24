@@ -3,9 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::access_type::BearerAccessSubject;
-use crate::expr::{AccessType, Base, Cond, FlowResultExt as _, Ident, Uuid, Value};
+use crate::expr::{AccessType, Base, Cond, FlowResultExt as _, Ident, RecordIdLit};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Datetime, Duration};
+use crate::val::{Datetime, Duration, Uuid, Value};
 use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;
@@ -182,7 +182,7 @@ impl From<AccessGrant> for Object {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Subject {
-	Record(Thing),
+	Record(RecordIdLit),
 	User(Ident),
 }
 

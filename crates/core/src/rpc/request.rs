@@ -1,11 +1,8 @@
 use uuid::Uuid;
 
-use crate::rpc::Method;
-use crate::rpc::RpcError;
 use crate::rpc::format::cbor::Cbor;
-use crate::sql::Array;
-use crate::sql::Number;
-use crate::sql::SqlValue;
+use crate::rpc::{Method, RpcError};
+use crate::val::{Array, Number, Value};
 
 pub static ID: &str = "id";
 pub static METHOD: &str = "method";
@@ -15,7 +12,7 @@ pub static TXN: &str = "txn";
 
 #[derive(Debug)]
 pub struct Request {
-	pub id: Option<SqlValue>,
+	pub id: Option<Value>,
 	pub version: Option<u8>,
 	pub txn: Option<Uuid>,
 	pub method: Method,
@@ -25,13 +22,13 @@ pub struct Request {
 impl TryFrom<Cbor> for Request {
 	type Error = RpcError;
 	fn try_from(val: Cbor) -> Result<Self, RpcError> {
-		SqlValue::try_from(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
+		Value::try_from(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
 	}
 }
 
-impl TryFrom<SqlValue> for Request {
+impl TryFrom<Value> for Request {
 	type Error = RpcError;
-	fn try_from(val: SqlValue) -> Result<Self, RpcError> {
+	fn try_from(val: Value) -> Result<Self, RpcError> {
 		// Fetch the 'id' argument
 		let id = match val.get_field_value("id") {
 			v if v.is_none() => None,
@@ -47,7 +44,7 @@ impl TryFrom<SqlValue> for Request {
 		let version = match val.get_field_value(VERSION) {
 			v if v.is_none() => None,
 			v if v.is_null() => None,
-			SqlValue::Number(v) => match v {
+			Value::Number(v) => match v {
 				Number::Int(1) => Some(1),
 				Number::Int(2) => Some(2),
 				_ => return Err(RpcError::InvalidRequest),
@@ -56,22 +53,20 @@ impl TryFrom<SqlValue> for Request {
 		};
 		// Fetch the 'txn' argument
 		let txn = match val.get_field_value(TXN) {
-			SqlValue::None => None,
-			SqlValue::Null => None,
-			SqlValue::Uuid(x) => Some(x.0),
-			SqlValue::Strand(x) => {
-				Some(Uuid::try_parse(&x.0).map_err(|_| RpcError::InvalidRequest)?)
-			}
+			Value::None => None,
+			Value::Null => None,
+			Value::Uuid(x) => Some(x.0),
+			Value::Strand(x) => Some(Uuid::try_parse(&x.0).map_err(|_| RpcError::InvalidRequest)?),
 			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'method' argument
 		let method = match val.get_field_value(METHOD) {
-			SqlValue::Strand(v) => v.to_raw(),
+			Value::Strand(v) => v.to_raw(),
 			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'params' argument
 		let params = match val.get_field_value(PARAMS) {
-			SqlValue::Array(v) => v,
+			Value::Array(v) => v,
 			_ => Array::new(),
 		};
 		// Parse the specified method

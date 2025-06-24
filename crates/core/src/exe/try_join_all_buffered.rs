@@ -1,6 +1,6 @@
-use futures::{
-	TryFuture, TryFutureExt, TryStream, future::IntoFuture, ready, stream::FuturesOrdered,
-};
+use futures::future::IntoFuture;
+use futures::stream::FuturesOrdered;
+use futures::{TryFuture, TryFutureExt, TryStream, ready};
 use pin_project_lite::pin_project;
 use std::future::Future;
 use std::mem;
@@ -86,11 +86,9 @@ mod tests {
 	use futures::ready;
 	use pin_project_lite::pin_project;
 	use rand::{Rng, thread_rng};
-	use std::{
-		future::Future,
-		task::Poll,
-		time::{Duration, Instant},
-	};
+	use std::future::Future;
+	use std::task::Poll;
+	use std::time::{Duration, Instant};
 	use tokio::time::{Sleep, sleep};
 
 	pin_project! {

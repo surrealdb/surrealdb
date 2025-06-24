@@ -1,13 +1,10 @@
-use crate::sql::{
-	Expr,
-	statements::{
-		AccessStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
-		RebuildStatement, UseStatement,
-	},
+use crate::sql::Expr;
+use crate::sql::statements::{
+	AccessStatement, KillStatement, LiveStatement, OptionStatement, RebuildStatement, UseStatement,
 };
 
 pub struct Ast {
-	statements: Vec<TopLevelExpr>,
+	pub statements: Vec<TopLevelExpr>,
 }
 
 pub enum TopLevelExpr {

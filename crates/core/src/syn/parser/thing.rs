@@ -1,20 +1,16 @@
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-use crate::{
-	sql::{
-		Ident, Param, RecordIdKeyLit, RecordIdLit,
-		graph::GraphSubject,
-		id::{Gen, range::IdRange},
-	},
-	syn::{
-		error::bail,
-		lexer::compound,
-		parser::mac::{expected, expected_whitespace, unexpected},
-		token::{Glued, TokenKind, t},
-	},
-};
-use std::{cmp::Ordering, ops::Bound};
+use crate::sql::graph::GraphSubject;
+use crate::sql::id::Gen;
+use crate::sql::id::range::RecordIdKeyRangeLit;
+use crate::sql::{Ident, Param, RecordIdKeyLit, RecordIdLit};
+use crate::syn::error::bail;
+use crate::syn::lexer::compound;
+use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
+use crate::syn::token::{Glued, TokenKind, t};
+use std::cmp::Ordering;
+use std::ops::Bound;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_record_string(
@@ -53,8 +49,8 @@ impl Parser<'_> {
 			};
 			return Ok(RecordIdLit {
 				tb: ident,
-				id: RecordIdKeyLit::Range(Box::new(IdRange {
-					beg: Bound::Unbounded,
+				id: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+					start: Bound::Unbounded,
 					end,
 				})),
 			});
@@ -88,8 +84,8 @@ impl Parser<'_> {
 			};
 			Ok(RecordIdLit {
 				tb: ident,
-				id: RecordIdKeyLit::Range(Box::new(IdRange {
-					beg,
+				id: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+					start: beg,
 					end,
 				})),
 			})
@@ -120,7 +116,10 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(crate) async fn parse_id_range(&mut self, stk: &mut Stk) -> ParseResult<IdRange> {
+	pub(crate) async fn parse_id_range(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<RecordIdKeyRangeLit> {
 		let beg = if Self::kind_starts_record_id_key(self.peek_whitespace().kind) {
 			let v = stk.run(|stk| self.parse_record_id_key(stk)).await?;
 
@@ -146,8 +145,8 @@ impl Parser<'_> {
 			Bound::Unbounded
 		};
 
-		Ok(IdRange {
-			beg,
+		Ok(RecordIdKeyRangeLit {
+			start: beg,
 			end,
 		})
 	}
@@ -160,43 +159,6 @@ impl Parser<'_> {
 		} else {
 			Ok(GraphSubject::Table(tb))
 		}
-	}
-
-	/// Parse an range
-	pub(crate) async fn parse_range(&mut self, ctx: &mut Stk) -> ParseResult<Range> {
-		// Check for beginning id
-		let beg = if Self::kind_is_identifier(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
-
-			if self.eat_whitespace(t!(">")) {
-				Bound::Excluded(v)
-			} else {
-				Bound::Included(v)
-			}
-		} else {
-			Bound::Unbounded
-		};
-
-		expected_whitespace!(self, t!(".."));
-
-		let inclusive = self.eat_whitespace(t!("="));
-
-		// parse ending id.
-		let end = if Self::kind_is_identifier(self.peek_whitespace().kind) {
-			let v = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
-			if inclusive {
-				Bound::Included(v)
-			} else {
-				Bound::Excluded(v)
-			}
-		} else {
-			Bound::Unbounded
-		};
-
-		Ok(Range {
-			beg,
-			end,
-		})
 	}
 
 	pub(crate) async fn parse_thing_with_range(

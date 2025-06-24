@@ -1,4 +1,5 @@
-use crate::sql::{AccessType, Base, Expr, Ident, Strand, access::AccessDuration};
+use crate::sql::access::AccessDuration;
+use crate::sql::{AccessType, Base, Expr, Ident, Strand};
 
 use rand::Rng;
 use rand::distributions::Alphanumeric;

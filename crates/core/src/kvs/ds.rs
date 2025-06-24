@@ -3,7 +3,6 @@ use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
 use crate::buc::BucketConnections;
-use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -15,12 +14,14 @@ use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
 };
 use crate::err::Error;
-use crate::expr::LogicalPlan;
-use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
+use crate::expr::statements::DefineUserStatement;
+use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
 use crate::idx::trees::store::IndexStores;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[expect(unused_imports)]
@@ -28,10 +29,10 @@ use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::Query;
-use crate::syn;
+use crate::kvs::{LockType, TransactionType};
 use crate::syn::parser::{ParserSettings, StatementStream};
+use crate::val::Value;
+use crate::{cf, syn};
 #[allow(unused_imports)]
 use anyhow::bail;
 use anyhow::{Result, ensure};
@@ -51,8 +52,7 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
-use tracing::instrument;
-use tracing::trace;
+use tracing::{instrument, trace};
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
@@ -617,7 +617,12 @@ impl Datastore {
 			// Display information in the logs
 			info!(target: TARGET, "Credentials were provided, and no root users were found. The root user '{user}' will be created");
 			// Create and new root user definition
-			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
+			let stm = DefineUserStatement::new_with_password(
+				Base::Root,
+				user.to_owned(),
+				pass,
+				INITIAL_USER_ROLE.to_owned(),
+			);
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());
@@ -1071,7 +1076,7 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(&self, val: &Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn evaluate(&self, val: &Expr, sess: &Session, vars: Variables) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
@@ -1260,22 +1265,27 @@ mod test {
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<()> {
-		use crate::expr::{Expression, Future, Number, Operator, Value};
+		use crate::expr::{BinaryOperator, Expr, Literal};
 		use crate::kvs::Datastore;
+		use crate::val::{Number, Value};
 		use reblessive::{Stack, Stk};
 
 		// build query manually to bypass query limits.
 		let mut stack = Stack::new();
-		async fn build_query(stk: &mut Stk, depth: usize) -> Value {
+		async fn build_query(stk: &mut Stk, depth: usize) -> Expr {
 			if depth == 0 {
-				Value::Expression(Box::new(Expression::Binary {
-					l: Value::Number(Number::Int(1)),
-					o: Operator::Add,
-					r: Value::Number(Number::Int(1)),
-				}))
+				Expr::Binary {
+					left: Box::new(Expr::Literal(Literal::Integer(1))),
+					op: BinaryOperator::Add,
+					right: Box::new(Expr::Literal(Literal::Integer(1))),
+				}
 			} else {
 				let q = stk.run(|stk| build_query(stk, depth - 1)).await;
-				Value::Future(Box::new(Future::from(q)))
+				Expr::Binary {
+					left: Box::new(q),
+					op: BinaryOperator::Add,
+					right: Box::new(Expr::Literal(Literal::Integer(1))),
+				}
 			}
 		}
 		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
@@ -1297,7 +1307,7 @@ mod test {
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
-		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?;
+		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?;
 		// Store the transaction
 		ctx.set_transaction(txn.enclose());
 		// Freeze the context

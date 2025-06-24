@@ -1,10 +1,11 @@
 use crate::buc::{self, BucketConnectionKey};
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, FlowResultExt, Ident, Permission};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
-use crate::{ctx::Context, expr::statements::info::InfoStructure};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;

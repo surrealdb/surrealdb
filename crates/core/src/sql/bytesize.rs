@@ -1,13 +1,13 @@
 use crate::err::Error;
+use crate::val::TryAdd;
 
 use anyhow::{Result, bail, ensure};
 use num_traits::CheckedAdd;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::iter::{Peekable, Sum};
-use std::ops;
 use std::str::{Chars, FromStr};
+use std::{fmt, ops};
 
 use super::Strand;
 
@@ -191,71 +191,6 @@ impl TryAdd for Bytesize {
 			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} + {other}")))
 			.map_err(anyhow::Error::new)
 			.map(Bytesize::new)
-	}
-}
-
-impl CheckedAdd for Bytesize {
-	fn checked_add(&self, other: &Self) -> Option<Self> {
-		self.0.checked_add(other.0).map(Bytesize::new)
-	}
-}
-
-impl<'b> ops::Add<&'b Bytesize> for &Bytesize {
-	type Output = Bytesize;
-	fn add(self, other: &'b Bytesize) -> Bytesize {
-		match self.0.checked_add(other.0) {
-			Some(v) => Bytesize::new(v),
-			None => Bytesize::new(u64::MAX),
-		}
-	}
-}
-
-impl<'b> TryAdd<&'b Bytesize> for &Bytesize {
-	type Output = Bytesize;
-	fn try_add(self, other: &'b Bytesize) -> Result<Bytesize> {
-		self.0
-			.checked_add(other.0)
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} + {other}")))
-			.map_err(anyhow::Error::new)
-			.map(Bytesize::new)
-	}
-}
-
-impl ops::Sub for Bytesize {
-	type Output = Self;
-	fn sub(self, other: Self) -> Self {
-		match self.0.checked_sub(other.0) {
-			Some(v) => Bytesize::new(v),
-			None => Bytesize::default(),
-		}
-	}
-}
-
-impl<'b> ops::Sub<&'b Bytesize> for &Bytesize {
-	type Output = Bytesize;
-	fn sub(self, other: &'b Bytesize) -> Bytesize {
-		match self.0.checked_sub(other.0) {
-			Some(v) => Bytesize::new(v),
-			None => Bytesize::default(),
-		}
-	}
-}
-
-impl Sum<Self> for Bytesize {
-	fn sum<I>(iter: I) -> Bytesize
-	where
-		I: Iterator<Item = Self>,
-	{
-		iter.fold(Bytesize::default(), |a, b| a + b)
-	}
-}
-
-impl<'a> Sum<&'a Self> for Bytesize {
-	fn sum<I>(iter: I) -> Bytesize
-	where
-		I: Iterator<Item = &'a Self>,
-	{
-		iter.fold(Bytesize::default(), |a, b| &a + b)
 	}
 }
 

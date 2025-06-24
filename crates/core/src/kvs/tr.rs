@@ -1,9 +1,6 @@
-use super::Key;
-use super::KeyEncode;
-use super::Val;
-use super::Version;
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
+use super::{Key, KeyEncode, Val, Version};
 use crate::cf;
 
 use crate::doc::CursorValue;
@@ -12,9 +9,9 @@ use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 
 use crate::expr;
-use crate::expr::thing::Thing;
 use crate::kvs::KeyDecode as _;
 use crate::kvs::stash::Stash;
+use crate::val::RecordId;
 use crate::vs::VersionStamp;
 use anyhow::Result;
 use expr::statements::DefineTableStatement;
@@ -549,7 +546,7 @@ impl Transactor {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &Thing,
+		id: &RecordId,
 		previous: CursorValue,
 		current: CursorValue,
 		store_difference: bool,

@@ -576,10 +576,11 @@ mod tests {
 	use std::str::FromStr;
 
 	use surrealdb::iam::verify::verify_root_creds;
-	use surrealdb::kvs::{LockType::*, TransactionType::*};
+	use surrealdb::kvs::LockType::*;
+	use surrealdb::kvs::TransactionType::*;
 	use test_log::test;
-	use wiremock::matchers::path;
-	use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+	use wiremock::matchers::{method, path};
+	use wiremock::{Mock, MockServer, ResponseTemplate};
 
 	use super::*;
 	use surrealdb::opt::auth::Root;

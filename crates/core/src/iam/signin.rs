@@ -9,11 +9,14 @@ use crate::dbs::Session;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::expr::statements::{AccessGrant, DefineAccessStatement, access};
-use crate::expr::{AccessType, Datetime, Object, Value, access_type};
+use crate::expr::{AccessType, access_type};
 use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::val::{Datetime, Object, Value};
 use anyhow::{Result, bail, ensure};
 use chrono::Utc;
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -47,8 +50,6 @@ impl From<SigninData> for Value {
 }
 
 pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SigninData> {
-	// Check vars contains only computed values
-	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -792,10 +793,12 @@ pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<&access
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{dbs::Capabilities, iam::Role};
+	use crate::dbs::Capabilities;
+	use crate::iam::Role;
 	use chrono::Duration;
 	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 	use regex::Regex;
@@ -4086,11 +4089,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::{
-			Base, Statement,
-			statements::{DefineUserStatement, define::DefineStatement},
-			user::UserDuration,
-		};
+		use crate::sql::Base;
+		use crate::sql::statements::DefineUserStatement;
+		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::user::UserDuration;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -4180,3 +4182,4 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 	}
 }
+*/

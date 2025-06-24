@@ -3,7 +3,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
-use crate::expr::{Expr, Idiom, Model, Permission, Script, Value, operator::BindingPower};
+use crate::expr::operator::BindingPower;
+use crate::expr::{Expr, Idiom, Model, Permission, Script, Value};
 use crate::fnc;
 use crate::iam::Action;
 use futures::future::try_join_all;
@@ -52,9 +53,10 @@ impl Function {
 	/// Convert function call to a field name
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
-			Self::Script(_) => "function".to_string().into(),
-			Self::Normal(f) => f.to_owned().into(),
-			Self::Custom(f) => format!("fn::{f}").into(),
+			Self::Script(_) => Idiom::field("function".to_owned()),
+			Self::Normal(f) => Idiom::field(f.to_owned()),
+			Self::Custom(f) => Idiom::field(format!("fn::{f}")),
+			Self::Model(m) => Idiom::field(m.to_string()),
 		}
 	}
 	/// Checks if this function invocation is writable
@@ -62,6 +64,7 @@ impl Function {
 		match self {
 			Self::Custom(_) | Self::Script(_) => false,
 			Self::Normal(f) => f != "api::invoke",
+			Self::Model(_) => true,
 		}
 	}
 

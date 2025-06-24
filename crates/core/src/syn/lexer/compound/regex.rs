@@ -1,10 +1,8 @@
 use regex::Regex;
 
-use crate::syn::{
-	error::{SyntaxError, bail, syntax_error},
-	lexer::Lexer,
-	token::{Token, t},
-};
+use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, t};
 
 pub fn regex(lexer: &mut Lexer, start: Token) -> Result<Regex, SyntaxError> {
 	assert_eq!(start.kind, t!("/"), "Invalid start token of regex compound");

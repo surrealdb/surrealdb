@@ -1,4 +1,6 @@
-use crate::expr::{Expr, Kind, fmt::Fmt, index::Distance};
+use crate::expr::fmt::Fmt;
+use crate::expr::index::Distance;
+use crate::expr::{Expr, Kind};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -66,7 +68,7 @@ pub enum BinaryOperator {
 	/// `/`
 	Divide,
 	/// `%`
-	Modulo,
+	Remainder,
 	/// `**`
 	Power,
 	/// `=`
@@ -159,7 +161,7 @@ impl fmt::Display for BinaryOperator {
 			Self::Subtract => write!(f, "-"),
 			Self::Multiply => write!(f, "*"),
 			Self::Divide => write!(f, "/"),
-			Self::Modulo => write!(f, "%"),
+			Self::Remainder => write!(f, "%"),
 			Self::Power => write!(f, "**"),
 			Self::Equal => write!(f, "="),
 			Self::ExactEqual => write!(f, "=="),
@@ -291,7 +293,7 @@ impl BindingPower {
 
 			BinaryOperator::Add | BinaryOperator::Subtract => BindingPower::AddSub,
 
-			BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Modulo => {
+			BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Remainder => {
 				BindingPower::MulDiv
 			}
 

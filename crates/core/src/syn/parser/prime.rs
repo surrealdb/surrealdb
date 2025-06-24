@@ -1,21 +1,16 @@
 use reblessive::Stk;
 
-use super::{ParseResult, Parser, mac::pop_glued};
-use crate::{
-	sql::{
-		Closure, Dir, Duration, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock,
-		Param, Part, Script, Strand, Table,
-	},
-	syn::{
-		error::bail,
-		lexer::compound::{self, Numeric},
-		parser::{
-			enter_object_recursion, enter_query_recursion,
-			mac::{expected, unexpected},
-		},
-		token::{Glued, Span, TokenKind, t},
-	},
+use super::mac::pop_glued;
+use super::{ParseResult, Parser};
+use crate::sql::{
+	Closure, Dir, Duration, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock, Param,
+	Part, Script, Strand, Table,
 };
+use crate::syn::error::bail;
+use crate::syn::lexer::compound::{self, Numeric};
+use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::{enter_object_recursion, enter_query_recursion};
+use crate::syn::token::{Glued, Span, TokenKind, t};
 
 impl Parser<'_> {
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {
@@ -27,7 +22,7 @@ impl Parser<'_> {
 			}
 			TokenKind::Glued(Glued::Number) => {
 				let v = self.next_token_value()?;
-				Ok(Expr::Literal(Literal::Duration(duration)))
+				Ok(Expr::Literal(Literal::Duration(v)))
 			}
 			_ => {
 				self.pop_peek();

@@ -4,8 +4,7 @@ use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::iter::once;
-use std::ops::Bound;
-use std::ops::Deref;
+use std::ops::{Bound, Deref};
 
 use crate::sql::DecimalExt;
 
@@ -550,7 +549,7 @@ impl TryFrom<sql::Range> for CborData {
 	}
 }
 
-impl TryFrom<CborData> for sql::id::range::IdRange {
+impl TryFrom<CborData> for sql::id::range::RecordIdKeyRangeLit {
 	type Error = &'static str;
 	fn try_from(val: CborData) -> Result<Self, &'static str> {
 		fn decode_bound(v: CborData) -> Result<Bound<sql::RecordIdKeyLit>, &'static str> {
@@ -571,7 +570,7 @@ impl TryFrom<CborData> for sql::id::range::IdRange {
 				let mut v = v;
 				let beg = decode_bound(v.remove(0).clone())?;
 				let end = decode_bound(v.remove(0).clone())?;
-				Ok(sql::id::range::IdRange::try_from((beg, end))
+				Ok(sql::id::range::RecordIdKeyRangeLit::try_from((beg, end))
 					.map_err(|_| "Found an invalid range with ranges as bounds")?)
 			}
 			_ => Err("Expected a CBOR array with 2 bounds"),
@@ -579,9 +578,9 @@ impl TryFrom<CborData> for sql::id::range::IdRange {
 	}
 }
 
-impl TryFrom<sql::id::range::IdRange> for CborData {
+impl TryFrom<sql::id::range::RecordIdKeyRangeLit> for CborData {
 	type Error = &'static str;
-	fn try_from(r: sql::id::range::IdRange) -> Result<CborData, &'static str> {
+	fn try_from(r: sql::id::range::RecordIdKeyRangeLit) -> Result<CborData, &'static str> {
 		fn encode(b: Bound<sql::RecordIdKeyLit>) -> Result<CborData, &'static str> {
 			match b {
 				Bound::Included(v) => {
@@ -594,7 +593,7 @@ impl TryFrom<sql::id::range::IdRange> for CborData {
 			}
 		}
 
-		Ok(CborData::Array(vec![encode(r.beg)?, encode(r.end)?]))
+		Ok(CborData::Array(vec![encode(r.start)?, encode(r.end)?]))
 	}
 }
 
@@ -606,9 +605,9 @@ impl TryFrom<CborData> for sql::RecordIdKeyLit {
 			CborData::Text(v) => Ok(sql::RecordIdKeyLit::String(v)),
 			CborData::Array(v) => Ok(sql::RecordIdKeyLit::Array(v.try_into()?)),
 			CborData::Map(v) => Ok(sql::RecordIdKeyLit::Object(v.try_into()?)),
-			CborData::Tag(TAG_RANGE, v) => {
-				Ok(sql::RecordIdKeyLit::Range(Box::new(sql::id::range::IdRange::try_from(*v)?)))
-			}
+			CborData::Tag(TAG_RANGE, v) => Ok(sql::RecordIdKeyLit::Range(Box::new(
+				sql::id::range::RecordIdKeyRangeLit::try_from(*v)?,
+			))),
 			CborData::Tag(TAG_STRING_UUID, v) => {
 				v.deref().to_owned().try_into().map(sql::RecordIdKeyLit::Uuid)
 			}

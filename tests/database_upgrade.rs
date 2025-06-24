@@ -15,10 +15,8 @@ mod database_upgrade {
 	use surrealdb::{Connection, Surreal, Value};
 	use test_log::test;
 	use tokio::net::TcpListener;
-	use tokio::time::sleep;
-	use tokio::time::timeout;
-	use tracing::error;
-	use tracing::info;
+	use tokio::time::{sleep, timeout};
+	use tracing::{error, info};
 	use ulid::Ulid;
 
 	const NS: &str = "test";

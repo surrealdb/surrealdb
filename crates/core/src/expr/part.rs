@@ -1,26 +1,19 @@
-use crate::{
-	cnf::IDIOM_RECURSION_LIMIT,
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	exe::try_join_all_buffered,
-	expr::{
-		Expr, FlowResultExt as _, Graph, Ident, Idiom, Thing, Value, fmt::Fmt, strand::no_nul_bytes,
-	},
-};
+use crate::cnf::IDIOM_RECURSION_LIMIT;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::exe::try_join_all_buffered;
+use crate::expr::fmt::Fmt;
+use crate::expr::idiom::recursion::{self, Recursion};
+use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Value};
+use crate::val::RecordId;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::fmt::Write;
-use std::str;
-
-use super::{
-	fmt::{is_pretty, pretty_indent},
-	value::idiom_recursion::{Recursion, clean_iteration, compute_idiom_recursion, is_final},
-};
+use std::{fmt, str};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -514,125 +507,86 @@ pub enum RecurseInstruction {
 	},
 	Shortest {
 		// What ending node are we looking for?
-		expects: Value,
+		expects: Expr,
 		// Do we include the starting point in the collection?
 		inclusive: bool,
 	},
 }
 
-macro_rules! to_vec_value {
-	(&$v: expr_2021) => {
-		match $v {
+async fn walk_paths(
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+	recursion: Recursion<'_>,
+	finished: &mut Vec<Value>,
+	inclusive: bool,
+	expects: Option<&Value>,
+) -> Result<Vec<Value>> {
+	let mut open: Vec<Value> = vec![];
+	let paths = match recursion.current {
+		Value::Array(v) => &v.0,
+		v => &vec![v.to_owned()],
+	};
+
+	for path in paths.iter() {
+		let path = match path {
 			Value::Array(v) => &v.0,
 			v => &vec![v.to_owned()],
+		};
+		let Some(last) = path.last() else {
+			continue;
+		};
+		let res =
+			stk.run(|stk| last.get(stk, ctx, opt, doc, recursion.path)).await.catch_return()?;
+
+		if recursion::is_final(&res) || &res == last {
+			if expects.is_none()
+				&& (recursion.iterated > 1 || *inclusive)
+				&& recursion.iterated >= recursion.min
+			{
+				finished.push(path.to_owned().into());
+			}
+			continue;
 		}
-	};
-	($v: expr_2021) => {
-		match $v {
+
+		let steps = match res {
 			Value::Array(v) => v.0,
 			v => vec![v],
-		}
-	};
-}
+		};
 
-macro_rules! walk_paths {
-	(
-		$stk: ident,
-		$ctx: ident,
-		$opt: ident,
-		$doc: ident,
-		$rec: ident,
-		$finished: ident,
-		$inclusive: ident,
-		$expects: expr_2021
-	) => {{
-		// Collection of paths we will continue processing
-		// in the next iteration
-		let mut open: Vec<Value> = vec![];
-
-		// Obtain an array value to iterate over
-		let paths = to_vec_value!(&$rec.current);
-
-		// Process all paths
-		for path in paths.iter() {
-			// Obtain an array value to iterate over
-			let path = to_vec_value!(&path);
-
-			// We always operate on the last value in the path
-			// If the path is empty, we skip it
-			let Some(last) = path.last() else {
-				continue;
+		let reached_max = recursion.max.is_some_and(|max| recursion.iterated >= max);
+		for step in steps.iter() {
+			let val = if recursion.iterated == 1 && !*inclusive {
+				Value::from(vec![step.to_owned()])
+			} else {
+				let mut path = path.to_owned();
+				path.push(step.to_owned());
+				Value::from(path)
 			};
-
-			// Apply the recursed path to the last value
-			let res = $crate::expr::FlowResultExt::catch_return(
-				$stk.run(|stk| last.get(stk, $ctx, $opt, $doc, $rec.path)).await,
-			)?;
-
-			// If we encounter a final value, we add it to the finished collection.
-			// - If expects is some, we are seeking for the shortest path, in which
-			//   case we eliminate the path.
-			// - In case this is the first iteration, and paths are not inclusive of
-			//   the starting point, we eliminate the it.
-			// - If we have not yet reached minimum depth, the path is eliminated aswell.
-			if is_final(&res) || &res == last {
-				if $expects.is_none()
-					&& ($rec.iterated > 1 || *$inclusive)
-					&& $rec.iterated >= $rec.min
-				{
-					$finished.push(path.to_owned().into());
+			if let Some(expects) = expects {
+				if step == expects {
+					let steps = match val {
+						Value::Array(v) => v.0,
+						v => vec![v],
+					};
+					for step in steps {
+						finished.push(step);
+					}
+					return Ok(Value::None);
 				}
-
-				continue;
 			}
-
-			// Obtain an array value to iterate over
-			let steps = to_vec_value!(res);
-
-			// Did we reach the final iteration?
-			let reached_max = $rec.max.is_some_and(|max| $rec.iterated >= max);
-
-			// For every step, prefix it with the current path
-			for step in steps.iter() {
-				// If this is the first iteration, and in case we are not inclusive
-				// of the starting point, we only add the step to the open collection
-				let val = if $rec.iterated == 1 && !*$inclusive {
-					Value::from(vec![step.to_owned()])
-				} else {
-					let mut path = path.to_owned();
-					path.push(step.to_owned());
-					Value::from(path)
-				};
-
-				// If we expect a certain value, let's check if we have reached it
-				// If so, we iterate over the steps and assign them to the finished collection
-				// We then return Value::None, indicating to the recursion loop that we are done
-				if let Some(expects) = $expects {
-					if step == expects {
-						let steps = to_vec_value!(val);
-
-						for step in steps {
-							$finished.push(step);
-						}
-
-						return Ok(Value::None);
-					}
+			if reached_max {
+				if (Option::<&Value>::None).is_none() {
+					finished.push(val);
 				}
-
-				// If we have reached the maximum amount of iterations, and are collecting
-				// individual paths, we assign them to the finished collection
-				if reached_max {
-					if $expects.is_none() {
-						$finished.push(val);
-					}
-				} else {
-					open.push(val);
-				}
+			} else {
+				open.push(val);
 			}
 		}
+	}
 
-		Ok(open.into())
-	}};
+	Ok(open)
 }
 
 impl RecurseInstruction {
@@ -648,9 +602,7 @@ impl RecurseInstruction {
 		match self {
 			Self::Path {
 				inclusive,
-			} => {
-				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Option::<&Value>::None)
-			}
+			} => walk_paths(stk, ctx, opt, doc, rec, finished, inclusive, None),
 			Self::Shortest {
 				expects,
 				inclusive,
@@ -659,37 +611,29 @@ impl RecurseInstruction {
 					.compute(stk, ctx, opt, doc)
 					.await
 					.catch_return()?
-					.coerce_to::<Thing>()?
+					.coerce_to::<RecordId>()?
 					.into();
-				walk_paths!(stk, ctx, opt, doc, rec, finished, inclusive, Some(&expects))
+				walk_paths(stk, ctx, opt, doc, rec, finished, inclusive, Some(&expects))
 			}
 			Self::Collect {
 				inclusive,
 			} => {
-				macro_rules! persist {
-					($finished:ident, $subject:expr_2021) => {
-						match $subject {
-							Value::Array(v) => {
-								for v in v.iter() {
-									// Add a unique value to the finished collection
-									if !$finished.contains(v) {
-										$finished.push(v.to_owned());
-									}
-								}
-							}
-							v => {
-								if !$finished.contains(v) {
-									// Add a unique value to the finished collection
-									$finished.push(v.to_owned());
+				// If we are inclusive, we add the starting point to the collection
+				if rec.iterated == 1 && *inclusive {
+					match rec.current {
+						Value::Array(v) => {
+							for v in v.iter() {
+								if !finished.contains(v) {
+									finished.push(v.to_owned());
 								}
 							}
 						}
+						v => {
+							if !finished.contains(v) {
+								finished.push(v.to_owned());
+							}
+						}
 					};
-				}
-
-				// If we are inclusive, we add the starting point to the collection
-				if rec.iterated == 1 && *inclusive {
-					persist!(finished, rec.current);
 				}
 
 				// Apply the recursed path to the current values
@@ -701,7 +645,20 @@ impl RecurseInstruction {
 				let res = clean_iteration(res);
 
 				// Persist any new values from the result
-				persist!(finished, &res);
+				match &res {
+					Value::Array(v) => {
+						for v in v.iter() {
+							if !finished.contains(v) {
+								finished.push(v.to_owned());
+							}
+						}
+					}
+					v => {
+						if !finished.contains(v) {
+							finished.push(v.to_owned());
+						}
+					}
+				};
 
 				// Continue
 				Ok(res)

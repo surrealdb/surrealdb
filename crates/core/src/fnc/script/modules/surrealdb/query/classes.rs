@@ -1,12 +1,10 @@
 use std::collections::BTreeMap;
 
-use crate::expr::Value as SurValue;
 use crate::sql;
-use js::{
-	Array, Ctx, Exception, FromJs, JsLifetime, Result, Value,
-	class::Trace,
-	prelude::{Coerced, Opt},
-};
+use crate::val::Value as SurValue;
+use js::class::Trace;
+use js::prelude::{Coerced, Opt};
+use js::{Array, Ctx, Exception, FromJs, JsLifetime, Result, Value};
 
 #[js::class]
 #[derive(Trace, Clone, JsLifetime)]

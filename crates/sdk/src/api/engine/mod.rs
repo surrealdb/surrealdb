@@ -18,11 +18,12 @@ pub mod tasks;
 
 use futures::Stream;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use std::task::{Context, Poll};
 use surrealdb_core::expr::Values as CoreValues;
-use surrealdb_core::sql::SqlValues as CoreSqlValues;
-use surrealdb_core::sql::{Edges as CoreSqlEdges, Object as CoreSqlObject, Thing as CoreSqlThing};
+use surrealdb_core::sql::{
+	Edges as CoreSqlEdges, Object as CoreSqlObject, SqlValues as CoreSqlValues,
+	Thing as CoreSqlThing,
+};
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
@@ -34,8 +35,7 @@ use wasmtimer::tokio::Interval;
 
 use crate::Value;
 
-use super::opt::Resource;
-use super::opt::Table;
+use super::opt::{Resource, Table};
 
 // used in http and all local engines.
 #[allow(dead_code)]

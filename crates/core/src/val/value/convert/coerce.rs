@@ -1,19 +1,15 @@
 use geo::Point;
 use rust_decimal::Decimal;
-use std::{
-	collections::{BTreeMap, HashMap},
-	fmt::{self},
-	hash::BuildHasher,
-};
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::{self};
+use std::hash::BuildHasher;
 
-use crate::val::{Array, Bytes, Number, Object, Range, Value, array::Uniq};
-use crate::{
-	expr::{
-		File, Ident, Kind, Regex, Table, Uuid,
-		kind::{HasKind, KindLiteral},
-		value::Null,
-	},
-	val::{Closure, Datetime, Duration, Geometry, RecordId, Strand},
+use crate::expr::kind::{HasKind, KindLiteral};
+use crate::expr::{File, Ident, Kind, Regex, Table, Uuid};
+use crate::val::array::Uniq;
+use crate::val::{
+	Array, Bytes, Closure, Datetime, Duration, Geometry, Number, Object, Range, RecordId, Strand,
+	Value,
 };
 
 #[derive(Clone, Debug)]

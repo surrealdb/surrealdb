@@ -3,8 +3,10 @@ use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, Uuid, Value, escape::EscapeRid, literal::ObjectEntry};
-use crate::val::{Array, Number, Object, RecordId, RecordIdKey, RecordIdKeyRange};
+use crate::expr::escape::EscapeRid;
+use crate::expr::literal::ObjectEntry;
+use crate::expr::{Expr, Value};
+use crate::val::{Array, Number, Object, RecordId, RecordIdKey, RecordIdKeyRange, Uuid};
 
 use anyhow::Result;
 use nanoid::nanoid;
@@ -73,7 +75,7 @@ impl RecordIdKeyLit {
 			(Self::Uuid(i), Value::Uuid(j)) if i == j => true,
 			(Self::Array(i), Value::Array(j)) if i == j => true,
 			(Self::Object(i), Value::Object(j)) if i == j => true,
-			(i, Value::Thing(t)) if i == &t.id => true,
+			(i, Value::Thing(t)) if i == &t.key => true,
 			_ => false,
 		}
 	}

@@ -1,4 +1,5 @@
-use crate::sql::{Ident, Strand, changefeed::ChangeFeed};
+use crate::sql::changefeed::ChangeFeed;
+use crate::sql::{Ident, Strand};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

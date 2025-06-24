@@ -2,11 +2,19 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::escape::QuoteStr;
+use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, escape::QuoteStr, fmt::Fmt, user::UserDuration};
+use crate::expr::user::UserDuration;
+use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
+use argon2::Argon2;
+use argon2::password_hash::SaltString;
+use rand::Rng as _;
+use rand::distributions::Alphanumeric;
+use rand::rngs::OsRng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -31,7 +39,14 @@ pub struct DefineUserStatement {
 #[expect(clippy::fallible_impl_from)]
 impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
+	}
+}
+*/
+
+impl DefineUserStatement {
+	pub fn new_with_password(base: Base, user: String, pass: &str, role: String) -> Self {
 		DefineUserStatement {
+			kind: DefineKind::Default,
 			base,
 			name: user.into(),
 			hash: Argon2::default()
@@ -46,14 +61,9 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 			roles: vec![role.into()],
 			duration: UserDuration::default(),
 			comment: None,
-			if_not_exists: false,
-			overwrite: false,
 		}
 	}
-}
-*/
 
-impl DefineUserStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

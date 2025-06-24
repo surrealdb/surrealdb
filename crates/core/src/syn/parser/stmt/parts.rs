@@ -2,25 +2,18 @@
 
 use reblessive::Stk;
 
+use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
+use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
-use crate::sql::{AssignOperator, Explain, Expr, Fetch, With};
-use crate::syn::error::bail;
-use crate::{
-	sql::{
-		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, Timeout, View,
-		changefeed::ChangeFeed,
-		index::{Distance, VectorType},
-	},
-	syn::{
-		parser::{
-			ParseResult, Parser,
-			mac::{expected, unexpected},
-		},
-		token::{DistanceKind, Span, TokenKind, VectorTypeKind, t},
-	},
+use crate::sql::{
+	AssignOperator, Base, Cond, Data, Duration, Explain, Expr, Fetch, Fetchs, Field, Fields, Group,
+	Groups, Ident, Idiom, Output, Permission, Permissions, Timeout, View, With,
 };
+use crate::syn::error::bail;
+use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{DistanceKind, Span, TokenKind, VectorTypeKind, t};
 
 pub(crate) enum MissingKind {
 	Split,

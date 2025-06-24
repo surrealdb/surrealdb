@@ -1,13 +1,9 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::{Expr, Function, FunctionCall, Ident, Model},
-	syn::{
-		error::syntax_error,
-		parser::mac::{expected, expected_whitespace, unexpected},
-		token::{TokenKind, t},
-	},
-};
+use crate::sql::{Expr, Function, FunctionCall, Ident, Model};
+use crate::syn::error::syntax_error;
+use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
+use crate::syn::token::{TokenKind, t};
 
 use super::{ParseResult, Parser};
 

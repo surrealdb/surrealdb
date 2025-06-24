@@ -1,6 +1,5 @@
 use crate::sql::Datetime;
-use chrono::TimeZone;
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

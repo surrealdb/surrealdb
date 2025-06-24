@@ -151,15 +151,16 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
-	use crate::expr::Datetime;
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::id::RecordIdKeyLit;
 	use crate::expr::statements::show::ShowSince;
 	use crate::expr::statements::{
 		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,
 	};
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
-	use crate::val::{RecordId, Value};
+	use crate::kvs::LockType::*;
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, Transaction};
+	use crate::val::{Datetime, RecordId, RecordIdKey, Value};
 	use crate::vs::VersionStamp;
 
 	const DONT_STORE_PREVIOUS: bool = false;
@@ -396,7 +397,7 @@ mod tests {
 	async fn record_change_feed_entry(tx: Transaction, key: String) -> RecordId {
 		let thing = RecordId {
 			table: TB.to_owned(),
-			key: RecordIdKeyLit::from(id),
+			key: RecordIdKey::String(key),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None.into();
@@ -448,7 +449,7 @@ mod tests {
 		tx.put(&ns_root, revision::to_vec(&dns).unwrap(), None).await.unwrap();
 		let db_root = crate::key::namespace::db::new(NS, DB);
 		tx.put(&db_root, revision::to_vec(&ddb).unwrap(), None).await.unwrap();
-		let tb_root = crate::key::database::table::new(NS, DB, TB);
+		let tb_root = crate::key::database::tb::new(NS, DB, TB);
 		tx.put(&tb_root, revision::to_vec(&dtb).unwrap(), None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds

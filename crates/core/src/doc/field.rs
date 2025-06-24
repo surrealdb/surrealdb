@@ -1,7 +1,6 @@
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::dbs::Statement;
 use crate::dbs::capabilities::ExperimentalTarget;
+use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::expr::data::Data;
@@ -10,12 +9,12 @@ use crate::expr::kind::Kind;
 use crate::expr::permission::Permission;
 use crate::expr::reference::Refs;
 use crate::expr::statements::DefineFieldStatement;
-use crate::expr::thing::Thing;
-use crate::expr::value::every::ArrayBehaviour;
-use crate::expr::value::{CoerceError, Value};
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
 use crate::kvs::KeyEncode as _;
+use crate::val::value::CoerceError;
+use crate::val::value::every::ArrayBehaviour;
+use crate::val::{RecordId, Value};
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
@@ -344,7 +343,7 @@ struct FieldEditContext<'a> {
 	/// The current document record being processed
 	doc: &'a Document,
 	/// The record id of the document that we are processing
-	rid: Arc<Thing>,
+	rid: Arc<RecordId>,
 	/// The initial value of the field before being modified
 	old: Arc<Value>,
 	/// The user input value of the field edited by the user
@@ -352,8 +351,8 @@ struct FieldEditContext<'a> {
 }
 
 enum RefAction<'a> {
-	Set(&'a Thing),
-	Delete(Vec<&'a Thing>, String),
+	Set(&'a RecordId),
+	Delete(Vec<&'a RecordId>, String),
 	Ignore,
 }
 

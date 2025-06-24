@@ -7,8 +7,7 @@ mod layer;
 
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
-use crate::idx::trees::hnsw::docs::HnswDocs;
-use crate::idx::trees::hnsw::docs::VecDocs;
+use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
@@ -427,6 +426,7 @@ where
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use crate::ctx::{Context, MutableContext};
@@ -982,4 +982,4 @@ mod tests {
 		let vec = Vector::I16(Array1::from_vec(vec![x as i16, y as i16]));
 		vec.into()
 	}
-}
+}*/

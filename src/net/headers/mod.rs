@@ -1,5 +1,4 @@
-use crate::cnf::PKG_NAME;
-use crate::cnf::PKG_VERSION;
+use crate::cnf::{PKG_NAME, PKG_VERSION};
 use crate::net::error::Error;
 use axum_extra::TypedHeader;
 use axum_extra::headers::Header;

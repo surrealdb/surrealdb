@@ -1,23 +1,23 @@
-use crate::expr::thing;
-use crate::expr::value::Value;
-use js::{JsLifetime, class::Trace};
+use crate::val::{RecordId, Value};
+use js::JsLifetime;
+use js::class::Trace;
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
 #[non_exhaustive]
 pub struct Record {
 	#[qjs(skip_trace)]
-	pub(crate) value: thing::Thing,
+	pub(crate) value: RecordId,
 }
 
 #[js::methods]
 impl Record {
 	#[qjs(constructor)]
-	pub fn new(tb: String, id: Value) -> Self {
+	pub fn new(table: String, key: Value) -> Self {
 		Self {
-			value: thing::Thing {
-				tb,
-				id: match id {
+			value: RecordId {
+				table,
+				key: match key {
 					Value::Array(v) => v.into(),
 					Value::Object(v) => v.into(),
 					Value::Number(v) => v.into(),
@@ -30,12 +30,12 @@ impl Record {
 
 	#[qjs(get)]
 	pub fn tb(&self) -> String {
-		self.value.tb.clone()
+		self.value.table.clone()
 	}
 
 	#[qjs(get)]
 	pub fn id(&self) -> Value {
-		self.value.id.clone().into()
+		self.value.key.clone().into()
 	}
 	// Compare two Record instances
 	pub fn is(a: &Record, b: &Record) -> bool {

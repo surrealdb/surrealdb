@@ -102,12 +102,14 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use crate::api::{self, Result, conn::DbResponse, err::Error, method::query::QueryResult};
+use crate::api::conn::DbResponse;
+use crate::api::err::Error;
+use crate::api::method::query::QueryResult;
+use crate::api::{self, Result};
 use crate::dbs::{self, Status};
 use crate::method::Stats;
 use indexmap::IndexMap;
-use revision::Revisioned;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;

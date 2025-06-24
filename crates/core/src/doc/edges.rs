@@ -1,16 +1,10 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Workable;
+use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
-use crate::expr::Dir;
-use crate::expr::Relation;
-use crate::expr::TableType;
-use crate::expr::paths::EDGE;
-use crate::expr::paths::IN;
-use crate::expr::paths::OUT;
-use crate::expr::value::Value;
+use crate::expr::paths::{EDGE, IN, OUT};
+use crate::expr::{Dir, Relation, TableType};
+use crate::val::Value;
 use anyhow::{Result, ensure};
 
 impl Document {

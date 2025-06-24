@@ -1,10 +1,9 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::ControlFlow;
-use crate::expr::Expr;
 use crate::expr::fetch::Fetchs;
+use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::val::Value;
-use crate::{ctx::Context, expr::FlowResult};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

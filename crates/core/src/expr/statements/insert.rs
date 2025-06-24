@@ -2,8 +2,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::paths::IN;
-use crate::expr::paths::OUT;
+use crate::expr::paths::{IN, OUT};
 use crate::expr::{
 	Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Table, Timeout, Value, Version,
 };
@@ -166,47 +165,37 @@ impl fmt::Display for InsertStatement {
 }
 
 fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
-	match relation {
-		false => Ok(Iterable::Mergeable(id, v)),
-		true => {
-			let f = match v.pick(&*IN) {
-				Value::Thing(v) => v,
-				v => {
-					bail!(Error::InsertStatementIn {
-						value: v.to_string(),
-					})
-				}
-			};
-			let w = match v.pick(&*OUT) {
-				Value::Thing(v) => v,
-				v => {
-					bail!(Error::InsertStatementOut {
-						value: v.to_string(),
-					})
-				}
-			};
-			Ok(Iterable::Relatable(f, id, w, Some(v)))
-		}
+	if relation {
+		let f = match v.pick(&*IN) {
+			Value::Thing(v) => v,
+			v => {
+				bail!(Error::InsertStatementIn {
+					value: v.to_string(),
+				})
+			}
+		};
+		let w = match v.pick(&*OUT) {
+			Value::Thing(v) => v,
+			v => {
+				bail!(Error::InsertStatementOut {
+					value: v.to_string(),
+				})
+			}
+		};
+		Ok(Iterable::Relatable(f, id, w, Some(v)))
+	} else {
+		Ok(Iterable::Mergeable(id, v))
 	}
 }
 
-/*
 fn gen_id(v: &Value, into: &Option<Table>) -> Result<RecordId> {
 	match into {
 		Some(into) => v.rid().generate(into, true),
 		None => match v.rid() {
-			Value::Thing(v) => match v {
-				RecordId{
-					id: RecordIdKeyLit::Generate(_),
-					..
-				} => Err(anyhow::Error::new(Error::InsertStatementId {
-					value: v.to_string(),
-				})),
-				v => Ok(v),
-			},
+			Value::Thing(v) => Ok(v),
 			v => Err(anyhow::Error::new(Error::InsertStatementId {
 				value: v.to_string(),
 			})),
 		},
 	}
-}*/
+}

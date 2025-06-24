@@ -1,5 +1,9 @@
+use crate::expr::Value;
+use crate::expr::cond::Cond;
+use crate::expr::field::Fields;
+use crate::expr::group::Groups;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Value, cond::Cond, field::Fields, group::Groups, table::Tables};
+use crate::expr::table::Tables;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

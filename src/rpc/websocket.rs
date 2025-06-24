@@ -1,9 +1,8 @@
 use super::RpcState;
-use crate::cnf::WEBSOCKET_PING_FREQUENCY;
-use crate::cnf::WEBSOCKET_RESPONSE_BUFFER_SIZE;
-use crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_SIZE;
-use crate::cnf::WEBSOCKET_RESPONSE_FLUSH_PERIOD;
-use crate::cnf::{PKG_NAME, PKG_VERSION};
+use crate::cnf::{
+	PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
+	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
+};
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
@@ -12,7 +11,8 @@ use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
 use arc_swap::ArcSwap;
-use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code::AGAIN};
+use axum::extract::ws::close_code::AGAIN;
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use core::fmt;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
@@ -24,20 +24,15 @@ use surrealdb::dbs::Session;
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
-use surrealdb::rpc::Data;
-use surrealdb::rpc::Method;
-use surrealdb::rpc::RpcContext;
 use surrealdb::rpc::format::Format;
-use surrealdb::sql::Array;
-use surrealdb::sql::SqlValue;
-use surrealdb_core::rpc::RpcProtocolV1;
-use surrealdb_core::rpc::RpcProtocolV2;
+use surrealdb::rpc::{Data, Method, RpcContext};
+use surrealdb::sql::{Array, SqlValue};
+use surrealdb_core::rpc::{RpcProtocolV1, RpcProtocolV2};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::Instrument;
-use tracing::Span;
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 /// An error string sent when the server is out of memory

@@ -1,4 +1,5 @@
-use crate::expr::{Array, Object, RecordIdKeyRangeLit, id::Gen, id::RecordIdKeyLit as NewId};
+use crate::expr::{RecordIdKeyRangeLit, id::Gen, id::RecordIdKeyLit as NewId};
+use crate::val::{Array, Object};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 

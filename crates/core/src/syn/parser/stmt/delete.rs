@@ -1,12 +1,8 @@
 use reblessive::Stk;
 
-use crate::{
-	sql::statements::DeleteStatement,
-	syn::{
-		parser::{ParseResult, Parser},
-		token::t,
-	},
-};
+use crate::sql::statements::DeleteStatement;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::t;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_delete_stmt(
@@ -15,7 +11,7 @@ impl Parser<'_> {
 	) -> ParseResult<DeleteStatement> {
 		self.eat(t!("FROM"));
 		let only = self.eat(t!("ONLY"));
-		let what = SqlValues(self.parse_what_list(ctx).await?);
+		let what = self.parse_what_list(ctx).await?;
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(ctx).await?;
 		let output = self.try_parse_output(ctx).await?;

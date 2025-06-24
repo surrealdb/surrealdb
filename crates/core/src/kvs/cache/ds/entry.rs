@@ -1,9 +1,8 @@
 use crate::err::Error;
-use crate::expr::statements::DefineEventStatement;
-use crate::expr::statements::DefineFieldStatement;
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::statements::LiveStatement;
+use crate::expr::statements::{
+	DefineEventStatement, DefineFieldStatement, DefineIndexStatement, DefineTableStatement,
+	LiveStatement,
+};
 use anyhow::Result;
 use std::any::Any;
 use std::sync::Arc;

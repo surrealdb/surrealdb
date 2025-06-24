@@ -3,12 +3,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Ident, Version};
-use crate::iam::Action;
-use crate::iam::ResourceKind;
+use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
 use crate::val::{Object, Value};
-use anyhow::Result;
-use anyhow::bail;
+use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
 use revision::revisioned;

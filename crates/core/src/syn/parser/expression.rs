@@ -6,11 +6,10 @@ use super::mac::unexpected;
 use crate::sql::operator::{BindingPower, NearestNeighbor};
 use crate::sql::{AssignOperator, BinaryOperator, Expr, Part, PostfixOperator, PrefixOperator};
 use crate::syn::error::bail;
-use crate::syn::token::{self, Token};
-use crate::syn::{
-	parser::{ParseResult, Parser, mac::expected},
-	token::{TokenKind, t},
-};
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{ParseResult, Parser};
+use crate::syn::token::{self, Token, TokenKind, t};
+use crate::val::Number;
 
 impl Parser<'_> {
 	/// Parsers a generic value.
@@ -182,7 +181,7 @@ impl Parser<'_> {
 					self.lexer.backup_before(p.span);
 					self.token_buffer.clear();
 					self.token_buffer.push(token);
-					let number = self.next_token_value::<Number>().map(SqlValue::Number)?;
+					let number = self.next_token_value::<Number>().map(Value::Number)?;
 					if self.peek_continues_idiom() {
 						return self
 							.parse_remaining_value_idiom(ctx, vec![Part::Start(number)])

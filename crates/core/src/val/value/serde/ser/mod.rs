@@ -6,9 +6,7 @@ use crate::val::{self, Bytes, Value};
 use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
-use serde_content::Number;
-use serde_content::Serializer;
-use serde_content::Unexpected;
+use serde_content::{Number, Serializer, Unexpected};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 

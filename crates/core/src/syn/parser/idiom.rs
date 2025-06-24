@@ -2,24 +2,16 @@ use std::mem;
 
 use reblessive::Stk;
 
-use crate::{
-	sql::{
-		Dir, Expr, Field, Fields, Graph, Ident, Idiom, Literal, Param, Part,
-		graph::GraphSubjects,
-		part::{DestructurePart, Recurse, RecurseInstruction},
-	},
-	syn::{
-		error::{bail, syntax_error},
-		lexer::compound::{self, NumberKind, Numeric},
-		token::{Glued, Span, TokenKind, t},
-	},
-};
+use crate::sql::graph::GraphSubjects;
+use crate::sql::part::{DestructurePart, Recurse, RecurseInstruction};
+use crate::sql::{Dir, Expr, Field, Fields, Graph, Ident, Idiom, Literal, Param, Part};
+use crate::syn::error::{bail, syntax_error};
+use crate::syn::lexer::compound::{self, NumberKind, Numeric};
+use crate::syn::token::{Glued, Span, TokenKind, t};
 
-use super::{
-	GluedValue, ParseResult, Parser,
-	basic::NumberToken,
-	mac::{expected, pop_glued, unexpected},
-};
+use super::basic::NumberToken;
+use super::mac::{expected, pop_glued, unexpected};
+use super::{GluedValue, ParseResult, Parser};
 
 impl Parser<'_> {
 	pub(super) fn peek_continues_idiom(&mut self) -> bool {
@@ -569,7 +561,7 @@ impl Parser<'_> {
 						TokenKind::Glued(Glued::Number) => {
 							let number = self.next_token_value::<NumberToken>()?;
 							let number = match number {
-								NumberToken::Float(f) => Expr::Literal(Literal::Float(x)),
+								NumberToken::Float(f) => Expr::Literal(Literal::Float(f)),
 								NumberToken::Integer(i) => Expr::Literal(Literal::Integer(i)),
 								NumberToken::Decimal(decimal) => {
 									Expr::Literal(Literal::Decimal(decimal))

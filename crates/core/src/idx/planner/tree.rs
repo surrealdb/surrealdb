@@ -1,11 +1,10 @@
 use crate::dbs::Options;
-use crate::expr::FlowResultExt as _;
 use crate::expr::index::Index;
+use crate::expr::operator::NearestNeighbor;
+use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::expr::{
-	Array, Cond, Expression, Idiom, Kind, Number, Operator, Order, Part, Subquery, Table, Value,
-	With,
-	order::{OrderList, Ordering},
+	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, Table, With,
 };
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
@@ -14,6 +13,7 @@ use crate::idx::planner::executor::{
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
 use crate::kvs::Transaction;
+use crate::val::{Array, Number, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use std::collections::HashMap;
@@ -70,11 +70,11 @@ struct TreeBuilder<'a> {
 	first_order: Option<&'a Order>,
 	schemas: HashMap<Table, SchemaCache>,
 	idioms_indexes: HashMap<Table, HashMap<Arc<Idiom>, LocalIndexRefs>>,
-	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
+	resolved_expressions: HashMap<Arc<Expr>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Node>,
 	index_map: IndexesMap,
 	with_indexes: Option<Vec<IndexReference>>,
-	knn_brute_force_expressions: HashMap<Arc<Expression>, KnnBruteForceExpression>,
+	knn_brute_force_expressions: HashMap<Arc<Expr>, KnnBruteForceExpression>,
 	knn_expressions: KnnExpressions,
 	idioms_record_options: HashMap<Arc<Idiom>, RecordOptions>,
 	group_sequence: GroupRef,
@@ -168,33 +168,92 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	async fn eval_value(&mut self, stk: &mut Stk, group: GroupRef, v: &Value) -> Result<Node> {
+	async fn eval_value(&mut self, stk: &mut Stk, group: GroupRef, v: &Expr) -> Result<Node> {
 		match v {
-			Value::Expression(e) => self.eval_expression(stk, group, e).await,
-			Value::Idiom(i) => self.eval_idiom(stk, group, i).await,
-			Value::Strand(_)
-			| Value::Number(_)
-			| Value::Bool(_)
-			| Value::Thing(_)
-			| Value::Duration(_)
-			| Value::Uuid(_)
-			| Value::Constant(_)
-			| Value::Geometry(_)
-			| Value::Datetime(_)
-			| Value::Param(_)
-			| Value::Null
-			| Value::None
-			| Value::Function(_) => {
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				// Did we already compute the same expression?
+				if let Some(re) = self.resolved_expressions.get(v).cloned() {
+					return Ok(re.into());
+				}
+				self.check_boolean_operator(group, op);
+				let left_node = stk.run(|stk| self.eval_value(stk, group, left)).await?;
+				let right_node = stk.run(|stk| self.eval_value(stk, group, right)).await?;
+				// If both values are computable, then we can delegate the computation to the parent
+				if left == Node::Computable && right == Node::Computable {
+					return Ok(Node::Computable);
+				}
+				let exp = Arc::new(v.clone());
+				let left = Arc::new(self.compute(stk, left, left_node).await?);
+				let right = Arc::new(self.compute(stk, right, right_node).await?);
+				let io = if let Some((id, local_irs, remote_irs)) = left.is_indexed_field() {
+					self.lookup_index_options(
+						op,
+						id,
+						&right,
+						&exp,
+						IdiomPosition::Left,
+						local_irs,
+						remote_irs,
+					)?
+				} else if let Some((id, local_irs, remote_irs)) = right.is_indexed_field() {
+					self.lookup_index_options(
+						op,
+						id,
+						&left,
+						&exp,
+						IdiomPosition::Right,
+						local_irs,
+						remote_irs,
+					)?
+				} else {
+					None
+				};
+				if let Some(id) = left.is_field() {
+					self.eval_bruteforce_knn(id, &right, &exp)?;
+				} else if let Some(id) = right.is_field() {
+					self.eval_bruteforce_knn(id, &left, &exp)?;
+				}
+				self.check_leaf_node_with_index(io.as_ref());
+				let re = ResolvedExpression {
+					group,
+					exp: exp.clone(),
+					io,
+					left: left.clone(),
+					right: right.clone(),
+				};
+				self.resolved_expressions.insert(exp, re.clone());
+				Ok(re.into())
+			}
+			Expr::Idiom(i) => self.eval_idiom(stk, group, i).await,
+			Expr::Literal(
+				Literal::Integer(_)
+				| Literal::Bool(_)
+				| Literal::Strand(_)
+				| Literal::RecordId(_)
+				| Literal::Duration(_)
+				| Literal::Uuid(_)
+				| Literal::Datetime(_)
+				| Literal::None
+				| Literal::Null
+				| Literal::Decimal(_)
+				| Literal::Float(_)
+				| Literal::Uuid(_),
+			)
+			| Expr::Param(_)
+			| Expr::FunctionCall(_) => {
 				self.leaf_nodes_count += 1;
 				Ok(Node::Computable)
 			}
-			Value::Array(a) => self.eval_array(stk, a).await,
-			Value::Subquery(s) => self.eval_subquery(stk, s).await,
+			Expr::Literal(Literal::Array(a)) => self.eval_array(stk, a).await,
 			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
 		}
 	}
 
-	async fn compute(&self, stk: &mut Stk, v: &Value, n: Node) -> Result<Node> {
+	async fn compute(&self, stk: &mut Stk, v: &Expr, n: Node) -> Result<Node> {
 		Ok(if n == Node::Computable {
 			match v.compute(stk, self.ctx.ctx, self.ctx.opt, None).await {
 				Ok(v) => Node::Computed(v.into()),
@@ -205,17 +264,17 @@ impl<'a> TreeBuilder<'a> {
 		})
 	}
 
-	async fn eval_array(&mut self, stk: &mut Stk, a: &Array) -> Result<Node> {
+	async fn eval_array(&mut self, stk: &mut Stk, a: &[Expr]) -> Result<Node> {
 		self.leaf_nodes_count += 1;
 		let mut values = Vec::with_capacity(a.len());
-		for v in &a.0 {
+		for v in a {
 			values.push(
 				stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None))
 					.await
 					.catch_return()?,
 			);
 		}
-		Ok(Node::Computed(Arc::new(Value::Array(Array::from(values)))))
+		Ok(Node::Computed(Arc::new(Value::Array(Array(values)))))
 	}
 
 	async fn eval_idiom(&mut self, stk: &mut Stk, gr: GroupRef, i: &Idiom) -> Result<Node> {
@@ -227,12 +286,12 @@ impl<'a> TreeBuilder<'a> {
 
 		// Compute the idiom value if it is a param
 		if let Some(Part::Start(x)) = i.0.first() {
-			if x.is_param() {
+			if matches!(x, Expr::Param(_)) {
 				let v = stk
 					.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None))
 					.await
 					.catch_return()?;
-				return stk.run(|stk| self.eval_value(stk, gr, &v)).await;
+				return stk.run(|stk| self.eval_value(stk, gr, &x)).await;
 			}
 		}
 
@@ -342,89 +401,15 @@ impl<'a> TreeBuilder<'a> {
 		Ok(None)
 	}
 
-	async fn eval_expression(
-		&mut self,
-		stk: &mut Stk,
-		group: GroupRef,
-		e: &Expression,
-	) -> Result<Node> {
-		match e {
-			Expression::Unary {
-				..
-			} => {
-				self.leaf_nodes_count += 1;
-				Ok(Node::Unsupported("unary expressions not supported".to_string()))
-			}
-			Expression::Binary {
-				l,
-				o,
-				r,
-			} => {
-				// Did we already compute the same expression?
-				if let Some(re) = self.resolved_expressions.get(e).cloned() {
-					return Ok(re.into());
-				}
-				self.check_boolean_operator(group, o);
-				let left = stk.run(|stk| self.eval_value(stk, group, l)).await?;
-				let right = stk.run(|stk| self.eval_value(stk, group, r)).await?;
-				// If both values are computable, then we can delegate the computation to the parent
-				if left == Node::Computable && right == Node::Computable {
-					return Ok(Node::Computable);
-				}
-				let exp = Arc::new(e.clone());
-				let left = Arc::new(self.compute(stk, l, left).await?);
-				let right = Arc::new(self.compute(stk, r, right).await?);
-				let io = if let Some((id, local_irs, remote_irs)) = left.is_indexed_field() {
-					self.lookup_index_options(
-						o,
-						id,
-						&right,
-						&exp,
-						IdiomPosition::Left,
-						local_irs,
-						remote_irs,
-					)?
-				} else if let Some((id, local_irs, remote_irs)) = right.is_indexed_field() {
-					self.lookup_index_options(
-						o,
-						id,
-						&left,
-						&exp,
-						IdiomPosition::Right,
-						local_irs,
-						remote_irs,
-					)?
-				} else {
-					None
-				};
-				if let Some(id) = left.is_field() {
-					self.eval_bruteforce_knn(id, &right, &exp)?;
-				} else if let Some(id) = right.is_field() {
-					self.eval_bruteforce_knn(id, &left, &exp)?;
-				}
-				self.check_leaf_node_with_index(io.as_ref());
-				let re = ResolvedExpression {
-					group,
-					exp: exp.clone(),
-					io,
-					left: left.clone(),
-					right: right.clone(),
-				};
-				self.resolved_expressions.insert(exp, re.clone());
-				Ok(re.into())
-			}
-		}
-	}
-
-	fn check_boolean_operator(&mut self, gr: GroupRef, op: &Operator) {
+	fn check_boolean_operator(&mut self, gr: GroupRef, op: &BinaryOperator) {
 		match op {
-			Operator::Neg | Operator::Or => {
+			BinaryOperator::Or => {
 				if self.all_and != Some(false) {
 					self.all_and = Some(false);
 				}
 				self.all_and_groups.entry(gr).and_modify(|b| *b = false).or_insert(false);
 			}
-			Operator::And => {
+			BinaryOperator::And => {
 				if self.all_and.is_none() {
 					self.all_and = Some(true);
 				}
@@ -450,10 +435,10 @@ impl<'a> TreeBuilder<'a> {
 	#[expect(clippy::too_many_arguments)]
 	fn lookup_index_options(
 		&mut self,
-		o: &Operator,
+		o: &BinaryOperator,
 		id: &Arc<Idiom>,
 		node: &Node,
-		exp: &Arc<Expression>,
+		exp: &Arc<Expr>,
 		p: IdiomPosition,
 		local_irs: &LocalIndexRefs,
 		remote_irs: Option<&RemoteIndexRefs>,
@@ -481,10 +466,10 @@ impl<'a> TreeBuilder<'a> {
 	fn lookup_index_option(
 		&mut self,
 		irs: &LocalIndexRefs,
-		op: &Operator,
+		op: &BinaryOperator,
 		id: &Arc<Idiom>,
 		n: &Node,
-		e: &Arc<Expression>,
+		e: &Arc<Expr>,
 		p: IdiomPosition,
 	) -> Result<Option<IndexOption>> {
 		let mut res = None;
@@ -520,9 +505,9 @@ impl<'a> TreeBuilder<'a> {
 		None
 	}
 
-	fn eval_matches_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
+	fn eval_matches_operator(op: &BinaryOperator, n: &Node) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
-			if let Operator::Matches(mr) = op {
+			if let BinaryOperator::Matches(mr) = op {
 				return Some(IndexOperator::Matches(v.to_raw_string(), *mr));
 			}
 		}
@@ -531,46 +516,66 @@ impl<'a> TreeBuilder<'a> {
 
 	fn eval_mtree_knn(
 		&mut self,
-		exp: &Arc<Expression>,
-		op: &Operator,
+		exp: &Arc<Expr>,
+		op: &BinaryOperator,
 		n: &Node,
 	) -> Result<Option<IndexOperator>> {
-		if let Operator::Knn(k, None) = op {
-			if let Node::Computed(v) = n {
-				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
-				self.knn_expressions.insert(exp.clone());
-				return Ok(Some(IndexOperator::Knn(vec, *k)));
-			}
+		let BinaryOperator::NearestNeighbor(nn) = op else {
+			return Ok(None);
+		};
+		let NearestNeighbor::KTree(k) = nn else {
+			return Ok(None);
+		};
+
+		if let Node::Computed(v) = n {
+			let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
+			self.knn_expressions.insert(exp.clone());
+			return Ok(Some(IndexOperator::Knn(vec, *k)));
 		}
 		Ok(None)
 	}
 
 	fn eval_hnsw_knn(
 		&mut self,
-		exp: &Arc<Expression>,
-		op: &Operator,
+		exp: &Arc<Expr>,
+		op: &BinaryOperator,
 		n: &Node,
 	) -> Result<Option<IndexOperator>> {
-		if let Operator::Ann(k, ef) = op {
-			if let Node::Computed(v) = n {
-				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
-				self.knn_expressions.insert(exp.clone());
-				return Ok(Some(IndexOperator::Ann(vec, *k, *ef)));
-			}
+		let BinaryOperator::NearestNeighbor(nn) = op else {
+			return Ok(None);
+		};
+		let NearestNeighbor::Approximate(k, ef) = nn else {
+			return Ok(None);
+		};
+
+		if let Node::Computed(v) = n {
+			let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
+			self.knn_expressions.insert(exp.clone());
+			return Ok(Some(IndexOperator::Ann(vec, *k, *ef)));
 		}
-		Ok(None)
 	}
 
-	fn eval_bruteforce_knn(&mut self, id: &Idiom, val: &Node, exp: &Arc<Expression>) -> Result<()> {
-		if let Operator::Knn(k, Some(d)) = exp.operator() {
-			if let Node::Computed(v) = val {
-				let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
-				self.knn_expressions.insert(exp.clone());
-				self.knn_brute_force_expressions.insert(
-					exp.clone(),
-					KnnBruteForceExpression::new(*k, id.clone(), vec, d.clone()),
-				);
-			}
+	fn eval_bruteforce_knn(&mut self, id: &Idiom, val: &Node, exp: &Arc<Expr>) -> Result<()> {
+		let Expr::Binary {
+			op,
+			..
+		} = exp
+		else {
+			return Ok(None);
+		};
+
+		let BinaryOperator::NearestNeighbor(nn) = op else {
+			return Ok(None);
+		};
+		let NearestNeighbor::K(k, d) = nn else {
+			return Ok(None);
+		};
+
+		if let Node::Computed(v) = val {
+			let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
+			self.knn_expressions.insert(exp.clone());
+			self.knn_brute_force_expressions
+				.insert(exp.clone(), KnnBruteForceExpression::new(*k, id.clone(), vec, d.clone()));
 		}
 		Ok(())
 	}
@@ -578,30 +583,30 @@ impl<'a> TreeBuilder<'a> {
 	fn eval_index_operator(
 		&mut self,
 		ixr: &IndexReference,
-		op: &Operator,
+		op: &BinaryOperator,
 		n: &Node,
 		p: IdiomPosition,
 		col: IdiomCol,
 	) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
 			match (op, v, p) {
-				(Operator::Equal | Operator::Exact, v, _) => {
+				(BinaryOperator::Equal | BinaryOperator::ExactEqual, v, _) => {
 					self.index_map.check_compound(ixr, col, &v);
 					if col == 0 {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
-				(Operator::Contain, v, IdiomPosition::Left) => {
+				(BinaryOperator::Contain, v, IdiomPosition::Left) => {
 					if col == 0 {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
-				(Operator::Inside, v, IdiomPosition::Right) => {
+				(BinaryOperator::Inside, v, IdiomPosition::Right) => {
 					if col == 0 {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
-				(Operator::Inside, v, IdiomPosition::Left) => {
+				(BinaryOperator::Inside, v, IdiomPosition::Left) => {
 					if let Value::Array(a) = v.as_ref() {
 						self.index_map.check_compound_array(ixr, col, a);
 						if col == 0 {
@@ -609,16 +614,20 @@ impl<'a> TreeBuilder<'a> {
 						}
 					}
 				}
-				(Operator::ContainAny | Operator::ContainAll, v, IdiomPosition::Left) => {
+				(
+					BinaryOperator::ContainAny | BinaryOperator::ContainAll,
+					v,
+					IdiomPosition::Left,
+				) => {
 					if v.is_array() && col == 0 {
 						return Some(IndexOperator::Union(v));
 					}
 				}
 				(
-					Operator::LessThan
-					| Operator::LessThanOrEqual
-					| Operator::MoreThan
-					| Operator::MoreThanOrEqual,
+					BinaryOperator::LessThan
+					| BinaryOperator::LessThanOrEqual
+					| BinaryOperator::MoreThan
+					| BinaryOperator::MoreThanOrEqual,
 					v,
 					p,
 				) => {
@@ -631,14 +640,6 @@ impl<'a> TreeBuilder<'a> {
 		}
 		None
 	}
-
-	async fn eval_subquery(&mut self, stk: &mut Stk, s: &Subquery) -> Result<Node> {
-		self.group_sequence += 1;
-		match s {
-			Subquery::Value(v) => stk.run(|stk| self.eval_value(stk, self.group_sequence, v)).await,
-			_ => Ok(Node::Unsupported(format!("Unsupported subquery: {}", s))),
-		}
-	}
 }
 
 pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Vec<Arc<Value>>>>;
@@ -646,7 +647,7 @@ pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Vec<Arc<Value>>>>;
 /// For each expression a possible index option
 #[derive(Default)]
 pub(super) struct IndexesMap {
-	pub(super) options: Vec<(Arc<Expression>, IndexOption)>,
+	pub(super) options: Vec<(Arc<Expr>, IndexOption)>,
 	/// For each index, tells if the columns are requested
 	pub(super) compound_indexes: CompoundIndexes,
 	pub(super) order_limit: Option<IndexOption>,
@@ -736,7 +737,7 @@ pub(super) enum Node {
 		io: Option<IndexOption>,
 		left: Arc<Node>,
 		right: Arc<Node>,
-		exp: Arc<Expression>,
+		exp: Arc<Expr>,
 	},
 	IndexedField(Arc<Idiom>, LocalIndexRefs),
 	RecordField(Arc<Idiom>, RecordOptions),
@@ -787,14 +788,14 @@ pub(super) enum IdiomPosition {
 
 impl IdiomPosition {
 	// Reverses the operator for non-commutative operators
-	fn transform(&self, op: &Operator) -> Operator {
+	fn transform(&self, op: &BinaryOperator) -> BinaryOperator {
 		match self {
 			IdiomPosition::Left => op.clone(),
 			IdiomPosition::Right => match op {
-				Operator::LessThan => Operator::MoreThan,
-				Operator::LessThanOrEqual => Operator::MoreThanOrEqual,
-				Operator::MoreThan => Operator::LessThan,
-				Operator::MoreThanOrEqual => Operator::LessThanOrEqual,
+				BinaryOperator::LessThan => BinaryOperator::MoreThan,
+				BinaryOperator::LessThanEqual => BinaryOperator::MoreThanEqual,
+				BinaryOperator::MoreThan => BinaryOperator::LessThan,
+				BinaryOperator::MoreThanEqual => BinaryOperator::LessThanEqual,
 				_ => op.clone(),
 			},
 			IdiomPosition::None => op.clone(),
@@ -805,7 +806,7 @@ impl IdiomPosition {
 #[derive(Clone)]
 struct ResolvedExpression {
 	group: GroupRef,
-	exp: Arc<Expression>,
+	exp: Arc<Expr>,
 	io: Option<IndexOption>,
 	left: Arc<Node>,
 	right: Arc<Node>,

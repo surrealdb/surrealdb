@@ -1,4 +1,4 @@
-use crate::expr::duration::Duration;
+use crate::val::Duration;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;

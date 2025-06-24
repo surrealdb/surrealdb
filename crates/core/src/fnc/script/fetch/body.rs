@@ -1,11 +1,10 @@
-use crate::fnc::script::fetch::{RequestError, stream::ReadableStream};
+use crate::fnc::script::fetch::RequestError;
+use crate::fnc::script::fetch::stream::ReadableStream;
 use bytes::{Bytes, BytesMut};
 use futures::{Stream, TryStreamExt, future};
 use js::{ArrayBuffer, Class, Ctx, Error, Exception, FromJs, Result, Type, TypedArray, Value};
-use std::{
-	cell::{Cell, RefCell},
-	result::Result as StdResult,
-};
+use std::cell::{Cell, RefCell};
+use std::result::Result as StdResult;
 
 use super::classes::Blob;
 

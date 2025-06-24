@@ -1,8 +1,8 @@
 use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::dbs::plan::Explanation;
 use crate::err::Error;
-use crate::expr::Value;
 use crate::expr::order::Ordering;
+use crate::val::Value;
 use anyhow::Result;
 use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
 use rand::Rng as _;

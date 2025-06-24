@@ -3,30 +3,19 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Closure;
-use crate::expr::FlowResultExt as _;
-use crate::expr::Function;
-use crate::expr::array::Array;
-use crate::expr::array::Clump;
-use crate::expr::array::Combine;
-use crate::expr::array::Complement;
-use crate::expr::array::Difference;
-use crate::expr::array::Flatten;
-use crate::expr::array::Intersect;
-use crate::expr::array::Matches;
-use crate::expr::array::Transpose;
-use crate::expr::array::Union;
-use crate::expr::array::Uniq;
-use crate::expr::array::Windows;
-use crate::expr::value::Value;
+use crate::expr::{FlowResultExt as _, Function};
+use crate::val::array::{
+	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Transpose, Union, Uniq,
+	Windows,
+};
+use crate::val::{Array, Closure, Value};
 use anyhow::{Result, bail, ensure};
 use rand::prelude::SliceRandom;
 use reblessive::tree::Stk;
 use std::cmp::Ordering;
 use std::mem::size_of_val;
 
-use super::args::Optional;
-use super::args::Rest;
+use super::args::{Optional, Rest};
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -757,8 +746,7 @@ pub fn windows((array, window_size): (Array, i64)) -> Result<Value> {
 
 pub mod sort {
 
-	use crate::expr::array::Array;
-	use crate::expr::value::Value;
+	use crate::val::{Array, Value};
 	use anyhow::Result;
 
 	pub fn asc((mut array,): (Array,)) -> Result<Value> {
@@ -775,10 +763,8 @@ pub mod sort {
 #[cfg(test)]
 mod tests {
 	use super::{at, first, join, last, slice};
-	use crate::{
-		expr::{Array, Value},
-		fnc::args::Optional,
-	};
+	use crate::fnc::args::Optional;
+	use crate::val::{Array, Value};
 
 	#[test]
 	fn array_slice() {

@@ -21,11 +21,10 @@ pub mod ia;
 pub mod ip;
 pub mod vm;
 
-use crate::expr::array::Array;
 use crate::expr::id::RecordIdKeyLit;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::{KeyEncode, impl_key};
+use crate::val::Array;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;

@@ -5,7 +5,6 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Object, RecordIdKeyLit, Thing, Value};
 use crate::idx::index::IndexOperation;
 use crate::key::index::ia::Ia;
 use crate::key::index::ip::Ip;
@@ -14,6 +13,7 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::mem::ALLOC;
+use crate::val::{Object, RecordId, RecordIdKey, Value};
 use anyhow::{Result, ensure};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
@@ -222,7 +222,7 @@ impl IndexBuilder {
 		ix: &DefineIndexStatement,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		if let Some(r) = self.indexes.get(&key) {
@@ -351,7 +351,7 @@ impl Building {
 		ctx: &Context,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let mut queue = self.queue.write().await;
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
@@ -527,7 +527,11 @@ impl Building {
 			let key = thing::Thing::decode(&k)?;
 			// Parse the value
 			let val: Value = revision::from_slice(&v)?;
-			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
+			let rid: Arc<RecordId> = RecordId {
+				table: key.tb.to_owned(),
+				key: key.id,
+			}
+			.into();
 
 			let opt_values;
 
@@ -587,7 +591,10 @@ impl Building {
 			if let Some(v) = tx.get(ia.clone(), None).await? {
 				tx.del(ia).await?;
 				let a: Appending = revision::from_slice(&v)?;
-				let rid = Thing::from((self.tb.clone(), a.id));
+				let rid = RecordId {
+					table: self.tb.clone(),
+					key: a.id,
+				};
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
 				stack.enter(|stk| io.compute(stk)).finish().await?;

@@ -1,8 +1,7 @@
 use crate::sql::duration::Duration;
 
 use std::fmt::{self, Display, Formatter};
-use std::str;
-use std::time;
+use std::{str, time};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[non_exhaustive]

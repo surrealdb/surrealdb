@@ -11,10 +11,8 @@ use std::result::Result as StdResult;
 use std::time::Duration;
 use surrealdb::sql::SqlValue;
 use tokio::net::TcpStream;
-use tokio::sync::{
-	mpsc::{self, Receiver, Sender},
-	oneshot,
-};
+use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::oneshot;
 use tokio::time;
 use tokio_stream::StreamExt;
 use tokio_tungstenite::tungstenite::Message;

@@ -1,10 +1,8 @@
-use crate::expr::value::Value;
+use crate::val::Value;
 use anyhow::Result;
-use md5::Digest;
-use md5::Md5;
+use md5::{Digest, Md5};
 use sha1::Sha1;
-use sha2::Sha256;
-use sha2::Sha512;
+use sha2::{Sha256, Sha512};
 
 pub fn blake3((arg,): (String,)) -> Result<Value> {
 	Ok(blake3::hash(arg.as_bytes()).to_string().into())
@@ -84,12 +82,10 @@ macro_rules! bounded_verify_password {
 pub mod argon2 {
 
 	use super::COST_ALLOWANCE;
-	use crate::expr::value::Value;
+	use crate::val::Value;
 	use anyhow::Result;
-	use argon2::{
-		Argon2,
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
-	};
+	use argon2::Argon2;
+	use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString};
 	use rand::rngs::OsRng;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
@@ -117,8 +113,8 @@ pub mod argon2 {
 
 pub mod bcrypt {
 
-	use crate::expr::value::Value;
 	use crate::fnc::crypto::COST_ALLOWANCE;
+	use crate::val::Value;
 	use anyhow::Result;
 	use bcrypt::HashParts;
 	use std::str::FromStr;
@@ -148,12 +144,10 @@ pub mod bcrypt {
 pub mod pbkdf2 {
 
 	use super::COST_ALLOWANCE;
-	use crate::expr::value::Value;
+	use crate::val::Value;
 	use anyhow::Result;
-	use pbkdf2::{
-		Pbkdf2,
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
-	};
+	use pbkdf2::Pbkdf2;
+	use pbkdf2::password_hash::{PasswordHash, PasswordHasher, SaltString};
 	use rand::rngs::OsRng;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
@@ -182,13 +176,11 @@ pub mod pbkdf2 {
 
 pub mod scrypt {
 
-	use crate::expr::value::Value;
+	use crate::val::Value;
 	use anyhow::Result;
 	use rand::rngs::OsRng;
-	use scrypt::{
-		Scrypt,
-		password_hash::{PasswordHash, PasswordHasher, SaltString},
-	};
+	use scrypt::Scrypt;
+	use scrypt::password_hash::{PasswordHash, PasswordHasher, SaltString};
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		type Params = <Scrypt as PasswordHasher>::Params;

@@ -1,12 +1,13 @@
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
-use crate::expr::{Cond, FlowResultExt as _, Thing, Value};
+use crate::expr::{Cond, FlowResultExt as _};
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
+use crate::val::{RecordId, Value};
 use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -143,7 +144,7 @@ impl MTreeChecker<'_> {
 		let txn = self.ctx.tx();
 		for (doc_id, dist) in res {
 			if let Some(key) = doc_ids.get_doc_key(&txn, doc_id).await? {
-				let rid: Thing = revision::from_slice(&key)?;
+				let rid: RecordId = revision::from_slice(&key)?;
 				result.push_back((rid.into(), dist, None));
 			}
 		}
@@ -152,7 +153,7 @@ impl MTreeChecker<'_> {
 }
 
 struct CheckerCacheEntry {
-	record: Option<(Arc<Thing>, Arc<Value>)>,
+	record: Option<(Arc<RecordId>, Arc<Value>)>,
 	truthy: bool,
 }
 
@@ -178,14 +179,14 @@ impl CheckerCacheEntry {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		rid: Option<Thing>,
+		rid: Option<RecordId>,
 		cond: &Cond,
 	) -> Result<Self> {
 		if let Some(rid) = rid {
 			let rid = Arc::new(rid);
 			let txn = ctx.tx();
 			let val = Iterable::fetch_thing(&txn, opt, &rid).await?;
-			if !val.is_none_or_null() {
+			if !val.is_nullish() {
 				let (value, truthy) = {
 					let mut cursor_doc = CursorDoc {
 						rid: Some(rid.clone()),
@@ -193,6 +194,7 @@ impl CheckerCacheEntry {
 						doc: val.into(),
 					};
 					let truthy = cond
+						.0
 						.compute(stk, ctx, opt, Some(&cursor_doc))
 						.await
 						.catch_return()?

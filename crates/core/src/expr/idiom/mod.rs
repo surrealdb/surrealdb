@@ -1,13 +1,11 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::fmt::{Fmt, fmt_separated_by};
+use crate::expr::part::{Next, NextMethod};
+use crate::expr::paths::{ID, IN, META, OUT};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{
-	Part, Value,
-	fmt::{Fmt, fmt_separated_by},
-	part::{Next, NextMethod},
-	paths::{ID, IN, META, OUT},
-};
+use crate::expr::{Ident, Part, Value};
 use md5::{Digest, Md5};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -16,6 +14,8 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
+
+pub mod recursion;
 
 use super::FlowResult;
 
@@ -99,6 +99,11 @@ impl From<Part> for Idiom {
 }
 
 impl Idiom {
+	/// Returns an idiom for a field of the given name.
+	pub(crate) fn field(field_name: String) -> Self {
+		Idiom(vec![Part::Field(Ident(field_name))])
+	}
+
 	/// Appends a part to the end of this Idiom
 	pub(crate) fn push(mut self, n: Part) -> Idiom {
 		self.0.push(n);

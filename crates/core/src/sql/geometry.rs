@@ -25,7 +25,7 @@ pub enum Geometry {
 	// Add new variants here
 }
 
-impl From<Geometry> for crate::expr::Geometry {
+impl From<Geometry> for crate::val::Geometry {
 	fn from(v: Geometry) -> Self {
 		match v {
 			Geometry::Point(v) => Self::Point(v),
@@ -39,16 +39,16 @@ impl From<Geometry> for crate::expr::Geometry {
 	}
 }
 
-impl From<crate::expr::Geometry> for Geometry {
-	fn from(v: crate::expr::Geometry) -> Self {
+impl From<crate::val::Geometry> for Geometry {
+	fn from(v: crate::val::Geometry) -> Self {
 		match v {
-			crate::expr::Geometry::Point(v) => Self::Point(v),
-			crate::expr::Geometry::Line(v) => Self::Line(v),
-			crate::expr::Geometry::Polygon(v) => Self::Polygon(v),
-			crate::expr::Geometry::MultiPoint(v) => Self::MultiPoint(v),
-			crate::expr::Geometry::MultiLine(v) => Self::MultiLine(v),
-			crate::expr::Geometry::MultiPolygon(v) => Self::MultiPolygon(v),
-			crate::expr::Geometry::Collection(v) => {
+			crate::val::Geometry::Point(v) => Self::Point(v),
+			crate::val::Geometry::Line(v) => Self::Line(v),
+			crate::val::Geometry::Polygon(v) => Self::Polygon(v),
+			crate::val::Geometry::MultiPoint(v) => Self::MultiPoint(v),
+			crate::val::Geometry::MultiLine(v) => Self::MultiLine(v),
+			crate::val::Geometry::MultiPolygon(v) => Self::MultiPolygon(v),
+			crate::val::Geometry::Collection(v) => {
 				Self::Collection(v.into_iter().map(Into::into).collect())
 			}
 		}

@@ -1,7 +1,6 @@
 use crate::val::{Datetime, Duration, Value};
 use anyhow::Result;
-use chrono::TimeZone;
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

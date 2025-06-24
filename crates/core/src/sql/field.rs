@@ -1,4 +1,5 @@
-use crate::sql::{Expr, Idiom, fmt::Fmt};
+use crate::sql::fmt::Fmt;
+use crate::sql::{Expr, Idiom};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};

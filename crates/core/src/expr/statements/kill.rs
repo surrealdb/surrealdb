@@ -1,10 +1,10 @@
+use crate::ctx::Context;
 use crate::dbs::{Action, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Expr;
+use crate::expr::{Expr, FlowResultExt as _};
 use crate::kvs::Live;
-use crate::val::Value;
-use crate::{ctx::Context, expr::FlowResultExt as _, expr::Uuid};
+use crate::val::{Uuid, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;

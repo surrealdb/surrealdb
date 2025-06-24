@@ -1,43 +1,28 @@
-use super::Key;
-use super::KeyEncode;
-use super::Val;
-use super::Version;
 use super::batch::Batch;
 use super::tr::Check;
-use super::util;
+use super::{Key, KeyEncode, Val, Version, util};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::expr::Permissions;
-use crate::expr::RecordIdKeyLit;
-use crate::expr::Value;
-use crate::expr::statements::AccessGrant;
-use crate::expr::statements::DefineAccessStatement;
-use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::statements::DefineDatabaseStatement;
-use crate::expr::statements::DefineEventStatement;
-use crate::expr::statements::DefineFieldStatement;
-use crate::expr::statements::DefineFunctionStatement;
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::statements::DefineModelStatement;
-use crate::expr::statements::DefineNamespaceStatement;
-use crate::expr::statements::DefineParamStatement;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::statements::DefineUserStatement;
-use crate::expr::statements::LiveStatement;
-use crate::expr::statements::define::BucketDefinition;
-use crate::expr::statements::define::DefineConfigStatement;
-use crate::expr::statements::define::{ApiDefinition, DefineSequenceStatement};
+use crate::expr::statements::define::{
+	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
+};
+use crate::expr::statements::{
+	AccessGrant, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineTableStatement,
+	DefineUserStatement, LiveStatement,
+};
+use crate::expr::{Permissions, RecordIdKeyLit};
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
-use crate::kvs::Transactor;
-use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
+use crate::kvs::{Transactor, cache};
+use crate::val::{RecordId, RecordIdKey, Value};
 use anyhow::Result;
-use futures::lock::Mutex;
-use futures::lock::MutexGuard;
+use futures::lock::{Mutex, MutexGuard};
 use futures::stream::Stream;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -1566,7 +1551,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &RecordIdKeyLit,
+		id: &RecordIdKey,
 		version: Option<u64>,
 	) -> Result<Arc<Value>> {
 		// Cache is not versioned
@@ -1578,7 +1563,10 @@ impl Transaction {
 				Some(val) => {
 					let mut val: Value = revision::from_slice(&val)?;
 					// Inject the id field into the document
-					let rid = crate::expr::Thing::from((tb, id.clone()));
+					let rid = RecordId {
+						table: tb.to_owned(),
+						key: id.clone(),
+					};
 					val.def(&rid);
 					let val = cache::tx::Entry::Val(Arc::new(val));
 					val.try_into_val()
@@ -1600,7 +1588,10 @@ impl Transaction {
 						Some(val) => {
 							let mut val: Value = revision::from_slice(&val)?;
 							// Inject the id field into the document
-							let rid = crate::expr::Thing::from((tb, id.clone()));
+							let rid = RecordId {
+								table: tb.to_owned(),
+								key: id.clone(),
+							};
 							val.def(&rid);
 							let val = cache::tx::Entry::Val(Arc::new(val));
 							self.cache.insert(qey, val.clone());
