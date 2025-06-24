@@ -3,8 +3,8 @@ use crate::api::QueryResults as QueryResponse;
 use crate::api::conn::{Command, Route};
 use crate::opt::Resource;
 use async_channel::Receiver;
-use surrealdb_core::dbs::QueryResultData;
-use surrealdb_core::expr::{Value as Value, to_value as to_core_value};
+use surrealdb_core::dbs::{QueryResult, QueryResultData};
+use surrealdb_core::expr::{Value as Value, to_value};
 use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc::{
 	CreateParams, DeleteParams, InsertParams, SelectParams, UpdateParams,
 	UpsertParams,
@@ -48,12 +48,12 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				} => Ok(QueryResultData::new_from_value(Value::None)),
 				Command::Query {
 					..
-				} => Ok(QueryResultData::Query(QueryResponse::new())),
+				} => Ok(QueryResultData::Results(Vec::new())),
 				Command::Create {
 					data,
 					..
 				} => match data {
-					None => Ok(QueryResultData::new_from_value(to_core_value(User::default()).unwrap())),
+					None => Ok(QueryResultData::new_from_value(to_value(User::default()).unwrap())),
 					Some(user) => Ok(QueryResultData::new_from_value(user.clone())),
 				},
 				Command::Select {
@@ -63,14 +63,20 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				| Command::Delete {
 					what,
 					..
-				} => match what {
-					Resource::Table(..) | Resource::Array(..) | Resource::Range(_) => {
-						Ok(QueryResultData::new_from_value(Value::Array(Default::default())))
+				} => {
+					let mut results = Vec::new();
+					for what in what.iter() {
+						match what {
+							Value::Table(..) | Value::Array(..) | Value::Range(_) => {
+								results.push(QueryResult::default());
+							}
+							Value::Thing(..) => {
+								results.push(QueryResult::new_from_value(to_value(User::default()).unwrap()));
+							}
+							_ => unreachable!(),
+						}
 					}
-					Resource::RecordId(..) => {
-						Ok(QueryResultData::new_from_value(to_core_value(User::default()).unwrap()))
-					}
-					_ => unreachable!(),
+					Ok(QueryResultData::Results(results))
 				},
 				Command::Upsert {
 					what,
@@ -79,14 +85,20 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				| Command::Update {
 					what,
 					..
-				} => match what {
-					Resource::Table(..) | Resource::Array(..) | Resource::Range(..) => {
-						Ok(QueryResultData::new_from_value(Value::Array(Default::default())))
+				} => {
+					let mut results = Vec::new();
+					for what in what.iter() {
+						match what {
+							Value::Table(..) | Value::Array(..) | Value::Range(_) => {
+								results.push(QueryResult::default());
+							}
+							Value::Thing(..) => {
+								results.push(QueryResult::new_from_value(to_value(User::default()).unwrap()));
+							}
+							_ => unreachable!(),
+						}
 					}
-					Resource::RecordId(..) => {
-						Ok(QueryResultData::new_from_value(to_core_value(User::default()).unwrap()))
-					}
-					_ => unreachable!(),
+					Ok(QueryResultData::Results(results))
 				},
 				Command::Insert {
 					data,
@@ -95,7 +107,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					Value::Array(..) => {
 						Ok(QueryResultData::new_from_value(Value::Array(Default::default())))
 					}
-					_ => Ok(QueryResultData::new_from_value(to_core_value(User::default()).unwrap())),
+					_ => Ok(QueryResultData::new_from_value(to_value(User::default()).unwrap())),
 				},
 				Command::Run {
 					..

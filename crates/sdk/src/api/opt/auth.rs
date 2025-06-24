@@ -121,8 +121,10 @@ impl<'a> From<RecordCredentials<'a>> for SignupParams {
 		SignupParams {
 			namespace: credentials.namespace.to_string(),
 			database: credentials.database.to_string(),
-			access: credentials.access.to_string(),
-			access_params: credentials.params,
+			access_name: credentials.access.to_string(),
+			variables: credentials.params.into_iter()
+				.map(|(k, v)| (k, Value::Strand(v.into())))
+				.collect(),
 		}
 	}
 }
@@ -183,7 +185,7 @@ impl TryFromValue for Jwt {
 	fn try_from_value(value: Value) -> anyhow::Result<Self> {
 		match value {
 			Value::Strand(s) => Ok(Jwt(s.0)),
-			_ => Err(anyhow::anyhow!("Expected a string value, got {:?}", value.value_type())),
+			_ => Err(anyhow::anyhow!("Expected a string value, got {}", value.kindof())),
 		}
 	}
 }

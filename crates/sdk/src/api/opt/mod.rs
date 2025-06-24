@@ -1,7 +1,7 @@
 //! The different options and types for use in API functions
 
 use serde::Serialize;
-use surrealdb_core::expr::Value;
+use surrealdb_core::expr::{Object, Value};
 use std::{borrow::Cow, collections::BTreeMap};
 
 pub mod auth;
@@ -57,7 +57,7 @@ impl PatchOp {
 	/// PatchOp::add("/biscuits/1", json!({ "name": "Ginger Nut" }))
 	/// # ;
 	/// ```
-	pub fn add<T>(path: impl Into<String>, value: Value) -> Self {
+	pub fn add(path: impl Into<String>, value: Value) -> Self {
 		Self::Add {
 			path: path.into(),
 			value,
@@ -126,27 +126,27 @@ impl TryFrom<PatchOp> for Value {
 				map.insert("op".to_string(), "add".into());
 				map.insert("path".to_string(), path.into());
 				map.insert("value".to_string(), value);
-				Value::Object(map)
+				Value::Object(Object::new(map))
 			},
 			PatchOp::Remove { path } => {
 				let mut map = BTreeMap::new();
 				map.insert("op".to_string(), "remove".into());
 				map.insert("path".to_string(), path.into());
-				Value::Object(map)
+				Value::Object(Object::new(map))
 			},
 			PatchOp::Replace { path, value } => {
 				let mut map = BTreeMap::new();
 				map.insert("op".to_string(), "replace".into());
 				map.insert("path".to_string(), path.into());
 				map.insert("value".to_string(), value);
-				Value::Object(map)
+				Value::Object(Object::new(map))
 			},
 			PatchOp::Change { path, value } => {
 				let mut map = BTreeMap::new();
 				map.insert("op".to_string(), "change".into());
 				map.insert("path".to_string(), path.into());
 				map.insert("value".to_string(), value);
-				Value::Object(map)
+				Value::Object(Object::new(map))
 			},
 		};
 		Ok(value)
@@ -197,9 +197,7 @@ impl PatchOps {
 	/// PatchOps::new().add("/biscuits/1", json!({ "name": "Ginger Nut" }))
 	/// # ;
 	/// ```
-	pub fn add<T>(mut self, path: &str, value: T) -> Self
-	where
-		T: Serialize,
+	pub fn add(mut self, path: &str, value: Value) -> Self
 	{
 		self.0.push(PatchOp::add(path, value));
 		self
@@ -239,9 +237,7 @@ impl PatchOps {
 	/// PatchOps::new().replace("/biscuits/0/name", "Chocolate Digestive")
 	/// # ;
 	/// ```
-	pub fn replace<T>(mut self, path: &str, value: T) -> Self
-	where
-		T: Serialize,
+	pub fn replace<T>(mut self, path: &str, value: Value) -> Self
 	{
 		self.0.push(PatchOp::replace(path, value));
 		self
@@ -249,7 +245,7 @@ impl PatchOps {
 
 	/// Changes a value
 	pub fn change(mut self, path: &str, diff: String) -> Self {
-		self.0.push(PatchOp::change(path, diff));
+		self.0.push(PatchOp::change(path, diff.into()));
 		self
 	}
 

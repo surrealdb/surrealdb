@@ -176,6 +176,11 @@ impl TryInto<HeaderMap> for Object {
 }
 
 impl Object {
+
+	pub fn new(object: BTreeMap<String, Value>) -> Self {
+		Self(object)
+	}
+
 	/// Fetch the record id if there is one
 	pub fn rid(&self) -> Option<Thing> {
 		match self.get("id") {

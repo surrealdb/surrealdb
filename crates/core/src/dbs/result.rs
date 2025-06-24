@@ -52,6 +52,22 @@ impl QueryResult {
 			result: Err(err),
 		}
 	}
+
+	pub fn new_from_value(value: Value) -> Self {
+		Self {
+			stats: QueryStats::default(),
+			result: Ok(value),
+		}
+	}
+}
+
+impl Default for QueryResult {
+	fn default() -> Self {
+		Self {
+			stats: QueryStats::default(),
+			result: Ok(Value::default()),
+		}
+	}
 }
 
 #[derive(Clone, Debug, Default)]

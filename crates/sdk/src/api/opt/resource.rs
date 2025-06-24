@@ -85,9 +85,7 @@ mod resource {
 
 pub trait RangeableResource: Resource {
 	/// Add a range to the resource, this only works if the resource is a table.
-	fn with_range<RT>(self, range: KeyRange) -> RT
-	where
-		RT: Resource;
+	fn with_range(self, range: KeyRange) -> RecordId;
 }
 
 pub trait InsertableResource: Resource {
@@ -95,30 +93,13 @@ pub trait InsertableResource: Resource {
 	fn default_content(&self) -> Option<Value>;
 }
 
-pub trait CreatableResource: Resource {
-	fn into_create_params(self) -> Values;
-}
+pub trait CreatableResource: Resource {}
 
 pub trait SubscribableResource: Resource {
 	/// Converts the resource into a live query parameters
 	fn into_live_query_params(self) -> LiveQueryParams;
 }
 
-// pub(crate) fn resource_to_values(r: Resource) -> Values {
-// 	let mut res = Values::default();
-// 	match r {
-// 		Resource::Table(x) => {
-// 			res.0 = vec![Table(x).into_core().into()];
-// 		}
-// 		Resource::RecordId(x) => res.0 = vec![x.into()],
-// 		Resource::Object(x) => res.0 = vec![x.into()],
-// 		Resource::Array(x) => res.0 = x,
-// 		Resource::Edge(x) => res.0 = vec![x.into_inner().into()],
-// 		Resource::Range(x) => res.0 = vec![x.into_inner().into()],
-// 		Resource::Unspecified => {}
-// 	}
-// 	res
-// }
 
 macro_rules! impl_resource_for_table_type {
 	($type:ty) => {
@@ -129,31 +110,7 @@ macro_rules! impl_resource_for_table_type {
 			}
 
 			fn into_values(self) -> Values {
-				vec![Value::from(CoreTable::from(self))]
-			}
-		}
-
-		impl RangeableResource for $type {
-			fn with_range<RT>(self, range: KeyRange) -> RT
-			where
-				RT: Resource,
-			 {
-				let range = KeyRange::from(range);
-				let res = IdRange {
-					beg: range.start.map(RecordIdKey::into_inner),
-					end: range.end.map(RecordIdKey::into_inner),
-				};
-				RecordId::from((self, res))
-			}
-		}
-
-		impl InsertableResource for $type {
-			fn table_name(&self) -> &str {
-				self.as_str()
-			}
-
-			fn default_content(&self) -> Option<Value> {
-				None
+				Values(vec![Value::from(CoreTable::from(self))])
 			}
 		}
 	};
@@ -162,6 +119,75 @@ macro_rules! impl_resource_for_table_type {
 impl_resource_for_table_type!(String);
 impl_resource_for_table_type!(&str);
 impl_resource_for_table_type!(CoreTable);
+
+
+impl CreatableResource for String {}
+impl CreatableResource for &str {}
+impl CreatableResource for CoreTable {}
+
+impl InsertableResource for String {
+	fn table_name(&self) -> &str {
+		self.as_str()
+	}
+
+	fn default_content(&self) -> Option<Value> {
+		None
+	}
+}
+
+impl RangeableResource for String {
+	fn with_range(self, range: KeyRange) -> RecordId {
+		let range = KeyRange::from(range);
+		let res = IdRange {
+			beg: range.start.map(RecordIdKey::into_inner),
+			end: range.end.map(RecordIdKey::into_inner),
+		};
+		RecordId::from((self, res))
+	}
+}
+
+impl InsertableResource for &str {
+	fn table_name(&self) -> &str {
+		self
+	}
+
+	fn default_content(&self) -> Option<Value> {
+		None
+	}
+}
+
+impl RangeableResource for &str {
+	fn with_range(self, range: KeyRange) -> RecordId {
+		let range = KeyRange::from(range);
+		let res = IdRange {
+			beg: range.start.map(RecordIdKey::into_inner),
+			end: range.end.map(RecordIdKey::into_inner),
+		};
+		RecordId::from((self, res))
+	}
+}
+
+impl InsertableResource for CoreTable {
+	fn table_name(&self) -> &str {
+		self.as_str()
+	}
+
+	fn default_content(&self) -> Option<Value> {
+		None
+	}
+}
+
+impl RangeableResource for CoreTable {
+	fn with_range(self, range: KeyRange) -> RecordId {
+		let range = KeyRange::from(range);
+		let res = IdRange {
+			beg: range.start.map(RecordIdKey::into_inner),
+			end: range.end.map(RecordIdKey::into_inner),
+		};
+		RecordId::from((self.as_str(), res))
+	}
+}
+
 
 impl resource::Sealed for RecordId {}
 impl Resource for RecordId {

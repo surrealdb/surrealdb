@@ -1,4 +1,5 @@
 use crate::{Result, error::Api as ApiError};
+use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -170,10 +171,7 @@ impl TryFrom<RecordIdKey> for Uuid {
 
 impl From<Vec<Value>> for RecordIdKey {
 	fn from(values: Vec<Value>) -> Self {
-		let res = Value::Array(Array(values));
-		let mut array = Array::default();
-		array.0 = res;
-		Self(Id::Array(array))
+		Self(Id::Array(Array(values)))
 	}
 }
 
@@ -205,12 +203,12 @@ impl fmt::Display for RecordIdKeyFromValueError {
 
 impl TryFromValue for RecordIdKey {
 	fn try_from_value(key: Value) -> std::result::Result<Self, anyhow::Error> {
-		match key.0 {
+		match key {
 			Value::Strand(x) => Ok(RecordIdKey::from_inner(Id::String(x.0))),
 			Value::Number(Number::Int(x)) => Ok(RecordIdKey::from_inner(Id::Number(x))),
 			Value::Object(x) => Ok(RecordIdKey::from_inner(Id::Object(x))),
 			Value::Array(x) => Ok(RecordIdKey::from_inner(Id::Array(x))),
-			_ => Err(RecordIdKeyFromValueError(())),
+			_ => Err(anyhow!("failed to convert value into a record id key: {key}")),
 		}
 	}
 }

@@ -6,6 +6,7 @@ use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt;
+use crate::method::Commit;
 use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
@@ -111,7 +112,7 @@ where
 	}
 }
 
-impl<C> Query<'_, C>
+impl<'req, C> Query<'req, C>
 where
 	C: Connection,
 {
@@ -129,6 +130,13 @@ where
 	/// Return query statistics along with its results
 	pub const fn with_stats(self) -> WithStats<Self> {
 		WithStats(self)
+	}
+
+
+	pub fn commit(self) -> Commit<'req, C> {
+		Commit {
+			client: Cow::Borrowed(&self.client),
+		}
 	}
 
 	/// Binds a parameter or parameters to a query

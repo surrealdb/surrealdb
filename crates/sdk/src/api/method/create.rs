@@ -47,7 +47,7 @@ macro_rules! into_future {
 				..
 			} = self;
 
-			let what = resource.into_create_params();
+			let what = resource.into_values();
 
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
@@ -100,7 +100,7 @@ where
 		};
 
 		let command = Command::Create {
-			what: self.resource.into_create_params(),
+			what: self.resource.into_values(),
 			data,
 		};
 
@@ -123,7 +123,7 @@ where
 		};
 
 		let command = Command::Create {
-			what: self.resource.into_create_params(),
+			what: self.resource.into_values(),
 			data,
 		};
 

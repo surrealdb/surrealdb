@@ -100,29 +100,29 @@ where
 	into_future! {execute_vec}
 }
 
-impl<C, R> Upsert<'_, C, R, Value>
-where
-	C: Connection,
-	R: RangeableResource,
-{
-	/// Restricts the records to upsert to those in the specified range
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.with_range(range.into());
-		self
-	}
-}
+// impl<C, R> Upsert<'_, C, R, Value>
+// where
+// 	C: Connection,
+// 	R: RangeableResource,
+// {
+// 	/// Restricts the records to upsert to those in the specified range
+// 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+// 		self.resource = self.resource.with_range(range.into());
+// 		self
+// 	}
+// }
 
-impl<C, R, RT> Upsert<'_, C, R, Vec<RT>>
-where
-	C: Connection,
-	R: RangeableResource,
-{
-	/// Restricts the records to upsert to those in the specified range
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.with_range(range.into());
-		self
-	}
-}
+// impl<C, R, RT> Upsert<'_, C, R, Vec<RT>>
+// where
+// 	C: Connection,
+// 	R: RangeableResource,
+// {
+// 	/// Restricts the records to upsert to those in the specified range
+// 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+// 		self.resource = self.resource.with_range(range.into());
+// 		self
+// 	}
+// }
 
 impl<'r, C, R, RT> Upsert<'r, C, R, RT>
 where

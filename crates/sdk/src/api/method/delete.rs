@@ -94,26 +94,32 @@ where
 	into_future! {execute_vec}
 }
 
-impl<C, R> Delete<'_, C, R, Value>
-where
-	C: Connection,
-	R: RangeableResource,
-{
-	/// Restricts a range of records to delete
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.with_range(range.into());
-		self
-	}
-}
+// impl<C, R, NewResource> Delete<'_, C, R, Value>
+// where
+// 	C: Connection,
+// 	R: RangeableResource,
+// {
+// 	/// Restricts a range of records to delete
+// 	pub fn range(self, range: impl Into<KeyRange>) -> Self {
+// 		Self {
+// 			resource: self.resource.with_range(range.into()),
+// 			..self
+// 		}
+// 	}
+// }
 
-impl<C, R, RT> Delete<'_, C, R, Vec<RT>>
-where
-	C: Connection,
-	R: RangeableResource,
-{
-	/// Restricts a range of records to delete
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-		self.resource = self.resource.with_range(range.into());
-		self
-	}
-}
+// impl<C, R, RT, NewResource> Delete<'_, C, R, Vec<RT>>
+// where
+// 	C: Connection,
+// 	R: RangeableResource,
+// 	NewResource: RangeableResource,
+// {
+// 	/// Restricts a range of records to delete
+// 	pub fn range<'a>(self, range: impl Into<KeyRange>) -> Delete<'a, C, NewResource, Vec<RT>> {
+// 		Delete {
+// 			resource: self.resource.with_range(range.into()),
+// 			client: Cow::Borrowed(self.client.as_ref()),
+// 			response_type: PhantomData,
+// 		}
+// 	}
+// }

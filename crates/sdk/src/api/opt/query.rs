@@ -34,6 +34,21 @@ pub trait IntoVariables {
 	fn into_variables(self) -> Variables;
 }
 
+impl IntoVariables for Variables {
+	fn into_variables(self) -> Variables {
+		self
+	}
+}
+
+impl IntoVariables for (&str, &str) {
+	fn into_variables(self) -> Variables {
+		let (key, value) = self;
+		let mut variables = Variables::new();
+		variables.insert(key.to_string(), Value::Strand(value.into()));
+		variables
+	}
+}
+
 /// Represents a way to take a single query result from a list of responses
 pub trait QueryAccessor<R>: query_accessor::Sealed<R> {
 }
@@ -73,7 +88,7 @@ where
 {
 	fn query_result(self, results: &mut QueryResults) -> Result<Option<T>> {
 		let value = match results.results.get_mut(&self) {
-			Some(query_result) => match query_result.result {
+			Some(query_result) => match &mut query_result.result {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
@@ -90,7 +105,7 @@ where
 				[] => Ok(None),
 				[value] => {
 					let value = mem::take(value);
-					T::try_from_value(value)
+					Option::<T>::try_from_value(value)
 				}
 				_ => Err(Error::LossyTake(QueryResults {
 					results: mem::take(&mut results.results),
@@ -100,7 +115,7 @@ where
 			},
 			_ => {
 				let value = mem::take(value);
-				T::try_from_value(value)
+				Option::<T>::try_from_value(value)
 			}
 		};
 		results.results.swap_remove(&self);
@@ -108,7 +123,7 @@ where
 	}
 
 	fn stats(&self, results: &QueryResults) -> Option<QueryStats> {
-		results.results.get(self).map(|x| x.0)
+		results.results.get(self).map(|x| x.stats.clone())
 	}
 }
 
@@ -117,7 +132,7 @@ impl query_accessor::Sealed<Value> for (usize, &str) {
 	fn query_result(self, response: &mut QueryResults) -> Result<Value> {
 		let (index, key) = self;
 		let value = match response.results.get_mut(&index) {
-			Some((_, result)) => match result {
+			Some(query_result) => match &mut query_result.result {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
@@ -126,7 +141,7 @@ impl query_accessor::Sealed<Value> for (usize, &str) {
 				}
 			},
 			None => {
-				return Ok(Value::from_inner(Value::None));
+				return Ok(Value::None);
 			}
 		};
 
@@ -135,11 +150,11 @@ impl query_accessor::Sealed<Value> for (usize, &str) {
 			_ => Value::None,
 		};
 
-		Ok(Value::from_inner(value))
+		Ok(value)
 	}
 
 	fn stats(&self, response: &QueryResults) -> Option<QueryStats> {
-		response.results.get(&self.0).map(|x| x.0)
+		response.results.get(&self.0).map(|x| x.stats.clone())
 	}
 }
 
@@ -151,7 +166,7 @@ where
 	fn query_result(self, results: &mut QueryResults) -> Result<Option<T>> {
 		let (index, key) = self;
 		let value = match results.results.get_mut(&index) {
-			Some(query_result) => match query_result.result {
+			Some(query_result) => match &mut query_result.result {
 				Ok(val) => val,
 				Err(error) => {
 					let error = mem::replace(error, Error::ConnectionUninitialised.into());
@@ -193,14 +208,14 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				from_core_value(value)
+				Option::<T>::try_from_value(value)
 			}
 			_ => Ok(None),
 		}
 	}
 
 	fn stats(&self, response: &QueryResults) -> Option<QueryStats> {
-		response.results.get(&self.0).map(|x| x.0)
+		response.results.get(&self.0).map(|x| x.stats.clone())
 	}
 }
 
@@ -225,7 +240,7 @@ where
 	}
 
 	fn stats(&self, results: &QueryResults) -> Option<QueryStats> {
-		results.results.get(self).map(|x| x.0)
+		results.results.get(self).map(|x| x.stats.clone())
 	}
 }
 
@@ -238,7 +253,7 @@ impl<T> query_accessor::Sealed<Vec<T>> for (usize, &str)
 		let (index, key) = self;
 		match results.results.get_mut(&index) {
 			Some(query_result) => match &mut query_result.result {
-				Ok(val) => match &mut val {
+				Ok(val) => match val {
 					Value::Array(vec) => {
 						let mut responses = Vec::with_capacity(vec.len());
 						for value in vec.iter_mut() {
