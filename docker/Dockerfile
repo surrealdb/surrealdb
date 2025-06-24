@@ -27,6 +27,15 @@ RUN chmod +x /builder-entrypoint.sh
 ENTRYPOINT ["/builder-entrypoint.sh"]
 
 ###
+# STAGE: tzdata
+# This stage is used to install the timezone files
+###
+
+FROM cgr.dev/chainguard/wolfi-base AS tzdata
+
+RUN apk add --no-cache tzdata
+
+###
 # Final Images
 ###
 
@@ -45,6 +54,10 @@ USER root
 
 COPY ${ARTIFACT_PREFIX}.${TARGETOS}-${TARGETARCH}/surreal /surreal
 
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
+
 RUN chmod +x /surreal
 
 # Allow connectivity from the host with bridge networking
@@ -62,6 +75,16 @@ ARG TARGETPLATFORM
 
 COPY --from=dev-ci /surreal /surreal
 
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
+
+COPY --from=dev-ci /data /data
+
+COPY --from=dev-ci /logs /logs
+
+VOLUME /data /logs
+
 # Allow connectivity from the host with bridge networking
 # This still requires publishing the port when running the container
 ENV SURREAL_BIND="0.0.0.0:8000"
@@ -77,9 +100,13 @@ ARG SURREALDB_BINARY=target/release/surreal
 
 COPY ${SURREALDB_BINARY} /surreal
 
-RUN chmod +x /surreal
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
 
 USER root
+
+RUN chmod +x /surreal
 
 # Allow connectivity from the host with bridge networking
 # This still requires publishing the port when running the container
@@ -93,6 +120,16 @@ ENTRYPOINT ["/surreal"]
 FROM cgr.dev/chainguard/glibc-dynamic:latest as prod
 
 COPY --from=dev /surreal /surreal
+
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
+
+COPY --from=dev /data /data
+
+COPY --from=dev /logs /logs
+
+VOLUME /data /logs
 
 # Allow connectivity from the host with bridge networking
 # This still requires publishing the port when running the container
