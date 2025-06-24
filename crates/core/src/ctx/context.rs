@@ -547,7 +547,7 @@ impl MutableContext {
 		match url.host() {
 			Some(host) => {
 				let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
-				// Check the domain name (if any)
+				// Check the domain name (if any) matches the allow list
 				let host_allowed = self.capabilities.matches_any_allow_net(&target);
 				if !host_allowed {
 					warn!(

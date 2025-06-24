@@ -585,7 +585,6 @@ pub async fn fix(path: String) -> Result<()> {
 #[cfg(test)]
 mod tests {
 	use std::str::FromStr;
-
 	use surrealdb::iam::verify::verify_root_creds;
 	use surrealdb::kvs::{LockType::*, TransactionType::*};
 	use test_log::test;
@@ -650,13 +649,13 @@ mod tests {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
 				.and(path("/"))
-				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
-			//.expect(1);
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(1);
 
 			let get2 = Mock::given(method("GET"))
 				.and(path("/test"))
-				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
-			//.expect(1);
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(1);
 
 			s.register(get).await;
 			s.register(get2).await;
@@ -666,8 +665,8 @@ mod tests {
 		let server2 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
-				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"));
-			//.expect(1);
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(1);
 			let head =
 				Mock::given(method("HEAD")).respond_with(ResponseTemplate::new(200)).expect(0);
 
@@ -681,9 +680,10 @@ mod tests {
 			let s = MockServer::start().await;
 			let redirect_res = ResponseTemplate::new(301).append_header("Location", server1.uri());
 
-			let redirect =
-				Mock::given(method("GET")).and(path("redirect")).respond_with(redirect_res);
-			//.expect(1);
+			let redirect = Mock::given(method("GET"))
+				.and(path("redirect"))
+				.respond_with(redirect_res)
+				.expect(1);
 
 			s.register(redirect).await;
 			s
@@ -945,7 +945,7 @@ mod tests {
 				),
 			),
 			(
-				// 16 - Ensure connecting via localhost succeeds
+				// 16 - Ensure connecting via localhost succeed
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
