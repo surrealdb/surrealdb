@@ -815,10 +815,12 @@ impl Capabilities {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
 	}
 
+	#[cfg(feature = "http")]
 	pub(crate) fn matches_any_allow_net(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target)
 	}
 
+	#[cfg(feature = "http")]
 	pub(crate) fn matches_any_deny_net(&self, target: &NetTarget) -> bool {
 		self.deny_net.matches(target)
 	}
