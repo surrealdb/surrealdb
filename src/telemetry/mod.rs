@@ -309,11 +309,9 @@ mod tests {
 		for (k, v) in vars {
 			restore.push((k.as_ref().to_string(), std::env::var_os(k.as_ref())));
 			if let Some(x) = v {
-				// TODO: Audit that the environment access only happens in single-threaded code.
-				unsafe { std::env::set_var(k.as_ref(), x.as_ref()) };
+				std::env::set_var(k.as_ref(), x.as_ref());
 			} else {
-				// TODO: Audit that the environment access only happens in single-threaded code.
-				unsafe { std::env::remove_var(k.as_ref()) };
+				std::env::remove_var(k.as_ref());
 			}
 		}
 
@@ -322,11 +320,9 @@ mod tests {
 			fn drop(&mut self) {
 				for (k, v) in self.0.drain(..) {
 					if let Some(v) = v {
-						// TODO: Audit that the environment access only happens in single-threaded code.
-						unsafe { std::env::set_var(k, v) };
+						std::env::set_var(k, v);
 					} else {
-						// TODO: Audit that the environment access only happens in single-threaded code.
-						unsafe { std::env::remove_var(k) };
+						std::env::remove_var(k);
 					}
 				}
 			}

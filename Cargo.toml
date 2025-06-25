@@ -148,7 +148,7 @@ serial_test = "2.0.0"
 temp-dir = "0.1.11"
 test-log = "0.2.13"
 time = "0.3.36"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+tracing-subscriber = "0.3.18"
 wiremock = "0.6.0"
 
 [features]
@@ -258,7 +258,7 @@ tower-http = { version = "0.5.2", features = [
 tower-service = "0.3.3"
 tracing-appender = "0.2.3"
 tracing-opentelemetry = "0.25.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 urlencoding = "2.1.3"
 
 # Other crates
