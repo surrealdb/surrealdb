@@ -939,10 +939,6 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.ntapi]]
-version = "0.4.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.num-complex]]
 version = "0.4.5"
 criteria = "safe-to-deploy"
@@ -1631,12 +1627,12 @@ criteria = "safe-to-deploy"
 version = "0.1.40"
 criteria = "safe-to-deploy"
 
-[[exemptions.tracing-attributes]]
-version = "0.1.28"
+[[exemptions.tracing-appender]]
+version = "0.2.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.tracing-core]]
-version = "0.1.33"
+[[exemptions.tracing-attributes]]
+version = "0.1.27"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-log]]
@@ -1647,8 +1643,8 @@ criteria = "safe-to-deploy"
 version = "0.25.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.tracing-subscriber]]
-version = "0.3.19"
+[[exemptions.tracing-serde]]
+version = "0.1.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.try_map]]
