@@ -1,11 +1,14 @@
+use crate::iam::{Auth, Level};
+use crate::rpc::Method;
+use ipnet::IpNet;
 use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
-
-use crate::iam::{Auth, Level};
-use crate::rpc::Method;
-use ipnet::IpNet;
+#[cfg(all(target_family = "wasm", feature = "http"))]
+use std::net::ToSocketAddrs;
+#[cfg(all(not(target_family = "wasm"), feature = "http"))]
+use tokio::net::lookup_host;
 use url::Url;
 
 pub trait Target<Item: ?Sized = Self> {
@@ -179,7 +182,64 @@ impl std::str::FromStr for ExperimentalTarget {
 #[non_exhaustive]
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
-	IPNet(ipnet::IpNet),
+	IPNet(IpNet),
+}
+
+#[cfg(feature = "http")]
+impl NetTarget {
+	/// Resolves a `NetTarget` to its associated IP address representations.
+	///
+	/// This function performs an asynchronous resolution of a `NetTarget` enum instance. If the
+	/// `NetTarget` is of variant `Host`, it attempts to resolve the provided hostname and optional
+	/// port into a list of `IPNet` values. If the port is not provided, port 80 is used by default.
+	/// If the `NetTarget` is of variant `IPNet`, it simply returns an empty vector, as there is nothing
+	/// to resolve.
+	///
+	/// # Returns
+	/// - On success, this function returns a `Vec<Self>` where each resolved `NetTarget::Host` is
+	///   transformed into a `NetTarget::IPNet`.
+	/// - On error, it returns a `std::io::Error` indicating the issue during resolution.
+	///
+	/// # Variants
+	/// - `NetTarget::Host(h, p)`:
+	///    - Resolves the given hostname `h` with an optional port `p` (default is 80) to a list of IPs.
+	///    - Each resolved IP is converted into a `NetTarget::IPNet` value.
+	/// - `NetTarget::IPNet(_)`:
+	///    - Returns an empty vector, as `IPNet` does not require resolution.
+	///
+	/// # Errors
+	/// - Returns `std::io::Error` if there is an issue in the asynchronous DNS resolution process.
+	///
+	/// # Notes
+	/// - The function uses `lookup_host` for DNS resolution, which must be awaited.
+	/// - The optional port is replaced by port 80 as a default if not provided.
+	#[cfg(not(target_family = "wasm"))]
+	pub(crate) async fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
+		match self {
+			NetTarget::Host(h, p) => {
+				let r = lookup_host((h.to_string(), p.unwrap_or(80)))
+					.await?
+					.map(|a| NetTarget::IPNet(a.ip().into()))
+					.collect();
+				Ok(r)
+			}
+			NetTarget::IPNet(_) => Ok(vec![]),
+		}
+	}
+
+	#[cfg(target_family = "wasm")]
+	pub(crate) fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
+		match self {
+			NetTarget::Host(h, p) => {
+				let r = (h.to_string(), p.unwrap_or(80))
+					.to_socket_addrs()?
+					.map(|a| NetTarget::IPNet(a.ip().into()))
+					.collect();
+				Ok(r)
+			}
+			NetTarget::IPNet(_) => Ok(vec![]),
+		}
+	}
 }
 
 // impl display
@@ -737,6 +797,16 @@ impl Capabilities {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
 	}
 
+	#[cfg(feature = "http")]
+	pub(crate) fn matches_any_allow_net(&self, target: &NetTarget) -> bool {
+		self.allow_net.matches(target)
+	}
+
+	#[cfg(feature = "http")]
+	pub(crate) fn matches_any_deny_net(&self, target: &NetTarget) -> bool {
+		self.deny_net.matches(target)
+	}
+
 	pub fn allows_rpc_method(&self, target: &MethodTarget) -> bool {
 		self.allow_rpc.matches(target) && !self.deny_rpc.matches(target)
 	}
@@ -919,6 +989,22 @@ mod tests {
 		assert!(NetTarget::from_str("11111.3.4.5").is_err());
 		assert!(NetTarget::from_str("2001:db8::1/129").is_err());
 		assert!(NetTarget::from_str("[2001:db8::1").is_err());
+	}
+
+	#[tokio::test]
+	#[cfg(all(not(target_family = "wasm"), feature = "http"))]
+	async fn test_net_target_resolve_async() {
+		let r = NetTarget::from_str("localhost").unwrap().resolve().await.unwrap();
+		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
+		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
+	}
+
+	#[test]
+	#[cfg(all(target_family = "wasm", feature = "http"))]
+	fn test_net_target_resolve_sync() {
+		let r = NetTarget::from_str("localhost").unwrap().resolve().unwrap();
+		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
+		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
 	}
 
 	#[test]
