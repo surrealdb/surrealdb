@@ -11,6 +11,7 @@ use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
 #[cfg(not(target_family = "wasm"))]
 use tokio::runtime::Handle;
+#[cfg(not(target_family = "wasm"))]
 use tokio::task;
 use url::Url;
 
