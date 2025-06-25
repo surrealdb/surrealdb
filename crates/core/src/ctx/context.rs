@@ -412,7 +412,7 @@ impl MutableContext {
 		}
 	}
 
-	/// Get a 'static view into the cancellation status.
+	/// Get a static view into the cancellation status.
 	#[cfg(feature = "scripting")]
 	pub(crate) fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {
 		crate::ctx::cancellation::Cancellation::new(
