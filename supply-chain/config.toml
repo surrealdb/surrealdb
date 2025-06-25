@@ -431,6 +431,10 @@ criteria = "safe-to-deploy"
 version = "0.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.crossbeam-channel]]
+version = "0.5.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.crossbeam-deque]]
 version = "0.8.5"
 criteria = "safe-to-deploy"
@@ -1628,7 +1632,11 @@ version = "0.1.40"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-attributes]]
-version = "0.1.27"
+version = "0.1.28"
+criteria = "safe-to-deploy"
+
+[[exemptions.tracing-core]]
+version = "0.1.33"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-log]]
@@ -1637,6 +1645,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing-opentelemetry]]
 version = "0.25.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.tracing-subscriber]]
+version = "0.3.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.try_map]]
