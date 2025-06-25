@@ -108,7 +108,7 @@ tower-service = "0.3.3"
 tracing = "0.1"
 tracing-appender = "0.2.3"
 tracing-opentelemetry = "0.25.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.10.0", features = ["serde", "js", "v4", "v7"] }
 
