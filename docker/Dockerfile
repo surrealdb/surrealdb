@@ -56,7 +56,7 @@ COPY ${ARTIFACT_PREFIX}.${TARGETOS}-${TARGETARCH}/surreal /surreal
 
 COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
-RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
+COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
 RUN chmod +x /surreal
 
@@ -84,7 +84,7 @@ COPY --from=dev-ci /surreal /surreal
 
 COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
-RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
+COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
 COPY --from=dev-ci /data /data
 
@@ -107,7 +107,7 @@ COPY ${SURREALDB_BINARY} /surreal
 
 COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
-RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
+COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
 USER root
 
@@ -135,7 +135,7 @@ COPY --from=dev /surreal /surreal
 
 COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
-RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
+COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
 COPY --from=dev /data /data
 
