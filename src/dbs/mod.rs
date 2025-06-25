@@ -632,10 +632,17 @@ mod tests {
 		let server1 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
+				.and(path("/"))
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(1);
+
+			let get2 = Mock::given(method("GET"))
+				.and(path("/test"))
 				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
 				.expect(1);
 
 			s.register(get).await;
+			s.register(get2).await;
 			s
 		};
 
@@ -913,8 +920,41 @@ mod tests {
 				Session::owner(),
 				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
-				format!("here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",server3.uri()),
-			)
+				format!(
+					"here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
+					server3.uri()
+				),
+			),
+			(
+				// Ensure connecting via localhost succeeds
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All),
+				),
+				Session::owner(),
+				format!("RETURN http::get('http://localhost:{}/test')", server1.address().port()),
+				true,
+				"SUCCESS".to_string(),
+			),
+			(
+				// Ensure redirect fails
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All)
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str("127.0.0.1/0").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
+				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
+				false,
+				format!(
+					"There was an error processing a remote HTTP request: error sending request for url (http://localhost:{}/)",
+					server1.address().port()
+				),
+			),
 		];
 
 		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {
