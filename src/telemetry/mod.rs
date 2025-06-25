@@ -79,7 +79,7 @@ impl Default for Builder {
 
 impl Builder {
 	/// Install the tracing dispatcher globally
-	pub fn init(self) -> Result<(WorkerGuard, WorkerGuard), Error> {
+	pub fn init(self) -> Result<Vec<WorkerGuard>, Error> {
 		// Setup logs, tracing, and metrics
 		let (registry, guards) = self.build()?;
 		// Initialise the registry
@@ -309,9 +309,11 @@ mod tests {
 		for (k, v) in vars {
 			restore.push((k.as_ref().to_string(), std::env::var_os(k.as_ref())));
 			if let Some(x) = v {
-				std::env::set_var(k.as_ref(), x.as_ref());
+				// TODO: Audit that the environment access only happens in single-threaded code.
+				unsafe { std::env::set_var(k.as_ref(), x.as_ref()) };
 			} else {
-				std::env::remove_var(k.as_ref());
+				// TODO: Audit that the environment access only happens in single-threaded code.
+				unsafe { std::env::remove_var(k.as_ref()) };
 			}
 		}
 
@@ -320,9 +322,11 @@ mod tests {
 			fn drop(&mut self) {
 				for (k, v) in self.0.drain(..) {
 					if let Some(v) = v {
-						std::env::set_var(k, v);
+						// TODO: Audit that the environment access only happens in single-threaded code.
+						unsafe { std::env::set_var(k, v) };
 					} else {
-						std::env::remove_var(k);
+						// TODO: Audit that the environment access only happens in single-threaded code.
+						unsafe { std::env::remove_var(k) };
 					}
 				}
 			}
