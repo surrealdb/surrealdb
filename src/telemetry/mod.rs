@@ -2,8 +2,8 @@ mod logs;
 pub mod metrics;
 pub mod traces;
 
-use crate::cli::LogFormat;
 use crate::cli::validator::parser::tracing::CustomFilter;
+use crate::cli::LogFormat;
 use crate::err::Error;
 use opentelemetry::global;
 use opentelemetry::KeyValue;
@@ -154,7 +154,9 @@ impl Builder {
 	}
 
 	/// Build a tracing dispatcher with the logs and tracer subscriber
-	pub fn build(&self) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, Vec<WorkerGuard>), Error> {
+	pub fn build(
+		&self,
+	) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, Vec<WorkerGuard>), Error> {
 		// Setup the metrics layer
 		if let Some(provider) = metrics::init()? {
 			global::set_meter_provider(provider);

@@ -735,11 +735,13 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>, Error> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		if !sess.expired() {
+			return Err(Error::ExpiredSession);
+		}
 		// Execute the SQL import
 		self.execute(sql, sess, None).await
 	}

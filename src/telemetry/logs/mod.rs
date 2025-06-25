@@ -1,5 +1,5 @@
-use crate::cli::LogFormat;
 use crate::cli::validator::parser::tracing::CustomFilter;
+use crate::cli::LogFormat;
 use crate::err::Error;
 use tracing::Level;
 use tracing::Subscriber;

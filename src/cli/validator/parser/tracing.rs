@@ -2,8 +2,8 @@ use crate::telemetry::{filter_from_value, span_filters_from_value};
 use clap::builder::{NonEmptyStringValueParser, PossibleValue, TypedValueParser};
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use std::collections::HashMap;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::{DynFilterFn, LevelFilter};
+use tracing_subscriber::EnvFilter;
 
 #[derive(Debug)]
 pub struct CustomFilter {
