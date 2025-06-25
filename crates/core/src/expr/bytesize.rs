@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::val::{TryAdd, TrySub};
+use crate::val::{TryAdd, TrySub, Value};
 use anyhow::{Result, bail, ensure};
 use num_traits::CheckedAdd;
 use revision::revisioned;
@@ -26,31 +26,7 @@ const PIB: u64 = TIB * 1024;
 impl FromStr for Bytesize {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
-}
-
-impl TryFrom<String> for Bytesize {
-	type Error = ();
-	fn try_from(v: String) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<Strand> for Bytesize {
-	type Error = ();
-	fn try_from(v: Strand) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<&str> for Bytesize {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match Bytesize::parse(v) {
-			Ok(v) => Ok(v),
-			_ => Err(()),
-		}
+		Bytesize::parse(s)
 	}
 }
 
@@ -62,47 +38,44 @@ impl Bytesize {
 		Bytesize(b)
 	}
 
-	pub fn parse(input: impl Into<String>) -> Result<Self> {
-		let input = input.into().trim().to_lowercase();
+	pub fn parse(input: &str) -> Result<Self> {
+		let input = input.trim();
 		ensure!(!input.is_empty(), Error::InvalidBytesize);
 
-		let mut chars: Peekable<Chars> = input.chars().peekable();
+		let mut chars = input.as_bytes().iter().peekable();
 		let mut total = Bytesize::new(0);
 
 		while chars.peek().is_some() {
 			// Parse number
-			let mut number = String::new();
+			let mut value = 0u64;
 			while let Some(&c) = chars.peek() {
 				if !c.is_ascii_digit() {
 					break;
 				}
-				number.push(
-					chars
-						.next()
-						.ok_or(Error::Unreachable("Char was previously peekable".into()))?,
-				);
-			}
 
-			let value = number.parse::<u64>().map_err(|_| Error::InvalidBytesize)?;
+				chars.next();
+				value = value.checked_mul(10).ok_or(Error::InvalidBytesize)?;
+				value = value.checked_add((b'0' - c) as u64).ok_or(Error::InvalidBytesize)?;
+			}
 
 			// Parse unit
 			let unit = chars.next().ok_or(Error::InvalidBytesize)?.to_ascii_lowercase();
 
 			// Handle optional 'b' suffix
-			if unit != 'b' {
+			if !matches!(unit, b'b' | b'B') {
 				match chars.next() {
-					Some('b') => (),
+					Some(b'b' | b'B') => (),
 					_ => bail!(Error::InvalidBytesize),
 				}
 			}
 
 			let bytesize = match unit {
-				'b' => Bytesize::b(value),
-				'k' => Bytesize::kb(value),
-				'm' => Bytesize::mb(value),
-				'g' => Bytesize::gb(value),
-				't' => Bytesize::tb(value),
-				'p' => Bytesize::pb(value),
+				b'b' | b'B' => Bytesize::b(value),
+				b'k' | b'K' => Bytesize::kb(value),
+				b'm' | b'M' => Bytesize::mb(value),
+				b'g' | b'G' => Bytesize::gb(value),
+				b't' | b'T' => Bytesize::tb(value),
+				b'p' | b'P' => Bytesize::pb(value),
 				_ => bail!(Error::InvalidBytesize),
 			};
 
@@ -194,12 +167,6 @@ impl TryAdd for Bytesize {
 			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} + {other}")))
 			.map_err(anyhow::Error::new)
 			.map(Bytesize::new)
-	}
-}
-
-impl CheckedAdd for Bytesize {
-	fn checked_add(&self, other: &Self) -> Option<Self> {
-		self.0.checked_add(other.0).map(Bytesize::new)
 	}
 }
 

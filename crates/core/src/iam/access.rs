@@ -109,7 +109,7 @@ pub async fn create_refresh_token_record(
 	let stmt = access::AccessStatementGrant {
 		ac,
 		base: Some(Base::Db),
-		subject: access::Subject::Record(rid),
+		subject: access::Subject::Record(rid.into_literal()),
 	};
 	let sess = Session::owner().with_ns(ns).with_db(db);
 	let opt = kvs.setup_options(&sess);

@@ -9,14 +9,16 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
 use crate::dbs::{QueryType, Response};
 use crate::err::Error;
-use crate::expr::Value;
-use crate::rpc::args::Take;
+use crate::expr::{self, LogicalPlan};
+use crate::rpc::args::extract_args;
 use crate::rpc::{Data, Method, RpcContext, RpcError};
+use crate::sql::statements::define::DefineKind;
 use crate::sql::statements::{
 	CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
 	RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
 };
-use crate::sql::{Array, Fields, Function, Model, Output, Query, SqlValue, Strand};
+use crate::sql::{Fields, Function, Model, Output};
+use crate::val::{Array, Object, Strand, Value};
 
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocolV1: RpcContext {
@@ -77,7 +79,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
 		// To be able to select a namespace, and then list resources in that namespace, as an example
-		let (ns, db) = params.needs_two()?;
+		let (ns, db) = extract_args::<(Value, Value)>(params.0).ok_or(RpcError::InvalidParams)?;
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -86,18 +88,18 @@ pub trait RpcProtocolV1: RpcContext {
 		let mut session = self.session().as_ref().clone();
 		// Update the selected namespace
 		match ns {
-			SqlValue::None => (),
-			SqlValue::Null => session.ns = None,
-			SqlValue::Strand(ns) => session.ns = Some(ns.0),
+			Value::None => (),
+			Value::Null => session.ns = None,
+			Value::Strand(ns) => session.ns = Some(ns.0),
 			_ => {
 				return Err(RpcError::InvalidParams);
 			}
 		}
 		// Update the selected database
 		match db {
-			SqlValue::None => (),
-			SqlValue::Null => session.db = None,
-			SqlValue::Strand(db) => session.db = Some(db.0),
+			Value::None => (),
+			Value::Null => session.db = None,
+			Value::Strand(db) => session.db = Some(db.0),
 			_ => {
 				return Err(RpcError::InvalidParams);
 			}
@@ -118,7 +120,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// This will allow returning refresh tokens as well as any additional credential resulting from signing up.
 	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
-		let Ok(SqlValue::Object(params)) = params.needs_one() else {
+		let Some(Value::Object(params)) = extract_args(params.0) else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
@@ -144,7 +146,7 @@ pub trait RpcProtocolV1: RpcContext {
 	// This will allow returning refresh tokens as well as any additional credential resulting from signing in.
 	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
-		let Ok(SqlValue::Object(params)) = params.needs_one() else {
+		let Some(Value::Object(params)) = extract_args(params) else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
@@ -169,7 +171,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 	async fn authenticate(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
-		let Ok(SqlValue::Strand(token)) = params.needs_one() else {
+		let Ok(Value::Strand(token)) = extract_args(params) else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
@@ -234,7 +236,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the SQL query string
 		let sql = SelectStatement {
 			expr: Fields::all(),
-			what: vec![crate::sql::SqlValue::Param("auth".into())].into(),
+			what: vec![crate::sql::Expr::Param("auth".into())].into(),
 			..Default::default()
 		}
 		.into();
@@ -254,7 +256,8 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((SqlValue::Strand(key), val)) = params.needs_one_or_two() else {
+		let Some((Value::Strand(key), val)) = extract_args::<(Value, Option<Value>)>(params.0)
+		else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the query parameters
@@ -304,7 +307,7 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok(SqlValue::Strand(key)) = params.needs_one() else {
+		let Some(Value::Strand(key)) = extract_args(params) else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
@@ -333,16 +336,16 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let id = params.needs_one()?;
+		let (id,) = extract_args::<(Value,)>(params).ok_or(RpcError::InvalidParams)?;
 		// Specify the SQL query string
-		let sql = KillStatement {
-			id,
+		let sql = expr::KillStatement {
+			id: expr::Expr::Literal(id.into_literal()),
 		}
 		.into();
 		// Specify the query parameters
 		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
-		let mut res = self.query_inner(SqlValue::Query(sql), var).await?;
+		let mut res = self.query_inner((sql), var).await?;
 		// Extract the first query result
 		Ok(res.remove(0).result?.into())
 	}
@@ -353,20 +356,35 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, diff) = params.needs_one_or_two()?;
+		let (what, diff) =
+			extract_args::<(Value, Option<Value>)>(params).ok_or(RpcError::InvalidParams)?;
+
+		// If value is a strand, handle it as if it was a table.
+		let what = match what{
+			Value::Strand(x) => expr::Expr::Table(x),
+			x => expr::Expr::Literal(x.into_literal())
+		}
+
 		// Specify the SQL query string
-		let sql = LiveStatement::new_from_what_expr(
-			match diff.is_true() {
-				true => Fields::default(),
-				false => Fields::all(),
+		let sql = expr::LiveStatement{
+			expr: if diff.unwrap_or(Value::None).is_true() {
+				expr::Fields::default()
+			}else{
+				 expr::Fields::all()
 			},
-			what.could_be_table(),
-		)
-		.into();
+			what: match what{
+				value::Strand(x) => expr::Expr::Table(x),
+				x => expr::Expr::Literal(x.into_literal())
+			},
+			..Default::default()
+		}
 		// Specify the query parameters
 		let var = Some(self.session().parameters.clone());
+		let plan = LogicalPlan{
+			expressions: vec![expr::TopLevelExpr::Expr(sql)]
+		};
 		// Execute the query on the database
-		let mut res = self.query_inner(SqlValue::Query(sql), var).await?;
+		let mut res = self.query_inner(plan, var).await?;
 		// Extract the first query result
 		Ok(res.remove(0).result?.into())
 	}
@@ -381,17 +399,33 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok(what) = params.needs_one() else {
-			return Err(RpcError::InvalidParams);
+		let (what, ) = extract_args::<(Value,)>(params.0).ok_or(RpcError::InvalidParams)?;
+
+		// If the what is a single record with a non range value, make it return only a single
+		// result.
+		let only = match what{
+			Value::Thing(x) => !x.key.is_range(),
+			_ => false
 		};
-		// Specify the SQL query string
-		let sql = SelectStatement {
-			only: what.is_thing_single(),
-			expr: Fields::all(),
-			what: vec![what.could_be_table()].into(),
-			..Default::default()
+
+		// If value is a strand, handle it as if it was a table.
+		let what = match what{
+			Value::Strand(x) => expr::Expr::Table(x),
+			x => expr::Expr::Literal(x.into_literal())
 		}
-		.into();
+
+		// Specify the SQL query string
+		let sql = expr::SelectStatement {
+			only,
+			expr: expr::Fields::all(),
+			what: vec![what].into(),
+			..Default::default()
+		};
+		let plan = LogicalPlan{
+			expressions: vec![expr::TopLevelExpr::Expr(sql)]
+		};
+
+
 		// Specify the query parameters
 		let var = Some(self.session().parameters.clone());
 		// Execute the query on the database
@@ -417,16 +451,20 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_two() else {
-			return Err(RpcError::InvalidParams);
+		let (what, data) = extract_args::<(Value,Value)>(params).ok_or(RpcError::InvalidParams)?;
+		let into = match what{
+			Value::Strand(x) => Some(expr::Expr::Table(x)),
+			x => if x.is_nullish(){
+				None
+			}else{
+				Some(expr::Expr::Literal(x.into_literal()))
+			}
 		};
+
 		// Specify the SQL query string
-		let sql = InsertStatement {
-			into: match what.is_none_or_null() {
-				false => Some(what.could_be_table()),
-				true => None,
-			},
-			data: crate::sql::Data::SingleExpression(data),
+		let sql = expr::InsertStatement {
+			into,
+			data: expr::Data::SingleExpression(data),
 			output: Some(Output::After),
 			..Default::default()
 		}
@@ -452,17 +490,19 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_two() else {
-			return Err(RpcError::InvalidParams);
+		let (what, data) = extract_args::<(Value,Value)>(params).ok_or(RpcError::InvalidParams)?;
+		let into = match what{
+			Value::Strand(x) => Some(expr::Expr::Table(x)),
+			x => if x.is_nullish(){
+				None
+			}else{
+				Some(expr::Expr::Literal(x.into_literal()))
+			}
 		};
 		// Specify the SQL query string
 		let sql = InsertStatement {
 			relation: true,
-			into: if what.is_none_or_null() {
-				None
-			} else {
-				Some(what.could_be_table())
-			},
+			into ,
 			data: crate::sql::Data::SingleExpression(data),
 			output: Some(Output::After),
 			..Default::default()
@@ -493,10 +533,15 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((what, data)) = params.needs_one_or_two() else {
+		let (what, data) = extract_args::<(Value,Option<Value>)>(params.0) else {
 			return Err(RpcError::InvalidParams);
 		};
-		let what = what.could_be_table();
+
+		let what = match what{
+			Value::Strand(x) => expr::Expr::Table(x),
+			x => expr::Expr::Literal(x.into_literal())
+		};
+
 		// Specify the SQL query string
 		let sql = CreateStatement {
 			only: what.is_thing_single() || what.is_table(),
@@ -983,7 +1028,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 	async fn query_inner(
 		&self,
-		query: SqlValue,
+		query: LogicalPlan,
 		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>> {
 		// If no live query handler force realtime off

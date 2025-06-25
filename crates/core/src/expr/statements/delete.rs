@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Explain, Expr, FlowResultExt as _, Output, Timeout, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
+use crate::val::Value;
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -53,7 +54,7 @@ impl DeleteStatement {
 		let mut planner = QueryPlanner::new();
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the delete targets
-		for w in self.what.0.iter() {
+		for w in self.what.iter() {
 			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
 			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| {
 				if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {

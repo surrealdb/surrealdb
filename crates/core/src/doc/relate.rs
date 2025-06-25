@@ -17,15 +17,10 @@ impl Document {
 		// Check if table has correct relation status
 		self.check_table_type(ctx, opt, stm).await?;
 		// Check whether current record exists
-		match self.current.doc.as_ref().is_some() {
-			// We attempted to RELATE a document with an ID,
-			// and this ID already exists in the database,
-			// so we need to update the record instead.
-			true => self.relate_update(stk, ctx, opt, stm).await,
-			// We attempted to RELATE a document with an ID,
-			// which does not exist in the database, or we
-			// are creating a new record with a new ID.
-			false => self.relate_create(stk, ctx, opt, stm).await,
+		if self.current.doc.as_ref().is_nullish() {
+			self.relate_create(stk, ctx, opt, stm).await
+		} else {
+			self.relate_update(stk, ctx, opt, stm).await
 		}
 	}
 	/// Attempt to run a RELATE clause

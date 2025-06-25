@@ -5,6 +5,7 @@ use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResultExt as _, Idiom, Part};
 use crate::syn;
+use crate::val::Value;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -20,7 +21,10 @@ use super::paths::ID;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Fields(pub Vec<Field>, pub bool);
+pub struct Fields {
+	pub fields: Vec<Field>,
+	pub value: bool,
+}
 
 impl Fields {
 	/// Create a new `*` field projection
@@ -29,26 +33,26 @@ impl Fields {
 	}
 	/// Check to see if this field is a `*` projection
 	pub fn is_all(&self) -> bool {
-		self.0.iter().any(|v| matches!(v, Field::All))
+		self.fields.iter().any(|v| matches!(v, Field::All))
 	}
 	/// Create a new `VALUE id` field projection
 	pub(crate) fn value_id() -> Self {
-		Self(
-			vec![Field::Single {
+		Self {
+			fields: vec![Field::Single {
 				expr: Expr::Idiom(Idiom(ID.to_vec())),
 				alias: None,
 			}],
-			true,
-		)
+			value: true,
+		}
 	}
 	/// Get all fields which are not an `*` projection
 	pub fn other(&self) -> impl Iterator<Item = &Field> {
-		self.0.iter().filter(|v| !matches!(v, Field::All))
+		self.fields.iter().filter(|v| !matches!(v, Field::All))
 	}
 	/// Check to see if this field is a single VALUE clause
 	pub fn single(&self) -> Option<&Field> {
-		match (self.0.len(), self.1) {
-			(1, true) => match self.0.first() {
+		match (self.fields.len(), self.value) {
+			(1, true) => match self.fields.first() {
 				Some(Field::All) => None,
 				Some(v) => Some(v),
 				_ => None,
@@ -59,7 +63,7 @@ impl Fields {
 	/// Check if the fields are only about counting
 	pub(crate) fn is_count_all_only(&self) -> bool {
 		let mut is_count_only = false;
-		for field in &self.0 {
+		for field in &self.fields {
 			if let Field::Single {
 				expr: Value::Function(func),
 				..
@@ -79,7 +83,7 @@ impl Fields {
 impl Deref for Fields {
 	type Target = Vec<Field>;
 	fn deref(&self) -> &Self::Target {
-		&self.0
+		&self.fields
 	}
 }
 
@@ -87,7 +91,7 @@ impl IntoIterator for Fields {
 	type Item = Field;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
-		self.0.into_iter()
+		self.fields.into_iter()
 	}
 }
 

@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::paths::{EDGE, IN, OUT};
 use crate::expr::{AssignOperator, FlowResultExt};
-use crate::val::Value;
+use crate::val::{RecordId, Value};
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
@@ -35,10 +35,10 @@ impl Document {
 						// Generate a new id from the id field
 						Some(id) => id.generate(tb, false)?,
 						// Generate a new random table id
-						None => tb.generate(),
+						None => RecordId::random_for_table(tb.0),
 					},
 					// There is no data clause so create a record id
-					None => tb.generate(),
+					None => RecordId::random_for_table(tb.0),
 				};
 				// The id field can not be a record range
 				ensure!(
@@ -154,36 +154,23 @@ impl Document {
 		// Set default field values
 		self.current.doc.to_mut().def(&rid);
 		// Process the permitted documents
-		match self.reduced(stk, ctx, opt, Current).await? {
-			true => {
-				// This is an INSERT statement
-				if let Workable::Insert(v) = &self.extras {
-					let v = v
-						.compute(stk, ctx, opt, Some(&self.current_reduced))
-						.await
-						.catch_return()?;
-					self.current.doc.to_mut().merge(v)?;
-				}
-				// This is an INSERT RELATION statement
-				if let Workable::Relate(_, _, Some(v)) = &self.extras {
-					let v = v
-						.compute(stk, ctx, opt, Some(&self.current_reduced))
-						.await
-						.catch_return()?;
-					self.current.doc.to_mut().merge(v)?;
-				}
+		if self.reduced(stk, ctx, opt, Current).await? {
+			// This is an INSERT statement
+			if let Workable::Insert(v) = &self.extras {
+				self.current.doc.to_mut().merge(Value::clone(v))?;
 			}
-			false => {
-				// This is an INSERT statement
-				if let Workable::Insert(v) = &self.extras {
-					let v = v.compute(stk, ctx, opt, Some(&self.current)).await.catch_return()?;
-					self.current.doc.to_mut().merge(v)?;
-				}
-				// This is an INSERT RELATION statement
-				if let Workable::Relate(_, _, Some(v)) = &self.extras {
-					let v = v.compute(stk, ctx, opt, Some(&self.current)).await.catch_return()?;
-					self.current.doc.to_mut().merge(v)?;
-				}
+			// This is an INSERT RELATION statement
+			if let Workable::Relate(_, _, Some(v)) = &self.extras {
+				self.current.doc.to_mut().merge(Value::clone(v))?;
+			}
+		} else {
+			// This is an INSERT statement
+			if let Workable::Insert(v) = &self.extras {
+				self.current.doc.to_mut().merge(Value::clone(v))?;
+			}
+			// This is an INSERT RELATION statement
+			if let Workable::Relate(_, _, Some(v)) = &self.extras {
+				self.current.doc.to_mut().merge(Value::clone(v))?;
 			}
 		};
 		// Set default field values
@@ -234,9 +221,10 @@ impl Document {
 				}
 				Data::ReplaceExpression(data) => {
 					// Process the permitted documents
-					let current = match self.reduced(stk, ctx, opt, Current).await? {
-						true => &self.current_reduced,
-						false => &self.current,
+					let current = if self.reduced(stk, ctx, opt, Current).await? {
+						&self.current_reduced
+					} else {
+						&self.current
 					};
 					// Process the REPLACE data clause
 					let data = data.compute(stk, ctx, opt, Some(current)).await.catch_return()?;
@@ -244,9 +232,10 @@ impl Document {
 				}
 				Data::ContentExpression(data) => {
 					// Process the permitted documents
-					let current = match self.reduced(stk, ctx, opt, Current).await? {
-						true => &self.current_reduced,
-						false => &self.current,
+					let current = if self.reduced(stk, ctx, opt, Current).await? {
+						&self.current_reduced
+					} else {
+						&self.current
 					};
 					// Process the CONTENT data clause
 					let data = data.compute(stk, ctx, opt, Some(current)).await.catch_return()?;
@@ -257,63 +246,128 @@ impl Document {
 						self.current.doc.to_mut().cut(i);
 					}
 				}
-				Data::SetExpression(x) => match self.reduced(stk, ctx, opt, Current).await? {
-					true => {
+				Data::SetExpression(x) => {
+					if self.reduced(stk, ctx, opt, Current).await? {
 						for x in x.iter() {
-							#[rustfmt::skip]
-							let v = x.2.compute(stk, ctx, opt, Some(&self.current_reduced)).await.catch_return()?;
-							match &x.1 {
-								#[rustfmt::skip]
-								AssignOperator::Assign=> match v {
-									Value::None => {
-										self.current_reduced.doc.to_mut().del(stk, ctx, opt, &x.0).await?;
-										self.current.doc.to_mut().del(stk, ctx, opt, &x.0).await?;
-									},
-									_ => {
-										self.current_reduced.doc.to_mut().set(stk, ctx, opt, &x.0, v.clone()).await?;
-										self.current.doc.to_mut().set(stk, ctx, opt, &x.0, v).await?;
-									},
-								},
-								#[rustfmt::skip]
-								AssignOperator::Add=> {
-									self.current_reduced.doc.to_mut().increment(stk, ctx, opt, &x.0, v.clone()).await?;
-									self.current.doc.to_mut().increment(stk, ctx, opt, &x.0, v).await?;
-								}
-								#[rustfmt::skip]
-								AssignOperator::Subtract => {
-									self.current_reduced.doc.to_mut().decrement(stk, ctx, opt, &x.0, v.clone()).await?;
-									self.current.doc.to_mut().decrement(stk, ctx, opt, &x.0, v).await?;
-								}
-								#[rustfmt::skip]
-								AssignOperator::Extend => {
-									self.current_reduced.doc.to_mut().extend(stk, ctx, opt, &x.0, v.clone()).await?;
-									self.current.doc.to_mut().extend(stk, ctx, opt, &x.0, v).await?;
-								}
-							}
-						}
-					}
-					false => {
-						for x in x.iter() {
-							#[rustfmt::skip]
-							let v = x.2.compute(stk, ctx, opt, Some(&self.current)).await.catch_return()?;
-							match &x.1 {
-								#[rustfmt::skip]
+							let v = x
+								.value
+								.compute(stk, ctx, opt, Some(&self.current_reduced))
+								.await
+								.catch_return()?;
+							match &x.operator {
 								AssignOperator::Assign => match v {
-									Value::None => self.current.doc.to_mut().del(stk, ctx, opt, &x.0).await?,
-									_ => self.current.doc.to_mut().set(stk, ctx, opt, &x.0, v).await?,
+									Value::None => {
+										self.current_reduced
+											.doc
+											.to_mut()
+											.del(stk, ctx, opt, &x.place)
+											.await?;
+										self.current
+											.doc
+											.to_mut()
+											.del(stk, ctx, opt, &x.place)
+											.await?;
+									}
+									_ => {
+										self.current_reduced
+											.doc
+											.to_mut()
+											.set(stk, ctx, opt, &x.place, v.clone())
+											.await?;
+										self.current
+											.doc
+											.to_mut()
+											.set(stk, ctx, opt, &x.place, v)
+											.await?;
+									}
 								},
-								#[rustfmt::skip]
-								AssignOperator::Add => self.current.doc.to_mut().increment(stk, ctx, opt, &x.0, v).await?,
-								#[rustfmt::skip]
-								AssignOperator::Subtract => self.current.doc.to_mut().decrement(stk, ctx, opt, &x.0, v).await?,
-								#[rustfmt::skip]
-								AssignOperator::Extend => self.current.doc.to_mut().extend(stk, ctx, opt, &x.0, v).await?,
-								#[rustfmt::skip]
-								o => fail!("Unexpected operator in SET clause: {o:?}"),
+								AssignOperator::Add => {
+									self.current_reduced
+										.doc
+										.to_mut()
+										.increment(stk, ctx, opt, &x.place, v.clone())
+										.await?;
+									self.current
+										.doc
+										.to_mut()
+										.increment(stk, ctx, opt, &x.place, v)
+										.await?;
+								}
+								AssignOperator::Subtract => {
+									self.current_reduced
+										.doc
+										.to_mut()
+										.decrement(stk, ctx, opt, &x.place, v.clone())
+										.await?;
+									self.current
+										.doc
+										.to_mut()
+										.decrement(stk, ctx, opt, &x.place, v)
+										.await?;
+								}
+								AssignOperator::Extend => {
+									self.current_reduced
+										.doc
+										.to_mut()
+										.extend(stk, ctx, opt, &x.place, v.clone())
+										.await?;
+									self.current
+										.doc
+										.to_mut()
+										.extend(stk, ctx, opt, &x.place, v)
+										.await?;
+								}
+							}
+						}
+					} else {
+						for x in x.iter() {
+							let v = x
+								.value
+								.compute(stk, ctx, opt, Some(&self.current))
+								.await
+								.catch_return()?;
+							match &x.operator {
+								AssignOperator::Assign => match v {
+									Value::None => {
+										self.current
+											.doc
+											.to_mut()
+											.del(stk, ctx, opt, &x.place)
+											.await?
+									}
+									_ => {
+										self.current
+											.doc
+											.to_mut()
+											.set(stk, ctx, opt, &x.place, v)
+											.await?
+									}
+								},
+								AssignOperator::Add => {
+									self.current
+										.doc
+										.to_mut()
+										.increment(stk, ctx, opt, &x.place, v)
+										.await?
+								}
+								AssignOperator::Subtract => {
+									self.current
+										.doc
+										.to_mut()
+										.decrement(stk, ctx, opt, &x.place, v)
+										.await?
+								}
+								AssignOperator::Extend => {
+									self.current
+										.doc
+										.to_mut()
+										.extend(stk, ctx, opt, &x.place, v)
+										.await?
+								}
 							}
 						}
 					}
-				},
+				}
 				Data::UpdateExpression(x) => {
 					// Duplicate context
 					let mut ctx = MutableContext::new(ctx);
@@ -327,58 +381,113 @@ impl Document {
 					// Freeze the context
 					let ctx = ctx.freeze();
 					// Process ON DUPLICATE KEY clause
-					match self.reduced(stk, &ctx, opt, Current).await? {
-						true => {
-							for x in x.iter() {
-								#[rustfmt::skip]
-								let v = x.2.compute(stk, &ctx, opt, Some(&self.current_reduced)).await.catch_return()?;
-								match &x.1 {
-									#[rustfmt::skip]
-									AssignOperator::Assign => match v {
-										Value::None => {
-											self.current_reduced.doc.to_mut().del(stk, &ctx, opt, &x.0).await?;
-											self.current.doc.to_mut().del(stk, &ctx, opt, &x.0).await?;
-										},
-										_ => {
-											self.current_reduced.doc.to_mut().set(stk, &ctx, opt, &x.0, v.clone()).await?;
-											self.current.doc.to_mut().set(stk, &ctx, opt, &x.0, v).await?;
-										},
-									},
-									#[rustfmt::skip]
-									AssignOperator::Add => {
-										self.current_reduced.doc.to_mut().increment(stk, &ctx, opt, &x.0, v.clone()).await?;
-										self.current.doc.to_mut().increment(stk, &ctx, opt, &x.0, v).await?;
+					if self.reduced(stk, &ctx, opt, Current).await? {
+						for x in x.iter() {
+							let v = x
+								.value
+								.compute(stk, &ctx, opt, Some(&self.current_reduced))
+								.await
+								.catch_return()?;
+							match &x.operator {
+								AssignOperator::Assign => match v {
+									Value::None => {
+										self.current_reduced
+											.doc
+											.to_mut()
+											.del(stk, &ctx, opt, &x.place)
+											.await?;
+										self.current
+											.doc
+											.to_mut()
+											.del(stk, &ctx, opt, &x.place)
+											.await?;
 									}
-									#[rustfmt::skip]
-									AssignOperator::Subtract => {
-										self.current_reduced.doc.to_mut().decrement(stk, &ctx, opt, &x.0, v.clone()).await?;
-										self.current.doc.to_mut().decrement(stk, &ctx, opt, &x.0, v).await?;
+									_ => {
+										self.current_reduced
+											.doc
+											.to_mut()
+											.set(stk, &ctx, opt, &x.place, v.clone())
+											.await?;
+										self.current
+											.doc
+											.to_mut()
+											.set(stk, &ctx, opt, &x.place, v)
+											.await?;
 									}
-									#[rustfmt::skip]
-									AssignOperator::Extend => {
-										self.current_reduced.doc.to_mut().extend(stk, &ctx, opt, &x.0, v.clone()).await?;
-										self.current.doc.to_mut().extend(stk, &ctx, opt, &x.0, v).await?;
-									}
+								},
+								AssignOperator::Add => {
+									self.current_reduced
+										.doc
+										.to_mut()
+										.increment(stk, &ctx, opt, &x.place, v.clone())
+										.await?;
+									self.current
+										.doc
+										.to_mut()
+										.increment(stk, &ctx, opt, &x.place, v)
+										.await?;
+								}
+								AssignOperator::Subtract => {
+									self.current_reduced
+										.doc
+										.to_mut()
+										.decrement(stk, &ctx, opt, &x.place, v.clone())
+										.await?;
+									self.current
+										.doc
+										.to_mut()
+										.decrement(stk, &ctx, opt, &x.place, v)
+										.await?;
+								}
+								AssignOperator::Extend => {
+									self.current_reduced
+										.doc
+										.to_mut()
+										.extend(stk, &ctx, opt, &x.place, v.clone())
+										.await?;
+									self.current
+										.doc
+										.to_mut()
+										.extend(stk, &ctx, opt, &x.place, v)
+										.await?;
 								}
 							}
 						}
-						false => {
-							for x in x.iter() {
-								#[rustfmt::skip]
-								let v = x.2.compute(stk, &ctx, opt, Some(&self.current)).await.catch_return()?;
-								match &x.1 {
-									#[rustfmt::skip]
-									AssignOperator::Assign => match v {
-										Value::None => self.current.doc.to_mut().del(stk, &ctx, opt, &x.0).await?,
-										_ => self.current.doc.to_mut().set(stk, &ctx, opt, &x.0, v).await?,
-									},
-									#[rustfmt::skip]
-									AssignOperator::Add => self.current.doc.to_mut().increment(stk, &ctx, opt, &x.0, v).await?,
-									#[rustfmt::skip]
-									AssignOperator::Subtract => self.current.doc.to_mut().decrement(stk, &ctx, opt, &x.0, v).await?,
-									#[rustfmt::skip]
-									AssignOperator::Extend => self.current.doc.to_mut().extend(stk, &ctx, opt, &x.0, v).await?,
+					} else {
+						for x in x.iter() {
+							let v = x
+								.value
+								.compute(stk, &ctx, opt, Some(&self.current))
+								.await
+								.catch_return()?;
+							match &x.operator {
+								AssignOperator::Assign => match v {
+									Value::None => {
+										self.current
+											.doc
+											.to_mut()
+											.del(stk, &ctx, opt, &x.place)
+											.await?
+									}
+									_ => {
+										self.current
+											.doc
+											.to_mut()
+											.set(stk, &ctx, opt, &x.place, v)
+											.await?
+									}
+								},
+								AssignOperator::Add => {
+									self.current
+										.doc
+										.to_mut()
+										.increment(stk, &ctx, opt, &x.place, v)
+										.await?
 								}
+								#[rustfmt::skip]
+									    AssignOperator::Subtract => self.current.doc.to_mut().decrement(stk, &ctx, opt, &x.place, v).await?,
+								#[rustfmt::skip]
+									    AssignOperator::Extend => self.current.doc.to_mut().extend(stk, &ctx, opt, &x.place, v).await?,
 							}
 						}
 					}

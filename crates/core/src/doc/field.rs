@@ -9,6 +9,7 @@ use crate::expr::kind::Kind;
 use crate::expr::permission::Permission;
 use crate::expr::reference::Refs;
 use crate::expr::statements::DefineFieldStatement;
+use crate::expr::statements::define::DefineDefault;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
 use crate::kvs::KeyEncode as _;
@@ -42,7 +43,7 @@ impl Document {
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
 				let is_flex = fd.flex;
-				let is_literal = fd.kind.as_ref().is_some_and(Kind::contains_literal);
+				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
 				for k in self.current.doc.each(&fd.name).into_iter() {
 					defined_field_names.insert(&k, is_flex || is_literal);
 				}
@@ -266,7 +267,7 @@ impl Document {
 				// Skip this field?
 				if !skipped {
 					// If the field is empty, mark child fields as skippable
-					if val.is_none() && fd.kind.as_ref().is_some_and(Kind::can_be_none) {
+					if val.is_none() && fd.field_kind.as_ref().is_some_and(Kind::can_be_none) {
 						skip = Some(&fd.name);
 					}
 					// Set the new value of the field, or delete it if empty
@@ -360,7 +361,7 @@ impl FieldEditContext<'_> {
 	/// Process any TYPE clause for the field definition
 	async fn process_type_clause(&self, val: Value) -> Result<Value> {
 		// Check for a TYPE clause
-		if let Some(kind) = &self.def.kind {
+		if let Some(kind) = &self.def.field_kind {
 			// Check if this is the `id` field
 			if self.def.name.is_id() {
 				// Ensure that the outer value is a record
@@ -368,7 +369,7 @@ impl FieldEditContext<'_> {
 					// See if we should check the inner type
 					if !kind.is_record() {
 						// Get the value of the ID only
-						let inner = Value::from(id.id.clone());
+						let inner = id.key.into_value();
 
 						// Check the type of the ID part
 						inner.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
@@ -413,12 +414,12 @@ impl FieldEditContext<'_> {
 			return Ok(val);
 		}
 		// The document is not being created
-		if !self.doc.is_new() && !self.def.default_always {
+		if !self.doc.is_new() && !matches!(self.def.default, DefineDefault::Always(_)) {
 			return Ok(val);
 		}
 		// Get the default value
 		let def = match &self.def.default {
-			Some(v) => Some(v),
+			DefineDefault::Set(v) | DefineDefault::Always(v) => Some(v),
 			_ => match &self.def.value {
 				// The VALUE clause doesn't
 				Some(v) if v.is_static() => Some(v),
@@ -500,7 +501,7 @@ impl FieldEditContext<'_> {
 		// If the field TYPE is optional, and the
 		// field value was not set or is NONE we
 		// ignore any defined ASSERT clause.
-		if val.is_none() && self.def.kind.as_ref().is_some_and(Kind::can_be_none) {
+		if val.is_none() && self.def.field_kind.as_ref().is_some_and(Kind::can_be_none) {
 			return Ok(val);
 		}
 		// Check for a ASSERT clause
@@ -709,11 +710,11 @@ impl FieldEditContext<'_> {
 					let key = crate::key::r#ref::new(
 						ns,
 						db,
-						&thing.tb,
-						&thing.id,
-						&self.rid.tb,
+						&thing.table,
+						&thing.key,
+						&self.rid.table,
 						&self.def.name.to_string(),
-						&self.rid.id,
+						&self.rid.key,
 					)
 					.encode_owned()
 					.unwrap();
@@ -729,11 +730,11 @@ impl FieldEditContext<'_> {
 						let key = crate::key::r#ref::new(
 							ns,
 							db,
-							&thing.tb,
-							&thing.id,
-							&self.rid.tb,
+							&thing.table,
+							&thing.key,
+							&self.rid.table,
 							&ff,
-							&self.rid.id,
+							&self.rid.key,
 						)
 						.encode_owned()
 						.unwrap();
@@ -755,7 +756,7 @@ impl FieldEditContext<'_> {
 			return Ok(None);
 		}
 
-		let refs = match &self.def.kind {
+		let refs = match &self.def.field_kind {
 			// We found a reference type for this field
 			// In this case, we force the value to be a reference
 			Some(Kind::References(ft, ff)) => Refs(vec![(ft.clone(), ff.clone())]),

@@ -32,14 +32,14 @@ impl Document {
 			let mut txn = txn.lock().await;
 			// For enforced relations, ensure that the edges exist
 			if matches!(
-				tb.kind,
+				tb.table_type,
 				TableType::Relation(Relation {
 					enforced: true,
 					..
 				})
 			) {
 				// Check that the `in` record exists
-				let key = crate::key::thing::new(ns, db, &l.tb, &l.id);
+				let key = crate::key::thing::new(ns, db, &l.table, &l.key);
 				ensure!(
 					txn.exists(key, None).await?,
 					Error::IdNotFound {
@@ -47,7 +47,7 @@ impl Document {
 					}
 				);
 				// Check that the `out` record exists
-				let key = crate::key::thing::new(ns, db, &r.tb, &r.id);
+				let key = crate::key::thing::new(ns, db, &r.table, &r.key);
 				ensure!(
 					txn.exists(key, None).await?,
 					Error::IdNotFound {
@@ -58,16 +58,16 @@ impl Document {
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge
-			let key = crate::key::graph::new(ns, db, &l.tb, &l.id, o, &rid);
+			let key = crate::key::graph::new(ns, db, &l.table, &l.key, o, &rid);
 			txn.set(key, vec![], opt.version).await?;
 			// Store the left inner edge
-			let key = crate::key::graph::new(ns, db, &rid.tb, &rid.id, i, l);
+			let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, i, l);
 			txn.set(key, vec![], opt.version).await?;
 			// Store the right inner edge
-			let key = crate::key::graph::new(ns, db, &rid.tb, &rid.id, o, r);
+			let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, o, r);
 			txn.set(key, vec![], opt.version).await?;
 			// Store the right pointer edge
-			let key = crate::key::graph::new(ns, db, &r.tb, &r.id, i, &rid);
+			let key = crate::key::graph::new(ns, db, &r.table, &r.key, i, &rid);
 			txn.set(key, vec![], opt.version).await?;
 			// Store the edges on the record
 			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));

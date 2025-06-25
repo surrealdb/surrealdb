@@ -93,7 +93,7 @@ impl DefineAccessStatement {
 					key,
 					revision::to_vec(&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
-						access_type: DefineKind::Default,
+						kind: DefineKind::Default,
 						..self.clone()
 					})?,
 					None,
@@ -130,7 +130,7 @@ impl DefineAccessStatement {
 					key,
 					revision::to_vec(&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
-						access_type: DefineKind::Default,
+						kind: DefineKind::Default,
 						..self.clone()
 					})?,
 					None,
@@ -169,7 +169,7 @@ impl DefineAccessStatement {
 					key,
 					revision::to_vec(&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
-						access_type: DefineKind::Default,
+						kind: DefineKind::Default,
 						..self.clone()
 					})?,
 					None,

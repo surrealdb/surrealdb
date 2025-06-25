@@ -136,33 +136,33 @@ pub fn new<'a>(
 	ns: &'a str,
 	db: &'a str,
 	tb: &'a str,
-	id: &RecordIdKeyLit,
+	id: &RecordIdKey,
 	ft: &'a str,
 	ff: &'a str,
-	fk: &RecordIdKeyLit,
+	fk: &RecordIdKey,
 ) -> Ref<'a> {
 	Ref::new(ns, db, tb, id.to_owned(), ft, ff, fk.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &RecordIdKeyLit) -> Result<Vec<u8>> {
+pub fn prefix(ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_owned()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &RecordIdKeyLit) -> Result<Vec<u8>> {
+pub fn suffix(ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_owned()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &RecordIdKeyLit, ft: &str) -> Result<Vec<u8>> {
+pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &RecordIdKeyLit, ft: &str) -> Result<Vec<u8>> {
+pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -172,7 +172,7 @@ pub fn ffprefix(
 	ns: &str,
 	db: &str,
 	tb: &str,
-	id: &RecordIdKeyLit,
+	id: &RecordIdKey,
 	ft: &str,
 	ff: &str,
 ) -> Result<Vec<u8>> {
@@ -185,7 +185,7 @@ pub fn ffsuffix(
 	ns: &str,
 	db: &str,
 	tb: &str,
-	id: &RecordIdKeyLit,
+	id: &RecordIdKey,
 	ft: &str,
 	ff: &str,
 ) -> Result<Vec<u8>> {
@@ -205,10 +205,10 @@ impl<'a> Ref<'a> {
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
-		id: RecordIdKeyLit,
+		id: RecordIdKey,
 		ft: &'a str,
 		ff: &'a str,
-		fk: RecordIdKeyLit,
+		fk: RecordIdKey,
 	) -> Self {
 		Self {
 			__: b'/',

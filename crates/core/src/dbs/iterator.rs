@@ -11,7 +11,7 @@ use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::val::{Object, RecordId, Value};
+use crate::val::{Array, Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::mem;
@@ -46,7 +46,7 @@ pub(crate) enum Iterable {
 	Table(Table, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	Range(String, RecordIdKeyRangeLit, RecordStrategy, ScanDirection),
+	Range(String, RecordIdKeyRange, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
@@ -76,7 +76,7 @@ pub(crate) enum Operable {
 #[derive(Debug)]
 pub(crate) enum Workable {
 	Normal,
-	Insert(Arc<Expr>),
+	Insert(Arc<Value>),
 	Relate(RecordId, RecordId, Option<Arc<Value>>),
 }
 
@@ -205,11 +205,11 @@ impl Iterator {
 		ctx: &StatementContext<'_>,
 		v: RecordId,
 	) -> Result<()> {
-		if v.is_range() {
+		if v.key.is_range() {
 			return self.prepare_range(planner, ctx, v).await;
 		}
 		// We add the iterable only if we have a permission
-		if matches!(planner.check_table_permission(ctx, &v.tb).await?, GrantedPermission::None) {
+		if matches!(planner.check_table_permission(ctx, &v.table).await?, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Add the record to the iterator
@@ -263,7 +263,7 @@ impl Iterator {
 		v: RecordId,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
-		let p = planner.check_table_permission(ctx, &v.tb).await?;
+		let p = planner.check_table_permission(ctx, &v.table).await?;
 		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
@@ -278,7 +278,7 @@ impl Iterator {
 		let rs = ctx.check_record_strategy(false, p)?;
 		let sc = ctx.check_scan_direction();
 		// Add the record to the iterator
-		if let (tb, RecordIdKeyLit::Range(v)) = (v.tb, v.id) {
+		if let (tb, RecordIdKey::Range(v)) = (v.table, v.key) {
 			self.ingest(Iterable::Range(tb, *v, rs, sc));
 		}
 		// All ingested ok

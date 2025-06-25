@@ -106,6 +106,7 @@ pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;
 pub use self::permission::{Permission, Permissions};
+pub use self::plan::TopLevelExpr;
 pub use self::plan::{LogicalPlan, TopLevelExpr};
 pub use self::record_id::RecordIdLit;
 pub use self::regex::Regex;
@@ -113,6 +114,11 @@ pub use self::scoring::Scoring;
 pub use self::script::Script;
 pub use self::split::{Split, Splits};
 pub use self::start::Start;
+pub use self::statements::{
+	CreateStatement, DefineStatement, IfelseStatement, InsertStatement, KillStatement,
+	LiveStatement, RelateStatement, SelectStatement, SetStatement, UpdateStatement,
+	UpsertStatement,
+};
 pub use self::table::{Table, Tables};
 pub use self::table_type::{Relation, TableType};
 pub use self::timeout::Timeout;

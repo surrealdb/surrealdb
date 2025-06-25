@@ -1,5 +1,5 @@
 use crate::dbs::Notification;
-use crate::expr::Value;
+use crate::val::Value;
 use crate::{dbs, expr};
 use revision::revisioned;
 use serde::Serialize;

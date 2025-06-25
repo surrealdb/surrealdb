@@ -36,50 +36,36 @@ impl Document {
 				Output::Null => Ok(Value::Null),
 				Output::Diff => {
 					// Process the permitted documents
-					let (initial, current) = match self.reduced(stk, ctx, opt, Both).await? {
-						true => (&self.initial_reduced, &self.current_reduced),
-						false => (&self.initial, &self.current),
+					let (initial, current) = if self.reduced(stk, ctx, opt, Both).await? {
+						(&self.initial_reduced, &self.current_reduced)
+					} else {
+						(&self.initial, &self.current)
 					};
 					// Output a DIFF of any changes applied to the document
 					Ok(initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default()).into())
 				}
 				Output::After => {
 					// Process the permitted documents
-					match self.reduced(stk, ctx, opt, Current).await? {
-						// This is an already processed reduced document
-						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
-						// Output the full document before any changes were applied
-						false => self
-							.current
-							.doc
-							.as_ref()
-							.compute(stk, ctx, opt, Some(&self.current))
-							.await
-							.catch_return()
-							.map_err(IgnoreError::from),
+					if self.reduced(stk, ctx, opt, Current).await? {
+						Ok(self.current_reduced.doc.as_ref().to_owned())
+					} else {
+						Ok(self.current.doc.as_ref().to_owned())
 					}
 				}
 				Output::Before => {
 					// Process the permitted documents
-					match self.reduced(stk, ctx, opt, Initial).await? {
-						// This is an already processed reduced document
-						true => Ok(self.initial_reduced.doc.as_ref().to_owned()),
-						// Output the full document before any changes were applied
-						false => self
-							.initial
-							.doc
-							.as_ref()
-							.compute(stk, ctx, opt, Some(&self.initial))
-							.await
-							.catch_return()
-							.map_err(IgnoreError::from),
+					if self.reduced(stk, ctx, opt, Initial).await? {
+						Ok(self.initial_reduced.doc.as_ref().to_owned())
+					} else {
+						Ok(self.initial.doc.as_ref().to_owned())
 					}
 				}
 				Output::Fields(v) => {
 					// Process the permitted documents
-					let (initial, current) = match self.reduced(stk, ctx, opt, Both).await? {
-						true => (&mut self.initial_reduced, &mut self.current_reduced),
-						false => (&mut self.initial, &mut self.current),
+					let (initial, current) = if self.reduced(stk, ctx, opt, Both).await? {
+						(&mut self.initial_reduced, &mut self.current_reduced)
+					} else {
+						(&mut self.initial, &mut self.current)
 					};
 					// Configure the context
 					let mut ctx = MutableContext::new(ctx);
@@ -94,18 +80,20 @@ impl Document {
 				Statement::Live(s) => match s.expr.len() {
 					0 => {
 						// Process the permitted documents
-						let (initial, current) = match self.reduced(stk, ctx, opt, Both).await? {
-							true => (&self.initial_reduced, &self.current_reduced),
-							false => (&self.initial, &self.current),
+						let (initial, current) = if self.reduced(stk, ctx, opt, Both).await? {
+							(&self.initial_reduced, &self.current_reduced)
+						} else {
+							(&self.initial, &self.current)
 						};
 						// Output a DIFF of any changes applied to the document
 						Ok(initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default()).into())
 					}
 					_ => {
 						// Process the permitted documents
-						let current = match self.reduced(stk, ctx, opt, Current).await? {
-							true => &self.current_reduced,
-							false => &self.current,
+						let current = if self.reduced(stk, ctx, opt, Current).await? {
+							&self.current_reduced
+						} else {
+							&self.current
 						};
 						// Process the LIVE SELECT statement fields
 						s.expr
@@ -116,9 +104,10 @@ impl Document {
 				},
 				Statement::Select(s) => {
 					// Process the permitted documents
-					let current = match self.reduced(stk, ctx, opt, Current).await? {
-						true => &self.current_reduced,
-						false => &self.current,
+					let current = if self.reduced(stk, ctx, opt, Current).await? {
+						&self.current_reduced
+					} else {
+						&self.current
 					};
 					// Process the SELECT statement fields
 					s.expr
@@ -126,84 +115,16 @@ impl Document {
 						.await
 						.map_err(IgnoreError::from)
 				}
-				Statement::Create(_) => {
+				Statement::Create(_)
+				| Statement::Upsert(_)
+				| Statement::Update(_)
+				| Statement::Relate(_)
+				| Statement::Insert(_) => {
 					// Process the permitted documents
-					match self.reduced(stk, ctx, opt, Current).await? {
-						// This is an already processed reduced document
-						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
-						// This is a full document, so process it
-						false => self
-							.current
-							.doc
-							.as_ref()
-							.compute(stk, ctx, opt, Some(&self.current))
-							.await
-							.catch_return()
-							.map_err(IgnoreError::from),
-					}
-				}
-				Statement::Upsert(_) => {
-					// Process the permitted documents
-					match self.reduced(stk, ctx, opt, Current).await? {
-						// This is an already processed reduced document
-						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
-						// This is a full document, so process it
-						false => self
-							.current
-							.doc
-							.as_ref()
-							.compute(stk, ctx, opt, Some(&self.current))
-							.await
-							.catch_return()
-							.map_err(IgnoreError::from),
-					}
-				}
-				Statement::Update(_) => {
-					// Process the permitted documents
-					match self.reduced(stk, ctx, opt, Current).await? {
-						// This is an already processed reduced document
-						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
-						// This is a full document, so process it
-						false => self
-							.current
-							.doc
-							.as_ref()
-							.compute(stk, ctx, opt, Some(&self.current))
-							.await
-							.catch_return()
-							.map_err(IgnoreError::from),
-					}
-				}
-				Statement::Relate(_) => {
-					// Process the permitted documents
-					match self.reduced(stk, ctx, opt, Current).await? {
-						// This is an already processed reduced document
-						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
-						// This is a full document, so process it
-						false => self
-							.current
-							.doc
-							.as_ref()
-							.compute(stk, ctx, opt, Some(&self.current))
-							.await
-							.catch_return()
-							.map_err(IgnoreError::from),
-					}
-				}
-				Statement::Insert(_) => {
-					// Process the permitted documents
-					match self.reduced(stk, ctx, opt, Current).await? {
-						// This is an already processed reduced document
-						true => Ok(self.current_reduced.doc.as_ref().to_owned()),
-						// This is a full document, so process it
-						false => self
-							.current
-							.doc
-							.as_ref()
-							.compute(stk, ctx, opt, Some(&self.current))
-							.await
-							.catch_return()
-							.map_err(IgnoreError::from),
+					if self.reduced(stk, ctx, opt, Current).await? {
+						Ok(self.current_reduced.doc.as_ref().to_owned())
+					} else {
+						Ok(self.current.doc.as_ref().to_owned())
 					}
 				}
 				_ => Err(IgnoreError::Ignore),

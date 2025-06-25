@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::idiom::Idiom;
-use crate::expr::{FlowResultExt as _, Function};
 use crate::val::{Closure, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -31,7 +30,7 @@ pub async fn diff(
 
 pub async fn patch(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(val, diff): (Value, Value),
+	(mut val, diff): (Value, Value),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
 		val.patch(diff)?;

@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::expr::Permission;
 use crate::expr::ident::Ident;
 use crate::iam::Action;
+use crate::val::Value;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;

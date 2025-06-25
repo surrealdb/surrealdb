@@ -109,7 +109,7 @@ impl ApiBody {
 					Some("application/json") => json::parse_value(&bytes),
 					Some("application/cbor") => cbor::parse_value(bytes),
 					Some("application/surrealdb") => revision::parse_value(bytes),
-					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
+					_ => return Ok(Value::Bytes(crate::val::Bytes(bytes))),
 				};
 
 				parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))

@@ -4,7 +4,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
-
 use crate::iam::Auth;
 use crate::kvs::Live;
 use crate::val::{Uuid, Value};
@@ -37,7 +36,7 @@ pub struct LiveStatement {
 	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
-	pub(crate) session: Option<Expr>,
+	pub(crate) session: Option<Value>,
 }
 
 impl LiveStatement {

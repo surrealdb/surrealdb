@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::expr::access_type::BearerAccessSubject;
 use crate::expr::{AccessType, Base, Cond, FlowResultExt as _, Ident, RecordIdLit};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Datetime, Duration, Uuid, Value};
+use crate::val::{Array, Datetime, Duration, Uuid, Value};
 use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;

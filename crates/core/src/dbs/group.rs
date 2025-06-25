@@ -3,7 +3,7 @@ use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::expr::function::OptimisedAggregate;
-use crate::expr::{Field, FlowResultExt as _, Function, Idiom};
+use crate::expr::{Expr, Field, FlowResultExt as _, Function, Idiom};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Array, TryAdd, TryFloatDiv, Value};
 use anyhow::Result;
@@ -131,7 +131,7 @@ impl GroupsCollector {
 			// Loop over each grouped collection
 			for aggregator in self.grp.values_mut() {
 				// Create a new value
-				let mut obj = Value::base();
+				let mut obj = Value::empty_object();
 				// Loop over each group clause
 				for field in fields.other() {
 					// Process the field
@@ -149,7 +149,7 @@ impl GroupsCollector {
 						{
 							if let Some(agr) = aggregator.get_mut(idioms_pos) {
 								match expr {
-									Value::Function(f) if f.is_aggregate() => {
+									Expr::FunctionCall(f) if f.is_aggregate() => {
 										let a = f.get_optimised_aggregate();
 										let x = if matches!(a, OptimisedAggregate::None) {
 											// The aggregation is not optimised, let's compute it with the values

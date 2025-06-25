@@ -34,8 +34,9 @@ impl Attach for Variables {
 	}
 }
 
+/*
 pub fn sql_variables_to_expr_variables(
-	variables: &BTreeMap<String, crate::sql::SqlValue>,
+	variables: &BTreeMap<String, crate::val::Value>,
 ) -> BTreeMap<String, crate::expr::Value> {
 	let mut expr_variables = BTreeMap::new();
 	for (key, val) in variables {
@@ -53,3 +54,4 @@ pub fn expr_variables_to_sql_variables(
 	}
 	sql_variables
 }
+*/

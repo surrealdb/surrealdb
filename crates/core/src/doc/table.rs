@@ -67,7 +67,7 @@ impl Document {
 			Force::Table(tb)
 				if tb.first().is_some_and(|tb| {
 					tb.view.as_ref().is_some_and(|v| {
-						self.id.as_ref().is_some_and(|id| v.what.iter().any(|p| p.0 == id.tb))
+						self.id.as_ref().is_some_and(|id| v.what.iter().any(|p| p.0 == id.table))
 					})
 				}) =>
 			{
@@ -222,7 +222,9 @@ impl Document {
 										// Delete the value in the table
 										Action::Delete => {
 											let stm = DeleteStatement {
-												what: vec![Value::from(rid)],
+												what: vec![Expr::Literal(Literal::RecordId(
+													rid.into_literal(),
+												))],
 												..DeleteStatement::default()
 											};
 											// Execute the statement
@@ -231,7 +233,9 @@ impl Document {
 										// Update the value in the table
 										_ => {
 											let stm = UpsertStatement {
-												what: vec![Value::from(rid)],
+												what: vec![Expr::Literal(Literal::RecordId(
+													rid.into_literal(),
+												))],
 												data: Some(
 													self.full(stk, ctx, opt, &tb.expr).await?,
 												),
@@ -245,7 +249,9 @@ impl Document {
 								_ => {
 									// Delete the value in the table
 									let stm = DeleteStatement {
-										what: vec![Value::from(rid)],
+										what: vec![Expr::Literal(Literal::RecordId(
+											rid.into_literal(),
+										))],
 										..DeleteStatement::default()
 									};
 									// Execute the statement
@@ -260,7 +266,9 @@ impl Document {
 								// Delete the value in the table
 								Action::Delete => {
 									let stm = DeleteStatement {
-										what: vec![Value::from(rid)],
+										what: vec![Expr::Literal(Literal::RecordId(
+											rid.into_literal(),
+										))],
 										..DeleteStatement::default()
 									};
 									// Execute the statement
@@ -269,7 +277,9 @@ impl Document {
 								// Update the value in the table
 								_ => {
 									let stm = UpsertStatement {
-										what: vec![Value::from(rid)],
+										what: vec![Expr::Literal(Literal::RecordId(
+											rid.into_literal(),
+										))],
 										data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
 										..UpsertStatement::default()
 									};
@@ -333,7 +343,7 @@ impl Document {
 			table: fdc.ft.name.to_raw(),
 			key: fdc.group_ids.into(),
 		};
-		let what = vec![Value::from(thg.clone())];
+		let what = vec![Expr::Literal(Literal::RecordId(thg.into_literal()))];
 		let stm = UpsertStatement {
 			what,
 			data: Some(Data::SetExpression(set_ops)),

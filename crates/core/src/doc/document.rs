@@ -321,8 +321,7 @@ impl Document {
 			// Get the full document
 			let full = target.0;
 			// Process the full document
-			let mut out =
-				full.doc.as_ref().compute(stk, ctx, opt, Some(full)).await.catch_return()?;
+			let mut out = (*full.doc).clone();
 			// Loop over each field in document
 			for fd in fds.iter() {
 				// Loop over each field in document
@@ -449,7 +448,7 @@ impl Document {
 			// No cache is present on the context
 			_ => {
 				// Return the table or attempt to define it
-				match txn.get_tb(ns, db, &id.tb).await {
+				match txn.get_tb(ns, db, &id.table).await {
 					Err(e) => {
 						// The table doesn't exist
 						if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {

@@ -330,18 +330,6 @@ impl Value {
 	*/
 
 	// -----------------------------------
-	// Simple conversion of values
-	// -----------------------------------
-
-	/// Treat a string as a table name
-	pub fn could_be_table(self) -> Value {
-		match self {
-			Value::Strand(v) => Value::Table(v.0.into()),
-			_ => self,
-		}
-	}
-
-	// -----------------------------------
 	// Simple output of value type
 	// -----------------------------------
 

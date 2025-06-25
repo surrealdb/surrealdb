@@ -1,5 +1,5 @@
 use super::key::Key;
-use crate::expr::id::RecordIdKeyLit;
+use crate::val::RecordIdKey;
 use quick_cache::Equivalent;
 use uuid::Uuid;
 
@@ -106,7 +106,7 @@ pub(crate) enum Lookup<'a> {
 	/// A cache key for an index (on a table)
 	Ix(&'a str, &'a str, &'a str, &'a str),
 	/// A cache key for a record
-	Record(&'a str, &'a str, &'a str, &'a RecordIdKeyLit),
+	Record(&'a str, &'a str, &'a str, &'a RecordIdKey),
 }
 
 impl Equivalent<Key> for Lookup<'_> {

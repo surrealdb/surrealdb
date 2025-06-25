@@ -62,8 +62,8 @@ pub use self::alter::{AlterStatement, AlterTableStatement};
 pub use self::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-	DefineTableStatement, DefineUserStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineParamStore,
+	DefineStatement, DefineTableStatement, DefineUserStatement,
 };
 
 pub use self::remove::{

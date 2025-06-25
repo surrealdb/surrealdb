@@ -91,8 +91,9 @@ impl Version {
 
 			// Apply fixes based on the current version
 			if v == 1 {
-				apply_fix!(v1_to_2_id_uuid);
-				apply_fix!(v1_to_2_migrate_to_access);
+				todo!()
+				//apply_fix!(v1_to_2_id_uuid);
+				//apply_fix!(v1_to_2_migrate_to_access);
 			}
 
 			// Obtain storage version key and value

@@ -4,16 +4,16 @@ use super::{Key, KeyEncode, Val, Version, util};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::expr::Permissions;
 use crate::expr::statements::define::{
 	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
 };
 use crate::expr::statements::{
 	AccessGrant, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineTableStatement,
-	DefineUserStatement, LiveStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineParamStore,
+	DefineTableStatement, DefineUserStatement, LiveStatement,
 };
-use crate::expr::{Permissions, RecordIdKeyLit};
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
@@ -771,7 +771,7 @@ impl Transaction {
 
 	/// Retrieve all param definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_params(&self, ns: &str, db: &str) -> Result<Arc<[DefineParamStatement]>> {
+	pub async fn all_db_params(&self, ns: &str, db: &str) -> Result<Arc<[DefineParamStore]>> {
 		let qey = cache::tx::Lookup::Pas(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_pas(),
@@ -1385,7 +1385,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		pa: &str,
-	) -> Result<Arc<DefineParamStatement>> {
+	) -> Result<Arc<DefineParamStore>> {
 		let qey = cache::tx::Lookup::Pa(ns, db, pa);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1394,7 +1394,7 @@ impl Transaction {
 				let val = self.get(key, None).await?.ok_or_else(|| Error::PaNotFound {
 					name: pa.to_owned(),
 				})?;
-				let val: DefineParamStatement = revision::from_slice(&val)?;
+				let val: DefineParamStore = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1611,7 +1611,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &RecordIdKeyLit,
+		id: &RecordIdKey,
 		val: Value,
 	) -> Result<()> {
 		// Set the value in the datastore
@@ -1630,7 +1630,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &RecordIdKeyLit,
+		id: &RecordIdKey,
 		val: Arc<Value>,
 	) -> Result<()> {
 		// Set the value in the cache
@@ -1641,13 +1641,7 @@ impl Transaction {
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn del_record(
-		&self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		id: &RecordIdKeyLit,
-	) -> Result<()> {
+	pub async fn del_record(&self, ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<()> {
 		// Set the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
 		self.del(&key).await?;

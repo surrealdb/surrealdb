@@ -7,7 +7,7 @@ use crate::expr::fmt::{Fmt, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Strand;
+use crate::val::{Object, Strand};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -59,14 +59,7 @@ impl DefineApiStatement {
 			}
 		}
 		// Process the statement
-		let path: Path = self
-			.path
-			.compute(stk, ctx, opt, doc)
-			.await
-			// Might be correct to not catch here.
-			.catch_return()?
-			.coerce_to::<String>()?
-			.parse()?;
+		let path: Path = self.path.coerce_to::<String>()?.parse()?;
 		let name = path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
 		txn.get_or_add_ns(ns, opt.strict).await?;
@@ -146,7 +139,7 @@ pub struct ApiDefinition {
 	pub id: Option<u32>,
 	pub path: Path,
 	pub actions: Vec<ApiAction>,
-	pub fallback: Option<Value>,
+	pub fallback: Option<Expr>,
 	pub config: Option<ApiConfig>,
 	pub comment: Option<Strand>,
 }

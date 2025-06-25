@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::val::{Datetime, Object, Value};
+use crate::val::{Datetime, File, Object, Value};
 use bytes::Bytes;
 use std::future::Future;
 use std::pin::Pin;

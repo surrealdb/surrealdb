@@ -53,15 +53,6 @@ impl InfoStructure for Fetchs {
 pub struct Fetch(#[revision(start = 1)] pub Expr);
 
 impl Fetch {
-	fn convert_fetch_idiom(&mut self, _revision: u16, old: Idiom) -> Result<(), revision::Error> {
-		self.0 = if old.is_empty() {
-			Value::None
-		} else {
-			Value::Idiom(old)
-		};
-		Ok(())
-	}
-
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -70,7 +61,7 @@ impl Fetch {
 		idioms: &mut Vec<Idiom>,
 	) -> Result<()> {
 		let strand_or_idiom = |v: Value| match v {
-			Expr::Literal(Literal::Strand(s)) => Ok(Idiom::from(s.0)),
+			Value::Strand(s) => Ok(Idiom::from(s.0)),
 			Expr::Idiom(i) => Ok(i.clone()),
 			v => Err(Error::InvalidFetch {
 				value: v,

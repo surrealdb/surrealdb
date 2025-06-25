@@ -9,7 +9,7 @@ use crate::expr::statements::DefineFunctionStatement;
 use crate::gql::schema::kind_to_type;
 use crate::gql::utils::GQLTx;
 use crate::kvs::Datastore;
-use crate::val::Value as SqlValue;
+use crate::val::Value;
 use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, Type};
 
 pub async fn process_fns(
@@ -46,24 +46,24 @@ pub async fn process_fns(
 							let arg_val = gql_to_sql_kind(arg_val, arg_kind)?;
 							args.push(arg_val);
 						} else {
-							args.push(SqlValue::None);
+							args.push(Value::None);
 						}
 					}
 
 					let res = gtx.run_fn(&fnd1.name, args).await?;
 
 					let gql_res = match res {
-						SqlValue::Thing(rid) => {
+						Value::Thing(rid) => {
 							let mut tmp = field_val_erase_owned((gtx.clone(), rid.clone()));
 							match kind1 {
 								Kind::Record(ts) if ts.len() != 1 => {
-									tmp = tmp.with_type(rid.tb.clone())
+									tmp = tmp.with_type(rid.table.clone())
 								}
 								_ => {}
 							}
 							Some(tmp)
 						}
-						SqlValue::None => None,
+						Value::None => None,
 						_ => Some(FieldValue::value(sql_value_to_gql_value(res)?)),
 					};
 

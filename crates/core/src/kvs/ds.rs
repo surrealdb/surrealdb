@@ -15,7 +15,7 @@ use crate::dbs::{
 };
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
-use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan};
+use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -1000,7 +1000,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(&self, val: Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn compute(
+		&self,
+		val: TopLevelExpr,
+		sess: &Session,
+		vars: Variables,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can compute values when auth is enabled
@@ -1033,8 +1038,14 @@ impl Datastore {
 		sess.context(&mut ctx);
 		// Store the query variables
 		vars.attach(&mut ctx)?;
+		let txn_type = if val.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
+
 		// Start a new transaction
-		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
 		// Freeze the context
@@ -1043,7 +1054,7 @@ impl Datastore {
 		let res =
 			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
-		match (res.is_ok(), val.writeable()) {
+		match (res.is_ok(), matches!(txn_type, TransactionType::Read)) {
 			// If the compute was successful, then commit if writeable
 			(true, true) => txn.commit().await?,
 			// Cancel if the compute was an error, or if readonly

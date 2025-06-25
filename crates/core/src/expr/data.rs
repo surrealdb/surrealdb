@@ -32,9 +32,9 @@ pub enum Data {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Assignment {
-	place: Idiom,
-	operator: AssignOperator,
-	value: Expr,
+	pub place: Idiom,
+	pub operator: AssignOperator,
+	pub value: Expr,
 }
 
 impl Default for Data {
@@ -62,31 +62,27 @@ impl Data {
 		path: &[Part],
 	) -> Result<Option<Value>> {
 		match self {
-			Self::MergeExpression(v) => match v {
-				Expr::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Expr::Literal(Literal::Object(_)) => {
-					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
+			Self::MergeExpression(v) | Self::ReplaceExpression(v) | Self::ContentExpression(v) => {
+				match v {
+					Expr::Param(_) | Expr::Literal(Literal::Object(_)) => {
+						let v = v.compute(stk, ctx, opt, None).await.catch_return()?.pick(path);
+						if v.is_null() {
+							Ok(None)
+						} else {
+							Ok(Some(v))
+						}
+					}
+					_ => Ok(None),
 				}
-				_ => Ok(None),
-			},
-			Self::ReplaceExpression(v) => match v {
-				Expr::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Expr::Literal(Literal::Object(_)) => {
-					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
-				}
-				_ => Ok(None),
-			},
-			Self::ContentExpression(v) => match v {
-				Expr::Param(v) => Ok(v.compute(stk, ctx, opt, None).await?.pick(path).some()),
-				Expr::Literal(Literal::Object(_)) => {
-					Ok(v.pick(path).compute(stk, ctx, opt, None).await.catch_return()?.some())
-				}
-				_ => Ok(None),
-			},
-			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_field(path)) {
-				Some((_, _, v)) => {
-					// This SET expression has this field
-					Ok(v.compute(stk, ctx, opt, None).await.catch_return()?.some())
+			}
+			Self::SetExpression(v) => match v.iter().find(|f| f.place.is_field(path)) {
+				Some(ass) => {
+					let v = ass.value.compute(stk, ctx, opt, None).await.catch_return()?;
+					if v.is_null() {
+						Ok(None)
+					} else {
+						Ok(Some(v))
+					}
 				}
 				// This SET expression does not have this field
 				_ => Ok(None),

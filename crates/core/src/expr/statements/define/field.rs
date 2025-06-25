@@ -4,6 +4,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
+use crate::expr::kind::KindLiteral;
 use crate::expr::reference::Reference;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
@@ -67,7 +68,7 @@ impl DefineFieldStatement {
 		let kind = if let Some(kind) = self.get_reference_kind(ctx, opt).await? {
 			Some(kind)
 		} else {
-			self.kind.clone()
+			self.field_kind.clone()
 		};
 
 		// Get the NS and DB
@@ -138,9 +139,9 @@ impl DefineFieldStatement {
 			// Get the table definition that this field belongs to
 			let tb = txn.get_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.kind {
+			if let TableType::Relation(ref relation) = tb.table_type {
 				// Check if a field TYPE has been specified
-				if let Some(kind) = self.kind.as_ref() {
+				if let Some(kind) = self.field_kind.as_ref() {
 					// The `in` field must be a record type
 					ensure!(
 						kind.is_record(),
@@ -151,7 +152,7 @@ impl DefineFieldStatement {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
 							cache_fields_ts: Uuid::now_v7(),
-							kind: TableType::Relation(Relation {
+							table_type: TableType::Relation(Relation {
 								from: self.field_kind.clone(),
 								..relation.to_owned()
 							}),
@@ -173,7 +174,7 @@ impl DefineFieldStatement {
 			// Get the table definition that this field belongs to
 			let tb = txn.get_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.kind {
+			if let TableType::Relation(ref relation) = tb.table_type {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `out` field must be a record type
@@ -186,7 +187,7 @@ impl DefineFieldStatement {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
 							cache_fields_ts: Uuid::now_v7(),
-							kind: TableType::Relation(Relation {
+							table_type: TableType::Relation(Relation {
 								to: self.field_kind.clone(),
 								..relation.to_owned()
 							}),
@@ -395,7 +396,7 @@ impl DefineFieldStatement {
 		if let Some(self_kind) = &self.field_kind {
 			for fd in fds.iter() {
 				if self.name.starts_with(&fd.name) && self.name != fd.name {
-					if let Some(fd_kind) = &fd.kind {
+					if let Some(fd_kind) = &fd.field_kind {
 						let path = self.name[fd.name.len()..].to_vec();
 						if !fd_kind.allows_nested_kind(&path, self_kind) {
 							bail!(Error::MismatchedFieldTypes {

@@ -89,6 +89,24 @@ impl DefineParamStatement {
 	}
 }
 
+impl Display for DefineParamStore {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE PARAM")?;
+		write!(f, " ${} VALUE {}", self.name, self.value)?;
+		if let Some(ref v) = self.comment {
+			write!(f, " COMMENT {v}")?
+		}
+		let _indent = if is_pretty() {
+			Some(pretty_indent())
+		} else {
+			f.write_char(' ')?;
+			None
+		};
+		write!(f, "PERMISSIONS {}", self.permissions)?;
+		Ok(())
+	}
+}
+
 impl Display for DefineParamStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE PARAM")?;

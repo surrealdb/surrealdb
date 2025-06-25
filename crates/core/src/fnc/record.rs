@@ -24,11 +24,11 @@ pub async fn exists(
 }
 
 pub fn id((arg,): (RecordId,)) -> Result<Value> {
-	Ok(arg.id.into())
+	Ok(arg.key.into())
 }
 
 pub fn tb((arg,): (RecordId,)) -> Result<Value> {
-	Ok(arg.tb.into())
+	Ok(arg.table.into())
 }
 
 pub async fn refs(
@@ -88,7 +88,7 @@ async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom)
 	let is_contained = if let Some(kind) = &fd.kind {
 		matches!(
 			kind.get_optional_inner_kind(),
-			Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(LiteralKind::Array(_))
+			Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(KindLiteral::Array(_))
 		)
 	} else {
 		false

@@ -88,11 +88,7 @@ impl GQLTx {
 		})
 	}
 
-	pub async fn get_record_field(
-		&self,
-		rid: RecordId,
-		field: impl Into<Part>,
-	) -> Result<SqlValue, GqlError> {
+	pub async fn get_record_field(&self, rid: RecordId, field: Part) -> Result<SqlValue, GqlError> {
 		let mut stack = TreeStack::new();
 		let part = [field.into()];
 		let value = SqlValue::Thing(rid);
@@ -118,7 +114,10 @@ impl GQLTx {
 
 	pub async fn run_fn(&self, name: &str, args: Vec<SqlValue>) -> Result<SqlValue, GqlError> {
 		let mut stack = TreeStack::new();
-		let fun = expr::Value::Function(Box::new(Function::Custom(name.to_string(), args)));
+		let fun = expr::Expr::FunctionCall(Box::new(expr::FunctionCall {
+			receiver: Function::Custom(name.to_string()),
+			arguments: args,
+		}));
 
 		let res = stack
 			// .enter(|stk| fnc::run(stk, &self.ctx, &self.opt, None, name, args))

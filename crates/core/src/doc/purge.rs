@@ -3,13 +3,14 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, CursorValue, Document};
 use crate::err::Error;
+use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
-use crate::expr::edges::Edges;
+//use crate::expr::edges::Edges;
 use crate::expr::graph::GraphSubjects;
 use crate::expr::paths::{EDGE, IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
-use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Operator, Part};
+use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Literal, Part};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode;
@@ -50,16 +51,16 @@ impl Document {
 					// Get temporary edge references
 					let (ref o, ref i) = (Dir::Out, Dir::In);
 					// Purge the left pointer edge
-					let key = crate::key::graph::new(ns, db, &l.tb, &l.id, o, rid);
+					let key = crate::key::graph::new(ns, db, &l.table, &l.key, o, rid);
 					txn.del(key).await?;
 					// Purge the left inner edge
-					let key = crate::key::graph::new(ns, db, &rid.tb, &rid.id, i, l);
+					let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, i, l);
 					txn.del(key).await?;
 					// Purge the right inner edge
-					let key = crate::key::graph::new(ns, db, &rid.tb, &rid.id, o, r);
+					let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, o, r);
 					txn.del(key).await?;
 					// Purge the right pointer edge
-					let key = crate::key::graph::new(ns, db, &r.tb, &r.id, i, rid);
+					let key = crate::key::graph::new(ns, db, &r.table, &r.key, i, rid);
 					txn.del(key).await?;
 					// Release the transaction
 					drop(txn);
@@ -115,14 +116,16 @@ impl Document {
 							}
 							// Delete the remote record which referenced this record
 							ReferenceDeleteStrategy::Cascade => {
-								let thing = RecordId {
+								let record_id = RecordId {
 									table: r#ref.ft.to_string(),
 									key: r#ref.fk.clone(),
 								};
 
 								// Setup the delete statement
 								let stm = DeleteStatement {
-									what: Values(vec![Value::from(thing)]),
+									what: vec![Expr::Literal(Literal::RecordId(
+										record_id.into_literal(),
+									))],
 									..DeleteStatement::default()
 								};
 								// Execute the delete statement
@@ -143,18 +146,22 @@ impl Document {
 								// Determine how we perform the update
 								let data = match fd.name.last() {
 									// This is a part of an array, remove all values like it
-									Some(Part::All) => Data::SetExpression(vec![(
-										fd.name.as_ref()[..fd.name.len() - 1].into(),
-										AssignOperator::Subtract,
-										Value::Thing(rid.as_ref().clone()),
-									)]),
+									Some(Part::All) => Data::SetExpression(vec![Assignment {
+										place: fd.name.as_ref()[..fd.name.len() - 1].into(),
+										operator: AssignOperator::Subtract,
+										value: Expr::Literal(Literal::RecordId(
+											(*rid).clone().into_literal(),
+										)),
+									}]),
 									// This is a self contained value, we can set it NONE
 									_ => Data::UnsetExpression(vec![fd.name.as_ref().into()]),
 								};
 
 								// Setup the delete statement
 								let stm = UpdateStatement {
-									what: vec![Expr::Literal(thing.into_literal())],
+									what: vec![Expr::Literal(Literal::RecordId(
+										thing.into_literal(),
+									))],
 									data: Some(data),
 									..UpdateStatement::default()
 								};

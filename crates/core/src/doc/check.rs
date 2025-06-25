@@ -129,7 +129,7 @@ impl Document {
 		}
 		// You cannot store a range id as the id field on a document
 		ensure!(
-			!rid.is_range(),
+			!rid.key.is_range(),
 			Error::IdInvalid {
 				value: rid.to_string(),
 			}
@@ -142,7 +142,7 @@ impl Document {
 				if let Some(field) = data.pick(stk, ctx, opt, &*ID).await? {
 					match field {
 						// You cannot store a range id as the id field on a document
-						Value::Thing(v) if v.is_range() => {
+						Value::Thing(v) if v.key.is_range() => {
 							bail!(Error::IdInvalid {
 								value: v.to_string(),
 							})
@@ -150,7 +150,7 @@ impl Document {
 						// The id is a match, so don't error
 						Value::Thing(v) if v.eq(&rid) => (),
 						// The id is a match, so don't error
-						v if rid.id.is(&v) => (),
+						v if rid.key == v => (),
 						// The id field does not match
 						v => {
 							bail!(Error::IdMismatch {
@@ -169,7 +169,7 @@ impl Document {
 				if let Some(field) = data.pick(stk, ctx, opt, &*ID).await? {
 					match field {
 						// You cannot store a range id as the id field on a document
-						Value::Thing(v) if v.is_range() => {
+						Value::Thing(v) if v.key.is_range() => {
 							bail!(Error::IdInvalid {
 								value: v.to_string(),
 							})
@@ -177,7 +177,7 @@ impl Document {
 						// The id field is a match, so don't error
 						Value::Thing(v) if v.eq(&rid) => (),
 						// The id is a match, so don't error
-						v if rid.key.is(&v) => (),
+						v if rid.key == v => (),
 						// There was no id field specified
 						v if v.is_none() => (),
 						// The id field does not match
@@ -192,7 +192,7 @@ impl Document {
 				if let Some(field) = data.pick(stk, ctx, opt, &*IN).await? {
 					match field {
 						// You cannot store a range id as the in field on a document
-						Value::Thing(v) if v.is_range() => {
+						Value::Thing(v) if v.key.is_range() => {
 							bail!(Error::InInvalid {
 								value: v.to_string(),
 							})
@@ -200,7 +200,7 @@ impl Document {
 						// The in field is a match, so don't error
 						Value::Thing(v) if v.eq(l) => (),
 						// The in is a match, so don't error
-						v if l.id.is(&v) => (),
+						v if l.key == v => (),
 						// The in field does not match
 						v => {
 							bail!(Error::InMismatch {
@@ -213,7 +213,7 @@ impl Document {
 				if let Some(field) = data.pick(stk, ctx, opt, &*OUT).await? {
 					match field {
 						// You cannot store a range id as the out field on a document
-						Value::Thing(v) if v.is_range() => {
+						Value::Thing(v) if v.key.is_range() => {
 							bail!(Error::OutInvalid {
 								value: v.to_string(),
 							})
@@ -221,7 +221,7 @@ impl Document {
 						// The out field is a match, so don't error
 						Value::Thing(v) if v.eq(r) => (),
 						// The out is a match, so don't error
-						v if r.id.is(&v) => (),
+						v if r.key == v => (),
 						// The out field does not match
 						v => {
 							bail!(Error::OutMismatch {
@@ -234,14 +234,9 @@ impl Document {
 			// This is a INSERT RELATION statement
 			else if let Some(data) = v {
 				// Check that the 'id' field matches
-				match data
-					.pick(&*ID)
-					.compute(stk, ctx, opt, Some(&self.current))
-					.await
-					.catch_return()?
-				{
+				match data.pick(&*ID) {
 					// You cannot store a range id as the id field on a document
-					Value::Thing(v) if v.is_range() => {
+					Value::Thing(v) if v.key.is_range() => {
 						bail!(Error::IdInvalid {
 							value: v.to_string(),
 						})
@@ -249,7 +244,7 @@ impl Document {
 					// The id field is a match, so don't error
 					Value::Thing(v) if v.eq(&rid) => (),
 					// The id is a match, so don't error
-					v if rid.id.is(&v) => (),
+					v if rid.key == v => (),
 					// There was no id field specified
 					v if v.is_none() => (),
 					// The id field does not match
@@ -260,14 +255,9 @@ impl Document {
 					}
 				}
 				// Check that the 'in' field matches
-				match data
-					.pick(&*IN)
-					.compute(stk, ctx, opt, Some(&self.current))
-					.await
-					.catch_return()?
-				{
+				match data.pick(&*IN) {
 					// You cannot store a range id as the in field on a document
-					Value::Thing(v) if v.is_range() => {
+					Value::Thing(v) if v.key.is_range() => {
 						bail!(Error::InInvalid {
 							value: v.to_string(),
 						})
@@ -275,7 +265,7 @@ impl Document {
 					// The in field is a match, so don't error
 					Value::Thing(v) if v.eq(l) => (),
 					// The in is a match, so don't error
-					v if l.id.is(&v) => (),
+					v if l.key == v => (),
 					// The in field does not match
 					v => {
 						bail!(Error::InMismatch {
@@ -284,14 +274,9 @@ impl Document {
 					}
 				}
 				// Check that the 'out' field matches
-				match data
-					.pick(&*OUT)
-					.compute(stk, ctx, opt, Some(&self.current))
-					.await
-					.catch_return()?
-				{
+				match data.pick(&*OUT) {
 					// You cannot store a range id as the out field on a document
-					Value::Thing(v) if v.is_range() => {
+					Value::Thing(v) if v.key.is_range() => {
 						bail!(Error::OutInvalid {
 							value: v.to_string(),
 						})
@@ -299,7 +284,7 @@ impl Document {
 					// The out field is a match, so don't error
 					Value::Thing(v) if v.eq(r) => (),
 					// The out is a match, so don't error
-					v if r.id.is(&v) => (),
+					v if r.key == v => (),
 					// The out field does not match
 					v => {
 						bail!(Error::OutMismatch {
@@ -334,7 +319,7 @@ impl Document {
 					false => &self.current,
 				};
 				// Check if the expression is truthy
-				if !cond.compute(stk, ctx, opt, Some(current)).await.catch_return()?.is_truthy() {
+				if !cond.0.compute(stk, ctx, opt, Some(current)).await.catch_return()?.is_truthy() {
 					// Ignore this document
 					return Err(IgnoreError::Ignore);
 				}

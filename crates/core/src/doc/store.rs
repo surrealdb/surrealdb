@@ -24,7 +24,7 @@ impl Document {
 		// Get NS & DB
 		let (ns, db) = opt.ns_db()?;
 		// Store the record data
-		let key = crate::key::thing::new(ns, db, &rid.tb, &rid.id);
+		let key = crate::key::thing::new(ns, db, &rid.table, &rid.key);
 		// Remove the id field from the doc so that it's not duplicated,
 		// because it's always present as a key in the underlying key-value
 		// datastore. When the doc is read from the datastore, the key is set
@@ -121,7 +121,7 @@ impl Document {
 			_ => ctx.tx().set(key, revision::to_vec(doc_without_id.as_ref())?, opt.version).await,
 		}?;
 		// Update the cache
-		ctx.tx().set_record_cache(ns, db, &rid.tb, &rid.id, doc_without_id.as_arc())?;
+		ctx.tx().set_record_cache(ns, db, &rid.table, &rid.key, doc_without_id.as_arc())?;
 		// Carry on
 		Ok(())
 	}

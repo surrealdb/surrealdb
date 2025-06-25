@@ -3,14 +3,14 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
+use crate::expr::Table;
 use crate::expr::dir::Dir;
 use crate::expr::id::range::RecordIdKeyRangeLit;
-use crate::expr::{Edges, Table};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
 use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, RecordIdKeyRange, Value};
 use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
@@ -107,7 +107,7 @@ impl Collected {
 				w,
 				o,
 			} => Self::process_relatable(opt, txn, f, v, w, o, rid_only).await,
-			Self::Thing(thing) => Self::process_thing(opt, txn, thing, rid_only).await,
+			Self::RecordId(record_id) => Self::process_thing(opt, txn, record_id, rid_only).await,
 			Self::Yield(table) => Self::process_yield(opt, txn, table, rid_only).await,
 			Self::Value(value) => Ok(Self::process_value(value)),
 			Self::Defer(key) => Self::process_defer(opt, txn, key, rid_only).await,
@@ -202,9 +202,9 @@ impl Collected {
 		} else {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
 			// Fetch the data from the store
-			let val = txn.get_record(ns, db, &v.tb, &v.id, None).await?;
+			let val = txn.get_record(ns, db, &v.table, &v.key, None).await?;
 			// Create a new operable value
 			Operable::Relate(f, val, w, o.map(|v| v.into()))
 		};
@@ -231,9 +231,9 @@ impl Collected {
 		} else {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
 			// Fetch the data from the store
-			txn.get_record(ns, db, &v.tb, &v.id, opt.version).await?
+			txn.get_record(ns, db, &v.table, &v.key, opt.version).await?
 		};
 		// Parse the data from the store
 		let val = Operable::Value(val);
@@ -293,7 +293,7 @@ impl Collected {
 		if !rid_only {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -317,7 +317,7 @@ impl Collected {
 		if !rid_only {
 			// Check that the table exists
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
+			txn.check_ns_db_tb(ns, db, &v.table, opt.strict).await?;
 		}
 		// Process the document record
 		let pro = Processed {
@@ -486,7 +486,7 @@ pub(super) trait Collector {
 					}
 				}
 				Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
-				Iterable::Thing(v) => self.collect(Collected::Thing(v)).await?,
+				Iterable::Thing(v) => self.collect(Collected::RecordId(v)).await?,
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
 				Iterable::Edges(e) => self.collect_edges(ctx, opt, e).await?,
 				Iterable::Range(tb, v, rs, sc) => match rs {
@@ -685,7 +685,7 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		opt: &Options,
 		tb: &str,
-		r: RecordIdKeyRangeLit,
+		r: RecordIdKeyRange,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
@@ -718,7 +718,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: RecordIdKeyRangeLit,
+		r: RecordIdKeyRange,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -757,7 +757,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: RecordIdKeyRangeLit,
+		r: RecordIdKeyRange,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -795,7 +795,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		tb: &str,
-		r: RecordIdKeyRangeLit,
+		r: RecordIdKeyRange,
 	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
@@ -986,7 +986,7 @@ impl Iterable {
 	) -> Result<Arc<Value>> {
 		// Fetch and parse the data from the store
 		let (ns, db) = opt.ns_db()?;
-		let val = txn.get_record(ns, db, &thg.tb, &thg.id, None).await?;
+		let val = txn.get_record(ns, db, &thg.table, &thg.key, None).await?;
 		// Return the result
 		Ok(val)
 	}

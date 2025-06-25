@@ -138,12 +138,7 @@ impl Document {
 					// Ensure futures are run
 					let lqopt: &Options = &lqopt.new_with_futures(true);
 					// Output the full document before any changes were applied
-					let mut result = doc
-						.doc
-						.as_ref()
-						.compute(stk, &lqctx, lqopt, Some(doc))
-						.await
-						.catch_return()?;
+					let mut result = (*doc.doc.as_ref()).clone();
 					// Remove metadata fields on output
 					result.del(stk, &lqctx, lqopt, &*META).await?;
 					(Action::Delete, result)
@@ -227,7 +222,7 @@ impl Document {
 		// Check where condition
 		if let Some(cond) = stm.cond() {
 			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
+			if !cond.0.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
 				// Ignore this document
 				return Err(IgnoreError::Ignore);
 			}

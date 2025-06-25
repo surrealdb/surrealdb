@@ -58,20 +58,35 @@ impl AlterTableStatement {
 		};
 		// Process the statement
 		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if let Some(full) = &self.schemafull {
-			dt.full = *full;
+		match self.schemafull {
+			AlterKind::Set(_) => dt.full = true,
+			AlterKind::Drop => dt.full = false,
+			AlterKind::None => {}
 		}
+
 		if let Some(permissions) = &self.permissions {
 			dt.permissions = permissions.clone();
 		}
-		if let Some(changefeed) = &self.changefeed {
-			dt.changefeed = *changefeed;
+
+		let mut changefeed_replaced = false;
+		match self.changefeed {
+			AlterKind::Set(x) => {
+				changefeed_replaced = dt.changefeed.is_some();
+				dt.changefeed = Some(x)
+			}
+			AlterKind::Drop => dt.changefeed = None,
+			AlterKind::None => {}
 		}
-		if let Some(comment) = &self.comment {
-			dt.comment.clone_from(comment);
+
+		match self.comment {
+			AlterKind::Set(x) => dt.comment = Some(x),
+
+			AlterKind::Drop => dt.comment = None,
+			AlterKind::None => {}
 		}
+
 		if let Some(kind) = &self.kind {
-			dt.kind = kind.clone();
+			dt.table_type = kind.clone();
 		}
 
 		// Add table relational fields
@@ -81,7 +96,7 @@ impl AlterTableStatement {
 		// Set the table definition
 		txn.set(key, revision::to_vec(&dt)?, None).await?;
 		// Record definition change
-		if self.changefeed.is_some() && dt.changefeed.is_some() {
+		if changefeed_replaced {
 			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
 		}
 		// Clear the cache
@@ -126,27 +141,25 @@ impl Display for AlterTableStatement {
 				}
 			}
 		}
-		if let Some(full) = self.schemafull {
-			f.write_str(if full {
-				" SCHEMAFULL"
-			} else {
-				" SCHEMALESS"
-			})?;
+
+		match self.schemafull {
+			AlterKind::Set(_) => writeln!(f, " SCHEMAFULL")?,
+			AlterKind::Drop => writeln!(f, " SCHEMALESS")?,
+			AlterKind::None => {}
 		}
-		if let Some(comment) = &self.comment {
-			if let Some(comment) = comment {
-				write!(f, " COMMENT {}", comment.clone())?;
-			} else {
-				write!(f, " DROP COMMENT")?;
-			}
+
+		match self.comment {
+			AlterKind::Set(x) => writeln!(f, " COMMENT {x}")?,
+			AlterKind::Drop => writeln!(f, " DROP COMMENT")?,
+			AlterKind::None => {}
 		}
-		if let Some(changefeed) = &self.changefeed {
-			if let Some(changefeed) = changefeed {
-				write!(f, " CHANGEFEED {}", changefeed.clone())?;
-			} else {
-				write!(f, " DROP CHANGEFEED")?;
-			}
+
+		match self.changefeed {
+			AlterKind::Set(x) => writeln!(f, " CHANGEFEED {x}")?,
+			AlterKind::Drop => writeln!(f, " DROP CHANGEFEED")?,
+			AlterKind::None => {}
 		}
+
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

@@ -184,7 +184,7 @@ impl DefineTableStatement {
 		tb: &mut DefineTableStatement,
 	) -> Result<()> {
 		// Add table relational fields
-		if let TableType::Relation(rel) = &tb.kind {
+		if let TableType::Relation(rel) = &tb.table_type {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");

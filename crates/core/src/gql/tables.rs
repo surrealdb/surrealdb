@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::dbs::Session;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
-use crate::expr::{self, Cond, Expr, Fields, Idiom, Kind, LogicalPlan, Table};
+use crate::expr::{self, Cond, Expr, Fields, Idiom, Kind, LogicalPlan, Part, Table};
 use crate::gql::ext::TryAsExt;
 use crate::gql::schema::{kind_to_type, unwrap_type};
 use crate::kvs::{Datastore, Transaction};
@@ -183,24 +183,23 @@ pub async fn process_tbs(
                     trace!("parsed filter: {cond:?}");
 
                     // SELECT VALUE id FROM ...
-                    let ast = LogicalPlan::Select({
-                        SelectStatement {
-                            what: vec![SqlValue::Table(tb_name.intox())].into(),
-                            expr: Fields(
-                                vec![expr::Field::Single {
-                                    expr: SqlValue::Idiom(Idiom::from("id")),
+                    let ast = expr::Expr::Select(
+                        Box::new(SelectStatement {
+                            what: vec![Expr::Table(tb_name.intox())].into(),
+                            expr: Fields{
+								fields: vec![expr::Field::Single {
+                                    expr: expr::Expr::Idiom(Idiom::from("id")),
                                     alias: None,
                                 }],
-                                // this means the `value` keyword
-                                true,
-                            ),
+                                value: true,
+                            },
                             order: orders.map(|x| Ordering::Order(OrderList(x))),
                             cond,
                             limit,
                             start,
                             ..Default::default()
-                        }
-                    });
+                        })
+                    );
 
                     trace!("generated query ast: {ast:?}");
 
@@ -266,15 +265,16 @@ pub async fn process_tbs(
 									.into());
 								}
 							};
+							// TODO: Parse record id.
 							let thing = match id.clone().try_into() {
 								Ok(t) => t,
 								Err(_) => RecordId {
 									table: tb_name,
-									key: id,
+									key: RecordIdKey::String(id),
 								},
 							};
 
-							match gtx.get_record_field(thing, "id").await? {
+							match gtx.get_record_field(thing, Part::Field("id".to_owned())).await? {
 								SqlValue::Thing(t) => {
 									let erased: ErasedRecord = (gtx, t);
 									Ok(Some(field_val_erase_owned(erased)))

@@ -1,14 +1,14 @@
 use crate::dbs::node::Node;
-use crate::expr::Value;
 use crate::expr::statements::define::{
 	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
 };
 use crate::expr::statements::{
 	AccessGrant, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineTableStatement,
-	DefineUserStatement, LiveStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineParamStore,
+	DefineTableStatement, DefineUserStatement, LiveStatement,
 };
+use crate::val::Value;
 use anyhow::Result;
 use std::any::Any;
 use std::sync::Arc;
@@ -59,7 +59,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineConfigStatement specified on a database.
 	Cgs(Arc<[DefineConfigStatement]>),
 	/// A slice of DefineParamStatement specified on a database.
-	Pas(Arc<[DefineParamStatement]>),
+	Pas(Arc<[DefineParamStore]>),
 	/// A slice of DefineSequenceStatement specified on a namespace.
 	Sqs(Arc<[DefineSequenceStatement]>),
 	/// A slice of DefineEventStatement specified on a table.

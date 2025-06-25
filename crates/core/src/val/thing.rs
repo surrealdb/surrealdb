@@ -1,6 +1,6 @@
+use crate::expr;
 use crate::expr::escape::EscapeRid;
-use crate::expr::{self, Uuid};
-use crate::val::{Array, Object};
+use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
 use futures::StreamExt;
 use nanoid::nanoid;
 use revision::revisioned;
@@ -45,10 +45,27 @@ impl RecordIdKey {
 		Self::Uuid(Uuid::new_v7())
 	}
 
+	/// Returns if this key is a range.
 	pub fn is_range(&self) -> bool {
 		matches!(self, RecordIdKey::Range(_))
 	}
 
+	/// Returns surrealql value of this key.
+	pub fn into_value(self) -> Value {
+		match self {
+			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
+			RecordIdKey::String(s) => Value::Strand(Strand(s)),
+			RecordIdKey::Uuid(u) => Value::Uuid(u),
+			RecordIdKey::Object(object) => Value::Object(object),
+			RecordIdKey::Array(array) => Value::Array(array),
+			RecordIdKey::Range(range) => Value::Range(Box::new(Range {
+				start: range.start.map(RecordIdKey::into_value),
+				end: range.end.map(RecordIdKey::into_value),
+			})),
+		}
+	}
+
+	/// Returns the expression which evaluates to the same value
 	pub fn into_literal(self) -> expr::RecordIdKeyLit {
 		match self {
 			RecordIdKey::Number(n) => expr::RecordIdKeyLit::Number(n),
@@ -68,6 +85,80 @@ impl RecordIdKey {
 	}
 }
 
+impl PartialEq<Value> for RecordIdKey {
+	fn eq(&self, other: &Value) -> bool {
+		match self {
+			RecordIdKey::Number(a) => Value::Number(Number::Int(a)) == other,
+			RecordIdKey::String(a) => {
+				if let Value::Strand(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			RecordIdKey::Uuid(a) => {
+				if let Value::Uuid(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			RecordIdKey::Object(a) => {
+				if let Value::Object(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			RecordIdKey::Array(a) => {
+				if let Value::Object(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			RecordIdKey::Range(a) => {
+				if let Value::Range(b) = other {
+					match a.start {
+						Bound::Included(a) => {
+							if let Bound::Included(b) = b.start {
+								a == b
+							} else {
+								false
+							}
+						}
+						Bound::Excluded(a) => {
+							if let Bound::Excluded(b) = b.start {
+								a == b
+							} else {
+								false
+							}
+						}
+						Bound::Unbounded => matches!(b.start, Bound::Unbounded),
+					}
+					&&match a.end {
+						Bound::Included(a) => {
+							if let Bound::Included(b) = b.end {
+								a == b
+							} else {
+								false
+							}
+						}
+						Bound::Excluded(a) => {
+							if let Bound::Excluded(b) = b.end {
+								a == b
+							} else {
+								false
+							}
+						}
+						Bound::Unbounded => matches!(b.end, Bound::Unbounded),
+					}
+				}
+			}
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Thing")]
@@ -78,6 +169,25 @@ pub struct RecordId {
 }
 
 impl RecordId {
+	/// Creates a new record id from the given table and key
+	pub fn new<K>(table: String, key: K) -> Self
+	where
+		RecordIdKey: From<K>,
+	{
+		RecordId {
+			table,
+			key: key.into(),
+		}
+	}
+
+	pub fn random_for_table(table: String) -> Self {
+		RecordId {
+			table,
+			key: RecordIdKey::rand(),
+		}
+	}
+
+	/// Turns the record id into a literal which resolves to the same value.
 	pub fn into_literal(self) -> expr::RecordIdLit {
 		expr::RecordIdLit {
 			tb: self.table,

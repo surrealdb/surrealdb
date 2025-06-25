@@ -7,25 +7,35 @@ use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Fields(pub Vec<Field>, pub bool);
+pub struct Fields {
+	pub fields: Vec<Field>,
+	/// If the `VALUE` clause was present before fields
+	pub value: bool,
+}
 
 impl From<Fields> for crate::expr::field::Fields {
 	fn from(v: Fields) -> Self {
-		Self(v.0.into_iter().map(Into::into).collect(), v.1)
+		Self {
+			fields: v.fields.into_iter().map(Into::into).collect(),
+			value: v.value,
+		}
 	}
 }
 
 impl From<crate::expr::field::Fields> for Fields {
 	fn from(v: crate::expr::field::Fields) -> Self {
-		Self(v.0.into_iter().map(Into::into).collect(), false)
+		Self {
+			fields: v.fields.into_iter().map(Into::into).collect(),
+			value: v.value,
+		}
 	}
 }
 
 impl Display for Fields {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self.single() {
+		match self.value {
 			Some(v) => write!(f, "VALUE {}", &v),
-			None => Display::fmt(&Fmt::comma_separated(&self.0), f),
+			None => Display::fmt(&Fmt::comma_separated(&self.fields), f),
 		}
 	}
 }

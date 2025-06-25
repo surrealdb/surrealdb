@@ -27,7 +27,7 @@ pub use function::DefineFunctionStatement;
 pub use index::DefineIndexStatement;
 pub use model::DefineModelStatement;
 pub use namespace::DefineNamespaceStatement;
-pub use param::DefineParamStatement;
+pub use param::{DefineParamStatement, DefineParamStore};
 pub use sequence::DefineSequenceStatement;
 pub use table::DefineTableStatement;
 pub use user::DefineUserStatement;

@@ -261,7 +261,7 @@ impl IndexBuilder {
 struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
-	id: RecordIdKeyLit,
+	id: RecordIdKey,
 }
 
 #[revisioned(revision = 1)]
@@ -367,7 +367,7 @@ impl Building {
 		let a = Appending {
 			old_values,
 			new_values,
-			id: rid.id.clone(),
+			id: rid.key.clone(),
 		};
 		// Get the idx of this appended record from the sequence
 		let idx = queue.add_update();
@@ -375,7 +375,7 @@ impl Building {
 		let ia = self.new_ia_key(idx)?;
 		tx.set(ia, revision::to_vec(&a)?, None).await?;
 		// Do we already have a primary appending?
-		let ip = self.new_ip_key(rid.id.clone())?;
+		let ip = self.new_ip_key(rid.key.clone())?;
 		if tx.get(ip.clone(), None).await?.is_none() {
 			// If not, we set it
 			tx.set(ip, revision::to_vec(&PrimaryAppending(idx))?, None).await?;
@@ -389,7 +389,7 @@ impl Building {
 		Ok(Ia::new(ns, db, &self.ix.what, &self.ix.name, i))
 	}
 
-	fn new_ip_key(&self, id: RecordIdKeyLit) -> Result<Ip> {
+	fn new_ip_key(&self, id: RecordIdKey) -> Result<Ip> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(Ip::new(ns, db, &self.ix.what, &self.ix.name, id))
 	}
@@ -536,7 +536,7 @@ impl Building {
 			let opt_values;
 
 			// Do we already have an appended value?
-			let ip = self.new_ip_key(rid.id.clone())?;
+			let ip = self.new_ip_key(rid.key.clone())?;
 			if let Some(v) = tx.get(ip, None).await? {
 				// Then we take the old value of the appending value as the initial indexing value
 				let pa: PrimaryAppending = revision::from_slice(&v)?;
@@ -600,7 +600,7 @@ impl Building {
 				stack.enter(|stk| io.compute(stk)).finish().await?;
 
 				// We can delete the ip record if any
-				let ip = self.new_ip_key(rid.id)?;
+				let ip = self.new_ip_key(rid.key)?;
 				tx.del(ip).await?;
 
 				*count += 1;

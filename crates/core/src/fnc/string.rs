@@ -399,7 +399,7 @@ pub mod similarity {
 pub mod semver {
 
 	use crate::err::Error;
-	use crate::expr::Value;
+	use crate::val::Value;
 	use anyhow::Result;
 	use semver::Version;
 
@@ -443,8 +443,8 @@ pub mod semver {
 	}
 
 	pub mod inc {
-		use crate::expr::Value;
 		use crate::fnc::string::semver::parse_version;
+		use crate::val::Value;
 		use anyhow::Result;
 
 		pub fn major((version,): (String,)) -> Result<Value> {
@@ -479,8 +479,8 @@ pub mod semver {
 	}
 
 	pub mod set {
-		use crate::expr::Value;
 		use crate::fnc::string::semver::parse_version;
+		use crate::val::Value;
 		use anyhow::Result;
 
 		pub fn major((version, value): (String, i64)) -> Result<Value> {
@@ -522,8 +522,8 @@ pub mod semver {
 #[cfg(test)]
 mod tests {
 	use super::{contains, matches, replace, slice};
-	use crate::expr::Value;
 	use crate::fnc::args::{Cast, Optional};
+	use crate::val::Value;
 
 	#[test]
 	fn string_slice() {

@@ -98,6 +98,8 @@ impl ForeachStatement {
 			// Loop over the code block statements
 			for v in self.block.iter() {
 				// Compute each block entry
+				let res = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
+				/*
 				let res = match v {
 					Entry::Set(v) => {
 						let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
@@ -128,6 +130,7 @@ impl ForeachStatement {
 					}
 					Entry::Throw(v) => return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
 				};
+				*/
 				// Catch any special errors
 				match res {
 					Err(ControlFlow::Continue) => break,

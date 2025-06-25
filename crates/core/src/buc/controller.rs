@@ -3,9 +3,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err;
 use crate::expr::statements::define::BucketDefinition;
-use crate::expr::{File, FlowResultExt, Permission};
+use crate::expr::{FlowResultExt, Permission};
+
 use crate::iam::Action;
-use crate::val::{Bytes, Value};
+use crate::val::{Bytes, File, Value};
 use anyhow::{Result, bail, ensure};
 use core::fmt;
 use reblessive::tree::Stk;
