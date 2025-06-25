@@ -27,6 +27,15 @@ RUN chmod +x /builder-entrypoint.sh
 ENTRYPOINT ["/builder-entrypoint.sh"]
 
 ###
+# STAGE: tzdata
+# This stage is used to install the timezone files
+###
+
+FROM cgr.dev/chainguard/wolfi-base AS tzdata
+
+RUN apk add --no-cache tzdata
+
+###
 # Final Images
 ###
 
@@ -44,6 +53,10 @@ ARG ARTIFACT_PREFIX
 USER root
 
 COPY ${ARTIFACT_PREFIX}.${TARGETOS}-${TARGETARCH}/surreal /surreal
+
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
 
 RUN chmod +x /surreal
 
@@ -69,6 +82,10 @@ ARG TARGETPLATFORM
 
 COPY --from=dev-ci /surreal /surreal
 
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
+
 COPY --from=dev-ci /data /data
 
 COPY --from=dev-ci /logs /logs
@@ -87,6 +104,10 @@ FROM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev
 ARG SURREALDB_BINARY=target/release/surreal
 
 COPY ${SURREALDB_BINARY} /surreal
+
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
 
 USER root
 
@@ -111,6 +132,10 @@ ENTRYPOINT ["/surreal"]
 FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod
 
 COPY --from=dev /surreal /surreal
+
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime
 
 COPY --from=dev /data /data
 
