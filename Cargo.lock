@@ -5972,7 +5972,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surreal"
-version = "2.1.7"
+version = "2.1.8"
 dependencies = [
  "argon2",
  "assert_fs",
@@ -6078,7 +6078,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "2.1.7"
+version = "2.1.8"
 dependencies = [
  "arrayvec",
  "async-channel",
@@ -6134,7 +6134,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "2.1.7"
+version = "2.1.8"
 dependencies = [
  "addr",
  "ahash 0.8.11",
