@@ -1,5 +1,6 @@
 //! Contains the actual fetch function.
 
+use super::classes::Headers;
 use crate::fnc::{
 	http::resolver,
 	script::{
@@ -18,8 +19,7 @@ use reqwest::{
 	redirect, Body as ReqBody,
 };
 use std::sync::Arc;
-
-use super::classes::Headers;
+use tokio::runtime::Handle;
 
 #[js::function]
 #[allow(unused_variables)]
@@ -42,6 +42,7 @@ pub async fn fetch<'js>(
 
 	query_ctx
 		.check_allowed_net(&url)
+		.await
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 	let capabilities = query_ctx.get_capabilities();
 
@@ -58,7 +59,7 @@ pub async fn fetch<'js>(
 
 	// set the policy for redirecting requests.
 	let policy = redirect::Policy::custom(move |attempt| {
-		if let Err(e) = query_ctx.check_allowed_net(attempt.url()) {
+		if let Err(e) = Handle::current().block_on(query_ctx.check_allowed_net(attempt.url())) {
 			return attempt.error(e.to_string());
 		}
 		match redirect {
