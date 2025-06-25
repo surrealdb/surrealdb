@@ -338,8 +338,8 @@ mod tests {
 
 		{
 			let otlp_endpoint = format!("http://{addr}");
-			temp_env::with_vars(
-				vec![
+			with_vars(
+				&[
 					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
@@ -385,8 +385,8 @@ mod tests {
 
 		{
 			let otlp_endpoint = format!("http://{addr}");
-			temp_env::with_vars(
-				vec![
+			with_vars(
+				&[
 					("SURREAL_TELEMETRY_PROVIDER", Some("otlp")),
 					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
 				],
