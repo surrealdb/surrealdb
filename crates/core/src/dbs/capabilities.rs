@@ -1,9 +1,9 @@
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
-use std::{collections::HashSet, sync::Arc};
 #[cfg(all(target_family = "wasm", feature = "http"))]
 use std::net::ToSocketAddrs;
+use std::{collections::HashSet, sync::Arc};
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
 
