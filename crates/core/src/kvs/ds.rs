@@ -739,7 +739,7 @@ impl Datastore {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
 		// Check if the session has expired
-		if !sess.expired() {
+		if sess.expired() {
 			return Err(Error::ExpiredSession);
 		}
 		// Execute the SQL import
