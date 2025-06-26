@@ -23,15 +23,11 @@ use surrealdb::expr::Value;
 use surrealdb::expr::statements::FindApi;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
-use surrealdb::rpc::format::Format;
-use surrealdb::rpc::format::cbor;
-use surrealdb::rpc::format::json;
-use surrealdb::rpc::format::proto;
 use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::{
-	body::ApiBody, invocation::ApiInvocation, method::Method as ApiMethod,
-	response::ResponseInstruction,
+	body::ApiBody, invocation::ApiInvocation, method::Method as ApiMethod, response::ResponseFormat,
 };
+use surrealdb_core::protocol::ToFlatbuffers;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
@@ -127,7 +123,7 @@ async fn handler(
 
 	let res_body: Vec<u8> = if let Some(value) = res.body {
 		match res_instruction {
-			ResponseInstruction::Raw => {
+			ResponseFormat::Raw => {
 				match value {
 					Value::Strand(v) => {
 						res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
@@ -152,7 +148,7 @@ async fn handler(
 					}
 				}
 			}
-			ResponseInstruction::Ipc(format) => {
+			ResponseFormat::Json => {
 				if res.headers.contains_key("Content-Type") {
 					return Err(ApiError::InvalidApiResponse(
 						"A Content-Type header was already set while this was not expected".into(),
@@ -160,23 +156,21 @@ async fn handler(
 					.into());
 				}
 
-				let network_value =
-					surrealdb_core::protocol::surrealdb::value::Value::try_from(value).unwrap();
+				serde_json::to_vec(&value)
+					.map_err(|e| ApiError::InvalidApiResponse(e.to_string()))?
+			}
+			ResponseFormat::Ipc => {
+				if res.headers.contains_key("Content-Type") {
+					return Err(ApiError::InvalidApiResponse(
+						"A Content-Type header was already set while this was not expected".into(),
+					)
+					.into());
+				}
 
-				let (header, val) = match format {
-					Format::Json => ("application/json", json::res(network_value)?),
-					Format::Cbor => ("application/cbor", cbor::res(network_value)?),
-					Format::Protobuf => ("application/surrealdb", proto::res(network_value)?),
-					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
-				};
-
-				res.headers.insert(
-					CONTENT_TYPE,
-					header
-						.parse()
-						.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
-				);
-				val
+				let mut builder = flatbuffers::FlatBufferBuilder::new();
+				let value_fb = value.to_fb(&mut builder);
+				builder.finish_minimal(value_fb);
+				builder.finished_data().to_vec()
 			}
 		}
 	} else {

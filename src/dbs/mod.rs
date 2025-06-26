@@ -13,6 +13,8 @@ use surrealdb::dbs::capabilities::{
 use surrealdb::kvs::Datastore;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 
+const TARGET: &str = "surreal::dbs";
+
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
 	#[arg(help = "Whether strict mode is enabled on this database instance")]
@@ -489,6 +491,8 @@ impl From<DbsCapabilities> for Capabilities {
 	}
 }
 
+/// Initialise the database server
+#[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 pub async fn init(
 	StartCommandDbsOptions {
 		strict_mode,
@@ -542,12 +546,18 @@ pub async fn init(
 	dbs.check_version().await?;
 	// Import file at start, if provided
 	if let Some(file) = import_file {
-		info!("Importing data from file: {:?}", file);
+		// Log the startup import path
+		info!(target: TARGET, file = ?file, "Importing data from file");
+		// Read the full file contents
 		let sql = fs::read_to_string(file)?;
-		dbs.import(&sql, &Session::owner()).await?;
+		// Execute the SurrealQL file
+		dbs.startup(&sql, &Session::owner()).await?;
 	}
 	// Setup initial server auth credentials
 	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
+		// Log the initialisation of credentials
+		info!(target: TARGET, user = %user, "Initialising credentials");
+		// Initialise the credentials
 		dbs.initialise_credentials(user, pass).await?;
 	}
 	// Bootstrap the datastore
@@ -556,6 +566,7 @@ pub async fn init(
 	Ok(dbs)
 }
 
+/// Performs a database fix
 pub async fn fix(path: String) -> Result<()> {
 	// Parse and setup the desired kv datastore
 	let dbs = Arc::new(Datastore::new(&path).await?);
@@ -638,10 +649,17 @@ mod tests {
 		let server1 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
+				.and(path("/"))
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(1);
+
+			let get2 = Mock::given(method("GET"))
+				.and(path("/test"))
 				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
 				.expect(1);
 
 			s.register(get).await;
+			s.register(get2).await;
 			s
 		};
 
@@ -921,6 +939,36 @@ mod tests {
 				format!(
 					"here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
 					server3.uri()
+				),
+			),
+			(
+				// Ensure connecting via localhost succeeds
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All),
+				),
+				Session::owner(),
+				format!("RETURN http::get('http://localhost:{}/test')", server1.address().port()),
+				true,
+				"SUCCESS".to_string(),
+			),
+			(
+				// Ensure redirect fails
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All)
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str("127.0.0.1/0").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
+				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
+				false,
+				format!(
+					"There was an error processing a remote HTTP request: error sending request for url (http://localhost:{}/)",
+					server1.address().port()
 				),
 			),
 		];

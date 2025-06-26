@@ -9,12 +9,14 @@ use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
+use uuid::Uuid;
 
 /// A merge future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Merge<'r, C: Connection, R: Resource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
+	pub(super) txn: Option<Uuid>,
 	pub(super) resource: R,
 	pub(super) content: Data,
 	pub(super) upsert: bool,
@@ -39,6 +41,7 @@ macro_rules! into_future {
 	() => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Merge {
+				txn,
 				client,
 				resource,
 				content,

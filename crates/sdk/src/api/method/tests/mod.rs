@@ -102,12 +102,12 @@ async fn api() {
 		.await
 		.unwrap();
 	let _: QueryResults = DB
-		.query(BeginStatement::default())
+		.query(BeginStatement::default().to_string())
 		.query("CREATE account:one SET balance = 135605.16")
 		.query("CREATE account:two SET balance = 91031.31")
 		.query("UPDATE account:one SET balance += 300.00")
 		.query("UPDATE account:two SET balance -= 300.00")
-		.query(CommitStatement::default())
+		.query(CommitStatement::default().to_string())
 		.await
 		.unwrap();
 

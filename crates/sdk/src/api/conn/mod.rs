@@ -15,7 +15,7 @@ use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use surrealdb_core::dbs::QueryResultData;
+use surrealdb_core::dbs::ResponseData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Value, from_value as from_core_value};
 
@@ -35,7 +35,7 @@ pub(crate) struct Route {
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: Request,
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) response: Sender<Result<QueryResultData>>,
+	pub(crate) response: Sender<Result<ResponseData>>,
 }
 
 /// Message router
@@ -55,7 +55,7 @@ impl Router {
 	pub(crate) fn send(
 		&self,
 		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<QueryResultData>>> {
+	) -> BoxFuture<'_, Result<Receiver<Result<ResponseData>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);
@@ -71,10 +71,10 @@ impl Router {
 		})
 	}
 
-	fn get_single_value(query_result_data: QueryResultData) -> Result<Value> {
-		let results = match query_result_data {
-			QueryResultData::Results(results) => results,
-			QueryResultData::Notification(_) => {
+	fn get_single_value(query_result_data: Result<ResponseData>) -> Result<Value> {
+		let results = match query_result_data? {
+			ResponseData::Results(results) => results,
+			ResponseData::Notification(_) => {
 				return Err(Error::InternalError(
 					"Received a notification instead of query results".to_owned(),
 				)
@@ -92,7 +92,8 @@ impl Router {
 		if results.len() > 1 {
 			return Err(Error::InternalError(
 				"Expected a single result, but received multiple".to_string(),
-			));
+			)
+			.into());
 		}
 
 		let Some(query_result) = results.into_iter().next() else {
@@ -162,7 +163,10 @@ impl Router {
 	pub(crate) fn execute_unit(&self, command: Command) -> BoxFuture<'_, Result<()>> {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
-			match self.recv(rx).await? {
+			let query_result_data = rx.recv().await?;
+			let value = Self::get_single_value(query_result_data)?;
+
+			match value {
 				Value::None | Value::Null => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
 				value => Err(Error::FromValue {
@@ -193,11 +197,11 @@ impl Router {
 			let query_result_data = rx.recv().await?;
 
 			let mut query_results = QueryResults::new();
-			match query_result_data {
-				QueryResultData::Results(results) => {
+			match query_result_data? {
+				ResponseData::Results(results) => {
 					query_results.results = results.into_iter().enumerate().collect();
 				}
-				QueryResultData::Notification(_) => {
+				ResponseData::Notification(_) => {
 					return Err(Error::InternalError(
 						"Received a notification instead of query results".to_owned(),
 					)

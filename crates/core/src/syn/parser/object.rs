@@ -287,41 +287,41 @@ impl Parser<'_> {
 			}
 			"LineString" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_line(&value) {
+					if let Some(line) = Geometry::array_to_line(&value) {
 						self.pop_peek();
-						return Ok(SqlValue::Geometry(Geometry::Line(point)));
+						return Ok(SqlValue::Geometry(Geometry::Line(line)));
 					}
 				}
 			}
 			"Polygon" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_polygon(&value) {
+					if let Some(polygon) = Geometry::array_to_polygon(&value) {
 						self.pop_peek();
-						return Ok(SqlValue::Geometry(Geometry::Polygon(point)));
+						return Ok(SqlValue::Geometry(Geometry::Polygon(polygon)));
 					}
 				}
 			}
 			"MultiPoint" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_multipolygon(&value) {
+					if let Some(points) = Geometry::array_to_multipoint(&value) {
 						self.pop_peek();
-						return Ok(SqlValue::Geometry(Geometry::MultiPolygon(point)));
+						return Ok(SqlValue::Geometry(Geometry::MultiPoint(points)));
 					}
 				}
 			}
 			"MultiLineString" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_multiline(&value) {
+					if let Some(multiline) = Geometry::array_to_multiline(&value) {
 						self.pop_peek();
-						return Ok(SqlValue::Geometry(Geometry::MultiLine(point)));
+						return Ok(SqlValue::Geometry(Geometry::MultiLine(multiline)));
 					}
 				}
 			}
 			"MultiPolygon" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_multipolygon(&value) {
+					if let Some(polygons) = Geometry::array_to_multipolygon(&value) {
 						self.pop_peek();
-						return Ok(SqlValue::Geometry(Geometry::MultiPolygon(point)));
+						return Ok(SqlValue::Geometry(Geometry::MultiPolygon(polygons)));
 					}
 				}
 			}

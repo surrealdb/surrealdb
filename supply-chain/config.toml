@@ -271,18 +271,6 @@ criteria = "safe-to-deploy"
 version = "1.2.17"
 criteria = "safe-to-deploy"
 
-[[exemptions.cedar-policy]]
-version = "2.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.cedar-policy-core]]
-version = "2.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.cedar-policy-validator]]
-version = "2.4.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.chrono]]
 version = "0.4.40"
 criteria = "safe-to-deploy"
@@ -801,10 +789,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.noisy_float]]
 version = "0.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.ntapi]]
-version = "0.4.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint]]

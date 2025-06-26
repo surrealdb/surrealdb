@@ -22,6 +22,7 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
+use surrealdb_core::dbs::Variables;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
@@ -92,7 +93,7 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 				// Get a database reference
 				let db = &state.datastore;
 				// Execute the received sql query
-				let _ = match db.execute(sql, &session, None).await {
+				let _ = match db.execute(sql, &session, Variables::default()).await {
 					// Convert the response to JSON
 					Ok(v) => match serde_json::to_string(&v) {
 						// Send the JSON response to the client

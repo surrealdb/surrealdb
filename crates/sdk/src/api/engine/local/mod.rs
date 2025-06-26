@@ -174,7 +174,7 @@ use std::{
 	mem,
 	sync::Arc,
 };
-use surrealdb_core::dbs::{QueryResult, QueryResultData};
+use surrealdb_core::dbs::{QueryResult, ResponseData};
 use surrealdb_core::expr::LogicalPlan;
 use surrealdb_core::expr::statements::{
 	CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
@@ -599,7 +599,7 @@ async fn router(
 	session: &Arc<RwLock<Session>>,
 	vars: &Arc<RwLock<BTreeMap<String, Value>>>,
 	live_queries: &Arc<RwLock<LiveQueryMap>>,
-) -> Result<QueryResultData> {
+) -> Result<ResponseData> {
 	match command {
 		Command::Use {
 			namespace,
@@ -611,7 +611,7 @@ async fn router(
 			if let Some(db) = database {
 				session.write().await.db = Some(db);
 			}
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::Signup(params) => {
 			let response = iam::signup::signup(kvs, &mut *session.write().await, params).await?;
@@ -621,24 +621,25 @@ async fn router(
 				None => Value::None,
 			};
 
-			Ok(QueryResultData::new_from_value(value))
+			Ok(ResponseData::new_from_value(value))
 		}
 		Command::Signin(params) => {
 			let response =
 				iam::signin::signin(kvs, &mut *session.write().await, params).await?.token;
-			Ok(QueryResultData::new_from_value(response.into()))
+			Ok(ResponseData::new_from_value(response.into()))
 		}
 		Command::Authenticate {
 			token,
 		} => {
 			iam::verify::token(kvs, &mut *session.write().await, &token).await?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::Invalidate => {
 			iam::clear::clear(&mut *session.write().await)?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::Create {
+			txn: _,
 			what,
 			data,
 		} => {
@@ -651,9 +652,10 @@ async fn router(
 			let response =
 				kvs.process_plan(plan, &*session.read().await, vars.read().await.clone()).await?;
 			let value = take(true, response).await?;
-			Ok(QueryResultData::new_from_value(value))
+			Ok(ResponseData::new_from_value(value))
 		}
 		Command::Upsert {
+			txn: _,
 			what,
 			data,
 		} => {
@@ -667,9 +669,10 @@ async fn router(
 			let plan = LogicalPlan::Upsert(upsert_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			Ok(QueryResultData::Results(results))
+			Ok(ResponseData::Results(results))
 		}
 		Command::Update {
+			txn: _,
 			what,
 			data,
 		} => {
@@ -683,9 +686,10 @@ async fn router(
 			let plan = LogicalPlan::Update(update_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			Ok(QueryResultData::Results(results))
+			Ok(ResponseData::Results(results))
 		}
 		Command::Insert {
+			txn: _,
 			what,
 			data,
 		} => {
@@ -700,9 +704,10 @@ async fn router(
 			let plan = LogicalPlan::Insert(insert_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			Ok(QueryResultData::Results(results))
+			Ok(ResponseData::Results(results))
 		}
 		Command::Select {
+			txn: _,
 			what,
 		} => {
 			let select_plan = {
@@ -714,9 +719,10 @@ async fn router(
 			let plan = LogicalPlan::Select(select_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			Ok(QueryResultData::Results(results))
+			Ok(ResponseData::Results(results))
 		}
 		Command::Delete {
+			txn: _,
 			what,
 		} => {
 			let delete_plan = {
@@ -728,18 +734,20 @@ async fn router(
 			let plan = LogicalPlan::Delete(delete_plan);
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			Ok(QueryResultData::Results(results))
+			Ok(ResponseData::Results(results))
 		}
 		Command::Query {
+			txn: _,
 			query,
 			mut variables,
 		} => {
 			let mut vars = vars.read().await.clone();
 			vars.append(&mut variables);
 			let results = kvs.execute(&query, &*session.read().await, vars).await?;
-			Ok(QueryResultData::Results(results))
+			Ok(ResponseData::Results(results))
 		}
 		Command::MultiQuery {
+			txn,
 			queries,
 			variables,
 		} => {
@@ -751,9 +759,10 @@ async fn router(
 					kvs.execute(&query, &*session.read().await, vars.clone()).await?;
 				results.extend(query_results);
 			}
-			Ok(QueryResultData::Results(results))
+			Ok(ResponseData::Results(results))
 		}
 		Command::LiveQuery(LiveQueryParams {
+			txn,
 			what,
 			cond,
 			fields,
@@ -767,7 +776,7 @@ async fn router(
 
 			let vars = vars.read().await.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 			let results = kvs.process_plan(plan, &*session.read().await, vars).await?;
-			Ok(QueryResultData::Results(results))
+			Ok(ResponseData::Results(results))
 		}
 
 		#[cfg(target_family = "wasm")]
@@ -837,7 +846,7 @@ async fn router(
 			let copy = copy(file, &mut reader, &mut output);
 
 			tokio::try_join!(export, bridge, copy)?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 
 		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
@@ -885,7 +894,7 @@ async fn router(
 			let copy = copy(path, &mut reader, &mut output);
 
 			tokio::try_join!(export, bridge, copy)?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 
 		#[cfg(not(target_family = "wasm"))]
@@ -915,7 +924,7 @@ async fn router(
 				tokio::join!(export, bridge);
 			});
 
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 		Command::ExportBytesMl {
@@ -944,7 +953,7 @@ async fn router(
 				tokio::join!(export, bridge);
 			});
 
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
@@ -994,7 +1003,7 @@ async fn router(
 				response.result?;
 			}
 
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 		Command::ImportMl {
@@ -1059,12 +1068,12 @@ async fn router(
 				response.result?;
 			}
 
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
-		Command::Health => Ok(QueryResultData::new_from_value(Value::None)),
-		Command::Version => Ok(QueryResultData::new_from_value(Value::from(
-			surrealdb_core::env::VERSION.to_string(),
-		))),
+		Command::Health => Ok(ResponseData::new_from_value(Value::None)),
+		Command::Version => {
+			Ok(ResponseData::new_from_value(Value::from(surrealdb_core::env::VERSION.to_string())))
+		}
 		Command::Set {
 			key,
 			value,
@@ -1079,20 +1088,20 @@ async fn router(
 				v => vars.write().await.insert(key, v),
 			};
 
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::Unset {
 			key,
 		} => {
 			vars.write().await.remove(&key);
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::SubscribeLive {
 			uuid,
 			notification_sender,
 		} => {
 			live_queries.write().await.insert(uuid, notification_sender);
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::Kill {
 			uuid,
@@ -1101,7 +1110,7 @@ async fn router(
 			let value =
 				kill_live_query(kvs, uuid, &*session.read().await, vars.read().await.clone())
 					.await?;
-			Ok(QueryResultData::new_from_value(value))
+			Ok(ResponseData::new_from_value(value))
 		}
 
 		Command::Run {
@@ -1138,7 +1147,7 @@ async fn router(
 				kvs.process_plan(plan, &*session.read().await, vars.read().await.clone()).await?;
 			let value = take(true, response).await?;
 
-			Ok(QueryResultData::new_from_value(value))
+			Ok(ResponseData::new_from_value(value))
 		}
 	}
 }

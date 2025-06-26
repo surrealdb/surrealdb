@@ -228,7 +228,7 @@ macro_rules! poll_next_and_convert {
 
 impl<R> futures::Stream for Stream<Option<R>>
 where
-	R: TryFromValue,
+	R: TryFromValue + Unpin,
 {
 	type Item = Result<Notification<R>>;
 
@@ -237,7 +237,7 @@ where
 
 impl<R> futures::Stream for Stream<Vec<R>>
 where
-	R: TryFromValue,
+	R: TryFromValue + Unpin,
 {
 	type Item = Result<Notification<R>>;
 
@@ -246,7 +246,7 @@ where
 
 impl<R> futures::Stream for Stream<Notification<R>>
 where
-	R: TryFromValue,
+	R: TryFromValue + Unpin,
 {
 	type Item = Result<Notification<R>>;
 

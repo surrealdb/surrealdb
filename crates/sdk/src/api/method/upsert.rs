@@ -1,3 +1,4 @@
+use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::method::merge::Merge;
 use crate::method::patch::Patch;
@@ -19,14 +20,27 @@ use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Value, to_value as to_core_value};
+use uuid::Uuid;
 
 /// An upsert future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Upsert<'r, C: Connection, R: Resource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
+	pub(super) txn: Option<Uuid>,
 	pub(super) resource: R,
 	pub(super) response_type: PhantomData<RT>,
+}
+
+impl<C, R, RT> WithTransaction for Upsert<'_, C, R, RT>
+where
+	C: Connection,
+	R: Resource,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 impl<C, R, RT> Upsert<'_, C, R, RT>
@@ -47,6 +61,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Upsert {
+				txn,
 				client,
 				resource,
 				..
@@ -55,6 +70,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Upsert {
+						txn,
 						what: resource.into_values(),
 						data: None,
 					})
@@ -67,7 +83,7 @@ macro_rules! into_future {
 impl<'r, Client, R> IntoFuture for Upsert<'r, Client, R, Value>
 where
 	Client: Connection,
-	R: Resource,
+	R: Resource + 'r,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -78,7 +94,7 @@ where
 impl<'r, Client, R, RT> IntoFuture for Upsert<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: Resource,
+	R: Resource + 'r,
 	RT: TryFromValue,
 {
 	type Output = Result<Option<RT>>;
@@ -90,7 +106,7 @@ where
 impl<'r, Client, R, RT> IntoFuture for Upsert<'r, Client, R, Vec<RT>>
 where
 	Client: Connection,
-	R: Resource,
+	R: Resource + 'r,
 	RT: TryFromValue,
 {
 	type Output = Result<Vec<RT>>;
@@ -134,6 +150,7 @@ where
 		let data = data.into();
 
 		let command = Command::Upsert {
+			txn: self.txn,
 			what: self.resource.into_values(),
 			data: match data {
 				Value::None => None,
@@ -147,6 +164,7 @@ where
 	/// Merges the current document / record data with the specified data
 	pub fn merge(self, data: Value) -> Merge<'r, C, R, RT> {
 		Merge {
+			txn: self.txn,
 			client: self.client,
 			resource: self.resource,
 			content: Data::MergeExpression(data),
@@ -158,6 +176,7 @@ where
 	/// Patches the current document / record data with the specified JSON Patch data
 	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R, RT> {
 		Patch {
+			txn: self.txn,
 			patches: PatchOps(vec![patch.into()]),
 			client: self.client,
 			resource: self.resource,

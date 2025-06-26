@@ -56,6 +56,7 @@ pub trait FromCapnp {
 pub trait ToFlatbuffers {
 	type Output<'bldr>;
 
+	#[inline]
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut ::flatbuffers::FlatBufferBuilder<'bldr>,
@@ -65,6 +66,7 @@ pub trait ToFlatbuffers {
 pub trait FromFlatbuffers {
 	type Input<'a>;
 
+	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self>
 	where
 		Self: Sized;

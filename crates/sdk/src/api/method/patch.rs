@@ -12,12 +12,14 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Array, Data, Value};
+use uuid::Uuid;
 
 /// A patch future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Patch<'r, C: Connection, R: Resource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
+	pub(super) txn: Option<Uuid>,
 	pub(super) resource: R,
 	pub(super) patches: PatchOps,
 	pub(super) upsert: bool,
@@ -42,6 +44,7 @@ macro_rules! into_future {
 	() => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Patch {
+				txn,
 				client,
 				resource,
 				patches,
@@ -56,11 +59,12 @@ macro_rules! into_future {
 				}
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Upsert {
+					txn,
 					what: resource.into_values(),
 					data: Some(Data::PatchExpression(Value::Array(Array(vec)))),
 				};
 
-				let query_results = router.execute_query(cmd).await?;
+				let mut query_results = router.execute_query(cmd).await?;
 
 				query_results.take(0_usize)
 			})
@@ -71,7 +75,7 @@ macro_rules! into_future {
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, R, Value>
 where
 	Client: Connection,
-	R: Resource,
+	R: Resource + 'r,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -82,7 +86,7 @@ where
 impl<'r, Client, R, RT> IntoFuture for Patch<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: Resource,
+	R: Resource + 'r,
 	RT: TryFromValue,
 {
 	type Output = Result<Option<RT>>;
@@ -94,7 +98,7 @@ where
 impl<'r, Client, R, RT> IntoFuture for Patch<'r, Client, R, Vec<RT>>
 where
 	Client: Connection,
-	R: Resource,
+	R: Resource + 'r,
 	RT: TryFromValue,
 {
 	type Output = Result<Vec<RT>>;

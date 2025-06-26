@@ -72,7 +72,7 @@ async fn execute_and_return(
 	vars: BTreeMap<String, Value>,
 	accept: Option<&Accept>,
 ) -> Result<Output, anyhow::Error> {
-	match db.execute(sql, session, Some(vars)).await {
+	match db.execute(sql, session, vars).await {
 		Ok(res) => match accept {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => Ok(Output::json(&output::simplify(res)?)),

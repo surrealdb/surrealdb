@@ -1,3 +1,4 @@
+use super::transaction::WithTransaction;
 use super::{Stream, live};
 use crate::Surreal;
 use crate::api::Connection;
@@ -28,21 +29,33 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use surrealdb_core::dbs;
-use surrealdb_core::dbs::QueryResultData;
+use surrealdb_core::dbs::ResponseData;
 use surrealdb_core::dbs::Variables;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Object, Value, to_value as to_core_value};
 use surrealdb_core::rpc;
 use surrealdb_core::sql;
 use surrealdb_core::sql::Statement;
+use uuid::Uuid;
 
 /// A query future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Query<'r, C: Connection> {
+	pub(crate) txn: Option<Uuid>,
 	pub(crate) client: Cow<'r, Surreal<C>>,
-	pub(crate) queries: Vec<Cow<'r, str>>,
+	pub(crate) queries: Vec<String>,
 	pub(crate) variables: Variables,
+}
+
+impl<C> WithTransaction for Query<'_, C>
+where
+	C: Connection,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 impl<'r, C> Query<'r, C>
@@ -51,6 +64,7 @@ where
 {
 	pub fn new(client: Cow<'r, Surreal<C>>) -> Self {
 		Query {
+			txn: None,
 			client,
 			queries: Vec::new(),
 			variables: Variables::default(),
@@ -66,6 +80,7 @@ where
 	/// Converts to an owned type which can easily be moved to a different thread
 	pub fn into_owned(self) -> Query<'static, C> {
 		Query {
+			txn: self.txn,
 			client: Cow::Owned(self.client.into_owned()),
 			queries: self.queries,
 			variables: self.variables,
@@ -87,6 +102,7 @@ where
 
 			let query_results = router
 				.execute_query(Command::MultiQuery {
+					txn: self.txn,
 					queries: self.queries,
 					variables: self.variables,
 				})
@@ -122,7 +138,7 @@ where
 
 		let surql = surql.into();
 
-		self.queries.push(Cow::Owned(surql));
+		self.queries.push(surql);
 
 		self
 	}
@@ -130,12 +146,6 @@ where
 	/// Return query statistics along with its results
 	pub const fn with_stats(self) -> WithStats<Self> {
 		WithStats(self)
-	}
-
-	pub fn commit(self) -> Commit<'req, C> {
-		Commit {
-			client: Cow::Borrowed(&self.client),
-		}
 	}
 
 	/// Binds a parameter or parameters to a query
@@ -374,7 +384,7 @@ impl QueryResults {
 			if let Some(query_result) = self.results.swap_remove(&key) {
 				if let Err(error) = query_result.result {
 					// If the result is an error, we insert it into the errors map
-					errors.insert(key, error);
+					errors.insert(key, error.into());
 				}
 			}
 		}
@@ -406,7 +416,7 @@ impl QueryResults {
 		if let Some(key) = first_error {
 			if let Some(query_result) = self.results.swap_remove(&key) {
 				if let Err(error) = query_result.result {
-					return Err(error);
+					return Err(error.into());
 				}
 			}
 		}

@@ -493,21 +493,38 @@ table SetExpr {
     value: Value (id: 2);
 }
 
-table UnsetExpr {
+table SetMultiExpr {
+    items: [SetExpr] (id: 0);
+}
+
+table UnsetMultiExpr {
+    items: [Idiom] (id: 0);
+}
+
+table IdiomValuePair {
     idiom: Idiom (id: 0);
+    value: Value (id: 1);
+}
+
+table ValuesExpr {
+    items: [IdiomValuePair] (id: 0);
+}
+
+table ValuesMultiExpr {
+    items: [ValuesExpr] (id: 0);
 }
 
 union DataContents {
     Empty: NullValue (id: 1),
-    Set: SetExpr (id: 2),
-    Unset: UnsetExpr (id: 3),
-    Update: Value (id: 4),
-    Patch: Value (id: 5),
-    Merge: Value (id: 6),
-    Replace: Value (id: 7),
-    Content: Value (id: 8),
-    Values: Array (id: 9),
-    Value: Value (id: 10),
+    Set: SetMultiExpr (id: 2),
+    Unset: UnsetMultiExpr (id: 3),
+    Patch: Value (id: 4),
+    Merge: Value (id: 5),
+    Replace: Value (id: 6),
+    Content: Value (id: 7),
+    Value: Value (id: 8),
+    Values: ValuesMultiExpr (id: 9),
+    Update: SetMultiExpr (id: 10),
 }
 
 table Data {

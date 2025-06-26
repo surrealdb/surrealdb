@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use http::{
 	HeaderMap, StatusCode,
 	header::{ACCEPT, CONTENT_TYPE},
@@ -82,26 +84,32 @@ impl TryInto<Value> for ApiResponse {
 	}
 }
 
-pub enum ResponseInstruction {
+/// The format in which the response should be returned.
+pub enum ResponseFormat {
+	/// Extracts the Value and either returns it as a raw string or bytes, if the return type matches.
 	Raw,
+
+	/// Returns the Value as JSON.
+	Json,
+
+	/// Returns the Value as a Flatbuffers.
 	Ipc,
 }
 
-// impl ResponseInstruction {
-// 	pub fn for_format(invocation: &ApiInvocation) -> Result<Self, Error> {
-// 		let mime = invocation
-// 			.headers
-// 			.get(ACCEPT)
-// 			.or_else(|| invocation.headers.get(CONTENT_TYPE))
-// 			.and_then(|v| v.to_str().ok());
+impl ResponseFormat {
+	pub fn for_format(invocation: &ApiInvocation) -> Result<Self, Error> {
+		let mime = invocation
+			.headers
+			.get(ACCEPT)
+			.or_else(|| invocation.headers.get(CONTENT_TYPE))
+			.and_then(|v| v.to_str().ok());
 
-// 		let format = match mime {
-// 			Some("application/json") => Format::Json,
-// 			Some("application/flatbuffer") => Format::Flatbuffer,
-// 			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
-// 			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
-// 		};
-
-// 		Ok(ResponseInstruction::Ipc(format))
-// 	}
-// }
+		match mime {
+			Some("text/plain") | Some("application/octet-stream") => Ok(ResponseFormat::Raw),
+			Some("application/json") => Ok(ResponseFormat::Json),
+			Some("application/vnd.surrealdb.flatbuffers") => Ok(ResponseFormat::Ipc),
+			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
+			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
+		}
+	}
+}

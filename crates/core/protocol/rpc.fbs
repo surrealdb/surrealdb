@@ -51,12 +51,17 @@ table DatabaseUserCredentials {
     password: string (id: 3);
 }
 
+table AccessToken {
+    token: string (id: 0);
+}
+
 union AccessMethod {
     Root: RootUserCredentials (id: 1),
     Namespace: NamespaceAccessCredentials (id: 2),
     Database: DatabaseAccessCredentials (id: 3),
     NamespaceUser: NamespaceUserCredentials (id: 4),
     DatabaseUser: DatabaseUserCredentials (id: 5),
+    AccessToken: AccessToken (id: 6),
 }
 
 table SignupParams {
@@ -247,7 +252,7 @@ enum Action: ubyte {
 }
 
 table LiveNotification {
-    id: string (id: 0);
+    id: SurrealDB.Protocol.Common.Uuid (id: 0);
     action: Action (id: 1);
     record: SurrealDB.Protocol.Expr.Value (id: 2);
     result: SurrealDB.Protocol.Expr.Value (id: 3);
@@ -264,24 +269,22 @@ union QueryResultData {
 }
 
 table QueryResult {
-    index: uint32 (id: 0);
-    stats: QueryStats (id: 1);
-    result: QueryResultData (id: 3);
+    stats: QueryStats (id: 0);
+    result: QueryResultData (id: 2);
 }
 
 table QueryResults {
     results: [QueryResult] (id: 0);
 }
 
-union QueryResponseType {
-    Value: SurrealDB.Protocol.Expr.Value (id: 1),
-    Results: QueryResults (id: 2),
-    Notification: LiveNotification (id: 3),
+union ResponseData {
+    Results: QueryResults (id: 1),
+    Notification: LiveNotification (id: 2),
 }
 
 table Response {
     id: string (id: 0);
-    response_type: QueryResponseType (id: 2);
+    data: ResponseData (id: 2);
 }
 
 table QueryStats {

@@ -5,7 +5,7 @@ use crate::api::Surreal;
 use crate::api::conn::{Command, Request};
 use crate::api::engine::remote::{deserialize_flatbuffers, serialize_flatbuffers};
 use crate::api::err::Error;
-use crate::dbs::QueryResultData;
+use crate::dbs::ResponseData;
 
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
@@ -252,7 +252,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		let response = deserialize_flatbuffers::<rpc_fb::Response<'_>>(&bytes)?;
 
 		let query_results = response
-			.response_type_as_results()
+			.data_as_results()
 			.ok_or_else(|| Error::InternalError("No results in response".to_string()))?;
 		let results = query_results
 			.results()
@@ -284,7 +284,7 @@ async fn send_request(
 	client: &reqwest::Client,
 	headers: &HeaderMap,
 	auth: &Option<Auth>,
-) -> Result<QueryResultData> {
+) -> Result<ResponseData> {
 	let url = base_url.join(RPC_PATH).unwrap();
 	let http_req =
 		client.post(url).headers(headers.clone()).auth(auth).body(serialize_flatbuffers(&req)?);
@@ -315,14 +315,16 @@ async fn router(
 	headers: &mut HeaderMap,
 	vars: &mut IndexMap<String, Value>,
 	auth: &mut Option<Auth>,
-) -> Result<QueryResultData> {
+) -> Result<ResponseData> {
 	match req.command {
 		Command::Query {
+			txn,
 			query,
 			mut variables,
 		} => {
 			variables.extend(vars.clone());
 			let req = Request::new(Command::Query {
+				txn,
 				query,
 				variables,
 			});
@@ -448,11 +450,11 @@ async fn router(
 			*auth = Some(Auth::Bearer {
 				token,
 			});
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::Invalidate => {
 			*auth = None;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::Set {
 			key,
@@ -462,7 +464,7 @@ async fn router(
 				key: key.clone(),
 				value,
 			});
-			let QueryResultData::Results(mut res) =
+			let ResponseData::Results(mut res) =
 				send_request(req, base_url, client, headers, auth).await?
 			else {
 				return Err(Error::InternalError(
@@ -475,13 +477,13 @@ async fn router(
 				res.into_iter().next().context("Expected one item in result")?;
 			let value = result.result?;
 			vars.insert(key, value);
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::Unset {
 			key,
 		} => {
 			vars.shift_remove(&key);
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		#[cfg(target_family = "wasm")]
 		Command::ExportFile {
@@ -516,7 +518,7 @@ async fn router(
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::ExportBytes {
 			bytes,
@@ -533,7 +535,7 @@ async fn router(
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportMl {
@@ -548,7 +550,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::ExportBytesMl {
 			bytes,
@@ -562,7 +564,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
@@ -575,7 +577,7 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportMl {
@@ -588,7 +590,7 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(QueryResultData::new_from_value(Value::None))
+			Ok(ResponseData::new_from_value(Value::None))
 		}
 		Command::SubscribeLive {
 			..

@@ -13,10 +13,15 @@ use crate::err::Error;
 use crate::expr;
 use crate::expr::Bytesize;
 use crate::expr::Value;
+use crate::protocol::FromFlatbuffers;
+use crate::rpc::format::Format;
 
 use super::context::InvocationContext;
 use super::err::ApiError;
 use super::invocation::ApiInvocation;
+
+use crate::protocol::flatbuffers::surreal_db::protocol::expr as expr_fb;
+use crate::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
 
 pub enum ApiBody {
 	#[cfg(not(target_family = "wasm"))]
@@ -104,14 +109,29 @@ impl ApiBody {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
 
-				todo!("STUDOTHIS");
+				let fmt: Format = content_type
+					.map(|c| c.parse().map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure)))
+					.transpose()?
+					.unwrap_or(Format::Json);
+
+				let value = match fmt {
+					Format::Json => serde_json::from_slice(&bytes)
+						.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))?,
+					Format::Flatbuffer => {
+						let value_fb = flatbuffers::root::<expr_fb::Value>(&bytes)
+							.map_err(|e| Error::ApiError(ApiError::BodyDecodeFailure))?;
+
+						Value::from_fb(value_fb)
+							.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))?
+					}
+				};
 				// let parsed = match content_type {
 				// 	Some("application/flatbuffer") => {
 				// 	},
 				// 	_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
 				// };
 
-				// parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
+				Ok(value)
 			}
 		}
 	}

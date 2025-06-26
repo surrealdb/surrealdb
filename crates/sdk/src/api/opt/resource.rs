@@ -123,6 +123,7 @@ impl_resource_for_table_type!(CoreTable);
 impl CreatableResource for String {}
 impl CreatableResource for &str {}
 impl CreatableResource for CoreTable {}
+impl CreatableResource for (&str, &str) {}
 
 impl InsertableResource for String {
 	fn table_name(&self) -> &str {
@@ -240,6 +241,18 @@ impl Resource for Edge {
 
 	fn into_values(self) -> Values {
 		Values(vec![Value::from(self.into_inner())])
+	}
+}
+
+impl resource::Sealed for (&str, &str) {}
+impl Resource for (&str, &str) {
+	fn kind(&self) -> &'static str {
+		"table"
+	}
+
+	fn into_values(self) -> Values {
+		let table = RecordId::from(self);
+		Values(vec![Value::from(table)])
 	}
 }
 

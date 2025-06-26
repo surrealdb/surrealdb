@@ -1,3 +1,4 @@
+use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::opt::InsertableResource;
 
@@ -14,6 +15,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Object, Value, to_value as to_core_value};
+use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
 
@@ -22,8 +24,20 @@ use super::insert_relation::InsertRelation;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Insert<'r, C: Connection, R: InsertableResource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
+	pub(super) txn: Option<Uuid>,
 	pub(super) resource: R,
 	pub(super) response_type: PhantomData<RT>,
+}
+
+impl<C, R, RT> WithTransaction for Insert<'_, C, R, RT>
+where
+	C: Connection,
+	R: InsertableResource,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 impl<C, R, RT> Insert<'_, C, R, RT>
@@ -44,6 +58,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Insert {
+				txn,
 				client,
 				resource,
 				..
@@ -52,6 +67,7 @@ macro_rules! into_future {
 				let table = resource.table_name();
 				let data = resource.default_content();
 				let cmd = Command::Insert {
+					txn,
 					what: Some(table.to_string()),
 					data: data.into(),
 				};
@@ -66,7 +82,7 @@ macro_rules! into_future {
 impl<'r, Client, R> IntoFuture for Insert<'r, Client, R, Value>
 where
 	Client: Connection,
-	R: InsertableResource,
+	R: InsertableResource + 'r,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -77,7 +93,7 @@ where
 impl<'r, Client, R, RT> IntoFuture for Insert<'r, Client, R, Option<RT>>
 where
 	Client: Connection,
-	R: InsertableResource,
+	R: InsertableResource + 'r,
 	RT: TryFromValue,
 {
 	type Output = Result<Option<RT>>;
@@ -89,7 +105,7 @@ where
 impl<'r, Client, R, RT> IntoFuture for Insert<'r, Client, R, Vec<RT>>
 where
 	Client: Connection,
-	R: InsertableResource,
+	R: InsertableResource + 'r,
 	RT: TryFromValue,
 {
 	type Output = Result<Vec<RT>>;
@@ -111,6 +127,7 @@ where
 		Content::new(
 			self.client,
 			Command::Insert {
+				txn: self.txn,
 				what: Some(table.into()),
 				data,
 			},

@@ -8,9 +8,10 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::dbs::QueryResultData;
+use surrealdb_core::dbs::ResponseData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
+use uuid::Uuid;
 
 /// A content future
 ///
@@ -18,6 +19,7 @@ use surrealdb_core::expr::Value;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Content<'r, C: Connection, R> {
+	#[allow(dead_code)]
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) command: Command,
 	pub(super) response_type: PhantomData<R>,

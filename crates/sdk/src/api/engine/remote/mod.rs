@@ -208,14 +208,17 @@ mod tests {
 // 	pub(crate) result: ServerResult,
 // }
 
-fn serialize_flatbuffers<'a, V, T>(input: &V) -> Result<&'a [u8]>
+fn serialize_flatbuffers<'a, V, T>(input: &V) -> Result<Vec<u8>>
 where
 	V: ToFlatbuffers<Output<'a> = ::flatbuffers::WIPOffset<T>>,
 {
 	let mut builder = flatbuffers::FlatBufferBuilder::new();
-	let input_fb = input.to_fb(&mut builder);
-	builder.finish_minimal(input_fb);
-	Ok(builder.finished_data())
+	{
+		let input_fb = input.to_fb(&mut builder);
+		builder.finish_minimal(input_fb);
+	}
+	let finished_data = builder.finished_data();
+	Ok(finished_data.to_vec())
 }
 
 fn deserialize_flatbuffers<'buf, T>(bytes: &'buf [u8]) -> Result<T::Inner>

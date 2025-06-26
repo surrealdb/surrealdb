@@ -9,11 +9,11 @@ use surrealdb_core::sql::statements::CommitStatement;
 /// A transaction commit future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Commit<'req, C: Connection> {
-	pub(crate) client: Cow<'req, Surreal<C>>,
+pub struct Commit<C: Connection> {
+	pub(crate) client: Surreal<C>,
 }
 
-impl<'req, C> IntoFuture for Commit<'req, C>
+impl<C> IntoFuture for Commit<C>
 where
 	C: Connection,
 {
@@ -23,7 +23,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			self.client.query(CommitStatement::default().to_string()).await?;
-			Ok(self.client.into_owned())
+			Ok(self.client)
 		})
 	}
 }

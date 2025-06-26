@@ -12,8 +12,9 @@ use crate::net::error::Error as NetError;
 use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::http::Http;
-use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::websocket::Websocket;
+use crate::surrealdb_core::rpc::IntoRpcResponse;
+use anyhow::Context;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::routing::options;
@@ -32,8 +33,8 @@ use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
 use surrealdb::rpc::RpcContext;
-use surrealdb::rpc::format::Format;
-use surrealdb::rpc::format::PROTOCOLS;
+use surrealdb_core::rpc::format::Format;
+use surrealdb_core::rpc::format::PROTOCOLS;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -139,7 +140,14 @@ async fn handle_socket(
 	// Check if there is a WebSocket protocol specified
 	let format = match ws.protocol().and_then(|h| h.to_str().ok()) {
 		// Any selected protocol will always be a valid value
-		Some(protocol) => protocol.into(),
+		Some(protocol) => match protocol.parse() {
+			Ok(format) => format,
+			Err(err) => {
+				warn!("Invalid protocol: {err}");
+				ws.close();
+				return;
+			}
+		},
 		// No protocol format was specified
 		_ => Format::Json,
 	};
@@ -162,13 +170,14 @@ async fn post_handler(
 		return Err(NetError::ForbiddenRoute(RouteTarget::Rpc.to_string()).into());
 	}
 	// Get the input format from the Content-Type header
-	let fmt: Format = content_type.deref().into();
-	// Check that the input format is a valid format
-	if matches!(fmt, Format::Unsupported) {
-		return Err(NetError::InvalidType.into());
-	}
+	let fmt: Format = content_type.deref().try_into().map_err(|err| NetError::InvalidType)?;
+
 	// Get the output format from the Accept header
-	let out: Option<Format> = accept.as_deref().map(Into::into);
+	let out: Option<Format> = accept
+		.as_deref()
+		.map(TryInto::try_into)
+		.transpose()
+		.map_err(|err| NetError::InvalidType)?;
 	// Check that the input format and the output format match
 	if let Some(out) = out {
 		if fmt != out {
@@ -185,7 +194,7 @@ async fn post_handler(
 	match fmt.req_http(body) {
 		Ok(req) => {
 			// Execute the specified method
-			let res = RpcContext::execute(&rpc, req.rpc_version, req.command).await;
+			let res = RpcContext::execute(&rpc, req.command).await;
 			// Return the HTTP response
 			Ok(fmt.res_http(res.into_response(None))?)
 		}

@@ -25,7 +25,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
-use surrealdb_core::dbs::QueryResultData;
+use surrealdb_core::dbs::ResponseData;
 use surrealdb_core::expr::Value;
 use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
 use tokio::net::TcpStream;
@@ -197,12 +197,7 @@ async fn router_handle_route(
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response
-				.clone()
-				.send(Ok(QueryResultData::new_from_value(Value::None)))
-				.await
-				.is_err()
-			{
+			if response.clone().send(Ok(ResponseData::new_from_value(Value::None))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here

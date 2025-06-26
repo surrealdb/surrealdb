@@ -9,7 +9,7 @@ use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::conn::Command;
-use crate::dbs::QueryResultData;
+use crate::dbs::ResponseData;
 use crate::opt::IntoEndpoint;
 use async_channel::Sender;
 use indexmap::IndexMap;
@@ -54,7 +54,7 @@ struct PendingRequest {
 	// Does resolving this request has some effects.
 	effect: RequestEffect,
 	// The channel to send the result of the request into.
-	response_channel: Sender<Result<QueryResultData>>,
+	response_channel: Sender<Result<ResponseData>>,
 }
 
 struct RouterState<Sink, Stream> {

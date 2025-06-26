@@ -1,3 +1,4 @@
+use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::opt::CreatableResource;
 
@@ -12,6 +13,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Value, to_value as to_core_value};
+use uuid::Uuid;
 
 use super::Content;
 
@@ -20,8 +22,20 @@ use super::Content;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Create<'r, C: Connection, R: CreatableResource, RT> {
 	pub(super) client: Cow<'r, Surreal<C>>,
+	pub(super) txn: Option<Uuid>,
 	pub(super) resource: R,
 	pub(super) response_type: PhantomData<RT>,
+}
+
+impl<C, R, RT> WithTransaction for Create<'_, C, R, RT>
+where
+	C: Connection,
+	R: CreatableResource,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 impl<C, R, RT> Create<'_, C, R, RT>
@@ -42,6 +56,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Create {
+				txn,
 				client,
 				resource,
 				..
@@ -53,6 +68,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 
 				let cmd = Command::Create {
+					txn,
 					what,
 					data: None,
 				};
@@ -100,6 +116,7 @@ where
 		};
 
 		let command = Command::Create {
+			txn: self.txn,
 			what: self.resource.into_values(),
 			data,
 		};
@@ -123,6 +140,7 @@ where
 		};
 
 		let command = Command::Create {
+			txn: self.txn,
 			what: self.resource.into_values(),
 			data,
 		};

@@ -1,17 +1,14 @@
 use super::Raw;
 use crate::{
 	api::{QueryResults, Result, err::Error},
-	method::{self, Stats, Stream},
-	value::Notification,
+	method,
 };
-use anyhow::bail;
+use anyhow::{Context, bail};
 use futures::future::Either;
 use futures::stream::select_all;
-use serde::de::DeserializeOwned;
+use std::borrow::Cow;
 use std::mem;
-use std::{borrow::Cow, marker::PhantomData};
-use surrealdb_core::expr::from_value as from_core_value;
-use surrealdb_core::sql::{self, Statement, Statements, statements::*};
+use surrealdb_core::expr::statements::*;
 use surrealdb_core::{
 	dbs::{QueryStats, Variables},
 	expr::{TryFromValue, Value},
@@ -19,19 +16,32 @@ use surrealdb_core::{
 
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery {
-	fn into_query(self) -> Cow<'static, str>;
+	fn into_query(self) -> String;
 }
 
 impl IntoQuery for String {
-	fn into_query(self) -> Cow<'static, str> {
-		Cow::Owned(self)
+	fn into_query(self) -> String {
+		self
 	}
 }
 impl IntoQuery for &str {
-	fn into_query(self) -> Cow<'static, str> {
-		Cow::Owned(self.to_string())
+	fn into_query(self) -> String {
+		self.to_string()
 	}
 }
+
+macro_rules! impl_into_query_for_statement {
+	($($stmt:ident),*) => {
+			$(
+				impl IntoQuery for $stmt {
+					fn into_query(self) -> String {
+						self.to_string()
+					}
+				}
+			)*
+	};
+}
+impl_into_query_for_statement!(BeginStatement, CommitStatement, SelectStatement);
 
 pub trait IntoVariables {
 	fn into_variables(self) -> Variables;
@@ -71,7 +81,7 @@ impl QueryAccessor<Value> for usize {}
 impl query_accessor::Sealed<Value> for usize {
 	fn query_result(self, results: &mut QueryResults) -> Result<Value> {
 		match results.results.swap_remove(&self) {
-			Some(query_result) => query_result.result,
+			Some(query_result) => Ok(query_result.result?),
 			None => Ok(Value::None),
 		}
 	}
@@ -87,20 +97,18 @@ where
 	T: TryFromValue,
 {
 	fn query_result(self, results: &mut QueryResults) -> Result<Option<T>> {
-		let value = match results.results.get_mut(&self) {
-			Some(query_result) => match &mut query_result.result {
+		let mut value = match results.results.swap_remove(&self) {
+			Some(query_result) => match query_result.result {
 				Ok(val) => val,
 				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
-					results.results.swap_remove(&self);
-					return Err(error);
+					return Err(error.into());
 				}
 			},
 			None => {
 				return Ok(None);
 			}
 		};
-		let result = match value {
+		let result = match &mut value {
 			Value::Array(vec) => match &mut vec.0[..] {
 				[] => Ok(None),
 				[value] => {
@@ -113,12 +121,11 @@ where
 				})
 				.into()),
 			},
-			_ => {
+			value => {
 				let value = mem::take(value);
 				Option::<T>::try_from_value(value)
 			}
 		};
-		results.results.swap_remove(&self);
 		result
 	}
 
@@ -131,13 +138,11 @@ impl QueryAccessor<Value> for (usize, &str) {}
 impl query_accessor::Sealed<Value> for (usize, &str) {
 	fn query_result(self, response: &mut QueryResults) -> Result<Value> {
 		let (index, key) = self;
-		let value = match response.results.get_mut(&index) {
-			Some(query_result) => match &mut query_result.result {
+		let mut value = match response.results.swap_remove(&index) {
+			Some(query_result) => match query_result.result {
 				Ok(val) => val,
 				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
-					response.results.swap_remove(&index);
-					return Err(error);
+					return Err(error.into());
 				}
 			},
 			None => {
@@ -145,7 +150,7 @@ impl query_accessor::Sealed<Value> for (usize, &str) {
 			}
 		};
 
-		let value = match value {
+		let value = match &mut value {
 			Value::Object(object) => object.remove(key).unwrap_or_default(),
 			_ => Value::None,
 		};
@@ -165,20 +170,18 @@ where
 {
 	fn query_result(self, results: &mut QueryResults) -> Result<Option<T>> {
 		let (index, key) = self;
-		let value = match results.results.get_mut(&index) {
-			Some(query_result) => match &mut query_result.result {
+		let mut value = match results.results.swap_remove(&index) {
+			Some(query_result) => match query_result.result {
 				Ok(val) => val,
 				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
-					results.results.swap_remove(&index);
-					return Err(error);
+					return Err(error.into());
 				}
 			},
 			None => {
 				return Ok(None);
 			}
 		};
-		let value = match value {
+		let value = match &mut value {
 			Value::Array(vec) => match &mut vec.0[..] {
 				[] => {
 					results.results.swap_remove(&index);
@@ -354,24 +357,22 @@ mod query_stream {
 
 // impl QueryStream<Value> for () {}
 // impl query_stream::Sealed<Value> for () {
-// 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
-// 		let mut streams = Vec::with_capacity(response.live_queries.len());
-// 		for (index, result) in mem::take(&mut response.live_queries) {
+// 	fn query_stream(self, results: &mut QueryResults) -> Result<method::QueryStream<Value>> {
+// 		let mut streams = Vec::with_capacity(results.live_queries.len());
+
+// 		for (index, result) in mem::take(&mut results.live_queries) {
 // 			match result {
 // 				Ok(stream) => streams.push(stream),
 // 				Err(e) => {
 // 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
-// 						match response.results.swap_remove(&index) {
-// 							Some((stats, Err(error))) => {
-// 								response.results.insert(
+// 						match results.results.swap_remove(&index) {
+// 							Some(query_result) => {
+// 								results.results.insert(
 // 									index,
-// 									(stats, Err(Error::ResponseAlreadyTaken.into())),
+// 									None,
 // 								);
 // 								return Err(error);
 // 							}
-// 							Some((_, Ok(..))) => unreachable!(
-// 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
-// 							),
 // 							None => {
 // 								bail!(Error::ResponseAlreadyTaken);
 // 							}

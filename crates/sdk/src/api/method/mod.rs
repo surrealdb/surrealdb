@@ -53,6 +53,7 @@ mod select;
 mod set;
 mod signin;
 mod signup;
+mod transaction;
 mod unset;
 mod update;
 mod upsert;
@@ -64,17 +65,8 @@ mod version;
 mod tests;
 
 pub use authenticate::Authenticate;
-/// Not supported yet
-#[doc(hidden)]
 pub use begin::Begin;
-/// Not supported yet
-#[doc(hidden)]
-pub use begin::Transaction;
-/// Not supported yet
-#[doc(hidden)]
 pub use cancel::Cancel;
-/// Not supported yet
-#[doc(hidden)]
 pub use commit::Commit;
 pub use content::Content;
 pub use create::Create;
@@ -95,6 +87,7 @@ pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
 use tokio::sync::watch;
+pub use transaction::Transaction;
 pub use unset::Unset;
 pub use update::Update;
 pub use upsert::Upsert;
@@ -121,6 +114,9 @@ pub struct ExportConfig;
 
 /// Live query marker type
 pub struct Live;
+
+/// Relation marker type
+pub struct Relation;
 
 /// Responses returned with statistics
 #[derive(Debug)]
@@ -274,6 +270,12 @@ where
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
+		}
+	}
+
+	pub fn transaction(&self) -> Begin<C> {
+		Begin {
+			client: self.clone(),
 		}
 	}
 
@@ -609,24 +611,6 @@ where
 		}
 	}
 
-	pub fn begin(&self) -> Begin<C> {
-		Begin {
-			client: Cow::Borrowed(self),
-		}
-	}
-
-	pub fn commit(&self) -> Commit<C> {
-		Commit {
-			client: Cow::Borrowed(self),
-		}
-	}
-
-	pub fn cancel(&self) -> Cancel<C> {
-		Cancel {
-			client: Cow::Borrowed(self),
-		}
-	}
-
 	/// Runs a set of SurrealQL statements against the database
 	///
 	/// # Examples
@@ -678,6 +662,7 @@ where
 	/// ```
 	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
 		Query {
+			txn: None,
 			queries: vec![query.into_query()],
 			variables: Variables::default(),
 			client: Cow::Borrowed(self),
@@ -728,6 +713,7 @@ where
 		R: Resource,
 	{
 		Select {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource,
 			response_type: PhantomData,
@@ -781,15 +767,16 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R, RT>(&self, resource: R) -> anyhow::Result<Create<C, R, RT>>
+	pub fn create<R, RT>(&self, resource: R) -> Create<C, R, RT>
 	where
 		R: CreatableResource,
 	{
-		Ok(Create {
+		Create {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource,
 			response_type: PhantomData,
-		})
+		}
 	}
 
 	/// Insert a record or records into a table
@@ -934,6 +921,7 @@ where
 		R: InsertableResource,
 	{
 		Insert {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource,
 			response_type: PhantomData,
@@ -1095,6 +1083,7 @@ where
 		R: Resource,
 	{
 		Upsert {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource,
 			response_type: PhantomData,
@@ -1256,6 +1245,7 @@ where
 		R: Resource,
 	{
 		Update {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource,
 			response_type: PhantomData,
@@ -1288,6 +1278,7 @@ where
 	/// ```
 	pub fn delete<R, RT>(&self, resource: R) -> Delete<C, R, RT> {
 		Delete {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource,
 			response_type: PhantomData,
