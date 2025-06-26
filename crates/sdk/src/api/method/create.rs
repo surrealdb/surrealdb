@@ -1,4 +1,6 @@
+use super::Content;
 use super::transaction::WithTransaction;
+use super::validate_data;
 use crate::Surreal;
 use crate::Value;
 use crate::api::Connection;
@@ -14,9 +16,6 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
 use uuid::Uuid;
-
-use super::Content;
-use super::validate_data;
 
 /// A record create future
 #[derive(Debug)]
