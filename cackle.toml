@@ -368,6 +368,9 @@ allow_unsafe = true
 [pkg.tracing-core]
 allow_unsafe = true
 
+[pkg.tracing-appender]
+allow_apis = ["fs"]
+
 [pkg.linux-raw-sys]
 allow_unsafe = true
 
@@ -804,6 +807,9 @@ allow_unsafe = true
 allow_unsafe = true
 allow_apis = ["net"]
 
+[pkg.tracing-serde]
+allow_apis = ["net"]
+
 [pkg.arrayvec]
 allow_unsafe = true
 
@@ -830,6 +836,9 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.crossbeam-deque]
+allow_unsafe = true
+
+[pkg.crossbeam-channel]
 allow_unsafe = true
 
 [pkg.anstream]

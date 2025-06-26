@@ -38,8 +38,6 @@ pub async fn init(
 		},
 	}: ImportCommandArguments,
 ) -> Result<(), Error> {
-	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_log_level("info").init()?;
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.

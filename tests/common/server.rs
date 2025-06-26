@@ -66,18 +66,22 @@ impl Child {
 		std::fs::read_to_string(&self.stderr_path).expect("Failed to read the stderr file")
 	}
 
+	pub fn stdout_and_stderr(&self) -> String {
+		let mut output: String = String::new();
+		output.push_str(self.stdout().as_str());
+		output.push_str(self.stderr().as_str());
+		output
+	}
+
 	/// Read the child's stdout concatenated with its stderr. Returns Ok if the child
 	/// returns successfully, Err otherwise.
 	pub fn output(&mut self) -> Result<String, String> {
 		let status = self.inner.as_mut().map(|child| child.wait().unwrap()).unwrap();
-
-		let mut buf = self.stdout();
-		buf.push_str(&self.stderr());
-
+		let buffer = self.stdout_and_stderr();
 		if status.success() {
-			Ok(buf)
+			Ok(buffer)
 		} else {
-			Err(buf)
+			Err(buffer)
 		}
 	}
 }
@@ -119,8 +123,8 @@ pub fn run_internal<P: AsRef<Path>>(
 	}
 
 	// Use local files instead of pipes to avoid deadlocks. See https://github.com/rust-lang/rust/issues/45572
-	let stdout_path = tmp_file("server-stdout.log");
-	let stderr_path = tmp_file("server-stderr.log");
+	let stdout_path = tmp_file("stdout.log");
+	let stderr_path = tmp_file("stderr.log");
 	debug!("Redirecting output. args=`{args}` stdout={stdout_path} stderr={stderr_path})");
 	let stdout = Stdio::from(File::create(&stdout_path).unwrap());
 	let stderr = Stdio::from(File::create(&stderr_path).unwrap());
@@ -308,7 +312,7 @@ pub async fn start_server(
 		for _i in 0..10 {
 			interval.tick().await;
 
-			let out = server.stderr();
+			let out = server.stdout_and_stderr();
 			if out.contains("Address already in use") {
 				continue 'retry;
 			}

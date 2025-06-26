@@ -42,6 +42,16 @@ who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.162 -> 0.2.171"
 
+[[audits.ntapi]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.4.1"
+
+[[audits.tracing-serde]]
+who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
+criteria = "safe-to-deploy"
+version = "0.2.0"
+
 [[audits.tracing-serde]]
 who = "Emmanuel Keller <emmanuel.keller@surrealdb.com>"
 criteria = "safe-to-deploy"

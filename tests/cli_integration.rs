@@ -1211,7 +1211,7 @@ mod cli_integration {
 			// Make sure the SLEEP query is being executed
 			tokio::time::timeout(time::Duration::from_secs(10), async {
 				loop {
-					let err = server.stderr();
+					let err = server.stdout_and_stderr();
 					if err.contains("SLEEP 30s") {
 						break;
 					}

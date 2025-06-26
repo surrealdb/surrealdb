@@ -1,7 +1,7 @@
 pub mod rpc;
 
-use crate::cli::validator::parser::env_filter::CustomEnvFilter;
-use crate::cnf::TELEMETRY_PROVIDER;
+use crate::cli::validator::parser::tracing::CustomFilter;
+use crate::cnf::{TELEMETRY_DISABLE_TRACING, TELEMETRY_PROVIDER};
 use crate::err::Error;
 use crate::telemetry::OTEL_DEFAULT_RESOURCE;
 use opentelemetry::trace::TracerProvider as _;
@@ -11,13 +11,13 @@ use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
 // Returns a tracer provider based on the SURREAL_TELEMETRY_PROVIDER environment variable
-pub fn new<S>(filter: CustomEnvFilter) -> Result<Option<Box<dyn Layer<S> + Send + Sync>>, Error>
+pub fn new<S>(filter: CustomFilter) -> Result<Option<Box<dyn Layer<S> + Send + Sync>>, Error>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
 	match TELEMETRY_PROVIDER.trim() {
 		// The OTLP telemetry provider has been specified
-		s if s.eq_ignore_ascii_case("otlp") => {
+		s if s.eq_ignore_ascii_case("otlp") && !*TELEMETRY_DISABLE_TRACING => {
 			// Create a new OTLP exporter using gRPC
 			let exporter = opentelemetry_otlp::new_exporter().tonic();
 			// Build a new span exporter which uses gRPC
@@ -35,7 +35,8 @@ where
 			Ok(Some(
 				tracing_opentelemetry::layer()
 					.with_tracer(provider.tracer("surealdb"))
-					.with_filter(filter.0)
+					.with_filter(filter.env())
+					.with_filter(filter.span_filter::<S>())
 					.boxed(),
 			))
 		}

@@ -17,8 +17,6 @@ pub async fn init(
 		},
 	}: VersionCommandArguments,
 ) -> Result<(), Error> {
-	// Initialize opentelemetry and logging
-	crate::telemetry::builder().with_log_level("error").init()?;
 	// Print server version if endpoint supplied else CLI version
 	if let Some(e) = endpoint {
 		// Print remote server version
@@ -27,6 +25,7 @@ pub async fn init(
 		// Print local CLI version
 		println!("{}", *RELEASE);
 	}
+	// All ok
 	Ok(())
 }
 
