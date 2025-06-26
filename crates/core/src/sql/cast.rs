@@ -25,9 +25,7 @@ impl Cast {
 	pub fn to_idiom(&self) -> Idiom {
 		self.1.to_idiom()
 	}
-}
 
-impl Cast {
 	/// Checks whether all array values are static values
 	pub(crate) fn is_static(&self) -> bool {
 		self.1.is_static()

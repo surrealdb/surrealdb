@@ -32,9 +32,7 @@ impl Cast {
 	pub fn to_idiom(&self) -> Idiom {
 		self.1.to_idiom()
 	}
-}
 
-impl Cast {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		self.1.writeable()

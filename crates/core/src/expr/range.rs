@@ -135,6 +135,50 @@ impl Range {
 		};
 		Some(r)
 	}
+
+	/// Construct a new range
+	pub fn new(beg: Bound<Value>, end: Bound<Value>) -> Self {
+		Self {
+			beg,
+			end,
+		}
+	}
+
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> FlowResult<Value> {
+		Ok(Value::Range(Box::new(Range {
+			beg: match &self.beg {
+				Bound::Included(v) => Bound::Included(v.compute(stk, ctx, opt, doc).await?),
+				Bound::Excluded(v) => Bound::Excluded(v.compute(stk, ctx, opt, doc).await?),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match &self.end {
+				Bound::Included(v) => Bound::Included(v.compute(stk, ctx, opt, doc).await?),
+				Bound::Excluded(v) => Bound::Excluded(v.compute(stk, ctx, opt, doc).await?),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		})))
+	}
+
+	/// Validate that a Range contains only computed Values
+	pub fn validate_computed(&self) -> Result<()> {
+		match &self.beg {
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
+			Bound::Unbounded => {}
+		}
+		match &self.end {
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
+			Bound::Unbounded => {}
+		}
+
+		Ok(())
+	}
 }
 
 /// A range but with specific value types.
@@ -244,52 +288,6 @@ impl FromStr for Range {
 			Ok(v) => Ok(v.into()),
 			_ => Err(()),
 		}
-	}
-}
-
-impl Range {
-	/// Construct a new range
-	pub fn new(beg: Bound<Value>, end: Bound<Value>) -> Self {
-		Self {
-			beg,
-			end,
-		}
-	}
-
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		Ok(Value::Range(Box::new(Range {
-			beg: match &self.beg {
-				Bound::Included(v) => Bound::Included(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Excluded(v) => Bound::Excluded(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Unbounded => Bound::Unbounded,
-			},
-			end: match &self.end {
-				Bound::Included(v) => Bound::Included(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Excluded(v) => Bound::Excluded(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Unbounded => Bound::Unbounded,
-			},
-		})))
-	}
-
-	/// Validate that a Range contains only computed Values
-	pub fn validate_computed(&self) -> Result<()> {
-		match &self.beg {
-			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
-			Bound::Unbounded => {}
-		}
-		match &self.end {
-			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
-			Bound::Unbounded => {}
-		}
-
-		Ok(())
 	}
 }
 
