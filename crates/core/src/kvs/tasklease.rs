@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::key::root::tl::Tl;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{Key, KeyEncode, LockType, TransactionType};
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use rand::{Rng, thread_rng};
 use revision::revisioned;
@@ -26,7 +26,6 @@ impl TaskLeaseType {
 	pub(super) async fn has_lease(&self, node: &Uuid, tf: &TransactionFactory) -> Result<bool> {
 		let key: Key = Tl::new(self).encode()?;
 		// Use for exponential backoff
-		let mut rng = thread_rng();
 		let mut tempo = 4;
 		const MAX_BACKOFF: u64 = 32_768;
 		// Loop until we have a successful allocation.
@@ -36,11 +35,11 @@ impl TaskLeaseType {
 				return Ok(r);
 			}
 			// exponential backoff with full jitter
-			let sleep_ms = rng.gen_range(1..=tempo);
+			let sleep_ms = thread_rng().gen_range(1..=tempo);
 			sleep(Duration::from_millis(sleep_ms)).await;
 			tempo *= 2;
 		}
-		Err(anyhow::Error::new(Error::QueryTimedout))
+		bail!(Error::QueryTimedout)
 	}
 
 	async fn check_lease(node: &Uuid, tf: &TransactionFactory, key: &Key) -> Result<bool> {
