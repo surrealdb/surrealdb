@@ -35,7 +35,7 @@ use crate::{
 			ParseResult, Parser,
 			mac::{expected, unexpected},
 		},
-		token::{Keyword, TokenKind, t},
+		token::{TokenKind, t},
 	},
 };
 
@@ -50,8 +50,12 @@ impl Parser<'_> {
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),
-			t!("TOKEN") => self.parse_define_token().map(DefineStatement::Access),
-			t!("SCOPE") => self.parse_define_scope(ctx).await.map(DefineStatement::Access),
+			t!("TOKEN") => {
+				bail!("`DEFINE TOKEN` has been deprecated, please use `DEFINE ACCESS` instead.", @next.span)
+			}
+			t!("SCOPE") => {
+				bail!("`DEFINE SCOPE` has been deprecated, please use `DEFINE ACCESS` instead.", @next.span)
+			}
 			t!("PARAM") => self.parse_define_param(ctx).await.map(DefineStatement::Param),
 			t!("TABLE") => self.parse_define_table(ctx).await.map(DefineStatement::Table),
 			t!("API") => self.parse_define_api(ctx).await.map(DefineStatement::Api),
@@ -214,7 +218,7 @@ impl Parser<'_> {
 		};
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
-		let base = self.parse_base(false)?;
+		let base = self.parse_base()?;
 
 		let mut res = DefineUserStatement::from_parsed_values(
 			name,
@@ -320,7 +324,7 @@ impl Parser<'_> {
 		let name = self.next_token_value()?;
 		expected!(self, t!("ON"));
 		// TODO: Parse base should no longer take an argument.
-		let base = self.parse_base(false)?;
+		let base = self.parse_base()?;
 
 		let mut res = DefineAccessStatement {
 			name,
@@ -496,175 +500,6 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-
-		Ok(res)
-	}
-
-	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
-	pub fn parse_define_token(&mut self) -> ParseResult<DefineAccessStatement> {
-		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
-			expected!(self, t!("NOT"));
-			expected!(self, t!("EXISTS"));
-			(true, false)
-		} else if self.eat(t!("OVERWRITE")) {
-			(false, true)
-		} else {
-			(false, false)
-		};
-		let name = self.next_token_value()?;
-		expected!(self, t!("ON"));
-		let base = self.parse_base(true)?;
-
-		let mut res = DefineAccessStatement {
-			name,
-			base: base.clone(),
-			if_not_exists,
-			overwrite,
-			..Default::default()
-		};
-
-		match base {
-			// DEFINE TOKEN ON SCOPE is now record access with JWT
-			Base::Sc(_) => {
-				res.base = Base::Db;
-				let mut ac = access_type::RecordAccess {
-					..Default::default()
-				};
-				ac.jwt.issue = None;
-				loop {
-					match self.peek_kind() {
-						t!("COMMENT") => {
-							self.pop_peek();
-							res.comment = Some(self.next_token_value()?);
-						}
-						// For backward compatibility, value is always expected after type
-						// This matches the display format of the legacy statement
-						t!("TYPE") => {
-							self.pop_peek();
-							let next = self.next();
-							match next.kind {
-								TokenKind::Algorithm(alg) => {
-									expected!(self, t!("VALUE"));
-									ac.jwt.verify = access_type::JwtAccessVerify::Key(
-										access_type::JwtAccessVerifyKey {
-											alg,
-											key: self.next_token_value::<Strand>()?.0,
-										},
-									);
-								}
-								TokenKind::Keyword(Keyword::Jwks) => {
-									expected!(self, t!("VALUE"));
-									ac.jwt.verify = access_type::JwtAccessVerify::Jwks(
-										access_type::JwtAccessVerifyJwks {
-											url: self.next_token_value::<Strand>()?.0,
-										},
-									);
-								}
-								_ => unexpected!(self, next, "a token algorithm or 'JWKS'"),
-							}
-						}
-						_ => break,
-					}
-				}
-				res.kind = AccessType::Record(ac);
-			}
-			// DEFINE TOKEN anywhere else is now JWT access
-			_ => {
-				let mut ac = access_type::JwtAccess {
-					issue: None,
-					..Default::default()
-				};
-				loop {
-					match self.peek_kind() {
-						t!("COMMENT") => {
-							self.pop_peek();
-							res.comment = Some(self.next_token_value()?);
-						}
-						// For backward compatibility, value is always expected after type
-						// This matches the display format of the legacy statement
-						t!("TYPE") => {
-							self.pop_peek();
-							let next = self.next();
-							match next.kind {
-								TokenKind::Algorithm(alg) => {
-									expected!(self, t!("VALUE"));
-									ac.verify = access_type::JwtAccessVerify::Key(
-										access_type::JwtAccessVerifyKey {
-											alg,
-											key: self.next_token_value::<Strand>()?.0,
-										},
-									);
-								}
-								TokenKind::Keyword(Keyword::Jwks) => {
-									expected!(self, t!("VALUE"));
-									ac.verify = access_type::JwtAccessVerify::Jwks(
-										access_type::JwtAccessVerifyJwks {
-											url: self.next_token_value::<Strand>()?.0,
-										},
-									);
-								}
-								_ => unexpected!(self, next, "a token algorithm or 'JWKS'"),
-							}
-						}
-						_ => break,
-					}
-				}
-				res.kind = AccessType::Jwt(ac);
-			}
-		}
-
-		Ok(res)
-	}
-
-	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
-	pub async fn parse_define_scope(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<DefineAccessStatement> {
-		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
-			expected!(self, t!("NOT"));
-			expected!(self, t!("EXISTS"));
-			(true, false)
-		} else if self.eat(t!("OVERWRITE")) {
-			(false, true)
-		} else {
-			(false, false)
-		};
-		let name = self.next_token_value()?;
-		let mut res = DefineAccessStatement {
-			name,
-			base: Base::Db,
-			if_not_exists,
-			overwrite,
-			..Default::default()
-		};
-		let mut ac = access_type::RecordAccess {
-			..Default::default()
-		};
-
-		loop {
-			match self.peek_kind() {
-				t!("COMMENT") => {
-					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
-				}
-				t!("SESSION") => {
-					self.pop_peek();
-					res.duration.session = Some(self.next_token_value()?);
-				}
-				t!("SIGNUP") => {
-					self.pop_peek();
-					ac.signup = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
-				}
-				t!("SIGNIN") => {
-					self.pop_peek();
-					ac.signin = Some(stk.run(|stk| self.parse_value_field(stk)).await?);
-				}
-				_ => break,
-			}
-		}
-
-		res.kind = AccessType::Record(ac);
 
 		Ok(res)
 	}
