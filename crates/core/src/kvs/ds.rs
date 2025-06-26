@@ -28,6 +28,7 @@ use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
+use crate::kvs::tasklease::TaskLeaseType;
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::Query;
 use crate::syn;
@@ -683,6 +684,9 @@ impl Datastore {
 	/// Run the background task to perform changefeed garbage collection
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn changefeed_process(&self) -> Result<()> {
+		if !TaskLeaseType::ChangeFeedCleanup.has_lease(&self.id, &self.transaction_factory).await? {
+			return Ok(());
+		}
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
 		// Calculate the current system time

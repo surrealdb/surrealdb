@@ -43,6 +43,7 @@ pub(crate) mod cache;
 mod index;
 pub(crate) mod savepoint;
 pub(crate) mod sequences;
+pub(crate) mod tasklease;
 #[cfg(test)]
 mod tests;
 mod util;
