@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings", condition = { env_not_set = [
+RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
 
