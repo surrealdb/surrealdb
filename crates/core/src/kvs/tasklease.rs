@@ -213,7 +213,6 @@ mod tests {
 	/// * How many times the node successfully acquired the lease
 	/// * How many times the node failed to acquire the lease (owned by another node)
 	/// * How many errors occurred during lease acquisition attempts
-	#[cfg(feature = "kv-mem")]
 	async fn node_task_lease(
 		id: Uuid,
 		tf: Arc<TransactionFactory>,
