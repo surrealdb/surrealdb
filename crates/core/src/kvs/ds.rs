@@ -685,9 +685,33 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Run the background task to perform changefeed garbage collection
+	/// Performs changefeed garbage collection as a background task.
+	///
+	/// This method is responsible for cleaning up old changefeed data across all databases.
+	/// It uses a distributed task lease mechanism to ensure that only one node in a cluster
+	/// performs this maintenance operation at a time, preventing duplicate work and potential
+	/// conflicts.
+	///
+	/// The process involves:
+	/// 1. Acquiring a lease for the ChangeFeedCleanup task
+	/// 2. Calculating the current system time
+	/// 3. Saving timestamps for current versionstamps
+	/// 4. Cleaning up old changefeed data from all databases
+	///
+	/// # Parameters
+	/// * `delay` - Duration specifying how long the lease should be valid
+	///
+	/// # Returns
+	/// * `Ok(())` - If the operation completes successfully or if this node doesn't have the lease
+	/// * `Err` - If any step in the process fails
+	///
+	/// # Errors
+	/// * Returns an error if the system clock appears to have gone backwards
+	/// * Propagates any errors from the underlying database operations
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn changefeed_process(&self, delay: &Duration) -> Result<()> {
+		// Attempt to acquire a lease for the ChangeFeedCleanup task
+		// If we don't get the lease, another node is handling this task
 		if !TaskLeaseType::ChangeFeedCleanup
 			.has_lease(&self.id, &self.transaction_factory, delay)
 			.await?
@@ -696,31 +720,55 @@ impl Datastore {
 		}
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Calculate the current system time
+		// Calculate the current system time in seconds since UNIX epoch
+		// This will be used as a reference point for cleanup operations
 		let ts = SystemTime::now()
 			.duration_since(UNIX_EPOCH)
 			.map_err(|e| {
 				Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
 			})?
 			.as_secs();
-		// Save timestamps for current versionstamps
+		// Save timestamps for current versionstamps to track cleanup progress
 		self.changefeed_versionstamp(ts).await?;
-		// Garbage old changefeed data from all databases
+		// Remove old changefeed data from all databases based on retention policies
 		self.changefeed_cleanup(ts).await?;
-		// Everything ok
+		// Everything completed successfully
 		Ok(())
 	}
 
-	/// Run the background task to perform changefeed garbage collection
+	/// Performs changefeed garbage collection using a specified timestamp.
+	///
+	/// This method is similar to `changefeed_process` but accepts an explicit timestamp
+	/// instead of calculating the current time. This allows for more controlled testing
+	/// and specific cleanup operations at predetermined points in time.
+	///
+	/// Unlike `changefeed_process`, this method does not use the task lease mechanism,
+	/// making it suitable for direct invocation in controlled environments or testing
+	/// scenarios where lease coordination is not required.
+	///
+	/// The process involves:
+	/// 1. Saving timestamps for current versionstamps using the provided timestamp
+	/// 2. Cleaning up old changefeed data from all databases
+	///
+	/// # Parameters
+	/// * `ts` - Explicit timestamp (in seconds since UNIX epoch) to use for cleanup operations
+	///
+	/// # Returns
+	/// * `Ok(())` - If the operation completes successfully
+	/// * `Err` - If any step in the process fails
+	///
+	/// # Errors
+	/// * Propagates any errors from the underlying database operations
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn changefeed_process_at(&self, ts: u64) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Save timestamps for current versionstamps
+		// Save timestamps for current versionstamps using the provided timestamp
 		self.changefeed_versionstamp(ts).await?;
-		// Garbage old changefeed data from all databases
+		// Remove old changefeed data from all databases based on retention policies
+		// using the provided timestamp as the reference point
 		self.changefeed_cleanup(ts).await?;
-		// Everything ok
+		// Everything completed successfully
 		Ok(())
 	}
 

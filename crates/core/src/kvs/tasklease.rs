@@ -26,7 +26,7 @@ struct TaskLease {
 
 impl TaskLeaseType {
 	/// Attempts to acquire or check a lease for a specific task type.
-	/// 
+	///
 	/// This method tries to determine if the current node has a lease for the specified task.
 	/// It uses exponential backoff with jitter to handle contention when multiple nodes
 	/// attempt to acquire the same lease simultaneously.
@@ -135,7 +135,7 @@ mod tests {
 	use temp_dir::TempDir;
 	use uuid::Uuid;
 
- 	/// Tracks the results of lease acquisition attempts by a node.
+	/// Tracks the results of lease acquisition attempts by a node.
 	///
 	/// This struct collects statistics about the outcomes of multiple lease acquisition attempts:
 	/// * `ok_true` - Count of successful lease acquisitions (node owns the lease)
@@ -148,7 +148,7 @@ mod tests {
 		err: usize,
 	}
 
- 	/// Simulates a node repeatedly attempting to acquire a lease for a specified duration.
+	/// Simulates a node repeatedly attempting to acquire a lease for a specified duration.
 	///
 	/// This function represents a single node in a distributed system that continuously
 	/// tries to acquire a task lease for the ChangeFeedCleanup task. It runs for a fixed
