@@ -40,8 +40,9 @@ impl Tl {
 #[cfg(test)]
 mod tests {
 	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
-	fn key() {
+	fn key_changefeed_cleanup() {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Tl::new(&TaskLeaseType::ChangeFeedCleanup);

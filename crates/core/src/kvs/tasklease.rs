@@ -9,10 +9,12 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing::trace;
 use uuid::Uuid;
 
 #[derive(Debug)]
 pub(crate) enum TaskLeaseType {
+	/// Task for cleaning up old changefeed data
 	ChangeFeedCleanup,
 }
 
@@ -96,21 +98,65 @@ impl TaskLeaseType {
 		key: &Key,
 		lt: &Duration,
 	) -> Result<bool> {
-		// First check if there's already a non-expired lease in the datastore
-		{
-			let tx = tf.transaction(TransactionType::Read, LockType::Optimistic).await?;
-			if let Some(l) = tx.get(key, None).await? {
-				let l: TaskLease = revision::from_slice(&l)?;
-				// If the lease hasn't expired yet, check if this node is the owner
-				if l.expiration > Utc::now() {
-					// Return true if this node is the owner, false otherwise
-					return Ok(l.owner.eq(node));
-				}
-				// If we reach here, the lease exists but has expired
-			}
-			// If we reach here, either no lease exists or it has expired
+		// First check if there's already a valid lease
+		if let Some(is_owner) = self.check_existing_lease(node, tf, key).await? {
+			return Ok(is_owner);
 		}
 
+		// If no valid lease exists or it has expired, acquire a new one
+		self.acquire_new_lease(node, tf, key, lt).await
+	}
+
+	/// Checks if there's an existing valid lease and determines if the current node is the owner.
+	///
+	/// # Parameters
+	/// * `node` - The UUID of the node checking the lease
+	/// * `tf` - Transaction factory for database operations
+	/// * `key` - The key used to store the lease in the datastore
+	///
+	/// # Returns
+	/// * `Ok(Some(true))` - If a valid lease exists and this node is the owner
+	/// * `Ok(Some(false))` - If a valid lease exists but another node is the owner
+	/// * `Ok(None)` - If no valid lease exists (either no lease or it has expired)
+	/// * `Err` - If database operations fail
+	async fn check_existing_lease(
+		&self,
+		node: &Uuid,
+		tf: &TransactionFactory,
+		key: &Key,
+	) -> Result<Option<bool>> {
+		let tx = tf.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		if let Some(l) = tx.get(key, None).await? {
+			let l: TaskLease = revision::from_slice(&l)?;
+			// If the lease hasn't expired yet, check if this node is the owner
+			if l.expiration > Utc::now() {
+				// Return whether this node is the owner
+				return Ok(Some(l.owner.eq(node)));
+			}
+			// If we reach here, the lease exists but has expired
+		}
+		// If we reach here, either no lease exists or it has expired
+		Ok(None)
+	}
+
+	/// Attempts to acquire a new lease for the current node.
+	///
+	/// # Parameters
+	/// * `node` - The UUID of the node acquiring the lease
+	/// * `tf` - Transaction factory for database operations
+	/// * `key` - The key used to store the lease in the datastore
+	/// * `lt` - Lease duration (how long the lease should be valid)
+	///
+	/// # Returns
+	/// * `Ok(true)` - If the lease was successfully acquired
+	/// * `Err` - If database operations fail
+	async fn acquire_new_lease(
+		&self,
+		node: &Uuid,
+		tf: &TransactionFactory,
+		key: &Key,
+		lt: &Duration,
+	) -> Result<bool> {
 		// Attempt to acquire a new lease by writing to the datastore
 		let tx = tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
 		let lease = TaskLease {
