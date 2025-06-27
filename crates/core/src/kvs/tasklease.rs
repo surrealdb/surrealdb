@@ -179,6 +179,7 @@ mod tests {
 	use crate::kvs::tasklease::TaskLeaseType;
 	use std::sync::Arc;
 	use std::time::{Duration, Instant};
+	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
 	use uuid::Uuid;
 
