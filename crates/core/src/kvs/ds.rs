@@ -105,13 +105,20 @@ pub struct Datastore {
 
 #[derive(Clone)]
 pub(super) struct TransactionFactory {
-	// Clock for tracking time. It is read only and accessible to all transactions. It is behind a mutex as tests may write to it.
+	// Clock for tracking time. It is read-only and accessible to all transactions.
 	clock: Arc<SizedClock>,
 	// The inner datastore type
 	flavor: Arc<DatastoreFlavor>,
 }
 
 impl TransactionFactory {
+	pub(super) fn new(clock: Arc<SizedClock>, flavor: DatastoreFlavor) -> Self {
+		Self {
+			clock,
+			flavor: flavor.into(),
+		}
+	}
+
 	#[allow(
 		unreachable_code,
 		unreachable_patterns,
@@ -381,10 +388,7 @@ impl Datastore {
 		}?;
 		// Set the properties on the datastore
 		flavor.map(|flavor| {
-			let tf = TransactionFactory {
-				clock,
-				flavor: Arc::new(flavor),
-			};
+			let tf = TransactionFactory::new(clock, flavor);
 			Self {
 				id: Uuid::new_v4(),
 				transaction_factory: tf.clone(),
@@ -683,8 +687,11 @@ impl Datastore {
 
 	/// Run the background task to perform changefeed garbage collection
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process(&self) -> Result<()> {
-		if !TaskLeaseType::ChangeFeedCleanup.has_lease(&self.id, &self.transaction_factory).await? {
+	pub async fn changefeed_process(&self, delay: &Duration) -> Result<()> {
+		if !TaskLeaseType::ChangeFeedCleanup
+			.has_lease(&self.id, &self.transaction_factory, delay)
+			.await?
+		{
 			return Ok(());
 		}
 		// Output function invocation details to logs
