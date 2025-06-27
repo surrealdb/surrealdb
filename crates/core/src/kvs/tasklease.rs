@@ -171,6 +171,7 @@ impl TaskLeaseType {
 }
 
 #[cfg(test)]
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-mem"))]
 mod tests {
 	use crate::dbs::node::Timestamp;
 	use crate::kvs::clock::{FakeClock, SizedClock};
