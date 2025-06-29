@@ -10,4 +10,3 @@ Api module:
 TODO
 cargo test -p surrealdb --features kv-rocksdb --test api api_integration::file::delete_record_range
 ```
-
