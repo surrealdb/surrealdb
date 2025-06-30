@@ -138,7 +138,9 @@ impl LeaseHandler {
 			// If we own the lease and it's not close to expiring (more than half the lease duration remaining),
 			// we can continue using it without renewal
 			// First ensure the lease hasn't expired (defensive check)
-			if current_lease.expiration > now && current_lease.expiration - now > self.lease_duration / 2 {
+			if current_lease.expiration > now
+				&& current_lease.expiration - now > self.lease_duration / 2
+			{
 				return Ok(true);
 			}
 			// If we reach here, we own the lease but it's close to expiring,
@@ -196,12 +198,12 @@ mod tests {
 	use crate::kvs::clock::{FakeClock, SizedClock};
 	use crate::kvs::ds::{DatastoreFlavor, TransactionFactory};
 	use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
+	use chrono::{DateTime, Utc};
 	use std::sync::Arc;
 	use std::time::{Duration, Instant};
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
 	use uuid::Uuid;
-	use chrono::{DateTime, Utc};
 
 	/// Tracks the results of lease acquisition attempts by a node.
 	///
@@ -361,7 +363,8 @@ mod tests {
 		let node_id = Uuid::new_v4();
 
 		// Create a lease handler
-		let lh = LeaseHandler::new(node_id, tf, TaskLeaseType::ChangeFeedCleanup, lease_duration).unwrap();
+		let lh = LeaseHandler::new(node_id, tf, TaskLeaseType::ChangeFeedCleanup, lease_duration)
+			.unwrap();
 
 		// PART 1: Initial lease acquisition
 		// Initially acquire the lease
@@ -381,8 +384,11 @@ mod tests {
 
 		// Verify the expiration hasn't changed (no renewal)
 		let current_lease = lh.check_valid_lease(now).await.unwrap();
-		assert_eq!(current_lease.unwrap().expiration, initial_expiration, 
-			"Lease should not be renewed when more than half duration remains");
+		assert_eq!(
+			current_lease.unwrap().expiration,
+			initial_expiration,
+			"Lease should not be renewed when more than half duration remains"
+		);
 
 		// PART 3: Verify the condition for renewal
 		// We can't directly control Utc::now() in check_lease(), so we'll manually verify
@@ -399,8 +405,10 @@ mod tests {
 		let half_duration = lh.lease_duration / 2;
 
 		// Verify that this would trigger the renewal condition in check_lease()
-		assert!(remaining_duration < half_duration, 
-			"The condition for renewal (less than half duration remaining) should be true");
+		assert!(
+			remaining_duration < half_duration,
+			"The condition for renewal (less than half duration remaining) should be true"
+		);
 
 		// PART 4: Force a renewal and verify it happened
 		// We can't directly control time, but we can force a renewal by manipulating the lease
