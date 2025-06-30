@@ -198,6 +198,7 @@ mod tests {
 	use crate::kvs::clock::{FakeClock, SizedClock};
 	use crate::kvs::ds::{DatastoreFlavor, TransactionFactory};
 	use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
+	#[cfg(feature = "kv-mem")]
 	use chrono::Utc;
 	use std::sync::Arc;
 	use std::time::{Duration, Instant};
