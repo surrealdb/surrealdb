@@ -28,7 +28,7 @@ use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
-use crate::kvs::tasklease::TaskLeaseType;
+use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::Query;
 use crate::syn;
@@ -709,15 +709,19 @@ impl Datastore {
 	/// * Returns an error if the system clock appears to have gone backwards
 	/// * Propagates any errors from the underlying database operations
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process(&self, delay: &Duration) -> Result<()> {
+	pub async fn changefeed_process(&self, gc_interval: &Duration) -> Result<()> {
+		let lh = LeaseHandler::new(
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::ChangeFeedCleanup,
+			*gc_interval * 2,
+		)?;
 		// Attempt to acquire a lease for the ChangeFeedCleanup task
 		// If we don't get the lease, another node is handling this task
-		if !TaskLeaseType::ChangeFeedCleanup
-			.has_lease(&self.id, &self.transaction_factory, delay)
-			.await?
-		{
+		if !lh.has_lease().await? {
 			return Ok(());
 		}
+		let lh = Some(lh);
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
 		// Calculate the current system time in seconds since UNIX epoch
@@ -729,9 +733,9 @@ impl Datastore {
 			})?
 			.as_secs();
 		// Save timestamps for current versionstamps to track cleanup progress
-		self.changefeed_versionstamp(ts).await?;
+		self.changefeed_versionstamp(lh.as_ref(), ts).await?;
 		// Remove old changefeed data from all databases based on retention policies
-		self.changefeed_cleanup(ts).await?;
+		self.changefeed_cleanup(lh.as_ref(), ts).await?;
 		// Everything completed successfully
 		Ok(())
 	}
@@ -759,15 +763,15 @@ impl Datastore {
 	///
 	/// # Errors
 	/// * Propagates any errors from the underlying database operations
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process_at(&self, ts: u64) -> Result<()> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, lh))]
+	pub async fn changefeed_process_at(&self, lh: Option<&LeaseHandler>, ts: u64) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
 		// Save timestamps for current versionstamps using the provided timestamp
-		self.changefeed_versionstamp(ts).await?;
+		self.changefeed_versionstamp(lh, ts).await?;
 		// Remove old changefeed data from all databases based on retention policies
 		// using the provided timestamp as the reference point
-		self.changefeed_cleanup(ts).await?;
+		self.changefeed_cleanup(lh, ts).await?;
 		// Everything completed successfully
 		Ok(())
 	}
