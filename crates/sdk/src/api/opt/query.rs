@@ -81,7 +81,18 @@ impl QueryAccessor<Value> for usize {}
 impl query_accessor::Sealed<Value> for usize {
 	fn query_result(self, results: &mut QueryResults) -> Result<Value> {
 		match results.results.swap_remove(&self) {
-			Some(query_result) => Ok(query_result.result?),
+			Some(query_result) => {
+				let mut values = query_result.values?;
+				if values.is_empty() {
+					bail!("No values found for index {}", self);
+				}
+
+				if values.len() > 1 {
+					bail!("{} values found for index {}, but expected 1", values.len(), self);
+				}
+
+				Ok(values.pop().unwrap())
+			},
 			None => Ok(Value::None),
 		}
 	}
@@ -97,8 +108,8 @@ where
 	T: TryFromValue,
 {
 	fn query_result(self, results: &mut QueryResults) -> Result<Option<T>> {
-		let mut value = match results.results.swap_remove(&self) {
-			Some(query_result) => match query_result.result {
+		let mut values = match results.results.swap_remove(&self) {
+			Some(query_result) => match query_result.values {
 				Ok(val) => val,
 				Err(error) => {
 					return Err(error.into());
@@ -108,25 +119,20 @@ where
 				return Ok(None);
 			}
 		};
-		let result = match &mut value {
-			Value::Array(vec) => match &mut vec.0[..] {
-				[] => Ok(None),
-				[value] => {
-					let value = mem::take(value);
-					Option::<T>::try_from_value(value)
-				}
-				_ => Err(Error::LossyTake(QueryResults {
-					results: mem::take(&mut results.results),
-					live_queries: mem::take(&mut results.live_queries),
-				})
-				.into()),
-			},
-			value => {
-				let value = mem::take(value);
-				Option::<T>::try_from_value(value)
-			}
-		};
-		result
+
+		if values.is_empty() {
+			return Ok(None);
+		}
+
+		if values.len() > 1 {
+			return Err(Error::LossyTake(QueryResults {
+				results: mem::take(&mut results.results),
+			})
+			.into());
+		}
+
+		let value = values.pop().unwrap();
+		Option::<T>::try_from_value(value)
 	}
 
 	fn stats(&self, results: &QueryResults) -> Option<QueryStats> {
@@ -138,8 +144,8 @@ impl QueryAccessor<Value> for (usize, &str) {}
 impl query_accessor::Sealed<Value> for (usize, &str) {
 	fn query_result(self, response: &mut QueryResults) -> Result<Value> {
 		let (index, key) = self;
-		let mut value = match response.results.swap_remove(&index) {
-			Some(query_result) => match query_result.result {
+		let mut values = match response.results.swap_remove(&index) {
+			Some(query_result) => match query_result.values {
 				Ok(val) => val,
 				Err(error) => {
 					return Err(error.into());
@@ -149,6 +155,16 @@ impl query_accessor::Sealed<Value> for (usize, &str) {
 				return Ok(Value::None);
 			}
 		};
+
+		if values.is_empty() {
+			return Ok(Value::None);
+		}
+
+		if values.len() > 1 {
+			bail!("{} values found for index {}, but expected 1", values.len(), index);
+		}
+
+		let mut value = values.pop().unwrap().try_into()?;
 
 		let value = match &mut value {
 			Value::Object(object) => object.remove(key).unwrap_or_default(),
@@ -170,8 +186,8 @@ where
 {
 	fn query_result(self, results: &mut QueryResults) -> Result<Option<T>> {
 		let (index, key) = self;
-		let mut value = match results.results.swap_remove(&index) {
-			Some(query_result) => match query_result.result {
+		let mut values = match results.results.swap_remove(&index) {
+			Some(query_result) => match query_result.values {
 				Ok(val) => val,
 				Err(error) => {
 					return Err(error.into());
@@ -181,31 +197,23 @@ where
 				return Ok(None);
 			}
 		};
-		let value = match &mut value {
-			Value::Array(vec) => match &mut vec.0[..] {
-				[] => {
-					results.results.swap_remove(&index);
-					return Ok(None);
-				}
-				[value] => value,
-				_ => {
-					return Err(Error::LossyTake(QueryResults {
-						results: mem::take(&mut results.results),
-						live_queries: mem::take(&mut results.live_queries),
-					})
-					.into());
-				}
-			},
-			value => value,
-		};
-		match value {
+
+		if values.is_empty() {
+			return Ok(None);
+		}
+
+		if values.len() > 1 {
+			bail!("{} values found for index {}, but expected 1", values.len(), index);
+		}
+
+		let mut value = values.pop().unwrap().try_into()?;
+
+		match &mut value {
 			Value::None => {
-				results.results.swap_remove(&index);
 				Ok(None)
 			}
 			Value::Object(object) => {
 				if object.is_empty() {
-					results.results.swap_remove(&index);
 					return Ok(None);
 				}
 				let Some(value) = object.remove(key) else {
@@ -229,9 +237,11 @@ where
 {
 	fn query_result(self, results: &mut QueryResults) -> Result<Vec<T>> {
 		let vec = match results.results.swap_remove(&self) {
-			Some(query_result) => match query_result.result? {
-				Value::Array(vec) => vec.0,
-				vec => vec![vec],
+			Some(query_result) => match query_result.values {
+				Ok(vec) => vec,
+				Err(err) => {
+					return Err(err.into());
+				}
 			},
 			None => {
 				return Ok(vec![]);
@@ -252,38 +262,25 @@ where
 {
 	fn query_result(self, results: &mut QueryResults) -> Result<Vec<T>> {
 		let (index, key) = self;
-		match results.results.get_mut(&index) {
-			Some(query_result) => match &mut query_result.result {
-				Ok(val) => match val {
-					Value::Array(vec) => {
-						let mut responses = Vec::with_capacity(vec.len());
-						for value in vec.iter_mut() {
-							if let Value::Object(object) = value {
-								if let Some(value) = object.remove(key) {
-									responses.push(T::try_from_value(value)?);
-								}
-							}
-						}
-						Ok(responses)
-					}
-					val => {
-						if let Value::Object(object) = val {
-							if let Some(value) = object.remove(key) {
-								return Ok(vec![T::try_from_value(value)?]);
-							}
-						}
-						Ok(vec![])
-					}
-				},
+		let values = match results.results.get_mut(&index) {
+			Some(query_result) => match &mut query_result.values {
+				Ok(values) => values,
 				Err(error) => {
-					todo!("STU");
-					// let error = mem::replace(error, Error::ConnectionUninitialised.into());
-					// results.results.swap_remove(&index);
-					// Err(error)
+					bail!(error.clone());
 				}
 			},
-			None => Ok(vec![]),
+			None => return Ok(vec![]),
+		};
+
+		let mut responses = Vec::with_capacity(values.len());
+		for value in values.iter_mut() {
+			if let Value::Object(object) = value {
+				if let Some(value) = object.remove(key) {
+					responses.push(T::try_from_value(value)?);
+				}
+			}
 		}
+		Ok(responses)
 	}
 
 	fn stats(&self, response: &QueryResults) -> Option<QueryStats> {
@@ -315,19 +312,6 @@ where
 {
 	fn query_result(self, response: &mut QueryResults) -> Result<Vec<T>> {
 		(0, self).query_result(response)
-	}
-}
-
-/// A way to take a query stream future from a query response
-pub trait QueryStream<R>: query_stream::Sealed<R> {}
-
-mod query_stream {
-	pub trait Sealed<R> {
-		/// Retrieves the query stream future
-		fn query_stream(
-			self,
-			results: &mut super::QueryResults,
-		) -> super::Result<super::method::QueryStream<R>>;
 	}
 }
 

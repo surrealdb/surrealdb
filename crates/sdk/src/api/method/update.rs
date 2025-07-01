@@ -1,20 +1,18 @@
 use super::transaction::WithTransaction;
 use crate::Surreal;
-use crate::method::merge::Merge;
-use crate::method::patch::Patch;
 use crate::opt::PatchOp;
 use crate::opt::PatchOps;
 use crate::opt::RangeableResource;
 
-use crate::api::Connection;
+
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::api::method::Content;
 use crate::api::opt::Resource;
-use crate::method::OnceLockExt;
+
 use crate::opt::KeyRange;
 use serde::Serialize;
+use surrealdb_protocol::proto::rpc::v1::UpdateRequest;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -26,17 +24,16 @@ use uuid::Uuid;
 /// An update future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Update<'r, C: Connection, R: Resource, RT> {
-	pub(super) client: Cow<'r, Surreal<C>>,
+pub struct Update<R: Resource, RT> {
+	pub(super) client: Surreal,
 	pub(super) txn: Option<Uuid>,
-	pub(super) resource: R,
+	pub(super) what: R,
+	pub(super) data: Data,
 	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R, RT> WithTransaction for Update<'_, C, R, RT>
-where
-	C: Connection,
-	R: Resource,
+impl<R, RT> WithTransaction for Update<R, RT>
+where 	R: Resource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -44,81 +41,42 @@ where
 	}
 }
 
-impl<C, R, RT> Update<'_, C, R, RT>
+impl<R, RT> IntoFuture for Update<R, RT>
 where
-	C: Connection,
 	R: Resource,
+	RT: TryFromValue,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Update<'static, C, R, RT> {
-		Update {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
+	type Output = Result<RT>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
+
+	fn into_future(self) -> Self::IntoFuture {
+		let Update {
+			txn,
+			client,
+			what,
+			data,
+			..
+		} = self;
+		Box::pin(async move {
+			let client = client.client;
+
+			// let response = client.update(UpdateRequest {
+			// 	txn: txn.map(TryInto::try_into).transpose()?,
+			// 	what: what.into_values(),
+			// 	data: data.map(TryInto::try_into).transpose()?,
+			// 	..Default::default()
+			// }).await?;
+			// let response = response.into_inner();
+
+			todo!("STUB: Update<R, RT> future");
+			// Ok(RT::try_from_value(response.data)?)
+		})
 	}
-}
-
-macro_rules! into_future {
-	($method:ident) => {
-		fn into_future(self) -> Self::IntoFuture {
-			let Update {
-				txn,
-				client,
-				resource,
-				..
-			} = self;
-			Box::pin(async move {
-				let router = client.inner.router.extract()?;
-				router
-					.$method(Command::Update {
-						txn,
-						what: resource.into_values(),
-						data: None,
-					})
-					.await
-			})
-		}
-	};
-}
-
-impl<'r, Client, R> IntoFuture for Update<'r, Client, R, Value>
-where
-	Client: Connection,
-	R: Resource + 'r,
-{
-	type Output = Result<Value>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_value}
-}
-
-impl<'r, Client, R, RT> IntoFuture for Update<'r, Client, R, Option<RT>>
-where
-	Client: Connection,
-	R: Resource + 'r,
-	RT: TryFromValue,
-{
-	type Output = Result<Option<RT>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_opt}
-}
-
-impl<'r, Client, R, RT> IntoFuture for Update<'r, Client, R, Vec<RT>>
-where
-	Client: Connection,
-	R: Resource + 'r,
-	RT: TryFromValue,
-{
-	type Output = Result<Vec<RT>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_vec}
 }
 
 // impl<C, R> Update<'_, C, R, Value>
 // where
-// 	C: Connection,
+// 	C
 // 	R: RangeableResource,
 // {
 // 	/// Restricts the records to update to those in the specified range
@@ -130,7 +88,7 @@ where
 
 // impl<C, R, RT> Update<'_, C, R, Vec<RT>>
 // where
-// 	C: Connection,
+// 	C
 // 	R: RangeableResource,
 // {
 // 	/// Restricts the records to update to those in the specified range
@@ -140,50 +98,46 @@ where
 // 	}
 // }
 
-impl<'r, C, R, RT> Update<'r, C, R, RT>
-where
-	C: Connection,
-	R: Resource,
+impl<R, RT> Update<R, RT>
+where R: Resource,
 	RT: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content(self, data: Value) -> Content<'r, C, RT> {
-		let what = self.resource.into_values();
-
+	pub fn content(self, data: Value) -> Update<R, RT> {
 		let data = match data {
-			Value::None => None,
-			content => Some(Data::ContentExpression(content)),
+			Value::None => Data::EmptyExpression,
+			content => Data::ContentExpression(content),
 		};
 
-		let cmd = Command::Update {
+
+		Self {
 			txn: self.txn,
-			what,
+			client: self.client,
+			what: self.what,
 			data,
-		};
-
-		Content::new(self.client, cmd)
+			response_type: PhantomData,
+		}
 	}
 
 	/// Merges the current document / record data with the specified data
-	pub fn merge(self, data: Value) -> Merge<'r, C, R, RT> {
-		Merge {
+	pub fn merge(self, data: Value) -> Update<R, RT> {
+		Self {
 			txn: self.txn,
 			client: self.client,
-			resource: self.resource,
-			content: Data::MergeExpression(data),
-			upsert: false,
+			what: self.what,
+			data: Data::MergeExpression(data),
 			response_type: PhantomData,
 		}
 	}
 
 	/// Patches the current document / record data with the specified JSON Patch data
-	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R, RT> {
-		Patch {
+	pub fn patch(self, patch: impl Into<PatchOp>) -> Update<R, RT> {
+		let patch = patch.into().into();
+		Self {
 			txn: self.txn,
-			patches: PatchOps(vec![patch.into()]),
 			client: self.client,
-			resource: self.resource,
-			upsert: false,
+			what: self.what,
+			data: Data::PatchExpression(patch),
 			response_type: PhantomData,
 		}
 	}

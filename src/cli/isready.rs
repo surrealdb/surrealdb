@@ -1,7 +1,7 @@
 use crate::cli::abstraction::DatabaseConnectionArguments;
 use anyhow::Result;
 use clap::Args;
-use surrealdb::engine::any::connect;
+use surrealdb::Surreal;
 
 #[derive(Args, Debug)]
 pub struct IsReadyCommandArguments {
@@ -17,7 +17,7 @@ pub async fn init(
 	}: IsReadyCommandArguments,
 ) -> Result<()> {
 	// Connect to the database engine
-	connect(endpoint).await?;
+	Surreal::connect(endpoint, 1024).await?;
 	// Log output ok
 	println!("OK");
 	// All ok

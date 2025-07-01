@@ -261,9 +261,9 @@ pub async fn init() -> ExitCode {
 		file.write_all(&content).unwrap();
 	};
 	// Error and exit the programme
-	if let Err(e) = output {
+	if let Err(err) = output {
 		// Output any error
-		error!("{}", e);
+		error!("{err:?}");
 		// Drop the log guards
 		for guard in guards {
 			drop(guard);

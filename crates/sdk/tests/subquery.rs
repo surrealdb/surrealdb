@@ -30,7 +30,7 @@ async fn subquery_select() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -43,7 +43,7 @@ async fn subquery_select() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -54,7 +54,7 @@ async fn subquery_select() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -65,7 +65,7 @@ async fn subquery_select() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -76,7 +76,7 @@ async fn subquery_select() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -87,7 +87,7 @@ async fn subquery_select() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -98,7 +98,7 @@ async fn subquery_select() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -151,15 +151,15 @@ async fn subquery_ifelse_set() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -172,11 +172,11 @@ async fn subquery_ifelse_set() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -191,7 +191,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -205,11 +205,11 @@ async fn subquery_ifelse_set() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -225,7 +225,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -281,15 +281,15 @@ async fn subquery_ifelse_array() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -302,11 +302,11 @@ async fn subquery_ifelse_array() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -321,7 +321,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -335,11 +335,11 @@ async fn subquery_ifelse_array() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -355,7 +355,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{

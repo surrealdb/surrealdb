@@ -30,7 +30,7 @@ async fn select_aggregate() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 12);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -43,7 +43,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -56,7 +56,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -69,7 +69,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -82,7 +82,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -95,7 +95,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -108,7 +108,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -121,7 +121,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -134,7 +134,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -147,7 +147,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -209,7 +209,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -259,7 +259,7 @@ async fn select_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -315,7 +315,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -329,7 +329,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -343,7 +343,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -357,7 +357,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -371,7 +371,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -391,7 +391,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -413,7 +413,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -469,7 +469,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -483,7 +483,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -497,7 +497,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -511,7 +511,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -525,7 +525,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -543,7 +543,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -561,7 +561,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -579,7 +579,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -629,7 +629,7 @@ async fn select_array_group_group_by() -> Result<()> {
 	//
 	skip_ok(res, 4)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
                 {
@@ -667,7 +667,7 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 	//
 	skip_ok(res, 3)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -692,7 +692,7 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 	);
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 					{
@@ -718,7 +718,7 @@ async fn select_aggregate_mean_update() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -730,11 +730,11 @@ async fn select_aggregate_mean_update() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("None").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -746,7 +746,7 @@ async fn select_aggregate_mean_update() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{

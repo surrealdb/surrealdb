@@ -2,19 +2,19 @@ use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::opt::InsertableResource;
 
-use crate::api::Connection;
+
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::method::Content;
 use crate::api::opt::Resource;
-use crate::method::OnceLockExt;
+
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::expr::{Data, TryFromValue};
 use surrealdb_core::expr::{Object, Value, to_value as to_core_value};
+use surrealdb_protocol::proto::rpc::v1::InsertRequest;
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
@@ -22,17 +22,16 @@ use super::insert_relation::InsertRelation;
 /// An insert future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Insert<'r, C: Connection, R: InsertableResource, RT> {
-	pub(super) client: Cow<'r, Surreal<C>>,
+pub struct Insert<R: InsertableResource, RT> {
+	pub(super) client: Surreal,
 	pub(super) txn: Option<Uuid>,
-	pub(super) resource: R,
+	pub(super) what: R,
+	pub(super) data: Data,
 	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R, RT> WithTransaction for Insert<'_, C, R, RT>
-where
-	C: Connection,
-	R: InsertableResource,
+impl<R, RT> WithTransaction for Insert<R, RT>
+where R: InsertableResource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -40,109 +39,62 @@ where
 	}
 }
 
-impl<C, R, RT> Insert<'_, C, R, RT>
+
+impl<R, RT> IntoFuture for Insert<R, RT>
 where
-	C: Connection,
 	R: InsertableResource,
+	RT: TryFromValue,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Insert<'static, C, R, RT> {
-		Insert {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
+	type Output = Result<RT>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
+
+	fn into_future(self) -> Self::IntoFuture {
+		let Insert {
+			txn,
+			client,
+			what,
+			data,
+			..
+		} = self;
+		Box::pin(async move {
+			let client = client.client;
+
+			// let response = client.insert(InsertRequest {
+			// 	txn: txn.map(TryInto::try_into).transpose()?,
+			// 	what: what.into_values().into_iter().map(TryInto::try_into).collect::<Result<Vec<_>>>()?,
+			// 	data,
+			// }).await?;
+
+			todo!("STU: Implement InsertResponse");
+		})
 	}
 }
 
-macro_rules! into_future {
-	($method:ident) => {
-		fn into_future(self) -> Self::IntoFuture {
-			let Insert {
-				txn,
-				client,
-				resource,
-				..
-			} = self;
-			Box::pin(async move {
-				let table = resource.table_name();
-				let data = resource.default_content();
-				let cmd = Command::Insert {
-					txn,
-					what: Some(table.to_string()),
-					data: data.into(),
-				};
-
-				let router = client.inner.router.extract()?;
-				router.$method(cmd).await
-			})
-		}
-	};
-}
-
-impl<'r, Client, R> IntoFuture for Insert<'r, Client, R, Value>
-where
-	Client: Connection,
-	R: InsertableResource + 'r,
-{
-	type Output = Result<Value>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_value}
-}
-
-impl<'r, Client, R, RT> IntoFuture for Insert<'r, Client, R, Option<RT>>
-where
-	Client: Connection,
-	R: InsertableResource + 'r,
-	RT: TryFromValue,
-{
-	type Output = Result<Option<RT>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_opt}
-}
-
-impl<'r, Client, R, RT> IntoFuture for Insert<'r, Client, R, Vec<RT>>
-where
-	Client: Connection,
-	R: InsertableResource + 'r,
-	RT: TryFromValue,
-{
-	type Output = Result<Vec<RT>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_vec}
-}
-
-impl<'r, C, R, RT> Insert<'r, C, R, RT>
-where
-	C: Connection,
-	R: InsertableResource,
+impl<R, RT> Insert<R, RT>
+where R: InsertableResource,
 	RT: TryFromValue,
 {
 	/// Specifies the data to insert into the table
-	pub fn content(self, data: Value) -> Content<'r, C, RT> {
-		let table = self.resource.table_name();
+	pub fn content(self, data: Value) -> Insert<R, RT> {
+		todo!("STU: Implement Insert::content");
+		// let table = self.what.table_name();
 
-		Content::new(
-			self.client,
-			Command::Insert {
-				txn: self.txn,
-				what: Some(table.into()),
-				data,
-			},
-		)
+		// Self {
+		// 	txn: self.txn,
+		// 	client: self.client,
+		// 	what: self.what,
+		// 	data: Some(data.try_into()?),
+		// 	response_type: PhantomData,
+		// }
 	}
 }
 
-impl<'r, C, R, RT> Insert<'r, C, R, RT>
-where
-	C: Connection,
-	R: InsertableResource,
+impl<R, RT> Insert<R, RT>
+where R: InsertableResource,
 	RT: TryFromValue,
 {
 	/// Specifies the data to insert into the table
-	pub fn relation(self, data: Value) -> InsertRelation<'r, C, RT> {
+	pub fn relation(self, data: Value) -> InsertRelation<RT> {
 		InsertRelation::from_closure(self.client, || {
 			todo!("STU: Implement InsertRelation for Insert");
 			// match self.resource? {

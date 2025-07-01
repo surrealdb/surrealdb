@@ -4,18 +4,18 @@ use std::time::Duration;
 use crate::dbs::Notification;
 use crate::expr::Value;
 use crate::protocol::ToFlatbuffers;
-use crate::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
+
 use crate::rpc::RpcError;
-use crate::sql::statement::Statement;
 use chrono::DateTime;
+use chrono::TimeZone;
 use chrono::Utc;
-use revision::Revisioned;
-use revision::revisioned;
 use serde::Deserialize;
 use serde::Serialize;
-use serde::ser::SerializeStruct;
+use surrealdb_protocol::proto::prost_types;
+use surrealdb_protocol::proto::rpc::v1;
 use std::error::Error;
 use std::fmt;
+use anyhow::Context;
 
 /// The data returned from a query execution.
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ impl ResponseData {
 	pub fn new_from_value(value: Value) -> Self {
 		Self::Results(vec![QueryResult {
 			stats: QueryStats::default(),
-			result: Ok(value),
+			values: Ok(value.into_vec()),
 		}])
 	}
 }
@@ -123,51 +123,32 @@ impl From<RpcError> for Failure {
 	}
 }
 
-impl ToFlatbuffers for Failure {
-	type Output<'bldr> = flatbuffers::WIPOffset<rpc_fb::QueryResultError<'bldr>>;
-
-	#[inline]
-	fn to_fb<'bldr>(
-		&self,
-		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		let message = builder.create_string(&self.message);
-		rpc_fb::QueryResultError::create(
-			builder,
-			&rpc_fb::QueryResultErrorArgs {
-				code: self.code,
-				message: Some(message),
-			},
-		)
-	}
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QueryResult {
 	// pub index: u32,
 	pub stats: QueryStats,
-	pub result: Result<Value, Failure>,
+	pub values: Result<Vec<Value>, Failure>,
 }
 
 impl QueryResult {
 	pub fn ok(value: Value) -> Self {
 		Self {
 			stats: QueryStats::default(),
-			result: Ok(value),
+			values: Ok(vec![value]),
 		}
 	}
 
 	pub fn err(err: Failure) -> Self {
 		Self {
 			stats: QueryStats::default(),
-			result: Err(err),
+			values: Err(err),
 		}
 	}
 
 	pub fn new_from_value(value: Value) -> Self {
 		Self {
 			stats: QueryStats::default(),
-			result: Ok(value),
+			values: Ok(vec![value]),
 		}
 	}
 }
@@ -176,35 +157,8 @@ impl Default for QueryResult {
 	fn default() -> Self {
 		Self {
 			stats: QueryStats::default(),
-			result: Ok(Value::default()),
+			values: Ok(vec![]),
 		}
-	}
-}
-
-impl ToFlatbuffers for QueryResult {
-	type Output<'bldr> = flatbuffers::WIPOffset<rpc_fb::QueryResult<'bldr>>;
-
-	#[inline]
-	fn to_fb<'bldr>(
-		&self,
-		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		let (result_type, result) = match &self.result {
-			Ok(value) => {
-				(rpc_fb::QueryResultData::Data, Some(value.to_fb(builder).as_union_value()))
-			}
-			Err(err) => (rpc_fb::QueryResultData::Error, Some(err.to_fb(builder).as_union_value())),
-		};
-		let stats = self.stats.to_fb(builder);
-
-		rpc_fb::QueryResult::create(
-			builder,
-			&rpc_fb::QueryResultArgs {
-				stats: Some(stats),
-				result_type,
-				result,
-			},
-		)
 	}
 }
 
@@ -213,11 +167,13 @@ impl ToFlatbuffers for QueryResult {
 pub struct QueryStats {
 	pub start_time: DateTime<Utc>,
 	pub execution_duration: Duration,
+	pub num_records: i64,
 }
 
 impl QueryStats {
 	pub fn from_start_time(start_time: DateTime<Utc>) -> Self {
 		Self {
+			num_records: 0,
 			execution_duration: Utc::now()
 				.signed_duration_since(&start_time)
 				.to_std()
@@ -234,27 +190,37 @@ impl QueryResult {
 	}
 
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<Value, Failure> {
-		self.result
+	pub fn output(self) -> Result<Vec<Value>, Failure> {
+		self.values
 	}
 }
 
-impl ToFlatbuffers for QueryStats {
-	type Output<'bldr> = flatbuffers::WIPOffset<rpc_fb::QueryStats<'bldr>>;
+impl TryFrom<v1::QueryStats> for QueryStats {
+	type Error = anyhow::Error;
 
-	#[inline]
-	fn to_fb<'bldr>(
-		&self,
-		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		let start_time = self.start_time.to_fb(builder);
-		let execution_duration = self.execution_duration.to_fb(builder);
-		rpc_fb::QueryStats::create(
-			builder,
-			&rpc_fb::QueryStatsArgs {
-				start_time: Some(start_time),
-				execution_duration: Some(execution_duration),
-			},
-		)
+	fn try_from(stats: v1::QueryStats) -> Result<Self, Self::Error> {
+		let start_time = stats.start_time.context("start_time is required")?;
+		let execution_duration = stats.execution_duration.context("execution_duration is required")?;
+		Ok(Self {
+			start_time: DateTime::from_timestamp(start_time.seconds, start_time.nanos as u32).context("failed to parse start_time")?,
+			execution_duration: Duration::from_nanos(execution_duration.seconds as u64 * 1_000_000_000 + execution_duration.nanos as u64),
+			num_records: stats.num_records,
+		})
+	}
+}
+
+impl From<QueryStats> for v1::QueryStats {
+	fn from(stats: QueryStats) -> Self {
+		Self {
+			start_time: Some(prost_types::Timestamp {
+				seconds: stats.start_time.timestamp() as i64,
+				nanos: stats.start_time.timestamp_subsec_nanos() as i32,
+			}),
+			execution_duration: Some(prost_types::Duration {
+				seconds: stats.execution_duration.as_secs() as i64,
+				nanos: stats.execution_duration.subsec_nanos() as i32,
+			}),
+			num_records: stats.num_records,
+		}
 	}
 }

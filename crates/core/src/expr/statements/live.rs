@@ -187,7 +187,7 @@ mod tests {
 		let live_query_response =
 			&mut dbs.execute(&lq_stmt, &ses, Variables::default()).await.unwrap();
 
-		let live_id = live_query_response.remove(0).result.unwrap();
+		let live_id = live_query_response.remove(0).values.unwrap();
 		let live_id = match live_id {
 			Value::Uuid(id) => id,
 			_ => panic!("expected uuid"),
@@ -213,7 +213,7 @@ mod tests {
 		))
 		.into();
 
-		let tmp = create_response.remove(0).result.unwrap();
+		let tmp = create_response.remove(0).values.unwrap();
 		assert_eq!(tmp, expected_record);
 
 		// Create a new transaction to verify that the same table was used.

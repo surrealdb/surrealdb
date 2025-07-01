@@ -12,10 +12,9 @@ use crate::expr::{
 	Cond, Duration, Fetchs, Limit, LogicalPlan, Number, Start, Timeout, Uuid, Version,
 };
 use crate::iam::{AccessMethod, SigninParams, SignupParams};
-use crate::protocol::FromFlatbuffers;
-use crate::protocol::flatbuffers::surreal_db::protocol::expr::Variable;
+
 #[cfg(not(target_family = "wasm"))]
-use crate::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
@@ -290,7 +289,7 @@ pub trait RpcProtocolV3: RpcContext {
 				// Clone the parameters
 				let mut session = self.session().as_ref().clone();
 				// Remove the set parameter
-				session.parameters.remove(&key);
+				session.variables.remove(&key);
 				// Store the updated session
 				self.set_session(Arc::new(session));
 				// Drop the mutex guard
@@ -305,7 +304,7 @@ pub trait RpcProtocolV3: RpcContext {
 				// Clone the parameters
 				let mut session = self.session().as_ref().clone();
 				// Remove the set parameter
-				session.parameters.insert(key.to_string(), v);
+				session.variables.insert(key.to_string(), v);
 				// Store the updated session
 				self.set_session(Arc::new(session));
 				// Drop the mutex guard
@@ -334,7 +333,7 @@ pub trait RpcProtocolV3: RpcContext {
 		// Clone the parameters
 		let mut session = self.session().as_ref().clone();
 		// Remove the set parameter
-		session.parameters.remove(&key);
+		session.variables.remove(&key);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -363,7 +362,7 @@ pub trait RpcProtocolV3: RpcContext {
 			id: Value::Uuid(Uuid(live_uuid)),
 		});
 		// Specify the query parameters
-		let vars = self.session().parameters.clone();
+		let vars = self.session().variables.clone();
 		// Execute the query on the database
 		let mut res = self.kvs().process_plan(plan, &self.session(), vars).await?;
 		// Extract the first query result
@@ -432,7 +431,7 @@ pub trait RpcProtocolV3: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 
-		variables.extend(self.session().parameters.clone());
+		variables.extend(self.session().variables.clone());
 
 		// Specify the SQL query string
 		let plan = LogicalPlan::Select(SelectStatement {
@@ -750,7 +749,7 @@ pub trait RpcProtocolV3: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Merge the variables with the session variables
-		variables.extend(self.session().parameters.clone());
+		variables.extend(self.session().variables.clone());
 
 		// Execute the specified query
 		self.query_inner(&query, variables).await

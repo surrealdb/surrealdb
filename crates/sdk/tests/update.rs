@@ -24,7 +24,7 @@ async fn update_merge_and_content() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -36,7 +36,7 @@ async fn update_merge_and_content() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -48,19 +48,19 @@ async fn update_merge_and_content() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Can not use 'some content' in a CONTENT clause"#
 	));
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Can not use 'some content' in a CONTENT clause"#
 	));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -73,7 +73,7 @@ async fn update_merge_and_content() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Can not use 'some content' in a MERGE clause"#
@@ -112,10 +112,10 @@ async fn update_simple_with_input() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -126,7 +126,7 @@ async fn update_simple_with_input() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -138,13 +138,13 @@ async fn update_simple_with_input() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Found 'Name: jaime' for field `name`, with record `person:test`, but field must conform to: IF $input THEN $input = /^[A-Z]{1}[a-z]+$/ ELSE true END"#
 	));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -156,13 +156,13 @@ async fn update_simple_with_input() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Found 'Name: tobie' for field `name`, with record `person:test`, but field must conform to: IF $input THEN $input = /^[A-Z]{1}[a-z]+$/ ELSE true END"#
 	));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -174,7 +174,7 @@ async fn update_simple_with_input() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -229,7 +229,7 @@ async fn update_with_return_clause() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -242,7 +242,7 @@ async fn update_with_return_clause() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -255,7 +255,7 @@ async fn update_with_return_clause() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -267,7 +267,7 @@ async fn update_with_return_clause() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -279,7 +279,7 @@ async fn update_with_return_clause() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -306,7 +306,7 @@ async fn update_with_object_array_string_field_names() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -320,7 +320,7 @@ async fn update_with_object_array_string_field_names() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -378,7 +378,7 @@ async fn update_records_and_arrays_with_json_patch() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -399,7 +399,7 @@ async fn update_records_and_arrays_with_json_patch() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -426,7 +426,7 @@ async fn update_records_and_arrays_with_json_patch() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -929,10 +929,10 @@ async fn update_field_permissions() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -945,10 +945,10 @@ async fn update_field_permissions() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -966,7 +966,7 @@ async fn update_field_permissions() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{

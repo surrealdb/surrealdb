@@ -2,7 +2,7 @@ use crate::dbs::Variables;
 use crate::expr::graph::{GraphSubject, GraphSubjects};
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::part::{DestructurePart, Recurse, RecurseInstruction};
-use crate::protocol::{FromCapnp, FromFlatbuffers, ToCapnp, ToFlatbuffers};
+use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 
 use crate::expr::{
 	self, Array, Cond, Data, Datetime, Dir, Duration, Fetch, Fetchs, Field, Fields, File, Geometry,
@@ -18,11 +18,11 @@ use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
-use crate::protocol::flatbuffers::surreal_db::protocol::common as common_fb;
-use crate::protocol::flatbuffers::surreal_db::protocol::expr::{self as expr_fb, FileArgs};
+use surrealdb_protocol::fb::v1 as proto_fb;
+
 
 impl ToFlatbuffers for Value {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Value<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Value<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -30,19 +30,19 @@ impl ToFlatbuffers for Value {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
 		let args = match self {
-			Self::Null => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::Null,
+			Self::Null => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Null,
 				value: Some(
-					expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {})
+					proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {})
 						.as_union_value(),
 				),
 			},
-			Self::Bool(b) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::Bool,
+			Self::Bool(b) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Bool,
 				value: Some(
-					expr_fb::BoolValue::create(
+					proto_fb::BoolValue::create(
 						builder,
-						&expr_fb::BoolValueArgs {
+						&proto_fb::BoolValueArgs {
 							value: *b,
 						},
 					)
@@ -50,47 +50,47 @@ impl ToFlatbuffers for Value {
 				),
 			},
 			Self::Number(n) => match n {
-				crate::expr::Number::Int(i) => expr_fb::ValueArgs {
-					value_type: expr_fb::ValueType::Int64,
+				crate::expr::Number::Int(i) => proto_fb::ValueArgs {
+					value_type: proto_fb::ValueType::Int64,
 					value: Some(
-						expr_fb::Int64Value::create(
+						proto_fb::Int64Value::create(
 							builder,
-							&expr_fb::Int64ValueArgs {
+							&proto_fb::Int64ValueArgs {
 								value: *i,
 							},
 						)
 						.as_union_value(),
 					),
 				},
-				crate::expr::Number::Float(f) => expr_fb::ValueArgs {
-					value_type: expr_fb::ValueType::Float64,
+				crate::expr::Number::Float(f) => proto_fb::ValueArgs {
+					value_type: proto_fb::ValueType::Float64,
 					value: Some(
-						expr_fb::Float64Value::create(
+						proto_fb::Float64Value::create(
 							builder,
-							&expr_fb::Float64ValueArgs {
+							&proto_fb::Float64ValueArgs {
 								value: *f,
 							},
 						)
 						.as_union_value(),
 					),
 				},
-				crate::expr::Number::Decimal(d) => expr_fb::ValueArgs {
-					value_type: expr_fb::ValueType::Decimal,
+				crate::expr::Number::Decimal(d) => proto_fb::ValueArgs {
+					value_type: proto_fb::ValueType::Decimal,
 					value: Some(d.to_fb(builder).as_union_value()),
 				},
 			},
-			Self::Strand(s) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::String,
+			Self::Strand(s) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::String,
 				value: Some(s.to_fb(builder).as_union_value()),
 			},
 			Self::Bytes(b) => {
 				let bytes = builder.create_vector(b.as_slice());
-				expr_fb::ValueArgs {
-					value_type: expr_fb::ValueType::Bytes,
+				proto_fb::ValueArgs {
+					value_type: proto_fb::ValueType::Bytes,
 					value: Some(
-						common_fb::Bytes::create(
+						proto_fb::Bytes::create(
 							builder,
-							&common_fb::BytesArgs {
+							&proto_fb::BytesArgs {
 								value: Some(bytes),
 							},
 						)
@@ -98,36 +98,36 @@ impl ToFlatbuffers for Value {
 					),
 				}
 			}
-			Self::Thing(thing) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::RecordId,
+			Self::Thing(thing) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::RecordId,
 				value: Some(thing.to_fb(builder).as_union_value()),
 			},
-			Self::Duration(d) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::Duration,
+			Self::Duration(d) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Duration,
 				value: Some(d.to_fb(builder).as_union_value()),
 			},
-			Self::Datetime(dt) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::Timestamp,
+			Self::Datetime(dt) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Timestamp,
 				value: Some(dt.to_fb(builder).as_union_value()),
 			},
-			Self::Uuid(uuid) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::Uuid,
+			Self::Uuid(uuid) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Uuid,
 				value: Some(uuid.to_fb(builder).as_union_value()),
 			},
-			Self::Object(obj) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::Object,
+			Self::Object(obj) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Object,
 				value: Some(obj.to_fb(builder).as_union_value()),
 			},
-			Self::Array(arr) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::Array,
+			Self::Array(arr) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Array,
 				value: Some(arr.to_fb(builder).as_union_value()),
 			},
-			Self::Geometry(geometry) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::Geometry,
+			Self::Geometry(geometry) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Geometry,
 				value: Some(geometry.to_fb(builder).as_union_value()),
 			},
-			Self::File(file) => expr_fb::ValueArgs {
-				value_type: expr_fb::ValueType::File,
+			Self::File(file) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::File,
 				value: Some(file.to_fb(builder).as_union_value()),
 			},
 			_ => {
@@ -136,27 +136,27 @@ impl ToFlatbuffers for Value {
 			}
 		};
 
-		expr_fb::Value::create(builder, &args)
+		proto_fb::Value::create(builder, &args)
 	}
 }
 
 impl FromFlatbuffers for Value {
-	type Input<'a> = expr_fb::Value<'a>;
+	type Input<'a> = proto_fb::Value<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.value_type() {
-			expr_fb::ValueType::Null => Ok(Value::Null),
-			expr_fb::ValueType::Bool => {
+			proto_fb::ValueType::Null => Ok(Value::Null),
+			proto_fb::ValueType::Bool => {
 				Ok(Value::Bool(input.value_as_bool().expect("Guaranteed to be a Bool").value()))
 			}
-			expr_fb::ValueType::Int64 => Ok(Value::Number(Number::Int(
+			proto_fb::ValueType::Int64 => Ok(Value::Number(Number::Int(
 				input.value_as_int_64().expect("Guaranteed to be an Int64").value(),
 			))),
-			expr_fb::ValueType::Float64 => Ok(Value::Number(Number::Float(
+			proto_fb::ValueType::Float64 => Ok(Value::Number(Number::Float(
 				input.value_as_float_64().expect("Guaranteed to be a Float64").value(),
 			))),
-			expr_fb::ValueType::Decimal => {
+			proto_fb::ValueType::Decimal => {
 				let decimal_value = input.value_as_decimal().expect("Guaranteed to be a Decimal");
 				let decimal = decimal_value
 					.value()
@@ -165,7 +165,7 @@ impl FromFlatbuffers for Value {
 					.map_err(|_| anyhow!("Invalid decimal format"))?;
 				Ok(Value::Number(Number::Decimal(decimal)))
 			}
-			expr_fb::ValueType::String => {
+			proto_fb::ValueType::String => {
 				let string_value = input.value_as_string().expect("Guaranteed to be a String");
 				let value = string_value
 					.value()
@@ -173,53 +173,53 @@ impl FromFlatbuffers for Value {
 					.to_string();
 				Ok(Value::Strand(Strand(value)))
 			}
-			expr_fb::ValueType::Bytes => {
+			proto_fb::ValueType::Bytes => {
 				let bytes_value = input.value_as_bytes().expect("Guaranteed to be Bytes");
 				let value = Vec::<u8>::from_fb(
 					bytes_value.value().expect("Bytes value is guaranteed to be present"),
 				)?;
 				Ok(Value::Bytes(crate::expr::Bytes(value)))
 			}
-			expr_fb::ValueType::RecordId => {
+			proto_fb::ValueType::RecordId => {
 				let record_id_value =
 					input.value_as_record_id().expect("Guaranteed to be a RecordId");
 				let thing = Thing::from_fb(record_id_value)?;
 				Ok(Value::Thing(thing))
 			}
-			expr_fb::ValueType::Duration => {
+			proto_fb::ValueType::Duration => {
 				let duration_value =
 					input.value_as_duration().expect("Guaranteed to be a Duration");
 				let duration = Duration::from_fb(duration_value)?;
 				Ok(Value::Duration(duration))
 			}
-			expr_fb::ValueType::Timestamp => {
+			proto_fb::ValueType::Timestamp => {
 				let timestamp_value =
 					input.value_as_timestamp().expect("Guaranteed to be a Timestamp");
 				let dt = DateTime::<Utc>::from_fb(timestamp_value)?;
 				Ok(Value::Datetime(Datetime(dt)))
 			}
-			expr_fb::ValueType::Uuid => {
+			proto_fb::ValueType::Uuid => {
 				let uuid_value = input.value_as_uuid().expect("Guaranteed to be a Uuid");
 				let uuid = Uuid::from_fb(uuid_value)?;
 				Ok(Value::Uuid(uuid))
 			}
-			expr_fb::ValueType::Object => {
+			proto_fb::ValueType::Object => {
 				let object_value = input.value_as_object().expect("Guaranteed to be an Object");
 				let object = Object::from_fb(object_value)?;
 				Ok(Value::Object(object))
 			}
-			expr_fb::ValueType::Array => {
+			proto_fb::ValueType::Array => {
 				let array_value = input.value_as_array().expect("Guaranteed to be an Array");
 				let array = Array::from_fb(array_value)?;
 				Ok(Value::Array(array))
 			}
-			expr_fb::ValueType::Geometry => {
+			proto_fb::ValueType::Geometry => {
 				let geometry_value =
 					input.value_as_geometry().expect("Guaranteed to be a Geometry");
 				let geometry = Geometry::from_fb(geometry_value)?;
 				Ok(Value::Geometry(geometry))
 			}
-			expr_fb::ValueType::File => {
+			proto_fb::ValueType::File => {
 				let file_value = input.value_as_file().expect("Guaranteed to be a File");
 				let file = File::from_fb(file_value)?;
 				Ok(Value::File(file))
@@ -233,16 +233,16 @@ impl FromFlatbuffers for Value {
 }
 
 impl ToFlatbuffers for i64 {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Int64Value<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Int64Value<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
-		expr_fb::Int64Value::create(
+		proto_fb::Int64Value::create(
 			builder,
-			&expr_fb::Int64ValueArgs {
+			&proto_fb::Int64ValueArgs {
 				value: *self,
 			},
 		)
@@ -250,7 +250,7 @@ impl ToFlatbuffers for i64 {
 }
 
 impl FromFlatbuffers for i64 {
-	type Input<'a> = expr_fb::Int64Value<'a>;
+	type Input<'a> = proto_fb::Int64Value<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -259,16 +259,16 @@ impl FromFlatbuffers for i64 {
 }
 
 impl ToFlatbuffers for f64 {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Float64Value<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Float64Value<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
-		expr_fb::Float64Value::create(
+		proto_fb::Float64Value::create(
 			builder,
-			&expr_fb::Float64ValueArgs {
+			&proto_fb::Float64ValueArgs {
 				value: *self,
 			},
 		)
@@ -276,7 +276,7 @@ impl ToFlatbuffers for f64 {
 }
 
 impl FromFlatbuffers for f64 {
-	type Input<'a> = expr_fb::Float64Value<'a>;
+	type Input<'a> = proto_fb::Float64Value<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -285,7 +285,7 @@ impl FromFlatbuffers for f64 {
 }
 
 impl ToFlatbuffers for String {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::StringValue<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::StringValue<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -293,9 +293,9 @@ impl ToFlatbuffers for String {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
 		let value = builder.create_string(self);
-		expr_fb::StringValue::create(
+		proto_fb::StringValue::create(
 			builder,
-			&expr_fb::StringValueArgs {
+			&proto_fb::StringValueArgs {
 				value: Some(value),
 			},
 		)
@@ -303,7 +303,7 @@ impl ToFlatbuffers for String {
 }
 
 impl ToFlatbuffers for Decimal {
-	type Output<'bldr> = flatbuffers::WIPOffset<common_fb::Decimal<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Decimal<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -311,9 +311,9 @@ impl ToFlatbuffers for Decimal {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
 		let value = builder.create_string(&self.to_string());
-		common_fb::Decimal::create(
+		proto_fb::Decimal::create(
 			builder,
-			&common_fb::DecimalArgs {
+			&proto_fb::DecimalArgs {
 				value: Some(value),
 			},
 		)
@@ -321,16 +321,16 @@ impl ToFlatbuffers for Decimal {
 }
 
 impl ToFlatbuffers for std::time::Duration {
-	type Output<'bldr> = flatbuffers::WIPOffset<common_fb::Duration<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Duration<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
-		common_fb::Duration::create(
+		proto_fb::Duration::create(
 			builder,
-			&common_fb::DurationArgs {
+			&proto_fb::DurationArgs {
 				seconds: self.as_secs(),
 				nanos: self.subsec_nanos(),
 			},
@@ -339,7 +339,7 @@ impl ToFlatbuffers for std::time::Duration {
 }
 
 impl FromFlatbuffers for std::time::Duration {
-	type Input<'a> = common_fb::Duration<'a>;
+	type Input<'a> = proto_fb::Duration<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -350,7 +350,7 @@ impl FromFlatbuffers for std::time::Duration {
 }
 
 impl ToFlatbuffers for Duration {
-	type Output<'bldr> = flatbuffers::WIPOffset<common_fb::Duration<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Duration<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -362,7 +362,7 @@ impl ToFlatbuffers for Duration {
 }
 
 impl FromFlatbuffers for Duration {
-	type Input<'a> = common_fb::Duration<'a>;
+	type Input<'a> = proto_fb::Duration<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -372,16 +372,16 @@ impl FromFlatbuffers for Duration {
 }
 
 impl ToFlatbuffers for DateTime<Utc> {
-	type Output<'bldr> = flatbuffers::WIPOffset<common_fb::Timestamp<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Timestamp<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
-		common_fb::Timestamp::create(
+		proto_fb::Timestamp::create(
 			builder,
-			&common_fb::TimestampArgs {
+			&proto_fb::TimestampArgs {
 				seconds: self.timestamp(),
 				nanos: self.timestamp_subsec_nanos(),
 			},
@@ -390,7 +390,7 @@ impl ToFlatbuffers for DateTime<Utc> {
 }
 
 impl FromFlatbuffers for DateTime<Utc> {
-	type Input<'a> = common_fb::Timestamp<'a>;
+	type Input<'a> = proto_fb::Timestamp<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -402,7 +402,7 @@ impl FromFlatbuffers for DateTime<Utc> {
 }
 
 impl ToFlatbuffers for Uuid {
-	type Output<'bldr> = flatbuffers::WIPOffset<common_fb::Uuid<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Uuid<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -410,9 +410,9 @@ impl ToFlatbuffers for Uuid {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
 		let bytes = builder.create_vector(self.as_bytes());
-		common_fb::Uuid::create(
+		proto_fb::Uuid::create(
 			builder,
-			&common_fb::UuidArgs {
+			&proto_fb::UuidArgs {
 				bytes: Some(bytes),
 			},
 		)
@@ -420,7 +420,7 @@ impl ToFlatbuffers for Uuid {
 }
 
 impl FromFlatbuffers for Uuid {
-	type Input<'a> = common_fb::Uuid<'a>;
+	type Input<'a> = proto_fb::Uuid<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -430,7 +430,7 @@ impl FromFlatbuffers for Uuid {
 }
 
 impl ToFlatbuffers for Thing {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::RecordId<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::RecordId<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -439,9 +439,9 @@ impl ToFlatbuffers for Thing {
 	) -> Self::Output<'bldr> {
 		let table = builder.create_string(&self.tb);
 		let id = self.id.to_fb(builder);
-		expr_fb::RecordId::create(
+		proto_fb::RecordId::create(
 			builder,
-			&expr_fb::RecordIdArgs {
+			&proto_fb::RecordIdArgs {
 				table: Some(table),
 				id: Some(id),
 			},
@@ -450,7 +450,7 @@ impl ToFlatbuffers for Thing {
 }
 
 impl FromFlatbuffers for Thing {
-	type Input<'a> = expr_fb::RecordId<'a>;
+	type Input<'a> = proto_fb::RecordId<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -473,7 +473,7 @@ impl FromFlatbuffers for Vec<u8> {
 }
 
 impl ToFlatbuffers for Id {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Id<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Id<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -483,40 +483,40 @@ impl ToFlatbuffers for Id {
 		match self {
 			Id::Number(n) => {
 				let id = n.to_fb(builder).as_union_value();
-				expr_fb::Id::create(
+				proto_fb::Id::create(
 					builder,
-					&expr_fb::IdArgs {
-						id_type: expr_fb::IdType::Int64,
+					&proto_fb::IdArgs {
+						id_type: proto_fb::IdType::Int64,
 						id: Some(id),
 					},
 				)
 			}
 			Id::String(s) => {
 				let id = s.to_fb(builder).as_union_value();
-				expr_fb::Id::create(
+				proto_fb::Id::create(
 					builder,
-					&expr_fb::IdArgs {
-						id_type: expr_fb::IdType::String,
+					&proto_fb::IdArgs {
+						id_type: proto_fb::IdType::String,
 						id: Some(id),
 					},
 				)
 			}
 			Id::Uuid(uuid) => {
 				let id = uuid.to_fb(builder).as_union_value();
-				expr_fb::Id::create(
+				proto_fb::Id::create(
 					builder,
-					&expr_fb::IdArgs {
-						id_type: expr_fb::IdType::Uuid,
+					&proto_fb::IdArgs {
+						id_type: proto_fb::IdType::Uuid,
 						id: Some(id),
 					},
 				)
 			}
 			Id::Array(arr) => {
 				let id = arr.to_fb(builder).as_union_value();
-				expr_fb::Id::create(
+				proto_fb::Id::create(
 					builder,
-					&expr_fb::IdArgs {
-						id_type: expr_fb::IdType::Array,
+					&proto_fb::IdArgs {
+						id_type: proto_fb::IdType::Array,
 						id: Some(id),
 					},
 				)
@@ -527,17 +527,17 @@ impl ToFlatbuffers for Id {
 }
 
 impl FromFlatbuffers for Id {
-	type Input<'a> = expr_fb::Id<'a>;
+	type Input<'a> = proto_fb::Id<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.id_type() {
-			expr_fb::IdType::Int64 => {
+			proto_fb::IdType::Int64 => {
 				let id_value =
 					input.id_as_int_64().ok_or_else(|| anyhow::anyhow!("Expected Int64 Id"))?;
 				Ok(Id::Number(id_value.value()))
 			}
-			expr_fb::IdType::String => {
+			proto_fb::IdType::String => {
 				let id_value =
 					input.id_as_string().ok_or_else(|| anyhow::anyhow!("Expected String Id"))?;
 				Ok(Id::String(
@@ -547,13 +547,13 @@ impl FromFlatbuffers for Id {
 						.to_string(),
 				))
 			}
-			expr_fb::IdType::Uuid => {
+			proto_fb::IdType::Uuid => {
 				let id_value =
 					input.id_as_uuid().ok_or_else(|| anyhow::anyhow!("Expected Uuid Id"))?;
 				let uuid = Uuid::from_fb(id_value)?;
 				Ok(Id::Uuid(uuid))
 			}
-			expr_fb::IdType::Array => {
+			proto_fb::IdType::Array => {
 				let id_value =
 					input.id_as_array().ok_or_else(|| anyhow::anyhow!("Expected Array Id"))?;
 				let array = Array::from_fb(id_value)?;
@@ -568,7 +568,7 @@ impl FromFlatbuffers for Id {
 }
 
 impl ToFlatbuffers for File {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::File<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::File<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -577,9 +577,9 @@ impl ToFlatbuffers for File {
 	) -> Self::Output<'bldr> {
 		let bucket = builder.create_string(&self.bucket);
 		let key = builder.create_string(&self.key);
-		expr_fb::File::create(
+		proto_fb::File::create(
 			builder,
-			&expr_fb::FileArgs {
+			&proto_fb::FileArgs {
 				bucket: Some(bucket),
 				key: Some(key),
 			},
@@ -588,7 +588,7 @@ impl ToFlatbuffers for File {
 }
 
 impl FromFlatbuffers for File {
-	type Input<'a> = expr_fb::File<'a>;
+	type Input<'a> = proto_fb::File<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -602,7 +602,7 @@ impl FromFlatbuffers for File {
 }
 
 impl ToFlatbuffers for Object {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Object<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Object<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -614,9 +614,9 @@ impl ToFlatbuffers for Object {
 			let key_fb = builder.create_string(key);
 			let value_fb = value.to_fb(builder);
 
-			let object_item = expr_fb::KeyValue::create(
+			let object_item = proto_fb::KeyValue::create(
 				builder,
-				&&expr_fb::KeyValueArgs {
+				&&proto_fb::KeyValueArgs {
 					key: Some(key_fb),
 					value: Some(value_fb),
 				},
@@ -625,9 +625,9 @@ impl ToFlatbuffers for Object {
 			entries.push(object_item);
 		}
 		let entries_vector = builder.create_vector(&entries);
-		expr_fb::Object::create(
+		proto_fb::Object::create(
 			builder,
-			&expr_fb::ObjectArgs {
+			&proto_fb::ObjectArgs {
 				items: Some(entries_vector),
 			},
 		)
@@ -635,7 +635,7 @@ impl ToFlatbuffers for Object {
 }
 
 impl FromFlatbuffers for Object {
-	type Input<'a> = expr_fb::Object<'a>;
+	type Input<'a> = proto_fb::Object<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -654,7 +654,7 @@ impl FromFlatbuffers for Object {
 }
 
 impl ToFlatbuffers for Array {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Array<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Array<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -666,9 +666,9 @@ impl ToFlatbuffers for Array {
 			values.push(value.to_fb(builder));
 		}
 		let values_vector = builder.create_vector(&values);
-		expr_fb::Array::create(
+		proto_fb::Array::create(
 			builder,
-			&expr_fb::ArrayArgs {
+			&proto_fb::ArrayArgs {
 				values: Some(values_vector),
 			},
 		)
@@ -676,7 +676,7 @@ impl ToFlatbuffers for Array {
 }
 
 impl FromFlatbuffers for Array {
-	type Input<'a> = expr_fb::Array<'a>;
+	type Input<'a> = proto_fb::Array<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -690,7 +690,7 @@ impl FromFlatbuffers for Array {
 }
 
 impl ToFlatbuffers for Geometry {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Geometry<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Geometry<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -700,60 +700,60 @@ impl ToFlatbuffers for Geometry {
 		match self {
 			Geometry::Point(point) => {
 				let geometry = point.to_fb(builder);
-				expr_fb::Geometry::create(
+				proto_fb::Geometry::create(
 					builder,
-					&expr_fb::GeometryArgs {
-						geometry_type: expr_fb::GeometryType::Point,
+					&proto_fb::GeometryArgs {
+						geometry_type: proto_fb::GeometryType::Point,
 						geometry: Some(geometry.as_union_value()),
 					},
 				)
 			}
 			Geometry::Line(line_string) => {
 				let geometry = line_string.to_fb(builder);
-				expr_fb::Geometry::create(
+				proto_fb::Geometry::create(
 					builder,
-					&expr_fb::GeometryArgs {
-						geometry_type: expr_fb::GeometryType::LineString,
+					&proto_fb::GeometryArgs {
+						geometry_type: proto_fb::GeometryType::LineString,
 						geometry: Some(geometry.as_union_value()),
 					},
 				)
 			}
 			Geometry::Polygon(polygon) => {
 				let geometry = polygon.to_fb(builder);
-				expr_fb::Geometry::create(
+				proto_fb::Geometry::create(
 					builder,
-					&expr_fb::GeometryArgs {
-						geometry_type: expr_fb::GeometryType::Polygon,
+					&proto_fb::GeometryArgs {
+						geometry_type: proto_fb::GeometryType::Polygon,
 						geometry: Some(geometry.as_union_value()),
 					},
 				)
 			}
 			Geometry::MultiPoint(multi_point) => {
 				let geometry = multi_point.to_fb(builder);
-				expr_fb::Geometry::create(
+				proto_fb::Geometry::create(
 					builder,
-					&expr_fb::GeometryArgs {
-						geometry_type: expr_fb::GeometryType::MultiPoint,
+					&proto_fb::GeometryArgs {
+						geometry_type: proto_fb::GeometryType::MultiPoint,
 						geometry: Some(geometry.as_union_value()),
 					},
 				)
 			}
 			Geometry::MultiLine(multi_line_string) => {
 				let geometry = multi_line_string.to_fb(builder);
-				expr_fb::Geometry::create(
+				proto_fb::Geometry::create(
 					builder,
-					&expr_fb::GeometryArgs {
-						geometry_type: expr_fb::GeometryType::MultiLineString,
+					&proto_fb::GeometryArgs {
+						geometry_type: proto_fb::GeometryType::MultiLineString,
 						geometry: Some(geometry.as_union_value()),
 					},
 				)
 			}
 			Geometry::MultiPolygon(multi_polygon) => {
 				let geometry = multi_polygon.to_fb(builder);
-				expr_fb::Geometry::create(
+				proto_fb::Geometry::create(
 					builder,
-					&expr_fb::GeometryArgs {
-						geometry_type: expr_fb::GeometryType::MultiPolygon,
+					&proto_fb::GeometryArgs {
+						geometry_type: proto_fb::GeometryType::MultiPolygon,
 						geometry: Some(geometry.as_union_value()),
 					},
 				)
@@ -765,17 +765,17 @@ impl ToFlatbuffers for Geometry {
 				}
 				let geometries_vector = builder.create_vector(&geometries_vec);
 
-				let collection = expr_fb::GeometryCollection::create(
+				let collection = proto_fb::GeometryCollection::create(
 					builder,
-					&expr_fb::GeometryCollectionArgs {
+					&proto_fb::GeometryCollectionArgs {
 						geometries: Some(geometries_vector),
 					},
 				);
 
-				expr_fb::Geometry::create(
+				proto_fb::Geometry::create(
 					builder,
-					&expr_fb::GeometryArgs {
-						geometry_type: expr_fb::GeometryType::Collection,
+					&proto_fb::GeometryArgs {
+						geometry_type: proto_fb::GeometryType::Collection,
 						geometry: Some(collection.as_union_value()),
 					},
 				)
@@ -785,48 +785,48 @@ impl ToFlatbuffers for Geometry {
 }
 
 impl FromFlatbuffers for Geometry {
-	type Input<'a> = expr_fb::Geometry<'a>;
+	type Input<'a> = proto_fb::Geometry<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.geometry_type() {
-			expr_fb::GeometryType::Point => {
+			proto_fb::GeometryType::Point => {
 				let point = input
 					.geometry_as_point()
 					.ok_or_else(|| anyhow::anyhow!("Expected Point geometry"))?;
 				Ok(Geometry::Point(geo::Point::from_fb(point)?))
 			}
-			expr_fb::GeometryType::LineString => {
+			proto_fb::GeometryType::LineString => {
 				let line_string = input
 					.geometry_as_line_string()
 					.ok_or_else(|| anyhow::anyhow!("Expected LineString geometry"))?;
 				Ok(Geometry::Line(geo::LineString::from_fb(line_string)?))
 			}
-			expr_fb::GeometryType::Polygon => {
+			proto_fb::GeometryType::Polygon => {
 				let polygon = input
 					.geometry_as_polygon()
 					.ok_or_else(|| anyhow::anyhow!("Expected Polygon geometry"))?;
 				Ok(Geometry::Polygon(geo::Polygon::from_fb(polygon)?))
 			}
-			expr_fb::GeometryType::MultiPoint => {
+			proto_fb::GeometryType::MultiPoint => {
 				let multi_point = input
 					.geometry_as_multi_point()
 					.ok_or_else(|| anyhow::anyhow!("Expected MultiPoint geometry"))?;
 				Ok(Geometry::MultiPoint(geo::MultiPoint::from_fb(multi_point)?))
 			}
-			expr_fb::GeometryType::MultiLineString => {
+			proto_fb::GeometryType::MultiLineString => {
 				let multi_line_string = input
 					.geometry_as_multi_line_string()
 					.ok_or_else(|| anyhow::anyhow!("Expected MultiLineString geometry"))?;
 				Ok(Geometry::MultiLine(geo::MultiLineString::from_fb(multi_line_string)?))
 			}
-			expr_fb::GeometryType::MultiPolygon => {
+			proto_fb::GeometryType::MultiPolygon => {
 				let multi_polygon = input
 					.geometry_as_multi_polygon()
 					.ok_or_else(|| anyhow::anyhow!("Expected MultiPolygon geometry"))?;
 				Ok(Geometry::MultiPolygon(geo::MultiPolygon::from_fb(multi_polygon)?))
 			}
-			expr_fb::GeometryType::Collection => {
+			proto_fb::GeometryType::Collection => {
 				let collection = input
 					.geometry_as_collection()
 					.ok_or_else(|| anyhow::anyhow!("Expected GeometryCollection"))?;
@@ -846,16 +846,16 @@ impl FromFlatbuffers for Geometry {
 }
 
 impl ToFlatbuffers for geo::Point {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Point<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Point<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
-		expr_fb::Point::create(
+		proto_fb::Point::create(
 			builder,
-			&expr_fb::PointArgs {
+			&proto_fb::PointArgs {
 				x: self.x(),
 				y: self.y(),
 			},
@@ -864,7 +864,7 @@ impl ToFlatbuffers for geo::Point {
 }
 
 impl FromFlatbuffers for geo::Point {
-	type Input<'a> = expr_fb::Point<'a>;
+	type Input<'a> = proto_fb::Point<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -873,16 +873,16 @@ impl FromFlatbuffers for geo::Point {
 }
 
 impl ToFlatbuffers for geo::Coord {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Point<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Point<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
-		expr_fb::Point::create(
+		proto_fb::Point::create(
 			builder,
-			&expr_fb::PointArgs {
+			&proto_fb::PointArgs {
 				x: self.x,
 				y: self.y,
 			},
@@ -891,7 +891,7 @@ impl ToFlatbuffers for geo::Coord {
 }
 
 impl FromFlatbuffers for geo::Coord {
-	type Input<'a> = expr_fb::Point<'a>;
+	type Input<'a> = proto_fb::Point<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -903,7 +903,7 @@ impl FromFlatbuffers for geo::Coord {
 }
 
 impl ToFlatbuffers for geo::LineString {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::LineString<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::LineString<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -915,9 +915,9 @@ impl ToFlatbuffers for geo::LineString {
 			points.push(point.to_fb(builder));
 		}
 		let points_vector = builder.create_vector(&points);
-		expr_fb::LineString::create(
+		proto_fb::LineString::create(
 			builder,
-			&expr_fb::LineStringArgs {
+			&proto_fb::LineStringArgs {
 				points: Some(points_vector),
 			},
 		)
@@ -925,7 +925,7 @@ impl ToFlatbuffers for geo::LineString {
 }
 
 impl FromFlatbuffers for geo::LineString {
-	type Input<'a> = expr_fb::LineString<'a>;
+	type Input<'a> = proto_fb::LineString<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -938,7 +938,7 @@ impl FromFlatbuffers for geo::LineString {
 }
 
 impl ToFlatbuffers for geo::Polygon {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Polygon<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Polygon<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -951,9 +951,9 @@ impl ToFlatbuffers for geo::Polygon {
 			interiors.push(interior.to_fb(builder));
 		}
 		let interiors_vector = builder.create_vector(&interiors);
-		expr_fb::Polygon::create(
+		proto_fb::Polygon::create(
 			builder,
-			&expr_fb::PolygonArgs {
+			&proto_fb::PolygonArgs {
 				exterior: Some(exterior),
 				interiors: Some(interiors_vector),
 			},
@@ -962,7 +962,7 @@ impl ToFlatbuffers for geo::Polygon {
 }
 
 impl FromFlatbuffers for geo::Polygon {
-	type Input<'a> = expr_fb::Polygon<'a>;
+	type Input<'a> = proto_fb::Polygon<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -982,7 +982,7 @@ impl FromFlatbuffers for geo::Polygon {
 }
 
 impl ToFlatbuffers for geo::MultiPoint {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::MultiPoint<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::MultiPoint<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -994,9 +994,9 @@ impl ToFlatbuffers for geo::MultiPoint {
 			points.push(point.to_fb(builder));
 		}
 		let points_vector = builder.create_vector(&points);
-		expr_fb::MultiPoint::create(
+		proto_fb::MultiPoint::create(
 			builder,
-			&expr_fb::MultiPointArgs {
+			&proto_fb::MultiPointArgs {
 				points: Some(points_vector),
 			},
 		)
@@ -1004,7 +1004,7 @@ impl ToFlatbuffers for geo::MultiPoint {
 }
 
 impl FromFlatbuffers for geo::MultiPoint {
-	type Input<'a> = expr_fb::MultiPoint<'a>;
+	type Input<'a> = proto_fb::MultiPoint<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1017,7 +1017,7 @@ impl FromFlatbuffers for geo::MultiPoint {
 }
 
 impl ToFlatbuffers for geo::MultiLineString {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::MultiLineString<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::MultiLineString<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1029,9 +1029,9 @@ impl ToFlatbuffers for geo::MultiLineString {
 			lines.push(line.to_fb(builder));
 		}
 		let lines_vector = builder.create_vector(&lines);
-		expr_fb::MultiLineString::create(
+		proto_fb::MultiLineString::create(
 			builder,
-			&expr_fb::MultiLineStringArgs {
+			&proto_fb::MultiLineStringArgs {
 				lines: Some(lines_vector),
 			},
 		)
@@ -1039,7 +1039,7 @@ impl ToFlatbuffers for geo::MultiLineString {
 }
 
 impl FromFlatbuffers for geo::MultiLineString {
-	type Input<'a> = expr_fb::MultiLineString<'a>;
+	type Input<'a> = proto_fb::MultiLineString<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1052,7 +1052,7 @@ impl FromFlatbuffers for geo::MultiLineString {
 }
 
 impl ToFlatbuffers for geo::MultiPolygon {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::MultiPolygon<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::MultiPolygon<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1064,9 +1064,9 @@ impl ToFlatbuffers for geo::MultiPolygon {
 			polygons.push(polygon.to_fb(builder));
 		}
 		let polygons_vector = builder.create_vector(&polygons);
-		expr_fb::MultiPolygon::create(
+		proto_fb::MultiPolygon::create(
 			builder,
-			&expr_fb::MultiPolygonArgs {
+			&proto_fb::MultiPolygonArgs {
 				polygons: Some(polygons_vector),
 			},
 		)
@@ -1074,7 +1074,7 @@ impl ToFlatbuffers for geo::MultiPolygon {
 }
 
 impl FromFlatbuffers for geo::MultiPolygon {
-	type Input<'a> = expr_fb::MultiPolygon<'a>;
+	type Input<'a> = proto_fb::MultiPolygon<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1087,7 +1087,7 @@ impl FromFlatbuffers for geo::MultiPolygon {
 }
 
 impl ToFlatbuffers for Idiom {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Idiom<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Idiom<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1099,9 +1099,9 @@ impl ToFlatbuffers for Idiom {
 			parts.push(part.to_fb(builder));
 		}
 		let parts_vector = builder.create_vector(&parts);
-		expr_fb::Idiom::create(
+		proto_fb::Idiom::create(
 			builder,
-			&expr_fb::IdiomArgs {
+			&proto_fb::IdiomArgs {
 				parts: Some(parts_vector),
 			},
 		)
@@ -1109,7 +1109,7 @@ impl ToFlatbuffers for Idiom {
 }
 
 impl FromFlatbuffers for Idiom {
-	type Input<'a> = expr_fb::Idiom<'a>;
+	type Input<'a> = proto_fb::Idiom<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1123,7 +1123,7 @@ impl FromFlatbuffers for Idiom {
 }
 
 impl ToFlatbuffers for Part {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Part<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Part<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1132,73 +1132,73 @@ impl ToFlatbuffers for Part {
 	) -> Self::Output<'bldr> {
 		let args = match self {
 			Self::All => {
-				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::All,
+				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::All,
 					part: Some(null.as_union_value()),
 				}
 			}
 			Self::Flatten => {
-				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Flatten,
+				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Flatten,
 					part: Some(null.as_union_value()),
 				}
 			}
 			Self::Last => {
-				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Last,
+				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Last,
 					part: Some(null.as_union_value()),
 				}
 			}
 			Self::First => {
-				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::First,
+				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::First,
 					part: Some(null.as_union_value()),
 				}
 			}
 			Self::Field(ident) => {
 				let ident = ident.to_fb(builder);
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Field,
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Field,
 					part: Some(ident.as_union_value()),
 				}
 			}
 			Self::Index(index) => {
 				let index: i64 = index.as_int();
 				let index_value = index.to_fb(builder);
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Index,
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Index,
 					part: Some(index_value.as_union_value()),
 				}
 			}
 			Self::Where(value) => {
 				let value_fb = value.to_fb(builder).as_union_value();
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Where,
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Where,
 					part: Some(value_fb),
 				}
 			}
 			Self::Graph(graph) => {
 				let graph_fb = graph.to_fb(builder).as_union_value();
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Graph,
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Graph,
 					part: Some(graph_fb),
 				}
 			}
 			Self::Value(value) => {
 				let value_fb = value.to_fb(builder).as_union_value();
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Value,
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Value,
 					part: Some(value_fb),
 				}
 			}
 			Self::Start(value) => {
 				let value_fb = value.to_fb(builder).as_union_value();
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Start,
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Start,
 					part: Some(value_fb),
 				}
 			}
@@ -1210,16 +1210,16 @@ impl ToFlatbuffers for Part {
 				}
 				let args = builder.create_vector(&args_vec);
 
-				let method = expr_fb::MethodPart::create(
+				let method = proto_fb::MethodPart::create(
 					builder,
-					&expr_fb::MethodPartArgs {
+					&proto_fb::MethodPartArgs {
 						name: Some(name),
 						args: Some(args),
 					},
 				);
 
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Method,
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Method,
 					part: Some(method.as_union_value()),
 				}
 			}
@@ -1230,22 +1230,22 @@ impl ToFlatbuffers for Part {
 				}
 				let parts = builder.create_vector(&parts_vec);
 
-				let part = expr_fb::DestructureParts::create(
+				let part = proto_fb::DestructureParts::create(
 					builder,
-					&expr_fb::DestructurePartsArgs {
+					&proto_fb::DestructurePartsArgs {
 						parts: Some(parts),
 					},
 				);
 
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Destructure,
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Destructure,
 					part: Some(part.as_union_value()),
 				}
 			}
 			Self::Optional => {
-				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Optional,
+				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Optional,
 					part: Some(null.as_union_value()),
 				}
 			}
@@ -1254,84 +1254,84 @@ impl ToFlatbuffers for Part {
 				let idiom = idiom.as_ref().map(|i| i.to_fb(builder));
 				let recurse_operation = instruction.as_ref().map(|op| op.to_fb(builder));
 
-				let recurse_fb = expr_fb::RecursePart::create(
+				let recurse_fb = proto_fb::RecursePart::create(
 					builder,
-					&expr_fb::RecursePartArgs {
+					&proto_fb::RecursePartArgs {
 						spec: Some(spec),
 						idiom,
 						recurse_operation,
 					},
 				);
 
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Recurse,
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Recurse,
 					part: Some(recurse_fb.as_union_value()),
 				}
 			}
 			Self::Doc => {
-				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::Doc,
+				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::Doc,
 					part: Some(null.as_union_value()),
 				}
 			}
 			Self::RepeatRecurse => {
-				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-				expr_fb::PartArgs {
-					part_type: expr_fb::PartType::RepeatRecurse,
+				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				proto_fb::PartArgs {
+					part_type: proto_fb::PartType::RepeatRecurse,
 					part: Some(null.as_union_value()),
 				}
 			}
 		};
 
-		expr_fb::Part::create(builder, &args)
+		proto_fb::Part::create(builder, &args)
 	}
 }
 
 impl FromFlatbuffers for Part {
-	type Input<'a> = expr_fb::Part<'a>;
+	type Input<'a> = proto_fb::Part<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.part_type() {
-			expr_fb::PartType::All => Ok(Self::All),
-			expr_fb::PartType::Flatten => Ok(Self::Flatten),
-			expr_fb::PartType::Last => Ok(Self::Last),
-			expr_fb::PartType::First => Ok(Self::First),
-			expr_fb::PartType::Field => {
+			proto_fb::PartType::All => Ok(Self::All),
+			proto_fb::PartType::Flatten => Ok(Self::Flatten),
+			proto_fb::PartType::Last => Ok(Self::Last),
+			proto_fb::PartType::First => Ok(Self::First),
+			proto_fb::PartType::Field => {
 				let ident =
 					input.part_as_field().ok_or_else(|| anyhow::anyhow!("Expected Field part"))?;
 				let ident =
 					ident.value().ok_or_else(|| anyhow::anyhow!("Missing value in Field part"))?;
 				Ok(Self::Field(Ident(ident.to_string())))
 			}
-			expr_fb::PartType::Index => {
+			proto_fb::PartType::Index => {
 				let index =
 					input.part_as_index().ok_or_else(|| anyhow::anyhow!("Expected Index part"))?;
 				let index = index.value();
 				Ok(Self::Index(Number::Int(index)))
 			}
-			expr_fb::PartType::Where => {
+			proto_fb::PartType::Where => {
 				let value =
 					input.part_as_where().ok_or_else(|| anyhow::anyhow!("Expected Where part"))?;
 				Ok(Self::Where(Value::from_fb(value)?))
 			}
-			expr_fb::PartType::Graph => {
+			proto_fb::PartType::Graph => {
 				let graph =
 					input.part_as_graph().ok_or_else(|| anyhow::anyhow!("Expected Graph part"))?;
 				Ok(Self::Graph(Graph::from_fb(graph)?))
 			}
-			expr_fb::PartType::Value => {
+			proto_fb::PartType::Value => {
 				let value =
 					input.part_as_value().ok_or_else(|| anyhow::anyhow!("Expected Value part"))?;
 				Ok(Self::Value(Value::from_fb(value)?))
 			}
-			expr_fb::PartType::Start => {
+			proto_fb::PartType::Start => {
 				let value =
 					input.part_as_start().ok_or_else(|| anyhow::anyhow!("Expected Start part"))?;
 				Ok(Self::Start(Value::from_fb(value)?))
 			}
-			expr_fb::PartType::Method => {
+			proto_fb::PartType::Method => {
 				let method_part = input
 					.part_as_method()
 					.ok_or_else(|| anyhow::anyhow!("Expected Method part"))?;
@@ -1343,7 +1343,7 @@ impl FromFlatbuffers for Part {
 				}
 				Ok(Self::Method(name, args))
 			}
-			expr_fb::PartType::Destructure => {
+			proto_fb::PartType::Destructure => {
 				let destructure_parts = input
 					.part_as_destructure()
 					.ok_or_else(|| anyhow::anyhow!("Expected Destructure part"))?;
@@ -1355,8 +1355,8 @@ impl FromFlatbuffers for Part {
 				}
 				Ok(Self::Destructure(parts))
 			}
-			expr_fb::PartType::Optional => Ok(Self::Optional),
-			expr_fb::PartType::Recurse => {
+			proto_fb::PartType::Optional => Ok(Self::Optional),
+			proto_fb::PartType::Recurse => {
 				let recurse_part = input
 					.part_as_recurse()
 					.ok_or_else(|| anyhow::anyhow!("Expected Recurse part"))?;
@@ -1371,8 +1371,8 @@ impl FromFlatbuffers for Part {
 					.transpose()?;
 				Ok(Self::Recurse(recurse, idiom, instruction))
 			}
-			expr_fb::PartType::Doc => Ok(Self::Doc),
-			expr_fb::PartType::RepeatRecurse => Ok(Self::RepeatRecurse),
+			proto_fb::PartType::Doc => Ok(Self::Doc),
+			proto_fb::PartType::RepeatRecurse => Ok(Self::RepeatRecurse),
 			_ => Err(anyhow::anyhow!(
 				"Unsupported Part type for FlatBuffers deserialization: {:?}",
 				input.part_type()
@@ -1382,7 +1382,7 @@ impl FromFlatbuffers for Part {
 }
 
 impl ToFlatbuffers for Ident {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Ident<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Ident<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1390,9 +1390,9 @@ impl ToFlatbuffers for Ident {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
 		let value = builder.create_string(&self.0);
-		expr_fb::Ident::create(
+		proto_fb::Ident::create(
 			builder,
-			&expr_fb::IdentArgs {
+			&proto_fb::IdentArgs {
 				value: Some(value),
 			},
 		)
@@ -1400,7 +1400,7 @@ impl ToFlatbuffers for Ident {
 }
 
 impl FromFlatbuffers for Ident {
-	type Input<'a> = expr_fb::Ident<'a>;
+	type Input<'a> = proto_fb::Ident<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1410,7 +1410,7 @@ impl FromFlatbuffers for Ident {
 }
 
 impl ToFlatbuffers for Recurse {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::RecurseSpec<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::RecurseSpec<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1419,50 +1419,50 @@ impl ToFlatbuffers for Recurse {
 	) -> Self::Output<'bldr> {
 		let args = match self {
 			Self::Fixed(fixed) => {
-				let fixed_value = expr_fb::FixedSpec::create(
+				let fixed_value = proto_fb::FixedSpec::create(
 					builder,
-					&expr_fb::FixedSpecArgs {
+					&proto_fb::FixedSpecArgs {
 						value: *fixed,
 					},
 				);
 
-				expr_fb::RecurseSpecArgs {
-					spec_type: expr_fb::RecurseSpecType::Fixed,
+				proto_fb::RecurseSpecArgs {
+					spec_type: proto_fb::RecurseSpecType::Fixed,
 					spec: Some(fixed_value.as_union_value()),
 				}
 			}
 			Self::Range(start, end) => {
-				let range_value = expr_fb::RangeSpec::create(
+				let range_value = proto_fb::RangeSpec::create(
 					builder,
-					&expr_fb::RangeSpecArgs {
+					&proto_fb::RangeSpecArgs {
 						start: start.clone(),
 						end: end.clone(),
 					},
 				);
 
-				expr_fb::RecurseSpecArgs {
-					spec_type: expr_fb::RecurseSpecType::Range,
+				proto_fb::RecurseSpecArgs {
+					spec_type: proto_fb::RecurseSpecType::Range,
 					spec: Some(range_value.as_union_value()),
 				}
 			}
 		};
 
-		expr_fb::RecurseSpec::create(builder, &args)
+		proto_fb::RecurseSpec::create(builder, &args)
 	}
 }
 
 impl FromFlatbuffers for Recurse {
-	type Input<'a> = expr_fb::RecurseSpec<'a>;
+	type Input<'a> = proto_fb::RecurseSpec<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.spec_type() {
-			expr_fb::RecurseSpecType::Fixed => {
+			proto_fb::RecurseSpecType::Fixed => {
 				let fixed =
 					input.spec_as_fixed().ok_or_else(|| anyhow::anyhow!("Expected Fixed spec"))?;
 				Ok(Self::Fixed(fixed.value()))
 			}
-			expr_fb::RecurseSpecType::Range => {
+			proto_fb::RecurseSpecType::Range => {
 				let range =
 					input.spec_as_range().ok_or_else(|| anyhow::anyhow!("Expected Range spec"))?;
 				Ok(Self::Range(range.start(), range.end()))
@@ -1476,7 +1476,7 @@ impl FromFlatbuffers for Recurse {
 }
 
 impl ToFlatbuffers for RecurseInstruction {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::RecurseOperation<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::RecurseOperation<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1487,30 +1487,30 @@ impl ToFlatbuffers for RecurseInstruction {
 			Self::Path {
 				inclusive,
 			} => {
-				let operation = expr_fb::RecursePath::create(
+				let operation = proto_fb::RecursePath::create(
 					builder,
-					&expr_fb::RecursePathArgs {
+					&proto_fb::RecursePathArgs {
 						inclusive: *inclusive,
 					},
 				);
 
-				expr_fb::RecurseOperationArgs {
-					operation_type: expr_fb::RecurseOperationType::Path,
+				proto_fb::RecurseOperationArgs {
+					operation_type: proto_fb::RecurseOperationType::Path,
 					operation: Some(operation.as_union_value()),
 				}
 			}
 			Self::Collect {
 				inclusive,
 			} => {
-				let operation = expr_fb::RecurseCollect::create(
+				let operation = proto_fb::RecurseCollect::create(
 					builder,
-					&expr_fb::RecurseCollectArgs {
+					&proto_fb::RecurseCollectArgs {
 						inclusive: *inclusive,
 					},
 				);
 
-				expr_fb::RecurseOperationArgs {
-					operation_type: expr_fb::RecurseOperationType::Collect,
+				proto_fb::RecurseOperationArgs {
+					operation_type: proto_fb::RecurseOperationType::Collect,
 					operation: Some(operation.as_union_value()),
 				}
 			}
@@ -1519,32 +1519,32 @@ impl ToFlatbuffers for RecurseInstruction {
 				inclusive,
 			} => {
 				let expects_value = expects.to_fb(builder);
-				let operation = expr_fb::RecurseShortest::create(
+				let operation = proto_fb::RecurseShortest::create(
 					builder,
-					&expr_fb::RecurseShortestArgs {
+					&proto_fb::RecurseShortestArgs {
 						expects: Some(expects_value),
 						inclusive: *inclusive,
 					},
 				);
 
-				expr_fb::RecurseOperationArgs {
-					operation_type: expr_fb::RecurseOperationType::Shortest,
+				proto_fb::RecurseOperationArgs {
+					operation_type: proto_fb::RecurseOperationType::Shortest,
 					operation: Some(operation.as_union_value()),
 				}
 			}
 		};
 
-		expr_fb::RecurseOperation::create(builder, &args)
+		proto_fb::RecurseOperation::create(builder, &args)
 	}
 }
 
 impl FromFlatbuffers for RecurseInstruction {
-	type Input<'a> = expr_fb::RecurseOperation<'a>;
+	type Input<'a> = proto_fb::RecurseOperation<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.operation_type() {
-			expr_fb::RecurseOperationType::Path => {
+			proto_fb::RecurseOperationType::Path => {
 				let path = input
 					.operation_as_path()
 					.ok_or_else(|| anyhow::anyhow!("Expected Path operation"))?;
@@ -1552,7 +1552,7 @@ impl FromFlatbuffers for RecurseInstruction {
 					inclusive: path.inclusive(),
 				})
 			}
-			expr_fb::RecurseOperationType::Collect => {
+			proto_fb::RecurseOperationType::Collect => {
 				let collect = input
 					.operation_as_collect()
 					.ok_or_else(|| anyhow::anyhow!("Expected Collect operation"))?;
@@ -1560,7 +1560,7 @@ impl FromFlatbuffers for RecurseInstruction {
 					inclusive: collect.inclusive(),
 				})
 			}
-			expr_fb::RecurseOperationType::Shortest => {
+			proto_fb::RecurseOperationType::Shortest => {
 				let shortest = input
 					.operation_as_shortest()
 					.ok_or_else(|| anyhow::anyhow!("Expected Shortest operation"))?;
@@ -1581,7 +1581,7 @@ impl FromFlatbuffers for RecurseInstruction {
 }
 
 impl ToFlatbuffers for DestructurePart {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::DestructurePart<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::DestructurePart<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1591,31 +1591,31 @@ impl ToFlatbuffers for DestructurePart {
 		let args = match self {
 			Self::All(ident) => {
 				let ident = ident.to_fb(builder);
-				expr_fb::DestructurePartArgs {
-					part_type: expr_fb::DestructurePartType::All,
+				proto_fb::DestructurePartArgs {
+					part_type: proto_fb::DestructurePartType::All,
 					part: Some(ident.as_union_value()),
 				}
 			}
 			Self::Field(ident) => {
 				let ident = ident.to_fb(builder);
-				expr_fb::DestructurePartArgs {
-					part_type: expr_fb::DestructurePartType::Field,
+				proto_fb::DestructurePartArgs {
+					part_type: proto_fb::DestructurePartType::Field,
 					part: Some(ident.as_union_value()),
 				}
 			}
 			Self::Aliased(ident, idiom) => {
 				let value = builder.create_string(&ident.0);
 				let alias = idiom.to_fb(builder);
-				let alias = expr_fb::Alias::create(
+				let alias = proto_fb::Alias::create(
 					builder,
-					&expr_fb::AliasArgs {
+					&proto_fb::AliasArgs {
 						value: Some(value),
 						alias: Some(alias),
 					},
 				);
 
-				expr_fb::DestructurePartArgs {
-					part_type: expr_fb::DestructurePartType::Aliased,
+				proto_fb::DestructurePartArgs {
+					part_type: proto_fb::DestructurePartType::Aliased,
 					part: Some(alias.as_union_value()),
 				}
 			}
@@ -1626,41 +1626,41 @@ impl ToFlatbuffers for DestructurePart {
 					parts_vec.push(part.to_fb(builder));
 				}
 				let parts_vector = builder.create_vector(&parts_vec);
-				let destructure_ident_parts = expr_fb::DestructureIdentParts::create(
+				let destructure_ident_parts = proto_fb::DestructureIdentParts::create(
 					builder,
-					&expr_fb::DestructureIdentPartsArgs {
+					&proto_fb::DestructureIdentPartsArgs {
 						name: Some(name),
 						parts: Some(parts_vector),
 					},
 				);
-				expr_fb::DestructurePartArgs {
-					part_type: expr_fb::DestructurePartType::Destructure,
+				proto_fb::DestructurePartArgs {
+					part_type: proto_fb::DestructurePartType::Destructure,
 					part: Some(destructure_ident_parts.as_union_value()),
 				}
 			}
 		};
 
-		expr_fb::DestructurePart::create(builder, &args)
+		proto_fb::DestructurePart::create(builder, &args)
 	}
 }
 
 impl FromFlatbuffers for DestructurePart {
-	type Input<'a> = expr_fb::DestructurePart<'a>;
+	type Input<'a> = proto_fb::DestructurePart<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.part_type() {
-			expr_fb::DestructurePartType::All => {
+			proto_fb::DestructurePartType::All => {
 				let ident =
 					input.part_as_all().ok_or_else(|| anyhow::anyhow!("Expected All part"))?;
 				Ok(Self::All(Ident::from_fb(ident)?))
 			}
-			expr_fb::DestructurePartType::Field => {
+			proto_fb::DestructurePartType::Field => {
 				let ident =
 					input.part_as_field().ok_or_else(|| anyhow::anyhow!("Expected Field part"))?;
 				Ok(Self::Field(Ident::from_fb(ident)?))
 			}
-			expr_fb::DestructurePartType::Aliased => {
+			proto_fb::DestructurePartType::Aliased => {
 				let alias = input
 					.part_as_aliased()
 					.ok_or_else(|| anyhow::anyhow!("Expected Aliased part"))?;
@@ -1669,7 +1669,7 @@ impl FromFlatbuffers for DestructurePart {
 					Idiom::from_fb(alias.alias().context("Missing alias in Aliased part")?)?;
 				Ok(Self::Aliased(Ident(value), idiom))
 			}
-			expr_fb::DestructurePartType::Destructure => {
+			proto_fb::DestructurePartType::Destructure => {
 				let destructure_parts = input
 					.part_as_destructure()
 					.ok_or_else(|| anyhow::anyhow!("Expected Destructure part"))?;
@@ -1694,7 +1694,7 @@ impl FromFlatbuffers for DestructurePart {
 }
 
 impl ToFlatbuffers for Graph {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Graph<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Graph<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1723,9 +1723,9 @@ impl ToFlatbuffers for Graph {
 		});
 		let alias = self.alias.as_ref().map(|a| a.to_fb(builder));
 
-		expr_fb::Graph::create(
+		proto_fb::Graph::create(
 			builder,
-			&expr_fb::GraphArgs {
+			&proto_fb::GraphArgs {
 				dir,
 				expr,
 				what: Some(what),
@@ -1742,7 +1742,7 @@ impl ToFlatbuffers for Graph {
 }
 
 impl FromFlatbuffers for Graph {
-	type Input<'a> = expr_fb::Graph<'a>;
+	type Input<'a> = proto_fb::Graph<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1773,7 +1773,7 @@ impl FromFlatbuffers for Graph {
 }
 
 impl ToFlatbuffers for Splits {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Splits<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Splits<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1785,9 +1785,9 @@ impl ToFlatbuffers for Splits {
 			splits.push(split.to_fb(builder));
 		}
 		let splits_vector = builder.create_vector(&splits);
-		expr_fb::Splits::create(
+		proto_fb::Splits::create(
 			builder,
-			&expr_fb::SplitsArgs {
+			&proto_fb::SplitsArgs {
 				splits: Some(splits_vector),
 			},
 		)
@@ -1795,7 +1795,7 @@ impl ToFlatbuffers for Splits {
 }
 
 impl FromFlatbuffers for Splits {
-	type Input<'a> = expr_fb::Splits<'a>;
+	type Input<'a> = proto_fb::Splits<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1809,7 +1809,7 @@ impl FromFlatbuffers for Splits {
 }
 
 impl ToFlatbuffers for Split {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Idiom<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Idiom<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1821,7 +1821,7 @@ impl ToFlatbuffers for Split {
 }
 
 impl FromFlatbuffers for Split {
-	type Input<'a> = expr_fb::Idiom<'a>;
+	type Input<'a> = proto_fb::Idiom<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1831,7 +1831,7 @@ impl FromFlatbuffers for Split {
 }
 
 impl ToFlatbuffers for Groups {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Groups<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Groups<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1843,9 +1843,9 @@ impl ToFlatbuffers for Groups {
 			groups.push(group.to_fb(builder));
 		}
 		let groups_vector = builder.create_vector(&groups);
-		expr_fb::Groups::create(
+		proto_fb::Groups::create(
 			builder,
-			&expr_fb::GroupsArgs {
+			&proto_fb::GroupsArgs {
 				groups: Some(groups_vector),
 			},
 		)
@@ -1853,7 +1853,7 @@ impl ToFlatbuffers for Groups {
 }
 
 impl FromFlatbuffers for Groups {
-	type Input<'a> = expr_fb::Groups<'a>;
+	type Input<'a> = proto_fb::Groups<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1867,7 +1867,7 @@ impl FromFlatbuffers for Groups {
 }
 
 impl ToFlatbuffers for Group {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Idiom<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Idiom<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1879,7 +1879,7 @@ impl ToFlatbuffers for Group {
 }
 
 impl FromFlatbuffers for Group {
-	type Input<'a> = expr_fb::Idiom<'a>;
+	type Input<'a> = proto_fb::Idiom<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1889,7 +1889,7 @@ impl FromFlatbuffers for Group {
 }
 
 impl ToFlatbuffers for Ordering {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::OrderingSpec<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::OrderingSpec<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1898,33 +1898,33 @@ impl ToFlatbuffers for Ordering {
 	) -> Self::Output<'bldr> {
 		let args = match self {
 			Self::Random => {
-				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-				expr_fb::OrderingSpecArgs {
-					ordering_type: expr_fb::OrderingType::Random,
+				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				proto_fb::OrderingSpecArgs {
+					ordering_type: proto_fb::OrderingType::Random,
 					ordering: Some(null.as_union_value()),
 				}
 			}
 			Self::Order(order_list) => {
 				let order_list = order_list.to_fb(builder);
-				expr_fb::OrderingSpecArgs {
-					ordering_type: expr_fb::OrderingType::Ordered,
+				proto_fb::OrderingSpecArgs {
+					ordering_type: proto_fb::OrderingType::Ordered,
 					ordering: Some(order_list.as_union_value()),
 				}
 			}
 		};
 
-		expr_fb::OrderingSpec::create(builder, &args)
+		proto_fb::OrderingSpec::create(builder, &args)
 	}
 }
 
 impl FromFlatbuffers for Ordering {
-	type Input<'a> = expr_fb::OrderingSpec<'a>;
+	type Input<'a> = proto_fb::OrderingSpec<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.ordering_type() {
-			expr_fb::OrderingType::Random => Ok(Self::Random),
-			expr_fb::OrderingType::Ordered => {
+			proto_fb::OrderingType::Random => Ok(Self::Random),
+			proto_fb::OrderingType::Ordered => {
 				let order_list = input
 					.ordering_as_ordered()
 					.ok_or_else(|| anyhow::anyhow!("Expected Ordered ordering"))?;
@@ -1940,7 +1940,7 @@ impl FromFlatbuffers for Ordering {
 }
 
 impl ToFlatbuffers for OrderList {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::OrderList<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::OrderList<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1952,9 +1952,9 @@ impl ToFlatbuffers for OrderList {
 			orders.push(order.to_fb(builder));
 		}
 		let orders_vector = builder.create_vector(&orders);
-		expr_fb::OrderList::create(
+		proto_fb::OrderList::create(
 			builder,
-			&expr_fb::OrderListArgs {
+			&proto_fb::OrderListArgs {
 				orders: Some(orders_vector),
 			},
 		)
@@ -1962,7 +1962,7 @@ impl ToFlatbuffers for OrderList {
 }
 
 impl FromFlatbuffers for OrderList {
-	type Input<'a> = expr_fb::OrderList<'a>;
+	type Input<'a> = proto_fb::OrderList<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -1976,7 +1976,7 @@ impl FromFlatbuffers for OrderList {
 }
 
 impl ToFlatbuffers for Order {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Order<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Order<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -1985,9 +1985,9 @@ impl ToFlatbuffers for Order {
 	) -> Self::Output<'bldr> {
 		let value = self.value.to_fb(builder);
 
-		expr_fb::Order::create(
+		proto_fb::Order::create(
 			builder,
-			&expr_fb::OrderArgs {
+			&proto_fb::OrderArgs {
 				value: Some(value),
 				collate: self.collate,
 				numeric: self.numeric,
@@ -1998,7 +1998,7 @@ impl ToFlatbuffers for Order {
 }
 
 impl FromFlatbuffers for Order {
-	type Input<'a> = expr_fb::Order<'a>;
+	type Input<'a> = proto_fb::Order<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2017,7 +2017,7 @@ impl FromFlatbuffers for Order {
 }
 
 impl ToFlatbuffers for Dir {
-	type Output<'bldr> = expr_fb::GraphDirection;
+	type Output<'bldr> = proto_fb::GraphDirection;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2025,22 +2025,22 @@ impl ToFlatbuffers for Dir {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
 		match self {
-			Dir::In => expr_fb::GraphDirection::In,
-			Dir::Out => expr_fb::GraphDirection::Out,
-			Dir::Both => expr_fb::GraphDirection::Both,
+			Dir::In => proto_fb::GraphDirection::In,
+			Dir::Out => proto_fb::GraphDirection::Out,
+			Dir::Both => proto_fb::GraphDirection::Both,
 		}
 	}
 }
 
 impl FromFlatbuffers for Dir {
-	type Input<'a> = expr_fb::GraphDirection;
+	type Input<'a> = proto_fb::GraphDirection;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input {
-			expr_fb::GraphDirection::In => Ok(Dir::In),
-			expr_fb::GraphDirection::Out => Ok(Dir::Out),
-			expr_fb::GraphDirection::Both => Ok(Dir::Both),
+			proto_fb::GraphDirection::In => Ok(Dir::In),
+			proto_fb::GraphDirection::Out => Ok(Dir::Out),
+			proto_fb::GraphDirection::Both => Ok(Dir::Both),
 			_ => Err(anyhow::anyhow!(
 				"Unsupported GraphDirection type for FlatBuffers deserialization: {:?}",
 				input
@@ -2050,7 +2050,7 @@ impl FromFlatbuffers for Dir {
 }
 
 impl ToFlatbuffers for GraphSubjects {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::GraphSubjects<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::GraphSubjects<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2062,9 +2062,9 @@ impl ToFlatbuffers for GraphSubjects {
 			subjects.push(subject.to_fb(builder));
 		}
 		let subjects_vector = builder.create_vector(&subjects);
-		expr_fb::GraphSubjects::create(
+		proto_fb::GraphSubjects::create(
 			builder,
-			&expr_fb::GraphSubjectsArgs {
+			&proto_fb::GraphSubjectsArgs {
 				subjects: Some(subjects_vector),
 			},
 		)
@@ -2072,7 +2072,7 @@ impl ToFlatbuffers for GraphSubjects {
 }
 
 impl FromFlatbuffers for GraphSubjects {
-	type Input<'a> = expr_fb::GraphSubjects<'a>;
+	type Input<'a> = proto_fb::GraphSubjects<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2086,7 +2086,7 @@ impl FromFlatbuffers for GraphSubjects {
 }
 
 impl ToFlatbuffers for GraphSubject {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::GraphSubject<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::GraphSubject<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2096,14 +2096,14 @@ impl ToFlatbuffers for GraphSubject {
 		let args = match self {
 			Self::Table(table) => {
 				let table = builder.create_string(&table.0);
-				let table_fb = expr_fb::Table::create(
+				let table_fb = proto_fb::Table::create(
 					builder,
-					&expr_fb::TableArgs {
+					&proto_fb::TableArgs {
 						name: Some(table),
 					},
 				);
-				expr_fb::GraphSubjectArgs {
-					subject_type: expr_fb::GraphSubjectType::Table,
+				proto_fb::GraphSubjectArgs {
+					subject_type: proto_fb::GraphSubjectType::Table,
 					subject: Some(table_fb.as_union_value()),
 				}
 			}
@@ -2111,38 +2111,38 @@ impl ToFlatbuffers for GraphSubject {
 				let table = builder.create_string(&table.0);
 				let start = id_range.beg.to_fb(builder);
 				let end = id_range.end.to_fb(builder);
-				let range_fb = expr_fb::TableIdRange::create(
+				let range_fb = proto_fb::TableIdRange::create(
 					builder,
-					&expr_fb::TableIdRangeArgs {
+					&proto_fb::TableIdRangeArgs {
 						table: Some(table),
 						start: Some(start),
 						end: Some(end),
 					},
 				);
 
-				expr_fb::GraphSubjectArgs {
-					subject_type: expr_fb::GraphSubjectType::Range,
+				proto_fb::GraphSubjectArgs {
+					subject_type: proto_fb::GraphSubjectType::Range,
 					subject: Some(range_fb.as_union_value()),
 				}
 			}
 		};
 
-		expr_fb::GraphSubject::create(builder, &args)
+		proto_fb::GraphSubject::create(builder, &args)
 	}
 }
 
 impl FromFlatbuffers for GraphSubject {
-	type Input<'a> = expr_fb::GraphSubject<'a>;
+	type Input<'a> = proto_fb::GraphSubject<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.subject_type() {
-			expr_fb::GraphSubjectType::Table => {
+			proto_fb::GraphSubjectType::Table => {
 				let table = input.subject_as_table().context("Expected Table subject")?;
 				let name = table.name().context("Missing name in Table subject")?.to_string();
 				Ok(GraphSubject::Table(Table(name)))
 			}
-			expr_fb::GraphSubjectType::Range => {
+			proto_fb::GraphSubjectType::Range => {
 				let range = input.subject_as_range().context("Expected Range subject")?;
 				let table_name =
 					range.table().context("Missing table in Range subject")?.to_string();
@@ -2166,7 +2166,7 @@ impl FromFlatbuffers for GraphSubject {
 }
 
 impl ToFlatbuffers for Bound<Id> {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::IdBound<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::IdBound<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2176,30 +2176,30 @@ impl ToFlatbuffers for Bound<Id> {
 		let args = match self {
 			Bound::Included(id) => {
 				let id_value = id.to_fb(builder);
-				expr_fb::IdBoundArgs {
+				proto_fb::IdBoundArgs {
 					id: Some(id_value),
 					inclusive: true,
 				}
 			}
 			Bound::Excluded(id) => {
 				let id_value = id.to_fb(builder);
-				expr_fb::IdBoundArgs {
+				proto_fb::IdBoundArgs {
 					id: Some(id_value),
 					inclusive: false,
 				}
 			}
-			Bound::Unbounded => expr_fb::IdBoundArgs {
+			Bound::Unbounded => proto_fb::IdBoundArgs {
 				id: None,
 				inclusive: false,
 			},
 		};
 
-		expr_fb::IdBound::create(builder, &args)
+		proto_fb::IdBound::create(builder, &args)
 	}
 }
 
 impl FromFlatbuffers for Bound<Id> {
-	type Input<'a> = expr_fb::IdBound<'a>;
+	type Input<'a> = proto_fb::IdBound<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2217,7 +2217,7 @@ impl FromFlatbuffers for Bound<Id> {
 }
 
 impl ToFlatbuffers for Field {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Field<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Field<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2226,9 +2226,9 @@ impl ToFlatbuffers for Field {
 	) -> Self::Output<'bldr> {
 		let args = match self {
 			Field::All => {
-				let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-				expr_fb::FieldArgs {
-					field_type: expr_fb::FieldType::All,
+				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+				proto_fb::FieldArgs {
+					field_type: proto_fb::FieldType::All,
 					field: Some(null.as_union_value()),
 				}
 			}
@@ -2241,33 +2241,33 @@ impl ToFlatbuffers for Field {
 					Some(a) => Some(a.to_fb(builder)),
 					None => None,
 				};
-				let single_field = expr_fb::SingleField::create(
+				let single_field = proto_fb::SingleField::create(
 					builder,
-					&expr_fb::SingleFieldArgs {
+					&proto_fb::SingleFieldArgs {
 						expr: Some(expr),
 						alias,
 					},
 				);
 
-				expr_fb::FieldArgs {
-					field_type: expr_fb::FieldType::Single,
+				proto_fb::FieldArgs {
+					field_type: proto_fb::FieldType::Single,
 					field: Some(single_field.as_union_value()),
 				}
 			}
 		};
 
-		expr_fb::Field::create(builder, &args)
+		proto_fb::Field::create(builder, &args)
 	}
 }
 
 impl FromFlatbuffers for Field {
-	type Input<'a> = expr_fb::Field<'a>;
+	type Input<'a> = proto_fb::Field<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.field_type() {
-			expr_fb::FieldType::All => Ok(Field::All),
-			expr_fb::FieldType::Single => {
+			proto_fb::FieldType::All => Ok(Field::All),
+			proto_fb::FieldType::Single => {
 				let single_field = input.field_as_single().context("Expected SingleField")?;
 				let expr =
 					Value::from_fb(single_field.expr().context("Missing expr in SingleField")?)?;
@@ -2286,7 +2286,7 @@ impl FromFlatbuffers for Field {
 }
 
 impl ToFlatbuffers for Fields {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Fields<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Fields<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2297,9 +2297,9 @@ impl ToFlatbuffers for Fields {
 		for field in &self.0 {
 			let args = match field {
 				Field::All => {
-					let null = expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {});
-					expr_fb::FieldArgs {
-						field_type: expr_fb::FieldType::All,
+					let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
+					proto_fb::FieldArgs {
+						field_type: proto_fb::FieldType::All,
 						field: Some(null.as_union_value()),
 					}
 				}
@@ -2309,28 +2309,28 @@ impl ToFlatbuffers for Fields {
 				} => {
 					let expr = expr.to_fb(builder);
 					let alias = alias.as_ref().map(|a| a.to_fb(builder));
-					let single_field = expr_fb::SingleField::create(
+					let single_field = proto_fb::SingleField::create(
 						builder,
-						&expr_fb::SingleFieldArgs {
+						&proto_fb::SingleFieldArgs {
 							expr: Some(expr),
 							alias,
 						},
 					);
-					expr_fb::FieldArgs {
-						field_type: expr_fb::FieldType::Single,
+					proto_fb::FieldArgs {
+						field_type: proto_fb::FieldType::Single,
 						field: Some(single_field.as_union_value()),
 					}
 				}
 			};
 
-			let field_item = expr_fb::Field::create(builder, &args);
+			let field_item = proto_fb::Field::create(builder, &args);
 
 			fields.push(field_item);
 		}
 		let fields_vector = builder.create_vector(&fields);
-		expr_fb::Fields::create(
+		proto_fb::Fields::create(
 			builder,
-			&expr_fb::FieldsArgs {
+			&proto_fb::FieldsArgs {
 				single: self.1,
 				fields: Some(fields_vector),
 			},
@@ -2339,7 +2339,7 @@ impl ToFlatbuffers for Fields {
 }
 
 impl FromFlatbuffers for Fields {
-	type Input<'a> = expr_fb::Fields<'a>;
+	type Input<'a> = proto_fb::Fields<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2354,7 +2354,7 @@ impl FromFlatbuffers for Fields {
 }
 
 impl ToFlatbuffers for Fetch {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Value<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Value<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2366,7 +2366,7 @@ impl ToFlatbuffers for Fetch {
 }
 
 impl FromFlatbuffers for Fetch {
-	type Input<'a> = expr_fb::Value<'a>;
+	type Input<'a> = proto_fb::Value<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2377,7 +2377,7 @@ impl FromFlatbuffers for Fetch {
 
 impl ToFlatbuffers for Fetchs {
 	type Output<'bldr> = flatbuffers::WIPOffset<
-		::flatbuffers::Vector<'bldr, ::flatbuffers::ForwardsUOffset<expr_fb::Value<'bldr>>>,
+		::flatbuffers::Vector<'bldr, ::flatbuffers::ForwardsUOffset<proto_fb::Value<'bldr>>>,
 	>;
 
 	#[inline]
@@ -2394,7 +2394,7 @@ impl ToFlatbuffers for Fetchs {
 }
 
 impl FromFlatbuffers for Fetchs {
-	type Input<'a> = flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<expr_fb::Value<'a>>>;
+	type Input<'a> = flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<proto_fb::Value<'a>>>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2407,7 +2407,7 @@ impl FromFlatbuffers for Fetchs {
 }
 
 impl ToFlatbuffers for Variables {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Variables<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Variables<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2418,9 +2418,9 @@ impl ToFlatbuffers for Variables {
 		for (key, value) in self.iter() {
 			let key_str = builder.create_string(key);
 			let value_fb = value.to_fb(builder);
-			let var = expr_fb::Variable::create(
+			let var = proto_fb::Variable::create(
 				builder,
-				&expr_fb::VariableArgs {
+				&proto_fb::VariableArgs {
 					key: Some(key_str),
 					value: Some(value_fb),
 				},
@@ -2428,9 +2428,9 @@ impl ToFlatbuffers for Variables {
 			vars.push(var);
 		}
 		let vars_vector = builder.create_vector(&vars);
-		expr_fb::Variables::create(
+		proto_fb::Variables::create(
 			builder,
-			&expr_fb::VariablesArgs {
+			&proto_fb::VariablesArgs {
 				items: Some(vars_vector),
 			},
 		)
@@ -2438,7 +2438,7 @@ impl ToFlatbuffers for Variables {
 }
 
 impl FromFlatbuffers for Variables {
-	type Input<'a> = expr_fb::Variables<'a>;
+	type Input<'a> = proto_fb::Variables<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2454,7 +2454,7 @@ impl FromFlatbuffers for Variables {
 }
 
 impl ToFlatbuffers for Operator {
-	type Output<'bldr> = expr_fb::Operator;
+	type Output<'bldr> = proto_fb::Operator;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2462,48 +2462,48 @@ impl ToFlatbuffers for Operator {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
 		match self {
-			Operator::Neg => expr_fb::Operator::Neg,
-			Operator::Not => expr_fb::Operator::Not,
-			Operator::Or => expr_fb::Operator::Or,
-			Operator::And => expr_fb::Operator::And,
-			Operator::Tco => expr_fb::Operator::Tco,
-			Operator::Nco => expr_fb::Operator::Nco,
-			Operator::Add => expr_fb::Operator::Add,
-			Operator::Sub => expr_fb::Operator::Sub,
-			Operator::Mul => expr_fb::Operator::Mul,
-			Operator::Div => expr_fb::Operator::Div,
-			Operator::Rem => expr_fb::Operator::Rem,
-			Operator::Pow => expr_fb::Operator::Pow,
-			Operator::Inc => expr_fb::Operator::Inc,
-			Operator::Dec => expr_fb::Operator::Dec,
-			Operator::Ext => expr_fb::Operator::Ext,
-			Operator::Equal => expr_fb::Operator::Equal,
-			Operator::Exact => expr_fb::Operator::Exact,
-			Operator::NotEqual => expr_fb::Operator::NotEqual,
-			Operator::AllEqual => expr_fb::Operator::AllEqual,
-			Operator::AnyEqual => expr_fb::Operator::AnyEqual,
-			Operator::Like => expr_fb::Operator::Like,
-			Operator::NotLike => expr_fb::Operator::NotLike,
-			Operator::AllLike => expr_fb::Operator::AllLike,
-			Operator::AnyLike => expr_fb::Operator::AnyLike,
-			Operator::LessThan => expr_fb::Operator::LessThan,
-			Operator::LessThanOrEqual => expr_fb::Operator::LessThanOrEqual,
-			Operator::MoreThan => expr_fb::Operator::GreaterThan,
-			Operator::MoreThanOrEqual => expr_fb::Operator::GreaterThanOrEqual,
-			Operator::Contain => expr_fb::Operator::Contain,
-			Operator::NotContain => expr_fb::Operator::NotContain,
-			Operator::ContainAll => expr_fb::Operator::ContainAll,
-			Operator::ContainAny => expr_fb::Operator::ContainAny,
-			Operator::ContainNone => expr_fb::Operator::ContainNone,
-			Operator::Inside => expr_fb::Operator::Inside,
-			Operator::NotInside => expr_fb::Operator::NotInside,
-			Operator::AllInside => expr_fb::Operator::AllInside,
-			Operator::AnyInside => expr_fb::Operator::AnyInside,
-			Operator::NoneInside => expr_fb::Operator::NoneInside,
-			Operator::Outside => expr_fb::Operator::Outside,
-			Operator::Intersects => expr_fb::Operator::Intersects,
-			Operator::AnyInside => expr_fb::Operator::AnyInside,
-			Operator::NoneInside => expr_fb::Operator::NoneInside,
+			Operator::Neg => proto_fb::Operator::Neg,
+			Operator::Not => proto_fb::Operator::Not,
+			Operator::Or => proto_fb::Operator::Or,
+			Operator::And => proto_fb::Operator::And,
+			Operator::Tco => proto_fb::Operator::Tco,
+			Operator::Nco => proto_fb::Operator::Nco,
+			Operator::Add => proto_fb::Operator::Add,
+			Operator::Sub => proto_fb::Operator::Sub,
+			Operator::Mul => proto_fb::Operator::Mul,
+			Operator::Div => proto_fb::Operator::Div,
+			Operator::Rem => proto_fb::Operator::Rem,
+			Operator::Pow => proto_fb::Operator::Pow,
+			Operator::Inc => proto_fb::Operator::Inc,
+			Operator::Dec => proto_fb::Operator::Dec,
+			Operator::Ext => proto_fb::Operator::Ext,
+			Operator::Equal => proto_fb::Operator::Equal,
+			Operator::Exact => proto_fb::Operator::Exact,
+			Operator::NotEqual => proto_fb::Operator::NotEqual,
+			Operator::AllEqual => proto_fb::Operator::AllEqual,
+			Operator::AnyEqual => proto_fb::Operator::AnyEqual,
+			Operator::Like => proto_fb::Operator::Like,
+			Operator::NotLike => proto_fb::Operator::NotLike,
+			Operator::AllLike => proto_fb::Operator::AllLike,
+			Operator::AnyLike => proto_fb::Operator::AnyLike,
+			Operator::LessThan => proto_fb::Operator::LessThan,
+			Operator::LessThanOrEqual => proto_fb::Operator::LessThanOrEqual,
+			Operator::MoreThan => proto_fb::Operator::GreaterThan,
+			Operator::MoreThanOrEqual => proto_fb::Operator::GreaterThanOrEqual,
+			Operator::Contain => proto_fb::Operator::Contain,
+			Operator::NotContain => proto_fb::Operator::NotContain,
+			Operator::ContainAll => proto_fb::Operator::ContainAll,
+			Operator::ContainAny => proto_fb::Operator::ContainAny,
+			Operator::ContainNone => proto_fb::Operator::ContainNone,
+			Operator::Inside => proto_fb::Operator::Inside,
+			Operator::NotInside => proto_fb::Operator::NotInside,
+			Operator::AllInside => proto_fb::Operator::AllInside,
+			Operator::AnyInside => proto_fb::Operator::AnyInside,
+			Operator::NoneInside => proto_fb::Operator::NoneInside,
+			Operator::Outside => proto_fb::Operator::Outside,
+			Operator::Intersects => proto_fb::Operator::Intersects,
+			Operator::AnyInside => proto_fb::Operator::AnyInside,
+			Operator::NoneInside => proto_fb::Operator::NoneInside,
 			Operator::Knn(_, _) => panic!("KNN operator not supported"),
 			Operator::Ann(_, _) => panic!("ANN operator not supported"),
 			Operator::Matches(_) => panic!("Matches not supported"),
@@ -2512,60 +2512,60 @@ impl ToFlatbuffers for Operator {
 }
 
 impl FromFlatbuffers for Operator {
-	type Input<'a> = expr_fb::Operator;
+	type Input<'a> = proto_fb::Operator;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input {
-			expr_fb::Operator::Neg => Ok(Operator::Neg),
-			expr_fb::Operator::Not => Ok(Operator::Not),
-			expr_fb::Operator::Or => Ok(Operator::Or),
-			expr_fb::Operator::And => Ok(Operator::And),
-			expr_fb::Operator::Tco => Ok(Operator::Tco),
-			expr_fb::Operator::Nco => Ok(Operator::Nco),
-			expr_fb::Operator::Add => Ok(Operator::Add),
-			expr_fb::Operator::Sub => Ok(Operator::Sub),
-			expr_fb::Operator::Mul => Ok(Operator::Mul),
-			expr_fb::Operator::Div => Ok(Operator::Div),
-			expr_fb::Operator::Rem => Ok(Operator::Rem),
-			expr_fb::Operator::Pow => Ok(Operator::Pow),
-			expr_fb::Operator::Inc => Ok(Operator::Inc),
-			expr_fb::Operator::Dec => Ok(Operator::Dec),
-			expr_fb::Operator::Ext => Ok(Operator::Ext),
-			expr_fb::Operator::Equal => Ok(Operator::Equal),
-			expr_fb::Operator::Exact => Ok(Operator::Exact),
-			expr_fb::Operator::NotEqual => Ok(Operator::NotEqual),
-			expr_fb::Operator::AllEqual => Ok(Operator::AllEqual),
-			expr_fb::Operator::AnyEqual => Ok(Operator::AnyEqual),
-			expr_fb::Operator::Like => Ok(Operator::Like),
-			expr_fb::Operator::NotLike => Ok(Operator::NotLike),
-			expr_fb::Operator::AllLike => Ok(Operator::AllLike),
-			expr_fb::Operator::AnyLike => Ok(Operator::AnyLike),
-			expr_fb::Operator::LessThan => Ok(Operator::LessThan),
-			expr_fb::Operator::LessThanOrEqual => Ok(Operator::LessThanOrEqual),
-			expr_fb::Operator::GreaterThan => Ok(Operator::MoreThan),
-			expr_fb::Operator::GreaterThanOrEqual => Ok(Operator::MoreThanOrEqual),
-			expr_fb::Operator::Contain => Ok(Operator::Contain),
-			expr_fb::Operator::NotContain => Ok(Operator::NotContain),
-			expr_fb::Operator::ContainAll => Ok(Operator::ContainAll),
-			expr_fb::Operator::ContainAny => Ok(Operator::ContainAny),
-			expr_fb::Operator::ContainNone => Ok(Operator::ContainNone),
-			expr_fb::Operator::Inside => Ok(Operator::Inside),
-			expr_fb::Operator::NotInside => Ok(Operator::NotInside),
-			expr_fb::Operator::AllInside => Ok(Operator::AllInside),
-			expr_fb::Operator::AnyInside => Ok(Operator::AnyInside),
-			expr_fb::Operator::NoneInside => Ok(Operator::NoneInside),
-			expr_fb::Operator::Outside => Ok(Operator::Outside),
-			expr_fb::Operator::Intersects => Ok(Operator::Intersects),
-			expr_fb::Operator::AnyInside => Ok(Operator::AnyInside),
-			expr_fb::Operator::NoneInside => Ok(Operator::NoneInside),
+			proto_fb::Operator::Neg => Ok(Operator::Neg),
+			proto_fb::Operator::Not => Ok(Operator::Not),
+			proto_fb::Operator::Or => Ok(Operator::Or),
+			proto_fb::Operator::And => Ok(Operator::And),
+			proto_fb::Operator::Tco => Ok(Operator::Tco),
+			proto_fb::Operator::Nco => Ok(Operator::Nco),
+			proto_fb::Operator::Add => Ok(Operator::Add),
+			proto_fb::Operator::Sub => Ok(Operator::Sub),
+			proto_fb::Operator::Mul => Ok(Operator::Mul),
+			proto_fb::Operator::Div => Ok(Operator::Div),
+			proto_fb::Operator::Rem => Ok(Operator::Rem),
+			proto_fb::Operator::Pow => Ok(Operator::Pow),
+			proto_fb::Operator::Inc => Ok(Operator::Inc),
+			proto_fb::Operator::Dec => Ok(Operator::Dec),
+			proto_fb::Operator::Ext => Ok(Operator::Ext),
+			proto_fb::Operator::Equal => Ok(Operator::Equal),
+			proto_fb::Operator::Exact => Ok(Operator::Exact),
+			proto_fb::Operator::NotEqual => Ok(Operator::NotEqual),
+			proto_fb::Operator::AllEqual => Ok(Operator::AllEqual),
+			proto_fb::Operator::AnyEqual => Ok(Operator::AnyEqual),
+			proto_fb::Operator::Like => Ok(Operator::Like),
+			proto_fb::Operator::NotLike => Ok(Operator::NotLike),
+			proto_fb::Operator::AllLike => Ok(Operator::AllLike),
+			proto_fb::Operator::AnyLike => Ok(Operator::AnyLike),
+			proto_fb::Operator::LessThan => Ok(Operator::LessThan),
+			proto_fb::Operator::LessThanOrEqual => Ok(Operator::LessThanOrEqual),
+			proto_fb::Operator::GreaterThan => Ok(Operator::MoreThan),
+			proto_fb::Operator::GreaterThanOrEqual => Ok(Operator::MoreThanOrEqual),
+			proto_fb::Operator::Contain => Ok(Operator::Contain),
+			proto_fb::Operator::NotContain => Ok(Operator::NotContain),
+			proto_fb::Operator::ContainAll => Ok(Operator::ContainAll),
+			proto_fb::Operator::ContainAny => Ok(Operator::ContainAny),
+			proto_fb::Operator::ContainNone => Ok(Operator::ContainNone),
+			proto_fb::Operator::Inside => Ok(Operator::Inside),
+			proto_fb::Operator::NotInside => Ok(Operator::NotInside),
+			proto_fb::Operator::AllInside => Ok(Operator::AllInside),
+			proto_fb::Operator::AnyInside => Ok(Operator::AnyInside),
+			proto_fb::Operator::NoneInside => Ok(Operator::NoneInside),
+			proto_fb::Operator::Outside => Ok(Operator::Outside),
+			proto_fb::Operator::Intersects => Ok(Operator::Intersects),
+			proto_fb::Operator::AnyInside => Ok(Operator::AnyInside),
+			proto_fb::Operator::NoneInside => Ok(Operator::NoneInside),
 			_ => Err(anyhow::anyhow!("Invalid operator: {:?}", input)),
 		}
 	}
 }
 
 impl ToFlatbuffers for Data {
-	type Output<'bldr> = flatbuffers::WIPOffset<expr_fb::Data<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Data<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
@@ -2574,8 +2574,8 @@ impl ToFlatbuffers for Data {
 	) -> Self::Output<'bldr> {
 		let (contents_type, contents) = match self {
 			Data::EmptyExpression => (
-				expr_fb::DataContents::Empty,
-				expr_fb::NullValue::create(builder, &expr_fb::NullValueArgs {}).as_union_value(),
+				proto_fb::DataContents::Empty,
+				proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {}).as_union_value(),
 			),
 			Data::SetExpression(set) => {
 				let mut items = Vec::with_capacity(set.len());
@@ -2583,9 +2583,9 @@ impl ToFlatbuffers for Data {
 					let idiom_fb = idiom.to_fb(builder);
 					let operator_fb = operator.to_fb(builder);
 					let value_fb = value.to_fb(builder);
-					items.push(expr_fb::SetExpr::create(
+					items.push(proto_fb::SetExpr::create(
 						builder,
-						&expr_fb::SetExprArgs {
+						&proto_fb::SetExprArgs {
 							idiom: Some(idiom_fb),
 							operator: operator_fb,
 							value: Some(value_fb),
@@ -2594,10 +2594,10 @@ impl ToFlatbuffers for Data {
 				}
 				let set_exprs = builder.create_vector(&items);
 				(
-					expr_fb::DataContents::Set,
-					expr_fb::SetMultiExpr::create(
+					proto_fb::DataContents::Set,
+					proto_fb::SetMultiExpr::create(
 						builder,
-						&expr_fb::SetMultiExprArgs {
+						&proto_fb::SetMultiExprArgs {
 							items: Some(set_exprs),
 						},
 					)
@@ -2612,10 +2612,10 @@ impl ToFlatbuffers for Data {
 				}
 				let unset_exprs = builder.create_vector(&items);
 				(
-					expr_fb::DataContents::Unset,
-					expr_fb::UnsetMultiExpr::create(
+					proto_fb::DataContents::Unset,
+					proto_fb::UnsetMultiExpr::create(
 						builder,
-						&expr_fb::UnsetMultiExprArgs {
+						&proto_fb::UnsetMultiExprArgs {
 							items: Some(unset_exprs),
 						},
 					)
@@ -2624,23 +2624,23 @@ impl ToFlatbuffers for Data {
 			}
 			Data::PatchExpression(patch) => {
 				let patch_fb = patch.to_fb(builder);
-				(expr_fb::DataContents::Patch, patch_fb.as_union_value())
+				(proto_fb::DataContents::Patch, patch_fb.as_union_value())
 			}
 			Data::MergeExpression(merge) => {
 				let merge_fb = merge.to_fb(builder);
-				(expr_fb::DataContents::Merge, merge_fb.as_union_value())
+				(proto_fb::DataContents::Merge, merge_fb.as_union_value())
 			}
 			Data::ReplaceExpression(replace) => {
 				let replace_fb = replace.to_fb(builder);
-				(expr_fb::DataContents::Replace, replace_fb.as_union_value())
+				(proto_fb::DataContents::Replace, replace_fb.as_union_value())
 			}
 			Data::ContentExpression(content) => {
 				let content_fb = content.to_fb(builder);
-				(expr_fb::DataContents::Content, content_fb.as_union_value())
+				(proto_fb::DataContents::Content, content_fb.as_union_value())
 			}
 			Data::SingleExpression(single) => {
 				let single_fb = single.to_fb(builder);
-				(expr_fb::DataContents::Value, single_fb.as_union_value())
+				(proto_fb::DataContents::Value, single_fb.as_union_value())
 			}
 			Data::ValuesExpression(values) => {
 				todo!("STU")
@@ -2651,7 +2651,7 @@ impl ToFlatbuffers for Data {
 				// }
 				// let values_fb = builder.create_vector(&items);
 				// (
-				// 	expr_fb::DataContents::Values,
+				// 	proto_fb::DataContents::Values,
 				// 	values_fb.as_union_value(),
 				// )
 			}
@@ -2661,9 +2661,9 @@ impl ToFlatbuffers for Data {
 					let idiom_fb = idiom.to_fb(builder);
 					let operator_fb = operator.to_fb(builder);
 					let value_fb = value.to_fb(builder);
-					items.push(expr_fb::SetExpr::create(
+					items.push(proto_fb::SetExpr::create(
 						builder,
-						&expr_fb::SetExprArgs {
+						&proto_fb::SetExprArgs {
 							idiom: Some(idiom_fb),
 							operator: operator_fb,
 							value: Some(value_fb),
@@ -2672,10 +2672,10 @@ impl ToFlatbuffers for Data {
 				}
 				let update_exprs = builder.create_vector(&items);
 				(
-					expr_fb::DataContents::Update,
-					expr_fb::SetMultiExpr::create(
+					proto_fb::DataContents::Update,
+					proto_fb::SetMultiExpr::create(
 						builder,
-						&expr_fb::SetMultiExprArgs {
+						&proto_fb::SetMultiExprArgs {
 							items: Some(update_exprs),
 						},
 					)
@@ -2684,9 +2684,9 @@ impl ToFlatbuffers for Data {
 			}
 		};
 
-		expr_fb::Data::create(
+		proto_fb::Data::create(
 			builder,
-			&expr_fb::DataArgs {
+			&proto_fb::DataArgs {
 				contents_type,
 				contents: Some(contents),
 			},
@@ -2700,45 +2700,45 @@ type UnsetMultiExpr = Vec<Idiom>;
 type ValuesExpr = Vec<Vec<(Idiom, Value)>>;
 
 impl FromFlatbuffers for Data {
-	type Input<'a> = expr_fb::Data<'a>;
+	type Input<'a> = proto_fb::Data<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.contents_type() {
-			expr_fb::DataContents::Empty => Ok(Data::EmptyExpression),
-			expr_fb::DataContents::Set => {
+			proto_fb::DataContents::Empty => Ok(Data::EmptyExpression),
+			proto_fb::DataContents::Set => {
 				let params = input.contents_as_set().context("Missing set")?;
 				Ok(Data::SetExpression(SetMultiExpr::from_fb(params)?))
 			}
-			expr_fb::DataContents::Unset => {
+			proto_fb::DataContents::Unset => {
 				let params = input.contents_as_unset().context("Missing unset")?;
 				Ok(Data::UnsetExpression(UnsetMultiExpr::from_fb(params)?))
 			}
-			expr_fb::DataContents::Patch => {
+			proto_fb::DataContents::Patch => {
 				let params = input.contents_as_patch().context("Missing patch")?;
 				Ok(Data::PatchExpression(Value::from_fb(params)?))
 			}
-			expr_fb::DataContents::Merge => {
+			proto_fb::DataContents::Merge => {
 				let params = input.contents_as_merge().context("Missing merge")?;
 				Ok(Data::MergeExpression(Value::from_fb(params)?))
 			}
-			expr_fb::DataContents::Replace => {
+			proto_fb::DataContents::Replace => {
 				let params = input.contents_as_replace().context("Missing replace")?;
 				Ok(Data::ReplaceExpression(Value::from_fb(params)?))
 			}
-			expr_fb::DataContents::Content => {
+			proto_fb::DataContents::Content => {
 				let params = input.contents_as_content().context("Missing content")?;
 				Ok(Data::ContentExpression(Value::from_fb(params)?))
 			}
-			expr_fb::DataContents::Value => {
+			proto_fb::DataContents::Value => {
 				let params = input.contents_as_value().context("Missing value")?;
 				Ok(Data::SingleExpression(Value::from_fb(params)?))
 			}
-			expr_fb::DataContents::Values => {
+			proto_fb::DataContents::Values => {
 				let params = input.contents_as_values().context("Missing values")?;
 				Ok(Data::ValuesExpression(ValuesExpr::from_fb(params)?))
 			}
-			expr_fb::DataContents::Update => {
+			proto_fb::DataContents::Update => {
 				let params = input.contents_as_update().context("Missing update")?;
 				Ok(Data::UpdateExpression(SetMultiExpr::from_fb(params)?))
 			}
@@ -2750,7 +2750,7 @@ impl FromFlatbuffers for Data {
 }
 
 impl FromFlatbuffers for SetMultiExpr {
-	type Input<'a> = expr_fb::SetMultiExpr<'a>;
+	type Input<'a> = proto_fb::SetMultiExpr<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2769,16 +2769,16 @@ impl FromFlatbuffers for SetMultiExpr {
 }
 
 impl ToFlatbuffers for SetExpr {
-	type Output<'a> = flatbuffers::WIPOffset<expr_fb::SetExpr<'a>>;
+	type Output<'a> = flatbuffers::WIPOffset<proto_fb::SetExpr<'a>>;
 
 	#[inline]
 	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
 		let idiom = self.0.to_fb(fbb);
 		let operator = self.1.to_fb(fbb);
 		let value = self.2.to_fb(fbb);
-		expr_fb::SetExpr::create(
+		proto_fb::SetExpr::create(
 			fbb,
-			&expr_fb::SetExprArgs {
+			&proto_fb::SetExprArgs {
 				idiom: Some(idiom),
 				operator,
 				value: Some(value),
@@ -2788,7 +2788,7 @@ impl ToFlatbuffers for SetExpr {
 }
 
 impl FromFlatbuffers for SetExpr {
-	type Input<'a> = expr_fb::SetExpr<'a>;
+	type Input<'a> = proto_fb::SetExpr<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2800,15 +2800,15 @@ impl FromFlatbuffers for SetExpr {
 }
 
 impl ToFlatbuffers for SetMultiExpr {
-	type Output<'a> = flatbuffers::WIPOffset<expr_fb::SetMultiExpr<'a>>;
+	type Output<'a> = flatbuffers::WIPOffset<proto_fb::SetMultiExpr<'a>>;
 
 	#[inline]
 	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
 		let items = self.iter().map(|v| v.to_fb(fbb)).collect::<Vec<_>>();
 		let items = fbb.create_vector(&items);
-		expr_fb::SetMultiExpr::create(
+		proto_fb::SetMultiExpr::create(
 			fbb,
-			&expr_fb::SetMultiExprArgs {
+			&proto_fb::SetMultiExprArgs {
 				items: Some(items),
 			},
 		)
@@ -2816,7 +2816,7 @@ impl ToFlatbuffers for SetMultiExpr {
 }
 
 impl FromFlatbuffers for UnsetMultiExpr {
-	type Input<'a> = expr_fb::UnsetMultiExpr<'a>;
+	type Input<'a> = proto_fb::UnsetMultiExpr<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2835,7 +2835,7 @@ impl FromFlatbuffers for UnsetMultiExpr {
 }
 
 impl FromFlatbuffers for ValuesExpr {
-	type Input<'a> = expr_fb::ValuesMultiExpr<'a>;
+	type Input<'a> = proto_fb::ValuesMultiExpr<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
@@ -2907,7 +2907,7 @@ mod tests {
 		let input_fb = input.to_fb(&mut builder);
 		builder.finish_minimal(input_fb);
 		let buf = builder.finished_data();
-		let value_fb = flatbuffers::root::<expr_fb::Value>(buf).expect("Failed to read FlatBuffer");
+		let value_fb = flatbuffers::root::<proto_fb::Value>(buf).expect("Failed to read FlatBuffer");
 		let value = Value::from_fb(value_fb).expect("Failed to convert from FlatBuffer");
 		assert_eq!(input, value, "Roundtrip conversion failed for input: {:?}", input);
 	}

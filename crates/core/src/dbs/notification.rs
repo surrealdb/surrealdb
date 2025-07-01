@@ -1,6 +1,5 @@
 use crate::expr::{Object, Uuid, Value};
-use crate::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
@@ -28,34 +27,29 @@ impl Display for Action {
 	}
 }
 
-impl ToFlatbuffers for Action {
-	type Output<'bldr> = rpc_fb::Action;
+impl TryFrom<rpc_proto::Action> for Action {
+	type Error = anyhow::Error;
 
-	#[inline]
-	fn to_fb<'bldr>(
-		&self,
-		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		match self {
-			Action::Create => rpc_fb::Action::Create,
-			Action::Update => rpc_fb::Action::Update,
-			Action::Delete => rpc_fb::Action::Delete,
-			Action::Killed => rpc_fb::Action::Killed,
+	fn try_from(value: rpc_proto::Action) -> Result<Self, Self::Error> {
+		match value {
+			rpc_proto::Action::Create => Ok(Action::Create),
+			rpc_proto::Action::Update => Ok(Action::Update),
+			rpc_proto::Action::Delete => Ok(Action::Delete),
+			rpc_proto::Action::Killed => Ok(Action::Killed),
+			unexpected => Err(anyhow::anyhow!("Unknown Action type: {unexpected:?}")),
 		}
 	}
 }
 
-impl FromFlatbuffers for Action {
-	type Input<'a> = rpc_fb::Action;
-
-	#[inline]
-	fn from_fb(reader: Self::Input<'_>) -> anyhow::Result<Self> {
-		match reader {
-			rpc_fb::Action::Create => Ok(Action::Create),
-			rpc_fb::Action::Update => Ok(Action::Update),
-			rpc_fb::Action::Delete => Ok(Action::Delete),
-			rpc_fb::Action::Killed => Ok(Action::Killed),
-			_ => Err(anyhow::anyhow!("Unknown action type in Notification")),
+impl TryFrom<Action> for rpc_proto::Action {
+	type Error = anyhow::Error;
+	
+	fn try_from(value: Action) -> Result<Self, Self::Error> {
+		match value {
+			Action::Create => Ok(rpc_proto::Action::Create),
+			Action::Update => Ok(rpc_proto::Action::Update),
+			Action::Delete => Ok(rpc_proto::Action::Delete),
+			Action::Killed => Ok(rpc_proto::Action::Killed),
 		}
 	}
 }
@@ -99,48 +93,18 @@ impl Notification {
 	}
 }
 
-impl ToFlatbuffers for Notification {
-	type Output<'bldr> = flatbuffers::WIPOffset<rpc_fb::LiveNotification<'bldr>>;
+impl TryFrom<rpc_proto::LiveResponse> for Notification {
+	type Error = anyhow::Error;
 
-	#[inline]
-	fn to_fb<'bldr>(
-		&self,
-		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		let id = self.id.to_fb(builder);
-		let action = self.action.to_fb(builder);
-		let record = self.record.to_fb(builder);
-		let result = self.result.to_fb(builder);
-
-		rpc_fb::LiveNotification::create(
-			builder,
-			&rpc_fb::LiveNotificationArgs {
-				id: Some(id),
-				action,
-				record: Some(record),
-				result: Some(result),
-			},
-		)
+	fn try_from(value: rpc_proto::LiveResponse) -> Result<Self, Self::Error> {
+		todo!()
 	}
 }
 
-impl FromFlatbuffers for Notification {
-	type Input<'a> = rpc_fb::LiveNotification<'a>;
+impl TryFrom<Notification> for rpc_proto::LiveResponse {
+	type Error = anyhow::Error;
 
-	#[inline]
-	fn from_fb(reader: Self::Input<'_>) -> anyhow::Result<Self> {
-		let id = reader.id().ok_or_else(|| anyhow::anyhow!("Missing id in Notification"))?;
-		let action = reader.action();
-		let record =
-			reader.record().ok_or_else(|| anyhow::anyhow!("Missing record in Notification"))?;
-		let result =
-			reader.result().ok_or_else(|| anyhow::anyhow!("Missing result in Notification"))?;
-
-		Ok(Self {
-			id: Uuid::from_fb(id)?,
-			action: Action::from_fb(action)?,
-			record: Value::from_fb(record)?,
-			result: Value::from_fb(result)?,
-		})
+	fn try_from(value: Notification) -> Result<Self, Self::Error> {
+		todo!()
 	}
 }

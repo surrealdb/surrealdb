@@ -1,44 +1,35 @@
 use crate::Surreal;
-use crate::api::Connection;
+
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::method::OnceLockExt;
+
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Array;
 use surrealdb_core::expr::TryFromValue;
+use surrealdb_protocol::proto::rpc::v1::RunFunctionRequest;
 
 /// A run future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Run<'r, C: Connection, R> {
-	pub(super) client: Cow<'r, Surreal<C>>,
+pub struct Run<R> {
+	pub(super) client: Surreal,
 	pub(super) function: Result<(String, Option<String>)>,
 	pub(super) args: Array,
 	pub(super) response_type: PhantomData<R>,
 }
-impl<C, R> Run<'_, C, R>
-where
-	C: Connection,
+impl<R> Run<R>
 {
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Run<'static, C, R> {
-		Run {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
 }
 
-impl<'r, Client, R> IntoFuture for Run<'r, Client, R>
+impl<R> IntoFuture for Run<R>
 where
-	Client: Connection,
 	R: TryFromValue,
 {
 	type Output = Result<R>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let Run {
@@ -49,25 +40,25 @@ where
 		} = self;
 
 		Box::pin(async move {
-			let router = client.inner.router.extract()?;
+			let client = client.client;
 			let (name, version) = function?;
+			todo!("STUB: Run<R> future");
+			// let response = client.run_function(RunFunctionRequest {
+			// 	name,
+			// 	version,
+			// 	args: Some(args.try_into()?),
+			// 	..Default::default()
+			// }).await?;
 
-			let value = router
-				.execute(Command::Run {
-					name,
-					version,
-					args,
-				})
-				.await?;
+			// let response = response.into_inner();
 
-			Ok(value)
+			// todo!("STUB: Run<R> future");
+			// Ok(value)
 		})
 	}
 }
 
-impl<Client, R> Run<'_, Client, R>
-where
-	Client: Connection,
+impl<R> Run<R>
 {
 	/// Supply arguments to the function being run.
 	pub fn args(mut self, args: impl Into<Array>) -> Self {

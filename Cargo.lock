@@ -5686,6 +5686,7 @@ dependencies = [
  "serial_test",
  "surrealdb",
  "surrealdb-core",
+ "surrealdb-protocol",
  "tempfile",
  "test-log",
  "thiserror 1.0.69",
@@ -5693,7 +5694,6 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "tokio-util",
- "tonic 0.12.3",
  "tower 0.4.13",
  "tower-http",
  "tower-service",
@@ -5712,12 +5712,15 @@ name = "surrealdb"
 version = "3.0.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "arrayvec",
  "async-channel",
  "bincode",
+ "bytes",
  "chrono",
  "ciborium",
  "criterion",
+ "dashmap",
  "dmp",
  "env_logger",
  "flatbuffers",
@@ -5726,6 +5729,9 @@ dependencies = [
  "geo",
  "getrandom 0.3.2",
  "hashbrown 0.14.5",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper-util",
  "indexmap 2.8.0",
  "native-tls",
  "parking_lot",
@@ -5749,13 +5755,17 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb-core",
+ "surrealdb-protocol",
  "temp-dir",
  "test-log",
  "thiserror 1.0.69",
  "time",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "tokio-util",
+ "tonic 0.12.3",
+ "tower 0.4.13",
  "tracing",
  "tracing-subscriber",
  "trice",
@@ -5862,6 +5872,7 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
+ "surrealdb-protocol",
  "surrealdb-tikv-client",
  "surrealkv",
  "surrealml-core",
@@ -5886,6 +5897,23 @@ dependencies = [
  "wasmtimer",
  "wiremock",
  "ws_stream_wasm",
+]
+
+[[package]]
+name = "surrealdb-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "flatbuffers",
+ "geo",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+ "rust_decimal",
+ "serde",
+ "tonic 0.12.3",
+ "uuid",
 ]
 
 [[package]]
@@ -6409,9 +6437,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.14"
+version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b9590b93e6fcc1739458317cccd391ad3955e2bde8913edf6f95f9e65a8f034"
+checksum = "66a539a9ad6d5d281510d5bd368c973d636c02dbf8a67300bfb6b950696ad7df"
 dependencies = [
  "bytes",
  "futures-core",

@@ -1655,7 +1655,7 @@ mod tests {
 					.with_capabilities(Capabilities::all());
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, Variables::default()).await.unwrap();
-				let tmp = res.remove(0).result.unwrap();
+				let tmp = res.remove(0).values.unwrap();
 				if tmp == Value::from("object") {
 					// Assume this function is superseded by a module of the same name.
 				} else if tmp != Value::from("function") {

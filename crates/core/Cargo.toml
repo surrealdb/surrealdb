@@ -169,6 +169,7 @@ sha2.workspace = true
 snap.workspace = true
 strsim.workspace = true
 subtle.workspace = true
+surrealdb-protocol.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

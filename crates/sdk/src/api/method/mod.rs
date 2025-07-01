@@ -1,7 +1,6 @@
 //! Methods to use when interacting with a SurrealDB instance
-use crate::api::Connect;
-use crate::api::Connection;
-use crate::api::OnceLockExt;
+
+use crate::api::Channel;
 use crate::api::Surreal;
 use crate::api::conn::Command;
 use crate::api::opt;
@@ -15,6 +14,9 @@ use crate::opt::IntoExportDestination;
 use crate::opt::Resource;
 use crate::opt::WaitFor;
 use serde::Serialize;
+use surrealdb_core::expr::Data;
+use surrealdb_protocol::proto::rpc::v1::SignupRequest;
+use tonic::transport::Body;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -29,6 +31,7 @@ use surrealdb_core::expr::to_value as to_core_value;
 use surrealdb_core::iam::SigninParams;
 use surrealdb_core::iam::SignupParams;
 use surrealdb_core::syn;
+use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -37,7 +40,6 @@ mod authenticate;
 mod begin;
 mod cancel;
 mod commit;
-mod content;
 mod create;
 mod delete;
 mod export;
@@ -46,8 +48,6 @@ mod import;
 mod insert;
 mod insert_relation;
 mod invalidate;
-mod merge;
-mod patch;
 mod run;
 mod select;
 mod set;
@@ -68,7 +68,6 @@ pub use authenticate::Authenticate;
 pub use begin::Begin;
 pub use cancel::Cancel;
 pub use commit::Commit;
-pub use content::Content;
 pub use create::Create;
 pub use delete::Delete;
 pub use export::{Backup, Export};
@@ -77,9 +76,7 @@ pub use health::Health;
 pub use import::Import;
 pub use insert::Insert;
 pub use invalidate::Invalidate;
-pub use live::Stream;
 pub use query::Query;
-pub use query::QueryStream;
 pub use run::IntoFn;
 pub use run::Run;
 pub use select::Select;
@@ -95,8 +92,7 @@ pub use use_db::UseDb;
 pub use use_ns::UseNs;
 pub use version::Version;
 
-/// A alias for an often used type of future returned by async methods in this library.
-pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
+pub(crate) use futures::future::BoxFuture;
 
 /// Query statistics
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -139,141 +135,106 @@ pub struct WithStats<T>(pub T);
 // 	}
 // }
 
-impl<C> Surreal<C>
-where
-	C: Connection,
-{
-	/// Initialises a new unconnected instance of the client
-	///
-	/// This makes it easy to create a static singleton of the client. The static singleton
-	/// pattern in the example below ensures that a single database instance is available
-	/// across very large or complicated applications. With the singleton, only one connection
-	/// to the database is instantiated, and the database connection does not have to be shared
-	/// across components or controllers.
-	///
-	/// # Examples
-	///
-	/// Using a static, compile-time scheme
-	///
-	/// ```no_run
-	/// use std::sync::LazyLock;
-	/// use serde::{Serialize, Deserialize};
-	/// use surrealdb::Surreal;
-	/// use surrealdb::opt::auth::Root;
-	/// use surrealdb::engine::remote::ws::Ws;
-	/// use surrealdb::engine::remote::ws::Client;
-	///
-	/// // Creates a new static instance of the client
-	/// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
-	///
-	/// #[derive(Serialize, Deserialize)]
-	/// struct Person {
-	///     name: String,
-	/// }
-	///
-	/// #[tokio::main]
-	/// async fn main() -> surrealdb::Result<()> {
-	///     // Connect to the database
-	///     DB.connect::<Ws>("localhost:8000").await?;
-	///
-	///     // Log into the database
-	///     DB.signin(Root {
-	///         username: "root",
-	///         password: "root",
-	///     }).await?;
-	///
-	///     // Select a namespace/database
-	///     DB.use_ns("namespace").use_db("database").await?;
-	///
-	///     // Create or update a specific record
-	///     let tobie: Option<Person> = DB.update(("person", "tobie"))
-	///         .content(Person {
-	///             name: "Tobie".into(),
-	///         }).await?;
-	///
-	///     Ok(())
-	/// }
-	/// ```
-	///
-	/// Using a dynamic, run-time scheme
-	///
-	/// ```no_run
-	/// use std::sync::LazyLock;
-	/// use serde::{Serialize, Deserialize};
-	/// use surrealdb::Surreal;
-	/// use surrealdb::engine::any::Any;
-	/// use surrealdb::opt::auth::Root;
-	///
-	/// // Creates a new static instance of the client
-	/// static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
-	///
-	/// #[derive(Serialize, Deserialize)]
-	/// struct Person {
-	///     name: String,
-	/// }
-	///
-	/// #[tokio::main]
-	/// async fn main() -> surrealdb::Result<()> {
-	///     // Connect to the database
-	///     DB.connect("ws://localhost:8000").await?;
-	///
-	///     // Log into the database
-	///     DB.signin(Root {
-	///         username: "root",
-	///         password: "root",
-	///     }).await?;
-	///
-	///     // Select a namespace/database
-	///     DB.use_ns("namespace").use_db("database").await?;
-	///
-	///     // Create or update a specific record
-	///     let tobie: Option<Person> = DB.update(("person", "tobie"))
-	///         .content(Person {
-	///             name: "Tobie".into(),
-	///         }).await?;
-	///
-	///     Ok(())
-	/// }
-	/// ```
-	pub fn init() -> Self {
-		Self {
-			inner: Arc::new(super::Inner {
-				router: OnceLock::new(),
-				waiter: watch::channel(None),
-			}),
-			engine: PhantomData,
-		}
-	}
+impl Surreal {
+	// /// Initialises a new unconnected instance of the client
+	// ///
+	// /// This makes it easy to create a static singleton of the client. The static singleton
+	// /// pattern in the example below ensures that a single database instance is available
+	// /// across very large or complicated applications. With the singleton, only one connection
+	// /// to the database is instantiated, and the database connection does not have to be shared
+	// /// across components or controllers.
+	// ///
+	// /// # Examples
+	// ///
+	// /// Using a static, compile-time scheme
+	// ///
+	// /// ```no_run
+	// /// use std::sync::LazyLock;
+	// /// use serde::{Serialize, Deserialize};
+	// /// use surrealdb::Surreal;
+	// /// use surrealdb::opt::auth::Root;
+	// /// use surrealdb::engine::remote::ws::Ws;
+	// /// use surrealdb::engine::remote::ws::Client;
+	// ///
+	// /// // Creates a new static instance of the client
+	// /// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+	// ///
+	// /// #[derive(Serialize, Deserialize)]
+	// /// struct Person {
+	// ///     name: String,
+	// /// }
+	// ///
+	// /// #[tokio::main]
+	// /// async fn main() -> surrealdb::Result<()> {
+	// ///     // Connect to the database
+	// ///     DB.connect::<Ws>("localhost:8000").await?;
+	// ///
+	// ///     // Log into the database
+	// ///     DB.signin(Root {
+	// ///         username: "root",
+	// ///         password: "root",
+	// ///     }).await?;
+	// ///
+	// ///     // Select a namespace/database
+	// ///     DB.use_ns("namespace").use_db("database").await?;
+	// ///
+	// ///     // Create or update a specific record
+	// ///     let tobie: Option<Person> = DB.update(("person", "tobie"))
+	// ///         .content(Person {
+	// ///             name: "Tobie".into(),
+	// ///         }).await?;
+	// ///
+	// ///     Ok(())
+	// /// }
+	// /// ```
+	// ///
+	// /// Using a dynamic, run-time scheme
+	// ///
+	// /// ```no_run
+	// /// use std::sync::LazyLock;
+	// /// use serde::{Serialize, Deserialize};
+	// /// use surrealdb::Surreal;
+	// /// use surrealdb::engine::any::Any;
+	// /// use surrealdb::opt::auth::Root;
+	// ///
+	// /// // Creates a new static instance of the client
+	// /// static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
+	// ///
+	// /// #[derive(Serialize, Deserialize)]
+	// /// struct Person {
+	// ///     name: String,
+	// /// }
+	// ///
+	// /// #[tokio::main]
+	// /// async fn main() -> surrealdb::Result<()> {
+	// ///     // Connect to the database
+	// ///     DB.connect("ws://localhost:8000").await?;
+	// ///
+	// ///     // Log into the database
+	// ///     DB.signin(Root {
+	// ///         username: "root",
+	// ///         password: "root",
+	// ///     }).await?;
+	// ///
+	// ///     // Select a namespace/database
+	// ///     DB.use_ns("namespace").use_db("database").await?;
+	// ///
+	// ///     // Create or update a specific record
+	// ///     let tobie: Option<Person> = DB.update(("person", "tobie"))
+	// ///         .content(Person {
+	// ///             name: "Tobie".into(),
+	// ///         }).await?;
+	// ///
+	// ///     Ok(())
+	// /// }
+	// /// ```
+	// pub fn init() -> Self {
+	// 	Self {
+	// 		client: SurrealDbServiceClient::new(C::default()),
+	// 	}
+	// }
 
-	/// Connects to a local or remote database endpoint
-	///
-	/// # Examples
-	///
-	/// ```no_run
-	/// use surrealdb::Surreal;
-	/// use surrealdb::engine::remote::ws::{Ws, Wss};
-	///
-	/// # #[tokio::main]
-	/// # async fn main() -> surrealdb::Result<()> {
-	/// // Connect to a local endpoint
-	/// let db = Surreal::new::<Ws>("localhost:8000").await?;
-	///
-	/// // Connect to a remote endpoint
-	/// let db = Surreal::new::<Wss>("cloud.surrealdb.com").await?;
-	/// #
-	/// # Ok(())
-	/// # }
-	/// ```
-	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<C, Self> {
-		Connect {
-			surreal: Surreal::init(),
-			address: address.into_endpoint(),
-			capacity: 0,
-			response_type: PhantomData,
-		}
-	}
-
-	pub fn transaction(&self) -> Begin<C> {
+	pub fn transaction(&self) -> Begin {
 		Begin {
 			client: self.clone(),
 		}
@@ -291,9 +252,9 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_ns(&self, ns: impl Into<String>) -> UseNs<C> {
+	pub fn use_ns(&self, ns: impl Into<String>) -> UseNs {
 		UseNs {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			ns: ns.into(),
 		}
 	}
@@ -310,9 +271,9 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_db(&self, db: impl Into<String>) -> UseDb<C> {
+	pub fn use_db(&self, db: impl Into<String>) -> UseDb {
 		UseDb {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			ns: None,
 			db: db.into(),
 		}
@@ -350,11 +311,11 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&self, key: impl Into<String>, value: impl Serialize + 'static) -> Set<C> {
+	pub fn set(&self, key: impl Into<String>, value: impl Into<Value>) -> Set {
 		Set {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			key: key.into(),
-			value: to_core_value(value),
+			value: value.into(),
 		}
 	}
 
@@ -390,9 +351,9 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn unset(&self, key: impl Into<String>) -> Unset<C> {
+	pub fn unset(&self, key: impl Into<String>) -> Unset {
 		Unset {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			key: key.into(),
 		}
 	}
@@ -448,10 +409,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(&self, params: impl Into<SignupParams>) -> Signup<C> {
+	pub fn signup<R>(&self, request: impl Into<SignupRequest>) -> Signup {
 		Signup {
-			client: Cow::Borrowed(self),
-			params: params.into(),
+			client: self.clone(),
+			request: request.into(),
 		}
 	}
 
@@ -564,12 +525,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signin(&self, credentials: impl IntoAccessCredentials) -> Signin<C> {
+	pub fn signin(&self, credentials: impl IntoAccessCredentials) -> Signin {
 		Signin {
-			client: Cow::Borrowed(self),
-			params: SigninParams {
-				access_method: credentials.into_access_method(),
-			},
+			client: self.clone(),
+			access_method: credentials.into_access_method(),
 		}
 	}
 
@@ -585,9 +544,9 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn invalidate(&self) -> Invalidate<C> {
+	pub fn invalidate(&self) -> Invalidate {
 		Invalidate {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 		}
 	}
 
@@ -604,9 +563,9 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn authenticate(&self, token: impl Into<Jwt>) -> Authenticate<C> {
+	pub fn authenticate(&self, token: impl Into<Jwt>) -> Authenticate {
 		Authenticate {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			token: token.into(),
 		}
 	}
@@ -660,12 +619,12 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
+	pub fn query(&self, query: impl opt::IntoQuery) -> Query {
 		Query {
 			txn: None,
 			queries: vec![query.into_query()],
 			variables: Variables::default(),
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 		}
 	}
 
@@ -708,13 +667,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<R, RT>(&self, resource: R) -> Select<C, R, RT>
+	pub fn select<R, RT>(&self, resource: R) -> Select<R, RT>
 	where
 		R: Resource,
 	{
 		Select {
 			txn: None,
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			resource,
 			response_type: PhantomData,
 			query_type: PhantomData,
@@ -767,14 +726,15 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R, RT>(&self, resource: R) -> Create<C, R, RT>
+	pub fn create<R, RT>(&self, what: R) -> Create<R, RT>
 	where
 		R: CreatableResource,
 	{
 		Create {
 			txn: None,
-			client: Cow::Borrowed(self),
-			resource,
+			client: self.clone(),
+			what,
+			data: Data::EmptyExpression,
 			response_type: PhantomData,
 		}
 	}
@@ -916,14 +876,15 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn insert<R, RT>(&self, resource: R) -> Insert<C, R, RT>
+	pub fn insert<R, RT>(&self, resource: R) -> Insert<R, RT>
 	where
 		R: InsertableResource,
 	{
 		Insert {
 			txn: None,
-			client: Cow::Borrowed(self),
-			resource,
+			client: self.clone(),
+			what: resource,
+			data: Data::EmptyExpression,
 			response_type: PhantomData,
 		}
 	}
@@ -1078,14 +1039,15 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn upsert<R, RT>(&self, resource: R) -> Upsert<C, R, RT>
+	pub fn upsert<R, RT>(&self, resource: R) -> Upsert<R, RT>
 	where
 		R: Resource,
 	{
 		Upsert {
 			txn: None,
-			client: Cow::Borrowed(self),
-			resource,
+			client: self.clone(),
+			what: resource,
+			data: Data::EmptyExpression,
 			response_type: PhantomData,
 		}
 	}
@@ -1240,14 +1202,15 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn update<R, RT>(&self, resource: R) -> Update<C, R, RT>
+	pub fn update<R, RT>(&self, what: R) -> Update<R, RT>
 	where
 		R: Resource,
 	{
 		Update {
 			txn: None,
-			client: Cow::Borrowed(self),
-			resource,
+			client: self.clone(),
+			what,
+			data: Data::EmptyExpression,
 			response_type: PhantomData,
 		}
 	}
@@ -1276,10 +1239,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<R, RT>(&self, resource: R) -> Delete<C, R, RT> {
+	pub fn delete<R, RT>(&self, resource: R) -> Delete<R, RT> {
 		Delete {
 			txn: None,
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			resource,
 			response_type: PhantomData,
 		}
@@ -1297,9 +1260,9 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn version(&self) -> Version<C> {
+	pub fn version(&self) -> Version {
 		Version {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 		}
 	}
 
@@ -1324,9 +1287,9 @@ where
 	/// # }
 	/// ```
 	///
-	pub fn run<R>(&self, function: impl IntoFn) -> Run<C, R> {
+	pub fn run<R>(&self, function: impl IntoFn) -> Run<R> {
 		Run {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			function: function.into_fn(),
 			args: Array::new(),
 			response_type: PhantomData,
@@ -1345,25 +1308,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn health(&self) -> Health<C> {
+	pub fn health(&self) -> Health {
 		Health {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 		}
-	}
-
-	/// Wait for the selected event to happen before proceeding
-	pub async fn wait_for(&self, event: WaitFor) {
-		let mut rx = self.inner.waiter.0.subscribe();
-		rx.wait_for(|current| match current {
-			// The connection hasn't been initialised yet.
-			None => false,
-			// The connection has been initialised. Only the connection even matches.
-			Some(WaitFor::Connection) => matches!(event, WaitFor::Connection),
-			// The database has been selected. Connection and database events both match.
-			Some(WaitFor::Database) => matches!(event, WaitFor::Connection | WaitFor::Database),
-		})
-		.await
-		.ok();
 	}
 
 	/// Dumps the database contents to a file
@@ -1400,9 +1348,9 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn export<R>(&self, target: impl IntoExportDestination<R>) -> Export<C, R> {
+	pub fn export<R>(&self, target: impl IntoExportDestination<R>) -> Export<R> {
 		Export {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			target: target.into_export_destination(),
 			ml_config: None,
 			db_config: None,
@@ -1430,12 +1378,12 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn import<P>(&self, file: P) -> Import<C>
+	pub fn import<P>(&self, file: P) -> Import
 	where
 		P: AsRef<Path>,
 	{
 		Import {
-			client: Cow::Borrowed(self),
+			client: self.clone(),
 			file: file.as_ref().to_owned(),
 			is_ml: false,
 			import_type: PhantomData,

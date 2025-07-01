@@ -27,14 +27,14 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<QueryResult> {
 	assert_eq!(r.len(), 8);
 	// Check the first statements are successful
 	for _ in 0..4 {
-		r.remove(0).result.unwrap();
+		r.remove(0).values.unwrap();
 	}
 	r
 }
 
 fn check(r: &mut Vec<QueryResult>, tmp: &str) {
 	let tmp = SqlValue::parse(tmp);
-	let val = match r.remove(0).result {
+	let val = match r.remove(0).values {
 		Ok(v) => v,
 		Err(err) => panic!("{err}"),
 	};
@@ -75,7 +75,7 @@ pub async fn standard(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check_array_is_sorted(&r.remove(0).result.unwrap(), 3);
+	check_array_is_sorted(&r.remove(0).values.unwrap(), 3);
 	check(
 		r,
 		"[
@@ -97,7 +97,7 @@ pub async fn standard(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check_array_is_sorted(&r.remove(0).result.unwrap(), 1500);
+	check_array_is_sorted(&r.remove(0).values.unwrap(), 1500);
 }
 
 pub async fn unique(new_ds: impl CreateDs) {
@@ -124,7 +124,7 @@ pub async fn unique(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check_array_is_sorted(&r.remove(0).result.unwrap(), 3);
+	check_array_is_sorted(&r.remove(0).values.unwrap(), 3);
 	check(
 		r,
 		"[
@@ -146,7 +146,7 @@ pub async fn unique(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check_array_is_sorted(&r.remove(0).result.unwrap(), 1500);
+	check_array_is_sorted(&r.remove(0).values.unwrap(), 1500);
 }
 
 pub async fn range(new_ds: impl CreateDs) {

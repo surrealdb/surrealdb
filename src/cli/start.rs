@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::engine::any;
+use surrealdb::Surreal;
 use surrealdb::engine::tasks;
 use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
@@ -173,13 +173,8 @@ pub async fn init(
 	if !no_banner {
 		println!("{LOGO}");
 	}
-	// Clean the path
-	let endpoint = any::__into_endpoint(path)?;
-	let path = if endpoint.path.is_empty() {
-		endpoint.url.to_string()
-	} else {
-		endpoint.path
-	};
+	use anyhow::Context;
+	let client = Surreal::connect(path.as_str(), 1024).await.context("Failed to connect to database")?;
 	// Extract the certificate and key
 	let (crt, key) = if let Some(val) = web {
 		(val.web_crt, val.web_key)

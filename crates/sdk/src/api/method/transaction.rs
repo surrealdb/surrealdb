@@ -1,4 +1,4 @@
-use crate::api::Connection;
+
 use crate::api::Surreal;
 use crate::api::method::Cancel;
 use crate::api::method::Commit;
@@ -18,36 +18,34 @@ use uuid::Uuid;
 /// An ongoing transaction
 #[derive(Debug)]
 #[must_use = "transactions must be committed or cancelled to complete them"]
-pub struct Transaction<C: Connection> {
+pub struct Transaction {
 	pub(crate) id: Uuid,
-	pub(crate) client: Surreal<C>,
+	pub(crate) client: Surreal,
 }
 
-impl<C> Transaction<C>
-where
-	C: Connection,
+impl Transaction
 {
 	/// Creates a commit future
-	pub fn commit(self) -> Commit<C> {
+	pub fn commit(self) -> Commit {
 		Commit {
 			client: self.client,
 		}
 	}
 
 	/// Creates a cancel future
-	pub fn cancel(self) -> Cancel<C> {
+	pub fn cancel(self) -> Cancel {
 		Cancel {
 			client: self.client,
 		}
 	}
 
 	/// See [Surreal::query]
-	pub fn query(&self, query: impl IntoQuery) -> Query<C> {
+	pub fn query(&self, query: impl IntoQuery) -> Query {
 		self.client.query(query).with_transaction(self.id)
 	}
 
 	/// See [Surreal::select]
-	pub fn select<R, RT>(&self, resource: R) -> Select<C, R, RT>
+	pub fn select<R, RT>(&self, resource: R) -> Select<R, RT>
 	where
 		R: Resource,
 	{
@@ -55,7 +53,7 @@ where
 	}
 
 	/// See [Surreal::create]
-	pub fn create<R, RT>(&self, resource: R) -> Create<C, R, RT>
+	pub fn create<R, RT>(&self, resource: R) -> Create<R, RT>
 	where
 		R: CreatableResource,
 	{
@@ -63,7 +61,7 @@ where
 	}
 
 	/// See [Surreal::insert]
-	pub fn insert<R, RT>(&self, resource: R) -> Insert<C, R, RT>
+	pub fn insert<R, RT>(&self, resource: R) -> Insert<R, RT>
 	where
 		R: InsertableResource,
 	{
@@ -71,7 +69,7 @@ where
 	}
 
 	/// See [Surreal::upsert]
-	pub fn upsert<R, RT>(&self, resource: R) -> Upsert<C, R, RT>
+	pub fn upsert<R, RT>(&self, resource: R) -> Upsert<R, RT>
 	where
 		R: Resource,
 	{
@@ -79,7 +77,7 @@ where
 	}
 
 	/// See [Surreal::update]
-	pub fn update<R, RT>(&self, resource: R) -> Update<C, R, RT>
+	pub fn update<R, RT>(&self, resource: R) -> Update<R, RT>
 	where
 		R: Resource,
 	{
@@ -87,7 +85,7 @@ where
 	}
 
 	/// See [Surreal::delete]
-	pub fn delete<R, RT>(&self, resource: R) -> Delete<C, R, RT>
+	pub fn delete<R, RT>(&self, resource: R) -> Delete<R, RT>
 	where
 		R: Resource,
 	{

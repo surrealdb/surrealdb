@@ -15,7 +15,7 @@ use surrealdb_core::expr::{Array, Object, Query, Value};
 use surrealdb_core::expr::{Data, Fields, Values};
 use surrealdb_core::iam::{SigninParams, SignupParams};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use surrealdb_core::protocol::{FromFlatbuffers, ToFlatbuffers};
 #[allow(unused_imports)]
 use surrealdb_core::sql::{Object as SqlObject, Query as SqlQuery, SqlValue};
@@ -51,43 +51,6 @@ impl Request {
 	}
 }
 
-impl ToFlatbuffers for Request {
-	type Output<'a> = flatbuffers::WIPOffset<rpc_fb::Request<'a>>;
-	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
-		let id = fbb.create_string(&self.id);
-		let (command_type, command) = match &self.command {
-			Command::Use {
-				namespace,
-				database,
-			} => {
-				let namespace = namespace.as_ref().map(|s| fbb.create_string(s));
-				let database = database.as_ref().map(|s| fbb.create_string(s));
-				(
-					rpc_fb::Command::Use,
-					rpc_fb::UseParams::create(
-						fbb,
-						&rpc_fb::UseParamsArgs {
-							namespace,
-							database,
-						},
-					)
-					.as_union_value(),
-				)
-			}
-			_ => todo!("STU"),
-		};
-
-		rpc_fb::Request::create(
-			fbb,
-			&rpc_fb::RequestArgs {
-				id: Some(id),
-				command_type,
-				command: Some(command),
-			},
-		)
-	}
-}
-
 #[derive(Debug, Clone)]
 pub struct LiveQueryParams {
 	pub txn: Option<Uuid>,
@@ -95,33 +58,6 @@ pub struct LiveQueryParams {
 	pub cond: Option<Value>,
 	pub fields: Fields,
 }
-
-// impl ToFlatbuffers for LiveQueryParams {
-// 	type Output<'a> = flatbuffers::WIPOffset<rpc_fb::LiveQueryParams<'a>>;
-// 	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
-// 		let what = self.what.to_fb(fbb);
-// 		let cond = self.cond.as_ref().map(|c| c.to_fb(fbb));
-
-// 		rpc_fb::LiveQueryParams::create(
-// 			fbb,
-// 			&rpc_fb::LiveQueryParamsArgs {
-// 				what: Some(what),
-// 				cond,
-// 			},
-// 		)
-// 	}
-// }
-
-// impl FromFlatbuffers for LiveQueryParams {
-// 	type Input<'a> = rpc_fb::LiveQueryParams<'a>;
-
-// 	fn from_fb(input: &Self::Input<'_>) -> Self {
-// 		let what = Values::from_fb(input.what().unwrap());
-// 		let cond = input.cond().map(Value::from_fb);
-
-// 		Self { what, cond }
-// 	}
-// }
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

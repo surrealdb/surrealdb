@@ -2,14 +2,14 @@ use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::opt::RangeableResource;
 
-use crate::api::Connection;
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
-use crate::method::OnceLockExt;
+
 use crate::opt::KeyRange;
 use serde::de::DeserializeOwned;
+use surrealdb_protocol::proto::rpc::v1::DeleteRequest;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -20,17 +20,15 @@ use uuid::Uuid;
 /// A record delete future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Delete<'r, C: Connection, R, RT> {
-	pub(super) client: Cow<'r, Surreal<C>>,
+pub struct Delete<R, RT> {
+	pub(super) client: Surreal,
 	pub(super) txn: Option<Uuid>,
 	pub(super) resource: R,
 	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R, RT> WithTransaction for Delete<'_, C, R, RT>
-where
-	C: Connection,
-	R: Resource,
+impl<R, RT> WithTransaction for Delete<R, RT>
+where R: Resource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -38,81 +36,52 @@ where
 	}
 }
 
-impl<C, R, RT> Delete<'_, C, R, RT>
-where
-	C: Connection,
-	R: Resource,
+impl<R, RT> Delete<R, RT>
+where R: Resource,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Delete<'static, C, R, RT> {
+	pub fn into_owned(self) -> Delete<R, RT> {
 		Delete {
-			client: Cow::Owned(self.client.into_owned()),
+			client: self.client,
 			..self
 		}
 	}
 }
 
-macro_rules! into_future {
-	($method:ident) => {
-		fn into_future(self) -> Self::IntoFuture {
-			let Delete {
-				txn,
-				client,
-				resource,
-				..
-			} = self;
-			let what = resource.into_values();
-			Box::pin(async move {
-				let router = client.inner.router.extract()?;
-				router
-					.$method(Command::Delete {
-						txn,
-						what,
-					})
-					.await
-			})
-		}
-	};
-}
 
-impl<'r, Client, R> IntoFuture for Delete<'r, Client, R, Value>
+impl<R, RT> IntoFuture for Delete<R, RT>
 where
-	Client: Connection,
-	R: Resource,
+	R: Resource + 'static,
+	RT: TryFromValue,
 {
 	type Output = Result<Value>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-	into_future! {execute_value}
-}
+	fn into_future(self) -> Self::IntoFuture {
+		let Delete {
+			txn,
+			mut client,
+			resource,
+			..
+		} = self;
+		Box::pin(async move {
+			let what = resource.into_values().into_iter().map(TryInto::try_into).collect::<Result<Vec<_>>>()?;
+			let client = &mut client.client;
 
-impl<'r, Client, R, RT> IntoFuture for Delete<'r, Client, R, Option<RT>>
-where
-	Client: Connection,
-	R: Resource,
-	RT: TryFromValue,
-{
-	type Output = Result<Option<RT>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+			let response = client.delete(DeleteRequest {
+				txn: txn.map(|id| id.try_into()).transpose()?,
+				what,
+				..Default::default()
+			}).await?;
 
-	into_future! {execute_opt}
-}
-
-impl<'r, Client, R, RT> IntoFuture for Delete<'r, Client, R, Vec<RT>>
-where
-	Client: Connection,
-	R: Resource,
-	RT: TryFromValue,
-{
-	type Output = Result<Vec<RT>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_vec}
+			todo!("STU: Implement DeleteResponse");
+		})
+	}
 }
 
 // impl<C, R, NewResource> Delete<'_, C, R, Value>
 // where
-// 	C: Connection,
+// 	C
 // 	R: RangeableResource,
 // {
 // 	/// Restricts a range of records to delete
@@ -126,7 +95,7 @@ where
 
 // impl<C, R, RT, NewResource> Delete<'_, C, R, Vec<RT>>
 // where
-// 	C: Connection,
+// 	C
 // 	R: RangeableResource,
 // 	NewResource: RangeableResource,
 // {

@@ -266,7 +266,7 @@ async fn knn_lookup_objects(ds: &Datastore, h: &HnswIndex, samples: &[Vec<Number
 async fn knn_lookup_objects_db(ds: &Datastore, session: &Session, selects: &[String]) {
 	for sql in selects {
 		let mut res = ds.execute(sql, session, None).await.expect(sql);
-		let res = res.remove(0).result.expect(sql);
+		let res = res.remove(0).values.expect(sql);
 		if let Value::Array(a) = &res {
 			assert_eq!(a.len(), NN);
 		} else {

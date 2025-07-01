@@ -1,7 +1,6 @@
-#[cfg(feature = "protocol-http")]
-mod http;
+
 #[cfg(feature = "protocol-ws")]
-mod ws;
+mod grpc;
 
 #[cfg(kv_fdb)]
 mod fdb;
@@ -16,7 +15,9 @@ mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
-use crate::api::Connection;
+
+use std::str::FromStr;
+
 use crate::api::Result;
 use crate::api::err::Error;
 use url::Url;
@@ -43,13 +44,42 @@ impl Endpoint {
 	}
 
 	#[doc(hidden)]
-	pub fn parse_kind(&self) -> Result<EndpointKind> {
-		match EndpointKind::from(self.url.scheme()) {
-			EndpointKind::Unsupported(s) => Err(Error::Scheme(s).into()),
-			kind => Ok(kind),
-		}
+	pub fn parse_kind(&self) -> std::result::Result<EndpointKind, Error> {
+		self.url.scheme().parse::<EndpointKind>()
 	}
 }
+
+impl FromStr for Endpoint {
+	type Err = anyhow::Error;
+
+	fn from_str(s: &str) -> anyhow::Result<Self> {
+		eprintln!("from_str: {s}");
+        let url = if s == "memory" {
+			Url::parse("memory://memory")?
+		} else {
+			Url::parse(s)?
+		};
+
+		Ok(Self::new(url))
+	}
+}
+
+impl TryFrom<&str> for Endpoint {
+	type Error = anyhow::Error;
+	
+	fn try_from(s: &str) -> anyhow::Result<Self> {
+		Self::from_str(s)
+	}
+}
+
+impl TryFrom<String> for Endpoint {
+	type Error = anyhow::Error;
+
+	fn try_from(s: String) -> anyhow::Result<Self> {
+		Self::from_str(&s)
+	}
+}
+
 
 /// A trait for converting inputs to a server address object
 pub trait IntoEndpoint<Scheme>: into_endpoint::Sealed<Scheme> {}
@@ -57,7 +87,7 @@ pub trait IntoEndpoint<Scheme>: into_endpoint::Sealed<Scheme> {}
 pub(crate) mod into_endpoint {
 	pub trait Sealed<Scheme> {
 		/// The client implied by this scheme and address combination
-		type Client: super::Connection;
+		type Client: tonic::client::GrpcService<tonic::body::BoxBody> + 'static;
 		/// Converts an input into a server address object
 		fn into_endpoint(self) -> super::Result<super::Endpoint>;
 	}
@@ -121,6 +151,8 @@ pub enum EndpointKind {
 	Https,
 	Ws,
 	Wss,
+	Grpc,
+	Grpcs,
 	FoundationDb,
 	#[cfg(target_family = "wasm")]
 	IndxDb,
@@ -128,29 +160,32 @@ pub enum EndpointKind {
 	RocksDb,
 	File,
 	TiKv,
-	Unsupported(String),
 	SurrealKv,
 	SurrealKvVersioned,
 }
 
-impl From<&str> for EndpointKind {
-	fn from(s: &str) -> Self {
-		match s {
+impl FromStr for EndpointKind {
+	type Err = Error;
+
+	fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+		Ok(match s {
 			"http" => Self::Http,
 			"https" => Self::Https,
 			"ws" => Self::Ws,
 			"wss" => Self::Wss,
+			"grpc" => Self::Grpc,
+			"grpcs" => Self::Grpcs,
 			"fdb" => Self::FoundationDb,
 			#[cfg(target_family = "wasm")]
 			"indxdb" => Self::IndxDb,
-			"mem" => Self::Memory,
+			"mem" | "memory" => Self::Memory,
 			"file" => Self::File,
 			"rocksdb" => Self::RocksDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKv,
 			"surrealkv+versioned" => Self::SurrealKvVersioned,
-			_ => Self::Unsupported(s.to_owned()),
-		}
+			unexpected => return Err(Error::Scheme(unexpected.to_string())),
+		})
 	}
 }
 
@@ -159,7 +194,7 @@ impl EndpointKind {
 	pub fn is_remote(&self) -> bool {
 		matches!(
 			self,
-			EndpointKind::Http | EndpointKind::Https | EndpointKind::Ws | EndpointKind::Wss
+			EndpointKind::Http | EndpointKind::Https | EndpointKind::Ws | EndpointKind::Wss | EndpointKind::Grpc | EndpointKind::Grpcs
 		)
 	}
 

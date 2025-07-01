@@ -55,7 +55,7 @@ impl RpcContext for Http {
 	fn version_data(&self) -> ResponseData {
 		ResponseData::Results(vec![QueryResult {
 			stats: QueryStats::default(),
-			result: Ok(Value::Strand(format!("{PKG_NAME}-{}", *PKG_VERSION).into())),
+			values: Ok(vec![Value::Strand(format!("{PKG_NAME}-{}", *PKG_VERSION).into())]),
 		}])
 	}
 

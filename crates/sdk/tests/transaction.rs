@@ -19,7 +19,7 @@ async fn transaction_basic() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -30,7 +30,7 @@ async fn transaction_basic() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -58,7 +58,7 @@ async fn transaction_with_return() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 			tobie: person:tobie,
@@ -85,19 +85,19 @@ async fn transaction_with_failure() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"The query was not executed due to a failed transaction"#
 	));
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"The query was not executed due to a failed transaction"#
 	));
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Database record `person:tobie` already exists"#
@@ -121,22 +121,22 @@ async fn transaction_with_failure_and_return() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(
 		tmp.err().map(|x| x.to_string()),
 		Some(r#"The query was not executed due to a failed transaction"#.to_string())
 	);
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(
 		tmp.err().map(|x| x.to_string()),
 		Some(r#"The query was not executed due to a failed transaction"#.to_string())
 	);
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(
 		tmp.err().map(|x| x.to_string()),
 		Some(r#"Database record `person:tobie` already exists"#.to_string())
 	);
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(
 		tmp.err().map(|x| x.to_string()),
 		Some(r#"The query was not executed due to a failed transaction"#.to_string())
@@ -159,19 +159,19 @@ async fn transaction_with_throw() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"The query was not executed due to a failed transaction"#
 	));
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"The query was not executed due to a failed transaction"#
 	));
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"An error occurred: there was an error"#
@@ -195,7 +195,7 @@ async fn transaction_with_throw_and_return() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"The query was not executed due to a failed transaction"#

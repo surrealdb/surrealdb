@@ -10,5 +10,5 @@ pub fn reset(session: &mut Session) {
 	session.rd = None;
 	session.ns = None;
 	session.db = None;
-	session.parameters = BTreeMap::new();
+	session.variables = BTreeMap::new();
 }

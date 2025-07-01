@@ -63,7 +63,7 @@ async fn prepare_data() -> Input {
 		.to_owned();
 	let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 	for _ in 0..3 {
-		res.remove(0).result.unwrap();
+		res.remove(0).values.unwrap();
 	}
 
 	let count = if cfg!(debug_assertions) {
@@ -88,7 +88,7 @@ async fn prepare_data() -> Input {
 		);
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		for _ in 0..5 {
-			res.remove(0).result.unwrap();
+			res.remove(0).values.unwrap();
 		}
 	}
 	Input {
@@ -102,7 +102,7 @@ async fn run(i: &Input, q: &str, expected: usize) {
 	let mut r = i.dbs.execute(black_box(q), &i.ses, None).await.unwrap();
 	if cfg!(debug_assertions) {
 		assert_eq!(r.len(), 1);
-		if let Value::Array(a) = r.remove(0).result.unwrap() {
+		if let Value::Array(a) = r.remove(0).values.unwrap() {
 			assert_eq!(a.len(), expected);
 		} else {
 			panic!("Fail");

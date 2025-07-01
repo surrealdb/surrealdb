@@ -53,12 +53,12 @@ async fn prepare_data() -> Input {
 	let ses = Session::owner().with_ns("bench").with_db("bench");
 	let sql = "DEFINE INDEX idx ON TABLE t COLUMNS n";
 	let res = &mut dbs.execute(sql, &ses, None).await.unwrap();
-	res.remove(0).result.unwrap();
+	res.remove(0).values.unwrap();
 	//
 	for i in 0..100_000 {
 		let sql = format!("CREATE t CONTENT {{ n: {i} }}");
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
-		res.remove(0).result.unwrap();
+		res.remove(0).values.unwrap();
 	}
 	Input {
 		dbs,
@@ -70,7 +70,7 @@ async fn run(i: &Input, q: &str, expected: usize) {
 	let mut r = i.dbs.execute(black_box(q), &i.ses, None).await.unwrap();
 	if cfg!(debug_assertions) {
 		assert_eq!(r.len(), 1);
-		let val = r.remove(0).result.unwrap();
+		let val = r.remove(0).values.unwrap();
 		let expected = Value::Array(Array::from(vec![Value::Object(Object::from(
 			BTreeMap::from([("count", Value::Number(Number::Int(expected as i64)))]),
 		))]));

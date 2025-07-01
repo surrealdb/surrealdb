@@ -16,7 +16,7 @@ impl TryFrom<&Accept> for Format {
 	fn try_from(value: &Accept) -> Result<Self, Self::Error> {
 		match value {
 			Accept::ApplicationJson => Ok(Format::Json),
-			Accept::Surrealdb => Ok(Format::Flatbuffer),
+			Accept::Surrealdb => Ok(Format::Protobuf),
 			unknown => Err(anyhow::anyhow!("Unsupported Accept format: {}", unknown.to_string())),
 		}
 	}
@@ -28,7 +28,7 @@ impl TryFrom<&ContentType> for Format {
 	fn try_from(value: &ContentType) -> Result<Self, Self::Error> {
 		match value {
 			ContentType::ApplicationJson => Ok(Format::Json),
-			ContentType::Surrealdb => Ok(Format::Flatbuffer),
+			ContentType::Surrealdb => Ok(Format::Protobuf),
 			unsupported => {
 				Err(anyhow::anyhow!("Unsupported Content-Type format: {}", unsupported.to_string()))
 			}
@@ -40,7 +40,7 @@ impl From<&Format> for ContentType {
 	fn from(format: &Format) -> Self {
 		match format {
 			Format::Json => ContentType::ApplicationJson,
-			Format::Flatbuffer => ContentType::Surrealdb,
+			Format::Protobuf => ContentType::Surrealdb,
 		}
 	}
 }

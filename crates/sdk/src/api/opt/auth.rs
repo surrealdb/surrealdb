@@ -8,7 +8,6 @@ use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
 use surrealdb_core::iam::AccessMethod;
 use surrealdb_core::iam::SignupParams;
-use surrealdb_core::protocol::flatbuffers::surreal_db::protocol::expr as expr_fb;
 
 /// Credentials for authenticating with the server
 pub trait IntoAccessCredentials {
@@ -195,21 +194,6 @@ impl TryFromValue for Jwt {
 impl fmt::Debug for Jwt {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "Jwt(REDACTED)")
-	}
-}
-
-impl TryFrom<expr_fb::Value<'_>> for Jwt {
-	type Error = anyhow::Error;
-
-	fn try_from(value: expr_fb::Value<'_>) -> Result<Self, Self::Error> {
-		let value_str = value.value_as_string().ok_or_else(|| {
-			anyhow::anyhow!("Expected a string value, got {:?}", value.value_type())
-		})?;
-
-		let value_str = value_str.value().ok_or_else(|| {
-			anyhow::anyhow!("Expected a string value, got {:?}", value.value_type())
-		})?;
-		Ok(Jwt(value_str.to_string()))
 	}
 }
 

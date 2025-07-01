@@ -20,9 +20,6 @@ use super::context::InvocationContext;
 use super::err::ApiError;
 use super::invocation::ApiInvocation;
 
-use crate::protocol::flatbuffers::surreal_db::protocol::expr as expr_fb;
-use crate::protocol::flatbuffers::surreal_db::protocol::rpc as rpc_fb;
-
 pub enum ApiBody {
 	#[cfg(not(target_family = "wasm"))]
 	Stream(Box<dyn Stream<Item = Result<Bytes, Box<dyn Display + Send + Sync>>> + Send + Unpin>),
@@ -117,12 +114,8 @@ impl ApiBody {
 				let value = match fmt {
 					Format::Json => serde_json::from_slice(&bytes)
 						.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))?,
-					Format::Flatbuffer => {
-						let value_fb = flatbuffers::root::<expr_fb::Value>(&bytes)
-							.map_err(|e| Error::ApiError(ApiError::BodyDecodeFailure))?;
-
-						Value::from_fb(value_fb)
-							.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))?
+					Format::Protobuf => {
+						todo!("STU: Remove protobuf from here and add back CBOR")
 					}
 				};
 				// let parsed = match content_type {

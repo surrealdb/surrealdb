@@ -56,7 +56,7 @@ impl Executor {
 		}
 	}
 
-	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<()> {
+	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<Vec<Value>> {
 		let ctx_ref = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
 			err::Error::unreachable(format_args!(
 				"Tried to unfreeze a Context with multiple references"
@@ -75,7 +75,7 @@ impl Executor {
 			session.put(DB.as_ref(), db.into());
 			ctx_ref.add_value("session", session.into());
 		}
-		Ok(())
+		Ok(vec![Value::None])
 	}
 
 	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<()> {
@@ -181,7 +181,7 @@ impl Executor {
 	}
 
 	/// Execute a query not wrapped in a transaction block.
-	async fn execute_bare_statement(&mut self, kvs: &Datastore, stmt: Statement) -> Result<Value> {
+	async fn execute_bare_statement(&mut self, kvs: &Datastore, stmt: Statement) -> Result<Vec<Value>> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
 			None => {}
@@ -195,7 +195,7 @@ impl Executor {
 
 		match stmt {
 			// These statements don't need a transaction.
-			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
+			Statement::Use(stmt) => self.execute_use_statement(stmt),
 			stmt => {
 				let planner = SqlToLogical::new();
 				let plan = planner.statement_to_logical(stmt)?;
@@ -205,7 +205,7 @@ impl Executor {
 		}
 	}
 
-	async fn execute_plan_impl(&mut self, kvs: &Datastore, plan: LogicalPlan) -> Result<Value> {
+	async fn execute_plan_impl(&mut self, kvs: &Datastore, plan: LogicalPlan) -> Result<Vec<Value>> {
 		let writeable = plan.writeable();
 		let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
 		let receiver = self.ctx.has_notifications().then(|| {
@@ -223,7 +223,7 @@ impl Executor {
 				// has nothing to commit anyway.
 				if !writeable {
 					let _ = lock.cancel().await;
-					return Ok(value);
+					return Ok(value.into_vec());
 				}
 
 				if let Err(e) = lock.complete_changes(false).await {
@@ -254,7 +254,7 @@ impl Executor {
 					}
 				}
 
-				Ok(value)
+				Ok(value.into_vec())
 			}
 			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
 				bail!(Error::InvalidControlFlow)
@@ -287,7 +287,7 @@ impl Executor {
 
 				self.results.push(QueryResult {
 					stats: QueryStats::default(),
-					result: Err(Failure {
+					values: Err(Failure {
 						code: 500,
 						message: "Failed to create a transaction".into(),
 					}),
@@ -330,7 +330,7 @@ impl Executor {
 				let _ = txn.cancel().await;
 
 				for res in &mut self.results[start_results..] {
-					res.result = Err(Failure::query_cancelled());
+					res.values = Err(Failure::query_cancelled());
 				}
 
 				while let Some(stmt) = stream.next().await {
@@ -342,7 +342,7 @@ impl Executor {
 
 					self.results.push(QueryResult {
 						stats: QueryStats::default(),
-						result: Err(match done {
+						values: Err(match done {
 							DoneReason::Timedout => Failure::query_timeout(),
 							DoneReason::Canceled => Failure::query_cancelled(),
 						}),
@@ -360,20 +360,20 @@ impl Executor {
 			trace!(target: TARGET, statement = %stmt, "Executing statement");
 
 			let started_at = Utc::now();
-			let value: Result<Value, Failure> = match stmt {
+			let result: Result<Value, Failure> = match stmt {
 				Statement::Begin(_) => {
 					let _ = txn.cancel().await;
 
 					// tried to begin a transaction within a transaction.
 					for res in &mut self.results[start_results..] {
-						res.result = Err(Failure::query_not_executed(
+						res.values = Err(Failure::query_not_executed(
 							"Query never executed, transaction already open when BEGIN was called",
 						));
 					}
 
 					self.results.push(QueryResult {
 						stats: QueryStats::default(),
-						result: Err(Failure::query_not_executed(
+						values: Err(Failure::query_not_executed(
 							"Tried to start a transaction while another transaction was open",
 						)),
 					});
@@ -389,7 +389,7 @@ impl Executor {
 
 						self.results.push(QueryResult {
 							stats: QueryStats::default(),
-							result: Err(Failure::query_not_executed(
+							values: Err(Failure::query_not_executed(
 								"Query never executed, transaction already open when BEGIN was called",
 							)),
 						});
@@ -403,7 +403,7 @@ impl Executor {
 
 					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
-						res.result = Err(Failure::query_cancelled());
+						res.values = Err(Failure::query_cancelled());
 					}
 
 					self.opt.sender = None;
@@ -442,7 +442,7 @@ impl Executor {
 
 					// failed to commit
 					for res in &mut self.results[start_results..] {
-						res.result = Err(Failure::query_not_executed(e.to_string()));
+						res.values = Err(Failure::query_not_executed(e.to_string()));
 					}
 
 					self.opt.sender = None;
@@ -479,13 +479,13 @@ impl Executor {
 							}
 							Err(ControlFlow::Err(e)) => {
 								for res in &mut self.results[start_results..] {
-									res.result = Err(Failure::query_not_executed(e.to_string()));
+									res.values = Err(Failure::query_not_executed(e.to_string()));
 								}
 
 								// statement return an error. Consume all the other statement until we hit a cancel or commit.
 								self.results.push(QueryResult {
 									stats: QueryStats::from_start_time(started_at),
-									result: Err(Failure::query_not_executed(e.to_string())),
+									values: Err(Failure::query_not_executed(e.to_string())),
 								});
 
 								let _ = txn.cancel().await;
@@ -501,7 +501,7 @@ impl Executor {
 
 									self.results.push(QueryResult {
 										stats: QueryStats::default(),
-										result: Err(Failure::query_not_executed(
+										values: Err(Failure::query_not_executed(
 											"Query never executed, statement returned an error",
 										)),
 									});
@@ -523,9 +523,14 @@ impl Executor {
 				}
 			};
 
+			let result = match result {
+				Ok(value) => Ok(vec![value]),
+				Err(e) => Err(e),
+			};
+
 			self.results.push(QueryResult {
 				stats: QueryStats::from_start_time(started_at),
-				result: value,
+				values: result,
 			});
 		}
 
@@ -534,7 +539,7 @@ impl Executor {
 		let _ = txn.cancel().await;
 
 		for res in &mut self.results[start_results..] {
-			res.result = Err(Failure::query_not_executed("Missing COMMIT statement".to_string()));
+			res.values = Err(Failure::query_not_executed("Missing COMMIT statement".to_string()));
 		}
 
 		self.opt.sender = None;
@@ -562,14 +567,14 @@ impl Executor {
 		let mut this = Executor::new(ctx, opt);
 
 		let started_at = Utc::now();
-		let result = this
+		let values = this
 			.execute_plan_impl(kvs, plan)
 			.await
 			.map_err(|err| Failure::execution_failed(err.to_string()));
 
 		Ok(vec![QueryResult {
 			stats: QueryStats::from_start_time(started_at.into()),
-			result,
+			values,
 		}])
 	}
 
@@ -594,7 +599,7 @@ impl Executor {
 				Err(e) => {
 					this.results.push(QueryResult {
 						stats: QueryStats::default(),
-						result: Err(Failure::execution_failed(e.to_string())),
+						values: Err(Failure::execution_failed(e.to_string())),
 					});
 
 					return Ok(this.results);
@@ -612,7 +617,7 @@ impl Executor {
 					{
 						this.results.push(QueryResult {
 							stats: QueryStats::default(),
-							result: Err(e),
+							values: Err(e),
 						});
 
 						return Ok(this.results);
@@ -620,13 +625,13 @@ impl Executor {
 				}
 				stmt => {
 					let started_at = Utc::now();
-					let result = this
+					let values = this
 						.execute_bare_statement(kvs, stmt)
 						.await
 						.map_err(|err| Failure::execution_failed(err.to_string()));
 					this.results.push(QueryResult {
 						stats: QueryStats::from_start_time(started_at),
-						result,
+						values,
 					});
 				}
 			}
@@ -874,7 +879,7 @@ mod tests {
 				)
 				.await;
 			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
-			let err = res.unwrap()[0].result.as_ref().unwrap_err().to_string();
+			let err = res.unwrap()[0].values.as_ref().unwrap_err().to_string();
 			assert!(
 				err.contains("Invalid timeout"),
 				"Expected to find invalid timeout error: {:?}",

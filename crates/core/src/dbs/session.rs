@@ -32,8 +32,8 @@ pub struct Session {
 	pub rd: Option<Value>,
 	/// The current expiration time of the session
 	pub exp: Option<i64>,
-	/// The parameters set
-	pub parameters: BTreeMap<String, Value>,
+	/// The accumulated variables for the current session.
+	pub variables: BTreeMap<String, Value>,
 }
 
 impl Session {
@@ -148,7 +148,7 @@ impl Session {
 			tk: None,
 			rd: Some(rid),
 			exp: None,
-			parameters: Default::default(),
+			variables: Default::default(),
 		}
 	}
 

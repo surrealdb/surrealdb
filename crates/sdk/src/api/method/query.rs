@@ -1,7 +1,6 @@
 use super::transaction::WithTransaction;
-use super::{Stream, live};
+use super::{live};
 use crate::Surreal;
-use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::conn::Command;
@@ -9,7 +8,6 @@ use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt;
 use crate::method::Commit;
-use crate::method::OnceLockExt;
 use crate::method::Stats;
 use crate::method::WithStats;
 use crate::opt::IntoVariables;
@@ -22,13 +20,14 @@ use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::dbs;
+use surrealdb_core::dbs::{self, Failure};
 use surrealdb_core::dbs::ResponseData;
 use surrealdb_core::dbs::Variables;
 use surrealdb_core::expr::TryFromValue;
@@ -41,16 +40,14 @@ use uuid::Uuid;
 /// A query future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Query<'r, C: Connection> {
+pub struct Query {
 	pub(crate) txn: Option<Uuid>,
-	pub(crate) client: Cow<'r, Surreal<C>>,
+	pub(crate) client: Surreal,
 	pub(crate) queries: Vec<String>,
 	pub(crate) variables: Variables,
 }
 
-impl<C> WithTransaction for Query<'_, C>
-where
-	C: Connection,
+impl WithTransaction for Query
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -58,11 +55,9 @@ where
 	}
 }
 
-impl<'r, C> Query<'r, C>
-where
-	C: Connection,
+impl Query
 {
-	pub fn new(client: Cow<'r, Surreal<C>>) -> Self {
+	pub fn new(client: Surreal) -> Self {
 		Query {
 			txn: None,
 			client,
@@ -76,49 +71,61 @@ where
 		self.variables = variables.into();
 		self
 	}
-
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Query<'static, C> {
-		Query {
-			txn: self.txn,
-			client: Cow::Owned(self.client.into_owned()),
-			queries: self.queries,
-			variables: self.variables,
-		}
-	}
 }
 
-impl<'r, Client> IntoFuture for Query<'r, Client>
+impl IntoFuture for Query
 where
-	Client: Connection,
+	Self: Send + Sync + 'static,
 {
 	type Output = Result<QueryResults>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
+		
 		Box::pin(async move {
-			// Extract the router from the client
-			let router = self.client.inner.router.extract()?;
+			let mut client = self.client.client.clone();
+			let client = &mut client;
+			let query = self.queries.join(";");
+			let variables = self.variables.try_into().context("Failed to convert variables to QueryRequest")?;
 
-			let query_results = router
-				.execute_query(Command::MultiQuery {
-					txn: self.txn,
-					queries: self.queries,
-					variables: self.variables,
-				})
-				.await?;
+			let num_statements = self.queries.len();
 
-			Ok(query_results)
+
+			let response = client.query(QueryRequest {
+				query,
+				variables: Some(variables),
+			}).await?;
+			todo!("STU: Query::into_future");
+
+			// let mut stream = response.into_inner();
+
+			// let mut query_results = QueryResults::with_capacity(num_statements);
+			// while let Some(result) = stream.next().await {
+			// 	let result = result?;
+			// 	let index = result.query_index as usize;
+			// 	let values = result.values.ok_or_else(|| anyhow::anyhow!("Missing values in query response"))?;
+			// 	// If this is the first result for the query index, create a new query result with the stats, otherwise extend the existing query result
+			// 	let mut query_result = query_results.results.entry(index).or_insert_with(dbs::QueryResult::default);
+			// 	if let Some(stats) = result.stats {
+			// 		// TODO: Only do this for the first result of the query index.
+			// 		query_result.stats = stats.try_into()?;
+			// 	}
+			// 	if let Ok(result_values) = &mut query_result.values {
+			// 		result_values.extend(values.values.into_iter().map(TryInto::try_into).collect::<Result<Vec<_>>>()?);
+			// 	}
+			// }
+
+			// Ok(query_results)
 		})
 	}
 }
 
-impl<'r, Client> IntoFuture for WithStats<Query<'r, Client>>
+impl IntoFuture for WithStats<Query>
 where
-	Client: Connection,
+	Self: Send + Sync + 'static,
 {
 	type Output = Result<WithStats<QueryResults>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
@@ -128,9 +135,7 @@ where
 	}
 }
 
-impl<'req, C> Query<'req, C>
-where
-	C: Connection,
+impl Query
 {
 	/// Chains a query onto an existing query
 	pub fn query(mut self, surql: impl Into<String>) -> Self {
@@ -199,7 +204,14 @@ where
 #[derive(Debug)]
 pub struct QueryResults {
 	pub(crate) results: IndexMap<usize, dbs::QueryResult>,
-	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
+}
+
+impl QueryResults {
+	pub(crate) fn with_capacity(capacity: usize) -> Self {
+		Self {
+			results: IndexMap::with_capacity(capacity),
+		}
+	}
 }
 
 #[derive(Debug)]
@@ -208,18 +220,6 @@ pub struct QueryResult<R> {
 	pub result: Result<R>,
 }
 
-/// A `LIVE SELECT` stream from the `query` method
-#[derive(Debug)]
-#[must_use = "streams do nothing unless you poll them"]
-pub struct QueryStream<R>(pub(crate) Either<Stream<R>, SelectAll<Stream<R>>>);
-
-impl futures::Stream for QueryStream<Value> {
-	type Item = Notification<Value>;
-
-	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-		self.as_mut().0.poll_next_unpin(cx)
-	}
-}
 
 // impl<R> futures::Stream for QueryStream<Notification<R>>
 // where
@@ -236,7 +236,6 @@ impl QueryResults {
 	pub(crate) fn new() -> Self {
 		Self {
 			results: Default::default(),
-			live_queries: Default::default(),
 		}
 	}
 
@@ -308,53 +307,6 @@ impl QueryResults {
 		index.query_result(self)
 	}
 
-	/// Takes and streams records returned from a `LIVE SELECT` query
-	///
-	/// This is the counterpart to [Response::take] used to stream the results
-	/// of a live query.
-	///
-	/// # Examples
-	///
-	/// ```no_run
-	/// use serde::Deserialize;
-	/// use surrealdb::Notification;
-	/// use surrealdb::RecordId;
-	/// use surrealdb::Value;
-	///
-	/// #[derive(Debug, Deserialize)]
-	/// struct User {
-	///     id: RecordId,
-	///     balance: String
-	/// }
-	///
-	/// # #[tokio::main]
-	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// #
-	/// let mut response = db
-	///     // Stream all changes to the user table
-	///     .query("LIVE SELECT * FROM user")
-	///     .await?;
-	///
-	/// // Stream the result of the live query at the given index
-	/// // while deserialising into the User type
-	/// let mut stream = response.stream::<Notification<User>>(0)?;
-	///
-	/// // Stream raw values instead
-	/// let mut stream = response.stream::<Value>(0)?;
-	///
-	/// // Combine and stream all `LIVE SELECT` statements in this query
-	/// let mut stream = response.stream::<Value>(())?;
-	/// #
-	/// # Ok(())
-	/// # }
-	/// ```
-	///
-	/// Consume the stream the same way you would any other type that implements `futures::Stream`.
-	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
-		index.query_stream(self)
-	}
-
 	/// Take all errors from the query response
 	///
 	/// The errors are keyed by the corresponding index of the statement that failed.
@@ -375,14 +327,14 @@ impl QueryResults {
 	pub fn take_errors(&mut self) -> HashMap<usize, anyhow::Error> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.results {
-			if result.result.is_err() {
+			if result.values.is_err() {
 				keys.push(*key);
 			}
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
 			if let Some(query_result) = self.results.swap_remove(&key) {
-				if let Err(error) = query_result.result {
+				if let Err(error) = query_result.values {
 					// If the result is an error, we insert it into the errors map
 					errors.insert(key, error.into());
 				}
@@ -408,14 +360,14 @@ impl QueryResults {
 	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
 		for (key, result) in &self.results {
-			if result.result.is_err() {
+			if result.values.is_err() {
 				first_error = Some(*key);
 				break;
 			}
 		}
 		if let Some(key) = first_error {
 			if let Some(query_result) = self.results.swap_remove(&key) {
-				if let Err(error) = query_result.result {
+				if let Err(error) = query_result.values {
 					return Err(error.into());
 				}
 			}
@@ -538,14 +490,14 @@ impl WithStats<QueryResults> {
 	pub fn take_errors(&mut self) -> HashMap<usize, dbs::QueryResult> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.0.results {
-			if result.result.is_err() {
+			if result.values.is_err() {
 				keys.push(*key);
 			}
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
 			if let Some(query_result) = self.0.results.swap_remove(&key) {
-				if query_result.result.is_err() {
+				if query_result.values.is_err() {
 					errors.insert(key, query_result);
 				}
 			}
@@ -639,7 +591,7 @@ mod tests {
 		let mut response = QueryResults {
 			results: to_map(vec![dbs::QueryResult {
 				stats: dbs::QueryStats::default(),
-				result: Err(Error::ConnectionUninitialised.into()),
+				values: Err(Error::ConnectionUninitialised.into()),
 			}]),
 			..QueryResults::new()
 		};

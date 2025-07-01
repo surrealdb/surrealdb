@@ -13,7 +13,7 @@ async fn throw_basic() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"An error occurred: there was an error"#
@@ -33,10 +33,10 @@ async fn throw_param() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"An error occurred: there was an error"#
@@ -58,10 +58,10 @@ async fn throw_value() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == r#"An error occurred: found unexpected value: { test: true }"#

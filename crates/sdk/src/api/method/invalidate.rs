@@ -1,42 +1,33 @@
+use surrealdb_protocol::proto::rpc::v1::InvalidateRequest;
+
 use crate::Surreal;
-use crate::api::Connection;
+
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::method::OnceLockExt;
+
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
 /// A session invalidate future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Invalidate<'r, C: Connection> {
-	pub(super) client: Cow<'r, Surreal<C>>,
+pub struct Invalidate {
+	pub(super) client: Surreal,
 }
 
-impl<C> Invalidate<'_, C>
-where
-	C: Connection,
-{
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Invalidate<'static, C> {
-		Invalidate {
-			client: Cow::Owned(self.client.into_owned()),
-		}
-	}
-}
-
-impl<'r, Client> IntoFuture for Invalidate<'r, Client>
-where
-	Client: Connection,
+impl IntoFuture for Invalidate
 {
 	type Output = Result<()>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-	fn into_future(self) -> Self::IntoFuture {
+	fn into_future(mut self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.inner.router.extract()?;
-			router.execute_unit(Command::Invalidate).await
+			let mut client = self.client.client.clone();
+			let client = &mut client;
+
+			client.invalidate(InvalidateRequest {}).await?;
+			Ok(())
 		})
 	}
 }

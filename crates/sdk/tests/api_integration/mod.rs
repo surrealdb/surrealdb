@@ -94,7 +94,7 @@ impl<F, Fut, C> CreateDb for F
 where
 	F: Fn() -> Fut,
 	Fut: Future<Output = (SemaphorePermit<'static>, Surreal<C>)>,
-	C: Connection,
+	C
 {
 	type Con = C;
 
@@ -105,8 +105,8 @@ where
 
 #[cfg(feature = "protocol-ws")]
 mod ws {
-	use surrealdb::engine::remote::ws::Client;
-	use surrealdb::engine::remote::ws::Ws;
+	use surrealdb::engine::remote::grpc::Client;
+	use surrealdb::engine::remote::grpc::Ws;
 
 	use futures::poll;
 	use std::pin::pin;

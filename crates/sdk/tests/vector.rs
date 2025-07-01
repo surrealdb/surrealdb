@@ -82,9 +82,9 @@ async fn delete_update_mtree_index() -> Result<()> {
 	assert_eq!(res.len(), 9);
 	//
 	for _ in 0..8 {
-		let _ = res.remove(0).result?;
+		let _ = res.remove(0).values?;
 	}
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -128,10 +128,10 @@ async fn index_embedding() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 			id: Document:1,
@@ -322,7 +322,7 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 	//
 	skip_ok(res, 3)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 					{
@@ -346,7 +346,7 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -394,7 +394,7 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 	//
 	skip_ok(res, 3)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 					{
@@ -418,7 +418,7 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -465,7 +465,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 	//
 	skip_ok(res, 2)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -485,7 +485,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{

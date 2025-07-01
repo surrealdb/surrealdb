@@ -1,48 +1,42 @@
+use surrealdb_protocol::proto::rpc::v1::UnsetRequest;
+
 use crate::Surreal;
-use crate::api::Connection;
+
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::method::OnceLockExt;
+
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
 /// An unset future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Unset<'r, C: Connection> {
-	pub(super) client: Cow<'r, Surreal<C>>,
+pub struct Unset {
+	pub(super) client: Surreal,
 	pub(super) key: String,
 }
 
-impl<C> Unset<'_, C>
-where
-	C: Connection,
+impl Unset
 {
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Unset<'static, C> {
-		Unset {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
+
 }
 
-impl<'r, Client> IntoFuture for Unset<'r, Client>
-where
-	Client: Connection,
+impl IntoFuture for Unset
 {
 	type Output = Result<()>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-	fn into_future(self) -> Self::IntoFuture {
+	fn into_future(mut self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.inner.router.extract()?;
-			router
-				.execute_unit(Command::Unset {
-					key: self.key,
-				})
-				.await
+			let mut client = self.client.client.clone();
+			let client = &mut client;
+
+			let response = client.unset(UnsetRequest {
+				key: self.key,
+			}).await?;
+
+			todo!("STUB: Unset future");
 		})
 	}
 }

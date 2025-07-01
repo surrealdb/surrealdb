@@ -63,6 +63,7 @@ targets = []
 [dependencies]
 # workspace internal dependencies
 surrealdb-core = { workspace = true, default-features = false }
+surrealdb-protocol.workspace = true
 
 # External surreal crates
 dmp.workspace = true
@@ -78,14 +79,20 @@ reblessive = { workspace = true, features = ["tree"] }
 trice = { workspace = true, optional = true }
 
 # Other crates
+arc-swap.workspace = true
 arrayvec.workspace = true
 anyhow.workspace = true
 bincode.workspace = true
+bytes.workspace = true
 async-channel.workspace = true
 chrono = { workspace = true, features = ["serde"] }
+dashmap.workspace = true
 flatbuffers.workspace = true
 futures.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
+hyper-util.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
 indexmap = { workspace = true, features = ["serde"] }
 path-clean.workspace = true
 prost.workspace = true
@@ -95,7 +102,10 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
 tokio-util = { workspace = true, features = ["compat"] }
+tower.workspace = true
 url.workspace = true
 
 # Optional crates

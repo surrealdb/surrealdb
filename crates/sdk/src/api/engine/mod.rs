@@ -1,6 +1,5 @@
 //! Different embedded and remote database engines
 
-pub mod any;
 #[cfg(any(
 	kv_fdb,
 	feature = "kv-mem",

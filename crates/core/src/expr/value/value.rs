@@ -37,6 +37,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
 pub trait TryFromValue: Sized {
 	/// Try to convert a Value into this type
+	#[inline]
 	fn try_from_value(value: Value) -> Result<Self>;
 }
 
@@ -60,6 +61,20 @@ impl TryFromValue for Value {
 	}
 }
 
+impl TryFromValue for semver::Version {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Strand(s) => Ok(semver::Version::parse(&s.0)?),
+			_ => Err(Error::UnexpectedType {
+				expected: "version",
+				actual: value.kindof(),
+			}
+			.into()),
+		}
+	}
+}
+
 impl TryFromValue for String {
 	#[inline]
 	fn try_from_value(value: Value) -> Result<Self> {
@@ -74,6 +89,7 @@ impl TryFromValue for String {
 			.into()),
 		}
 	}
+		
 }
 
 impl TryFromValue for uuid::Uuid {
@@ -603,6 +619,13 @@ impl Value {
 			| Value::Thing(_)
 			| Value::Table(_) => true,
 			_ => false,
+		}
+	}
+
+	pub fn into_vec(self) -> Vec<Value> {
+		match self {
+			Value::Array(v) => v.0,
+			_ => vec![self],
 		}
 	}
 

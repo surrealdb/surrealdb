@@ -47,7 +47,7 @@ async fn error_on_invalid_function() -> Result<()> {
 	let session = Session::owner().with_ns("test").with_db("test");
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
-	let err = resp.pop().unwrap().result.unwrap_err();
+	let err = resp.pop().unwrap().values.unwrap_err();
 	if !matches!(err.downcast_ref(), Some(Error::InvalidFunction { .. })) {
 		panic!("returned wrong result {:#?}", err)
 	}
@@ -3951,7 +3951,7 @@ async fn function_outside_database() -> Result<()> {
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	match res.remove(0).result.unwrap_err().downcast() {
+	match res.remove(0).values.unwrap_err().downcast() {
 		Ok(Error::DbEmpty) => (),
 		_ => panic!("Query should have failed with error: Specify a database to use"),
 	}

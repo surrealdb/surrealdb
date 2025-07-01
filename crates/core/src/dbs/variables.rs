@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::expr::value::Value;
 use crate::protocol::FromFlatbuffers;
 use anyhow::Result;
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use std::collections::BTreeMap;
 
 pub type Variables = BTreeMap<String, Value>;

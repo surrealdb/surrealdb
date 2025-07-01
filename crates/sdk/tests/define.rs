@@ -30,10 +30,10 @@ async fn define_statement_namespace() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 			accesses: {},
@@ -72,10 +72,10 @@ async fn define_statement_database() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 			accesses: {},
@@ -219,7 +219,7 @@ async fn define_statement_index_concurrently_building_status(
 		}
 		// We monitor the status
 		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
-		let tmp = r.remove(0).result?;
+		let tmp = r.remove(0).values?;
 		if let Value::Object(o) = &tmp {
 			if let Some(Value::Object(o)) = o.get("building") {
 				if let Some(Value::Strand(s)) = o.get("status") {
@@ -384,11 +384,11 @@ async fn define_statement_search_index() -> Result<()> {
 	assert_eq!(res.len(), 8);
 	//
 	for i in 0..6 {
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		assert!(tmp.is_ok(), "{}", i);
 	}
 
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 			events: {},
@@ -403,7 +403,7 @@ async fn define_statement_search_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 
 	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
@@ -441,11 +441,11 @@ async fn define_statement_user_root() -> Result<()> {
 
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
 
 	assert!(
@@ -475,13 +475,13 @@ async fn define_statement_user_ns() -> Result<()> {
 	let res = dbs.execute(sql, &ses, None).await?;
 
 	let mut res = res.into_iter();
-	res.next().unwrap().result.unwrap();
-	res.next().unwrap().result.unwrap();
+	res.next().unwrap().values.unwrap();
+	res.next().unwrap().values.unwrap();
 
 	assert!(
 		res.next()
 			.unwrap()
-			.result
+			.values
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -490,7 +490,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	assert!(
 		res.next()
 			.unwrap()
-			.result
+			.values
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -499,7 +499,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	assert!(
 		res.next()
 			.unwrap()
-			.result
+			.values
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -507,7 +507,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	);
 
 	assert_eq!(
-		res.next().unwrap().result.as_ref().unwrap_err().to_string(),
+		res.next().unwrap().values.as_ref().unwrap_err().to_string(),
 		"The root user 'test' does not exist"
 	); // User doesn't exist at the NS level
 
@@ -517,7 +517,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	assert!(res.remove(0).result.is_err());
+	assert!(res.remove(0).values.is_err());
 
 	Ok(())
 }
@@ -540,18 +540,18 @@ async fn define_statement_user_db() -> Result<()> {
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	res[2].result.as_ref().unwrap();
-	res[3].result.as_ref().unwrap();
-	res[4].result.as_ref().unwrap();
-	res[5].result.as_ref().unwrap();
+	res[2].values.as_ref().unwrap();
+	res[3].values.as_ref().unwrap();
+	res[4].values.as_ref().unwrap();
+	res[5].values.as_ref().unwrap();
 	assert_eq!(
-		res[6].result.as_ref().unwrap_err().to_string(),
+		res[6].values.as_ref().unwrap_err().to_string(),
 		"The user 'test' does not exist in the namespace 'ns'"
 	); // User doesn't exist at the NS level
 
 	assert!(
 		res[3]
-			.result
+			.values
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -559,7 +559,7 @@ async fn define_statement_user_db() -> Result<()> {
 	);
 	assert!(
 		res[4]
-			.result
+			.values
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -567,7 +567,7 @@ async fn define_statement_user_db() -> Result<()> {
 	);
 	assert!(
 		res[5]
-			.result
+			.values
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -580,7 +580,7 @@ async fn define_statement_user_db() -> Result<()> {
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	assert!(res.remove(0).result.is_err());
+	assert!(res.remove(0).values.is_err());
 
 	Ok(())
 }
@@ -1335,7 +1335,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let sql = r"DEFINE TABLE test;".to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	res.remove(0).result.unwrap();
+	res.remove(0).values.unwrap();
 	// Obtain the initial uuids
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let initial = txn.get_tb("test", "test", "test").await?;
@@ -1353,11 +1353,11 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	.to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
-	res.remove(0).result.unwrap();
-	res.remove(0).result.unwrap();
-	res.remove(0).result.unwrap();
-	res.remove(0).result.unwrap();
-	let lqid = res.remove(0).result?;
+	res.remove(0).values.unwrap();
+	res.remove(0).values.unwrap();
+	res.remove(0).values.unwrap();
+	res.remove(0).values.unwrap();
+	let lqid = res.remove(0).values?;
 	assert!(matches!(lqid, Value::Uuid(_)));
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
@@ -1383,11 +1383,11 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let vars = map! { "lqid".to_string() => lqid };
 	let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 	assert_eq!(res.len(), 5);
-	res.remove(0).result.unwrap();
-	res.remove(0).result.unwrap();
-	res.remove(0).result.unwrap();
-	res.remove(0).result.unwrap();
-	res.remove(0).result.unwrap();
+	res.remove(0).values.unwrap();
+	res.remove(0).values.unwrap();
+	res.remove(0).values.unwrap();
+	res.remove(0).values.unwrap();
+	res.remove(0).values.unwrap();
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_remove = txn.get_tb("test", "test", "test").await?;

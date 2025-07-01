@@ -60,7 +60,7 @@ async fn prepare_data(n: usize, n_value: usize) -> Input {
 	let ses = Session::owner().with_ns("bench").with_db("bench");
 	let sql = format!(" CREATE |i:{n}| SET v = rand::guid(), d = {value} RETURN NONE");
 	let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
-	let _ = res.remove(0).result.is_ok();
+	let _ = res.remove(0).values.is_ok();
 	Input {
 		dbs,
 		ses,
@@ -71,7 +71,7 @@ async fn run(i: &Input, q: &str, expected: usize) {
 	let mut r = i.dbs.execute(black_box(q), &i.ses, None).await.unwrap();
 	if cfg!(debug_assertions) {
 		assert_eq!(r.len(), 1);
-		match r.remove(0).result.unwrap() {
+		match r.remove(0).values.unwrap() {
 			Value::Array(a) => {
 				assert_eq!(a.len(), expected);
 			}

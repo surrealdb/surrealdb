@@ -149,7 +149,7 @@ use crate::api::err::Error;
 use crate::{
 	Result,
 	api::{
-		Connect, QueryResults as QueryResponse, Surreal,
+		QueryResults as QueryResponse, Surreal,
 		conn::{Command, Request},
 	},
 	method::Stats,
@@ -221,6 +221,8 @@ use surrealdb_core::{
 pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
+
+pub(crate) mod grpc;
 
 type LiveQueryMap = HashMap<Uuid, Sender<Notification>>;
 
@@ -458,21 +460,6 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKv;
 
-/// An embedded database
-#[derive(Debug, Clone)]
-pub struct Db(());
-
-impl Surreal<Db> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
-	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
-		Connect {
-			surreal: self.inner.clone().into(),
-			address: address.into_endpoint(),
-			capacity: 0,
-			response_type: PhantomData,
-		}
-	}
-}
 
 fn process(responses: Vec<QueryResult>) -> QueryResponse {
 	let mut map = IndexMap::with_capacity(responses.len());
@@ -480,32 +467,33 @@ fn process(responses: Vec<QueryResult>) -> QueryResponse {
 		map.insert(index, query_result);
 	}
 	QueryResponse {
-		results: map,
+		results: map.into(),
 		..QueryResponse::new()
 	}
 }
 
 async fn take(one: bool, responses: Vec<QueryResult>) -> Result<Value> {
-	if let Some(result) = process(responses).results.swap_remove(&0) {
-		let value = result.result?;
+	todo!("STU: take");
+	// if let Some(result) = process(responses).results.swap_remove(&0) {
+	// 	let value = result.result?;
 
-		match one {
-			true => match value {
-				Value::Array(mut array) => {
-					if let [ref mut value] = array[..] {
-						return Ok(mem::replace(value, Value::None));
-					}
-				}
-				Value::None | Value::Null => {}
-				value => return Ok(value),
-			},
-			false => return Ok(value),
-		}
-	}
-	match one {
-		true => Ok(Value::None),
-		false => Ok(Value::Array(Default::default())),
-	}
+	// 	match one {
+	// 		true => match value {
+	// 			Value::Array(mut array) => {
+	// 				if let [ref mut value] = array[..] {
+	// 					return Ok(mem::replace(value, Value::None));
+	// 				}
+	// 			}
+	// 			Value::None | Value::Null => {}
+	// 			value => return Ok(value),
+	// 		},
+	// 		false => return Ok(value),
+	// 	}
+	// }
+	// match one {
+	// 	true => Ok(Value::None),
+	// 	false => Ok(Value::Array(Default::default())),
+	// }
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -1000,7 +988,7 @@ async fn router(
 				.await?;
 
 			for response in responses {
-				response.result?;
+				response.values?;
 			}
 
 			Ok(ResponseData::new_from_value(Value::None))

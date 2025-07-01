@@ -94,13 +94,9 @@
 //! }
 //! ```
 
-#[cfg(feature = "protocol-http")]
-#[cfg_attr(docsrs, doc(cfg(feature = "protocol-http")))]
-pub mod http;
-
 #[cfg(feature = "protocol-ws")]
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
-pub mod ws;
+pub mod grpc;
 
 use crate::api::{self, Result, err::Error};
 use crate::dbs::{self};

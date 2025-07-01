@@ -30,13 +30,13 @@ async fn script_function_error() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(
 		tmp.unwrap_err().to_string(),
 		"Problem with embedded script function. An exception occurred: error\n"
 	);
 
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(
 		tmp.unwrap_err().to_string(),
 		"Problem with embedded script function. An exception occurred: error\n"
@@ -59,7 +59,7 @@ async fn script_function_simple() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val =
 		SqlValue::parse(r#"[{ bio: "Line 1\nLine 2", id: person:test, scores: [66, 84, 73] }]"#)
 			.into();
@@ -90,7 +90,7 @@ async fn script_function_context() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -125,13 +125,13 @@ async fn script_function_arguments() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -175,7 +175,7 @@ async fn script_function_types() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -207,7 +207,7 @@ async fn script_function_module_os() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
 	Ok(())
@@ -234,7 +234,7 @@ async fn script_query_from_script_select() -> Result<()> {
 	"#;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -255,7 +255,7 @@ async fn script_query_from_script_select() -> Result<()> {
 	"#;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -280,7 +280,7 @@ async fn script_query_from_script() -> Result<()> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"{
 				id: article:test,
@@ -296,7 +296,7 @@ async fn script_query_from_script() -> Result<()> {
 	"#;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[{
 				id: article:test,
@@ -321,7 +321,7 @@ async fn script_value_function_params() -> Result<()> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
-	let tmp = res.remove(1).result?;
+	let tmp = res.remove(1).values?;
 	let val = SqlValue::parse(r#""The daily news""#).into();
 	assert_eq!(tmp, val);
 	Ok(())
@@ -346,7 +346,7 @@ async fn script_value_function_inline_values() -> Result<()> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	res.remove(0).result?;
+	res.remove(0).values?;
 	Ok(())
 }
 
@@ -382,7 +382,7 @@ async fn script_function_number_conversion_test() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let Value::Object(res) = res.remove(0).result? else {
+	let Value::Object(res) = res.remove(0).values? else {
 		panic!("not an object")
 	};
 	assert_eq!(res.get("a").unwrap(), &Value::Number(Number::Float(9007199254740991f64)));
@@ -408,7 +408,7 @@ async fn script_bytes() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let Value::Bytes(b) = res.remove(0).result? else {
+	let Value::Bytes(b) = res.remove(0).values? else {
 		panic!("not bytes");
 	};
 
@@ -434,7 +434,7 @@ async fn script_geometry_point() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let Value::Geometry(Geometry::Point(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::Point(x)) = res.remove(0).values? else {
 		panic!("not a geometry");
 	};
 
@@ -462,7 +462,7 @@ async fn script_geometry_line() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let Value::Geometry(Geometry::Line(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::Line(x)) = res.remove(0).values? else {
 		panic!("not a geometry");
 	};
 
@@ -498,7 +498,7 @@ async fn script_geometry_polygon() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let Value::Geometry(Geometry::Polygon(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::Polygon(x)) = res.remove(0).values? else {
 		panic!("not a geometry");
 	};
 
@@ -533,7 +533,7 @@ async fn script_geometry_multi_point() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let Value::Geometry(Geometry::MultiPoint(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::MultiPoint(x)) = res.remove(0).values? else {
 		panic!("not a geometry");
 	};
 
@@ -569,7 +569,7 @@ async fn script_geometry_multi_line() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let Value::Geometry(Geometry::MultiLine(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::MultiLine(x)) = res.remove(0).values? else {
 		panic!("not a geometry");
 	};
 
@@ -612,7 +612,7 @@ async fn script_geometry_multi_polygon() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let v = res.remove(0).result?;
+	let v = res.remove(0).values?;
 	let Value::Geometry(Geometry::MultiPolygon(x)) = v else {
 		panic!("{:?} is not the right geometry", v);
 	};
@@ -654,7 +654,7 @@ async fn script_geometry_collection() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 
-	let Value::Geometry(Geometry::Collection(x)) = res.remove(0).result? else {
+	let Value::Geometry(Geometry::Collection(x)) = res.remove(0).values? else {
 		panic!("not a geometry");
 	};
 
@@ -774,7 +774,7 @@ async fn script_run_too_long() -> Result<()> {
 	}
 	// This should timeout within surreal not from the above timeout.
 	let mut resp = time.unwrap().unwrap();
-	resp.pop().unwrap().result.unwrap_err();
+	resp.pop().unwrap().values.unwrap_err();
 
 	Ok(())
 }

@@ -1,5 +1,4 @@
 use crate::Surreal;
-use crate::api::Connection;
 use crate::api::Error;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -8,7 +7,7 @@ use crate::api::conn::MlExportConfig;
 use crate::api::method::BoxFuture;
 use crate::method::ExportConfig as Config;
 use crate::method::Model;
-use crate::method::OnceLockExt;
+
 use async_channel::Receiver;
 use futures::Stream;
 use futures::StreamExt;
@@ -25,8 +24,8 @@ use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
 /// A database export future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Export<'r, C: Connection, R, T = ()> {
-	pub(super) client: Cow<'r, Surreal<C>>,
+pub struct Export<R, T = ()> {
+	pub(super) client: Surreal,
 	pub(super) target: R,
 	pub(super) ml_config: Option<MlExportConfig>,
 	pub(super) db_config: Option<DbExportConfig>,
@@ -34,12 +33,10 @@ pub struct Export<'r, C: Connection, R, T = ()> {
 	pub(super) export_type: PhantomData<T>,
 }
 
-impl<'r, C, R> Export<'r, C, R>
-where
-	C: Connection,
+impl<R> Export<R>
 {
 	/// Export machine learning model
-	pub fn ml(self, name: &str, version: Version) -> Export<'r, C, R, Model> {
+	pub fn ml(self, name: &str, version: Version) -> Export<R, Model> {
 		Export {
 			client: self.client,
 			target: self.target,
@@ -54,7 +51,7 @@ where
 	}
 
 	/// Configure the export options
-	pub fn with_config(self) -> Export<'r, C, R, Config> {
+	pub fn with_config(self) -> Export<R, Config> {
 		Export {
 			client: self.client,
 			target: self.target,
@@ -67,9 +64,7 @@ where
 	}
 }
 
-impl<C, R> Export<'_, C, R, Config>
-where
-	C: Connection,
+impl<R> Export<R, Config>
 {
 	/// Whether to export users from the database
 	pub fn users(mut self, users: bool) -> Self {
@@ -151,90 +146,79 @@ where
 	}
 }
 
-impl<C, R, T> Export<'_, C, R, T>
-where
-	C: Connection,
+impl<R, T> Export<R, T>
 {
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Export<'static, C, R, T> {
-		Export {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
 }
 
-impl<'r, Client, T> IntoFuture for Export<'r, Client, PathBuf, T>
-where
-	Client: Connection,
+impl<T> IntoFuture for Export<PathBuf, T>
 {
 	type Output = Result<()>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.inner.router.extract()?;
-			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::BackupsNotSupported.into());
-			}
+			todo!("STU: Implement Export");
+			// let router = self.client.inner.router.extract()?;
+			// if !router.features.contains(&ExtraFeatures::Backup) {
+			// 	return Err(Error::BackupsNotSupported.into());
+			// }
 
-			if let Some(config) = self.ml_config {
-				return router
-					.execute_unit(Command::ExportMl {
-						path: self.target,
-						config,
-					})
-					.await;
-			}
+			// if let Some(config) = self.ml_config {
+			// 	return router
+			// 		.execute_unit(Command::ExportMl {
+			// 			path: self.target,
+			// 			config,
+			// 		})
+			// 		.await;
+			// }
 
-			router
-				.execute_unit(Command::ExportFile {
-					path: self.target,
-					config: self.db_config,
-				})
-				.await
+			// router
+			// 	.execute_unit(Command::ExportFile {
+			// 		path: self.target,
+			// 		config: self.db_config,
+			// 	})
+			// 	.await
 		})
 	}
 }
 
-impl<'r, Client, T> IntoFuture for Export<'r, Client, (), T>
-where
-	Client: Connection,
+impl<T> IntoFuture for Export<(), T>
 {
 	type Output = Result<Backup>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.inner.router.extract()?;
-			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::BackupsNotSupported.into());
-			}
-			let (tx, rx) = crate::channel::bounded(1);
-			let rx = Box::pin(rx);
+			todo!("STU: Implement Export");
+			// let router = self.client.inner.router.extract()?;
+			// if !router.features.contains(&ExtraFeatures::Backup) {
+			// 	return Err(Error::BackupsNotSupported.into());
+			// }
+			// let (tx, rx) = crate::channel::bounded(1);
+			// let rx = Box::pin(rx);
 
-			if let Some(config) = self.ml_config {
-				router
-					.execute_unit(Command::ExportBytesMl {
-						bytes: tx,
-						config,
-					})
-					.await?;
-				return Ok(Backup {
-					rx,
-				});
-			}
+			// if let Some(config) = self.ml_config {
+			// 	router
+			// 		.execute_unit(Command::ExportBytesMl {
+			// 			bytes: tx,
+			// 			config,
+			// 		})
+			// 		.await?;
+			// 	return Ok(Backup {
+			// 		rx,
+			// 	});
+			// }
 
-			router
-				.execute_unit(Command::ExportBytes {
-					bytes: tx,
-					config: self.db_config,
-				})
-				.await?;
+			// router
+			// 	.execute_unit(Command::ExportBytes {
+			// 		bytes: tx,
+			// 		config: self.db_config,
+			// 	})
+			// 	.await?;
 
-			Ok(Backup {
-				rx,
-			})
+			// Ok(Backup {
+			// 	rx,
+			// })
 		})
 	}
 }

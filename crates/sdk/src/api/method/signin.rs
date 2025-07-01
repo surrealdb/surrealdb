@@ -1,11 +1,12 @@
-use surrealdb_core::iam::SigninParams;
+use surrealdb_core::iam::{AccessMethod, SigninParams};
+use surrealdb_protocol::proto::rpc::v1::SigninRequest;
 
 use crate::Surreal;
-use crate::api::Connection;
+
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::method::OnceLockExt;
+
 use crate::opt::auth::Jwt;
 use std::borrow::Cow;
 use std::future::IntoFuture;
@@ -13,41 +14,31 @@ use std::future::IntoFuture;
 /// A signin future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Signin<'r, C: Connection> {
-	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) params: SigninParams,
+pub struct Signin {
+	pub(super) client: Surreal,
+	pub(super) access_method: AccessMethod,
 }
 
-impl<C> Signin<'_, C>
-where
-	C: Connection,
-{
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Signin<'static, C> {
-		Signin {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
-}
-
-impl<'r, Client> IntoFuture for Signin<'r, Client>
-where
-	Client: Connection,
+impl IntoFuture for Signin
 {
 	type Output = Result<Jwt>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let Signin {
 			client,
-			params,
+			access_method,
 		} = self;
 		Box::pin(async move {
-			let router = client.inner.router.extract()?;
-			let value = router.execute(Command::Signin(params)).await?;
+			let mut client = client.client.clone();
+			let client = &mut client;
 
-			Ok(value)
+			let response = client.signin(SigninRequest {
+				access_method: Some(access_method.try_into()?),
+				..Default::default()
+			}).await?;
+
+			todo!("STUB: Signin future");
 		})
 	}
 }

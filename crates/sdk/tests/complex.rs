@@ -239,7 +239,7 @@ async fn run_queries(
 ) -> Result<impl ExactSizeIterator<Item = Result<Value>> + DoubleEndedIterator + 'static> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
+	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.values))
 }
 
 fn cast_chain(n: usize) -> String {

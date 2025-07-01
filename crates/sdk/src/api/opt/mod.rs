@@ -115,12 +115,10 @@ impl PatchOp {
 	}
 }
 
-impl TryFrom<PatchOp> for Value {
-	type Error = anyhow::Error;
-
-	fn try_from(op: PatchOp) -> Result<Self, Self::Error> {
+impl From<PatchOp> for Value {
+	fn from(op: PatchOp) -> Self {
 		// Convert the PatchOp into a Value
-		let value = match op {
+		match op {
 			PatchOp::Add {
 				path,
 				value,
@@ -159,8 +157,7 @@ impl TryFrom<PatchOp> for Value {
 				map.insert("value".to_string(), value);
 				Value::Object(Object::new(map))
 			}
-		};
-		Ok(value)
+		}
 	}
 }
 

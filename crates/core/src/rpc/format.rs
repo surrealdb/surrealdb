@@ -7,10 +7,12 @@ use crate::{
 	expr::Value,
 	protocol::{
 		ToFlatbuffers,
-		flatbuffers::surreal_db::protocol::{expr::Value as ValueFb, rpc as rpc_fb},
 	},
 	rpc::Response,
 };
+use surrealdb_protocol::proto::v1::Value as ValueProto;
+
+
 
 const FLATBUFFERS_PROTOCOL: &str = "flatbuffers";
 const JSON_PROTOCOL: &str = "json";
@@ -20,7 +22,7 @@ pub const PROTOCOLS: [&str; 2] = [FLATBUFFERS_PROTOCOL, JSON_PROTOCOL];
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Format {
 	Json,       // Self describing JSON serialisation
-	Flatbuffer, // For full flatbuffer serialisation
+	Protobuf, // For full flatbuffer serialisation
 }
 
 impl FromStr for Format {
@@ -29,7 +31,7 @@ impl FromStr for Format {
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s {
 			JSON_PROTOCOL => Ok(Format::Json),
-			FLATBUFFERS_PROTOCOL => Ok(Format::Flatbuffer),
+			FLATBUFFERS_PROTOCOL => Ok(Format::Protobuf),
 			unsupported => {
 				Err(RpcError::InvalidRequest(format!("Unsupported format: {unsupported}")))
 			}
@@ -46,13 +48,8 @@ impl Format {
 					.map_err(|e| RpcError::InvalidRequest(e.to_string()))?;
 				Ok(req)
 			}
-			Format::Flatbuffer => {
-				let req = flatbuffers::root::<rpc_fb::Request>(bytes)
-					.map_err(|e| RpcError::InvalidRequest(e.to_string()))?;
-
-				Request::from_fb(req).map_err(|_| {
-					RpcError::InvalidRequest("Failed to convert Flatbuffer request".into())
-				})
+			Format::Protobuf => {
+				todo!("STU: Remove protobuf from here and add back CBOR")
 			}
 		}
 	}
@@ -65,11 +62,8 @@ impl Format {
 					serde_json::to_vec(&response).map_err(|e| RpcError::Thrown(e.to_string()))?;
 				Ok(json)
 			}
-			Format::Flatbuffer => {
-				let mut builder = flatbuffers::FlatBufferBuilder::new();
-				let response_fb = response.to_fb(&mut builder);
-				builder.finish_minimal(response_fb);
-				Ok(builder.finished_data().to_vec())
+			Format::Protobuf => {
+				todo!("STU: Remove protobuf from here and add back CBOR")
 			}
 		}
 	}
@@ -80,12 +74,8 @@ impl Format {
 			Format::Json => {
 				serde_json::from_slice(val).map_err(|e| RpcError::InvalidRequest(e.to_string()))
 			}
-			Format::Flatbuffer => {
-				let fb_value = flatbuffers::root::<ValueFb>(val)
-					.map_err(|e| RpcError::InvalidRequest(e.to_string()))?;
-				Value::from_fb(fb_value).map_err(|_| {
-					RpcError::InvalidRequest("Failed to convert Flatbuffer value".into())
-				})
+			Format::Protobuf => {
+				todo!("STU: Remove protobuf from here and add back CBOR")
 			}
 		}
 	}
