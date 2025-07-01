@@ -29,26 +29,27 @@ pub mod file;
 pub mod geometry;
 pub mod number;
 pub mod object;
+mod operation;
 pub mod range;
 pub mod strand;
 pub mod thing;
 pub mod uuid;
 pub mod value;
 
-pub use array::Array;
-pub use bytes::Bytes;
-pub use closure::Closure;
-pub use datetime::Datetime;
-pub use duration::Duration;
-pub use file::File;
-pub use geometry::Geometry;
-pub use number::Number;
-pub use object::Object;
-pub use range::Range;
-pub use strand::Strand;
-pub use thing::{RecordId, RecordIdKey, RecordIdKeyRange};
-pub use uuid::Uuid;
-pub use value::{CastError, CoerceError};
+pub use self::array::Array;
+pub use self::bytes::Bytes;
+pub use self::closure::Closure;
+pub use self::datetime::Datetime;
+pub use self::duration::Duration;
+pub use self::file::File;
+pub use self::geometry::Geometry;
+pub use self::number::Number;
+pub use self::object::Object;
+pub use self::range::Range;
+pub use self::strand::Strand;
+pub use self::thing::{RecordId, RecordIdKey, RecordIdKeyRange};
+pub use self::uuid::Uuid;
+pub use self::value::{CastError, CoerceError};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -392,6 +393,8 @@ impl Value {
 			Self::Geometry(Geometry::MultiLine(_)) => "geometry<multiline>",
 			Self::Geometry(Geometry::MultiPolygon(_)) => "geometry<multipolygon>",
 			Self::Geometry(Geometry::Collection(_)) => "geometry<collection>",
+			Self::Regex(_) => "regex",
+			Self::File(_) => "file",
 			Self::Bytes(_) => "bytes",
 			Self::Range(_) => "range",
 			Self::Thing(_) => todo!(),
@@ -655,6 +658,8 @@ impl Value {
 			Value::Null => expr::Literal::Null,
 			Value::Bool(x) => expr::Literal::Bool(x),
 			Value::Number(Number::Int(i)) => expr::Literal::Integer(i),
+			Value::Number(Number::Float(f)) => expr::Literal::Float(f),
+			Value::Number(Number::Decimal(d)) => expr::Literal::Float(d),
 			Value::Strand(strand) => expr::Literal::Strand(strand),
 			Value::Duration(duration) => expr::Literal::Duration(duration),
 			Value::Datetime(datetime) => expr::Literal::Datetime(datetime),

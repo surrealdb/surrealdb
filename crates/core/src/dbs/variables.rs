@@ -5,13 +5,11 @@ use crate::val::Value;
 use anyhow::Result;
 use std::collections::BTreeMap;
 
-pub(crate) type Variables = Option<BTreeMap<String, Value>>;
-
 pub(crate) trait Attach {
 	fn attach(self, ctx: &mut MutableContext) -> Result<(), Error>;
 }
 
-impl Attach for Variables {
+impl Attach for Option<BTreeMap<String, Value>> {
 	fn attach(self, ctx: &mut MutableContext) -> Result<(), Error> {
 		match self {
 			Some(m) => {

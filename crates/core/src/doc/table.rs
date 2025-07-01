@@ -9,9 +9,9 @@ use crate::expr::statements::upsert::UpsertStatement;
 use crate::expr::statements::{DefineTableStatement, SelectStatement};
 use crate::expr::{
 	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
-	FunctionCall, Groups, Idiom, Literal, Part, View,
+	FunctionCall, Groups, Ident, Idiom, Literal, Part, View,
 };
-use crate::val::{Number, RecordId, Value};
+use crate::val::{Array, Number, RecordId, RecordIdKey, Value};
 use anyhow::{Result, bail};
 use futures::future::try_join_all;
 use js::prelude::Func;
@@ -341,7 +341,7 @@ impl Document {
 		//
 		let thg = RecordId {
 			table: fdc.ft.name.to_raw(),
-			key: fdc.group_ids.into(),
+			key: RecordIdKey::Array(Array(fdc.group_ids)),
 		};
 		let what = vec![Expr::Literal(Literal::RecordId(thg.into_literal()))];
 		let stm = UpsertStatement {
@@ -371,7 +371,7 @@ impl Document {
 						right: Box::new(exp),
 					};
 				}
-				let what = vec![Value::from(thg)];
+				let what = vec![Expr::Literal(Value::from(thg).into_literal())];
 				let stm = DeleteStatement {
 					what,
 					cond: Some(Cond(root)),
@@ -393,7 +393,7 @@ impl Document {
 		let mut set_ops: Ops = vec![];
 		let mut del_ops: Ops = vec![];
 		//
-		for field in fdc.view.expr.other() {
+		for field in fdc.view.expr.iter_non_all_fields() {
 			// Process the field
 			if let Field::Single {
 				expr,
@@ -581,7 +581,7 @@ impl Document {
 		val: Value,
 	) -> Result<()> {
 		// Key for the value count
-		let mut key_c = Idiom::from(vec![Part::from("__")]);
+		let mut key_c = Idiom::from(vec![Part::Field("__")]);
 		key_c.0.push(Part::from(key.to_hash()));
 		key_c.0.push(Part::from("c"));
 		match fdc.act {
@@ -637,9 +637,9 @@ impl Document {
 		val: Value,
 	) -> Result<()> {
 		// Key for the value count
-		let mut key_c = Idiom::from(vec![Part::from("__")]);
-		key_c.0.push(Part::from(key.to_hash()));
-		key_c.0.push(Part::from("c"));
+		let mut key_c = Idiom(vec![Part::Field(Ident("__".to_owned()))]);
+		key_c.0.push(Part::Field(Ident(key.to_hash())));
+		key_c.0.push(Part::Field(Ident("c".to_owned())));
 		//
 		match fdc.act {
 			FieldAction::Add => {

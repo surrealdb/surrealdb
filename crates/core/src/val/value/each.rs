@@ -1,5 +1,6 @@
 use crate::expr::idiom::Idiom;
 use crate::expr::part::{Next, Part};
+use crate::sql::{Expr, Literal};
 use crate::val::Value;
 
 impl Value {
@@ -33,7 +34,10 @@ impl Value {
 					Part::All => v
 						.iter()
 						.enumerate()
-						.flat_map(|(i, v)| v._each(path.next(), prev.clone().push(Part::from(i))))
+						.flat_map(|(i, v)| {
+							let part = Part::Value(Expr::Literal(Literal::Index(i)));
+							v._each(path.next(), prev.clone().push(part))
+						})
 						.collect::<Vec<_>>(),
 					Part::First => match v.first() {
 						Some(v) => v._each(path.next(), prev.push(p.clone())),

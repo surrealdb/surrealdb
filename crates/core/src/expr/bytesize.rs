@@ -24,7 +24,7 @@ const TIB: u64 = GIB * 1024;
 const PIB: u64 = TIB * 1024;
 
 impl FromStr for Bytesize {
-	type Err = ();
+	type Err = anyhow::Error;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		Bytesize::parse(s)
 	}

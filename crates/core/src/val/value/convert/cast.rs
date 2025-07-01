@@ -6,11 +6,11 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::expr::kind::{HasKind, KindLiteral};
-use crate::expr::{File, Ident, Kind, Regex, Table, Uuid};
+use crate::expr::{Ident, Kind, Regex, Table};
 use crate::val::array::Uniq;
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, Geometry, Number, Object, Range, RecordId, Strand,
-	Value,
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
+	RecordId, Strand, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]

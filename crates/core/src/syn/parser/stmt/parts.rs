@@ -132,21 +132,27 @@ impl Parser<'_> {
 			t!("$param") => Ok(vec![Fetch(Expr::Param(self.next_token_value()?))]),
 			t!("TYPE") => {
 				let fields = self.parse_fields(ctx).await?;
-				let fetches = fields
-					.0
-					.into_iter()
-					.filter_map(|f| {
-						if let Field::Single {
+
+				let fetches = match fields {
+					Fields::Value(field) => match *field {
+						Field::All => Vec::new(),
+						Field::Single {
 							expr,
 							..
-						} = f
-						{
-							Some(Fetch(expr))
-						} else {
-							None
-						}
-					})
-					.collect();
+						} => vec![Fetch(expr)],
+					},
+					Fields::Select(fields) => fields
+						.into_iter()
+						.filter_map(|f| match f {
+							Field::All => None,
+							Field::Single {
+								expr,
+								..
+							} => Some(Fetch(expr)),
+						})
+						.collect(),
+				};
+
 				Ok(fetches)
 			}
 			_ => Ok(vec![Fetch(Expr::Idiom(self.parse_plain_idiom(ctx).await?))]),
@@ -167,35 +173,67 @@ impl Parser<'_> {
 		field_span: Span,
 		idiom: &Idiom,
 		idiom_span: Span,
-	) -> ParseResult<&'a Field> {
+	) -> ParseResult<()> {
 		let mut found = None;
-		for field in fields.0.iter() {
-			let Field::Single {
-				expr,
-				alias,
-			} = field
-			else {
-				unreachable!()
-			};
+		match fields {
+			Fields::Value(field) => {
+				let Field::Single {
+					expr,
+					alias,
+				} = *field
+				else {
+					unreachable!()
+				};
 
-			if let Some(alias) = alias {
-				if idiom == alias {
-					found = Some(field);
-					break;
-				}
-			}
-
-			match expr {
-				Expr::Idiom(x) => {
-					if idiom == x {
+				if let Some(alias) = alias {
+					if idiom == alias {
 						found = Some(field);
-						break;
 					}
 				}
-				v => {
-					if *idiom == v.to_idiom() {
-						found = Some(field);
-						break;
+
+				match expr {
+					Expr::Idiom(x) => {
+						if idiom == x {
+							found = Some(field);
+						}
+					}
+					v => {
+						if *idiom == v.to_idiom() {
+							found = Some(field);
+						}
+					}
+				}
+			}
+			Fields::Select(fields) => {
+				for field in fields.iter() {
+					let Field::Single {
+						expr,
+						alias,
+					} = field
+					else {
+						unreachable!()
+					};
+
+					if let Some(alias) = alias {
+						if idiom == alias {
+							found = Some(field);
+							break;
+						}
+					}
+
+					match expr {
+						Expr::Idiom(x) => {
+							if idiom == x {
+								found = Some(field);
+								break;
+							}
+						}
+						v => {
+							if *idiom == v.to_idiom() {
+								found = Some(field);
+								break;
+							}
+						}
 					}
 				}
 			}
@@ -227,7 +265,7 @@ impl Parser<'_> {
 			};
 		};
 
-		Ok(found)
+		Ok(())
 	}
 
 	pub async fn try_parse_group(
@@ -246,7 +284,7 @@ impl Parser<'_> {
 
 		self.eat(t!("BY"));
 
-		let has_all = fields.0.contains(&Field::All);
+		let has_all = fields.contains_all();
 
 		let before = self.peek().span;
 		let group = self.parse_basic_idiom(ctx).await?;

@@ -11,11 +11,12 @@ pub(super) fn to_value(content: Content) -> Result<Value> {
 			val::strand::TOKEN => val::Strand::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
+			/*
 			expr::future::TOKEN => {
 				expr::Future::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
-			}
+			}*/
 			val::range::TOKEN => val::Range::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),

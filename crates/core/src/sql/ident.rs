@@ -10,6 +10,12 @@ impl From<crate::expr::Ident> for Ident {
 	}
 }
 
+impl From<Ident> for crate::expr::Ident {
+	fn from(v: Ident) -> Self {
+		Self(v.0)
+	}
+}
+
 impl fmt::Display for Ident {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		EscapeIdent(&self.0).fmt(f)

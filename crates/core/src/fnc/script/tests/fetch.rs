@@ -143,7 +143,7 @@ async fn test_fetch_error() {
 
 	assert_eq!(
 		res,
-		syn::value("{ body: {baz:2, foo:\"bar\"}, status: 500f }").unwrap().into(),
+		syn::expr("{ body: {baz:2, foo:\"bar\"}, status: 500f }").unwrap().into(),
 		"Unexpected result: {:?}",
 		res
 	);

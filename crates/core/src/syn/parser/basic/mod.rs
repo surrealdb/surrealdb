@@ -185,7 +185,7 @@ impl TokenValue for Regex {
 					parser.backup_after(peek.span);
 				}
 				let v = parser.lexer.lex_compound(peek, compound::regex)?.value;
-				Ok(Regex(v))
+				Ok(v)
 			}
 			_ => unexpected!(parser, peek, "a regex"),
 		}
@@ -300,10 +300,10 @@ mod test {
 				.unwrap_or_else(|_| panic!("failed on {}", ident));
 
 			assert_eq!(
-				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Idiom(
-					sql::Idiom(vec![Part::Field(Ident(ident.to_string()))])
-				))]))
+				r.statements,
+				vec![sql::TopLevelExpr::Expr(sql::Expr::Idiom(sql::Idiom(vec![Part::Field(
+					Ident(ident.to_string())
+				)])))]
 			)
 		}
 

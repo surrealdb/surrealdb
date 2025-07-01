@@ -75,7 +75,17 @@ impl Writer {
 		current: CursorValue,
 		store_difference: bool,
 	) {
-		if current.as_ref().is_some() {
+		if current.as_ref().is_nullish() {
+			self.buf.push(
+				ns.to_string(),
+				db.to_string(),
+				tb.to_string(),
+				match store_difference {
+					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+					false => TableMutation::Del(id),
+				},
+			);
+		} else {
 			self.buf.push(
 				ns.to_string(),
 				db.to_string(),
@@ -97,16 +107,6 @@ impl Writer {
 						}
 					}
 					false => TableMutation::Set(id, current.into_owned()),
-				},
-			);
-		} else {
-			self.buf.push(
-				ns.to_string(),
-				db.to_string(),
-				tb.to_string(),
-				match store_difference {
-					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
-					false => TableMutation::Del(id),
 				},
 			);
 		}
@@ -185,7 +185,7 @@ mod tests {
 		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_a = RecordId {
 			table: TB.to_owned(),
-			key: RecordIdKeyLit::String("A".to_owned()),
+			key: RecordIdKey::String("A".to_owned()),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None;
@@ -204,7 +204,7 @@ mod tests {
 		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_c = RecordId {
 			table: TB.to_owned(),
-			key: RecordIdKeyLit::from("C"),
+			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c: Value = "c".into();
 		tx2.record_change(
@@ -222,7 +222,7 @@ mod tests {
 		let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let thing_b = RecordId {
 			table: TB.to_owned(),
-			key: RecordIdKeyLit::from("B"),
+			key: RecordIdKey::String("B".to_owned()),
 		};
 		let value_b: Value = "b".into();
 		tx3.record_change(
@@ -236,7 +236,7 @@ mod tests {
 		);
 		let thing_c2 = RecordId {
 			table: TB.to_owned(),
-			key: RecordIdKeyLit::from("C"),
+			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c2: Value = "c2".into();
 		tx3.record_change(
@@ -269,7 +269,10 @@ mod tests {
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
-						RecordId::from((TB.to_string(), "A".to_string())),
+						RecordId {
+							table: TB.to_string(),
+							key: RecordIdKey::String("A".to_owned()),
+						},
 						Value::from("a"),
 					)],
 				)]),
@@ -279,7 +282,10 @@ mod tests {
 				DatabaseMutation(vec![TableMutations(
 					TB.to_string(),
 					vec![TableMutation::Set(
-						RecordId::from((TB.to_string(), "C".to_string())),
+						RecordId {
+							table: TB.to_string(),
+							key: RecordIdKey::String("C".to_owned()),
+						},
 						Value::from("c"),
 					)],
 				)]),
@@ -290,11 +296,17 @@ mod tests {
 					TB.to_string(),
 					vec![
 						TableMutation::Set(
-							RecordId::from((TB.to_string(), "B".to_string())),
+							RecordId {
+								table: TB.to_string(),
+								key: RecordIdKey::String("B".to_owned()),
+							},
 							Value::from("b"),
 						),
 						TableMutation::Set(
-							RecordId::from((TB.to_string(), "C".to_string())),
+							RecordId {
+								table: TB.to_string(),
+								key: RecordIdKey::String("C".to_owned()),
+							},
 							Value::from("c2"),
 						),
 					],
@@ -323,11 +335,17 @@ mod tests {
 				TB.to_string(),
 				vec![
 					TableMutation::Set(
-						RecordId::from((TB.to_string(), "B".to_string())),
+						RecordId {
+							table: TB.to_string(),
+							key: RecordIdKey::String("B".to_owned()),
+						},
 						Value::from("b"),
 					),
 					TableMutation::Set(
-						RecordId::from((TB.to_string(), "C".to_string())),
+						RecordId {
+							table: TB.to_string(),
+							key: RecordIdKey::String("C".to_owned()),
+						},
 						Value::from("c2"),
 					),
 				],

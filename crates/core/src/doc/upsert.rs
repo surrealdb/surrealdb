@@ -88,7 +88,7 @@ impl Document {
 		}
 
 		let (ns, db) = opt.ns_db()?;
-		let val = ctx.tx().get_record(ns, db, &retry.tb, &retry.id, opt.version).await?;
+		let val = ctx.tx().get_record(ns, db, &retry.table, &retry.key, opt.version).await?;
 
 		self.modify_for_update_retry(retry, val);
 

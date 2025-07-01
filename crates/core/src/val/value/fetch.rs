@@ -237,7 +237,7 @@ impl Value {
 				let val = v.clone();
 				// Fetch the remote embedded record
 				let stm = SelectStatement {
-					expr: Fields(vec![Field::All], false),
+					expr: Fields::Select(vec![Field::All]),
 					what: vec![Expr::Literal(Literal::RecordId(val.into_literal()))],
 					..SelectStatement::default()
 				};

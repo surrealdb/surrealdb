@@ -98,7 +98,7 @@ impl HnswDocs {
 	pub(super) async fn remove(
 		&mut self,
 		tx: &Transaction,
-		id: RecordIdKeyLit,
+		id: RecordIdKey,
 	) -> Result<Option<DocId>> {
 		let id_key = self.ikb.new_hi_key(id)?;
 		if let Some(v) = tx.get(id_key.clone(), None).await? {

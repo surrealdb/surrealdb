@@ -240,8 +240,8 @@ impl Document {
 	/// DELETE some:from..to;
 	pub(crate) fn is_specific_record_id(&self) -> bool {
 		match self.extras {
-			Workable::Insert(ref v) if v.rid().is_some() => true,
-			Workable::Normal if self.r#gen.is_none() => true,
+			Workable::Insert(ref v) => !v.rid().is_nullish(),
+			Workable::Normal => self.r#gen.is_none(),
 			_ => false,
 		}
 	}

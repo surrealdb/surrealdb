@@ -25,7 +25,7 @@ impl From<RecordIdKeyRangeLit> for crate::expr::RecordIdKeyRangeLit {
 
 impl From<crate::expr::RecordIdKeyRangeLit> for RecordIdKeyRangeLit {
 	fn from(value: crate::expr::RecordIdKeyRangeLit) -> Self {
-		crate::expr::RecordIdKeyRangeLit {
+		RecordIdKeyRangeLit {
 			start: value.start.map(|x| x.into()),
 			end: value.end.map(|x| x.into()),
 		}

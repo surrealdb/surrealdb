@@ -363,7 +363,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let what = match what{
 			Value::Strand(x) => expr::Expr::Table(x),
 			x => expr::Expr::Literal(x.into_literal())
-		}
+		};
 
 		// Specify the SQL query string
 		let sql = expr::LiveStatement{
@@ -377,7 +377,7 @@ pub trait RpcProtocolV1: RpcContext {
 				x => expr::Expr::Literal(x.into_literal())
 			},
 			..Default::default()
-		}
+		};
 		// Specify the query parameters
 		let var = Some(self.session().parameters.clone());
 		let plan = LogicalPlan{

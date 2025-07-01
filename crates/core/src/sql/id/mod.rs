@@ -14,6 +14,26 @@ pub enum Gen {
 	Uuid,
 }
 
+impl From<Gen> for crate::expr::id::Gen {
+	fn from(value: Gen) -> Self {
+		match value {
+			Gen::Rand => crate::expr::id::Gen::Rand,
+			Gen::Ulid => crate::expr::id::Gen::Ulid,
+			Gen::Uuid => crate::expr::id::Gen::Uuid,
+		}
+	}
+}
+
+impl From<crate::expr::id::Gen> for Gen {
+	fn from(value: crate::expr::id::Gen) -> Self {
+		match value {
+			crate::expr::id::Gen::Rand => Gen::Rand,
+			crate::expr::id::Gen::Ulid => Gen::Ulid,
+			crate::expr::id::Gen::Uuid => Gen::Uuid,
+		}
+	}
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecordIdKeyLit {
@@ -31,10 +51,10 @@ impl From<RecordIdKeyLit> for crate::expr::RecordIdKeyLit {
 		match value {
 			RecordIdKeyLit::Number(x) => crate::expr::RecordIdKeyLit::Number(x),
 			RecordIdKeyLit::String(x) => crate::expr::RecordIdKeyLit::String(x),
-			RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(x),
-			RecordIdKeyLit::Array(x) => crate::expr::RecordIdKeyLit::Array(x),
-			RecordIdKeyLit::Object(x) => crate::expr::RecordIdKeyLit::Object(x),
-			RecordIdKeyLit::Generate(x) => crate::expr::RecordIdKeyLit::Generate(x),
+			RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(x.into()),
+			RecordIdKeyLit::Array(x) => crate::expr::RecordIdKeyLit::Array(x.into()),
+			RecordIdKeyLit::Object(x) => crate::expr::RecordIdKeyLit::Object(x.into()),
+			RecordIdKeyLit::Generate(x) => crate::expr::RecordIdKeyLit::Generate(x.into()),
 			RecordIdKeyLit::Range(x) => crate::expr::RecordIdKeyLit::Range(x.into()),
 		}
 	}

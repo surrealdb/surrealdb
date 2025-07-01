@@ -36,7 +36,7 @@ impl GroupsCollector {
 	pub(super) fn new(stm: &Statement<'_>) -> Self {
 		let mut idioms_agr: HashMap<Idiom, Aggregator> = HashMap::new();
 		if let Some(fields) = stm.expr() {
-			for field in fields.other() {
+			for field in fields.iter_non_all_fields() {
 				if let Field::Single {
 					expr,
 					alias,
@@ -133,41 +133,42 @@ impl GroupsCollector {
 				// Create a new value
 				let mut obj = Value::empty_object();
 				// Loop over each group clause
-				for field in fields.other() {
+				for field in fields.iter_non_all_fields() {
 					// Process the field
-					if let Field::Single {
+					let Field::Single {
 						expr,
 						alias,
 					} = field
+					else {
+						// iter_non_all_fields, should remove all non Field::Single entries.
+						unreachable!()
+					};
+					let idiom = alias
+						.as_ref()
+						.map(Cow::Borrowed)
+						.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
+					if let Some(idioms_pos) = self.idioms.iter().position(|i| i.eq(idiom.as_ref()))
 					{
-						let idiom = alias
-							.as_ref()
-							.map(Cow::Borrowed)
-							.unwrap_or_else(|| Cow::Owned(expr.to_idiom()));
-						if let Some(idioms_pos) =
-							self.idioms.iter().position(|i| i.eq(idiom.as_ref()))
-						{
-							if let Some(agr) = aggregator.get_mut(idioms_pos) {
-								match expr {
-									Expr::FunctionCall(f) if f.is_aggregate() => {
-										let a = f.get_optimised_aggregate();
-										let x = if matches!(a, OptimisedAggregate::None) {
-											// The aggregation is not optimised, let's compute it with the values
-											let vals = agr.take();
-											f.aggregate(vals)?
-												.compute(stk, ctx, opt, None)
-												.await
-												.catch_return()?
-										} else {
-											// The aggregation is optimised, just get the value
-											agr.compute(a)?
-										};
-										obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
-									}
-									_ => {
-										let x = agr.take().first();
-										obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
-									}
+						if let Some(agr) = aggregator.get_mut(idioms_pos) {
+							match expr {
+								Expr::FunctionCall(f) if f.is_aggregate() => {
+									let a = f.get_optimised_aggregate();
+									let x = if matches!(a, OptimisedAggregate::None) {
+										// The aggregation is not optimised, let's compute it with the values
+										let vals = agr.take();
+										f.aggregate(vals)?
+											.compute(stk, ctx, opt, None)
+											.await
+											.catch_return()?
+									} else {
+										// The aggregation is optimised, just get the value
+										agr.compute(a)?
+									};
+									obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
+								}
+								_ => {
+									let x = agr.take().first();
+									obj.set(stk, ctx, opt, idiom.as_ref(), x).await?;
 								}
 							}
 						}

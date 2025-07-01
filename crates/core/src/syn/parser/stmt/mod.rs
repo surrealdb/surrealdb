@@ -9,15 +9,12 @@ use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
-	BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
 	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
 	UseStatement,
 };
-use crate::sql::{AssignOperator, Duration, Expr, Fields, Ident, Param, TopLevelExpr};
-use crate::syn::error::bail;
+use crate::sql::{AssignOperator, Duration, Expr, Fields, Ident, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
-use crate::syn::parser::enter_query_recursion;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{Glued, TokenKind, t};
 
@@ -348,7 +345,7 @@ impl Parser<'_> {
 	pub(super) async fn parse_info_stmt(&mut self, stk: &mut Stk) -> ParseResult<InfoStatement> {
 		expected!(self, t!("FOR"));
 		let next = self.next();
-		let mut stmt = match next.kind {
+		let stmt = match next.kind {
 			t!("ROOT") => {
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::Root(structure)
@@ -404,7 +401,7 @@ impl Parser<'_> {
 		let peek = self.peek();
 		let id = match peek.kind {
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
-				self.next_token_value().map(Expr::Literal)?
+				self.next_token_value().map(|u| Expr::Literal(Literal::Uuid(u)))?
 			}
 			t!("$param") => self.next_token_value().map(Expr::Param)?,
 			_ => unexpected!(self, peek, "a UUID or a parameter"),
@@ -424,7 +421,7 @@ impl Parser<'_> {
 		let expr = match self.peek_kind() {
 			t!("DIFF") => {
 				self.pop_peek();
-				Fields::default()
+				Fields::all()
 			}
 			_ => self.parse_fields(stk).await?,
 		};

@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
-use crate::val::{Strand, TryAdd, TryDiv, TryMul, TryPow, TryRem, TrySub};
+use crate::val::{Strand, TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 use anyhow::{Result, bail};
 use revision::revisioned;
 use rust_decimal::prelude::*;

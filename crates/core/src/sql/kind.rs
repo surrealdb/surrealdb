@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
+#[derive(Clone, Debug)]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
@@ -236,6 +237,7 @@ impl Display for Kind {
 	}
 }
 
+#[derive(Clone, Debug)]
 pub enum KindLiteral {
 	String(Strand),
 	Integer(i64),

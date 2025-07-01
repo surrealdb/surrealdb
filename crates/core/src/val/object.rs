@@ -181,10 +181,13 @@ impl Object {
 	}
 
 	pub fn into_literal(self) -> Vec<ObjectEntry> {
-		self.0.into_iter().map(|(k, v)| ObjectEntry {
-			key: k,
-			value: Expr::Literal(v.into_literal()),
-		})
+		self.0
+			.into_iter()
+			.map(|(k, v)| ObjectEntry {
+				key: k,
+				value: Expr::Literal(v.into_literal()),
+			})
+			.collect()
 	}
 
 	/*

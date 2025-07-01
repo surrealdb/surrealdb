@@ -395,7 +395,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			GqlValue::String(s) => {
 				use Kind::*;
 				any_try_kinds!(val, Datetime, Duration, Uuid);
-				syn::value_legacy_strand(s.as_str())
+				syn::expr_legacy_strand(s.as_str())
 					.map(Into::into)
 					.map_err(|_| type_error(kind, val))
 			}
@@ -439,7 +439,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 				}
 			}
 			//TODO: Verify correctness of code here.
-			GqlValue::String(s) => match syn::value(s).map(Into::into) {
+			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
 				Ok(SurValue::Number(n)) => match n {
 					SurNumber::Int(i) => Ok(SurValue::from(i.into())),
 					SurNumber::Float(f) => match Decimal::from_f64(f) {
@@ -471,7 +471,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
-			GqlValue::String(s) => match syn::value(s).map(Into::into) {
+			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
 				Ok(SurValue::Number(n)) => match n {
 					SurNumber::Int(int) => Ok(SurValue::Number(SurNumber::Float(int as f64))),
 					SurNumber::Float(float) => Ok(SurValue::Number(SurNumber::Float(float))),
@@ -492,7 +492,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 					Err(type_error(kind, val))
 				}
 			}
-			GqlValue::String(s) => match syn::value(s).map(Into::into) {
+			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
 				Ok(SurValue::Number(n)) => match n {
 					SurNumber::Int(int) => Ok(SurValue::Number(SurNumber::Int(int))),
 					SurNumber::Float(float) => {
@@ -523,7 +523,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
-			GqlValue::String(s) => match syn::value(s).map(Into::into) {
+			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
 				Ok(SurValue::Number(n)) => Ok(SurValue::Number(n)),
 				_ => Err(type_error(kind, val)),
 			},
@@ -537,7 +537,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 					.collect();
 				Ok(SurValue::Object(out?.into()))
 			}
-			GqlValue::String(s) => match syn::value_legacy_strand(s.as_str()).map(Into::into) {
+			GqlValue::String(s) => match syn::expr_legacy_strand(s.as_str()).map(Into::into) {
 				Ok(obj @ SurValue::Object(_)) => Ok(obj),
 				_ => Err(type_error(kind, val)),
 			},

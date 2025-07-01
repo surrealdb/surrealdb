@@ -1,41 +1,53 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::{Expr, Idiom};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Fields {
-	pub fields: Vec<Field>,
-	/// If the `VALUE` clause was present before fields
-	pub value: bool,
+pub enum Fields {
+	/// Fields had the `VALUE` clause and should only return the given selector
+	Value(Box<Field>),
+	/// Normal fields where an object with the selected fields is expected
+	Select(Vec<Field>),
+}
+
+impl Fields {
+	// Shorthand for `Fields::Select(vec![Field::all])`
+	pub fn all() -> Fields {
+		Fields::Select(vec![Field::All])
+	}
+
+	pub fn contains_all(&self) -> bool {
+		match self {
+			Fields::Value(field) => matches!(field, Field::All),
+			Fields::Select(fields) => fields.iter().all(|x| matches!(x, Field::All)),
+		}
+	}
 }
 
 impl From<Fields> for crate::expr::field::Fields {
 	fn from(v: Fields) -> Self {
-		Self {
-			fields: v.fields.into_iter().map(Into::into).collect(),
-			value: v.value,
+		match v {
+			Fields::Value(x) => crate::expr::field::Fields::Value(x.into()),
+			Fields::Select(x) => crate::expr::field::Fields::Select(x.into()),
 		}
 	}
 }
 
 impl From<crate::expr::field::Fields> for Fields {
 	fn from(v: crate::expr::field::Fields) -> Self {
-		Self {
-			fields: v.fields.into_iter().map(Into::into).collect(),
-			value: v.value,
+		match v {
+			crate::expr::field::Fields::Value(x) => Fields::Value(x.into()),
+			crate::expr::field::Fields::Select(x) => Fields::Select(x.into()),
 		}
 	}
 }
 
 impl Display for Fields {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self.value {
-			Some(v) => write!(f, "VALUE {}", &v),
-			None => Display::fmt(&Fmt::comma_separated(&self.fields), f),
+		match self {
+			Fields::Value(v) => write!(f, "VALUE {}", &v),
+			Fields::Select(x) => Display::fmt(&Fmt::comma_separated(x), f),
 		}
 	}
 }

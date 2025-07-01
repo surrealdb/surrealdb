@@ -9,15 +9,14 @@ use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 //use crate::expr::edges::Edges;
 use crate::expr::field::{Field, Fields};
+use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Function};
+use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _};
 use crate::fnc::idiom;
 use crate::val::{RecordId, RecordIdKey, Value};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
-
-use super::idiom_recursion::{Recursion, compute_idiom_recursion};
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -273,43 +272,15 @@ impl Value {
 							})
 							.await?;
 
-						let res = stk
-							.run(|stk| {
+						let res = if let Some(Value::Closure(x)) = v.get(name) {
+							let v = x.compute(stk, ctx, opt, doc, args).await?;
+							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await?
+						} else {
+							stk.run(|stk| {
 								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
 							})
-							.await;
-
-						let res = match res {
-							Ok(_) => res,
-							Err(e) => {
-								if matches!(e.downcast_ref(), Some(Error::InvalidFunction { .. })) {
-									if let Some(v) = v.get(name) {
-										let fnc = Expr::FunctionCall(v.clone(), args, true);
-										match stk
-											.run(|stk| fnc.compute(stk, ctx, opt, doc))
-											.await
-											.catch_return()
-										{
-											Ok(v) => Ok(v),
-											Err(e) => {
-												if matches!(
-													e.downcast_ref(),
-													Some(Error::InvalidFunction { .. })
-												) {
-													Ok(Value::None)
-												} else {
-													Err(e)
-												}
-											}
-										}
-									} else {
-										Err(e)
-									}
-								} else {
-									Err(e)
-								}
-							}
-						}?;
+							.await?
+						};
 
 						stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 					}
@@ -530,7 +501,7 @@ impl Value {
 							// This is a remote field expression
 							_ => {
 								let stm = SelectStatement {
-									expr: Fields(vec![Field::All], false),
+									expr: Fields::Select(vec![Field::All]),
 									what: vec![Expr::Literal(val.into_literal())],
 									..SelectStatement::default()
 								};

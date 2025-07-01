@@ -9,6 +9,12 @@ use crate::val::Value;
 #[derive(Clone, Debug)]
 pub struct ObjectKey(String);
 
+impl Default for ObjectKey {
+	fn default() -> Self {
+		ObjectKey("/".to_owned())
+	}
+}
+
 impl ObjectKey {
 	/// Create a new path, ensuring it starts with "/"
 	pub fn new(path: impl Into<String>) -> Self {
@@ -34,12 +40,11 @@ impl ObjectKey {
 
 	/// Remove a prefix from this path, returning a new Path.
 	/// If this path doesn't start with the given prefix, returns None.
-	pub fn strip_prefix(&self, prefix: impl AsRef<str>) -> Option<Self> {
-		let prefix_str = prefix.as_ref();
-		let normalized_prefix = if prefix_str.starts_with('/') {
-			prefix_str.to_string()
+	pub fn strip_prefix(&self, prefix: &str) -> Option<Self> {
+		let normalized_prefix = if prefix.starts_with('/') {
+			prefix.to_string()
 		} else {
-			format!("/{}", prefix_str)
+			format!("/{}", prefix)
 		};
 
 		// Ensure the prefix ends without a trailing slash for comparison

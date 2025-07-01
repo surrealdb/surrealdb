@@ -25,7 +25,7 @@ pub enum NumericKind {
 	Float,
 	Int,
 	Decimal,
-	Duration,
+	Duration(Duration),
 }
 
 #[derive(Debug)]

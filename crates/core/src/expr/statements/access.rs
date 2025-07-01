@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::expr::access_type::BearerAccessSubject;
 use crate::expr::{AccessType, Base, Cond, FlowResultExt as _, Ident, RecordIdLit};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Array, Datetime, Duration, Uuid, Value};
+use crate::val::{Array, Datetime, Duration, Object, RecordId, Strand, Uuid, Value};
 use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;
@@ -133,26 +133,25 @@ impl AccessGrant {
 	pub fn is_active(&self) -> bool {
 		!(self.is_expired() || self.is_revoked())
 	}
-}
 
-impl From<AccessGrant> for Object {
-	fn from(grant: AccessGrant) -> Self {
+	/// Returns the surrealql object representation of the access grant
+	pub fn into_access_object(self) -> Object {
 		let mut res = Object::default();
-		res.insert("id".to_owned(), Value::from(grant.id.to_raw()));
-		res.insert("ac".to_owned(), Value::from(grant.ac.to_raw()));
-		res.insert("type".to_owned(), Value::from(grant.grant.variant()));
-		res.insert("creation".to_owned(), Value::from(grant.creation));
-		res.insert("expiration".to_owned(), Value::from(grant.expiration));
-		res.insert("revocation".to_owned(), Value::from(grant.revocation));
+		res.insert("id".to_owned(), Value::from(self.id.to_raw()));
+		res.insert("ac".to_owned(), Value::from(self.ac.to_raw()));
+		res.insert("type".to_owned(), Value::from(self.grant.variant()));
+		res.insert("creation".to_owned(), Value::from(self.creation));
+		res.insert("expiration".to_owned(), Value::from(self.expiration));
+		res.insert("revocation".to_owned(), Value::from(self.revocation));
 		let mut sub = Object::default();
-		match grant.subject {
+		match self.subject {
 			Subject::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
 			Subject::User(name) => sub.insert("user".to_owned(), Value::from(name.to_raw())),
 		};
 		res.insert("subject".to_owned(), Value::from(sub));
 
 		let mut gr = Object::default();
-		match grant.grant {
+		match self.grant {
 			Grant::Jwt(jg) => {
 				gr.insert("jti".to_owned(), Value::from(jg.jti));
 				if let Some(token) = jg.token {
@@ -182,7 +181,7 @@ impl From<AccessGrant> for Object {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Subject {
-	Record(RecordIdLit),
+	Record(RecordId),
 	User(Ident),
 }
 

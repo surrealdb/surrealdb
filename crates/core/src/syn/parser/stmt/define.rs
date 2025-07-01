@@ -207,7 +207,7 @@ impl Parser<'_> {
 			kind,
 			name,
 			base,
-			roles: vec!["Viewer".into()], // New users get the viewer role by default
+			roles: vec![Ident("Viewer".to_owned())], // New users get the viewer role by default
 			..DefineUserStatement::default()
 		};
 
@@ -518,7 +518,7 @@ impl Parser<'_> {
 		let mut res = DefineAccessStatement {
 			name,
 			base: base.clone(),
-			access_type: kind,
+			kind,
 			..Default::default()
 		};
 
@@ -1341,7 +1341,7 @@ impl Parser<'_> {
 								let open_span = expected!(self, t!("(")).span;
 								let path: Strand = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
-								filters.push(Filter::Mapper(path.into()))
+								filters.push(Filter::Mapper(path.into_inner()))
 							}
 							_ => unexpected!(self, next, "a filter"),
 						}
@@ -1380,7 +1380,7 @@ impl Parser<'_> {
 					while self.eat(t!("::")) {
 						let value = self.next_token_value::<Ident>()?;
 						ident.0.push_str("::");
-						ident.0.push_str(&value);
+						ident.0.push_str(&*value);
 					}
 					res.function = Some(ident);
 				}

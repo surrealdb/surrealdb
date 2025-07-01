@@ -1,12 +1,11 @@
 mod convert;
 
-pub use convert::Cbor;
-
 use crate::expr::Value;
 use crate::rpc::RpcError;
 use crate::rpc::request::Request;
 use crate::sql::SqlValue;
 use ciborium::Value as Data;
+pub use convert::Cbor;
 
 use super::ResTrait;
 

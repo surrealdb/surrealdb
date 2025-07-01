@@ -1,11 +1,16 @@
 //! This module defines the pratt parser for operators.
 
+use md5::digest::typenum::Exp;
 use reblessive::Stk;
 
 use super::mac::unexpected;
+use crate::key::sequence::Prefix;
 use crate::sql::operator::{BindingPower, NearestNeighbor};
-use crate::sql::{AssignOperator, BinaryOperator, Expr, Part, PostfixOperator, PrefixOperator};
+use crate::sql::{
+	self, AssignOperator, BinaryOperator, Expr, Literal, Part, PostfixOperator, PrefixOperator,
+};
 use crate::syn::error::bail;
+use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, Token, TokenKind, t};
@@ -49,7 +54,7 @@ impl Parser<'_> {
 	pub(super) fn parse_assign_operator(&mut self) -> ParseResult<AssignOperator> {
 		let token = self.next();
 		match token.kind {
-			t!("=") => Ok(AssignOperator::Equal),
+			t!("=") => Ok(AssignOperator::Assign),
 			t!("+=") => Ok(AssignOperator::Add),
 			t!("-=") => Ok(AssignOperator::Subtract),
 			t!("+?=") => Ok(AssignOperator::Extend),
@@ -181,13 +186,21 @@ impl Parser<'_> {
 					self.lexer.backup_before(p.span);
 					self.token_buffer.clear();
 					self.token_buffer.push(token);
-					let number = self.next_token_value::<Number>().map(Value::Number)?;
+					let expr = match self.next_token_value::<Numeric>()? {
+						Numeric::Float(f) => Expr::Literal(Literal::Float(f)),
+						Numeric::Integer(i) => Expr::Literal(Literal::Integer(i)),
+						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
+						Numeric::Duration(d) => Expr::Prefix {
+							op: PrefixOperator::Positive,
+							expr: Box::new(Expr::Literal(Literal::Duration(sql::Duration(d)))),
+						},
+					};
 					if self.peek_continues_idiom() {
 						return self
-							.parse_remaining_value_idiom(ctx, vec![Part::Start(number)])
+							.parse_remaining_value_idiom(ctx, vec![Part::Start(expr)])
 							.await;
 					} else {
-						return Ok(number);
+						return Ok(expr);
 					}
 				}
 				self.pop_peek();
@@ -209,13 +222,21 @@ impl Parser<'_> {
 					self.lexer.backup_before(p.span);
 					self.token_buffer.clear();
 					self.token_buffer.push(token);
-					let number = self.next_token_value::<Number>().map(SqlValue::Number)?;
+					let expr = match self.next_token_value::<Numeric>()? {
+						Numeric::Float(f) => Expr::Literal(Literal::Float(f)),
+						Numeric::Integer(i) => Expr::Literal(Literal::Integer(i)),
+						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
+						Numeric::Duration(d) => Expr::Prefix {
+							op: PrefixOperator::Negate,
+							expr: Box::new(Expr::Literal(Literal::Duration(sql::Duration(d)))),
+						},
+					};
 					if self.peek_continues_idiom() {
 						return self
-							.parse_remaining_value_idiom(ctx, vec![Part::Start(number)])
+							.parse_remaining_value_idiom(ctx, vec![Part::Start(expr)])
 							.await;
 					} else {
-						return Ok(number);
+						return Ok(expr);
 					}
 				}
 
@@ -430,7 +451,7 @@ impl Parser<'_> {
 		let is_relation = Self::operator_is_relation(&operator);
 		if !lhs_prime && is_relation && Self::expr_is_relation(&lhs) {
 			bail!("Chained relational operators have no defined associativity.",
-				@span => "Use parens, '()', to specify which operator must be evaluated first")
+				@token.span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		let is_range = matches!(
@@ -442,7 +463,7 @@ impl Parser<'_> {
 		);
 		if !lhs_prime && is_range && Self::expr_is_range(&lhs) {
 			bail!("Chained range operators has no specified associativity",
-				@span => "use parens, '()', to specify which operator must be evaluated first")
+				@token.span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		let rhs_covered = self.peek().kind == t!("(");
@@ -450,17 +471,17 @@ impl Parser<'_> {
 
 		if !rhs_covered && is_relation && Self::expr_is_relation(&rhs) {
 			bail!("Chained relational operators have no defined associativity.",
-				@span => "Use parens, '()', to specify which operator must be evaluated first")
+				@token.span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		if !rhs_covered && is_range && Self::expr_is_range(&rhs) {
 			bail!("Chained range operators have no defined associativity.",
-				@span => "Use parens, '()', to specify which operator must be evaluated first")
+				@token.span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		Ok(Expr::Binary {
 			left: Box::new(lhs),
-			op,
+			op: operator,
 			right: Box::new(rhs),
 		})
 	}
@@ -548,14 +569,14 @@ impl Parser<'_> {
 				assert!(self.eat_whitespace(t!("..")));
 				if !lhs_prime && Self::expr_is_range(&lhs) {
 					bail!("Chaining range operators has no specified associativity",
-						@span => "use parens, '()', to specify which operator must be evaluated first")
+						@token.span => "use parens, '()', to specify which operator must be evaluated first")
 				}
 				PostfixOperator::RangeSkip
 			}
 			t!("..") => {
 				if !lhs_prime && Self::expr_is_range(&lhs) {
 					bail!("Chaining range operators has no specified associativity",
-						@span => "use parens, '()', to specify which operator must be evaluated first")
+						@token.span => "use parens, '()', to specify which operator must be evaluated first")
 				}
 				PostfixOperator::Range
 			}

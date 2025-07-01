@@ -1,5 +1,4 @@
-use regex::Regex;
-
+use crate::sql::Regex;
 use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Token, t};

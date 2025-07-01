@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Object, Value};
+use crate::val::{Object, Strand, Value};
 use std::collections::HashMap;
 
 pub(super) struct Plan {
@@ -142,8 +142,9 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![
-					("table", tb.to_owned().into()),
-					("range", r.to_owned().into()),
+					//TODO: Properly handle possible null byte.
+					("table", Value::Strand(Strand::new(tb.to_owned()).unwrap())),
+					("range", Value::Range(Box::new(r.into_value_range()))),
 					("direction", sc.to_string().into()),
 				],
 			},

@@ -1,3 +1,4 @@
+use crate::cnf::ID_CHARS;
 use crate::expr;
 use crate::expr::escape::EscapeRid;
 use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
@@ -16,6 +17,54 @@ use ulid::Ulid;
 pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	pub end: Bound<RecordIdKey>,
+}
+
+impl RecordIdKeyRange {
+	/// Convertes a record id key range into the range from a normal value.
+	pub fn into_value_range(self) -> Range {
+		Range {
+			start: self.start.map(|x| x.into_value()),
+			end: self.end.map(|x| x.into_value()),
+		}
+	}
+}
+
+impl PartialEq<Range> for RecordIdKeyRange {
+	fn eq(&self, other: &Range) -> bool {
+		(match self.start {
+			Bound::Included(ref a) => {
+				if let Bound::Included(ref b) = other.start {
+					a == b
+				} else {
+					false
+				}
+			}
+			Bound::Excluded(ref a) => {
+				if let Bound::Excluded(ref b) = other.start {
+					a == b
+				} else {
+					false
+				}
+			}
+			Bound::Unbounded => matches!(other.start, Bound::Unbounded),
+		}) && (match self.end {
+			Bound::Included(ref a) => {
+				if let Bound::Included(ref b) = other.end {
+					a == b
+				} else {
+					false
+				}
+			}
+			Bound::Excluded(ref a) => {
+				if let Bound::Excluded(ref b) = other.end {
+					a == b
+				} else {
+					false
+				}
+			}
+			Bound::Unbounded => matches!(other.end, Bound::Unbounded),
+		})
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -119,40 +168,9 @@ impl PartialEq<Value> for RecordIdKey {
 			}
 			RecordIdKey::Range(a) => {
 				if let Value::Range(b) = other {
-					match a.start {
-						Bound::Included(a) => {
-							if let Bound::Included(b) = b.start {
-								a == b
-							} else {
-								false
-							}
-						}
-						Bound::Excluded(a) => {
-							if let Bound::Excluded(b) = b.start {
-								a == b
-							} else {
-								false
-							}
-						}
-						Bound::Unbounded => matches!(b.start, Bound::Unbounded),
-					}
-					&&match a.end {
-						Bound::Included(a) => {
-							if let Bound::Included(b) = b.end {
-								a == b
-							} else {
-								false
-							}
-						}
-						Bound::Excluded(a) => {
-							if let Bound::Excluded(b) = b.end {
-								a == b
-							} else {
-								false
-							}
-						}
-						Bound::Unbounded => matches!(b.end, Bound::Unbounded),
-					}
+					a == b
+				} else {
+					false
 				}
 			}
 		}
@@ -193,6 +211,11 @@ impl RecordId {
 			tb: self.table,
 			id: self.key.into_literal(),
 		}
+	}
+
+	/// Returns the string representation of this record id without
+	pub fn into_raw_string(&self) -> String {
+		todo!()
 	}
 }
 

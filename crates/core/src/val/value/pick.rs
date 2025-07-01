@@ -14,7 +14,12 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					Part::Value(Expr::Literal(Literal::Integer(i))) => {}
+					Part::Value(Expr::Literal(Literal::Integer(i))) => {
+						match v.get(&i.to_string()) {
+							Some(v) => v.pick(path.next()),
+							None => Value::None,
+						}
+					}
 					Part::All => {
 						v.iter().map(|(_, v)| v.pick(path.next())).collect::<Vec<_>>().into()
 					}

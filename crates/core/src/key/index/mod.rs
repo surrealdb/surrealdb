@@ -21,10 +21,9 @@ pub mod ia;
 pub mod ip;
 pub mod vm;
 
-use crate::expr::id::RecordIdKeyLit;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KeyEncode, impl_key};
-use crate::val::Array;
+use crate::val::{Array, RecordIdKey};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -109,7 +108,7 @@ pub struct Index<'a> {
 	pub ix: &'a str,
 	_e: u8,
 	pub fd: Cow<'a, Array>,
-	pub id: Option<Cow<'a, RecordIdKeyLit>>,
+	pub id: Option<Cow<'a, RecordIdKey>>,
 }
 impl_key!(Index<'a>);
 
@@ -126,7 +125,7 @@ impl<'a> Index<'a> {
 		tb: &'a str,
 		ix: &'a str,
 		fd: &'a Array,
-		id: Option<&'a RecordIdKeyLit>,
+		id: Option<&'a RecordIdKey>,
 	) -> Self {
 		Self {
 			__: b'/',

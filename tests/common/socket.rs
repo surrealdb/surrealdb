@@ -147,7 +147,7 @@ impl Socket {
 				// First of all we convert the JSON type to a string.
 				let json = message.to_string();
 				// Then we parse the JSON in to SurrealQL.
-				let surrealql = surrealdb::syn::value_legacy_strand(&json)?;
+				let surrealql = surrealdb::syn::expr_legacy_strand(&json)?;
 				// Then we convert the SurrealQL in to CBOR.
 				let cbor = Cbor::try_from(surrealql)?;
 				// Then serialize the CBOR as binary data.

@@ -91,7 +91,7 @@ impl Parser<'_> {
 
 		self.eat(t!("ON"));
 
-		let has_all = fields.0.contains(&Field::All);
+		let has_all = fields.contains_all();
 
 		let before = self.peek().span;
 		let split = self.parse_basic_idiom(ctx).await?;
@@ -132,7 +132,7 @@ impl Parser<'_> {
 			return Ok(Some(Ordering::Random));
 		};
 
-		let has_all = fields.0.contains(&Field::All);
+		let has_all = fields.contains_all();
 
 		let before = self.recent_span();
 		let order = self.parse_order(ctx).await?;

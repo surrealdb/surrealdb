@@ -116,7 +116,7 @@ impl Parser<'_> {
 				}
 
 				let file = self.next_token_value()?;
-				Expr::Literal(Literal::Bytes(file))
+				Expr::Literal(Literal::File(file))
 			}
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;

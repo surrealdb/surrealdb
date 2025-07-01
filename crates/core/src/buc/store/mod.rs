@@ -44,11 +44,11 @@ impl TryFrom<Object> for ListOptions {
 		let mut opts = ListOptions::default();
 
 		if let Some(start) = obj.remove("start") {
-			opts.start = Some(start.coerce_to::<String>()?.into());
+			opts.start = Some(ObjectKey::new(start.coerce_to::<String>()?));
 		}
 
 		if let Some(prefix) = obj.remove("prefix") {
-			opts.prefix = Some(prefix.coerce_to::<String>()?.into());
+			opts.prefix = Some(ObjectKey::new(prefix.coerce_to::<String>()?));
 		}
 
 		if let Some(limit) = obj.remove("limit") {

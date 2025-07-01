@@ -30,6 +30,7 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, TransactionType};
+use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::val::Value;
 use crate::{cf, syn};
@@ -41,6 +42,7 @@ use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use futures::{Future, Stream};
 use reblessive::TreeStack;
+use std::collections::BTreeMap;
 use std::fmt;
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -920,40 +922,19 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn process(
 		&self,
-		ast: Query,
+		ast: Ast,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>> {
-		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
-		// Check if anonymous actors can execute queries when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "process".to_string(),
-				resource: "query".to_string(),
-			})
-		})?;
-
-		// Create a new query options
-		let opt = self.setup_options(sess);
-
-		// Create a default context
-		let mut ctx = self.setup_ctx()?;
-		// Start an execution context
-		sess.context(&mut ctx);
-		// Store the query variables
-		vars.attach(&mut ctx)?;
-		// Process all statements
-		Executor::execute(self, ctx.freeze(), opt, ast).await
+		//TODO: Insert planner here.
+		self.process_plan(ast.into(), sess, vars)
 	}
 
 	pub async fn process_plan(
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1004,7 +985,7 @@ impl Datastore {
 		&self,
 		val: TopLevelExpr,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1087,7 +1068,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(&self, val: &Expr, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn evaluate(
+		&self,
+		val: &Expr,
+		sess: &Session,
+		vars: Option<BTreeMap<String, Value>>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack

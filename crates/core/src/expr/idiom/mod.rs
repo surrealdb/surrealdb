@@ -142,10 +142,10 @@ impl Idiom {
 	}
 	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {
-		self.iter().any(Self::split_multi_yield)
+		self.iter().any(Self::part_is_multi_yield)
 	}
 	/// Check if the path part is a yield in a multi-yield expression
-	pub(crate) fn split_multi_yield(v: &Part) -> bool {
+	pub(crate) fn part_is_multi_yield(v: &Part) -> bool {
 		matches!(v, Part::Graph(g) if g.alias.is_some())
 	}
 	/// Check if the path part is a yield in a multi-yield expression

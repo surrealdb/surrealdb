@@ -78,10 +78,10 @@ impl Value {
 						},
 						Value::Thing(t) => match path.len() {
 							1 => {
-								v.remove(&t.to_raw());
+								v.remove(&t.into_raw_string());
 								Ok(())
 							}
-							_ => match v.get_mut(&t.to_raw()) {
+							_ => match v.get_mut(&t.into_raw_string()) {
 								Some(v) if !v.is_nullish() => {
 									stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 								}
@@ -109,12 +109,11 @@ impl Value {
 				},
 				// Current value at path is an array
 				Value::Array(v) => match p {
-					Part::All => match path.len() {
-						1 => {
+					Part::All => {
+						if path.len() == 1 {
 							v.clear();
 							Ok(())
-						}
-						_ => {
+						} else {
 							let path = path.next();
 							stk.scope(|scope| {
 								let futs = v
@@ -125,35 +124,37 @@ impl Value {
 							.await?;
 							Ok(())
 						}
-					},
-					Part::First => match path.len() {
-						1 => {
+					}
+					Part::First => {
+						if path.len() == 1 {
 							if !v.is_empty() {
 								let i = 0;
 								v.remove(i);
 							}
 							Ok(())
+						} else {
+							match v.first_mut() {
+								Some(v) => stk.run(|stk| v.del(stk, ctx, opt, path.next())).await,
+								None => Ok(()),
+							}
 						}
-						_ => match v.first_mut() {
-							Some(v) => stk.run(|stk| v.del(stk, ctx, opt, path.next())).await,
-							None => Ok(()),
-						},
-					},
-					Part::Last => match path.len() {
-						1 => {
+					}
+					Part::Last => {
+						if path.len() == 1 {
 							if !v.is_empty() {
 								let i = v.len() - 1;
 								v.remove(i);
 							}
 							Ok(())
+						} else {
+							match v.last_mut() {
+								Some(v) => stk.run(|stk| v.del(stk, ctx, opt, path.next())).await,
+								None => Ok(()),
+							}
 						}
-						_ => match v.last_mut() {
-							Some(v) => stk.run(|stk| v.del(stk, ctx, opt, path.next())).await,
-							None => Ok(()),
-						},
-					},
-					Part::Where(w) => match path.len() {
-						1 => {
+					}
+					Part::Where(w) => {
+						if path.len() == 1 {
 							let mut new_res = Vec::new();
 							for (i, v) in v.0.into_iter().enumerate() {
 								let cur = v.into();
@@ -168,9 +169,8 @@ impl Value {
 							}
 							v.0 = new_res;
 							Ok(())
-						}
-						_ => match path.get(1) {
-							Some(Part::Value(_)) => {
+						} else {
+							if let Some(Part::Value(_)) = path.get(1) {
 								//TODO: Figure out if the behavior here is different with this
 								//special case then without. I think this can be simplified.
 								let mut true_values = Vec::new();
@@ -194,7 +194,8 @@ impl Value {
 								// Push the new values into the original array
 								for (i, p) in true_indecies.into_iter().enumerate().rev() {
 									match a.pick(&[Part::Value(Expr::Literal(Literal::Integer(
-										i.into(),
+										// This technically can overflow but it is very unlikely.
+										i as i64,
 									)))]) {
 										Value::None => {
 											v.remove(i);
@@ -203,8 +204,7 @@ impl Value {
 									}
 								}
 								Ok(())
-							}
-							_ => {
+							} else {
 								let path = path.next();
 								for v in v.iter_mut() {
 									let cur = v.clone().into();
@@ -218,23 +218,29 @@ impl Value {
 								}
 								Ok(())
 							}
-						},
-					},
-					Part::Value(x) => match x.compute(stk, ctx, opt, None).await.catch_return()? {
-						Value::Number(i) => match path.len() {
-							1 => {
+						}
+					}
+					Part::Value(x) => {
+						if let Value::Number(i) =
+							x.compute(stk, ctx, opt, None).await.catch_return()?
+						{
+							if path.len() == 1 {
 								if v.len() > i.to_usize() {
 									v.remove(i.to_usize());
 								}
 								Ok(())
+							} else {
+								match v.get_mut(i.to_usize()) {
+									Some(v) => {
+										stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
+									}
+									None => Ok(()),
+								}
 							}
-							_ => match v.get_mut(i.to_usize()) {
-								Some(v) => stk.run(|stk| v.del(stk, ctx, opt, path.next())).await,
-								None => Ok(()),
-							},
-						},
-						_ => Ok(()),
-					},
+						} else {
+							Ok(())
+						}
+					}
 					_ => {
 						stk.scope(|scope| {
 							let futs =

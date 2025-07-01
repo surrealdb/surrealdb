@@ -213,7 +213,7 @@ impl Value {
 						// Push the new values into the original array
 						for (i, p) in p.into_iter().enumerate() {
 							arr[p] =
-								a.pick(&[Part::Value(Expr::Literal(Literal::Integer(i.into())))]);
+								a.pick(&[Part::Value(Expr::Literal(Literal::Integer(i as i64)))]);
 						}
 						return Ok(());
 					} else {
@@ -256,7 +256,7 @@ impl Value {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
 						Value::Strand(x) => x.0,
-						Value::Thing(x) => x.to_raw(),
+						Value::Thing(x) => x.into_raw_string(),
 						Value::Number(x) => x.to_string(),
 						Value::Range(x) => x.to_string(),
 						_ => return Ok(()),

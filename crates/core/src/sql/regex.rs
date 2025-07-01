@@ -1,7 +1,6 @@
 use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 use quick_cache::sync::{Cache, GuardResult};
 use regex::RegexBuilder;
-use revision::revisioned;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -20,6 +19,7 @@ impl Regex {
 }
 
 pub(crate) fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
+	// TODO Move out regex cache
 	static REGEX_CACHE: LazyLock<Cache<String, regex::Regex>> =
 		LazyLock::new(|| Cache::new(REGEX_CACHE_SIZE.max(10)));
 	match REGEX_CACHE.get_value_or_guard(str, None) {

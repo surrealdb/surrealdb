@@ -35,8 +35,8 @@ pub enum InfoStatement {
 
 impl InfoStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		false
+	pub(crate) fn read_only(&self) -> bool {
+		true
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -53,15 +53,17 @@ impl InfoStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
-				Ok(match structured {
-					true => Value::from(map! {
+				if *structured {
+					let object = map! {
 						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"system".to_string() => system().await,
 						"users".to_string() => process(txn.all_root_users().await?),
-					}),
-					false => Value::from(map! {
+					};
+					Ok(Value::Object(object))
+				} else {
+					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
@@ -91,8 +93,9 @@ impl InfoStatement {
 							}
 							out.into()
 						}
-					}),
-				})
+					};
+					Ok(Value::Object(Object(object)))
+				}
 			}
 			InfoStatement::Ns(structured) => {
 				// Allowed to run?
@@ -102,13 +105,15 @@ impl InfoStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
-				Ok(match structured {
-					true => Value::from(map! {
+				if *structured {
+					let object = map! {
 						"accesses".to_string() => process(txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()).collect()),
 						"databases".to_string() => process(txn.all_db(ns).await?),
 						"users".to_string() => process(txn.all_ns_users(ns).await?),
-					}),
-					false => Value::from(map! {
+					};
+					Ok(Value::Object(object))
+				} else {
+					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()) {
@@ -130,8 +135,9 @@ impl InfoStatement {
 							}
 							out.into()
 						},
-					}),
-				})
+					};
+					Ok(Value::Object(Object(object)))
+				}
 			}
 			InfoStatement::Db(structured, version) => {
 				// Allowed to run?
@@ -146,8 +152,8 @@ impl InfoStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
-				Ok(match structured {
-					true => Value::from(map! {
+				let res = if *structured {
+					let object = map! {
 						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
 						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
@@ -159,8 +165,10 @@ impl InfoStatement {
 						"users".to_string() => process(txn.all_db_users(ns, db).await?),
 						"configs".to_string() => process(txn.all_db_configs(ns, db).await?),
 						"sequences".to_string() => process(txn.all_db_sequences(ns, db).await?),
-					}),
-					false => Value::from(map! {
+					};
+					Value::Object(object)
+				} else {
+					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()) {
@@ -238,8 +246,10 @@ impl InfoStatement {
 							}
 							out.into()
 						},
-					}),
-				})
+					};
+					Value::Object(object)
+				};
+				Ok(res)
 			}
 			InfoStatement::Tb(tb, structured, version) => {
 				// Allowed to run?

@@ -77,6 +77,7 @@ mod stmt;
 mod thing;
 mod token;
 mod token_buffer;
+mod value;
 
 pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
 

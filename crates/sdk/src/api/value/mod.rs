@@ -223,7 +223,7 @@ impl FromStr for Value {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		Ok(Value::from_inner(surrealdb_core::syn::value(s)?.into()))
+		Ok(Value::from_inner(surrealdb_core::syn::expr(s)?.into()))
 	}
 }
 

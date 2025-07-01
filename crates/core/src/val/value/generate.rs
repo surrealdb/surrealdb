@@ -1,5 +1,4 @@
 use crate::err::Error;
-use crate::expr::id::RecordIdKeyLit;
 use crate::expr::table::Table;
 use crate::val::{RecordId, RecordIdKey, Value};
 use anyhow::Result;
@@ -10,12 +9,12 @@ impl Value {
 			// There is a floating point number for the id field
 			Value::Number(id) if id.is_float() => Ok(RecordId {
 				table: tb.0.to_string(),
-				key: id.as_int().into(),
+				key: RecordIdKey::Number(id.as_int().into()),
 			}),
 			// There is an integer number for the id field
 			Value::Number(id) if id.is_int() => Ok(RecordId {
 				table: tb.0.to_string(),
-				key: id.as_int().into(),
+				key: RecordIdKey::Number(id.as_int().into()),
 			}),
 			// There is a string for the id field
 			Value::Strand(id) if !id.is_empty() => Ok(RecordId {

@@ -1,8 +1,7 @@
 use reblessive::Stk;
 
-use crate::expr::{Expr, Literal};
 use crate::sql::statements::RelateStatement;
-use crate::sql::{Ident, Table};
+use crate::sql::{Expr, Ident, Literal, Table};
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
@@ -97,7 +96,7 @@ impl Parser<'_> {
 			| t!("INFO") => self.parse_inner_subquery(ctx, None).await,
 			t!("IF") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_if_stmt(ctx)).await.map(|x| Expr::IfElse(x))
+				ctx.run(|ctx| self.parse_if_stmt(ctx)).await.map(|x| Expr::If(Box::new(x)))
 			}
 			t!("(") => {
 				let span = self.pop_peek().span;

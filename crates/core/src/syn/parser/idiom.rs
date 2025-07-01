@@ -34,13 +34,10 @@ impl Parser<'_> {
 			} else {
 				None
 			};
-			Ok(Fields(
-				vec![Field::Single {
-					expr,
-					alias,
-				}],
-				true,
-			))
+			Ok(Fields::Value(Box::new(Field::Single {
+				expr,
+				alias,
+			})))
 		} else {
 			let mut fields = Vec::new();
 			loop {
@@ -63,7 +60,7 @@ impl Parser<'_> {
 					break;
 				}
 			}
-			Ok(Fields(fields, false))
+			Ok(Fields::Select(fields))
 		}
 	}
 
@@ -547,7 +544,8 @@ impl Parser<'_> {
 							Part::All
 						}
 						TokenKind::Digits | t!("+") => {
-							let number = self.lexer.lex_compound(self.next(), compound::numeric)?;
+							let next = self.next();
+							let number = self.lexer.lex_compound(next, compound::numeric)?;
 							let number = match number.value {
 								Numeric::Duration(x) => {
 									bail!("Unexpected token `duration` expected a number", @number.span );

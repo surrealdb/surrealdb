@@ -54,10 +54,7 @@ impl Node {
 	}
 	// Return the node id if archived
 	pub fn archived(&self) -> Option<Uuid> {
-		match self.is_archived() {
-			true => Some(self.id),
-			false => None,
-		}
+		self.is_archived().then_some(self.id)
 	}
 	// Sets the default gc value for old nodes
 	fn default_id(_revision: u16) -> Result<Uuid, Error> {
@@ -96,10 +93,10 @@ impl Display for Node {
 
 impl InfoStructure for Node {
 	fn structure(self) -> Value {
-		Value::from(map! {
-			"id".to_string() => Value::from(self.id),
+		Value::Object(map! {
+			"id".to_string() => Value::Uuid(self.id),
 			"seen".to_string() => self.hb.structure(),
-			"active".to_string() => Value::from(!self.gc),
+			"active".to_string() => Value::Bool(!self.gc),
 		})
 	}
 }
