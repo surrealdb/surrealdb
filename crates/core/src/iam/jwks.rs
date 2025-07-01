@@ -15,6 +15,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use tokio::sync::RwLock;
+use crate::env::VERSION;
 
 pub(crate) type JwksCache = HashMap<String, JwksCacheEntry>;
 #[derive(Clone, Serialize, Deserialize)]
@@ -294,11 +295,17 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 
 // Attempts to fetch a JWKS object from a remote location and stores it in the cache if successful
 async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Result<JwkSet> {
-	let client = Client::new();
-	#[cfg(not(target_family = "wasm"))]
-	let res = client.get(url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
-	#[cfg(target_family = "wasm")]
-	let res = client.get(url).send().await?;
+    let client = Client::new();
+    let mut req = client.get(url);
+    // Add a User-Agent header so that WAF rules don't reject the request
+    if cfg!(not(target_family = "wasm")) {
+        let agent = format!("SurrealDB/{}", VERSION);
+        req = req.header(reqwest::header::USER_AGENT, agent);
+    }
+    #[cfg(not(target_family = "wasm"))]
+    let res = req.timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
+    #[cfg(target_family = "wasm")]
+    let res = req.send().await?;
 	if !res.status().is_success() {
 		warn!(
 			"Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'",
