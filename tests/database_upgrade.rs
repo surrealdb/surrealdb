@@ -268,7 +268,8 @@ mod database_upgrade {
 		info!("Create {info} data on Docker's instance");
 		for l in data {
 			info!("Run `{l}`");
-			client.query(*l).await.expect(l).check().expect(l);
+			let data = surrealdb::opt::Raw::from(l.to_string());
+			client.query(data).await.expect(l).check().expect(l);
 		}
 	}
 
@@ -283,8 +284,9 @@ mod database_upgrade {
 			info!("Run `{query}`");
 			match expected {
 				Some(expected) => {
+					let data = surrealdb::opt::Raw::from(query.to_string());
 					let response: Value =
-						client.query(*query).await.expect(query).take(0).expect(query);
+						client.query(data).await.expect(query).take(0).expect(query);
 					assert_eq!(response.to_string(), *expected, "{query}");
 				}
 				None => {
@@ -328,8 +330,8 @@ mod database_upgrade {
 		info!("Collect INFO TABLE(S) for the database {info}");
 		let mut tables = vec![];
 		for n in table_names {
-			let table =
-				client.query(format!("INFO FOR TABLE `{n}`")).await.unwrap().take(0).unwrap();
+			let data = surrealdb::opt::Raw::from(format!("INFO FOR TABLE `{n}`"));
+			let table = client.query(data).await.unwrap().take(0).unwrap();
 			tables.push(table);
 		}
 		tables
@@ -345,7 +347,8 @@ mod database_upgrade {
 		for n in table_names {
 			let q = format!("SELECT * FROM `{n}`");
 			info!("{q}");
-			let rows: Value = client.query(q).await.unwrap().take(0).unwrap();
+			let rows: Value =
+				client.query(surrealdb::opt::Raw::from(q)).await.unwrap().take(0).unwrap();
 			tables_rows.push(rows);
 		}
 		tables_rows
@@ -391,7 +394,8 @@ mod database_upgrade {
 		C: Connection,
 	{
 		info!("Run `{q}`");
-		let mut res = db.query(q).await.expect(q).check().expect(q);
+		let data = surrealdb::opt::Raw::from(q.to_string());
+		let mut res = db.query(data).await.expect(q).check().expect(q);
 		if let Some(expected) = expected {
 			let results: Value = res.take(0).unwrap();
 			assert_eq!(results.to_string(), expected, "{q}");
