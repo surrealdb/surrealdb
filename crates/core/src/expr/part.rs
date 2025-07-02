@@ -4,10 +4,12 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::expr::fmt::Fmt;
-use crate::expr::idiom::recursion::{self, Recursion};
+use crate::expr::fmt::{Fmt, is_pretty, pretty_indent};
+use crate::expr::idiom::recursion::{
+	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
+};
 use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
-use crate::val::RecordId;
+use crate::val::{Array, RecordId};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -46,11 +48,11 @@ impl Part {
 
 	/// Returns a part which is equivalent to `[1]` if called with integer `1`.
 	pub fn index_int(idx: i64) -> Self {
-		Part::Field(Expr::Literal(Literal::Integer(idx)))
+		Part::Value(Expr::Literal(Literal::Integer(idx)))
 	}
 
 	pub(crate) fn is_index(&self) -> bool {
-		matches!(self, Part::Index(_) | Part::First | Part::Last)
+		matches!(self, Part::Value(Expr::Literal(Literal::Integer(_))) | Part::First | Part::Last)
 	}
 
 	/// Returns the idex if this part would have been `Part::Index(x)` before that field was
@@ -145,7 +147,7 @@ impl fmt::Display for Part {
 			Part::Start(v) => write!(f, "{v}"),
 			Part::Field(v) => write!(f, ".{v}"),
 			Part::Flatten => f.write_str("…"),
-			Part::Index(v) => write!(f, "[{v}]"),
+			//Part::Index(v) => write!(f, "[{v}]"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
@@ -398,7 +400,7 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 // ------------------------------
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum DestructurePart {
@@ -450,7 +452,7 @@ impl fmt::Display for DestructurePart {
 // ------------------------------
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Recurse {
@@ -503,7 +505,7 @@ impl fmt::Display for Recurse {
 // ------------------------------
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum RecurseInstruction {
@@ -532,7 +534,7 @@ async fn walk_paths(
 	finished: &mut Vec<Value>,
 	inclusive: bool,
 	expects: Option<&Value>,
-) -> Result<Vec<Value>> {
+) -> Result<Value> {
 	let mut open: Vec<Value> = vec![];
 	let paths = match recursion.current {
 		Value::Array(v) => &v.0,
@@ -552,7 +554,7 @@ async fn walk_paths(
 
 		if recursion::is_final(&res) || &res == last {
 			if expects.is_none()
-				&& (recursion.iterated > 1 || *inclusive)
+				&& (recursion.iterated > 1 || inclusive)
 				&& recursion.iterated >= recursion.min
 			{
 				finished.push(path.to_owned().into());
@@ -567,7 +569,7 @@ async fn walk_paths(
 
 		let reached_max = recursion.max.is_some_and(|max| recursion.iterated >= max);
 		for step in steps.iter() {
-			let val = if recursion.iterated == 1 && !*inclusive {
+			let val = if recursion.iterated == 1 && !inclusive {
 				Value::from(vec![step.to_owned()])
 			} else {
 				let mut path = path.to_owned();
@@ -596,7 +598,7 @@ async fn walk_paths(
 		}
 	}
 
-	Ok(open)
+	Ok(Value::Array(Array(open)))
 }
 
 impl RecurseInstruction {
@@ -612,7 +614,7 @@ impl RecurseInstruction {
 		match self {
 			Self::Path {
 				inclusive,
-			} => walk_paths(stk, ctx, opt, doc, rec, finished, inclusive, None),
+			} => walk_paths(stk, ctx, opt, doc, rec, finished, *inclusive, None).await,
 			Self::Shortest {
 				expects,
 				inclusive,
@@ -623,7 +625,7 @@ impl RecurseInstruction {
 					.catch_return()?
 					.coerce_to::<RecordId>()?
 					.into();
-				walk_paths(stk, ctx, opt, doc, rec, finished, inclusive, Some(&expects))
+				walk_paths(stk, ctx, opt, doc, rec, finished, *inclusive, Some(&expects)).await
 			}
 			Self::Collect {
 				inclusive,

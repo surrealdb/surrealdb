@@ -10,9 +10,10 @@ use std::hash::{Hash, Hasher};
 /// # Note regarding equality.
 /// A literal is equal to an other literal if it is the exact same byte representation, so normal float rules
 /// regarding equality do not apply, i.e. if `a != b` then `Literal::Float(a)` could still be equal
-/// to `Literal::Float(b)` in the case of `NaN` floats for example.
+/// to `Literal::Float(b)` in the case of `NaN` floats for example. Also surrealql rules regarding
+/// number equality are not observed, 1f != 1dec.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Literal {
@@ -36,7 +37,6 @@ pub enum Literal {
 	Geometry(Geometry),
 	File(File),
 	Closure(Box<Closure>),
-	Point(f64, f64),
 }
 
 impl PartialEq for Literal {

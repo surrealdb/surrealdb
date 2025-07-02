@@ -59,18 +59,18 @@ impl Param {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Find the variable by name
-		match self.as_str() {
+		match self.0.as_str() {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.doc.as_ref().compute(stk, ctx, opt, doc).await.catch_return(),
+				Some(v) => Ok(v.doc.as_ref().clone()),
 				// The base document does not exist
 				None => Ok(Value::None),
 			},
 			// This is a normal param
 			v => match ctx.value(v) {
 				// The param has been set locally
-				Some(v) => v.compute(stk, ctx, opt, doc).await.catch_return(),
+				Some(v) => Ok(v.clone()),
 				// The param has not been set locally
 				None => {
 					// Ensure a database is set
@@ -112,7 +112,7 @@ impl Param {
 						}
 					}
 					// Return the computed value
-					val.value.compute(stk, ctx, opt, doc).await.catch_return()
+					Ok(val.value.clone())
 				}
 			},
 		}

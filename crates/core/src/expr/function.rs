@@ -41,7 +41,6 @@ pub enum Function {
 }
 
 impl Function {
-
 	/// Get function name if applicable
 	pub fn name(&self) -> Option<&str> {
 		match self {
@@ -171,7 +170,6 @@ impl Function {
 	}
 	*/
 
-
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -180,7 +178,7 @@ impl Function {
 		doc: Option<&CursorDoc>,
 		args: Vec<Expr>,
 	) -> FlowResult<Value> {
-		match self{
+		match self {
 			Function::Normal(ref s) => {
 				// Check this function is allowed
 				ctx.check_allowed_function(s)?;
@@ -339,16 +337,15 @@ impl FunctionCall {
 	) -> FlowResult<Value> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
-				// Compute the function arguments
-				let args = stk
-					.scope(|scope| {
-						try_join_all(
-							self.arguments
-								.iter()
-								.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-						)
-					})
-					.await?;
+		// Compute the function arguments
+		let args = stk
+			.scope(|scope| {
+				try_join_all(
+					self.arguments.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
+				)
+			})
+			.await?;
 		// Process the function type
 		self.receiver.compute(stk, ctx, opt, doc, args).await
+	}
 }
