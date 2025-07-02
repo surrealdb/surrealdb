@@ -11,11 +11,11 @@
 <br>
 
 <p align="center">
-    <a href="https://docs.rs/surrealdb-core/latest/surrealdb_core/"><img src="https://img.shields.io/badge/docs.rs-view-f4c153.svg?style=flat-square"></a>
+    <a href="https://docs.rs/surrealdb-sql/latest/surrealdb_sql/"><img src="https://img.shields.io/badge/docs.rs-view-f4c153.svg?style=flat-square"></a>
     &nbsp;
-	<a href="https://crates.io/crates/surrealdb-core"><img src="https://img.shields.io/crates/v/surrealdb-core?color=dca282&style=flat-square"></a>
+	<a href="https://crates.io/crates/surrealdb-sql"><img src="https://img.shields.io/crates/v/surrealdb-sql?color=dca282&style=flat-square"></a>
 	&nbsp;
-	<a href="https://crates.io/crates/surrealdb-core"><img src="https://img.shields.io/crates/d/surrealdb-core?style=flat-square"></a>
+	<a href="https://crates.io/crates/surrealdb-sql"><img src="https://img.shields.io/crates/d/surrealdb-sql?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -28,9 +28,10 @@
     <a href="https://www.youtube.com/@surrealdb"><img src="https://img.shields.io/badge/youtube-subscribe-fc1c1c.svg?style=flat-square"></a>
 </p>
 
-# surrealdb-core
+# surrealdb-sql
 
-This crate is the internal core library of SurrealDB.
-It contains most of the database functionality on top of which the surreal binary is
-implemented. This crate should not be used outside of SurrealDB itself. 
-For a stable interface to the SurrealDB library see [the Rust SDK](https://crates.io/crates/surrealdb)
+> [!WARNING]
+> This crate is under development and is currently a placeholder for code that will be moved out of
+> the `surrealdb-core` crate. 
+
+This crate contains the SurrealQL parser, which produces an abstract syntax tree (AST) from SQL queries.
