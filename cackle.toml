@@ -1369,3 +1369,6 @@ allow_apis = ["fs", "net"]
 [pkg.rstest_macros]
 allow_apis = ["fs"]
 allow_proc_macro = true
+
+[pkg.hdrhistogram]
+allow_unsafe = true
