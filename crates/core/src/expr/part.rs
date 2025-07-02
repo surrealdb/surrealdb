@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::expr::fmt::Fmt;
 use crate::expr::idiom::recursion::{self, Recursion};
-use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Value};
+use crate::expr::{Expr, FlowResultExt as _, Graph, Ident, Idiom, Literal, Value};
 use crate::val::RecordId;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -16,7 +16,7 @@ use std::fmt::Write;
 use std::{fmt, str};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Part {
@@ -39,6 +39,16 @@ pub enum Part {
 }
 
 impl Part {
+	/// Returns a part which is equivalent to `.bla` if called with string `bla`.
+	pub fn field(field: String) -> Self {
+		Part::Field(Ident(field))
+	}
+
+	/// Returns a part which is equivalent to `[1]` if called with integer `1`.
+	pub fn index_int(idx: i64) -> Self {
+		Part::Field(Expr::Literal(Literal::Integer(idx)))
+	}
+
 	pub(crate) fn is_index(&self) -> bool {
 		matches!(self, Part::Index(_) | Part::First | Part::Last)
 	}
@@ -261,7 +271,7 @@ impl<'a> RecursionPlan {
 					.catch_return()?
 				{
 					Value::Object(mut obj) => {
-						obj.insert(field.to_raw(), v);
+						obj.insert(field.into_raw_string(), v);
 						Ok(Value::Object(obj))
 					}
 					Value::None => Ok(Value::None),

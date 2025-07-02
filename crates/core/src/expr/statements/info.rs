@@ -67,14 +67,14 @@ impl InfoStatement {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"namespaces".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns().await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -89,7 +89,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						}
@@ -117,21 +117,21 @@ impl InfoStatement {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"databases".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db(ns).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_users(ns).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -172,7 +172,7 @@ impl InfoStatement {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -186,7 +186,7 @@ impl InfoStatement {
 						"analyzers".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_analyzers( ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -200,35 +200,35 @@ impl InfoStatement {
 						"functions".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"models".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_models(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"params".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_params(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb(ns, db, version).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_users(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -242,7 +242,7 @@ impl InfoStatement {
 						"sequences".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_sequences( ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -276,7 +276,7 @@ impl InfoStatement {
 						"events".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -290,7 +290,7 @@ impl InfoStatement {
 						"indexes".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_indexes(ns, db, tb).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -304,7 +304,7 @@ impl InfoStatement {
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_views(ns, db, tb).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},

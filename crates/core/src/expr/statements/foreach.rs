@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Block, ControlFlow, Expr, FlowResult, Param, Value};
+use crate::val::range::IntegerRangeIter;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct ForeachStatement {
@@ -21,7 +22,7 @@ pub struct ForeachStatement {
 
 enum ForeachIter {
 	Array(std::vec::IntoIter<Value>),
-	Range(std::iter::Map<TypedRange<i64>, fn(i64) -> Value>),
+	Range(std::iter::Map<IntegerRangeIter, fn(i64) -> Value>),
 }
 
 impl Iterator for ForeachIter {
@@ -57,22 +58,7 @@ impl ForeachStatement {
 			Value::Range(r) => {
 				let r =
 					r.coerce_to_typed::<i64>().map_err(Error::from).map_err(anyhow::Error::new)?;
-				ForeachIter::Range(r.map(Value::from))
-			}
-			Value::Future(fut) => {
-				let result = fut.compute(stk, ctx, opt, doc).await?;
-
-				// We only accept arrays as output of a future in a foreach statement.
-				match result {
-					Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
-					v => {
-						return Err(ControlFlow::from(anyhow::Error::new(
-							Error::InvalidStatementTarget {
-								value: v.to_string(),
-							},
-						)));
-					}
-				}
+				ForeachIter::Range(r.iter().map(Value::from))
 			}
 
 			v => {
@@ -90,47 +76,14 @@ impl ForeachStatement {
 			// Duplicate context
 			let ctx = MutableContext::new(ctx).freeze();
 			// Set the current parameter
-			let key = self.param.0.to_raw();
-			let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
+			let key = self.param.0.into_raw_string();
 			let mut ctx = MutableContext::unfreeze(ctx)?;
-			ctx.add_value(key, val.into());
+			ctx.add_value(key, v.into());
 			let mut ctx = ctx.freeze();
 			// Loop over the code block statements
 			for v in self.block.iter() {
 				// Compute each block entry
-				let res = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
-				/*
-				let res = match v {
-					Entry::Set(v) => {
-						let val = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
-						let mut c = MutableContext::unfreeze(ctx)?;
-						c.add_value(v.name.clone(), val.into());
-						ctx = c.freeze();
-						Ok(Value::None)
-					}
-					Entry::Value(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Break(v) => v.compute(&ctx, opt, doc).await,
-					Entry::Continue(v) => v.compute(&ctx, opt, doc).await,
-					Entry::Foreach(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Ifelse(v) => stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-					Entry::Select(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
-					Entry::Create(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
-					Entry::Upsert(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
-					Entry::Update(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
-					Entry::Delete(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
-					Entry::Relate(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
-					Entry::Insert(v) => Ok(stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?),
-					Entry::Define(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
-					Entry::Alter(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
-					Entry::Rebuild(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
-					Entry::Remove(v) => Ok(v.compute(&ctx, opt, doc).await?),
-					Entry::Info(v) => Ok(v.compute(stk, &ctx, opt, doc).await?),
-					Entry::Output(v) => {
-						return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
-					}
-					Entry::Throw(v) => return stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await,
-				};
-				*/
+				let res = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
 				// Catch any special errors
 				match res {
 					Err(ControlFlow::Continue) => break,

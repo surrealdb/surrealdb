@@ -1,5 +1,5 @@
-use crate::err::Error;
 use crate::val::Value;
+use crate::{err::Error, val::value::every::ArrayBehaviour};
 use anyhow::{Result, ensure};
 
 impl Value {
@@ -12,7 +12,7 @@ impl Value {
 			}
 		);
 		// Otherwise loop through every object field
-		for k in val.every(None, true, false).iter() {
+		for k in val.every(None, true, ArrayBehaviour::Ignore).iter() {
 			// Because we iterate every step, we need to this check
 			// If old & new are both objects, we do not want to completely
 			// replace the old object with the new object as that will drop

@@ -41,6 +41,7 @@ pub enum Function {
 }
 
 impl Function {
+
 	/// Get function name if applicable
 	pub fn name(&self) -> Option<&str> {
 		match self {
@@ -169,6 +170,128 @@ impl Function {
 		matches!(self, Self::Normal(f, p) if f == "count" && p.is_empty() )
 	}
 	*/
+
+
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		args: Vec<Expr>,
+	) -> FlowResult<Value> {
+		match self{
+			Function::Normal(ref s) => {
+				// Check this function is allowed
+				ctx.check_allowed_function(s)?;
+				// Run the normal function
+				Ok(fnc::run(stk, ctx, opt, doc, s, args).await?)
+			}
+			Function::Custom(ref s) => {
+				// Get the full name of this function
+				let name = format!("fn::{s}");
+				// Check this function is allowed
+				ctx.check_allowed_function(name.as_str())?;
+				// Get the function definition
+				let (ns, db) = opt.ns_db()?;
+				let val = ctx.tx().get_db_function(ns, db, s).await?;
+				// Check permissions
+				if opt.check_perms(Action::View)? {
+					match &val.permissions {
+						Permission::Full => (),
+						Permission::None => {
+							return Err(ControlFlow::from(anyhow::Error::new(
+								Error::FunctionPermissions {
+									name: s.to_owned(),
+								},
+							)));
+						}
+						Permission::Specific(e) => {
+							// Disable permissions
+							let opt = &opt.new_with_perms(false);
+							// Process the PERMISSION clause
+							if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
+								return Err(ControlFlow::from(anyhow::Error::new(
+									Error::FunctionPermissions {
+										name: s.to_owned(),
+									},
+								)));
+							}
+						}
+					}
+				}
+				// Get the number of function arguments
+				let max_args_len = val.args.len();
+				// Track the number of required arguments
+				let mut min_args_len = 0;
+				// Check for any final optional arguments
+				val.args.iter().rev().for_each(|(_, kind)| match kind {
+					Kind::Option(_) if min_args_len == 0 => {}
+					Kind::Any if min_args_len == 0 => {}
+					_ => min_args_len += 1,
+				});
+				// Check the necessary arguments are passed
+				//TODO(planner): Move this check out of the call.
+				if (min_args_len..=max_args_len).contains(&args.len()) {
+					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
+						name: format!("fn::{}", val.name),
+						message: match (min_args_len, max_args_len) {
+							(1, 1) => String::from("The function expects 1 argument."),
+							(r, t) if r == t => format!("The function expects {r} arguments."),
+							(r, t) => format!("The function expects {r} to {t} arguments."),
+						},
+					})));
+				}
+				// Compute the function arguments
+				// Duplicate context
+				let mut ctx = MutableContext::new_isolated(ctx);
+				// Process the function arguments
+				for (val, (name, kind)) in args.into_iter().zip(&val.args) {
+					ctx.add_value(
+						name.into_raw_string(),
+						val.coerce_to_kind(kind)
+							.map_err(Error::from)
+							.map_err(anyhow::Error::new)?
+							.into(),
+					);
+				}
+				let ctx = ctx.freeze();
+				// Run the custom function
+				let result =
+					stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await.catch_return()?;
+
+				if let Some(ref returns) = val.returns {
+					result
+						.coerce_to_kind(returns)
+						.map_err(|e| Error::ReturnCoerce {
+							name: val.name.to_string(),
+							error: Box::new(e),
+						})
+						.map_err(anyhow::Error::new)
+						.map_err(ControlFlow::from)
+				} else {
+					Ok(result)
+				}
+			}
+			#[cfg_attr(not(feature = "scripting"), expect(unused_variables))]
+			Function::Script(s) => {
+				#[cfg(feature = "scripting")]
+				{
+					// Check if scripting is allowed
+					ctx.check_allowed_scripting()?;
+					// Run the script function
+					Ok(fnc::script::run(ctx, opt, doc, &s.0, args).await?)
+				}
+				#[cfg(not(feature = "scripting"))]
+				{
+					Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidScript {
+						message: String::from("Embedded functions are not enabled."),
+					})))
+				}
+			}
+			Function::Model(ref m) => m.compute(stk, ctx, opt, doc, args),
+		}
+	}
 }
 
 ///TODO(3.0): Remove after proper first class function support?
@@ -216,146 +339,16 @@ impl FunctionCall {
 	) -> FlowResult<Value> {
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
+				// Compute the function arguments
+				let args = stk
+					.scope(|scope| {
+						try_join_all(
+							self.arguments
+								.iter()
+								.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
+						)
+					})
+					.await?;
 		// Process the function type
-		match self.receiver {
-			Function::Normal(ref s) => {
-				// Check this function is allowed
-				ctx.check_allowed_function(s)?;
-				// Compute the function arguments
-				let a = stk
-					.scope(|scope| {
-						try_join_all(
-							self.arguments
-								.iter()
-								.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-						)
-					})
-					.await?;
-				// Run the normal function
-				Ok(fnc::run(stk, ctx, opt, doc, s, a).await?)
-			}
-			Function::Custom(ref s) => {
-				// Get the full name of this function
-				let name = format!("fn::{s}");
-				// Check this function is allowed
-				ctx.check_allowed_function(name.as_str())?;
-				// Get the function definition
-				let (ns, db) = opt.ns_db()?;
-				let val = ctx.tx().get_db_function(ns, db, s).await?;
-				// Check permissions
-				if opt.check_perms(Action::View)? {
-					match &val.permissions {
-						Permission::Full => (),
-						Permission::None => {
-							return Err(ControlFlow::from(anyhow::Error::new(
-								Error::FunctionPermissions {
-									name: s.to_owned(),
-								},
-							)));
-						}
-						Permission::Specific(e) => {
-							// Disable permissions
-							let opt = &opt.new_with_perms(false);
-							// Process the PERMISSION clause
-							if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
-								return Err(ControlFlow::from(anyhow::Error::new(
-									Error::FunctionPermissions {
-										name: s.to_owned(),
-									},
-								)));
-							}
-						}
-					}
-				}
-				// Get the number of function arguments
-				let max_args_len = val.args.len();
-				// Track the number of required arguments
-				let mut min_args_len = 0;
-				// Check for any final optional arguments
-				val.args.iter().rev().for_each(|(_, kind)| match kind {
-					Kind::Option(_) if min_args_len == 0 => {}
-					Kind::Any if min_args_len == 0 => {}
-					_ => min_args_len += 1,
-				});
-				// Check the necessary arguments are passed
-				//TODO(planner): Move this check out of the call.
-				if self.arguments.len() < min_args_len || max_args_len < self.arguments.len() {
-					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
-						name: format!("fn::{}", val.name),
-						message: match (min_args_len, max_args_len) {
-							(1, 1) => String::from("The function expects 1 argument."),
-							(r, t) if r == t => format!("The function expects {r} arguments."),
-							(r, t) => format!("The function expects {r} to {t} arguments."),
-						},
-					})));
-				}
-				// Compute the function arguments
-				let a = stk
-					.scope(|scope| {
-						try_join_all(
-							self.arguments
-								.iter()
-								.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-						)
-					})
-					.await?;
-				// Duplicate context
-				let mut ctx = MutableContext::new_isolated(ctx);
-				// Process the function arguments
-				for (val, (name, kind)) in a.into_iter().zip(&val.args) {
-					ctx.add_value(
-						name.to_raw(),
-						val.coerce_to_kind(kind)
-							.map_err(Error::from)
-							.map_err(anyhow::Error::new)?
-							.into(),
-					);
-				}
-				let ctx = ctx.freeze();
-				// Run the custom function
-				let result =
-					stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await.catch_return()?;
-
-				if let Some(ref returns) = val.returns {
-					result
-						.coerce_to_kind(returns)
-						.map_err(|e| Error::ReturnCoerce {
-							name: val.name.to_string(),
-							error: Box::new(e),
-						})
-						.map_err(anyhow::Error::new)
-						.map_err(ControlFlow::from)
-				} else {
-					Ok(result)
-				}
-			}
-			#[cfg_attr(not(feature = "scripting"), expect(unused_variables))]
-			Function::Script(s) => {
-				#[cfg(feature = "scripting")]
-				{
-					// Check if scripting is allowed
-					ctx.check_allowed_scripting()?;
-					// Compute the function arguments
-					let a = stk
-						.scope(|scope| {
-							try_join_all(
-								self.arguments
-									.iter()
-									.map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
-							)
-						})
-						.await?;
-					// Run the script function
-					Ok(fnc::script::run(ctx, opt, doc, &s.0, a).await?)
-				}
-				#[cfg(not(feature = "scripting"))]
-				{
-					Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidScript {
-						message: String::from("Embedded functions are not enabled."),
-					})))
-				}
-			}
-			Function::Model(ref m) => m.compute(stk, ctx, opt, doc, &self.arguments),
-		}
-	}
+		self.receiver.compute(stk, ctx, opt, doc, args).await
 }

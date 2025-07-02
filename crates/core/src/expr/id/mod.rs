@@ -1,4 +1,5 @@
 use super::FlowResultExt as _;
+use super::fmt::Fmt;
 use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -15,13 +16,12 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Bound, Deref};
-use ulid::Ulid;
 
 pub mod range;
 pub use range::RecordIdKeyRangeLit;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Gen {
@@ -30,8 +30,18 @@ pub enum Gen {
 	Uuid,
 }
 
+impl Gen {
+	pub fn compute(&self) -> RecordIdKey {
+		match self {
+			Gen::Rand => RecordIdKey::rand(),
+			Gen::Ulid => RecordIdKey::ulid(),
+			Gen::Uuid => RecordIdKey::uuid(),
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum RecordIdKeyLit {
@@ -44,6 +54,7 @@ pub enum RecordIdKeyLit {
 	Range(Box<RecordIdKeyRangeLit>),
 }
 
+/*
 impl RecordIdKeyLit {
 	/// Create a record id key from a value.
 	///
@@ -58,7 +69,7 @@ impl RecordIdKeyLit {
 			x => Err(x),
 		}
 	}
-}
+}*/
 
 impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
 	fn from(v: RecordIdKeyRangeLit) -> Self {
@@ -66,6 +77,7 @@ impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
 	}
 }
 
+/*
 impl RecordIdKeyLit {
 	/// Check if this Id matches a value
 	pub fn is(&self, val: &Value) -> bool {
@@ -79,7 +91,7 @@ impl RecordIdKeyLit {
 			_ => false,
 		}
 	}
-}
+}*/
 
 impl Display for RecordIdKeyLit {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -87,7 +99,9 @@ impl Display for RecordIdKeyLit {
 			Self::Number(v) => Display::fmt(v, f),
 			Self::String(v) => EscapeRid(v).fmt(f),
 			Self::Uuid(v) => Display::fmt(v, f),
-			Self::Array(v) => Display::fmt(v, f),
+			Self::Array(v) => {
+				write!(f, "[{}]", Fmt::comma_separated(v.iter()))
+			}
 			Self::Object(v) => Display::fmt(v, f),
 			Self::Generate(v) => match v {
 				Gen::Rand => Display::fmt("rand()", f),
@@ -128,27 +142,10 @@ impl RecordIdKeyLit {
 				}
 				Ok(RecordIdKey::Object(res))
 			}
-			RecordIdKeyLit::Generate(v) => match v {
-				Gen::Rand => Ok(RecordIdKey::rand()),
-				Gen::Ulid => Ok(RecordIdKey::ulid()),
-				Gen::Uuid => Ok(RecordIdKey::uuid()),
-			},
+			RecordIdKeyLit::Generate(v) => Ok(v.compute()),
 			RecordIdKeyLit::Range(v) => {
-				let start = match v.start {
-					Bound::Included(x) => Bound::Included(x.compute(stk, ctx, opt, doc).await?),
-					Bound::Excluded(x) => Bound::Excluded(x.compute(stk, ctx, opt, doc).await?),
-					Bound::Unbounded => Bound::Unbounded,
-				};
-				let end = match v.end {
-					Bound::Included(x) => Bound::Included(x.compute(stk, ctx, opt, doc).await?),
-					Bound::Excluded(x) => Bound::Excluded(x.compute(stk, ctx, opt, doc).await?),
-					Bound::Unbounded => Bound::Unbounded,
-				};
-
-				Ok(RecordIdKey::Range(Box::new(RecordIdKeyRange {
-					start,
-					end,
-				})))
+				let range = v.compute(stk, ctx, opt, doc).await?;
+				Ok(RecordIdKey::Range(Box::new(range)))
 			}
 		}
 	}

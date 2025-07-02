@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::order::{OldOrders, Order, OrderList, Ordering};
+use crate::expr::order::Ordering;
 use crate::expr::{
-	Cond, Explain, Expr, Fetchs, Field, Fields, FlowResultExt as _, Groups, Idioms, Limit, Splits,
-	Start, Timeout, Version, With,
+	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Idioms, Limit, Splits, Start,
+	Timeout, Version, With,
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
@@ -18,7 +18,7 @@ use std::fmt;
 use std::sync::Arc;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct SelectStatement {
@@ -43,46 +43,35 @@ pub struct SelectStatement {
 	pub tempfiles: bool,
 }
 
-impl SelectStatement {
-	fn convert_old_orders(
-		&mut self,
-		_rev: u16,
-		old_value: Option<OldOrders>,
-	) -> Result<(), revision::Error> {
-		let Some(x) = old_value else {
-			// nothing to do.
-			return Ok(());
-		};
-
-		if x.0.iter().any(|x| x.random) {
-			self.order = Some(Ordering::Random);
-			return Ok(());
+impl Default for SelectStatement {
+	fn default() -> Self {
+		SelectStatement {
+			expr: Fields::all(),
+			omit: None,
+			only: false,
+			what: Vec::new(),
+			with: None,
+			cond: None,
+			split: None,
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: None,
+			timeout: None,
+			parallel: false,
+			explain: None,
+			tempfiles: None,
 		}
-
-		let new_ord =
-			x.0.into_iter()
-				.map(|x| Order {
-					value: x.order,
-					collate: x.collate,
-					numeric: x.numeric,
-					direction: x.direction,
-				})
-				.collect();
-
-		self.order = Some(Ordering::Order(OrderList(new_ord)));
-
-		Ok(())
 	}
+}
 
-	/// Check if we require a writeable transaction
+impl SelectStatement {
+	/// Check if computing this type can be done on a read only transaction.
 	pub(crate) fn read_only(&self) -> bool {
-		self.expr.iter().all(|v| match v {
-			Field::All => true,
-			Field::Single {
-				expr,
-				..
-			} => expr.read_only(),
-		}) && self.what.iter().all(|v| v.read_only())
+		self.expr.read_only()
+			&& self.what.iter().all(|v| v.read_only())
 			&& self.cond.map(|x| x.0.read_only()).unwrap_or(true)
 	}
 

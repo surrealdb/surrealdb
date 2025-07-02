@@ -30,9 +30,9 @@ impl From<Value> for serde_json::Value {
 			// These Value types are un-computed values
 			// and are not used in query responses sent
 			// to the client.
-			Value::Table(table) => json!(table),
+			//Value::Table(table) => json!(table),
 			Value::Range(range) => json!(range),
-			Value::Future(future) => json!(future),
+			//Value::Future(future) => json!(future),
 			Value::Closure(closure) => json!(closure),
 			Value::File(file) => file.to_string().into(),
 		}

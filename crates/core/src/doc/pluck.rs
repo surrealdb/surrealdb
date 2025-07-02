@@ -2,11 +2,11 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
-use crate::expr::FlowResultExt as _;
 use crate::expr::idiom::Idiom;
 use crate::expr::output::Output;
 use crate::expr::paths::META;
 use crate::expr::permission::Permission;
+use crate::expr::{FlowResultExt as _, Operation};
 use crate::iam::Action;
 use crate::val::Value;
 use reblessive::tree::Stk;
@@ -42,7 +42,8 @@ impl Document {
 						(&self.initial, &self.current)
 					};
 					// Output a DIFF of any changes applied to the document
-					Ok(initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default()).into())
+					let ops = initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default());
+					Ok(Operation::operations_to_value(ops))
 				}
 				Output::After => {
 					// Process the permitted documents
@@ -77,8 +78,8 @@ impl Document {
 				}
 			},
 			None => match stm {
-				Statement::Live(s) => match s.expr.len() {
-					0 => {
+				Statement::Live(s) => {
+					if s.expr.is_empty() {
 						// Process the permitted documents
 						let (initial, current) = if self.reduced(stk, ctx, opt, Both).await? {
 							(&self.initial_reduced, &self.current_reduced)
@@ -86,9 +87,9 @@ impl Document {
 							(&self.initial, &self.current)
 						};
 						// Output a DIFF of any changes applied to the document
-						Ok(initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default()).into())
-					}
-					_ => {
+						let ops = initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default());
+						Ok(Operation::operations_to_value(ops))
+					} else {
 						// Process the permitted documents
 						let current = if self.reduced(stk, ctx, opt, Current).await? {
 							&self.current_reduced
@@ -101,7 +102,7 @@ impl Document {
 							.await
 							.map_err(IgnoreError::from)
 					}
-				},
+				}
 				Statement::Select(s) => {
 					// Process the permitted documents
 					let current = if self.reduced(stk, ctx, opt, Current).await? {

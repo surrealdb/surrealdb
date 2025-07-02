@@ -254,7 +254,7 @@ impl Value {
 						for p in p.iter() {
 							let idiom = p.idiom();
 							obj.insert(
-								p.field().to_raw(),
+								p.field().into_raw_string(),
 								stk.run(|stk| idiom.compute(stk, ctx, opt, Some(&cur_doc))).await?,
 							);
 						}
@@ -342,6 +342,10 @@ impl Value {
 						},
 						Value::Range(r) => {
 							let v = r
+								.coerce_to_typed::<i64>()
+								.map_err(Error::from)
+								.map_err(anyhow::Error::new)
+								.map_err(ControlFlow::Err)?
 								.slice(v.as_slice())
 								.map(|v| Value::from(v.to_vec()))
 								.unwrap_or_default();
@@ -457,11 +461,7 @@ impl Value {
 								};
 
 								if last_part {
-									stk.run(|stk| stm.compute(stk, ctx, opt, None))
-										.await?
-										.all()
-										.ok()
-										.map_err(ControlFlow::from)
+									Ok(stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all())
 								} else {
 									let v = stk
 										.run(|stk| stm.compute(stk, ctx, opt, None))
@@ -502,7 +502,7 @@ impl Value {
 							_ => {
 								let stm = SelectStatement {
 									expr: Fields::Select(vec![Field::All]),
-									what: vec![Expr::Literal(val.into_literal())],
+									what: vec![Expr::Literal(Value::Thing(val.into_literal()))],
 									..SelectStatement::default()
 								};
 								let v =

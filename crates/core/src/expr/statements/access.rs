@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::access_type::BearerAccessSubject;
-use crate::expr::{AccessType, Base, Cond, FlowResultExt as _, Ident, RecordIdLit};
+use crate::expr::{AccessType, Base, Cond, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, RecordId, Strand, Uuid, Value};
 use anyhow::{Result, bail, ensure};
@@ -137,8 +137,8 @@ impl AccessGrant {
 	/// Returns the surrealql object representation of the access grant
 	pub fn into_access_object(self) -> Object {
 		let mut res = Object::default();
-		res.insert("id".to_owned(), Value::from(self.id.to_raw()));
-		res.insert("ac".to_owned(), Value::from(self.ac.to_raw()));
+		res.insert("id".to_owned(), Value::from(self.id.into_raw_string()));
+		res.insert("ac".to_owned(), Value::from(self.ac.into_raw_string()));
 		res.insert("type".to_owned(), Value::from(self.grant.variant()));
 		res.insert("creation".to_owned(), Value::from(self.creation));
 		res.insert("expiration".to_owned(), Value::from(self.expiration));
@@ -146,7 +146,9 @@ impl AccessGrant {
 		let mut sub = Object::default();
 		match self.subject {
 			Subject::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
-			Subject::User(name) => sub.insert("user".to_owned(), Value::from(name.to_raw())),
+			Subject::User(name) => {
+				sub.insert("user".to_owned(), Value::from(name.into_raw_string()))
+			}
 		};
 		res.insert("subject".to_owned(), Value::from(sub));
 
@@ -166,7 +168,7 @@ impl AccessGrant {
 				}
 			}
 			Grant::Bearer(bg) => {
-				gr.insert("id".to_owned(), Value::from(bg.id.to_raw()));
+				gr.insert("id".to_owned(), Value::from(bg.id.into_raw_string()));
 				gr.insert("key".to_owned(), Value::from(bg.key));
 			}
 		};
@@ -189,8 +191,8 @@ impl Subject {
 	// Returns the main identifier of a subject as a string.
 	pub fn id(&self) -> String {
 		match self {
-			Subject::Record(id) => id.to_raw(),
-			Subject::User(name) => name.to_raw(),
+			Subject::Record(id) => id.into_raw_string(),
+			Subject::User(name) => name.into_raw_string(),
 		}
 	}
 }
@@ -518,7 +520,7 @@ async fn compute_grant(
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
 	let grant = create_grant(stmt, ctx, opt).await?;
-	Ok(Value::Object(grant.into()))
+	Ok(Value::Object(grant.into_access_object()))
 }
 
 async fn compute_show(
@@ -570,7 +572,7 @@ async fn compute_show(
 				)),
 			};
 
-			Ok(Value::Object(grant.redacted().into()))
+			Ok(Value::Object(grant.redacted().into_access_object()))
 		}
 		None => {
 			// Get all grants.
@@ -592,8 +594,9 @@ async fn compute_show(
 				// If provided, check if grant matches conditions.
 				if let Some(cond) = &stmt.cond {
 					// Redact grant before evaluating conditions.
-					let redacted_gr = Value::Object(gr.redacted().clone().into());
+					let redacted_gr = Value::Object(gr.redacted().into_access_object());
 					if !cond
+						.0
 						.compute(
 							stk,
 							ctx,
@@ -614,7 +617,7 @@ async fn compute_show(
 				}
 
 				// Store revoked version of the redacted grant.
-				show.push(Value::Object(gr.redacted().clone().into()));
+				show.push(Value::Object(gr.redacted().into_access_object()));
 			}
 
 			Ok(Value::Array(show.into()))
@@ -708,7 +711,7 @@ pub async fn revoke_grant(
 				opt.auth.id()
 			);
 
-			revoked.push(Value::Object(revoke.redacted().into()));
+			revoked.push(Value::Object(revoke.redacted().into_access_object()));
 		}
 		None => {
 			// Get all grants.
@@ -734,8 +737,9 @@ pub async fn revoke_grant(
 				// If provided, check if grant matches conditions.
 				if let Some(cond) = &stmt.cond {
 					// Redact grant before evaluating conditions.
-					let redacted_gr = Value::Object(gr.redacted().clone().into());
+					let redacted_gr = Value::Object(gr.redacted().into_access_object());
 					if !cond
+						.0
 						.compute(
 							stk,
 							ctx,
@@ -793,7 +797,7 @@ pub async fn revoke_grant(
 				);
 
 				// Store revoked version of the redacted grant.
-				revoked.push(Value::Object(gr.redacted().into()));
+				revoked.push(Value::Object(gr.redacted().into_access_object()));
 			}
 		}
 	}
@@ -906,7 +910,7 @@ async fn compute_purge(
 				opt.auth.id()
 			);
 
-			purged = purged + Value::Object(gr.redacted().clone().into());
+			purged = purged + Value::Object(gr.redacted().into_access_object());
 		}
 	}
 

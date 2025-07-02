@@ -40,6 +40,7 @@ impl Display for LogicalPlan {
 	}
 }
 
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub enum TopLevelExpr {
 	Begin,
 	Cancel,

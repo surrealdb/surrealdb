@@ -5,7 +5,6 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::expr::Table;
 use crate::expr::dir::Dir;
-use crate::expr::id::range::RecordIdKeyRangeLit;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};

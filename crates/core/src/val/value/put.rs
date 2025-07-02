@@ -16,7 +16,7 @@ impl Value {
 						}
 					}
 					Part::Field(f) => {
-						let entry = v.entry(f.to_raw()).or_insert_with(Value::empty_object);
+						let entry = v.entry(f.into_raw_string()).or_insert_with(Value::empty_object);
 						if !entry.is_nullish() {
 							entry.put(path.next(), val);
 						}

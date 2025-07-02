@@ -1,73 +1,97 @@
 use crate::expr::idiom::Idiom;
 use crate::expr::part::{Next, Part};
-use crate::sql::{Expr, Literal};
 use crate::val::Value;
 
 impl Value {
+	/// Widens an idiom into a list of idioms with the given object.
+	/// Resolving .* to all the different fields or indexes in that position.
+	///
+	/// For example `a.*.*` with the object `{ a: { b:  [1,2], c: 1} }` resolves to a.b[0], a.b[1],
+	/// a.c.
+	/// and `a.$` with object `{ a: [1,2,3] }` resolves to `a[2]`.
 	pub(crate) fn each(&self, path: &[Part]) -> Vec<Idiom> {
-		self._each(path, Idiom::default())
+		let mut accum = Vec::new();
+		let mut build = Vec::new();
+		self._each(path, &mut accum, &mut build);
+		build
 	}
 
-	fn _each(&self, path: &[Part], prev: Idiom) -> Vec<Idiom> {
-		match path.first() {
-			// Get the current path part
-			Some(p) => match self {
-				// Current path part is an object
-				Value::Object(v) => match p {
-					Part::Field(f) => match v.get(f as &str) {
-						Some(v) => v._each(path.next(), prev.push(p.clone())),
-						None => vec![],
-					},
-					Part::All => v
-						.iter()
-						.flat_map(|(field, v)| {
-							v._each(
-								path.next(),
-								prev.clone().push(Part::Field(field.to_owned().into())),
-							)
-						})
-						.collect::<Vec<_>>(),
-					_ => vec![],
-				},
-				// Current path part is an array
-				Value::Array(v) => match p {
-					Part::All => v
-						.iter()
-						.enumerate()
-						.flat_map(|(i, v)| {
-							let part = Part::Value(Expr::Literal(Literal::Index(i)));
-							v._each(path.next(), prev.clone().push(part))
-						})
-						.collect::<Vec<_>>(),
-					Part::First => match v.first() {
-						Some(v) => v._each(path.next(), prev.push(p.clone())),
-						None => vec![],
-					},
-					Part::Last => match v.last() {
-						Some(v) => v._each(path.next(), prev.push(p.clone())),
-						None => vec![],
-					},
-					x => {
-						if let Some(idx) = x.as_old_index() {
-							match v.get(idx) {
-								Some(v) => v._each(path.next(), prev.push(p.clone())),
-								None => vec![],
-							}
-						} else {
-							v.iter()
-								.enumerate()
-								.flat_map(|(i, v)| {
-									v._each(path.next(), prev.clone().push(Part::from(i)))
-								})
-								.collect::<Vec<_>>()
+	fn _each(&self, path: &[Part], accum: &mut Vec<Part>, build: &mut Vec<Idiom>) {
+		let Some(first) = path.first() else {
+			if !accum.is_empty() {
+				build.push(Idiom(accum.clone()))
+			}
+			return;
+		};
+
+		// Get the current path part
+		match self {
+			// Current path part is an object
+			Value::Object(v) => match first {
+				Part::Field(f) => {
+					if let Some(v) = v.get(f as &str) {
+						accum.push(Part::field(f.clone()));
+						v._each(path.next(), accum, build);
+						accum.pop();
+					}
+				}
+				Part::All => {
+					for (k, v) in v.iter() {
+						accum.push(Part::field(k.clone()));
+						v._each(path.next(), accum, build);
+						accum.pop();
+					}
+				}
+				_ => {}
+			},
+			// Current path part is an array
+			Value::Array(v) => match first {
+				Part::All => {
+					for (idx, v) in v.iter().enumerate() {
+						accum.push(Part::index_int(idx as i64));
+						v._each(path.next(), accum, build);
+						accum.pop();
+					}
+				}
+				Part::First => {
+					if !v.is_empty() {
+						// NOTE: We previously did not add an index into the resulting path here.
+						// That seemed like an bug but it might not be.
+						accum.push(Part::index_int(0));
+						v[0]._each(path.next(), accum, build);
+						accum.pop();
+					}
+				}
+				Part::Last => {
+					let len = v.len();
+					if len > 0 {
+						// NOTE: We previously did not add an index into the resulting path here.
+						// That seemed like an bug but it might not be.
+						accum.push(Part::index_int(len - 1));
+						v[len]._each(path.next(), accum, build);
+						accum.pop();
+					}
+				}
+				x => {
+					if let Some(idx) = x.as_old_index() {
+						if let Some(v) = v.get(idx) {
+							// NOTE: We previously did not add an index into the resulting path here.
+							// That seemed like an bug but it might not be.
+							accum.push(x.clone());
+							v._each(path.next(), accum, build);
+							accum.pop();
+						}
+					} else {
+						for (idx, v) in v.iter().enumerate() {
+							accum.push(Part::index_int(idx as i64));
+							v._each(path.next(), accum, build);
+							accum.pop();
 						}
 					}
-				},
-				// Ignore everything else
-				_ => vec![],
+				}
 			},
-			// No more parts so get the value
-			None => vec![prev],
+			// Ignore everything else
+			_ => {}
 		}
 	}
 }

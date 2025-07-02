@@ -106,7 +106,6 @@ pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;
 pub use self::permission::{Permission, Permissions};
-pub use self::plan::TopLevelExpr;
 pub use self::plan::{LogicalPlan, TopLevelExpr};
 pub use self::record_id::RecordIdLit;
 pub use self::regex::Regex;

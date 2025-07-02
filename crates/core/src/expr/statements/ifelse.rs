@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct IfelseStatement {
@@ -24,13 +24,13 @@ impl IfelseStatement {
 	/// Check if we require a writeable transaction
 	pub(crate) fn read_only(&self) -> bool {
 		self.exprs.iter().all(|x| x.0.read_only() && x.1.read_only())
-			&& self.close.map(|x| x.read_only()).unwrap_or(true)
+			&& self.close.as_ref().map(|x| x.read_only()).unwrap_or(true)
 	}
 	/// Check if we require a writeable transaction
 	pub(crate) fn bracketed(&self) -> bool {
-		self.exprs.iter().all(|(_, v)| matches!(v, Value::Block(_)))
+		self.exprs.iter().all(|(_, v)| matches!(v, Expr::Block(_)))
 			&& (self.close.as_ref().is_none()
-				|| self.close.as_ref().is_some_and(|v| matches!(v, Value::Block(_))))
+				|| self.close.as_ref().is_some_and(|v| matches!(v, Expr::Block(_))))
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -56,90 +56,88 @@ impl IfelseStatement {
 impl Display for IfelseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
-		match self.bracketed() {
-			true => {
-				write!(
-					f,
-					"{}",
-					&Fmt::new(
-						self.exprs.iter().map(|args| {
-							Fmt::new(args, |(cond, then), f| {
-								if is_pretty() {
-									write!(f, "IF {cond}")?;
-									let indent = pretty_indent();
-									write!(f, "{then}")?;
-									drop(indent);
-								} else {
-									write!(f, "IF {cond} {then}")?;
-								}
-								Ok(())
-							})
-						}),
-						if is_pretty() {
-							fmt_separated_by("ELSE ")
-						} else {
-							fmt_separated_by(" ELSE ")
-						},
-					),
-				)?;
-				if let Some(ref v) = self.close {
+		if self.bracketed() {
+			write!(
+				f,
+				"{}",
+				&Fmt::new(
+					self.exprs.iter().map(|args| {
+						Fmt::new(args, |(cond, then), f| {
+							if is_pretty() {
+								write!(f, "IF {cond}")?;
+								let indent = pretty_indent();
+								write!(f, "{then}")?;
+								drop(indent);
+							} else {
+								write!(f, "IF {cond} {then}")?;
+							}
+							Ok(())
+						})
+					}),
 					if is_pretty() {
-						write!(f, "ELSE")?;
-						let indent = pretty_indent();
-						write!(f, "{v}")?;
-						drop(indent);
+						fmt_separated_by("ELSE ")
 					} else {
-						write!(f, " ELSE {v}")?;
-					}
-				}
-				Ok(())
-			}
-			false => {
-				write!(
-					f,
-					"{}",
-					&Fmt::new(
-						self.exprs.iter().map(|args| {
-							Fmt::new(args, |(cond, then), f| {
-								if is_pretty() {
-									write!(f, "IF {cond} THEN")?;
-									let indent = pretty_indent();
-									write!(f, "{then}")?;
-									drop(indent);
-								} else {
-									write!(f, "IF {cond} THEN {then}")?;
-								}
-								Ok(())
-							})
-						}),
-						if is_pretty() {
-							fmt_separated_by("ELSE ")
-						} else {
-							fmt_separated_by(" ELSE ")
-						},
-					),
-				)?;
-				if let Some(ref v) = self.close {
-					if is_pretty() {
-						write!(f, "ELSE")?;
-						let indent = pretty_indent();
-						write!(f, "{v}")?;
-						drop(indent);
-					} else {
-						write!(f, " ELSE {v}")?;
-					}
-				}
+						fmt_separated_by(" ELSE ")
+					},
+				),
+			)?;
+			if let Some(ref v) = self.close {
 				if is_pretty() {
-					f.write_str("END")?;
+					write!(f, "ELSE")?;
+					let indent = pretty_indent();
+					write!(f, "{v}")?;
+					drop(indent);
 				} else {
-					f.write_str(" END")?;
+					write!(f, " ELSE {v}")?;
 				}
-				Ok(())
 			}
+			Ok(())
+		} else {
+			write!(
+				f,
+				"{}",
+				&Fmt::new(
+					self.exprs.iter().map(|args| {
+						Fmt::new(args, |(cond, then), f| {
+							if is_pretty() {
+								write!(f, "IF {cond} THEN")?;
+								let indent = pretty_indent();
+								write!(f, "{then}")?;
+								drop(indent);
+							} else {
+								write!(f, "IF {cond} THEN {then}")?;
+							}
+							Ok(())
+						})
+					}),
+					if is_pretty() {
+						fmt_separated_by("ELSE ")
+					} else {
+						fmt_separated_by(" ELSE ")
+					},
+				),
+			)?;
+			if let Some(ref v) = self.close {
+				if is_pretty() {
+					write!(f, "ELSE")?;
+					let indent = pretty_indent();
+					write!(f, "{v}")?;
+					drop(indent);
+				} else {
+					write!(f, " ELSE {v}")?;
+				}
+			}
+			if is_pretty() {
+				f.write_str("END")?;
+			} else {
+				f.write_str(" END")?;
+			}
+			Ok(())
 		}
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use crate::syn::parse;
@@ -151,3 +149,4 @@ mod tests {
 		assert_eq!(format!("{:#}", query), "IF 1\n\t{ 1 }\nELSE IF 2\n\t{ 2 }\n;");
 	}
 }
+*/

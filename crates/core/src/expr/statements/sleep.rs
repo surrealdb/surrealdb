@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq,  Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct SleepStatement {
 	pub(crate) duration: Duration,

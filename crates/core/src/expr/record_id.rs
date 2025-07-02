@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
+
 use crate::expr::escape::EscapeRid;
 use crate::expr::id::RecordIdKeyLit;
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdLit {
 	/// Table name

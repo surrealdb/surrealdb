@@ -34,7 +34,7 @@ const ARGUMENTS: &str = "The model expects 1 argument. The argument can be eithe
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Model")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -57,7 +57,7 @@ impl Model {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-		args: &[Expr],
+		args: Vec<Expr>,
 	) -> FlowResult<Value> {
 		use crate::expr::FlowResultExt;
 		use crate::val::CoerceError;
@@ -109,7 +109,7 @@ impl Model {
 		}
 
 		// Take the first and only specified argument
-		let argument = stk.run(|stk| args[0].compute(stk, ctx, opt, doc)).await;
+		let argument = args.pop();
 		match argument {
 			// Perform bufferered compute
 			Value::Object(v) => {
@@ -224,7 +224,7 @@ impl Model {
 		_ctx: &Context,
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
-		_args: &[Expr],
+		_args: Vec<Value>,
 	) -> FlowResult<Value> {
 		Err(ControlFlow::from(anyhow::Error::new(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),

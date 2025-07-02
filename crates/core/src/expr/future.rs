@@ -14,7 +14,7 @@ use super::FlowResultExt as _;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Future")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]

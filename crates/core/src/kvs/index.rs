@@ -330,7 +330,7 @@ impl Building {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
 			tf,
-			tb: ix.what.to_raw(),
+			tb: ix.what.into_raw_string(),
 			ix,
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),

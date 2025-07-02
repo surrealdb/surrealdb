@@ -629,7 +629,7 @@ pub async fn signin_bearer(
 		db: db.clone(),
 		ac: Some(av.name.to_string()),
 		id: match &gr.subject {
-			access::Subject::User(user) => Some(user.to_raw()),
+			access::Subject::User(user) => Some(user.into_raw_string()),
 			access::Subject::Record(rid) => Some(rid.to_raw()),
 		},
 		roles: match &gr.subject {

@@ -13,7 +13,7 @@ use std::str::FromStr;
 
 /// The type of access methods available
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum AccessType {

@@ -1,6 +1,6 @@
-use crate::err::Error;
 use crate::expr::part::Part;
 use crate::val::Value;
+use crate::{err::Error, expr::Operation};
 use anyhow::{Result, ensure};
 
 impl Value {
@@ -20,16 +20,15 @@ impl Value {
 						// Check what the last path part is
 						Some((last, left)) => match last {
 							Part::Index(i) => match new.pick(left) {
-								Value::Array(mut v) => match v.len() > i.as_usize() {
-									true => {
+								Value::Array(mut v) => {
+									if v.len() > i.as_usize() {
 										v.insert((*i).as_usize(), value);
 										new.put(left, Value::Array(v));
-									}
-									false => {
+									} else {
 										v.push(value);
 										new.put(left, Value::Array(v));
 									}
-								},
+								}
 								_ => new.put(left, value),
 							},
 							Part::Field(v) if v.is_dash() => match new.pick(left) {

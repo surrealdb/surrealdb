@@ -19,7 +19,7 @@ use std::fmt;
 use super::PostfixOperator;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Expr {

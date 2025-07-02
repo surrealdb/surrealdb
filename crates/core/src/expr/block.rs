@@ -14,13 +14,13 @@ use super::FlowResult;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Block")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Block(pub Vec<Expr>);
 
 impl Deref for Block {
-	type Target = Vec<Expr>;
+	type Target = [Expr];
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -41,7 +41,7 @@ impl Block {
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
 		// Duplicate context
-		let mut ctx = MutableContext::new(ctx).freeze();
+		let ctx = MutableContext::new(ctx).freeze();
 		// Loop over the statements
 		let mut res = Value::None;
 		for v in self.iter() {
@@ -57,7 +57,7 @@ impl Display for Block {
 		let mut f = Pretty::from(f);
 		match (self.len(), self.first()) {
 			(0, _) => f.write_str("{}"),
-			(1, Some(Expr::Value(v))) => {
+			(1, Some(Expr::Literal(v))) => {
 				write!(f, "{{ {v} }}")
 			}
 			(l, _) => {

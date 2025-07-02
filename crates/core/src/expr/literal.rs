@@ -1,5 +1,4 @@
 use crate::expr::{Expr, RecordIdLit};
-use crate::key::sequence::st;
 use crate::val::{Bytes, Closure, Datetime, Duration, File, Geometry, Strand, Uuid};
 use revision::revisioned;
 use rust_decimal::Decimal;
@@ -13,7 +12,7 @@ use std::hash::{Hash, Hasher};
 /// regarding equality do not apply, i.e. if `a != b` then `Literal::Float(a)` could still be equal
 /// to `Literal::Float(b)` in the case of `NaN` floats for example.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialOrd, Eq, PartialEq, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Literal {
@@ -93,6 +92,10 @@ impl Hash for Literal {
 	}
 }
 
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
 pub struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,

@@ -5,7 +5,7 @@ use crate::expr::fmt::{Fmt, fmt_separated_by};
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, META, OUT};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Ident, Part, Value};
+use crate::expr::{FlowResult, FlowResultExt, Ident, Part, Value};
 use md5::{Digest, Md5};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -16,8 +16,6 @@ use std::ops::Deref;
 use std::str;
 
 pub mod recursion;
-
-use super::FlowResult;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
@@ -68,33 +66,9 @@ impl Deref for Idiom {
 	}
 }
 
-impl From<String> for Idiom {
-	fn from(v: String) -> Self {
-		Self(vec![Part::from(v)])
-	}
-}
-
-impl From<&str> for Idiom {
-	fn from(v: &str) -> Self {
-		Self(vec![Part::from(v)])
-	}
-}
-
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
 		Self(v)
-	}
-}
-
-impl From<&[Part]> for Idiom {
-	fn from(v: &[Part]) -> Self {
-		Self(v.to_vec())
-	}
-}
-
-impl From<Part> for Idiom {
-	fn from(v: Part) -> Self {
-		Self(vec![v])
 	}
 }
 
@@ -148,10 +122,11 @@ impl Idiom {
 	pub(crate) fn part_is_multi_yield(v: &Part) -> bool {
 		matches!(v, Part::Graph(g) if g.alias.is_some())
 	}
-	/// Check if the path part is a yield in a multi-yield expression
+
+	/// Removes the last part of the idiom if it is a Part::All
 	pub(crate) fn remove_trailing_all(&mut self) {
-		if self.ends_with(&[Part::All]) {
-			self.0.truncate(self.len() - 1);
+		while self.ends_with(&[Part::All]) {
+			self.0.pop();
 		}
 	}
 	/// Check if this Idiom starts with a specific path part
@@ -162,8 +137,8 @@ impl Idiom {
 
 impl Idiom {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.0.iter().any(|v| v.writeable())
+	pub(crate) fn read_only(&self) -> bool {
+		self.0.iter().all(|v| v.read_only())
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -179,29 +154,14 @@ impl Idiom {
 				v.compute(stk, ctx, opt, doc)
 					.await?
 					.get(stk, ctx, opt, doc, self.as_ref().next())
-					.await?
-					.compute(stk, ctx, opt, doc)
 					.await
 			}
 			// Otherwise use the current document
 			_ => match doc {
 				// There is a current document
-				Some(v) => {
-					v.doc
-						.as_ref()
-						.get(stk, ctx, opt, doc, self)
-						.await?
-						.compute(stk, ctx, opt, doc)
-						.await
-				}
+				Some(v) => v.doc.as_ref().get(stk, ctx, opt, doc, self).await,
 				// There isn't any document
-				None => {
-					Value::None
-						.get(stk, ctx, opt, doc, self.next_method())
-						.await?
-						.compute(stk, ctx, opt, doc)
-						.await
-				}
+				None => Value::None.get(stk, ctx, opt, doc, self.next_method()).await,
 			},
 		}
 	}
@@ -209,18 +169,17 @@ impl Idiom {
 
 impl Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		Display::fmt(
-			&Fmt::new(
-				self.0.iter().enumerate().map(|args| {
-					Fmt::new(args, |(i, p), f| match (i, p) {
-						(0, Part::Field(v)) => Display::fmt(v, f),
-						_ => Display::fmt(p, f),
-					})
-				}),
-				fmt_separated_by(""),
-			),
-			f,
-		)
+		let mut iter = self.0.iter();
+		// TODO: Look at why the first Part::Field is formatted differently.
+		match iter.next() {
+			Some(Part::Field(v)) => v.fmt(f)?,
+			Some(x) => x.fmt(f)?,
+			None => {}
+		};
+		for p in iter {
+			p.fmt(f)?;
+		}
+		Ok(())
 	}
 }
 

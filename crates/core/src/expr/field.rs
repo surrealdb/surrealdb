@@ -19,7 +19,7 @@ use super::paths::ID;
 
 /// TODO: Convert this to a struct and document what the boolean does.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Fields {
@@ -32,7 +32,30 @@ pub enum Fields {
 	Select(Vec<Field>),
 }
 
+impl Display for Fields {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self.single() {
+			Some(v) => write!(f, "VALUE {}", &v),
+			None => Display::fmt(&Fmt::comma_separated(&self.0), f),
+		}
+	}
+}
+
+impl InfoStructure for Fields {
+	fn structure(self) -> Value {
+		self.to_string().into()
+	}
+}
+
 impl Fields {
+	/// Check if computing this value can be done on a read only transaction.
+	pub fn read_only(&self) -> bool {
+		match self {
+			Fields::Value(field) => field.read_only(),
+			Fields::Select(fields) => fields.iter().all(|x| x.read_only()),
+		}
+	}
+
 	/// Create a new `*` field projection
 	pub(crate) fn all() -> Self {
 		Fields::Select(vec![Field::All])
@@ -90,54 +113,7 @@ impl Fields {
 		is_count_only
 		*/
 	}
-}
 
-enum FieldsIter<'a> {
-	Single(Option<&'a Field>),
-	Multiple(Iter<'a, Field>),
-}
-
-impl<'a> Iterator for FieldsIter<'a> {
-	type Item = &'a Field;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		match self {
-			FieldsIter::Single(field) => field.take(),
-			FieldsIter::Multiple(iter) => iter.next(),
-		}
-	}
-
-	fn size_hint(&self) -> (usize, Option<usize>) {
-		match self {
-			FieldsIter::Single(field) => {
-				if field.is_some() {
-					(1, Some(1))
-				} else {
-					(0, Some(0))
-				}
-			}
-			FieldsIter::Multiple(iter) => iter.size_hint(),
-		}
-	}
-}
-impl ExactSizeIterator for FieldsIter<'_> {}
-
-impl Display for Fields {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self.single() {
-			Some(v) => write!(f, "VALUE {}", &v),
-			None => Display::fmt(&Fmt::comma_separated(&self.0), f),
-		}
-	}
-}
-
-impl InfoStructure for Fields {
-	fn structure(self) -> Value {
-		self.to_string().into()
-	}
-}
-
-impl Fields {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -370,8 +346,38 @@ impl Fields {
 	}
 }
 
+enum FieldsIter<'a> {
+	Single(Option<&'a Field>),
+	Multiple(Iter<'a, Field>),
+}
+
+impl<'a> Iterator for FieldsIter<'a> {
+	type Item = &'a Field;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		match self {
+			FieldsIter::Single(field) => field.take(),
+			FieldsIter::Multiple(iter) => iter.next(),
+		}
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		match self {
+			FieldsIter::Single(field) => {
+				if field.is_some() {
+					(1, Some(1))
+				} else {
+					(0, Some(0))
+				}
+			}
+			FieldsIter::Multiple(iter) => iter.size_hint(),
+		}
+	}
+}
+impl ExactSizeIterator for FieldsIter<'_> {}
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Field {
@@ -384,6 +390,19 @@ pub enum Field {
 		/// The `quality` in `SELECT rating AS quality FROM ...`
 		alias: Option<Idiom>,
 	},
+}
+
+impl Field {
+	/// Check if computing this type can be done on a read only transaction.
+	pub fn read_only(&self) -> bool {
+		match self {
+			Field::All => true,
+			Field::Single {
+				expr,
+				..
+			} => expr.read_only(),
+		}
+	}
 }
 
 impl Display for Field {

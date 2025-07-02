@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::fmt::Fmt;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Version};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
@@ -13,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct CreateStatement {
@@ -107,7 +108,7 @@ impl fmt::Display for CreateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_seperated(self.what.iter()))?;
 		if let Some(ref v) = self.data {
 			write!(f, " {v}")?
 		}

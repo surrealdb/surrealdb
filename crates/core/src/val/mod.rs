@@ -29,7 +29,6 @@ pub mod file;
 pub mod geometry;
 pub mod number;
 pub mod object;
-mod operation;
 pub mod range;
 pub mod strand;
 pub mod thing;

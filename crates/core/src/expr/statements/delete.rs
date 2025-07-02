@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Explain, Expr, FlowResultExt as _, Output, Timeout, With};
+use crate::expr::{Cond, Explain, Expr, FlowResultExt as _, Output, Timeout, With, fmt::Fmt};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 use anyhow::{Result, ensure};
@@ -99,7 +99,7 @@ impl fmt::Display for DeleteStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_seperated(self.what.iter()))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}

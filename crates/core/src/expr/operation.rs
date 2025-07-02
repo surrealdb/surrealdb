@@ -1,6 +1,9 @@
 use std::fmt;
 
-use crate::val::{Object, Strand, Value};
+use crate::{
+	fnc::operate,
+	val::{Array, Object, Strand, Value},
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +20,7 @@ impl fmt::Display for PatchError {
 
 /// A type representing an delta change to a value.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(tag = "op")]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -53,52 +56,93 @@ pub enum Operation {
 
 impl Operation {
 	fn value_to_jsonpath(val: &Value) -> Vec<String> {
-			val.to_raw_string()
-				.trim_start_matches('/')
-				.split(&['.', '/'])
-				.map(|x| x.to_owned())
-				.collect(),
+		val.to_raw_string()
+			.trim_start_matches('/')
+			.split(&['.', '/'])
+			.map(|x| x.to_owned())
+			.collect()
 	}
 
-	pub fn into_object(self) -> Object{
-		match self{
-    Operation::Add { path, value } => {
-		map!{
-			// safety: does not contain null bytes.
-			"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("add".to_owned()) }),
-			// TODO: Ensure null byte correctness
-			"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
-			"value".to_owned() => value,
-
-		}
-	},
-    Operation::Remove { path } => todo!(),
-    Operation::Replace { path, value } => {
-		map!{
-			// safety: does not contain null bytes.
-			"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("replace".to_owned()) }),
-			// TODO: Ensure null byte correctness
-			"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
-
-			"value".to_owned() => value,
-		}
-	},
-    Operation::Change { path, value } => {
-		map!{
-			// safety: does not contain null bytes.
-			"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("replace".to_owned()) }),
-			// TODO: Ensure null byte correctness
-			"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
-			"value".to_owned() => value,
-
-		}
+	pub fn into_object(self) -> Object {
+		let res = match self {
+			Operation::Add {
+				path,
+				value,
+			} => {
+				map! {
+					// safety: does not contain null bytes.
+					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("add".to_owned()) }),
+					// TODO: Ensure null byte correctness
+					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"value".to_owned() => value,
+				}
+			}
+			Operation::Remove {
+				path,
+			} => todo!(),
+			Operation::Replace {
+				path,
+				value,
+			} => {
+				map! {
+					// safety: does not contain null bytes.
+					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("replace".to_owned()) }),
+					// TODO: Ensure null byte correctness
+					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"value".to_owned() => value,
+				}
+			}
+			Operation::Change {
+				path,
+				value,
+			} => {
+				map! {
+					// safety: does not contain null bytes.
+					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("replace".to_owned()) }),
+					// TODO: Ensure null byte correctness
+					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"value".to_owned() => value,
+				}
+			}
+			Operation::Copy {
+				path,
+				from,
+			} => {
+				map! {
+					// safety: does not contain null bytes.
+					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("copy".to_owned()) }),
+					// TODO: Ensure null byte correctness
+					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"from".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+				}
+			}
+			Operation::Move {
+				path,
+				from,
+			} => {
+				map! {
+					// safety: does not contain null bytes.
+					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("map".to_owned()) }),
+					// TODO: Ensure null byte correctness
+					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"from".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+				}
+			}
+			Operation::Test {
+				path,
+				value,
+			} => {
+				map! {
+					// safety: does not contain null bytes.
+					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("map".to_owned()) }),
+					// TODO: Ensure null byte correctness
+					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"value".to_
+				}
+			}
+		};
+		Object(res)
 	}
-    Operation::Copy { path, from } => todo!(),
-    Operation::Move { path, from } => todo!(),
-    Operation::Test { path, value } => todo!(),
-}
-	}
-
 
 	/// Returns the operaton encoded in the object, or an error if the object does not contain a
 	/// valid operation.
@@ -135,7 +179,7 @@ impl Operation {
 
 		let path = Operation::value_to_jsonpath(path);
 
-		match &**op {
+		match op.as_str() {
 			"add" => Ok(Operation::Add {
 				path,
 				value: value()?,
@@ -168,5 +212,30 @@ impl Operation {
 				message: format!("Invalid operation '{x}'"),
 			}),
 		}
+	}
+
+	/// Turns a value into a list of operations if the value has the right structure.
+	pub fn value_to_operations(value: Value) -> Result<Vec<Operation>, PatchError> {
+		let Value::Array(array) = value else {
+			return Err(PatchError {
+				message: "Patch operations should be an array of objects".to_owned(),
+			});
+		};
+
+		let mut res = Vec::new();
+		for o in array.into_iter() {
+			let Value::Object(o) = o else {
+				return Err(PatchError {
+					message: "Patch operations should be an array of objects".to_owned(),
+				});
+			};
+			res.push(Operation::operation_from_object(o)?)
+		}
+		Ok(res)
+	}
+
+	pub fn operations_to_value(operations: Vec<Operation>) -> Value {
+		let array = operations.into_iter().map(|x| Value::Object(x.into_object())).collect();
+		Value::Array(Array(array))
 	}
 }

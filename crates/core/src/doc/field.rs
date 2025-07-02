@@ -20,6 +20,23 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
 
+fn clean_none(v: &mut Value) -> bool {
+	match v {
+		Value::None => return false,
+		Value::Object(o) => {
+			o.retain(|_, v| clean_none(v));
+			true
+		}
+		Value::Array(x) => {
+			x.iter_mut().for_each(|x| {
+				clean_none(x);
+			});
+			true
+		}
+		_ => true,
+	}
+}
+
 impl Document {
 	/// Ensures that any remaining fields on a
 	/// SCHEMAFULL table are cleaned up and removed.
@@ -50,7 +67,9 @@ impl Document {
 			}
 
 			// Loop over every field in the document
-			for current_doc_field_idiom in self.current.doc.every(None, true, true).iter() {
+			for current_doc_field_idiom in
+				self.current.doc.every(None, true, ArrayBehaviour::Full).iter()
+			{
 				if current_doc_field_idiom.is_special() {
 					// This field is a built-in field, so we can skip it.
 					continue;
@@ -82,7 +101,7 @@ impl Document {
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.to_raw(),
+								table: tb.name.into_raw_string(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -97,7 +116,7 @@ impl Document {
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.to_raw(),
+								table: tb.name.into_raw_string(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -110,12 +129,16 @@ impl Document {
 		}
 
 		// Loop over every field in the document
+		// NONE values should never be stored
+		// TODO: Verify identical behavior.
+		clean_none(self.current.doc.to_mut());
+		/* Below was the original implemenation which seemed horribly inefficient.
 		for fd in self.current.doc.every(None, true, ArrayBehaviour::Nested).iter() {
 			// NONE values should never be stored
 			if self.current.doc.pick(fd).is_none() {
 				self.current.doc.to_mut().cut(fd);
 			}
-		}
+		}*/
 		// Carry on
 		Ok(())
 	}
@@ -565,10 +588,13 @@ impl FieldEditContext<'_> {
 				// The field PERMISSIONS clause
 				// is NONE, meaning that this
 				// change will be reverted.
-				Permission::None => match val.eq(&self.old) {
-					false => self.old.as_ref().clone(),
-					true => val,
-				},
+				Permission::None => {
+					if !val.eq(&self.old) {
+						self.old.as_ref().clone()
+					} else {
+						val
+					}
+				}
 				// The field PERMISSIONS clause
 				// is a custom expression, so
 				// we check the expression and
@@ -608,12 +634,12 @@ impl FieldEditContext<'_> {
 					// then this field could not be
 					// updated, meanint that this
 					// change will be reverted.
-					match res.is_truthy() {
-						false => match val.eq(&self.old) {
-							false => self.old.as_ref().clone(),
-							true => val,
-						},
-						true => val,
+					if res.is_truthy() {
+						val
+					} else if val.eq(&self.old) {
+						val
+					} else {
+						self.old.as_ref().clone()
 					}
 				}
 			};

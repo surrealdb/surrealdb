@@ -92,7 +92,7 @@ pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
 		Value::Strand(s) => Ok(s.0.into()),
 		Value::Table(n) => Ok(n.0.into()),
 		Value::Idiom(ref i) => match &i[..] {
-			[Part::Field(n)] => Ok(n.to_raw().into()),
+			[Part::Field(n)] => Ok(n.into_raw_string().into()),
 			_ => Err(val),
 		},
 		_ => Err(val),
@@ -188,10 +188,10 @@ impl InfoStructure for FunctionsConfig {
 			FunctionsConfig::None => Value::None,
 			FunctionsConfig::Auto => Value::Strand("AUTO".into()),
 			FunctionsConfig::Include(fs) => Value::from(map!(
-				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.to_raw())).collect()),
+				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.into_raw_string())).collect()),
 			)),
 			FunctionsConfig::Exclude(fs) => Value::from(map!(
-				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.to_raw())).collect()),
+				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.into_raw_string())).collect()),
 			)),
 		}
 	}

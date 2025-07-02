@@ -9,17 +9,19 @@ use std::ops::Deref;
 use std::str;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Ident(#[serde(with = "no_nul_bytes")] pub String);
 
+//TODO: Remove these once we start properly managing null bytes.
 impl From<String> for Ident {
 	fn from(v: String) -> Self {
 		Self(v)
 	}
 }
 
+//TODO: Remove these once we start properly managing null bytes.
 impl From<&str> for Ident {
 	fn from(v: &str) -> Self {
 		Self::from(String::from(v))
@@ -35,7 +37,7 @@ impl Deref for Ident {
 
 impl Ident {
 	/// Convert the Ident to a raw String
-	pub fn to_raw(&self) -> String {
+	pub fn into_raw_string(&self) -> String {
 		self.0.to_string()
 	}
 	/// Checks if this field is the `id` field
@@ -68,6 +70,6 @@ impl Display for Ident {
 
 impl InfoStructure for Ident {
 	fn structure(self) -> Value {
-		self.to_raw().into()
+		self.into_raw_string().into()
 	}
 }

@@ -3,12 +3,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::val::{RecordIdKeyRange, Value};
+use crate::val::RecordIdKeyRange;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
 
@@ -18,120 +17,6 @@ use std::ops::Bound;
 pub struct RecordIdKeyRangeLit {
 	pub start: Bound<RecordIdKeyLit>,
 	pub end: Bound<RecordIdKeyLit>,
-}
-
-impl RecordIdKeyRangeLit {
-	pub(crate) async fn compute(
-		self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<RecordIdKeyRange> {
-		todo!()
-	}
-}
-
-impl TryFrom<(Bound<RecordIdKeyLit>, Bound<RecordIdKeyLit>)> for RecordIdKeyRangeLit {
-	type Error = anyhow::Error;
-	fn try_from(
-		(beg, end): (Bound<RecordIdKeyLit>, Bound<RecordIdKeyLit>),
-	) -> Result<Self, Self::Error> {
-		if matches!(
-			beg,
-			Bound::Included(RecordIdKeyLit::Range(_)) | Bound::Excluded(RecordIdKeyLit::Range(_))
-		) {
-			bail!(Error::IdInvalid {
-				value: "range".into(),
-			});
-		}
-
-		if matches!(
-			end,
-			Bound::Included(RecordIdKeyLit::Range(_)) | Bound::Excluded(RecordIdKeyLit::Range(_))
-		) {
-			bail!(Error::IdInvalid {
-				value: "range".into(),
-			});
-		}
-
-		Ok(RecordIdKeyRangeLit {
-			start: beg,
-			end,
-		})
-	}
-}
-
-impl TryFrom<Value> for RecordIdKeyRangeLit {
-	type Error = anyhow::Error;
-	fn try_from(v: Value) -> Result<Self, Self::Error> {
-		match v {
-			Value::Range(v) => RecordIdKeyRangeLit::try_from(*v),
-			v => Err(anyhow::Error::new(Error::IdInvalid {
-				value: v.kindof().to_string(),
-			})),
-		}
-	}
-}
-
-impl PartialOrd for RecordIdKeyRangeLit {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for RecordIdKeyRangeLit {
-	fn cmp(&self, other: &Self) -> Ordering {
-		match &self.start {
-			Bound::Unbounded => match &other.start {
-				Bound::Unbounded => Ordering::Equal,
-				_ => Ordering::Less,
-			},
-			Bound::Included(v) => match &other.start {
-				Bound::Unbounded => Ordering::Greater,
-				Bound::Included(w) => match v.cmp(w) {
-					Ordering::Equal => match &self.end {
-						Bound::Unbounded => match &other.end {
-							Bound::Unbounded => Ordering::Equal,
-							_ => Ordering::Greater,
-						},
-						Bound::Included(v) => match &other.end {
-							Bound::Unbounded => Ordering::Less,
-							Bound::Included(w) => v.cmp(w),
-							_ => Ordering::Greater,
-						},
-						Bound::Excluded(v) => match &other.end {
-							Bound::Excluded(w) => v.cmp(w),
-							_ => Ordering::Less,
-						},
-					},
-					ordering => ordering,
-				},
-				_ => Ordering::Less,
-			},
-			Bound::Excluded(v) => match &other.start {
-				Bound::Excluded(w) => match v.cmp(w) {
-					Ordering::Equal => match &self.end {
-						Bound::Unbounded => match &other.end {
-							Bound::Unbounded => Ordering::Equal,
-							_ => Ordering::Greater,
-						},
-						Bound::Included(v) => match &other.end {
-							Bound::Unbounded => Ordering::Less,
-							Bound::Included(w) => v.cmp(w),
-							_ => Ordering::Greater,
-						},
-						Bound::Excluded(v) => match &other.end {
-							Bound::Excluded(w) => v.cmp(w),
-							_ => Ordering::Less,
-						},
-					},
-					ordering => ordering,
-				},
-				_ => Ordering::Greater,
-			},
-		}
-	}
 }
 
 impl fmt::Display for RecordIdKeyRangeLit {
@@ -158,8 +43,8 @@ impl RecordIdKeyRangeLit {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<RecordIdKeyRangeLit> {
-		let beg = match &self.start {
+	) -> Result<RecordIdKeyRange> {
+		let start = match &self.start {
 			Bound::Included(beg) => {
 				Bound::Included(stk.run(|stk| beg.compute(stk, ctx, opt, doc)).await?)
 			}
@@ -180,6 +65,9 @@ impl RecordIdKeyRangeLit {
 		};
 
 		// The TryFrom implementation ensures that the bounds do not contain an `Id::Range` value
-		RecordIdKeyRangeLit::try_from((beg, end))
+		Ok(RecordIdKeyRange {
+			start,
+			end,
+		})
 	}
 }

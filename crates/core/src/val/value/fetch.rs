@@ -62,8 +62,7 @@ impl Value {
 							.get(stk, ctx, opt, None, path.next())
 							.await
 							.catch_return()?
-							.flatten()
-							.ok()?;
+							.flatten();
 						return Ok(());
 					}
 					Value::Array(x) => {
@@ -109,7 +108,7 @@ impl Value {
 						}
 						Value::Array(array) => {
 							if let Value::Range(x) = v {
-								let Some(range) = x.slice(array) else {
+								let Some(range) = x.coerce_to_typed::<i64>()?.slice(array) else {
 									return Ok(());
 								};
 								let mut range = Value::Array(range.to_vec().into());

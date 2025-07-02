@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq,  Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Kind {
@@ -51,7 +51,6 @@ pub enum Kind {
 	/// UUID type.
 	Uuid,
 	/// Regular expression type.
-	#[revision(start = 2)]
 	Regex,
 	/// A record type.
 	Record(Vec<Table>),
