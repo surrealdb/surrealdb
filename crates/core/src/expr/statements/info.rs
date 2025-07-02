@@ -1,13 +1,11 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::{Base, Ident, Object, Value, Version};
 use crate::iam::Action;
 use crate::iam::ResourceKind;
 use crate::sys::INFORMATION;
 use anyhow::Result;
-use anyhow::bail;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -325,7 +323,6 @@ impl InfoStatement {
 						let (ns, db) = opt.ns_db()?;
 						txn.get_db_user(ns, db, user).await?
 					}
-					_ => bail!(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
 				Ok(match structured {
