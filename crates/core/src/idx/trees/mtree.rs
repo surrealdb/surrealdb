@@ -1471,7 +1471,8 @@ mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::expr::index::{Distance, VectorType};
 	use crate::idx::IndexKeyBase;
-	use crate::idx::docids::{BTreeDocIds, DocId};
+	use crate::idx::docids::DocId;
+	use crate::idx::docids::btdocids::BTreeDocIds;
 	use crate::idx::planner::checker::MTreeConditionChecker;
 	use crate::idx::trees::knn::tests::TestCollection;
 	use crate::idx::trees::mtree::{MState, MTree, MTreeNode, MTreeSearchContext, MTreeStore};

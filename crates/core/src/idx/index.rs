@@ -171,14 +171,21 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_fulltext(&mut self, stk: &mut Stk, p: &FullTextParams) -> Result<()> {
 		// Build a FullText instance
-		let s = FullTextIndex::new(self.ctx, self.opt, p).await?;
+		let s = FullTextIndex::new(self.ctx, self.opt, self.ix, p).await?;
 		// Delete the old index data
-		if let Some(o) = self.o.take() {
-			s.remove_document(stk, self.ctx, self.opt, self.ix, self.rid, o).await?;
-		}
+		let doc_id = if let Some(o) = self.o.take() {
+			s.remove_content(stk, self.ctx, self.opt, self.ix, self.rid, o).await?
+		} else {
+			None
+		};
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			s.index_document(stk, self.ctx, self.opt, self.ix, self.rid, n).await?;
+			s.index_content(stk, self.ctx, self.opt, self.ix, self.rid, n).await?;
+		} else {
+			// It is a deletion, we can remove the doc
+			if let Some(doc_id) = doc_id {
+				s.remove_doc(self.ctx, doc_id).await?;
+			}
 		}
 		Ok(())
 	}

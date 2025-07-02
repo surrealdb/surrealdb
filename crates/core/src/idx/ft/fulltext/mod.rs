@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Thing, Value};
+use crate::idx::IndexKeyBaseRef;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
 use crate::idx::ft::analyzer::Analyzer;
@@ -26,28 +27,34 @@ struct TermDocument {
 	o: Vec<Offset>,
 }
 
-pub(crate) struct FullTextIndex {
+pub(crate) struct FullTextIndex<'a> {
 	analyzer: Analyzer,
 	highlighting: bool,
-	doc_ids: SeqDocIds,
+	doc_ids: SeqDocIds<'a>,
 }
 
-impl FullTextIndex {
-	pub(crate) async fn new(ctx: &Context, opt: &Options, p: &FullTextParams) -> Result<Self> {
+impl<'a> FullTextIndex<'a> {
+	pub(crate) async fn new(
+		ctx: &Context,
+		opt: &'a Options,
+		ix: &'a DefineIndexStatement,
+		p: &FullTextParams,
+	) -> Result<Self> {
 		let tx = ctx.tx();
 		let ixs = ctx.get_index_stores();
 		let (ns, db) = opt.ns_db()?;
+		let ikb = IndexKeyBaseRef::new(ns, db, &ix.what, &ix.name);
 		let az = tx.get_db_analyzer(ns, db, &p.az).await?;
 		ixs.mappers().check(&az).await?;
 		let analyzer = Analyzer::new(ixs, az)?;
 		Ok(Self {
 			analyzer,
 			highlighting: p.hl,
-			doc_ids: SeqDocIds::new(),
+			doc_ids: SeqDocIds::new(ikb),
 		})
 	}
 
-	pub(crate) async fn remove_document(
+	pub(crate) async fn remove_content(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -55,7 +62,7 @@ impl FullTextIndex {
 		ix: &DefineIndexStatement,
 		rid: &Thing,
 		content: Vec<Value>,
-	) -> Result<()> {
+	) -> Result<Option<DocId>> {
 		let (ns, db) = opt.ns_db()?;
 		// Collect the tokens.
 		let tokens =
@@ -82,12 +89,17 @@ impl FullTextIndex {
 			// Delete the doc length
 			let key = Dl::new(ns, db, &rid.tb, &ix.name, id);
 			tx.del(key).await?;
+			Ok(Some(id))
+		} else {
+			Ok(None)
 		}
-		// We're done
-		Ok(())
 	}
 
-	pub(crate) async fn index_document(
+	pub(crate) async fn remove_doc(&self, _ctx: &Context, _doc_id: DocId) -> Result<()> {
+		todo!()
+	}
+
+	pub(crate) async fn index_content(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,

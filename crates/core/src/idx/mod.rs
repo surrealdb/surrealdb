@@ -36,6 +36,28 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::sync::Arc;
 
+pub(crate) struct IndexKeyBaseRef<'a> {
+	ns: &'a str,
+	db: &'a str,
+	tb: &'a str,
+	ix: &'a str,
+}
+
+impl<'a> IndexKeyBaseRef<'a> {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+		Self {
+			ns,
+			db,
+			tb,
+			ix,
+		}
+	}
+
+	fn new_bi_key(&self, doc_id: DocId) -> Result<Key> {
+		Bi::new(self.ns, self.db, self.tb, self.ix, doc_id).encode()
+	}
+}
+
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct IndexKeyBase {
