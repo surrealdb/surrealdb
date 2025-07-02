@@ -319,6 +319,14 @@ criteria = "safe-to-deploy"
 version = "2.5.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.console-api]]
+version = "0.8.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.console-subscriber]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.console_error_panic_hook]]
 version = "0.1.7"
 criteria = "safe-to-deploy"
@@ -553,6 +561,10 @@ criteria = "safe-to-run"
 
 [[exemptions.hash32]]
 version = "0.3.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.hdrhistogram]]
+version = "7.5.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.heapless]]
@@ -961,6 +973,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.prost-types]]
 version = "0.12.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.prost-types]]
+version = "0.13.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.psm]]
