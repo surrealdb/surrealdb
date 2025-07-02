@@ -244,7 +244,7 @@ impl SearchIndex {
 			let mut doc_ids = self.doc_ids.write().await;
 			doc_ids.resolve_doc_id(&tx, revision::to_vec(rid)?).await?
 		};
-		let doc_id = *resolved.doc_id();
+		let doc_id = resolved.doc_id();
 
 		// Extract the doc_lengths, terms en frequencies (and offset)
 		let mut t = self.terms.write().await;

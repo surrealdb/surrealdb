@@ -74,7 +74,7 @@ impl FullTextIndex {
 					// Check if the term has already been deleted
 					if set.insert(s) {
 						// Delete the term
-						let key = Td::new(ns, db, &rid.tb, &ix.name, s, id);
+						let key = Td::new(ns, db, &rid.tb, &ix.name, s, Some(id));
 						tx.del(key).await?;
 					}
 				}
@@ -105,9 +105,9 @@ impl FullTextIndex {
 		let tokens =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
 		let dl = if self.highlighting {
-			Self::index_with_offsets(&tx, ns, db, ix, rid, tokens).await?
+			Self::index_with_offsets(&tx, ns, db, ix, id.doc_id(), tokens).await?
 		} else {
-			Self::index_without_offsets(&tx, ns, db, ix, rid, tokens).await?
+			Self::index_without_offsets(&tx, ns, db, ix, id.doc_id(), tokens).await?
 		};
 		// Set the doc length
 		let key = Dl::new(ns, db, &rid.tb, &ix.name, id.doc_id());
@@ -127,7 +127,7 @@ impl FullTextIndex {
 		let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, o) in offsets {
-			let key = Td::new(ns, db, &rid.tb, &ix.name, t, &rid.id);
+			let key = Td::new(ns, db, &ix.what, &ix.name, t, Some(id));
 			td.f = o.len() as TermFrequency;
 			td.o = o;
 			tx.set(key, revision::to_vec(&td)?, None).await?;
@@ -140,13 +140,13 @@ impl FullTextIndex {
 		ns: &str,
 		db: &str,
 		ix: &DefineIndexStatement,
-		rid: &Thing,
+		id: DocId,
 		tokens: Vec<Tokens>,
 	) -> Result<DocLength> {
 		let (dl, tf) = Analyzer::extract_frequencies(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, f) in tf {
-			let key = Td::new(ns, db, &rid.tb, &ix.name, t, &rid.id);
+			let key = Td::new(ns, db, &ix.what, &ix.name, t, Some(id));
 			td.f = f;
 			tx.set(key, revision::to_vec(&td)?, None).await?;
 		}

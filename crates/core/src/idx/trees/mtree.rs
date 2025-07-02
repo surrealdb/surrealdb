@@ -90,7 +90,7 @@ impl MTreeIndex {
 		// Resolve the doc_id
 		let mut doc_ids = self.doc_ids.write().await;
 		let resolved = doc_ids.resolve_doc_id(txn, revision::to_vec(rid)?).await?;
-		let doc_id = *resolved.doc_id();
+		let doc_id = resolved.doc_id();
 		drop(doc_ids);
 		// Index the values
 		let mut mtree = self.mtree.write().await;
