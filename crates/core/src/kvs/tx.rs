@@ -769,9 +769,10 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineFunctionStatement]>> {
+		// Collect all normal functions
 		let qey = cache::tx::Lookup::Fcs(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_fcs(),
+		let normal = match self.cache.get(&qey) {
+			Some(val) => val.try_into_fcs()?,
 			None => {
 				let beg = crate::key::database::fc::prefix(ns, db)?;
 				let end = crate::key::database::fc::suffix(ns, db)?;
@@ -779,9 +780,32 @@ impl Transaction {
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
 				let entry = cache::tx::Entry::Fcs(val.clone());
 				self.cache.insert(qey, entry);
-				Ok(val)
+				val
 			}
-		}
+		};
+
+		// Collect all silo functions
+		let qey = cache::tx::Lookup::Sis(ns, db);
+		let silo = match self.cache.get(&qey) {
+			Some(val) => val.try_into_sis()?,
+			None => {
+				let beg = crate::key::database::si::prefix(ns, db)?;
+				let end = crate::key::database::si::suffix(ns, db)?;
+				let val = self.getr(beg..end, None).await?;
+				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+				let entry = cache::tx::Entry::Sis(val.clone());
+				self.cache.insert(qey, entry);
+				val
+			}
+		};
+
+		let mut combined: Vec<DefineFunctionStatement> =
+			Vec::with_capacity(normal.len() + silo.len());
+
+		combined.extend_from_slice(&normal);
+		combined.extend_from_slice(&silo);
+
+		Ok(Arc::from(combined.into_boxed_slice()))
 	}
 
 	/// Retrieve all param definitions for a specific database.
@@ -1383,6 +1407,31 @@ impl Transaction {
 				let key = crate::key::database::fc::new(ns, db, fc).encode()?;
 				let val = self.get(key, None).await?.ok_or_else(|| Error::FcNotFound {
 					name: fc.to_owned(),
+				})?;
+				let val: DefineFunctionStatement = revision::from_slice(&val)?;
+				let val = Arc::new(val);
+				let entr = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entr);
+				Ok(val)
+			}
+		}
+	}
+
+	/// Retrieve a specific function definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn get_silo_function(
+		&self,
+		ns: &str,
+		db: &str,
+		si: &str,
+	) -> Result<Arc<DefineFunctionStatement>> {
+		let qey = cache::tx::Lookup::Si(ns, db, si);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type(),
+			None => {
+				let key = crate::key::database::si::new(ns, db, si).encode()?;
+				let val = self.get(key, None).await?.ok_or_else(|| Error::SiNotFound {
+					name: si.to_owned(),
 				})?;
 				let val: DefineFunctionStatement = revision::from_slice(&val)?;
 				let val = Arc::new(val);
