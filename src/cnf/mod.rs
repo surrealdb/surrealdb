@@ -134,3 +134,7 @@ pub static PKG_VERSION: LazyLock<String> =
 		}
 		_ => env!("CARGO_PKG_VERSION").to_owned(),
 	});
+
+/// Whether to enable Tokio Console
+pub static TOKIO_CONSOLE: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_ENABLE_TOKIO_CONSOLE", bool, false);
