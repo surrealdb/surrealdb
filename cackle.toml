@@ -1375,7 +1375,7 @@ allow_proc_macro = true
 allow_unsafe = true
 
 [pkg.console-subscriber]
-allow_apis = ["net"]
+allow_apis = ["fs", "net"]
 
 [pkg.console-api]
 allow_apis = ["net"]
