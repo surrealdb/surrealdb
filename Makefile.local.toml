@@ -1,3 +1,5 @@
+extend = "Makefile.common.toml"
+
 [env]
 RUSTFLAGS = { value = "-D warnings", condition = { env_not_set = [
     "RUSTFLAGS",
@@ -36,7 +38,7 @@ args = [
 [tasks.test]
 category = "LOCAL USAGE"
 command = "cargo"
-args = ["test", "--profile", "make", "--workspace", "--no-fail-fast"]
+args = ["nextest", "run", "--workspace", "--no-fail-fast"]
 
 # Format
 [tasks.cargo-fmt]
@@ -50,8 +52,6 @@ category = "LOCAL USAGE"
 command = "cargo"
 args = [
     "check",
-    "--profile",
-    "make",
     "--workspace",
     "--all-targets",
     "--features",
@@ -64,8 +64,6 @@ category = "LOCAL USAGE"
 command = "cargo"
 args = [
     "clippy",
-    "--profile",
-    "make",
     "--workspace",
     "--all-targets",
     "--features",
@@ -110,8 +108,6 @@ category = "LOCAL USAGE"
 command = "cargo"
 args = [
     "run",
-    "--profile",
-    "make",
     "--no-default-features",
     "--features",
     "${DEV_FEATURES}",
@@ -125,8 +121,6 @@ category = "LOCAL USAGE"
 command = "cargo"
 args = [
     "run",
-    "--profile",
-    "make",
     "--no-default-features",
     "--features",
     "${DEV_FEATURES}",
@@ -143,8 +137,6 @@ command = "cargo"
 env = { SURREAL_LOG = "error" }
 args = [
     "run",
-    "--profile",
-    "make",
     "--no-default-features",
     "--features",
     "${DEV_FEATURES}",
@@ -161,8 +153,6 @@ command = "cargo"
 env = { SURREAL_LOG = "error" }
 args = [
     "run",
-    "--profile",
-    "make",
     "--no-default-features",
     "--features",
     "${DEV_FEATURES}",
@@ -182,7 +172,7 @@ args = [
 [tasks.build]
 category = "LOCAL USAGE"
 command = "cargo"
-args = ["build", "--profile", "make", "${@}"]
+args = ["build", "${@}"]
 
 # Release
 [tasks.release]
