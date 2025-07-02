@@ -36,65 +36,7 @@ pub struct Duration(pub time::Duration);
 
 impl Duration {
 	pub const MAX: Duration = Duration(time::Duration::MAX);
-}
 
-impl From<time::Duration> for Duration {
-	fn from(v: time::Duration) -> Self {
-		Self(v)
-	}
-}
-
-impl From<Duration> for time::Duration {
-	fn from(s: Duration) -> Self {
-		s.0
-	}
-}
-
-impl From<time::Duration> for Value {
-	fn from(value: time::Duration) -> Self {
-		Self::Duration(value.into())
-	}
-}
-
-impl FromStr for Duration {
-	type Err = ();
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
-}
-
-impl TryFrom<String> for Duration {
-	type Error = ();
-	fn try_from(v: String) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<Strand> for Duration {
-	type Error = ();
-	fn try_from(v: Strand) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<&str> for Duration {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::duration(v) {
-			Ok(v) => Ok(v.into()),
-			_ => Err(()),
-		}
-	}
-}
-
-impl Deref for Duration {
-	type Target = time::Duration;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl Duration {
 	/// Create a duration from both seconds and nanoseconds components
 	pub fn new(secs: u64, nanos: u32) -> Duration {
 		time::Duration::new(secs, nanos).into()
@@ -170,6 +112,62 @@ impl Duration {
 	/// Create a duration from weeks
 	pub fn from_weeks(weeks: u64) -> Option<Duration> {
 		weeks.checked_mul(SECONDS_PER_WEEK).map(time::Duration::from_secs).map(|x| x.into())
+	}
+}
+
+impl From<time::Duration> for Duration {
+	fn from(v: time::Duration) -> Self {
+		Self(v)
+	}
+}
+
+impl From<Duration> for time::Duration {
+	fn from(s: Duration) -> Self {
+		s.0
+	}
+}
+
+impl From<time::Duration> for Value {
+	fn from(value: time::Duration) -> Self {
+		Self::Duration(value.into())
+	}
+}
+
+impl FromStr for Duration {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<String> for Duration {
+	type Error = ();
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<Strand> for Duration {
+	type Error = ();
+	fn try_from(v: Strand) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<&str> for Duration {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match syn::duration(v) {
+			Ok(v) => Ok(v.into()),
+			_ => Err(()),
+		}
+	}
+}
+
+impl Deref for Duration {
+	type Target = time::Duration;
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 

@@ -39,6 +39,19 @@ impl Strand {
 		debug_assert!(!s.contains('\0'));
 		Strand(s)
 	}
+
+	/// Get the underlying String slice
+	pub fn as_str(&self) -> &str {
+		self.0.as_str()
+	}
+	/// Returns the underlying String
+	pub fn as_string(self) -> String {
+		self.0
+	}
+	/// Convert the Strand to a raw String
+	pub fn to_raw(self) -> String {
+		self.0
+	}
 }
 
 impl From<String> for Strand {
@@ -65,21 +78,6 @@ impl Deref for Strand {
 impl From<Strand> for String {
 	fn from(s: Strand) -> Self {
 		s.0
-	}
-}
-
-impl Strand {
-	/// Get the underlying String slice
-	pub fn as_str(&self) -> &str {
-		self.0.as_str()
-	}
-	/// Returns the underlying String
-	pub fn as_string(self) -> String {
-		self.0
-	}
-	/// Convert the Strand to a raw String
-	pub fn to_raw(self) -> String {
-		self.0
 	}
 }
 

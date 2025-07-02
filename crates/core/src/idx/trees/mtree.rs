@@ -268,23 +268,10 @@ impl MTree {
 			visited_nodes,
 		))
 	}
-}
 
-enum InsertionResult {
-	DocAdded,
-	CoveringRadius(f64),
-	PromotedEntries(SharedVector, RoutingProperties, SharedVector, RoutingProperties),
-}
+	// Insertion
 
-enum DeletionResult {
-	NotFound,
-	DocRemoved,
-	CoveringRadius(f64),
-	Underflown(MStoredNode, bool),
-}
-
-// Insertion
-impl MTree {
+	/// Create a new node id
 	fn new_node_id(&mut self) -> NodeId {
 		let new_node_id = self.state.next_node_id;
 		self.state.next_node_id += 1;
@@ -1176,6 +1163,19 @@ impl MTree {
 			Ok(DeletionResult::DocRemoved)
 		}
 	}
+}
+
+enum InsertionResult {
+	DocAdded,
+	CoveringRadius(f64),
+	PromotedEntries(SharedVector, RoutingProperties, SharedVector, RoutingProperties),
+}
+
+enum DeletionResult {
+	NotFound,
+	DocRemoved,
+	CoveringRadius(f64),
+	Underflown(MStoredNode, bool),
 }
 
 struct DistanceCache(HashMap<(SharedVector, SharedVector), f64>);
