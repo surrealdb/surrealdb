@@ -8,6 +8,6 @@ where
 {
 	console_subscriber::ConsoleLayer::builder()
 		.retention(Duration::from_secs(60))
-		.server_addr(([127, 0, 0, 1], 5555))
+		.server_addr(([127, 0, 0, 1], 6669))
 		.spawn()
 }
