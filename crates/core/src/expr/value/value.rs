@@ -17,7 +17,6 @@ use crate::expr::{
 	model::Model,
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
-use crate::fnc::util::string::fuzzy::Fuzzy;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -700,37 +699,6 @@ impl Value {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
 			_ => self.equal(other),
-		}
-	}
-
-	/// Fuzzy check if this Value is equal to another Value
-	pub fn fuzzy(&self, other: &Value) -> bool {
-		match self {
-			Value::Uuid(v) => match other {
-				Value::Strand(w) => v.to_raw().as_str().fuzzy_match(w.as_str()),
-				_ => false,
-			},
-			Value::Strand(v) => match other {
-				Value::Strand(w) => v.as_str().fuzzy_match(w.as_str()),
-				_ => false,
-			},
-			_ => self.equal(other),
-		}
-	}
-
-	/// Fuzzy check if all Values in an Array are equal to another Value
-	pub fn all_fuzzy(&self, other: &Value) -> bool {
-		match self {
-			Value::Array(v) => v.iter().all(|v| v.fuzzy(other)),
-			_ => self.fuzzy(other),
-		}
-	}
-
-	/// Fuzzy check if any Values in an Array are equal to another Value
-	pub fn any_fuzzy(&self, other: &Value) -> bool {
-		match self {
-			Value::Array(v) => v.iter().any(|v| v.fuzzy(other)),
-			_ => self.fuzzy(other),
 		}
 	}
 
