@@ -229,8 +229,6 @@ args = [
     "ml_integration",
     "--skip",
     "graphql_integration",
-    "--skip",
-    "database_upgrade",
 ]
 
 [tasks.ci-workspace-coverage]
@@ -257,8 +255,6 @@ args = [
     "ml_integration",
     "--skip",
     "graphql_integration",
-    "--skip",
-    "database_upgrade",
 ]
 
 [tasks.test-workspace-coverage-complete]
@@ -283,10 +279,6 @@ run_task = { name = [
     "stop-surrealdb",
 ], fork = true }
 
-[tasks.ci-database-upgrade]
-env = { _TEST_FEATURES = "storage-rocksdb", RUSTFLAGS = "-D warnings --cfg docker" }
-category = "CI - DATABASE UPGRADE TESTS"
-run_task = { name = ["test-database-upgrade"], fork = true }
 
 #
 # Tests private tasks
@@ -333,24 +325,6 @@ run_task = { name = [
     "test-api-integration",
     "stop-surrealdb",
 ], fork = true }
-
-[tasks.test-database-upgrade]
-private = true
-command = "cargo"
-env = { RUST_LOG = "info" }
-args = [
-    "test",
-    "--locked",
-    "--no-default-features",
-    "--features",
-    "${_TEST_FEATURES}",
-    "--workspace",
-    "--test",
-    "database_upgrade",
-    "--",
-    "database_upgrade",
-    "--show-output",
-]
 
 #
 # Integration tests with background services
