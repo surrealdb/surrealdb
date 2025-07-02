@@ -271,7 +271,7 @@ expected or not. See below for some examples of matching expressions:
 # Tests if the statement output was either the string foo or an error: 'An error
 # occurred: foo'
 [[test.results]]
-match = "$result == 'foo' || $error == 'An error occurred: foo'"
+match = "$result == 'foo' || $error == 'Execution halted with output: `foo`'"
 
 # Tests an error with a regex as some parts of the error are non-deterministic.
 [[test.results]]
