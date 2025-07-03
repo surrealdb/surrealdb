@@ -301,7 +301,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "signal"] }
+tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
 tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
