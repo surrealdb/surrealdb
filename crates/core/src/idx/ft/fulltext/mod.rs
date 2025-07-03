@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Thing, Value};
-use crate::idx::IndexKeyBaseRef;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
 use crate::idx::ft::analyzer::Analyzer;
@@ -27,30 +26,30 @@ struct TermDocument {
 	o: Vec<Offset>,
 }
 
-pub(crate) struct FullTextIndex<'a> {
+pub(crate) struct FullTextIndex {
 	analyzer: Analyzer,
 	highlighting: bool,
-	doc_ids: SeqDocIds<'a>,
+	doc_ids: SeqDocIds,
 }
 
-impl<'a> FullTextIndex<'a> {
+impl FullTextIndex {
 	pub(crate) async fn new(
 		ctx: &Context,
-		opt: &'a Options,
-		ix: &'a DefineIndexStatement,
+		opt: &Options,
+		ix: &DefineIndexStatement,
 		p: &FullTextParams,
 	) -> Result<Self> {
 		let tx = ctx.tx();
-		let ixs = ctx.get_index_stores();
 		let (ns, db) = opt.ns_db()?;
-		let ikb = IndexKeyBaseRef::new(ns, db, &ix.what, &ix.name);
+		let nid = opt.id()?;
 		let az = tx.get_db_analyzer(ns, db, &p.az).await?;
+		let ixs = ctx.get_index_stores();
 		ixs.mappers().check(&az).await?;
 		let analyzer = Analyzer::new(ixs, az)?;
 		Ok(Self {
 			analyzer,
 			highlighting: p.hl,
-			doc_ids: SeqDocIds::new(ikb),
+			doc_ids: SeqDocIds::new(nid, ns, db, &ix.what, &ix.name),
 		})
 	}
 
@@ -111,8 +110,7 @@ impl<'a> FullTextIndex<'a> {
 		let (ns, db) = opt.ns_db()?;
 		let tx = ctx.tx();
 		// Get the doc id (if it exists)
-		let doc_key: Key = revision::to_vec(&rid.id)?;
-		let id = self.doc_ids.resolve_doc_id(&tx, doc_key).await?;
+		let id = self.doc_ids.resolve_doc_id(ctx, rid.id.clone()).await?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;

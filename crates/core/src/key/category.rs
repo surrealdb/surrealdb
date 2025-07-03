@@ -150,8 +150,12 @@ pub enum Category {
 	IndexHnswVec,
 	/// crate::key::index::ia                /*{ns}*{db}*{tb}+{ix}!ia{id}
 	IndexAppendings,
+	/// crate::key::index::ib                /*{ns}*{db}*{tb}+{ix}!ib{id}
+	IndexInvertedDocIds,
 	/// crate::key::index::ip                /*{ns}*{db}*{tb}+{ix}!ip{id}
 	IndexPrimaryAppending,
+	/// crate::key::index::is                /*{ns}*{db}*{tb}+{ix}!is{uuid}
+	IndexFullTextDocIdsSequenceState,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -255,6 +259,8 @@ impl Display for Category {
 			Self::SequenceState => "SequenceState",
 			Self::SequenceBatch => "SequenceBatch",
 			Self::TaskLease => "TaskLease",
+			Self::IndexInvertedDocIds => "IndexInvertedDocIds",
+			Self::IndexFullTextDocIdsSequenceState => "IndexFullTextDocIdsSequenceState",
 		};
 		write!(f, "{}", name)
 	}
