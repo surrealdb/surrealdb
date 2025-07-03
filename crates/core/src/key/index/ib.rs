@@ -52,10 +52,23 @@ impl<'a> Ib<'a> {
 		tb: &'a str,
 		ix: &'a str,
 	) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-		let mut beg = Self::new(ns, db, tb, ix, b'i', b'b').encode()?;
-		let mut end = Self::new(ns, db, tb, ix, b'i', b'b').encode()?;
-		beg.extend_from_slice(&[0x00; 9]);
-		end.extend_from_slice(&[0xFF; 9]);
+		let beg = Self::new(ns, db, tb, ix, i64::MIN).encode()?;
+		let end = Self::new(ns, db, tb, ix, i64::MAX).encode()?;
 		Ok((beg, end))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn ib_range() {
+		let (beg, end) = Ib::new_range("testns", "testdb", "testtb", "testix").unwrap();
+		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!ib\0\0\0\0\0\0\0\0");
+		assert_eq!(
+			end,
+			b"/*testns\0*testdb\0*testtb\0+testix\0!ib\xff\xff\xff\xff\xff\xff\xff\xff"
+		);
 	}
 }

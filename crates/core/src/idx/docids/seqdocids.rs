@@ -33,9 +33,10 @@ impl SeqDocIds {
 	}
 
 	pub(in crate::idx) async fn resolve_doc_id(&self, ctx: &Context, id: Id) -> Result<Resolved> {
-		let id_key = self.seq_key.new_id_key(id)?;
+		let id_key = self.seq_key.new_id_key(id.clone())?;
+		let tx = ctx.tx();
 		// Do we already have an ID?
-		if let Some(val) = ctx.tx().get(id_key, None).await? {
+		if let Some(val) = tx.get(id_key.clone(), None).await? {
 			// Validate the length and convert to array (zero copy)
 			let val: [u8; 8] = val.as_slice().try_into().map_err(|_| {
 				Error::Internal(format!(
@@ -47,11 +48,20 @@ impl SeqDocIds {
 			return Ok(Resolved::Existing(doc_id));
 		}
 		// If not, let's get one from the sequence
-		let _new_doc_id = ctx
+		let new_doc_id = ctx
 			.try_get_sequences()?
 			.next_val_fts_idx(ctx, self.nid, self.seq_key.clone(), self.batch)
-			.await?;
-		todo!()
+			.await? as DocId;
+		{
+			let val = new_doc_id.to_be_bytes();
+			tx.set(id_key, &val, None).await?;
+		}
+		{
+			let k = self.seq_key.new_bi_key(new_doc_id)?;
+			let v = revision::to_vec(&id)?;
+			tx.set(k, v, None).await?;
+		}
+		Ok(Resolved::New(new_doc_id))
 	}
 
 	pub(in crate::idx) async fn get_doc_key(

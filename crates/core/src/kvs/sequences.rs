@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::expr::Id;
 use crate::idx::docids::DocId;
 use crate::key::index::bi::Bi;
+use crate::key::index::ib::Ib;
 use crate::key::index::id::Id as IdKey;
 use crate::key::index::is::Is;
 use crate::key::sequence::Prefix;
@@ -98,7 +99,7 @@ impl SequenceKey {
 			SequenceDomain::FullTextDocIds {
 				tb,
 				ix,
-			} => todo!(),
+			} => Ib::new_range(&self.ns, &self.db, tb, ix),
 		}
 	}
 
@@ -106,8 +107,9 @@ impl SequenceKey {
 		match &self.domain {
 			SequenceDomain::UserName(sq) => Ba::new(&self.ns, &self.db, sq, start).encode(),
 			SequenceDomain::FullTextDocIds {
-				..
-			} => todo!(),
+				tb,
+				ix,
+			} => Ib::new(&self.ns, &self.db, tb, ix, start).encode(),
 		}
 	}
 
