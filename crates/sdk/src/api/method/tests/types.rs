@@ -1,5 +1,9 @@
 use serde::Deserialize;
 use serde::Serialize;
+use surrealdb_core::dbs::Variables;
+use surrealdb_core::expr::Object;
+
+use crate::opt::IntoVariables;
 
 pub const USER: &str = "user";
 
@@ -7,6 +11,15 @@ pub const USER: &str = "user";
 pub struct User {
 	pub id: String,
 	pub name: String,
+}
+
+impl IntoVariables for User {
+	fn into_variables(self) -> Variables {
+		let mut vars = Variables::default();
+		vars.insert("id".to_string(), self.id.into());
+		vars.insert("name".to_string(), self.name.into());
+		vars
+	}
 }
 
 #[derive(Debug, Serialize, Deserialize)]

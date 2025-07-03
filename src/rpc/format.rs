@@ -1,6 +1,4 @@
 use crate::net::headers::{Accept, ContentType};
-use crate::rpc::failure::Failure;
-use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use axum::response::IntoResponse;
 use axum::response::Response as AxumResponse;
@@ -9,27 +7,31 @@ use http::header::{CONTENT_TYPE, HeaderValue};
 use surrealdb::rpc::RpcError;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::request::Request;
+use surrealdb_core::dbs::Failure;
+use surrealdb_core::rpc::Response;
 
-impl From<&Accept> for Format {
-	fn from(value: &Accept) -> Self {
+impl TryFrom<&Accept> for Format {
+	type Error = anyhow::Error;
+
+	fn try_from(value: &Accept) -> Result<Self, Self::Error> {
 		match value {
-			Accept::TextPlain => Format::Unsupported,
-			Accept::ApplicationJson => Format::Json,
-			Accept::ApplicationCbor => Format::Cbor,
-			Accept::ApplicationOctetStream => Format::Unsupported,
-			Accept::Surrealdb => Format::Bincode,
+			Accept::ApplicationJson => Ok(Format::Json),
+			Accept::Surrealdb => Ok(Format::Protobuf),
+			unknown => Err(anyhow::anyhow!("Unsupported Accept format: {}", unknown.to_string())),
 		}
 	}
 }
 
-impl From<&ContentType> for Format {
-	fn from(value: &ContentType) -> Self {
+impl TryFrom<&ContentType> for Format {
+	type Error = anyhow::Error;
+
+	fn try_from(value: &ContentType) -> Result<Self, Self::Error> {
 		match value {
-			ContentType::TextPlain => Format::Unsupported,
-			ContentType::ApplicationJson => Format::Json,
-			ContentType::ApplicationCbor => Format::Cbor,
-			ContentType::ApplicationOctetStream => Format::Unsupported,
-			ContentType::Surrealdb => Format::Bincode,
+			ContentType::ApplicationJson => Ok(Format::Json),
+			ContentType::Surrealdb => Ok(Format::Protobuf),
+			unsupported => {
+				Err(anyhow::anyhow!("Unsupported Content-Type format: {}", unsupported.to_string()))
+			}
 		}
 	}
 }
@@ -38,10 +40,7 @@ impl From<&Format> for ContentType {
 	fn from(format: &Format) -> Self {
 		match format {
 			Format::Json => ContentType::ApplicationJson,
-			Format::Cbor => ContentType::ApplicationCbor,
-			Format::Unsupported => ContentType::ApplicationOctetStream,
-			Format::Bincode => ContentType::Surrealdb,
-			_ => ContentType::TextPlain,
+			Format::Protobuf => ContentType::Surrealdb,
 		}
 	}
 }
@@ -57,7 +56,7 @@ impl WsFormat for Format {
 	/// Process a WebSocket RPC request
 	fn req_ws(&self, msg: Message) -> Result<Request, Failure> {
 		let val = msg.into_data();
-		self.req(val).map_err(Into::into)
+		self.req(&val).map_err(Into::into)
 	}
 	/// Process a WebSocket RPC response
 	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
@@ -84,7 +83,7 @@ pub trait HttpFormat {
 impl HttpFormat for Format {
 	/// Process a HTTP RPC request
 	fn req_http(&self, body: Bytes) -> Result<Request, RpcError> {
-		self.req(body)
+		self.req(&body)
 	}
 	/// Process a HTTP RPC response
 	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {

@@ -1,30 +1,30 @@
-use crate::api::Connection;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::method::BoxFuture;
 use crate::api::method::Cancel;
 use crate::api::method::Commit;
+use crate::method::Query;
+use crate::opt;
+use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::ops::Deref;
+use surrealdb_core::dbs::Variables;
 use surrealdb_core::sql::statements::BeginStatement;
 
 /// A beginning of a transaction
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Begin<C: Connection> {
-	pub(super) client: Surreal<C>,
+pub struct Begin {
+	pub(super) client: Surreal,
 }
 
-impl<C> IntoFuture for Begin<C>
-where
-	C: Connection,
-{
-	type Output = Result<Transaction<C>>;
+impl IntoFuture for Begin {
+	type Output = Result<Transaction>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(BeginStatement::default()).await?;
+			self.client.query(BeginStatement::default().to_string()).await?;
 			Ok(Transaction {
 				client: self.client,
 			})
@@ -35,34 +35,28 @@ where
 /// An ongoing transaction
 #[derive(Debug)]
 #[must_use = "transactions must be committed or cancelled to complete them"]
-pub struct Transaction<C: Connection> {
-	client: Surreal<C>,
+pub struct Transaction {
+	client: Surreal,
 }
 
-impl<C> Transaction<C>
-where
-	C: Connection,
-{
+impl Transaction {
 	/// Creates a commit future
-	pub fn commit(self) -> Commit<C> {
+	pub fn commit(self) -> Commit {
 		Commit {
 			client: self.client,
 		}
 	}
 
 	/// Creates a cancel future
-	pub fn cancel(self) -> Cancel<C> {
+	pub fn cancel(self) -> Cancel {
 		Cancel {
 			client: self.client,
 		}
 	}
 }
 
-impl<C> Deref for Transaction<C>
-where
-	C: Connection,
-{
-	type Target = Surreal<C>;
+impl Deref for Transaction {
+	type Target = Surreal;
 
 	fn deref(&self) -> &Self::Target {
 		&self.client

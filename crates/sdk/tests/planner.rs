@@ -498,7 +498,7 @@ async fn select_with_no_index_unary_operator() -> Result<()> {
 		.execute("SELECT * FROM table WITH NOINDEX WHERE !param.subparam EXPLAIN", &ses, None)
 		.await?;
 	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -533,7 +533,7 @@ async fn select_unsupported_unary_operator() -> Result<()> {
 	let mut res =
 		dbs.execute("SELECT * FROM table WHERE !param.subparam EXPLAIN", &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -1127,7 +1127,7 @@ async fn select_with_idiom_param_value() -> Result<()> {
 	let mut res = dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	skip_ok(&mut res, 5)?;
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -1425,7 +1425,7 @@ async fn select_with_datetime_value() -> Result<()> {
 	skip_ok(&mut res, 4)?;
 
 	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 				{
@@ -1451,7 +1451,7 @@ async fn select_with_datetime_value() -> Result<()> {
 	}
 
 	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 				{
@@ -1488,7 +1488,7 @@ async fn select_with_uuid_value() -> Result<()> {
 	skip_ok(&mut res, 3)?;
 
 	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 				{
@@ -1514,7 +1514,7 @@ async fn select_with_uuid_value() -> Result<()> {
 	}
 
 	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 				{
@@ -1549,7 +1549,7 @@ async fn select_with_in_operator() -> Result<()> {
 	skip_ok(&mut res, 3)?;
 
 	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 				{
@@ -1575,7 +1575,7 @@ async fn select_with_in_operator() -> Result<()> {
 	}
 
 	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 				{
@@ -1609,12 +1609,12 @@ async fn select_with_in_operator_uniq_index() -> Result<()> {
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 2)?;
 
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(r#"[]"#);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	for _ in 0..4 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 			{
@@ -1625,7 +1625,7 @@ async fn select_with_in_operator_uniq_index() -> Result<()> {
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	}
 
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -1774,7 +1774,7 @@ async fn select_with_record_id_link_no_index() -> Result<()> {
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 6)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{ "id": i:A, "t": t:1 },
@@ -1783,7 +1783,7 @@ async fn select_with_record_id_link_no_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -1835,7 +1835,7 @@ async fn select_with_record_id_link_index() -> Result<()> {
 			]"#,
 	);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 					{
@@ -1865,7 +1865,7 @@ async fn select_with_record_id_link_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
 	//
 	Ok(())
@@ -1900,7 +1900,7 @@ async fn select_with_record_id_link_unique_index() -> Result<()> {
 			]"#,
 	);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 					{
@@ -1930,7 +1930,7 @@ async fn select_with_record_id_link_unique_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
 	//
 	Ok(())
@@ -1964,7 +1964,7 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<()> {
 			]"#,
 	);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 					{
@@ -1997,7 +1997,7 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
 	//
 	Ok(())
@@ -2024,7 +2024,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 	assert_eq!(res.len(), 9);
 	skip_ok(&mut res, 7)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -2054,7 +2054,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(r#"[{ "id": i:A, "t": t:1}]"#);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
@@ -2081,7 +2081,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 6)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 					{
@@ -2101,7 +2101,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(r#"[{ "id": i:A, "t": t:1}]"#);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
@@ -2145,10 +2145,10 @@ async fn select_with_record_id_index() -> Result<()> {
 	skip_ok(&mut res, 2)?;
 	//
 	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", expected), "{t}");
 		//
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 				{
@@ -2171,10 +2171,10 @@ async fn select_with_record_id_index() -> Result<()> {
 	//
 	skip_ok(&mut res, 1)?;
 	// CONTAINS
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
 	// CONTAINS EXPLAIN
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -2198,10 +2198,10 @@ async fn select_with_record_id_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	// CONTAINSANY
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
 	// CONTAINSANY EXPLAIN
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -2227,10 +2227,10 @@ async fn select_with_record_id_index() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	// IN
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
 	// IN EXPLAIN
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -2276,7 +2276,7 @@ async fn select_with_exact_operator() -> Result<()> {
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 4)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -2288,7 +2288,7 @@ async fn select_with_exact_operator() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -2313,7 +2313,7 @@ async fn select_with_exact_operator() -> Result<()> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -2325,7 +2325,7 @@ async fn select_with_exact_operator() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 				{
@@ -2380,7 +2380,7 @@ async fn select_with_non_boolean_expression() -> Result<()> {
 	skip_ok(&mut res, 5)?;
 	//
 	for i in 0..5 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 				{
@@ -2391,7 +2391,7 @@ async fn select_with_non_boolean_expression() -> Result<()> {
 		);
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
 		//
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = SqlValue::parse(
 			r#"[
 					{

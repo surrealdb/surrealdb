@@ -129,3 +129,13 @@ pub static GLOBAL_BUCKET: LazyLock<Option<String>> =
 /// Whether to enforce a global bucket for file data (default: false)
 pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_GLOBAL_BUCKET_ENFORCED", bool, false);
+
+/// The version identifier of this build
+pub static PKG_VERSION: LazyLock<String> =
+	LazyLock::new(|| match option_env!("SURREAL_BUILD_METADATA") {
+		Some(metadata) if !metadata.trim().is_empty() => {
+			let version = env!("CARGO_PKG_VERSION");
+			format!("{version}+{metadata}")
+		}
+		_ => env!("CARGO_PKG_VERSION").to_owned(),
+	});

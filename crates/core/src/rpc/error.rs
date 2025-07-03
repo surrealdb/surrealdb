@@ -7,8 +7,8 @@ use crate::err;
 pub enum RpcError {
 	#[error("Parse error")]
 	ParseError,
-	#[error("Invalid request")]
-	InvalidRequest,
+	#[error("Invalid request: {0}")]
+	InvalidRequest(String),
 	#[error("Method not found")]
 	MethodNotFound,
 	#[error("Method not allowed")]

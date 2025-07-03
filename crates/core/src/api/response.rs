@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use http::{
 	HeaderMap, StatusCode,
 	header::{ACCEPT, CONTENT_TYPE},
@@ -6,7 +8,6 @@ use http::{
 use crate::{
 	err::Error,
 	expr::{Object, Value},
-	rpc::format::Format,
 };
 
 use super::{convert, err::ApiError, invocation::ApiInvocation};
@@ -83,13 +84,19 @@ impl TryInto<Value> for ApiResponse {
 	}
 }
 
-pub enum ResponseInstruction {
-	Native,
+/// The format in which the response should be returned.
+pub enum ResponseFormat {
+	/// Extracts the Value and either returns it as a raw string or bytes, if the return type matches.
 	Raw,
-	Format(Format),
+
+	/// Returns the Value as JSON.
+	Json,
+
+	/// Returns the Value as a Flatbuffers.
+	Ipc,
 }
 
-impl ResponseInstruction {
+impl ResponseFormat {
 	pub fn for_format(invocation: &ApiInvocation) -> Result<Self, Error> {
 		let mime = invocation
 			.headers
@@ -97,14 +104,12 @@ impl ResponseInstruction {
 			.or_else(|| invocation.headers.get(CONTENT_TYPE))
 			.and_then(|v| v.to_str().ok());
 
-		let format = match mime {
-			Some("application/json") => Format::Json,
-			Some("application/cbor") => Format::Cbor,
-			Some("application/surrealdb") => Format::Revision,
+		match mime {
+			Some("text/plain") | Some("application/octet-stream") => Ok(ResponseFormat::Raw),
+			Some("application/json") => Ok(ResponseFormat::Json),
+			Some("application/vnd.surrealdb.flatbuffers") => Ok(ResponseFormat::Ipc),
 			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
 			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
-		};
-
-		Ok(ResponseInstruction::Format(format))
+		}
 	}
 }

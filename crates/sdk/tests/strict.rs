@@ -183,23 +183,23 @@ async fn strict_mode_all_ok() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
@@ -222,18 +222,18 @@ async fn loose_mode_all_ok() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 			accesses: { },
@@ -245,7 +245,7 @@ async fn loose_mode_all_ok() -> Result<()> {
 	).into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 			accesses: {},
@@ -256,7 +256,7 @@ async fn loose_mode_all_ok() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 			accesses: {},
@@ -275,7 +275,7 @@ async fn loose_mode_all_ok() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 			events: {},

@@ -7,7 +7,7 @@ use wiremock::{
 
 use crate::{
 	dbs::{
-		Capabilities, Session,
+		Capabilities, Session, Variables,
 		capabilities::{NetTarget, Targets},
 	},
 	kvs::Datastore,
@@ -44,7 +44,7 @@ async fn test_fetch_get() {
     "#,
 		server.uri()
 	);
-	let res = ds.execute(&sql, &sess, None).await;
+	let res = ds.execute(&sql, &sess, Variables::default()).await;
 
 	let res = res.unwrap().remove(0).output().unwrap();
 
@@ -91,7 +91,7 @@ async fn test_fetch_put() {
     "#,
 		server.uri()
 	);
-	let res = ds.execute(&sql, &sess, None).await;
+	let res = ds.execute(&sql, &sess, Variables::default()).await;
 
 	let res = res.unwrap().remove(0).output().unwrap();
 
@@ -141,7 +141,7 @@ async fn test_fetch_error() {
     "#,
 		server.uri()
 	);
-	let res = ds.execute(&sql, &sess, None).await;
+	let res = ds.execute(&sql, &sess, Variables::default()).await;
 
 	let res = res.unwrap().remove(0).output().unwrap();
 
@@ -189,7 +189,7 @@ async fn test_fetch_denied() {
     "#,
 		server.uri()
 	);
-	let res = ds.execute(&sql, &sess, None).await;
+	let res = ds.execute(&sql, &sess, Variables::default()).await;
 
 	let res = res.unwrap().remove(0).output().unwrap_err();
 

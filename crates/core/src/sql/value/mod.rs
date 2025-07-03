@@ -7,7 +7,6 @@ mod value;
 
 mod clear;
 mod flatten;
-mod into_json;
 mod put;
 mod walk;
 

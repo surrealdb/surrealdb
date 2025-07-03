@@ -74,6 +74,7 @@ surrealml = { workspace = true, optional = true }
 affinitypool = { workspace = true, optional = true }
 #derive.workspace = true
 dmp.workspace = true
+prost.workspace = true
 indxdb = { workspace = true, optional = true }
 js = { workspace = true, features = [
     "array-buffer",
@@ -122,11 +123,13 @@ bcrypt.workspace = true
 bincode.workspace = true
 blake3.workspace = true
 bytes.workspace = true
+capnp.workspace = true
 castaway.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
+flatbuffers.workspace = true
 fst.workspace = true
 futures.workspace = true
 fuzzy-matcher.workspace = true
@@ -166,6 +169,7 @@ sha2.workspace = true
 snap.workspace = true
 strsim.workspace = true
 subtle.workspace = true
+surrealdb-protocol.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -185,11 +189,17 @@ reqwest = { workspace = true, default-features = false, features = [
 ], optional = true }
 tempfile = { workspace = true, optional = true }
 
+[build-dependencies]
+capnpc.workspace = true
+flatbuffers-build.workspace = true
+prost-build.workspace = true
+
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
+prost-build.workspace = true
 rstest.workspace = true
 serial_test.workspace = true
 temp-dir.workspace = true

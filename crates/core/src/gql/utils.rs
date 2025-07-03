@@ -84,7 +84,7 @@ impl GQLTx {
 		let mut ctx = kvs.setup_ctx()?;
 		ctx.set_transaction(tx);
 
-		sess.context(&mut ctx);
+		ctx.attach_session(sess);
 
 		Ok(GQLTx {
 			ctx: ctx.freeze(),

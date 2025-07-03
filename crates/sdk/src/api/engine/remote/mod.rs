@@ -94,17 +94,14 @@
 //! }
 //! ```
 
-#[cfg(feature = "protocol-http")]
-#[cfg_attr(docsrs, doc(cfg(feature = "protocol-http")))]
-pub mod http;
-
 #[cfg(feature = "protocol-ws")]
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
-pub mod ws;
+pub mod grpc;
 
-use crate::api::{self, Result, conn::DbResponse, err::Error, method::query::QueryResult};
-use crate::dbs::{self, Status};
+use crate::api::{self, Result, err::Error};
+use crate::dbs::{self};
 use crate::method::Stats;
+use anyhow::Context;
 use indexmap::IndexMap;
 use revision::Revisioned;
 use revision::revisioned;
@@ -113,7 +110,8 @@ use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::Value;
+use surrealdb_core::protocol::{FromFlatbuffers, ToFlatbuffers};
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;
@@ -170,104 +168,60 @@ mod tests {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct Failure {
-	pub(crate) code: i64,
-	pub(crate) message: String,
-}
+// #[revisioned(revision = 1)]
+// #[derive(Clone, Debug, Deserialize)]
+// pub(crate) struct Failure {
+// 	pub(crate) code: i64,
+// 	pub(crate) message: String,
+// }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Deserialize)]
-pub(crate) enum Data {
-	Other(CoreValue),
-	Query(Vec<dbs::QueryMethodResponse>),
-	Live(dbs::Notification),
-}
+// #[revisioned(revision = 1)]
+// #[derive(Debug, Deserialize)]
+// pub(crate) enum Data {
+// 	Other(Value),
+// 	Query(Vec<dbs::QueryMethodResponse>),
+// 	Live(dbs::Notification),
+// }
 
-type ServerResult = std::result::Result<Data, Failure>;
+// type ServerResult = std::result::Result<Data, Failure>;
 
-impl From<Failure> for Error {
-	fn from(failure: Failure) -> Self {
-		match failure.code {
-			-32600 => Self::InvalidRequest(failure.message),
-			-32602 => Self::InvalidParams(failure.message),
-			-32603 => Self::InternalError(failure.message),
-			-32700 => Self::ParseError(failure.message),
-			_ => Self::Query(failure.message),
-		}
-	}
-}
+// impl From<Failure> for Error {
+// 	fn from(failure: Failure) -> Self {
+// 		match failure.code {
+// 			-32600 => Self::InvalidRequest(failure.message),
+// 			-32602 => Self::InvalidParams(failure.message),
+// 			-32603 => Self::InternalError(failure.message),
+// 			-32700 => Self::ParseError(failure.message),
+// 			_ => Self::Query(failure.message),
+// 		}
+// 	}
+// }
 
-impl DbResponse {
-	fn from_server_result(result: ServerResult) -> Result<Self> {
-		match result.map_err(Error::from)? {
-			Data::Other(value) => Ok(DbResponse::Other(value)),
-			Data::Query(responses) => {
-				let mut map =
-					IndexMap::<usize, (Stats, QueryResult)>::with_capacity(responses.len());
+// #[revisioned(revision = 1)]
+// #[derive(Debug, Deserialize)]
+// pub(crate) struct Response {
+// 	id: Option<Value>,
+// 	pub(crate) result: ServerResult,
+// }
 
-				for (index, response) in responses.into_iter().enumerate() {
-					let stats = Stats {
-						execution_time: duration_from_str(&response.time),
-					};
-					match response.status {
-						Status::Ok => {
-							map.insert(index, (stats, Ok(response.result)));
-						}
-						Status::Err => {
-							map.insert(
-								index,
-								(stats, Err(Error::Query(response.result.as_raw_string()).into())),
-							);
-						}
-						_ => unreachable!(),
-					}
-				}
-
-				Ok(DbResponse::Query(api::Response {
-					results: map,
-					..api::Response::new()
-				}))
-			}
-			// Live notifications don't call this method
-			Data::Live(..) => unreachable!(),
-		}
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Debug, Deserialize)]
-pub(crate) struct Response {
-	id: Option<CoreValue>,
-	pub(crate) result: ServerResult,
-}
-
-fn serialize<V>(value: &V, revisioned: bool) -> Result<Vec<u8>>
+fn serialize_flatbuffers<'a, V, T>(input: &V) -> Result<Vec<u8>>
 where
-	V: serde::Serialize + Revisioned,
+	V: ToFlatbuffers<Output<'a> = ::flatbuffers::WIPOffset<T>>,
 {
-	if revisioned {
-		let mut buf = Vec::new();
-		value.serialize_revisioned(&mut buf)?;
-		return Ok(buf);
+	let mut builder = flatbuffers::FlatBufferBuilder::new();
+	{
+		let input_fb = input.to_fb(&mut builder);
+		builder.finish_minimal(input_fb);
 	}
-	surrealdb_core::expr::serde::serialize(value)
-		.map_err(surrealdb_core::err::Error::from)
-		.map_err(anyhow::Error::new)
+	let finished_data = builder.finished_data();
+	Ok(finished_data.to_vec())
 }
 
-fn deserialize<T>(bytes: &[u8], revisioned: bool) -> Result<T>
+fn deserialize_flatbuffers<'buf, T>(bytes: &'buf [u8]) -> Result<T::Inner>
 where
-	T: Revisioned + DeserializeOwned,
+	T: 'buf + flatbuffers::Follow<'buf> + flatbuffers::Verifiable,
 {
-	if revisioned {
-		let mut read = std::io::Cursor::new(bytes);
-		return T::deserialize_revisioned(&mut read)
-			.map_err(surrealdb_core::err::Error::from)
-			.map_err(anyhow::Error::new);
-	}
-	surrealdb_core::expr::serde::deserialize(bytes)
-		.map_err(surrealdb_core::err::Error::from)
-		.map_err(anyhow::Error::new)
+	let fb = flatbuffers::root::<T>(&bytes).context("Failed to deserialize FlatBuffer")?;
+
+	Ok(fb)
 }

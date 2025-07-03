@@ -20,19 +20,19 @@ async fn query_basic() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("['Tobie']").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::from("Tobie").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::from("Tobie").into();
 	assert_eq!(tmp, val);
 	//
@@ -52,19 +52,19 @@ async fn query_basic_with_modification() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[45062]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::from(45062);
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::from(45062);
 	assert_eq!(tmp, val);
 	//
@@ -84,19 +84,19 @@ async fn query_root_function() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::from("THIS IS A TEST");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::from("this is a test");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::from("this-is-a-test");
 	assert_eq!(tmp, val);
 	//
@@ -117,7 +117,7 @@ async fn query_root_record() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -129,7 +129,7 @@ async fn query_root_record() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -141,7 +141,7 @@ async fn query_root_record() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -155,11 +155,11 @@ async fn query_root_record() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("['Jaime']").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("['Jaime']").into();
 	assert_eq!(tmp, val);
 	//

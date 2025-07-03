@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::result::Results;
+use crate::dbs::iterator::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::expr::{Object, Value};
 use crate::idx::planner::RecordStrategy;

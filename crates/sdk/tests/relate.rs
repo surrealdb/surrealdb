@@ -24,15 +24,15 @@ async fn relate_with_parameters() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -63,15 +63,15 @@ async fn relate_and_overwrite() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -85,7 +85,7 @@ async fn relate_and_overwrite() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -99,7 +99,7 @@ async fn relate_and_overwrite() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -134,13 +134,13 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	assert_eq!(res.len(), 8);
 	//
 	for _ in 0..3 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let val = Value::None;
 		assert_eq!(tmp, val);
 	}
 	//
 	for _ in 0..2 {
-		let tmp = res.remove(0).result?;
+		let tmp = res.remove(0).values?;
 		let Value::Array(v) = tmp else {
 			panic!("response should be array:{tmp:?}")
 		};
@@ -159,11 +159,11 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		assert_eq!(t.tb, "knows");
 	}
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -176,7 +176,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -204,15 +204,15 @@ async fn relate_with_complex_table() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: a:1 }, { id: a:2 }]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: `-`:`-`, in: a:1, out: a:2 }]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ rel: [`-`:`-`] }]").into();
 	assert_eq!(tmp, val);
 	//

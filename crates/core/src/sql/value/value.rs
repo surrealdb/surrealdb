@@ -468,7 +468,7 @@ impl SqlValue {
 	/// This converts certain types like `Thing` into their simpler formats
 	/// instead of the format used internally by SurrealDB.
 	pub fn into_json(self) -> Json {
-		self.into()
+		serde_json::to_value(self).unwrap_or(Json::Null)
 	}
 
 	// -----------------------------------

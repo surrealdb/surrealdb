@@ -1,206 +1,230 @@
-use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
-use crate::ctx::Context;
-#[cfg(storage)]
-use crate::dbs::file::FileCollector;
-use crate::dbs::group::GroupsCollector;
-use crate::dbs::plan::Explanation;
-use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
-use crate::dbs::{Options, Statement};
-use crate::expr::Value;
-use crate::expr::order::Ordering;
-use crate::idx::planner::RecordStrategy;
-use anyhow::Result;
-use reblessive::tree::Stk;
+use std::borrow::Cow;
+use std::time::Duration;
 
-pub(super) enum Results {
-	None,
-	Memory(MemoryCollector),
-	MemoryRandom(MemoryRandom),
-	MemoryOrdered(MemoryOrdered),
-	MemoryOrderedLimit(MemoryOrderedLimit),
-	#[cfg(storage)]
-	File(Box<FileCollector>),
-	Groups(GroupsCollector),
+use crate::dbs::Notification;
+use crate::expr::Value;
+use crate::protocol::ToFlatbuffers;
+
+use crate::rpc::RpcError;
+use anyhow::Context;
+use chrono::DateTime;
+use chrono::TimeZone;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
+use std::error::Error;
+use std::fmt;
+use surrealdb_protocol::proto::prost_types;
+use surrealdb_protocol::proto::rpc::v1;
+
+/// The data returned from a query execution.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ResponseData {
+	/// The query methods, `query` and `query_with` return a `Vec` of responses
+	Results(Vec<QueryResult>),
+	/// Live queries return a notification
+	Notification(Notification),
 }
 
-impl Results {
-	pub(super) fn prepare(
-		&mut self,
-		#[cfg(storage)] ctx: &Context,
-		stm: &Statement<'_>,
-		start: Option<u32>,
-		limit: Option<u32>,
-	) -> Result<Self> {
-		if stm.expr().is_some() && stm.group().is_some() {
-			return Ok(Self::Groups(GroupsCollector::new(stm)));
-		}
-		#[cfg(storage)]
-		if stm.tempfiles() {
-			if let Some(temp_dir) = ctx.temporary_directory() {
-				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
-			}
-		}
-		if let Some(ordering) = stm.order() {
-			return match ordering {
-				Ordering::Random => Ok(Self::MemoryRandom(MemoryRandom::new(None))),
-				Ordering::Order(orders) => {
-					if let Some(limit) = limit {
-						let limit = start.unwrap_or(0) + limit;
-						if limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
-							return Ok(Self::MemoryOrderedLimit(MemoryOrderedLimit::new(
-								limit as usize,
-								orders.clone(),
-							)));
-						}
-					}
-					Ok(Self::MemoryOrdered(MemoryOrdered::new(orders.clone(), None)))
-				}
-			};
-		}
-		Ok(Self::Memory(Default::default()))
+impl ResponseData {
+	pub fn new_from_value(value: Value) -> Self {
+		Self::Results(vec![QueryResult {
+			stats: QueryStats::default(),
+			values: Ok(value.into_vec()),
+		}])
 	}
+}
 
-	pub(super) async fn push(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		stm: &Statement<'_>,
-		rs: RecordStrategy,
-		val: Value,
-	) -> Result<()> {
-		match self {
-			Self::None => {}
-			Self::Memory(s) => {
-				s.push(val);
-			}
-			Self::MemoryOrdered(c) => {
-				c.push(val);
-			}
-			Self::MemoryOrderedLimit(c) => {
-				c.push(val);
-			}
-			Self::MemoryRandom(c) => {
-				c.push(val);
-			}
-			#[cfg(storage)]
-			Self::File(e) => {
-				e.push(val).await?;
-			}
-			Self::Groups(g) => {
-				g.push(stk, ctx, opt, stm, rs, val).await?;
-			}
-		}
-		Ok(())
+impl From<Vec<QueryResult>> for ResponseData {
+	fn from(results: Vec<QueryResult>) -> Self {
+		Self::Results(results)
 	}
+}
 
-	#[cfg(not(target_family = "wasm"))]
-	#[cfg_attr(not(storage), expect(unused_variables))]
-	pub(super) async fn sort(&mut self, orders: &Ordering) -> Result<()> {
-		match self {
-			#[cfg(storage)]
-			Self::File(f) => f.sort(orders),
-			Self::MemoryOrdered(c) => c.sort().await?,
-			Self::MemoryOrderedLimit(c) => c.sort(),
-			Self::MemoryRandom(c) => c.sort(),
-			Self::None | Self::Memory(_) | Self::Groups(_) => {}
-		}
-		Ok(())
+impl From<Notification> for ResponseData {
+	fn from(notification: Notification) -> Self {
+		Self::Notification(notification)
 	}
+}
 
-	#[cfg(target_family = "wasm")]
-	#[cfg_attr(not(storage), expect(unused_variables))]
-	pub(super) fn sort(&mut self, orders: &Ordering) {
-		match self {
-			Self::MemoryOrdered(c) => c.sort(),
-			Self::MemoryOrderedLimit(c) => c.sort(),
-			Self::MemoryRandom(c) => c.sort(),
-			#[cfg(storage)]
-			Self::File(f) => f.sort(orders),
-			Self::None | Self::Groups(_) | Self::Memory(_) => {}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Failure {
+	pub(crate) code: i64,
+	pub(crate) message: Cow<'static, str>,
+}
+
+impl Failure {
+	pub fn new(code: i64, message: impl Into<Cow<'static, str>>) -> Self {
+		Self {
+			code,
+			message: message.into(),
 		}
 	}
 
-	pub(super) async fn start_limit(
-		&mut self,
-		skip: Option<usize>,
-		start: Option<u32>,
-		limit: Option<u32>,
-	) -> Result<()> {
-		let start = if skip.is_some() {
-			None
-		} else {
-			start
-		};
-		match self {
-			Self::Memory(m) => m.start_limit(start, limit),
-			Self::MemoryOrdered(m) => m.start_limit(start, limit),
-			Self::MemoryOrderedLimit(m) => m.start_limit(start, limit),
-			Self::MemoryRandom(c) => c.start_limit(start, limit),
-			#[cfg(storage)]
-			Self::File(f) => f.start_limit(start, limit),
-			Self::None | Self::Groups(_) => {}
+	pub fn code(&self) -> i64 {
+		self.code
+	}
+
+	pub fn message(&self) -> &str {
+		&self.message
+	}
+
+	// TODO: STU: Copy over the error codes from src/rpc/failure.rs
+
+	pub fn query_cancelled() -> Self {
+		Self::new(1000, "Query cancelled")
+	}
+	pub fn query_timeout() -> Self {
+		Self::new(1001, "Query timed out")
+	}
+	pub fn query_not_executed(message: impl Into<Cow<'static, str>>) -> Self {
+		Self::new(1002, message.into())
+	}
+
+	pub fn execution_failed(message: impl Into<Cow<'static, str>>) -> Self {
+		Self::new(1002, message.into())
+	}
+
+	pub fn invalid_control_flow() -> Self {
+		Self::new(1003, "Invalid control flow")
+	}
+
+	pub fn method_not_found() -> Self {
+		Self::new(1004, "Method not found")
+	}
+
+	pub fn custom(message: impl Into<Cow<'static, str>>) -> Self {
+		Self::new(-32000, message.into())
+	}
+}
+
+impl Error for Failure {}
+
+impl fmt::Display for Failure {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "Failure ({}): {}", self.code, self.message)
+	}
+}
+
+impl From<RpcError> for Failure {
+	fn from(err: RpcError) -> Self {
+		Self {
+			code: match err {
+				RpcError::ParseError => -32700,
+				RpcError::InvalidRequest(_) => -32600,
+				RpcError::MethodNotFound => -32601,
+				RpcError::InvalidParams => -32602,
+				RpcError::InternalError(_) => -32603,
+				RpcError::Thrown(_) => 1002, // Custom error code for thrown errors
+				_ => 1002,                   // Default custom error code
+			},
+			message: Cow::Owned(err.to_string()),
 		}
-		Ok(())
 	}
+}
 
-	pub(super) fn is_empty(&self) -> bool {
-		self.len() == 0
-	}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QueryResult {
+	// pub index: u32,
+	pub stats: QueryStats,
+	pub values: Result<Vec<Value>, Failure>,
+}
 
-	pub(super) fn len(&self) -> usize {
-		match self {
-			Self::None => 0,
-			Self::Memory(s) => s.len(),
-			Self::MemoryOrdered(s) => s.len(),
-			Self::MemoryOrderedLimit(s) => s.len(),
-			Self::MemoryRandom(s) => s.len(),
-			#[cfg(storage)]
-			Self::File(e) => e.len(),
-			Self::Groups(g) => g.len(),
+impl QueryResult {
+	pub fn ok(value: Value) -> Self {
+		Self {
+			stats: QueryStats::default(),
+			values: Ok(vec![value]),
 		}
 	}
 
-	pub(super) async fn take(&mut self) -> Result<Vec<Value>> {
-		Ok(match self {
-			Self::Memory(m) => m.take_vec(),
-			Self::MemoryOrdered(c) => c.take_vec(),
-			Self::MemoryOrderedLimit(c) => c.take_vec(),
-			Self::MemoryRandom(c) => c.take_vec(),
-			#[cfg(storage)]
-			Self::File(f) => f.take_vec().await?,
-			Self::None | Self::Groups(_) => vec![],
+	pub fn err(err: Failure) -> Self {
+		Self {
+			stats: QueryStats::default(),
+			values: Err(err),
+		}
+	}
+
+	pub fn new_from_value(value: Value) -> Self {
+		Self {
+			stats: QueryStats::default(),
+			values: Ok(vec![value]),
+		}
+	}
+}
+
+impl Default for QueryResult {
+	fn default() -> Self {
+		Self {
+			stats: QueryStats::default(),
+			values: Ok(vec![]),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct QueryStats {
+	pub start_time: DateTime<Utc>,
+	pub execution_duration: Duration,
+	pub num_records: i64,
+}
+
+impl QueryStats {
+	pub fn from_start_time(start_time: DateTime<Utc>) -> Self {
+		Self {
+			num_records: 0,
+			execution_duration: Utc::now()
+				.signed_duration_since(&start_time)
+				.to_std()
+				.expect("Duration should not be negative"),
+			start_time,
+		}
+	}
+}
+
+impl QueryResult {
+	/// Return the transaction duration as a string
+	pub fn speed(&self) -> String {
+		format!("{:?}", self.stats.execution_duration)
+	}
+
+	/// Retrieve the response as a normal result
+	pub fn output(self) -> Result<Vec<Value>, Failure> {
+		self.values
+	}
+}
+
+impl TryFrom<v1::QueryStats> for QueryStats {
+	type Error = anyhow::Error;
+
+	fn try_from(stats: v1::QueryStats) -> Result<Self, Self::Error> {
+		let start_time = stats.start_time.context("start_time is required")?;
+		let execution_duration =
+			stats.execution_duration.context("execution_duration is required")?;
+		Ok(Self {
+			start_time: DateTime::from_timestamp(start_time.seconds, start_time.nanos as u32)
+				.context("failed to parse start_time")?,
+			execution_duration: Duration::from_nanos(
+				execution_duration.seconds as u64 * 1_000_000_000 + execution_duration.nanos as u64,
+			),
+			num_records: stats.num_records,
 		})
 	}
+}
 
-	pub(super) fn explain(&self, exp: &mut Explanation) {
-		match self {
-			Self::None => exp.add_collector("None", vec![]),
-			Self::Memory(s) => {
-				s.explain(exp);
-			}
-			Self::MemoryOrdered(c) => c.explain(exp),
-			Self::MemoryOrderedLimit(c) => c.explain(exp),
-			Self::MemoryRandom(c) => c.explain(exp),
-			#[cfg(storage)]
-			Self::File(e) => {
-				e.explain(exp);
-			}
-			Self::Groups(g) => {
-				g.explain(exp);
-			}
+impl From<QueryStats> for v1::QueryStats {
+	fn from(stats: QueryStats) -> Self {
+		Self {
+			start_time: Some(prost_types::Timestamp {
+				seconds: stats.start_time.timestamp() as i64,
+				nanos: stats.start_time.timestamp_subsec_nanos() as i32,
+			}),
+			execution_duration: Some(prost_types::Duration {
+				seconds: stats.execution_duration.as_secs() as i64,
+				nanos: stats.execution_duration.subsec_nanos() as i32,
+			}),
+			num_records: stats.num_records,
 		}
-	}
-}
-
-impl Default for Results {
-	fn default() -> Self {
-		Self::None
-	}
-}
-
-impl From<Vec<Value>> for Results {
-	fn from(value: Vec<Value>) -> Self {
-		Results::Memory(value.into())
 	}
 }

@@ -11,9 +11,7 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::Timestamp;
-use crate::dbs::{
-	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
-};
+use crate::dbs::{Capabilities, Executor, Notification, Options, QueryResult, Session, Variables};
 use crate::err::Error;
 use crate::expr::LogicalPlan;
 use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
@@ -778,7 +776,7 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
 		// Check if the session has expired
@@ -850,12 +848,12 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute(
 		&self,
-		txt: &str,
+		sql: &str,
 		sess: &Session,
-		vars: Variables,
-	) -> Result<Vec<Response>> {
+		vars: Option<Variables>,
+	) -> Result<Vec<QueryResult>> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
+		let ast = syn::parse_with_capabilities(sql, &self.capabilities)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -864,9 +862,9 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 		query: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -889,11 +887,13 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
-		// Process all statements
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 
+		// Process all statements
 		let parser_settings = ParserSettings {
 			references_enabled: ctx
 				.get_capabilities()
@@ -991,8 +991,8 @@ impl Datastore {
 		&self,
 		ast: Query,
 		sess: &Session,
-		vars: Variables,
-	) -> Result<Vec<Response>> {
+		vars: Option<Variables>,
+	) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1011,9 +1011,11 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Process all statements
 		Executor::execute(self, ctx.freeze(), opt, ast).await
 	}
@@ -1022,8 +1024,8 @@ impl Datastore {
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Variables,
-	) -> Result<Vec<Response>> {
+		vars: Option<Variables>,
+	) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1042,9 +1044,11 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await
@@ -1069,7 +1073,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(&self, val: Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn compute(
+		&self,
+		val: Value,
+		sess: &Session,
+		vars: Option<Variables>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can compute values when auth is enabled
@@ -1099,9 +1108,11 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
@@ -1145,7 +1156,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(&self, val: &Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn evaluate(
+		&self,
+		val: &Value,
+		sess: &Session,
+		vars: Option<Variables>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
@@ -1165,9 +1181,11 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
@@ -1214,7 +1232,7 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
@@ -1223,7 +1241,7 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<Response>>
+	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{

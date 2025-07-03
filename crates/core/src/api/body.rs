@@ -13,9 +13,8 @@ use crate::err::Error;
 use crate::expr;
 use crate::expr::Bytesize;
 use crate::expr::Value;
-use crate::rpc::format::cbor;
-use crate::rpc::format::json;
-use crate::rpc::format::revision;
+use crate::protocol::FromFlatbuffers;
+use crate::rpc::format::Format;
 
 use super::context::InvocationContext;
 use super::err::ApiError;
@@ -107,14 +106,25 @@ impl ApiBody {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
 
-				let parsed = match content_type {
-					Some("application/json") => json::parse_value(&bytes),
-					Some("application/cbor") => cbor::parse_value(bytes),
-					Some("application/surrealdb") => revision::parse_value(bytes),
-					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
-				};
+				let fmt: Format = content_type
+					.map(|c| c.parse().map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure)))
+					.transpose()?
+					.unwrap_or(Format::Json);
 
-				parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
+				let value = match fmt {
+					Format::Json => serde_json::from_slice(&bytes)
+						.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))?,
+					Format::Protobuf => {
+						todo!("STU: Remove protobuf from here and add back CBOR")
+					}
+				};
+				// let parsed = match content_type {
+				// 	Some("application/flatbuffer") => {
+				// 	},
+				// 	_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
+				// };
+
+				Ok(value)
 			}
 		}
 	}
