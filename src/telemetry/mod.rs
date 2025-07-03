@@ -5,7 +5,7 @@ pub mod traces;
 
 use crate::cli::LogFormat;
 use crate::cli::validator::parser::tracing::CustomFilter;
-use crate::cnf::TOKIO_CONSOLE;
+use crate::cnf::ENABLE_TOKIO_CONSOLE;
 use anyhow::Result;
 use opentelemetry::KeyValue;
 use opentelemetry::global;
@@ -209,12 +209,12 @@ impl Builder {
 		} else {
 			(None, vec![stdout_guard, stderr_guard])
 		};
-		Ok(match (file_layer, *TOKIO_CONSOLE) {
+		Ok(match (file_layer, *ENABLE_TOKIO_CONSOLE) {
 			(Some(file_layer), true) => {
 				// Setup logging layer
 				let registry = registry.with(file_layer);
 				// Create the Tokio Console destination layer
-				let console_layer = console::new();
+				let console_layer = console::new()?;
 				// Setup the Tokio Console layer
 				let registry = registry.with(console_layer);
 				// Return the registry
@@ -228,7 +228,7 @@ impl Builder {
 			}
 			(None, true) => {
 				// Create the Tokio Console destination layer
-				let console_layer = console::new();
+				let console_layer = console::new()?;
 				// Setup the Tokio Console layer
 				let registry = registry.with(console_layer);
 				// Return the registry

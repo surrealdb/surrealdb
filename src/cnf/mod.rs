@@ -136,5 +136,5 @@ pub static PKG_VERSION: LazyLock<String> =
 	});
 
 /// Whether to enable Tokio Console
-pub static TOKIO_CONSOLE: LazyLock<bool> =
+pub static ENABLE_TOKIO_CONSOLE: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ENABLE_TOKIO_CONSOLE", bool, false);
