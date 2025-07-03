@@ -91,6 +91,7 @@ flatbuffers.workspace = true
 futures.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 hyper-util.workspace = true
+http.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
 indexmap = { workspace = true, features = ["serde"] }

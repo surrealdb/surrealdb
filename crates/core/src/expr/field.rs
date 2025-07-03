@@ -23,7 +23,7 @@ pub struct Fields(pub Vec<Field>, pub bool);
 
 impl Fields {
 	/// Create a new `*` field projection
-	pub(crate) fn all() -> Self {
+	pub fn all() -> Self {
 		Self(vec![Field::All], false)
 	}
 	/// Check to see if this field is a `*` projection

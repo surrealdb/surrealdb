@@ -4,7 +4,6 @@ use crate::opt::PatchOp;
 use crate::opt::PatchOps;
 use crate::opt::RangeableResource;
 
-
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
@@ -12,13 +11,13 @@ use crate::api::opt::Resource;
 
 use crate::opt::KeyRange;
 use serde::Serialize;
-use surrealdb_protocol::proto::rpc::v1::UpdateRequest;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Value, to_value as to_core_value};
+use surrealdb_protocol::proto::rpc::v1::UpdateRequest;
 use uuid::Uuid;
 
 /// An update future
@@ -33,7 +32,8 @@ pub struct Update<R: Resource, RT> {
 }
 
 impl<R, RT> WithTransaction for Update<R, RT>
-where 	R: Resource,
+where
+	R: Resource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -99,7 +99,8 @@ where
 // }
 
 impl<R, RT> Update<R, RT>
-where R: Resource,
+where
+	R: Resource,
 	RT: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data
@@ -108,7 +109,6 @@ where R: Resource,
 			Value::None => Data::EmptyExpression,
 			content => Data::ContentExpression(content),
 		};
-
 
 		Self {
 			txn: self.txn,

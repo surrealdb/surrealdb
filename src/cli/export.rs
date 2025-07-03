@@ -3,9 +3,9 @@ use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 use anyhow::Result;
 use clap::Args;
 use futures_util::StreamExt;
+use surrealdb::Surreal;
 use surrealdb::kvs::export::TableConfig;
 use surrealdb::method::{Export, ExportConfig};
-use surrealdb::Surreal;
 use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Args, Debug)]
@@ -102,7 +102,6 @@ pub async fn init(
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
 			CredentialsLevel::Database => client.signin(creds.database()?).await?,
 		};
-
 	} else if token.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		client.authenticate(token.unwrap()).await?;
@@ -132,10 +131,7 @@ pub async fn init(
 	Ok(())
 }
 
-fn apply_config<R>(
-	config: ExportConfigArguments,
-	export: Export<R>,
-) -> Export<R, ExportConfig> {
+fn apply_config<R>(config: ExportConfigArguments, export: Export<R>) -> Export<R, ExportConfig> {
 	let mut export = export.with_config();
 
 	if config.only {

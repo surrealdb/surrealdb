@@ -1,8 +1,8 @@
 use crate::expr::{Object, Uuid, Value};
-use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -43,7 +43,7 @@ impl TryFrom<rpc_proto::Action> for Action {
 
 impl TryFrom<Action> for rpc_proto::Action {
 	type Error = anyhow::Error;
-	
+
 	fn try_from(value: Action) -> Result<Self, Self::Error> {
 		match value {
 			Action::Create => Ok(rpc_proto::Action::Create),

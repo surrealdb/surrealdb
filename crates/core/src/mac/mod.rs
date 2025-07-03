@@ -77,6 +77,20 @@ macro_rules! map {
     }};
 }
 
+/// Creates a new Variables map of key-value pairs.
+///
+/// This macro creates a new Variables map, clones the items
+/// from the secondary map, and inserts additional items to the new map.
+#[macro_export]
+macro_rules! vars {
+    ($($k:expr_2021 $(, if let $grant:pat = $check:expr_2021)? $(, if $guard:expr_2021)? => $v:expr_2021),* $(,)? $( => $x:expr_2021 )?) => {{
+        let mut m = ::std::collections::BTreeMap::new();
+    	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
+		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
+        Variables(m)
+    }};
+}
+
 /// Extends a b-tree map of key-value pairs.
 ///
 /// This macro extends the supplied map, by cloning

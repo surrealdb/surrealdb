@@ -1,8 +1,8 @@
 use super::SignupParams;
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
-use crate::dbs::Session;
 use crate::dbs::capabilities::ExperimentalTarget;
+use crate::dbs::{Session, Variables};
 use crate::err::Error;
 use crate::expr::AccessType;
 use crate::expr::Object;
@@ -56,7 +56,7 @@ pub async fn signup(
 ) -> Result<SignupData> {
 	// Attempt to signup using specified access method
 	// Currently, signup is only supported at the database level
-	super::signup::db_access(kvs, session, namespace, database, access_name, variables).await
+	super::signup::db_access(kvs, session, namespace, database, access_name, Some(variables)).await
 }
 
 pub async fn db_access(
@@ -65,7 +65,7 @@ pub async fn db_access(
 	namespace: String,
 	database: String,
 	access: String,
-	variables: BTreeMap<String, Value>,
+	variables: Option<Variables>,
 ) -> Result<SignupData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;

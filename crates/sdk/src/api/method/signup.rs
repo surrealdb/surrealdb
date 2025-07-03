@@ -6,9 +6,9 @@ use crate::api::method::BoxFuture;
 
 use crate::opt::auth::Jwt;
 use anyhow::Context;
-use surrealdb_protocol::proto::rpc::v1::SignupRequest;
 use std::borrow::Cow;
 use std::future::IntoFuture;
+use surrealdb_protocol::proto::rpc::v1::SignupRequest;
 
 /// A signup future
 #[derive(Debug)]
@@ -18,13 +18,9 @@ pub struct Signup {
 	pub(super) request: SignupRequest,
 }
 
-impl Signup
-{
-	
-}
+impl Signup {}
 
-impl IntoFuture for Signup
-{
+impl IntoFuture for Signup {
 	type Output = Result<Jwt>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 

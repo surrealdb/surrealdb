@@ -1,4 +1,3 @@
-
 #[cfg(feature = "protocol-ws")]
 mod grpc;
 
@@ -14,7 +13,6 @@ mod rocksdb;
 mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
-
 
 use std::str::FromStr;
 
@@ -53,8 +51,7 @@ impl FromStr for Endpoint {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> anyhow::Result<Self> {
-		eprintln!("from_str: {s}");
-        let url = if s == "memory" {
+		let url = if s == "memory" {
 			Url::parse("memory://memory")?
 		} else {
 			Url::parse(s)?
@@ -66,7 +63,7 @@ impl FromStr for Endpoint {
 
 impl TryFrom<&str> for Endpoint {
 	type Error = anyhow::Error;
-	
+
 	fn try_from(s: &str) -> anyhow::Result<Self> {
 		Self::from_str(s)
 	}
@@ -79,7 +76,6 @@ impl TryFrom<String> for Endpoint {
 		Self::from_str(&s)
 	}
 }
-
 
 /// A trait for converting inputs to a server address object
 pub trait IntoEndpoint<Scheme>: into_endpoint::Sealed<Scheme> {}
@@ -194,7 +190,12 @@ impl EndpointKind {
 	pub fn is_remote(&self) -> bool {
 		matches!(
 			self,
-			EndpointKind::Http | EndpointKind::Https | EndpointKind::Ws | EndpointKind::Wss | EndpointKind::Grpc | EndpointKind::Grpcs
+			EndpointKind::Http
+				| EndpointKind::Https
+				| EndpointKind::Ws
+				| EndpointKind::Wss
+				| EndpointKind::Grpc
+				| EndpointKind::Grpcs
 		)
 	}
 

@@ -19,6 +19,12 @@ use super::FlowResultExt as _;
 pub struct Start(pub Value);
 
 impl Start {
+	/// Create a new start expression.
+	pub fn new(value: Value) -> Self {
+		Self(value)
+	}
+
+	/// Process the start expression.
 	pub(crate) async fn process(
 		&self,
 		stk: &mut Stk,
@@ -50,5 +56,17 @@ impl Start {
 impl fmt::Display for Start {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "START {}", self.0)
+	}
+}
+
+impl From<i64> for Start {
+	fn from(value: i64) -> Self {
+		Self(Value::Number(Number::Int(value)))
+	}
+}
+
+impl From<u64> for Start {
+	fn from(value: u64) -> Self {
+		Self(Value::Number(Number::Int(value as i64)))
 	}
 }

@@ -89,7 +89,6 @@ impl TryFromValue for String {
 			.into()),
 		}
 	}
-		
 }
 
 impl TryFromValue for uuid::Uuid {
@@ -367,6 +366,10 @@ impl Value {
 	/// Create an empty Object Value
 	pub fn base() -> Self {
 		Value::Object(Object::default())
+	}
+
+	pub fn uuid(uuid: uuid::Uuid) -> Self {
+		Value::Uuid(Uuid(uuid))
 	}
 
 	// -----------------------------------

@@ -14,7 +14,6 @@ use std::fmt;
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
 	#[revision(start = 2)]

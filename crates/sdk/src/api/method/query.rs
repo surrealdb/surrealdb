@@ -1,5 +1,5 @@
+use super::live;
 use super::transaction::WithTransaction;
-use super::{live};
 use crate::Surreal;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -20,21 +20,21 @@ use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::dbs::{self, Failure};
 use surrealdb_core::dbs::ResponseData;
 use surrealdb_core::dbs::Variables;
+use surrealdb_core::dbs::{self, Failure};
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Object, Value, to_value as to_core_value};
 use surrealdb_core::rpc;
 use surrealdb_core::sql;
 use surrealdb_core::sql::Statement;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;
 
 /// A query future
@@ -47,16 +47,14 @@ pub struct Query {
 	pub(crate) variables: Variables,
 }
 
-impl WithTransaction for Query
-{
+impl WithTransaction for Query {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
 		self
 	}
 }
 
-impl Query
-{
+impl Query {
 	pub fn new(client: Surreal) -> Self {
 		Query {
 			txn: None,
@@ -81,20 +79,23 @@ where
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
-		
 		Box::pin(async move {
 			let mut client = self.client.client.clone();
 			let client = &mut client;
 			let query = self.queries.join(";");
-			let variables = self.variables.try_into().context("Failed to convert variables to QueryRequest")?;
+			let variables =
+				self.variables.try_into().context("Failed to convert variables to QueryRequest")?;
 
 			let num_statements = self.queries.len();
 
+			let response = client
+				.query(QueryRequest {
+					query,
+					variables: Some(variables),
+				})
+				.await?;
 
-			let response = client.query(QueryRequest {
-				query,
-				variables: Some(variables),
-			}).await?;
+			let response = response.into_inner();
 			todo!("STU: Query::into_future");
 
 			// let mut stream = response.into_inner();
@@ -135,8 +136,7 @@ where
 	}
 }
 
-impl Query
-{
+impl Query {
 	/// Chains a query onto an existing query
 	pub fn query(mut self, surql: impl Into<String>) -> Self {
 		let client = self.client.clone();
@@ -219,7 +219,6 @@ pub struct QueryResult<R> {
 	pub stats: dbs::QueryStats,
 	pub result: Result<R>,
 }
-
 
 // impl<R> futures::Stream for QueryStream<Notification<R>>
 // where

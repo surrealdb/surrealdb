@@ -13,8 +13,6 @@ use crate::expr::{
 };
 use crate::iam::{AccessMethod, SigninParams, SignupParams};
 
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
@@ -37,6 +35,8 @@ use crate::{
 	rpc::args::Take,
 };
 use anyhow::Result;
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocolV3: RpcContext {
@@ -253,7 +253,7 @@ pub trait RpcProtocolV3: RpcContext {
 			..Default::default()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().process_plan(plan, &self.session(), Variables::default()).await?;
+		let mut res = self.kvs().process_plan(plan, &self.session(), None).await?;
 		// Extract the first value from the result
 		Ok(ResponseData::Results(res))
 	}
@@ -275,11 +275,11 @@ pub trait RpcProtocolV3: RpcContext {
 		};
 
 		// Specify the query parameters
-		let vars = map! {
+		let vars = Variables(map! {
 			key.to_string() => Value::None,
-		};
+		});
 		// Compute the specified parameter
-		match self.kvs().compute(value.into(), &self.session(), vars).await? {
+		match self.kvs().compute(value.into(), &self.session(), Some(vars)).await? {
 			// Remove the variable if undefined
 			Value::None => {
 				// Get the context lock
@@ -304,7 +304,7 @@ pub trait RpcProtocolV3: RpcContext {
 				// Clone the parameters
 				let mut session = self.session().as_ref().clone();
 				// Remove the set parameter
-				session.variables.insert(key.to_string(), v);
+				session.variables.insert(key, v);
 				// Store the updated session
 				self.set_session(Arc::new(session));
 				// Drop the mutex guard
@@ -361,10 +361,8 @@ pub trait RpcProtocolV3: RpcContext {
 		let plan = LogicalPlan::Kill(KillStatement {
 			id: Value::Uuid(Uuid(live_uuid)),
 		});
-		// Specify the query parameters
-		let vars = self.session().variables.clone();
 		// Execute the query on the database
-		let mut res = self.kvs().process_plan(plan, &self.session(), vars).await?;
+		let mut res = self.kvs().process_plan(plan, &self.session(), None).await?;
 		// Extract the first query result
 		Ok(ResponseData::Results(res))
 	}
@@ -375,7 +373,7 @@ pub trait RpcProtocolV3: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Specify the query parameters
-		todo!("STU: Implement live queries in v3 protocol");
+		todo!("STU: DELETE");
 		// let mut vars = proto_variables_to_expr_variables(&vars)?;
 		// let vars = mrg! {vars, &self.session().parameters};
 		// // Specify the SQL query string
@@ -423,15 +421,13 @@ pub trait RpcProtocolV3: RpcContext {
 			parallel,
 			explain,
 			tempfiles,
-			mut variables,
+			variables,
 		}: SelectParams,
 	) -> Result<ResponseData, RpcError> {
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
-
-		variables.extend(self.session().variables.clone());
 
 		// Specify the SQL query string
 		let plan = LogicalPlan::Select(SelectStatement {
@@ -447,7 +443,7 @@ pub trait RpcProtocolV3: RpcContext {
 			..Default::default()
 		});
 		// Execute the query on the database
-		let mut res = self.kvs().process_plan(plan, &self.session(), variables).await?;
+		let mut res = self.kvs().process_plan(plan, &self.session(), Some(variables)).await?;
 		// Extract the first query result
 		Ok(ResponseData::Results(res))
 	}
@@ -748,11 +744,9 @@ pub trait RpcProtocolV3: RpcContext {
 		if !self.kvs().allows_query_by_subject(self.session().au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
 		}
-		// Merge the variables with the session variables
-		variables.extend(self.session().variables.clone());
 
 		// Execute the specified query
-		self.query_inner(&query, variables).await
+		self.query_inner(&query, Some(variables)).await
 	}
 
 	// ------------------------------
@@ -934,7 +928,7 @@ pub trait RpcProtocolV3: RpcContext {
 	async fn query_inner(
 		&self,
 		query: &str,
-		vars: BTreeMap<String, Value>,
+		vars: Option<Variables>,
 	) -> Result<ResponseData, RpcError> {
 		// If no live query handler force realtime off
 		if !Self::LQ_SUPPORT && self.session().rt {

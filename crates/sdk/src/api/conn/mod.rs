@@ -26,7 +26,6 @@ pub(crate) use cmd::{Command, LiveQueryParams, Request};
 
 use super::opt::Config;
 
-
 #[derive(Debug, Clone)]
 pub(crate) struct MlExportConfig {
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]

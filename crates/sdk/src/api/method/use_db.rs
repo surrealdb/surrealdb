@@ -18,12 +18,9 @@ pub struct UseDb {
 	pub(super) db: String,
 }
 
-impl UseDb
-{
-}
+impl UseDb {}
 
-impl IntoFuture for UseDb
-{
+impl IntoFuture for UseDb {
 	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -32,10 +29,12 @@ impl IntoFuture for UseDb
 			let mut client = self.client.client.clone();
 			let client = &mut client;
 
-			let response = client.r#use(UseRequest {
-				namespace: self.ns.unwrap_or_default(),
-				database: self.db,
-			}).await?;
+			let response = client
+				.r#use(UseRequest {
+					namespace: self.ns.unwrap_or_default(),
+					database: self.db,
+				})
+				.await?;
 
 			todo!("STUB: UseDb future");
 			Ok(())

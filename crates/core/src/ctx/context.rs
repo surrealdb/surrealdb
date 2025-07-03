@@ -3,7 +3,7 @@ use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::DoneReason;
-use crate::dbs::{Capabilities, Notification};
+use crate::dbs::{Capabilities, Notification, Session, Variables};
 use crate::err::Error;
 use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
@@ -243,6 +243,31 @@ impl MutableContext {
 			ctx.add_timeout(timeout)?;
 		}
 		Ok(ctx)
+	}
+
+	/// Attach a session to the context.
+	///
+	/// This will add the session's values and variables to the context.
+	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
+		self.add_values(session.values());
+		if !session.variables.is_empty() {
+			self.attach_variables(session.variables.clone())?;
+		}
+		Ok(())
+	}
+
+	/// Attach query-specific variables to the context.
+	/// These variables are in supplemental to the session variables.
+	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
+		for (key, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				return Err(Error::InvalidParam {
+					name: key.clone(),
+				});
+			}
+			self.add_value(key, val.into());
+		}
+		Ok(())
 	}
 
 	/// Freezes this context, allowing it to be used as a parent context.

@@ -30,7 +30,8 @@ pub struct Upsert<R: Resource, RT> {
 }
 
 impl<R, RT> WithTransaction for Upsert<R, RT>
-where 	R: Resource,
+where
+	R: Resource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -38,11 +39,7 @@ where 	R: Resource,
 	}
 }
 
-impl<R, RT> Upsert<R, RT>
-where R: Resource,
-{
-
-}
+impl<R, RT> Upsert<R, RT> where R: Resource {}
 
 impl<R, RT> IntoFuture for Upsert<R, RT>
 where
@@ -100,7 +97,8 @@ where
 // }
 
 impl<R, RT> Upsert<R, RT>
-where R: Resource,
+where
+	R: Resource,
 	RT: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data

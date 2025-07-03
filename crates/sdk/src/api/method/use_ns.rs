@@ -18,12 +18,9 @@ pub struct UseNs {
 	pub(super) ns: String,
 }
 
-impl UseNs
-{
-}
+impl UseNs {}
 
-impl UseNs
-{
+impl UseNs {
 	/// Switch to a specific database
 	pub fn use_db(self, db: impl Into<String>) -> UseDb {
 		UseDb {
@@ -34,8 +31,7 @@ impl UseNs
 	}
 }
 
-impl IntoFuture for UseNs
-{
+impl IntoFuture for UseNs {
 	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -44,10 +40,12 @@ impl IntoFuture for UseNs
 			let mut client = self.client.client.clone();
 			let client = &mut client;
 
-			let response = client.r#use(UseRequest {
-				namespace: self.ns,
-				database: String::new(),
-			}).await?;
+			let response = client
+				.r#use(UseRequest {
+					namespace: self.ns,
+					database: String::new(),
+				})
+				.await?;
 
 			Ok(())
 		})

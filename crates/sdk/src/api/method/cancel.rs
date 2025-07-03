@@ -1,4 +1,3 @@
-
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::method::BoxFuture;
@@ -13,8 +12,7 @@ pub struct Cancel {
 	pub(crate) client: Surreal,
 }
 
-impl IntoFuture for Cancel
-{
+impl IntoFuture for Cancel {
 	type Output = Result<Surreal>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 

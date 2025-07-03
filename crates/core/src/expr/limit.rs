@@ -19,6 +19,10 @@ use super::FlowResultExt as _;
 pub struct Limit(pub Value);
 
 impl Limit {
+	pub fn new(value: Value) -> Self {
+		Self(value)
+	}
+
 	pub(crate) async fn process(
 		&self,
 		stk: &mut Stk,
@@ -44,6 +48,18 @@ impl Limit {
 			// A different error occurred
 			Err(e) => Err(e),
 		}
+	}
+}
+
+impl From<i64> for Limit {
+	fn from(value: i64) -> Self {
+		Self(Value::Number(Number::Int(value)))
+	}
+}
+
+impl From<u64> for Limit {
+	fn from(value: u64) -> Self {
+		Self(Value::Number(Number::Int(value as i64)))
 	}
 }
 

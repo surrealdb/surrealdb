@@ -2,7 +2,6 @@ use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::opt::RangeableResource;
 
-
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
@@ -28,7 +27,8 @@ pub struct Select<R: Resource, RT, T = ()> {
 }
 
 impl<R, RT, T> WithTransaction for Select<R, RT, T>
-where 	R: Resource,
+where
+	R: Resource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -36,15 +36,10 @@ where 	R: Resource,
 	}
 }
 
-impl<R, RT, T> Select<R, RT, T>
-where R: Resource,
-{
-}
+impl<R, RT, T> Select<R, RT, T> where R: Resource {}
 
 macro_rules! into_future {
-	($method:ident) => {
-		
-	};
+	($method:ident) => {};
 }
 
 impl<R, RT> IntoFuture for Select<R, RT>
@@ -93,7 +88,8 @@ where
 // }
 
 impl<R, RT> Select<R, RT>
-where R: Resource,
+where
+	R: Resource,
 	RT: TryFromValue,
 {
 	/// Turns a normal select query into a live query

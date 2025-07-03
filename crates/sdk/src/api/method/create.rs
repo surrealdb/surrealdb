@@ -27,7 +27,8 @@ pub struct Create<R: CreatableResource, RT> {
 }
 
 impl<R, RT> WithTransaction for Create<R, RT>
-where	R: CreatableResource,
+where
+	R: CreatableResource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -35,10 +36,7 @@ where	R: CreatableResource,
 	}
 }
 
-impl<R, RT> Create<R, RT>
-where	R: CreatableResource,
-{
-}
+impl<R, RT> Create<R, RT> where R: CreatableResource {}
 
 macro_rules! into_future {
 	($method:ident) => {
@@ -56,19 +54,19 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let client = client.client;
 
-
-				let response = client.create(CreateRequest {
-					txn: txn.map(|id| id.to_string()),
-					what,
-					data,
-				}).await?;
+				let response = client
+					.create(CreateRequest {
+						txn: txn.map(|id| id.to_string()),
+						what,
+						data,
+					})
+					.await?;
 
 				Ok(response.into())
 			})
 		}
 	};
 }
-
 
 impl<R, RT> IntoFuture for Create<R, RT>
 where
@@ -106,7 +104,8 @@ where
 }
 
 impl<R, RT> Create<R, RT>
-where R: CreatableResource,
+where
+	R: CreatableResource,
 	RT: TryFromValue,
 {
 	/// Sets content of a record

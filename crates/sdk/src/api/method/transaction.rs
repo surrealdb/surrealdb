@@ -1,4 +1,3 @@
-
 use crate::api::Surreal;
 use crate::api::method::Cancel;
 use crate::api::method::Commit;
@@ -23,8 +22,7 @@ pub struct Transaction {
 	pub(crate) client: Surreal,
 }
 
-impl Transaction
-{
+impl Transaction {
 	/// Creates a commit future
 	pub fn commit(self) -> Commit {
 		Commit {

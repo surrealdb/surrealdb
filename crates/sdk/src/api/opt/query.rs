@@ -92,7 +92,7 @@ impl query_accessor::Sealed<Value> for usize {
 				}
 
 				Ok(values.pop().unwrap())
-			},
+			}
 			None => Ok(Value::None),
 		}
 	}
@@ -209,9 +209,7 @@ where
 		let mut value = values.pop().unwrap().try_into()?;
 
 		match &mut value {
-			Value::None => {
-				Ok(None)
-			}
+			Value::None => Ok(None),
 			Value::Object(object) => {
 				if object.is_empty() {
 					return Ok(None);

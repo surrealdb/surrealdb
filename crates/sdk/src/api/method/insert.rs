@@ -2,7 +2,6 @@ use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::opt::InsertableResource;
 
-
 use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::err::Error;
@@ -31,14 +30,14 @@ pub struct Insert<R: InsertableResource, RT> {
 }
 
 impl<R, RT> WithTransaction for Insert<R, RT>
-where R: InsertableResource,
+where
+	R: InsertableResource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
 		self
 	}
 }
-
 
 impl<R, RT> IntoFuture for Insert<R, RT>
 where
@@ -71,7 +70,8 @@ where
 }
 
 impl<R, RT> Insert<R, RT>
-where R: InsertableResource,
+where
+	R: InsertableResource,
 	RT: TryFromValue,
 {
 	/// Specifies the data to insert into the table
@@ -90,7 +90,8 @@ where R: InsertableResource,
 }
 
 impl<R, RT> Insert<R, RT>
-where R: InsertableResource,
+where
+	R: InsertableResource,
 	RT: TryFromValue,
 {
 	/// Specifies the data to insert into the table

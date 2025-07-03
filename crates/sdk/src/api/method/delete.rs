@@ -9,12 +9,12 @@ use crate::api::opt::Resource;
 
 use crate::opt::KeyRange;
 use serde::de::DeserializeOwned;
-use surrealdb_protocol::proto::rpc::v1::DeleteRequest;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
+use surrealdb_protocol::proto::rpc::v1::DeleteRequest;
 use uuid::Uuid;
 
 /// A record delete future
@@ -28,7 +28,8 @@ pub struct Delete<R, RT> {
 }
 
 impl<R, RT> WithTransaction for Delete<R, RT>
-where R: Resource,
+where
+	R: Resource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -37,7 +38,8 @@ where R: Resource,
 }
 
 impl<R, RT> Delete<R, RT>
-where R: Resource,
+where
+	R: Resource,
 {
 	/// Converts to an owned type which can easily be moved to a different thread
 	pub fn into_owned(self) -> Delete<R, RT> {
@@ -47,7 +49,6 @@ where R: Resource,
 		}
 	}
 }
-
 
 impl<R, RT> IntoFuture for Delete<R, RT>
 where
@@ -65,14 +66,20 @@ where
 			..
 		} = self;
 		Box::pin(async move {
-			let what = resource.into_values().into_iter().map(TryInto::try_into).collect::<Result<Vec<_>>>()?;
+			let what = resource
+				.into_values()
+				.into_iter()
+				.map(TryInto::try_into)
+				.collect::<Result<Vec<_>>>()?;
 			let client = &mut client.client;
 
-			let response = client.delete(DeleteRequest {
-				txn: txn.map(|id| id.try_into()).transpose()?,
-				what,
-				..Default::default()
-			}).await?;
+			let response = client
+				.delete(DeleteRequest {
+					txn: txn.map(|id| id.try_into()).transpose()?,
+					what,
+					..Default::default()
+				})
+				.await?;
 
 			todo!("STU: Implement DeleteResponse");
 		})

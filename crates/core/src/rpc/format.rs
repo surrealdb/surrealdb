@@ -2,17 +2,8 @@ use std::str::FromStr;
 
 use super::{RpcError, request::Request};
 use crate::protocol::FromFlatbuffers;
-use crate::{
-	dbs::ResponseData,
-	expr::Value,
-	protocol::{
-		ToFlatbuffers,
-	},
-	rpc::Response,
-};
+use crate::{dbs::ResponseData, expr::Value, protocol::ToFlatbuffers, rpc::Response};
 use surrealdb_protocol::proto::v1::Value as ValueProto;
-
-
 
 const FLATBUFFERS_PROTOCOL: &str = "flatbuffers";
 const JSON_PROTOCOL: &str = "json";
@@ -21,7 +12,7 @@ pub const PROTOCOLS: [&str; 2] = [FLATBUFFERS_PROTOCOL, JSON_PROTOCOL];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Format {
-	Json,       // Self describing JSON serialisation
+	Json,     // Self describing JSON serialisation
 	Protobuf, // For full flatbuffer serialisation
 }
 

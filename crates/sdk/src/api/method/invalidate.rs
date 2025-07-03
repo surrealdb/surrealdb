@@ -16,8 +16,7 @@ pub struct Invalidate {
 	pub(super) client: Surreal,
 }
 
-impl IntoFuture for Invalidate
-{
+impl IntoFuture for Invalidate {
 	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 

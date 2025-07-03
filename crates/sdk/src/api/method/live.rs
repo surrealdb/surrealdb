@@ -35,7 +35,6 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 const ID: &str = "id";
 
-
 fn deserialize<R>(notification: CoreNotification) -> Option<Result<crate::Notification<R>>>
 where
 	R: TryFromValue,

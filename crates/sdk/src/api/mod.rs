@@ -1,32 +1,30 @@
 //! Functionality for connecting to local and remote databases
 
 use crate::Result;
-use anyhow::ensure;
 use anyhow::Context;
+use anyhow::ensure;
 use method::BoxFuture;
 use semver::BuildMetadata;
 use semver::Version;
 use semver::VersionReq;
-use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 use std::fmt;
 use std::fmt::Debug;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 use tokio::sync::watch;
 
-use tonic::transport::Uri;
-use hyper_util::rt::TokioIo;
-use tower::service_fn;
 use anyhow::bail;
+use hyper_util::rt::TokioIo;
 use std::collections::HashSet;
-use tonic::codegen::{Body, StdError};
 use tokio_util::bytes::Bytes;
 use tonic::body::BoxBody;
 use tonic::client::GrpcService;
-
-
+use tonic::codegen::{Body, StdError};
+use tonic::transport::Uri;
+use tower::service_fn;
 
 // impl<T> Connection for T
 // where
@@ -38,7 +36,6 @@ use tonic::client::GrpcService;
 // }
 
 // impl Connection for tokio::io::DuplexStream {}
-
 
 macro_rules! transparent_wrapper{
 	(
@@ -165,7 +162,6 @@ type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>)
 
 const SUPPORTED_VERSIONS: (&str, &str) = (">=1.2.0, <4.0.0", "20230701.55918b7c");
 
-
 // /// The future returned when creating a new SurrealDB instance
 // #[derive(Debug)]
 // #[must_use = "futures do nothing unless you `.await` or poll them"]
@@ -280,10 +276,8 @@ pub(crate) enum ExtraFeatures {
 	LiveQueries,
 }
 
-
 #[cfg(not(target_family = "wasm"))]
 type Channel = tonic::transport::Channel;
-
 
 /// A database client instance for embedded or remote databases.
 ///
@@ -291,15 +285,12 @@ type Channel = tonic::transport::Channel;
 /// for tips on how to optimize performance for the client when working
 /// with embedded instances.
 #[derive(Clone)]
-pub struct Surreal
-{
+pub struct Surreal {
 	client: SurrealDbServiceClient<Channel>,
 	endpoint: Endpoint,
 }
 
-impl Surreal
-{
-
+impl Surreal {
 	/// Connects to a local or remote database endpoint
 	///
 	/// # Examples
@@ -319,15 +310,17 @@ impl Surreal
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn new(dst: Channel, endpoint: Endpoint) -> Self
-	{
+	pub fn new(dst: Channel, endpoint: Endpoint) -> Self {
 		Self {
 			client: SurrealDbServiceClient::new(dst),
 			endpoint,
 		}
 	}
 
-	pub async fn connect(endpoint: impl TryInto<Endpoint, Error = anyhow::Error>, capacity: usize) -> Result<Self> {
+	pub async fn connect(
+		endpoint: impl TryInto<Endpoint, Error = anyhow::Error>,
+		capacity: usize,
+	) -> Result<Self> {
 		let endpoint = endpoint.try_into().context("Failed to parse endpoint")?;
 		let config = endpoint.config.clone();
 		let mut features: HashSet<ExtraFeatures> = HashSet::new();
@@ -417,9 +410,12 @@ impl Surreal
 				bail!("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned());
 			}
 
-			opt::EndpointKind::Http | opt::EndpointKind::Https |
-			opt::EndpointKind::Ws | opt::EndpointKind::Wss |
-			opt::EndpointKind::Grpc | opt::EndpointKind::Grpcs => {
+			opt::EndpointKind::Http
+			| opt::EndpointKind::Https
+			| opt::EndpointKind::Ws
+			| opt::EndpointKind::Wss
+			| opt::EndpointKind::Grpc
+			| opt::EndpointKind::Grpcs => {
 				#[cfg(feature = "protocol-ws")]
 				{
 					// features.insert(ExtraFeatures::LiveQueries);
@@ -450,7 +446,6 @@ impl Surreal
 					// 	socket,
 					// 	route_rx,
 					// ));
-
 
 					let channel = tonic::transport::Endpoint::new(endpoint.url.to_string())?
 						.connect()
@@ -493,10 +488,8 @@ impl Surreal
 	}
 }
 
-impl Debug for Surreal
-{
+impl Debug for Surreal {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("Surreal")
-			.finish()
+		f.debug_struct("Surreal").finish()
 	}
 }

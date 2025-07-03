@@ -18,9 +18,7 @@ pub struct Set {
 	pub(super) value: Value,
 }
 
-
-impl IntoFuture for Set
-{
+impl IntoFuture for Set {
 	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -29,10 +27,12 @@ impl IntoFuture for Set
 			let mut client = self.client.client.clone();
 			let client = &mut client;
 
-			let response = client.set(SetRequest {
-				key: self.key,
-				value: Some(self.value.try_into()?),
-			}).await?;
+			let response = client
+				.set(SetRequest {
+					key: self.key,
+					value: Some(self.value.try_into()?),
+				})
+				.await?;
 
 			todo!("STUB: Set future");
 		})

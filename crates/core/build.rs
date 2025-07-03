@@ -1,4 +1,3 @@
-
 fn main() {
 	if cfg!(target_family = "wasm") {
 		println!("cargo:rustc-cfg=wasm");
@@ -14,5 +13,4 @@ fn main() {
 		println!("cargo:rustc-cfg=storage");
 		println!("cargo::rustc-check-cfg=cfg(storage)");
 	}
-
 }

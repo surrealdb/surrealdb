@@ -1,20 +1,31 @@
 use crate::{
 	api::{
-		conn, method::BoxFuture, opt::{Endpoint, EndpointKind}, ExtraFeatures, Result, Surreal
+		ExtraFeatures, Result, Surreal, conn,
+		method::BoxFuture,
+		opt::{Endpoint, EndpointKind},
 	},
-	engine::{local::grpc::{ConnectionsState, SurrealDBGrpcService}, tasks},
-	opt::{auth::Root, WaitFor},
+	engine::{
+		local::{
+			grpc::{ConnectionsState, SurrealDBGrpcService},
+			middleware::SessionManagementLayer,
+		},
+		tasks,
+	},
+	opt::{WaitFor, auth::Root},
 };
 use async_channel::{Receiver, Sender};
 use futures::{StreamExt, stream::poll_fn};
-use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::SurrealDbServiceServer;
 use std::{
 	collections::{BTreeMap, HashMap, HashSet},
 	sync::{Arc, atomic::AtomicI64},
 	task::Poll,
 };
 use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
-use tokio::{io::DuplexStream, sync::{watch, RwLock}};
+use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::SurrealDbServiceServer;
+use tokio::{
+	io::DuplexStream,
+	sync::{RwLock, watch},
+};
 use tokio_util::sync::CancellationToken;
 
 pub(crate) async fn serve(
@@ -23,10 +34,8 @@ pub(crate) async fn serve(
 	// The address of the database to connect to. This will be a URL when running as a remote instance and a path when running locally.
 	address: Endpoint,
 ) -> Result<()> {
-
 	let id = uuid::Uuid::new_v4();
 	let session = Session::default().with_rt(true);
-	
 
 	let configured_root = match address.config.auth {
 		Level::Root => Some(Root {
@@ -63,22 +72,22 @@ pub(crate) async fn serve(
 	let canceller = CancellationToken::new();
 	let shutdown = CancellationToken::new();
 
+	let service = SurrealDbServiceServer::new(SurrealDBGrpcService::new(
+		id,
+		Arc::new(kvs),
+		state,
+		canceller,
+		shutdown,
+	));
 
 	let server_task = tokio::spawn(async move {
 		tonic::transport::Server::builder()
-			.add_service(SurrealDbServiceServer::new(SurrealDBGrpcService::new(
-				id,
-				session,
-				Arc::new(kvs),
-				state,
-				canceller,
-				shutdown,
-			)))
+			.layer(SessionManagementLayer {})
+			.add_service(service)
 			.serve_with_incoming(tokio_stream::once(Ok::<_, std::io::Error>(channel)))
 			.await
 	});
 	todo!("STU: Implement local native router");
-	
 
 	// let kvs = match address.config.capabilities.allows_live_query_notifications() {
 	// 	true => kvs.with_notifications(),

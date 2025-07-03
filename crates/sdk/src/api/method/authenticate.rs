@@ -21,9 +21,12 @@ impl IntoFuture for Authenticate {
 
 	fn into_future(mut self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.client.authenticate(AuthenticateRequest {
-				token: self.token.0,
-			}).await?;
+			self.client
+				.client
+				.authenticate(AuthenticateRequest {
+					token: self.token.0,
+				})
+				.await?;
 			Ok(())
 		})
 	}

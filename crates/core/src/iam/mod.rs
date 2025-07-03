@@ -1,3 +1,4 @@
+use anyhow::Context;
 pub use entities::Level;
 use thiserror::Error;
 
@@ -22,6 +23,8 @@ use crate::dbs::Variables;
 pub use self::auth::*;
 pub use self::entities::*;
 use serde::{Deserialize, Serialize};
+
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -74,9 +77,57 @@ pub struct SignupParams {
 	pub variables: Variables,
 }
 
+impl TryFrom<SignupParams> for rpc_proto::SignupRequest {
+	type Error = anyhow::Error;
+
+	fn try_from(value: SignupParams) -> Result<Self, Self::Error> {
+		Ok(Self {
+			namespace: value.namespace,
+			database: value.database,
+			access_name: value.access_name,
+			variables: Some(value.variables.try_into()?),
+		})
+	}
+}
+
+impl TryFrom<rpc_proto::SignupRequest> for SignupParams {
+	type Error = anyhow::Error;
+
+	fn try_from(value: rpc_proto::SignupRequest) -> Result<Self, Self::Error> {
+		let variables = value.variables.context("variables are required")?;
+		Ok(Self {
+			namespace: value.namespace,
+			database: value.database,
+			access_name: value.access_name,
+			variables: variables.try_into()?,
+		})
+	}
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SigninParams {
 	pub access_method: AccessMethod,
+}
+
+impl TryFrom<SigninParams> for rpc_proto::SigninRequest {
+	type Error = anyhow::Error;
+
+	fn try_from(value: SigninParams) -> Result<Self, Self::Error> {
+		Ok(Self {
+			access_method: Some(value.access_method.try_into()?),
+		})
+	}
+}
+
+impl TryFrom<rpc_proto::SigninRequest> for SigninParams {
+	type Error = anyhow::Error;
+
+	fn try_from(value: rpc_proto::SigninRequest) -> Result<Self, Self::Error> {
+		let access_method = value.access_method.context("access_method is required")?;
+		Ok(Self {
+			access_method: access_method.try_into()?,
+		})
+	}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

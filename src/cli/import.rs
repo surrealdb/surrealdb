@@ -67,7 +67,6 @@ pub async fn init(
 		};
 	} else if token.is_some() && !is_local {
 		client.authenticate(token.unwrap()).await?;
-
 	} else {
 		debug!("Connecting to the database engine without authentication");
 	}

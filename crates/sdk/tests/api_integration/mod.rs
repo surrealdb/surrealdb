@@ -94,7 +94,6 @@ impl<F, Fut, C> CreateDb for F
 where
 	F: Fn() -> Fut,
 	Fut: Future<Output = (SemaphorePermit<'static>, Surreal<C>)>,
-	C
 {
 	type Con = C;
 

@@ -1,6 +1,5 @@
 use crate::Surreal;
 
-
 use crate::api::Result;
 use crate::api::conn::Command;
 
@@ -24,8 +23,7 @@ pub struct InsertRelation<R> {
 	pub(super) response_type: PhantomData<R>,
 }
 
-impl<R> InsertRelation<R>
-{
+impl<R> InsertRelation<R> {
 	pub(crate) fn from_closure<F>(client: Surreal, f: F) -> Self
 	where
 		F: FnOnce() -> Result<Command>,

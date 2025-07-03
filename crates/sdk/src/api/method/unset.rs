@@ -17,13 +17,9 @@ pub struct Unset {
 	pub(super) key: String,
 }
 
-impl Unset
-{
+impl Unset {}
 
-}
-
-impl IntoFuture for Unset
-{
+impl IntoFuture for Unset {
 	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -32,9 +28,11 @@ impl IntoFuture for Unset
 			let mut client = self.client.client.clone();
 			let client = &mut client;
 
-			let response = client.unset(UnsetRequest {
-				key: self.key,
-			}).await?;
+			let response = client
+				.unset(UnsetRequest {
+					key: self.key,
+				})
+				.await?;
 
 			todo!("STUB: Unset future");
 		})

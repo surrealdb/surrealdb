@@ -181,7 +181,11 @@ impl Executor {
 	}
 
 	/// Execute a query not wrapped in a transaction block.
-	async fn execute_bare_statement(&mut self, kvs: &Datastore, stmt: Statement) -> Result<Vec<Value>> {
+	async fn execute_bare_statement(
+		&mut self,
+		kvs: &Datastore,
+		stmt: Statement,
+	) -> Result<Vec<Value>> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
 			None => {}
@@ -205,7 +209,11 @@ impl Executor {
 		}
 	}
 
-	async fn execute_plan_impl(&mut self, kvs: &Datastore, plan: LogicalPlan) -> Result<Vec<Value>> {
+	async fn execute_plan_impl(
+		&mut self,
+		kvs: &Datastore,
+		plan: LogicalPlan,
+	) -> Result<Vec<Value>> {
 		let writeable = plan.writeable();
 		let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
 		let receiver = self.ctx.has_notifications().then(|| {

@@ -15,10 +15,10 @@ use surrealdb_core::expr::{Array, Object, Query, Value};
 use surrealdb_core::expr::{Data, Fields, Values};
 use surrealdb_core::iam::{SigninParams, SignupParams};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use surrealdb_core::protocol::{FromFlatbuffers, ToFlatbuffers};
 #[allow(unused_imports)]
 use surrealdb_core::sql::{Object as SqlObject, Query as SqlQuery, SqlValue};
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use uuid::Uuid;
 
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]

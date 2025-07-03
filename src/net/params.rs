@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::str::FromStr;
 use surrealdb::expr::Value;
+use surrealdb_core::dbs::Variables;
 
 use super::error::ResponseError;
 
@@ -43,21 +44,21 @@ pub struct Params {
 }
 
 impl Params {
-	pub fn parse(self) -> BTreeMap<String, Value> {
+	pub fn parse(self) -> Variables {
 		self.into()
 	}
 }
 
-impl From<Params> for BTreeMap<String, Value> {
-	fn from(v: Params) -> BTreeMap<String, Value> {
+impl From<Params> for Variables {
+	fn from(v: Params) -> Variables {
 		v.inner
 			.into_iter()
 			.map(|(k, v)| {
 				let value = surrealdb::syn::json_legacy_strand(&v)
 					.map(Into::into)
 					.unwrap_or_else(|_| Value::from(v));
-				(k, value)
+				(k, value.into())
 			})
-			.collect::<BTreeMap<_, _>>()
+			.collect()
 	}
 }

@@ -16,12 +16,9 @@ pub struct Version {
 	pub(super) client: Surreal,
 }
 
-impl Version
-{
-}
+impl Version {}
 
-impl IntoFuture for Version
-{
+impl IntoFuture for Version {
 	type Output = Result<semver::Version>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -33,9 +30,7 @@ impl IntoFuture for Version
 			let response = client.version(VersionRequest {}).await?;
 			let response = response.into_inner();
 
-			let version: Value = response.version.context("Expected value in response")?.try_into()?;
-
-			let version = semver::Version::try_from_value(version)?;
+			let version = semver::Version::parse(&response.version)?;
 
 			Ok(version)
 		})

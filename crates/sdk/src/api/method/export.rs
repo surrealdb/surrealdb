@@ -33,8 +33,7 @@ pub struct Export<R, T = ()> {
 	pub(super) export_type: PhantomData<T>,
 }
 
-impl<R> Export<R>
-{
+impl<R> Export<R> {
 	/// Export machine learning model
 	pub fn ml(self, name: &str, version: Version) -> Export<R, Model> {
 		Export {
@@ -64,8 +63,7 @@ impl<R> Export<R>
 	}
 }
 
-impl<R> Export<R, Config>
-{
+impl<R> Export<R, Config> {
 	/// Whether to export users from the database
 	pub fn users(mut self, users: bool) -> Self {
 		if let Some(cfg) = self.db_config.as_mut() {
@@ -146,12 +144,9 @@ impl<R> Export<R, Config>
 	}
 }
 
-impl<R, T> Export<R, T>
-{
-}
+impl<R, T> Export<R, T> {}
 
-impl<T> IntoFuture for Export<PathBuf, T>
-{
+impl<T> IntoFuture for Export<PathBuf, T> {
 	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -182,8 +177,7 @@ impl<T> IntoFuture for Export<PathBuf, T>
 	}
 }
 
-impl<T> IntoFuture for Export<(), T>
-{
+impl<T> IntoFuture for Export<(), T> {
 	type Output = Result<Backup>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 

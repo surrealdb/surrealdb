@@ -93,7 +93,7 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 				// Get a database reference
 				let db = &state.datastore;
 				// Execute the received sql query
-				let _ = match db.execute(sql, &session, Variables::default()).await {
+				let _ = match db.execute(sql, &session, None).await {
 					// Convert the response to JSON
 					Ok(v) => match serde_json::to_string(&v) {
 						// Send the JSON response to the client

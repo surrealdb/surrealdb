@@ -15,10 +15,7 @@ pub struct Health {
 	pub(super) client: Surreal,
 }
 
-impl Health
-{
-
-}
+impl Health {}
 
 impl IntoFuture for Health
 where

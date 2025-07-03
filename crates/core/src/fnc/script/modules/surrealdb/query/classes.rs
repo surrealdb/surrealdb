@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::expr::Value as SurValue;
 use crate::sql;
+use crate::{dbs::Variables, expr::Value as SurValue};
 use js::{
 	Array, Ctx, Exception, FromJs, JsLifetime, Result, Value,
 	class::Trace,
@@ -15,7 +15,7 @@ pub struct Query {
 	#[qjs(skip_trace)]
 	pub(crate) query: SurValue,
 	#[qjs(skip_trace)]
-	pub(crate) vars: BTreeMap<String, SurValue>,
+	pub(crate) vars: Variables,
 }
 
 #[derive(Default, Clone)]
@@ -102,7 +102,7 @@ impl Query {
 				Exception::throw_type(&ctx, &error_text)
 			})?
 			.into();
-		let vars = variables.into_inner().map(|x| x.0).unwrap_or_default();
+		let vars = variables.into_inner().map(|x| Variables(x.0)).unwrap_or_default();
 		Ok(Query {
 			query,
 			vars,

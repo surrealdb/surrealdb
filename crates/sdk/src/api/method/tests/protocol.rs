@@ -32,7 +32,6 @@ pub struct Test;
 // #[derive(Debug, Clone)]
 // pub struct Client(());
 
-
 // impl crate::api::Connection for Client {}
 
 // impl conn::Sealed for Client {

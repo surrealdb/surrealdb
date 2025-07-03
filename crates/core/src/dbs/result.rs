@@ -6,16 +6,16 @@ use crate::expr::Value;
 use crate::protocol::ToFlatbuffers;
 
 use crate::rpc::RpcError;
+use anyhow::Context;
 use chrono::DateTime;
 use chrono::TimeZone;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb_protocol::proto::prost_types;
-use surrealdb_protocol::proto::rpc::v1;
 use std::error::Error;
 use std::fmt;
-use anyhow::Context;
+use surrealdb_protocol::proto::prost_types;
+use surrealdb_protocol::proto::rpc::v1;
 
 /// The data returned from a query execution.
 #[derive(Debug, Serialize, Deserialize)]
@@ -200,10 +200,14 @@ impl TryFrom<v1::QueryStats> for QueryStats {
 
 	fn try_from(stats: v1::QueryStats) -> Result<Self, Self::Error> {
 		let start_time = stats.start_time.context("start_time is required")?;
-		let execution_duration = stats.execution_duration.context("execution_duration is required")?;
+		let execution_duration =
+			stats.execution_duration.context("execution_duration is required")?;
 		Ok(Self {
-			start_time: DateTime::from_timestamp(start_time.seconds, start_time.nanos as u32).context("failed to parse start_time")?,
-			execution_duration: Duration::from_nanos(execution_duration.seconds as u64 * 1_000_000_000 + execution_duration.nanos as u64),
+			start_time: DateTime::from_timestamp(start_time.seconds, start_time.nanos as u32)
+				.context("failed to parse start_time")?,
+			execution_duration: Duration::from_nanos(
+				execution_duration.seconds as u64 * 1_000_000_000 + execution_duration.nanos as u64,
+			),
 			num_records: stats.num_records,
 		})
 	}

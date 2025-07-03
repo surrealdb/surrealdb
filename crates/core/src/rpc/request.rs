@@ -3,9 +3,9 @@ use crate::expr::Duration;
 use crate::expr::{Data, Fetchs, Fields, TryFromValue, Value};
 use crate::iam::AccessMethod;
 use crate::iam::{SigninParams, SignupParams};
-use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use serde::{Deserialize, Serialize};
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 
 use uuid::Uuid;
 

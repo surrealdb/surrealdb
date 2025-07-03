@@ -21,8 +21,7 @@ pub struct Import<T = ()> {
 	pub(super) import_type: PhantomData<T>,
 }
 
-impl Import
-{
+impl Import {
 	/// Import machine learning model
 	pub fn ml(self) -> Import<Model> {
 		Import {
@@ -34,8 +33,7 @@ impl Import
 	}
 }
 
-impl<T> IntoFuture for Import<T>
-{
+impl<T> IntoFuture for Import<T> {
 	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 

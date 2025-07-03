@@ -1,4 +1,3 @@
-
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
@@ -19,13 +18,13 @@ use futures::stream::{SplitSink, SplitStream};
 use prost::Message as _;
 use revision::revisioned;
 use serde::Deserialize;
-use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
 use surrealdb_core::dbs::ResponseData;
 use surrealdb_core::expr::Value;
 use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
+use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -89,9 +88,7 @@ pub(crate) async fn connect(
 	Ok(socket)
 }
 
-pub(crate) async fn run_router(
-	channel: String,
-) {
+pub(crate) async fn run_router(channel: String) {
 	todo!("STU: ")
 
 	// let ping = {

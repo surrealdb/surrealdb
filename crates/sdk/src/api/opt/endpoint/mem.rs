@@ -5,4 +5,3 @@ use crate::api::opt::IntoEndpoint;
 use crate::api::opt::endpoint::into_endpoint;
 use crate::opt::Config;
 use url::Url;
-

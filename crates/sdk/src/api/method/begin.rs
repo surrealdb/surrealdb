@@ -1,4 +1,3 @@
-
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::api::method::BoxFuture;
@@ -19,8 +18,7 @@ pub struct Begin {
 	pub(super) client: Surreal,
 }
 
-impl IntoFuture for Begin
-{
+impl IntoFuture for Begin {
 	type Output = Result<Transaction>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -41,8 +39,7 @@ pub struct Transaction {
 	client: Surreal,
 }
 
-impl Transaction
-{
+impl Transaction {
 	/// Creates a commit future
 	pub fn commit(self) -> Commit {
 		Commit {
@@ -58,8 +55,7 @@ impl Transaction
 	}
 }
 
-impl Deref for Transaction
-{
+impl Deref for Transaction {
 	type Target = Surreal;
 
 	fn deref(&self) -> &Self::Target {

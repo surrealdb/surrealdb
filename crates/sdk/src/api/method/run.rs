@@ -20,9 +20,7 @@ pub struct Run<R> {
 	pub(super) args: Array,
 	pub(super) response_type: PhantomData<R>,
 }
-impl<R> Run<R>
-{
-}
+impl<R> Run<R> {}
 
 impl<R> IntoFuture for Run<R>
 where
@@ -58,8 +56,7 @@ where
 	}
 }
 
-impl<R> Run<R>
-{
+impl<R> Run<R> {
 	/// Supply arguments to the function being run.
 	pub fn args(mut self, args: impl Into<Array>) -> Self {
 		self.args = args.into();

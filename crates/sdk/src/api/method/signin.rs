@@ -19,8 +19,7 @@ pub struct Signin {
 	pub(super) access_method: AccessMethod,
 }
 
-impl IntoFuture for Signin
-{
+impl IntoFuture for Signin {
 	type Output = Result<Jwt>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -33,10 +32,12 @@ impl IntoFuture for Signin
 			let mut client = client.client.clone();
 			let client = &mut client;
 
-			let response = client.signin(SigninRequest {
-				access_method: Some(access_method.try_into()?),
-				..Default::default()
-			}).await?;
+			let response = client
+				.signin(SigninRequest {
+					access_method: Some(access_method.try_into()?),
+					..Default::default()
+				})
+				.await?;
 
 			todo!("STUB: Signin future");
 		})
