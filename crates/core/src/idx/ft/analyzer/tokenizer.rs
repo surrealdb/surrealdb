@@ -5,7 +5,7 @@ use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
 use crate::idx::ft::offsets::{Offset, Position};
 use anyhow::{Result, bail};
 
-pub(in crate::idx) struct Tokens {
+pub(in crate::idx::ft) struct Tokens {
 	/// The input string
 	i: String,
 	/// The final list of tokens
@@ -20,7 +20,7 @@ impl Tokens {
 		}
 	}
 
-	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&'a str> {
+	pub(in crate::idx::ft) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&'a str> {
 		t.get_str(&self.i)
 	}
 
@@ -59,7 +59,7 @@ impl Tokens {
 		})
 	}
 
-	pub(super) fn list(&self) -> &Vec<Token> {
+	pub(in crate::idx::ft) fn list(&self) -> &Vec<Token> {
 		&self.t
 	}
 }
@@ -77,7 +77,7 @@ impl TryFrom<Tokens> for Value {
 }
 
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
-pub(super) enum Token {
+pub(in crate::idx::ft) enum Token {
 	Ref {
 		chars: (Position, Position, Position),
 		bytes: (Position, Position),

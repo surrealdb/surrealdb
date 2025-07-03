@@ -4,6 +4,7 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::kvs::{Transaction, Val};
 use anyhow::Result;
+use revision::revisioned;
 
 pub(super) type Position = u32;
 
@@ -57,6 +58,7 @@ impl Offsets {
 	}
 }
 
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Offset {
 	pub(super) index: u32,
@@ -79,7 +81,7 @@ impl Offset {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub(super) struct OffsetRecords(pub(super) Vec<Offset>);
 
 impl TryFrom<OffsetRecords> for Val {

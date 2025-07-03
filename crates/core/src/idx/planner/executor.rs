@@ -8,13 +8,13 @@ use crate::expr::{
 	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
 };
 use crate::idx::IndexKeyBase;
-use crate::idx::docids::DocIds;
+use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::ft::scorer::BM25Scorer;
+use crate::idx::ft::search::{MatchRef, SearchIndex};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::Terms;
-use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
@@ -73,7 +73,7 @@ pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
 
 pub(super) struct InnerQueryExecutor {
 	table: String,
-	ft_map: HashMap<IndexReference, FtIndex>,
+	ft_map: HashMap<IndexReference, SearchIndex>,
 	mr_entries: HashMap<MatchRef, FtEntry>,
 	exp_entries: HashMap<Arc<Expression>, FtEntry>,
 	it_entries: Vec<IteratorEntry>,
@@ -141,7 +141,7 @@ impl InnerQueryExecutor {
 						Entry::Vacant(e) => {
 							let (ns, db) = opt.ns_db()?;
 							let ikb = IndexKeyBase::new(ns, db, e.key())?;
-							let ft = FtIndex::new(
+							let ft = SearchIndex::new(
 								ctx,
 								opt,
 								p.az.as_str(),
@@ -359,6 +359,9 @@ impl QueryExecutor {
 			Index::Search {
 				..
 			} => self.new_search_index_iterator(irf, io.clone()).await,
+			Index::FullText {
+				..
+			} => self.new_fulltext_index_iterator(irf, io.clone()).await,
 			Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(irf)),
 			Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(irf)),
 		}
@@ -919,6 +922,14 @@ impl QueryExecutor {
 		Ok(None)
 	}
 
+	async fn new_fulltext_index_iterator(
+		&self,
+		_ir: IteratorRef,
+		_io: IndexOption,
+	) -> Result<Option<ThingIterator>> {
+		todo!("new_fulltext_index_iterator")
+	}
+
 	fn new_mtree_index_knn_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
 			if let Some(mte) = self.0.mt_entries.get(exp) {
@@ -1042,7 +1053,7 @@ impl QueryExecutor {
 		}
 	}
 
-	fn get_ft_entry_and_index(&self, match_ref: &Value) -> Option<(&FtEntry, &FtIndex)> {
+	fn get_ft_entry_and_index(&self, match_ref: &Value) -> Option<(&FtEntry, &SearchIndex)> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
 			if let Some(ft) = self.0.ft_map.get(e.0.index_option.ix_ref()) {
 				return Some((e, ft));
@@ -1121,7 +1132,7 @@ struct FtEntry(Arc<Inner>);
 
 struct Inner {
 	index_option: IndexOption,
-	doc_ids: Arc<RwLock<DocIds>>,
+	doc_ids: Arc<RwLock<BTreeDocIds>>,
 	analyzer: Analyzer,
 	query_terms_set: TermsSet,
 	query_terms_list: TermsList,
@@ -1135,7 +1146,7 @@ impl FtEntry {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ft: &FtIndex,
+		ft: &SearchIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
 		if let Matches(qs, _) = io.op() {
@@ -1143,7 +1154,6 @@ impl FtEntry {
 				ft.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let tx = ctx.tx();
 			let terms_docs = Arc::new(ft.get_terms_docs(&tx, &terms_list).await?);
-			drop(tx);
 			Ok(Some(Self(Arc::new(Inner {
 				index_option: io,
 				doc_ids: ft.doc_ids(),

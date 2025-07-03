@@ -3,11 +3,12 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::index::{HnswParams, MTreeParams, SearchParams};
+use crate::expr::index::{FullTextParams, HnswParams, MTreeParams, SearchParams};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Array, Index, Part, Thing, Value};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::FtIndex;
+use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 use crate::kvs::TransactionType;
@@ -49,7 +50,8 @@ impl<'a> IndexOperation<'a> {
 		match &self.ix.index {
 			Index::Uniq => self.index_unique().await,
 			Index::Idx => self.index_non_unique().await,
-			Index::Search(p) => self.index_full_text(stk, p).await,
+			Index::Search(p) => self.index_search(stk, p).await,
+			Index::FullText(p) => self.index_fulltext(stk, p).await,
 			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
 		}
@@ -152,12 +154,12 @@ impl<'a> IndexOperation<'a> {
 		}))
 	}
 
-	async fn index_full_text(&mut self, stk: &mut Stk, p: &SearchParams) -> Result<()> {
+	async fn index_search(&mut self, stk: &mut Stk, p: &SearchParams) -> Result<()> {
 		let (ns, db) = self.opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 
 		let mut ft =
-			FtIndex::new(self.ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
+			SearchIndex::new(self.ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(stk, self.ctx, self.opt, self.rid, n).await?;
@@ -165,6 +167,27 @@ impl<'a> IndexOperation<'a> {
 			ft.remove_document(self.ctx, self.rid).await?;
 		}
 		ft.finish(self.ctx).await
+	}
+
+	async fn index_fulltext(&mut self, stk: &mut Stk, p: &FullTextParams) -> Result<()> {
+		// Build a FullText instance
+		let s = FullTextIndex::new(self.ctx, self.opt, self.ix, p).await?;
+		// Delete the old index data
+		let doc_id = if let Some(o) = self.o.take() {
+			s.remove_content(stk, self.ctx, self.opt, self.ix, self.rid, o).await?
+		} else {
+			None
+		};
+		// Create the new index data
+		if let Some(n) = self.n.take() {
+			s.index_content(stk, self.ctx, self.opt, self.ix, self.rid, n).await?;
+		} else {
+			// It is a deletion, we can remove the doc
+			if let Some(doc_id) = doc_id {
+				s.remove_doc(self.ctx, doc_id).await?;
+			}
+		}
+		Ok(())
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {
