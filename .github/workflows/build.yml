@@ -333,7 +333,7 @@ jobs:
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
-        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        if: ${{ inputs.publish && (matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu') }}
         with:
           aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
@@ -341,7 +341,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        if: ${{ inputs.publish && (matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu') }}
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # (Actions must be pinned by commit hash) v2.0.1
 
       - name: Output package versions
