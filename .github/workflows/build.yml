@@ -216,9 +216,14 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
+              extra_run_args=""
+              if [[ "${{ inputs.publish }}" == "true" ]]; then
+                extra_run_args="${extra_run_args} --pull always"
+              fi
+
               docker run \
                 --rm -t \
-                --pull always \
+                ${extra_run_args} \
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
                 -e RUSTFLAGS="${RUSTFLAGS}" \
@@ -262,9 +267,14 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
+              extra_run_args=""
+              if [[ "${{ inputs.publish }}" == "true" ]]; then
+                extra_run_args="${extra_run_args} --pull always"
+              fi
+
               docker run \
                 --rm -t \
-                --pull always \
+                ${extra_run_args} \
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
                 -e RUSTFLAGS="${RUSTFLAGS}" \
