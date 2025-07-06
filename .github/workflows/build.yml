@@ -93,7 +93,11 @@ jobs:
           # (Actions must be pinned by commit hash) Use the github branch name so we can use modified builders on custom branches
           tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
 
-          echo "name=${{ steps.login-ecr.outputs.registry }}/surrealdb-builder" >> $GITHUB_OUTPUT
+          if [[ "${{ inputs.publish }}" == "true" ]]; then
+            echo "name=${{ steps.login-ecr.outputs.registry }}/surrealdb-builder" >> $GITHUB_OUTPUT
+          else
+            echo "name=surrealdb-builder" >> $GITHUB_OUTPUT
+          fi
           echo "tag=${tag}" >> $GITHUB_OUTPUT
 
       - name: Build & Push builder image
