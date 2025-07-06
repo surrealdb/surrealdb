@@ -65,11 +65,6 @@ jobs:
       tag: ${{ steps.image.outputs.tag }}
     steps:
       - name: Checkout sources
-        if: ${{ inputs.release-branch == '' }}
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # Actions must be pinned by hash
-
-      - name: Checkout sources
-        if: ${{ inputs.release-branch != '' }}
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # Actions must be pinned by hash
         with:
           ref: ${{ inputs.release-branch }}
