@@ -113,7 +113,6 @@ jobs:
             type=registry,ref=${{ steps.image.outputs.name }}:main
           cache-to: type=inline
           push: ${{ inputs.publish }}
-          load: ${{ !inputs.publish }}
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
