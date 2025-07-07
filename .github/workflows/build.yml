@@ -113,7 +113,7 @@ jobs:
             type=registry,ref=${{ steps.image.outputs.name }}:main
           cache-to: type=inline
           push: ${{ inputs.publish }}
-          outputs: ${{ !inputs.publish && 'type=oci,dest=/tmp/surrealdb-builder.zip' || '' }}
+          outputs: ${{ !inputs.publish && 'type=oci,dest=/tmp/surrealdb-builder.tar' || '' }}
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
@@ -123,7 +123,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: surrealdb-builder
-          path: /tmp/surrealdb-builder.zip
+          path: /tmp/surrealdb-builder.tar
 
   build:
     name: Build ${{ matrix.arch }} binary
@@ -228,7 +228,7 @@ jobs:
               if [[ "${{ inputs.publish }}" == "true" ]]; then
                 extra_run_args="${extra_run_args} --pull always"
               else
-                docker load -i /tmp/surrealdb-builder.zip
+                docker load -i /tmp/surrealdb-builder.tar
               fi
 
               docker run \
@@ -281,7 +281,7 @@ jobs:
               if [[ "${{ inputs.publish }}" == "true" ]]; then
                 extra_run_args="${extra_run_args} --pull always"
               else
-                docker load -i /tmp/surrealdb-builder.zip
+                docker load -i /tmp/surrealdb-builder.tar
               fi
 
               docker run \
