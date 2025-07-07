@@ -63,6 +63,8 @@ jobs:
     outputs:
       name: ${{ steps.image.outputs.name }}
       tag: ${{ steps.image.outputs.tag }}
+      dest: ${{ steps.image.outputs.dest }}
+      dest-output: ${{ steps.image.outputs.dest-output }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # Actions must be pinned by hash
@@ -99,6 +101,9 @@ jobs:
             echo "name=surrealdb-builder" >> $GITHUB_OUTPUT
           fi
           echo "tag=${tag}" >> $GITHUB_OUTPUT
+          dest=$(mktemp -d)
+          echo "dest=${dest}" >> $GITHUB_OUTPUT
+          echo "dest-output='type=docker,dest=${dest}'" >> $GITHUB_OUTPUT
 
       - name: Build & Push builder image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
@@ -113,7 +118,7 @@ jobs:
             type=registry,ref=${{ steps.image.outputs.name }}:main
           cache-to: type=inline
           push: ${{ inputs.publish }}
-          outputs: ${{ !inputs.publish && 'type=tar,dest=/tmp/surrealdb-builder.tar' || '' }}
+          outputs: ${{ !inputs.publish && steps.image.outputs.dest-output || '' }}
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
@@ -123,7 +128,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: surrealdb-builder
-          path: /tmp/surrealdb-builder.tar
+          path: ${{ steps.image.outputs.dest }}
           retention-days: 1
 
   build:
@@ -229,7 +234,7 @@ jobs:
               if [[ "${{ inputs.publish }}" == "true" ]]; then
                 extra_run_args="${extra_run_args} --pull always"
               else
-                docker load -i /tmp/surrealdb-builder.tar
+                docker load -i ${{ needs.docker-builder.outputs.dest }}
               fi
 
               docker run \
@@ -282,7 +287,7 @@ jobs:
               if [[ "${{ inputs.publish }}" == "true" ]]; then
                 extra_run_args="${extra_run_args} --pull always"
               else
-                docker load -i /tmp/surrealdb-builder.tar
+                docker load -i ${{ needs.docker-builder.outputs.dest }}
               fi
 
               docker run \
@@ -372,7 +377,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: surrealdb-builder
-          path: /tmp
+          path: ${{ needs.docker-builder.outputs.dest }}
 
       - name: Output package versions
         run: |
