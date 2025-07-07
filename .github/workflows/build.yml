@@ -113,7 +113,7 @@ jobs:
             type=registry,ref=${{ steps.image.outputs.name }}:main
           cache-to: type=inline
           push: ${{ inputs.publish }}
-          outputs: ${{ !inputs.publish && 'type=oci,dest=/tmp/surrealdb-builder.tar' || '' }}
+          outputs: ${{ !inputs.publish && 'type=tar,dest=/tmp/surrealdb-builder.tar' || '' }}
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
@@ -124,6 +124,7 @@ jobs:
         with:
           name: surrealdb-builder
           path: /tmp/surrealdb-builder.tar
+          retention-days: 1
 
   build:
     name: Build ${{ matrix.arch }} binary
