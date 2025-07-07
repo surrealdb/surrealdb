@@ -71,6 +71,7 @@ jobs:
           echo "tag=${tag}" >> $GITHUB_OUTPUT
 
           folder=$(mktemp -d)
+          mkdir -p ${folder}/linux/{amd64,arm64}
           echo "folder=${folder}" >> $GITHUB_OUTPUT
 
   docker-builder:
