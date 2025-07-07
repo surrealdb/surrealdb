@@ -113,9 +113,17 @@ jobs:
             type=registry,ref=${{ steps.image.outputs.name }}:main
           cache-to: type=inline
           push: ${{ inputs.publish }}
+          outputs: ${{ !inputs.publish && 'type=docker,dest=/tmp/surrealdb-builder.tar' || '' }}
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
+
+      - name: Upload builder image
+        if: ${{ !inputs.publish }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: surrealdb-builder
+          path: /tmp/surrealdb-builder.tar
 
   build:
     name: Build ${{ matrix.arch }} binary
@@ -219,6 +227,8 @@ jobs:
               extra_run_args=""
               if [[ "${{ inputs.publish }}" == "true" ]]; then
                 extra_run_args="${extra_run_args} --pull always"
+              else
+                docker load -i /tmp/surrealdb-builder.tar
               fi
 
               docker run \
@@ -270,6 +280,8 @@ jobs:
               extra_run_args=""
               if [[ "${{ inputs.publish }}" == "true" ]]; then
                 extra_run_args="${extra_run_args} --pull always"
+              else
+                docker load -i /tmp/surrealdb-builder.tar
               fi
 
               docker run \
@@ -353,6 +365,13 @@ jobs:
         id: login-ecr
         if: ${{ inputs.publish && (matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu') }}
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # (Actions must be pinned by commit hash) v2.0.1
+
+      - name: Download builder image
+        if: ${{ !inputs.publish }}
+        uses: actions/download-artifact@v4
+        with:
+          name: surrealdb-builder
+          path: /tmp
 
       - name: Output package versions
         run: |
