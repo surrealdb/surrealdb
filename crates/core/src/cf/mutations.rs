@@ -9,7 +9,7 @@ use std::fmt::{self, Display, Formatter};
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of Thing,
@@ -39,7 +39,7 @@ impl From<DefineTableStatement> for Value {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct TableMutations(pub String, pub Vec<TableMutation>);
 
@@ -50,7 +50,7 @@ impl TableMutations {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct DatabaseMutation(pub Vec<TableMutations>);
 
@@ -90,7 +90,7 @@ impl TableMutation {
 						operations
 							.clone()
 							.into_iter()
-							.map(|x| Value::Object(Object::from(x)))
+							.map(|x| Value::Object(x.into_object()))
 							.collect(),
 					)),
 				);

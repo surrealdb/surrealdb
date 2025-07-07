@@ -54,11 +54,12 @@
 //! we encountered a leading token of a compound token it will result in the 'default' compound token.
 
 use self::token_buffer::TokenBuffer;
-use crate::sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid};
+use crate::sql;
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::NumberKind;
 use crate::syn::token::{Span, Token, TokenKind, t};
+use crate::val::{Bytes, Datetime, Duration, File, Strand, Uuid};
 use bytes::BytesMut;
 use reblessive::{Stack, Stk};
 
@@ -68,7 +69,6 @@ mod expression;
 mod function;
 mod glue;
 mod idiom;
-mod json;
 mod kind;
 pub(crate) mod mac;
 mod object;

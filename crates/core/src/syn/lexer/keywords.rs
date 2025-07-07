@@ -291,7 +291,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("ARRAY") => TokenKind::Keyword(Keyword::Array),
 	UniCase::ascii("GEOMETRY") => TokenKind::Keyword(Keyword::Geometry),
 	UniCase::ascii("RECORD") => TokenKind::Keyword(Keyword::Record),
-	UniCase::ascii("FUTURE") => TokenKind::Keyword(Keyword::Future),
 	UniCase::ascii("BOOL") => TokenKind::Keyword(Keyword::Bool),
 	UniCase::ascii("BYTES") => TokenKind::Keyword(Keyword::Bytes),
 	UniCase::ascii("DATETIME") => TokenKind::Keyword(Keyword::Datetime),

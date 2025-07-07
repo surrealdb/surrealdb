@@ -10,7 +10,7 @@ impl Value {
 				// Loop over old keys
 				for (key, _) in a.iter() {
 					if !b.contains_key(key) {
-						let path = Idiom::from(key.clone());
+						let path = Idiom::field(key.clone());
 						chg.put(&path, Value::None);
 					}
 				}
@@ -19,12 +19,12 @@ impl Value {
 					match a.get(key) {
 						// Key did not exist
 						None => {
-							let path = Idiom::from(key.clone());
+							let path = Idiom::field(key.clone());
 							chg.put(&path, val.clone());
 						}
 						Some(old) => {
 							if old != val {
-								let path = Idiom::from(key.clone());
+								let path = Idiom::field(key.clone());
 								chg.put(&path, old.changed(val));
 							}
 						}

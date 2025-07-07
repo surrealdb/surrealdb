@@ -1,3 +1,4 @@
+use crate::expr::Part;
 use crate::expr::idiom::Idiom;
 use crate::expr::operation::Operation;
 use crate::val::Value;
@@ -12,7 +13,7 @@ impl Value {
 				for (key, _) in a.iter() {
 					if !b.contains_key(key) {
 						ops.push(Operation::Remove {
-							path: path.clone().push(key.clone().into()),
+							path: path.clone().push(Part::field(key.clone())),
 						})
 					}
 				}
@@ -20,11 +21,11 @@ impl Value {
 				for (key, val) in b.iter() {
 					match a.get(key) {
 						None => ops.push(Operation::Add {
-							path: path.clone().push(key.clone().into()),
+							path: path.clone().push(Part::field(key.clone())),
 							value: val.clone(),
 						}),
 						Some(old) => {
-							let path = path.clone().push(key.clone().into());
+							let path = path.clone().push(Part::field(key.clone()));
 							ops.append(&mut old.diff(val, path))
 						}
 					}
@@ -33,14 +34,14 @@ impl Value {
 			(Value::Array(a), Value::Array(b)) if a != b => {
 				let mut n = 0;
 				while n < min(a.len(), b.len()) {
-					let path = path.clone().push(n.into());
+					let path = path.clone().push(Part::index_int(n));
 					ops.append(&mut a[n].diff(&b[n], path));
 					n += 1;
 				}
 				while n < b.len() {
 					if n >= a.len() {
 						ops.push(Operation::Add {
-							path: path.clone().push(n.into()),
+							path: path.clone().push(Part::index_int(n)),
 							value: b[n].clone(),
 						})
 					}
@@ -49,7 +50,7 @@ impl Value {
 				while n < a.len() {
 					if n >= b.len() {
 						ops.push(Operation::Remove {
-							path: path.clone().push(n.into()),
+							path: path.clone().push(Part::index_int(n)),
 						})
 					}
 					n += 1;

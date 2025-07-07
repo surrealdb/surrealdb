@@ -8,12 +8,13 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Closure";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Closure")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -21,6 +22,17 @@ pub struct Closure {
 	pub args: Vec<(Ident, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,
+}
+
+impl PartialOrd for Closure {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(Ordering::Equal)
+	}
+}
+impl Ord for Closure {
+	fn cmp(&self, other: &Self) -> Ordering {
+		Ordering::Equal
+	}
 }
 
 impl Closure {

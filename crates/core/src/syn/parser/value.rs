@@ -5,14 +5,13 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 
-use crate::sql::{Duration, Ident, Strand};
+use crate::sql::{self, Ident};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::mac::{expected, pop_glued};
 use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
-use crate::val::{self, Array, Number, Object, RecordId, RecordIdKey, Value};
-use crate::{ctx, sql};
+use crate::val::{self, Array, Duration, Number, Object, RecordId, RecordIdKey, Strand, Value};
 
 trait ValueParseFunc {
 	async fn parse<'a>(parser: &mut Parser<'a>, ctx: &mut Stk) -> ParseResult<Value>;
@@ -79,8 +78,8 @@ impl Parser<'_> {
 					unexpected!(self, token, "the experimental files feature to be enabled");
 				}
 
-				let file = self.next_token_value::<sql::File>()?;
-				Ok(Value::File(file.into()))
+				let file = self.next_token_value::<val::File>()?;
+				Ok(Value::File(file))
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
 				self.pop_peek();
@@ -206,7 +205,7 @@ impl Parser<'_> {
 		expected!(self, t!(":"));
 		let peek = self.peek();
 		let key = match peek.kind {
-			t!("u'") | t!("u\"") => RecordIdKey::Uuid(self.next_token_value::<sql::Uuid>()?.into()),
+			t!("u'") | t!("u\"") => RecordIdKey::Uuid(self.next_token_value::<val::Uuid>()?.into()),
 			t!("{") => {
 				let peek = self.pop_peek();
 				RecordIdKey::Object(self.parse_value_object::<VP>(ctx, peek.span).await?)

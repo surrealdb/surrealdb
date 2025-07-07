@@ -20,7 +20,7 @@ impl Record {
 				key: match key {
 					Value::Array(v) => v.into(),
 					Value::Object(v) => v.into(),
-					Value::Number(v) => v.into(),
+					Value::Number(v) => v.to_int().into(),
 					Value::Uuid(v) => v.into(),
 					v => v.as_string().into(),
 				},
@@ -35,7 +35,7 @@ impl Record {
 
 	#[qjs(get)]
 	pub fn id(&self) -> Value {
-		self.value.key.clone().into()
+		self.value.key.clone().into_value()
 	}
 	// Compare two Record instances
 	pub fn is(a: &Record, b: &Record) -> bool {
@@ -44,11 +44,11 @@ impl Record {
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
-		self.value.to_raw()
+		self.value.into_raw_string()()
 	}
 	/// Convert the object to JSON
 	#[qjs(rename = "toJSON")]
 	pub fn to_json(&self) -> String {
-		self.value.to_raw()
+		self.value.into_raw_string()
 	}
 }

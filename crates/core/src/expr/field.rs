@@ -34,9 +34,9 @@ pub enum Fields {
 
 impl Display for Fields {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self.single() {
-			Some(v) => write!(f, "VALUE {}", &v),
-			None => Display::fmt(&Fmt::comma_separated(&self.0), f),
+		match self {
+			Fields::Value(v) => write!(f, "VALUE {}", &v),
+			Fields::Select(x) => Display::fmt(&Fmt::comma_separated(x), f),
 		}
 	}
 }
@@ -78,7 +78,7 @@ impl Fields {
 	/// Get all fields which are not an `*` projection
 	pub fn iter_fields(&self) -> FieldsIter {
 		match self {
-			Fields::Value(field) => FieldsIter::Single(&field),
+			Fields::Value(field) => FieldsIter::Single(Some(&field)),
 			Fields::Select(fields) => FieldsIter::Multiple(fields.iter()),
 		}
 	}
@@ -89,7 +89,7 @@ impl Fields {
 	}
 
 	/// Check to see if this field is a single VALUE clause
-	pub fn single(&self) -> Option<&Field> {
+	pub fn is_single(&self) -> bool {
 		matches!(self, Fields::Value(_))
 	}
 	/// Check if the fields are only about counting
@@ -219,7 +219,7 @@ impl Fields {
 										.catch_return()?
 								};
 								// Check if this is a single VALUE field expression
-								if self.single().is_some() {
+								if self.is_single() {
 									out = x
 								} else {
 									out.set(stk, ctx, opt, name.as_ref(), x).await?
@@ -262,7 +262,7 @@ impl Fields {
 											idiom_results.push(res);
 										}
 										// Check if this is a single VALUE field expression
-										if self.single().is_some() {
+										if self.is_single() {
 											out = Value::Array(Array(idiom_results));
 										} else {
 											// TODO: Alias is ignored here, figure out the right
@@ -301,7 +301,7 @@ impl Fields {
 											.await
 											.catch_return()?;
 
-										if let Some(_) = self.single() {
+										if self.is_single() {
 											out = res
 										} else {
 											// TODO: Alias is ignored here, figure out the right
@@ -317,7 +317,7 @@ impl Fields {
 											.await
 											.catch_return()?;
 
-										if self.single().is_some() {
+										if self.is_single() {
 											out = expr;
 										} else {
 											out.set(stk, ctx, opt, name.as_ref(), expr).await?;
@@ -332,7 +332,7 @@ impl Fields {
 							let expr =
 								expr.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 							// Check if this is a single VALUE field expression
-							if self.single().is_some() {
+							if self.is_single() {
 								out = expr;
 							} else {
 								out.set(stk, ctx, opt, name.as_ref(), expr).await?;

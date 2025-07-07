@@ -627,7 +627,8 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut ast = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Expr::Define(DefineStatement::Analyzer(az)) = ast.statements.pop().unwrap() else {
+		let Expr::Define(DefineStatement::Analyzer(az)) = ast.statements.pop().unwrap().into()
+		else {
 			panic!()
 		};
 		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
@@ -635,9 +636,9 @@ mod tests {
 
 		let btree_order = 5;
 
-		let doc1: RecordId = ("t", "doc1").into();
-		let doc2: RecordId = ("t", "doc2").into();
-		let doc3: RecordId = ("t", "doc3").into();
+		let doc1: RecordId = RecordId::new("t".to_string(), "doc1".to_owned());
+		let doc2: RecordId = RecordId::new("t".to_string(), "doc2".to_owned());
+		let doc3: RecordId = RecordId::new("t".to_string(), "doc3".to_owned());
 
 		stack
 			.enter(|stk| async {
@@ -903,7 +904,7 @@ mod tests {
 
 	async fn concurrent_task(ds: Arc<Datastore>, az: Arc<DefineAnalyzerStatement>) {
 		let btree_order = 5;
-		let doc1: RecordId = ("t", "doc1").into();
+		let doc1: RecordId = RecordId::new("t".to_owned(), "doc1".to_owned());
 		let content1 = Value::from(Array::from(vec![
 			"Enter a search term",
 			"Welcome",
@@ -950,7 +951,7 @@ mod tests {
 	async fn concurrent_test() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = ast.statements.pop().unwrap() else {
+		let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = q.statements.pop().unwrap() else {
 			panic!()
 		};
 		let sql::statements::DefineStatement::Analyzer(az) = *def else {
@@ -982,14 +983,14 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = ast.statements.pop().unwrap() else {
+		let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = q.statements.pop().unwrap() else {
 			panic!()
 		};
 		let sql::statements::DefineStatement::Analyzer(az) = *def else {
 			panic!()
 		};
 		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
-		let doc: RecordId = ("t", "doc1").into();
+		let doc: RecordId = RecordId::new("t".to_owned(), "doc1".to_owned());
 		let content = Value::from(Array::from(vec![
 			"Enter a search term",
 			"Welcome",

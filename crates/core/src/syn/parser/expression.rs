@@ -1,20 +1,18 @@
 //! This module defines the pratt parser for operators.
 
-use md5::digest::typenum::Exp;
 use reblessive::Stk;
 
 use super::mac::unexpected;
-use crate::key::sequence::Prefix;
 use crate::sql::operator::{BindingPower, NearestNeighbor};
 use crate::sql::{
-	self, AssignOperator, BinaryOperator, Expr, Literal, Part, PostfixOperator, PrefixOperator,
+	AssignOperator, BinaryOperator, Expr, Literal, Part, PostfixOperator, PrefixOperator,
 };
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, Token, TokenKind, t};
-use crate::val::Number;
+use crate::val;
 
 impl Parser<'_> {
 	/// Parsers a generic value.
@@ -150,7 +148,7 @@ impl Parser<'_> {
 			t!("..") => Some(BindingPower::Range),
 			t!("<") => {
 				let peek = self.peek1();
-				if matches!(peek.kind, t!("-") | t!("->") | t!("FUTURE")) {
+				if matches!(peek.kind, t!("-") | t!("->")) {
 					return None;
 				}
 				Some(BindingPower::Prefix)
@@ -192,7 +190,7 @@ impl Parser<'_> {
 						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Positive,
-							expr: Box::new(Expr::Literal(Literal::Duration(sql::Duration(d)))),
+							expr: Box::new(Expr::Literal(Literal::Duration(val::Duration(d)))),
 						},
 					};
 					if self.peek_continues_idiom() {
@@ -228,7 +226,7 @@ impl Parser<'_> {
 						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Negate,
-							expr: Box::new(Expr::Literal(Literal::Duration(sql::Duration(d)))),
+							expr: Box::new(Expr::Literal(Literal::Duration(val::Duration(d)))),
 						},
 					};
 					if self.peek_continues_idiom() {
@@ -258,6 +256,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					PrefixOperator::RangeInclusive
 				} else {
+					if !Self::kind_starts_prime_value(self.peek_whitespace().kind) {
+						// unbounded range.
+						return Ok(Expr::Literal(Literal::UnboundedRange));
+					}
 					PrefixOperator::Range
 				}
 			}
@@ -656,7 +658,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod test {
 	use super::*;
-	use crate::sql::{Block, Future, Kind};
+	use crate::sql::{Block, Kind};
 	use crate::syn::Parse;
 
 	//TODO(EXPR)

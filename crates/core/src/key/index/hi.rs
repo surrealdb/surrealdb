@@ -18,12 +18,12 @@ pub struct Hi<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: RecordIdKeyLit,
+	pub id: RecordIdKey,
 }
 impl_key!(Hi<'a>);
 
 impl<'a> Hi<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: RecordIdKeyLit) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

@@ -15,7 +15,7 @@ use std::fmt;
 use std::sync::Arc;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
@@ -61,7 +61,7 @@ impl InfoStatement {
 						"system".to_string() => system().await,
 						"users".to_string() => process(txn.all_root_users().await?),
 					};
-					Ok(Value::Object(object))
+					Ok(Value::Object(Object(object)))
 				} else {
 					let object = map! {
 						"accesses".to_string() => {
@@ -111,7 +111,7 @@ impl InfoStatement {
 						"databases".to_string() => process(txn.all_db(ns).await?),
 						"users".to_string() => process(txn.all_ns_users(ns).await?),
 					};
-					Ok(Value::Object(object))
+					Ok(Value::Object(Object(object)))
 				} else {
 					let object = map! {
 						"accesses".to_string() => {
@@ -166,7 +166,7 @@ impl InfoStatement {
 						"configs".to_string() => process(txn.all_db_configs(ns, db).await?),
 						"sequences".to_string() => process(txn.all_db_sequences(ns, db).await?),
 					};
-					Value::Object(object)
+					Value::Object(Object(object))
 				} else {
 					let object = map! {
 						"accesses".to_string() => {
@@ -247,7 +247,7 @@ impl InfoStatement {
 							out.into()
 						},
 					};
-					Value::Object(object)
+					Value::Object(Object(object))
 				};
 				Ok(res)
 			}

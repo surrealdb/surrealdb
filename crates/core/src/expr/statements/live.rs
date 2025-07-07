@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
+use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
 use crate::kvs::Live;
 use crate::val::{Uuid, Value};
@@ -45,11 +45,15 @@ impl LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
 			expr,
-			..Default::default()
+			what: Expr::Literal(Literal::Null),
+			cond: None,
+			fetch: None,
+			auth: None,
+			session: None,
 		}
 	}
 
-	pub fn new_from_what_expr(expr: Fields, what: Value) -> Self {
+	pub fn new_from_what_expr(expr: Fields, what: Expr) -> Self {
 		LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),

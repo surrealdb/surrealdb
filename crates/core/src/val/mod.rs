@@ -79,6 +79,7 @@ pub enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
+	Table(Strand),
 	Thing(RecordId),
 	Regex(Regex),
 	File(File),
@@ -145,6 +146,8 @@ impl Value {
 			Value::Strand(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
+			// TODO: Table, range, bytes and closure should probably also have certain truthy
+			// values.
 			_ => false,
 		}
 	}
@@ -301,24 +304,6 @@ impl Value {
 		}
 	}
 
-	/// Try to convert this Value into a set of JSONPatch operations
-	pub fn to_operations(&self) -> Result<Vec<Operation>> {
-		match self {
-			Value::Array(v) => v
-				.iter()
-				.map(|v| match v {
-					Value::Object(v) => v.to_operation(),
-					_ => Err(anyhow::Error::new(Error::InvalidPatch {
-						message: String::from("Operation must be an object"),
-					})),
-				})
-				.collect::<Result<Vec<_>>>(),
-			_ => Err(anyhow::Error::new(Error::InvalidPatch {
-				message: String::from("Operations must be an array"),
-			})),
-		}
-	}
-
 	/*
 	/// Converts a `surrealdb::sq::Value` into a `serde_json::Value`
 	///
@@ -396,7 +381,7 @@ impl Value {
 			Self::File(_) => "file",
 			Self::Bytes(_) => "bytes",
 			Self::Range(_) => "range",
-			Self::Thing(_) => todo!(),
+			Self::Thing(_) => "thing",
 			Self::Closure(_) => todo!(),
 			Self::Range(_) => todo!(),
 		}
@@ -424,21 +409,6 @@ impl Value {
 			// There is no valid record id
 			_ => None,
 		}
-	}
-
-	// -----------------------------------
-	// JSON Path conversion
-	// -----------------------------------
-
-	/// Converts this Value into a JSONPatch path
-	pub(crate) fn jsonpath(&self) -> Idiom {
-		self.to_raw_string()
-			.as_str()
-			.trim_start_matches('/')
-			.split(&['.', '/'][..])
-			.map(Part::from)
-			.collect::<Vec<Part>>()
-			.into()
 	}
 
 	// -----------------------------------
@@ -651,27 +621,31 @@ impl Value {
 	}
 
 	/// Turns this value into a literal evaluating to the same value.
-	pub fn into_literal(self) -> expr::Literal {
+	pub fn into_literal(self) -> expr::Expr {
 		match self {
-			Value::None => expr::Literal::None,
-			Value::Null => expr::Literal::Null,
-			Value::Bool(x) => expr::Literal::Bool(x),
-			Value::Number(Number::Int(i)) => expr::Literal::Integer(i),
-			Value::Number(Number::Float(f)) => expr::Literal::Float(f),
-			Value::Number(Number::Decimal(d)) => expr::Literal::Float(d),
-			Value::Strand(strand) => expr::Literal::Strand(strand),
-			Value::Duration(duration) => expr::Literal::Duration(duration),
-			Value::Datetime(datetime) => expr::Literal::Datetime(datetime),
-			Value::Uuid(uuid) => expr::Literal::Uuid(uuid),
-			Value::Array(array) => expr::Literal::Array(array.into_literal()),
-			Value::Object(object) => expr::Literal::Object(object.into_literal()),
-			Value::Geometry(geometry) => expr::Literal::Geometry(geometry),
-			Value::Bytes(bytes) => expr::Literal::Bytes(bytes),
-			Value::Thing(record_id) => expr::Literal::RecordId(record_id.into_literal()),
-			Value::Regex(regex) => expr::Literal::Regex(regex),
-			Value::File(file) => expr::Literal::File(file),
-			Value::Closure(closure) => expr::Literal::Closure(closure),
-			Value::Range(range) => expr::Literal::Range(range.into_literal()),
+			Value::None => expr::Expr::Literal(expr::Literal::None),
+			Value::Null => expr::Expr::Literal(expr::Literal::Null),
+			Value::Bool(x) => expr::Expr::Literal(expr::Literal::Bool(x)),
+			Value::Number(Number::Int(i)) => expr::Expr::Literal(expr::Literal::Integer(i)),
+			Value::Number(Number::Float(f)) => expr::Expr::Literal(expr::Literal::Float(f)),
+			Value::Number(Number::Decimal(d)) => expr::Expr::Literal(expr::Literal::Decimal(d)),
+			Value::Strand(strand) => expr::Expr::Literal(expr::Literal::Strand(strand)),
+			Value::Duration(duration) => expr::Expr::Literal(expr::Literal::Duration(duration)),
+			Value::Datetime(datetime) => expr::Expr::Literal(expr::Literal::Datetime(datetime)),
+			Value::Uuid(uuid) => expr::Expr::Literal(expr::Literal::Uuid(uuid)),
+			Value::Array(array) => expr::Expr::Literal(expr::Literal::Array(array.into_literal())),
+			Value::Object(object) => {
+				expr::Expr::Literal(expr::Literal::Object(object.into_literal()))
+			}
+			Value::Geometry(geometry) => expr::Expr::Literal(expr::Literal::Geometry(geometry)),
+			Value::Bytes(bytes) => expr::Expr::Literal(expr::Literal::Bytes(bytes)),
+			Value::Thing(record_id) => {
+				expr::Expr::Literal(expr::Literal::RecordId(record_id.into_literal()))
+			}
+			Value::Regex(regex) => expr::Expr::Literal(expr::Literal::Regex(regex)),
+			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
+			Value::Closure(closure) => expr::Expr::Literal(expr::Literal::Closure(closure)),
+			Value::Range(range) => range.into_literal(),
 		}
 	}
 }
@@ -696,7 +670,7 @@ impl fmt::Display for Value {
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
-			Value::Refs(v) => write!(f, "{v}"),
+			//Value::Refs(v) => write!(f, "{v}"),
 			Value::File(v) => write!(f, "{v}"),
 		}
 	}

@@ -121,7 +121,7 @@ pub async fn db_access(
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
 				ac: Some(ac.clone()),
-				id: Some(rid.to_raw()),
+				id: Some(rid.into_raw_string()),
 				..Claims::default()
 			};
 			// AUTHENTICATE clause

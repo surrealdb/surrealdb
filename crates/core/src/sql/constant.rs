@@ -1,11 +1,4 @@
-use crate::sql::Datetime;
-use chrono::{TimeZone, Utc};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use super::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -39,11 +32,11 @@ pub enum Constant {
 }
 
 /// A type of constant that may be converted to a value or JSON.
-pub(crate) enum ConstantValue {
-	Float(f64),
-	Datetime(Datetime),
-	Duration(Duration),
-}
+//pub(crate) enum ConstantValue {
+//Float(f64),
+//Datetime(Datetime),
+//Duration(Duration),
+//}
 
 impl Constant {
 	/*

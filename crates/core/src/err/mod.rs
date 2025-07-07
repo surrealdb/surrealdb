@@ -1,7 +1,7 @@
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
-use crate::expr::idiom::Idiom;
 use crate::expr::index::Distance;
+use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;

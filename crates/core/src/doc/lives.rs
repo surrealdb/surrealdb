@@ -69,9 +69,10 @@ impl Document {
 			let current = self.current.doc.as_arc();
 			let initial = self.initial.doc.as_arc();
 			// Check if this is a delete statement
-			let doc = match stm.is_delete() {
-				true => &self.initial,
-				false => &self.current,
+			let doc = if stm.is_delete() {
+				&self.initial
+			} else {
+				&self.current
 			};
 			// Ensure that a session exists on the LIVE query
 			let sess = match lv.session.as_ref() {

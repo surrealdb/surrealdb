@@ -176,7 +176,7 @@ impl Function {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-		args: Vec<Expr>,
+		args: Vec<Value>,
 	) -> FlowResult<Value> {
 		match self {
 			Function::Normal(ref s) => {
@@ -278,7 +278,7 @@ impl Function {
 					// Check if scripting is allowed
 					ctx.check_allowed_scripting()?;
 					// Run the script function
-					Ok(fnc::script::run(ctx, opt, doc, &s.0, args).await?)
+					fnc::script::run(ctx, opt, doc, &s.0, args).await
 				}
 				#[cfg(not(feature = "scripting"))]
 				{
@@ -287,7 +287,7 @@ impl Function {
 					})))
 				}
 			}
-			Function::Model(ref m) => m.compute(stk, ctx, opt, doc, args),
+			Function::Model(ref m) => m.compute(stk, ctx, opt, doc, args).await,
 		}
 	}
 }
@@ -312,13 +312,13 @@ impl FunctionCall {
 impl fmt::Display for FunctionCall {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.receiver {
-			Function::Normal(s) => write!(f, "{s}({})", Fmt::comma_separated(self.arguments)),
-			Function::Custom(s) => write!(f, "fn::{s}({})", Fmt::comma_separated(self.arguments)),
+			Function::Normal(s) => write!(f, "{s}({})", Fmt::comma_separated(&self.arguments)),
+			Function::Custom(s) => write!(f, "fn::{s}({})", Fmt::comma_separated(&self.arguments)),
 			Function::Script(s) => {
-				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments))
+				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(&self.arguments))
 			}
 			Function::Model(m) => {
-				write!(f, "{}({})", m, Fmt::comma_separated(self.arguments))
+				write!(f, "{}({})", m, Fmt::comma_separated(&self.arguments))
 			}
 		}
 	}

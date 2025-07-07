@@ -101,7 +101,6 @@ impl Expr {
 				right,
 				..
 			} => left.read_only() && right.read_only(),
-			Expr::Model(model) => model.read_only(),
 			Expr::FunctionCall(function) => function.read_only(),
 			Expr::Return(expr) => expr.read_only(),
 			Expr::Throw(expr) => expr.read_only(),

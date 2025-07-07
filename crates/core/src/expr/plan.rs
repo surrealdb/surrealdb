@@ -2,16 +2,14 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::rebuild::RebuildStatement;
-use crate::expr::statements::{
-	InfoStatement, KillStatement, LiveStatement, OptionStatement, UseStatement,
-};
+use crate::expr::statements::{KillStatement, LiveStatement, OptionStatement, UseStatement};
 use crate::expr::{Expr, Value};
 
 use reblessive::tree::Stk;
-use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
+use std::fmt::{self, Display, Formatter};
 
-use super::{ControlFlow, FlowResult};
+use super::FlowResult;
+use super::statements::AccessStatement;
 
 pub struct LogicalPlan {
 	pub expressions: Vec<TopLevelExpr>,
@@ -45,7 +43,7 @@ pub enum TopLevelExpr {
 	Begin,
 	Cancel,
 	Commit,
-	Info(InfoStatement),
+	Access(Box<AccessStatement>),
 	Kill(KillStatement),
 	Live(Box<LiveStatement>),
 	Option(OptionStatement),
@@ -61,12 +59,12 @@ impl TopLevelExpr {
 			TopLevelExpr::Begin
 			| TopLevelExpr::Cancel
 			| TopLevelExpr::Commit
-			| TopLevelExpr::Info(_)
 			| TopLevelExpr::Use(_) => true,
 			TopLevelExpr::Kill(_)
 			| TopLevelExpr::Live(_)
 			| TopLevelExpr::Option(_)
-			| TopLevelExpr::Rebuild(_) => false,
+			| TopLevelExpr::Rebuild(_)
+			| TopLevelExpr::Access(_) => false,
 			TopLevelExpr::Expr(expr) => expr.read_only(),
 		}
 	}

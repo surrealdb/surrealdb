@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug,  Eq, PartialEq,  Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct SetStatement {
@@ -22,8 +22,8 @@ pub struct SetStatement {
 
 impl SetStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.what.writeable()
+	pub(crate) fn read_only(&self) -> bool {
+		self.what.read_only()
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(

@@ -13,10 +13,11 @@ use crate::sql::statements::{
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
 	UseStatement,
 };
-use crate::sql::{AssignOperator, Duration, Expr, Fields, Ident, Literal, Param, TopLevelExpr};
+use crate::sql::{AssignOperator, Expr, Fields, Ident, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{Glued, TokenKind, t};
+use crate::val::Duration;
 
 use super::mac::expected;
 use super::{ParseResult, Parser};

@@ -10,7 +10,7 @@ use crate::expr::graph::GraphSubjects;
 use crate::expr::paths::{EDGE, IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
-use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Literal, Part};
+use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Idiom, Literal, Part};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode;
@@ -147,7 +147,9 @@ impl Document {
 								let data = match fd.name.last() {
 									// This is a part of an array, remove all values like it
 									Some(Part::All) => Data::SetExpression(vec![Assignment {
-										place: fd.name.as_ref()[..fd.name.len() - 1].into(),
+										place: Idiom(
+											fd.name.as_ref()[..fd.name.len() - 1].to_vec(),
+										),
 										operator: AssignOperator::Subtract,
 										value: Expr::Literal(Literal::RecordId(
 											(*rid).clone().into_literal(),

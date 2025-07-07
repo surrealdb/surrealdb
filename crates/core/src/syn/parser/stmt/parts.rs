@@ -7,13 +7,14 @@ use crate::sql::data::Assignment;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
 use crate::sql::{
-	AssignOperator, Base, Cond, Data, Duration, Explain, Expr, Fetch, Fetchs, Field, Fields, Group,
-	Groups, Ident, Idiom, Output, Permission, Permissions, Timeout, View, With,
+	AssignOperator, Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups,
+	Ident, Idiom, Output, Permission, Permissions, Timeout, View, With,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{DistanceKind, Span, TokenKind, VectorTypeKind, t};
+use crate::val::Duration;
 
 pub(crate) enum MissingKind {
 	Split,

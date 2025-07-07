@@ -336,7 +336,7 @@ impl Document {
 	) -> Result<Data> {
 		let mut data = exp.compute(stk, ctx, opt, Some(&self.current), false).await?;
 		data.cut(ID.as_ref());
-		Ok(Data::ReplaceExpression(Expr::Literal(data.into_literal())))
+		Ok(Data::ReplaceExpression(data.into_literal()))
 	}
 	//
 	async fn data(
@@ -362,7 +362,7 @@ impl Document {
 		stm.compute(stk, ctx, opt, None).await?;
 
 		if let Some(del_cond) = del_ops {
-			let what = vec![Expr::Literal(Value::from(thg).into_literal())];
+			let what = vec![Expr::Literal(Literal::RecordId(thg.into_literal()))];
 			let stm = DeleteStatement {
 				what,
 				cond: Some(Cond(del_cond)),
@@ -536,7 +536,7 @@ impl Document {
 		ops.push(Assignment {
 			place: key,
 			operator: AssignOperator::Assign,
-			value: Expr::Literal(val.into_literal()),
+			value: val.into_literal(),
 		});
 		// Everything ok
 		Ok(())
@@ -555,14 +555,14 @@ impl Document {
 				set_ops.push(Assignment {
 					place: key.clone(),
 					operator: AssignOperator::Add,
-					value: Expr::Literal(val.into_literal()),
+					value: val.into_literal(),
 				});
 			}
 			FieldAction::Sub => {
 				set_ops.push(Assignment {
 					place: key.clone(),
 					operator: AssignOperator::Subtract,
-					value: Expr::Literal(val.into_literal()),
+					value: val.into_literal(),
 				});
 
 				// Add a purge condition (delete record if the number of values is 0)
@@ -613,10 +613,10 @@ impl Document {
 								right: Box::new(Expr::Binary {
 									left: Box::new(Expr::Idiom(key.clone())),
 									op: BinaryOperator::MoreThan,
-									right: Box::new(Expr::Literal(val_lit)),
+									right: Box::new(val_lit),
 								}),
 							},
-							Expr::Literal(val_lit),
+							val_lit,
 						)],
 						close: Some(Expr::Idiom(key)),
 					})),
@@ -690,10 +690,10 @@ impl Document {
 								right: Box::new(Expr::Binary {
 									left: Box::new(Expr::Idiom(key.clone())),
 									op: BinaryOperator::LessThan,
-									right: Box::new(Expr::Literal(val_lit.clone())),
+									right: Box::new(val_lit.clone()),
 								}),
 							},
-							Expr::Literal(val_lit),
+							val_lit,
 						)],
 						close: Some(Expr::Idiom(key)),
 					})),
@@ -774,7 +774,7 @@ impl Document {
 						FieldAction::Sub => BinaryOperator::Subtract,
 						FieldAction::Add => BinaryOperator::Add,
 					},
-					right: Box::new(Expr::Literal(val.into_literal())),
+					right: Box::new(val.into_literal()),
 				}),
 				op: BinaryOperator::Divide,
 				right: Box::new(Expr::Binary {
@@ -833,13 +833,13 @@ impl Document {
 			let mut root = Expr::Binary {
 				left: Box::new(Expr::Idiom(g.0.clone())),
 				op: BinaryOperator::Equal,
-				right: Box::new(Expr::Literal(fdc.group_ids[i].clone().into_literal())),
+				right: Box::new(fdc.group_ids[i].clone().into_literal()),
 			};
 			for (i, g) in iter {
 				let exp = Expr::Binary {
 					left: Box::new(Expr::Idiom(g.0.clone())),
 					op: BinaryOperator::Equal,
-					right: Box::new(Expr::Literal(fdc.group_ids[i].clone().into_literal())),
+					right: Box::new(fdc.group_ids[i].clone().into_literal()),
 				};
 				root = Expr::Binary {
 					left: Box::new(root),
@@ -886,7 +886,7 @@ impl Document {
 				Expr::Binary {
 					left: Box::new(Expr::Idiom(key.clone())),
 					op: BinaryOperator::Equal,
-					right: Box::new(Expr::Literal(val.clone().into_literal())),
+					right: Box::new(val.clone().into_literal()),
 				},
 				compute_query,
 			)],

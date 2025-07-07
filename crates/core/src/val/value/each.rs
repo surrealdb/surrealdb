@@ -30,7 +30,7 @@ impl Value {
 			Value::Object(v) => match first {
 				Part::Field(f) => {
 					if let Some(v) = v.get(f as &str) {
-						accum.push(Part::field(f.clone()));
+						accum.push(Part::field(f.0.clone()));
 						v._each(path.next(), accum, build);
 						accum.pop();
 					}
@@ -67,7 +67,7 @@ impl Value {
 					if len > 0 {
 						// NOTE: We previously did not add an index into the resulting path here.
 						// That seemed like an bug but it might not be.
-						accum.push(Part::index_int(len - 1));
+						accum.push(Part::index_int(len as i64 - 1));
 						v[len]._each(path.next(), accum, build);
 						accum.pop();
 					}

@@ -2,7 +2,7 @@ use crate::expr::escape::EscapeIdent;
 use crate::expr::fmt::Fmt;
 use crate::expr::{Ident, RecordIdKeyLit};
 use crate::val::strand::no_nul_bytes;
-use crate::val::{Duration, RecordId};
+use crate::val::{Duration, RecordId, RecordIdKey};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -99,7 +99,7 @@ impl Access {
 	pub fn generate(&self) -> RecordId {
 		RecordId {
 			table: self.0.clone(),
-			key: RecordIdKeyLit::rand(),
+			key: RecordIdKey::rand(),
 		}
 	}
 }

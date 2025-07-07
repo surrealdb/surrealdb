@@ -1,21 +1,18 @@
 use super::FlowResultExt as _;
 use super::fmt::Fmt;
-use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::Expr;
 use crate::expr::escape::EscapeRid;
 use crate::expr::literal::ObjectEntry;
-use crate::expr::{Expr, Value};
-use crate::val::{Array, Number, Object, RecordId, RecordIdKey, RecordIdKeyRange, Uuid};
+use crate::val::{Array, Object, RecordIdKey, Uuid};
 
 use anyhow::Result;
-use nanoid::nanoid;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::ops::{Bound, Deref};
 
 pub mod range;
 pub use range::RecordIdKeyRangeLit;

@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
-use crate::expr::{Cond, FlowResultExt as _};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Literal};
 use crate::idx::docids::{DocId, DocIds};
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
@@ -79,7 +79,7 @@ impl<'a> HnswConditionChecker<'a> {
 
 impl<'a> MTreeConditionChecker<'a> {
 	pub fn new_cond(ctx: &'a Context, opt: &'a Options, cond: Arc<Cond>) -> Self {
-		if Cond(Value::Bool(true)).ne(cond.as_ref()) {
+		if Expr::Literal(Literal::Bool(true)) != cond.0 {
 			Self::MTreeCondition(MTreeCondChecker {
 				ctx,
 				opt,

@@ -1,11 +1,12 @@
 use reblessive::Stk;
 
 use crate::sql::literal::ObjectEntry;
-use crate::sql::{Block, Expr, Literal, Strand};
+use crate::sql::{Block, Expr, Literal};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser, enter_object_recursion};
 use crate::syn::token::{Glued, Span, TokenKind, t};
+use crate::val::Strand;
 
 use super::mac::unexpected;
 

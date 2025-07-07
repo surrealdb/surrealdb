@@ -1,8 +1,8 @@
-use crate::sql::duration::Duration;
+use crate::val::Duration;
 use std::fmt;
 use std::ops::Deref;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Timeout(pub Duration);
 

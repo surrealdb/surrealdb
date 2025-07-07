@@ -3,12 +3,14 @@ use std::mem;
 use rust_decimal::Decimal;
 
 use crate::sql::language::Language;
-use crate::sql::{Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid};
+use crate::sql::{Ident, Param, Regex, Table};
 use crate::syn::error::syntax_error;
 use crate::syn::lexer::compound::{self, NumberKind};
 use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, TokenKind, t};
+use crate::val::{Bytes, Datetime, Duration, File};
+use crate::val::{Strand, Uuid};
 
 use super::GluedValue;
 use super::mac::pop_glued;

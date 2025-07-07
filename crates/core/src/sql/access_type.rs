@@ -57,7 +57,7 @@ impl Default for AccessType {
 impl Jwt for AccessType {
 	fn jwt(&self) -> &JwtAccess {
 		match self {
-			AccessType::Record(at) => at.jwt(),
+			AccessType::Record(at) => &at.jwt,
 			AccessType::Jwt(at) => at.jwt(),
 			AccessType::Bearer(at) => at.jwt(),
 		}

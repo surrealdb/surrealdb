@@ -1,14 +1,13 @@
 use super::escape::EscapeKey;
-use super::{Duration, Ident, Idiom, Strand};
-
-use crate::sql::Table;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::sql::{Ident, Idiom, Table};
+use crate::val::{Duration, Strand};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
@@ -209,12 +208,12 @@ impl Display for Kind {
 				}
 			}
 			Kind::Set(k, l) => match (k, l) {
-				(k, None) if k.is_any() => write!(f, "set"),
+				(k, None) if matches!(*k, Kind::Any) => write!(f, "set"),
 				(k, None) => write!(f, "set<{k}>"),
 				(k, Some(l)) => write!(f, "set<{k}, {l}>"),
 			},
 			Kind::Array(k, l) => match (k, l) {
-				(k, None) if k.is_any() => write!(f, "array"),
+				(k, None) if matches!(*k, Kind::Any) => write!(f, "array"),
 				(k, None) => write!(f, "array<{k}>"),
 				(k, Some(l)) => write!(f, "array<{k}, {l}>"),
 			},
@@ -302,7 +301,7 @@ impl From<KindLiteral> for crate::expr::kind::KindLiteral {
 		match v {
 			KindLiteral::String(s) => crate::expr::kind::KindLiteral::String(s.into()),
 			KindLiteral::Integer(i) => crate::expr::kind::KindLiteral::Integer(i),
-			KindLiteral::Float(f) => crate::expr::kind::KindLiteral::Integer(f),
+			KindLiteral::Float(f) => crate::expr::kind::KindLiteral::Float(f),
 			KindLiteral::Decimal(d) => crate::expr::kind::KindLiteral::Decimal(d),
 			KindLiteral::Duration(d) => crate::expr::kind::KindLiteral::Duration(d),
 			KindLiteral::Array(a) => {

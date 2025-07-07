@@ -3,7 +3,7 @@ use crate::sql::index::Distance;
 use crate::sql::{Expr, Kind};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum PrefixOperator {
 	/// `!`
@@ -33,7 +33,7 @@ impl From<PrefixOperator> for crate::expr::PrefixOperator {
 }
 
 impl From<crate::expr::PrefixOperator> for PrefixOperator {
-	fn from(value: PrefixOperator) -> Self {
+	fn from(value: crate::expr::PrefixOperator) -> Self {
 		match value {
 			crate::expr::PrefixOperator::Not => PrefixOperator::Not,
 			crate::expr::PrefixOperator::Positive => PrefixOperator::Positive,
@@ -67,24 +67,24 @@ pub enum PostfixOperator {
 }
 
 impl From<PostfixOperator> for crate::expr::PostfixOperator {
-	fn from(value: PrefixOperator) -> Self {
+	fn from(value: PostfixOperator) -> Self {
 		match value {
 			PostfixOperator::Range => crate::expr::PostfixOperator::Range,
 			PostfixOperator::RangeSkip => crate::expr::PostfixOperator::RangeSkip,
 			PostfixOperator::Call(x) => {
-				crate::expr::PostfixOperator::Call(x.into_iter().map(|x| x.into()))
+				crate::expr::PostfixOperator::Call(x.into_iter().map(|x| x.into()).collect())
 			}
 		}
 	}
 }
 
 impl From<crate::expr::PostfixOperator> for PostfixOperator {
-	fn from(value: PostfixOperator) -> Self {
+	fn from(value: crate::expr::PostfixOperator) -> Self {
 		match value {
 			crate::expr::PostfixOperator::Range => PostfixOperator::Range,
 			crate::expr::PostfixOperator::RangeSkip => PostfixOperator::RangeSkip,
 			crate::expr::PostfixOperator::Call(x) => {
-				PostfixOperator::Call(x.into_iter().map(|x| x.into()))
+				PostfixOperator::Call(x.into_iter().map(|x| x.into()).collect())
 			}
 		}
 	}
@@ -222,14 +222,14 @@ impl From<BinaryOperator> for crate::expr::BinaryOperator {
 			BinaryOperator::RangeSkipInclusive => crate::expr::BinaryOperator::RangeSkipInclusive,
 			BinaryOperator::Matches(m) => crate::expr::BinaryOperator::Matches(m.into()),
 			BinaryOperator::NearestNeighbor(n) => {
-				crate::expr::BinaryOperator::NearestNeighbor(n.into())
+				crate::expr::BinaryOperator::NearestNeighbor(Box::new((*n).into()))
 			}
 		}
 	}
 }
 
 impl From<crate::expr::BinaryOperator> for BinaryOperator {
-	fn from(value: BinaryOperator) -> Self {
+	fn from(value: crate::expr::BinaryOperator) -> Self {
 		match value {
 			crate::expr::BinaryOperator::Subtract => BinaryOperator::Subtract,
 			crate::expr::BinaryOperator::Add => BinaryOperator::Add,
@@ -267,7 +267,7 @@ impl From<crate::expr::BinaryOperator> for BinaryOperator {
 			crate::expr::BinaryOperator::RangeSkipInclusive => BinaryOperator::RangeSkipInclusive,
 			crate::expr::BinaryOperator::Matches(m) => BinaryOperator::Matches(m.into()),
 			crate::expr::BinaryOperator::NearestNeighbor(n) => {
-				BinaryOperator::NearestNeighbor(n.into())
+				BinaryOperator::NearestNeighbor(Box::new((*n).into()))
 			}
 		}
 	}
@@ -287,10 +287,22 @@ pub enum NearestNeighbor {
 impl From<NearestNeighbor> for crate::expr::operator::NearestNeighbor {
 	fn from(value: NearestNeighbor) -> Self {
 		match value {
-			NearestNeighbor::K(k, d) => crate::expr::operator::NearestNeighbor::K(k, d),
+			NearestNeighbor::K(k, d) => crate::expr::operator::NearestNeighbor::K(k, d.into()),
 			NearestNeighbor::KTree(k) => crate::expr::operator::NearestNeighbor::KTree(k),
 			NearestNeighbor::Approximate(k, ef) => {
 				crate::expr::operator::NearestNeighbor::Approximate(k, ef)
+			}
+		}
+	}
+}
+
+impl From<crate::expr::operator::NearestNeighbor> for NearestNeighbor {
+	fn from(value: crate::expr::operator::NearestNeighbor) -> Self {
+		match value {
+			crate::expr::operator::NearestNeighbor::K(k, d) => NearestNeighbor::K(k, d.into()),
+			crate::expr::operator::NearestNeighbor::KTree(k) => NearestNeighbor::KTree(k),
+			crate::expr::operator::NearestNeighbor::Approximate(k, ef) => {
+				NearestNeighbor::Approximate(k, ef)
 			}
 		}
 	}
@@ -375,7 +387,7 @@ impl From<AssignOperator> for crate::expr::AssignOperator {
 	}
 }
 impl From<crate::expr::AssignOperator> for AssignOperator {
-	fn from(value: AssignOperator) -> Self {
+	fn from(value: crate::expr::AssignOperator) -> Self {
 		match value {
 			crate::expr::AssignOperator::Assign => AssignOperator::Assign,
 			crate::expr::AssignOperator::Add => AssignOperator::Add,

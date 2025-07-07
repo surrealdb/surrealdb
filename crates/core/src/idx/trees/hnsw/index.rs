@@ -9,7 +9,7 @@ use crate::idx::trees::hnsw::{ElementId, HnswSearch};
 use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
-use crate::val::{Number, Value};
+use crate::val::{Number, RecordIdKey, Value};
 #[cfg(debug_assertions)]
 use ahash::HashMap;
 use anyhow::Result;
@@ -97,7 +97,7 @@ impl HnswIndex {
 		// Resolve the doc_id
 		let doc_id = self.docs.resolve(tx, id).await?;
 		// Index the values
-		for value in content.iter().filter(|v| v.is_some()) {
+		for value in content.iter().filter(|v| !v.is_nullish()) {
 			// Extract the vector
 			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
 			vector.check_dimension(self.dim)?;

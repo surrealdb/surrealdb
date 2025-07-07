@@ -4,10 +4,9 @@ use crate::cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH};
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
-use crate::sql::{
-	Ast, Block, Datetime, Duration, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit,
-};
+use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit};
 use crate::val::Value;
+use crate::val::{Datetime, Duration};
 
 pub mod error;
 pub mod lexer;

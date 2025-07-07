@@ -3,14 +3,15 @@ use reblessive::Stk;
 use super::mac::pop_glued;
 use super::{ParseResult, Parser};
 use crate::sql::{
-	Closure, Dir, Duration, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock, Param,
-	Part, Script, Strand, Table,
+	Closure, Dir, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock, Param, Part,
+	Script, Table,
 };
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{enter_object_recursion, enter_query_recursion};
 use crate::syn::token::{Glued, Span, TokenKind, t};
+use crate::val::{Duration, Strand};
 
 impl Parser<'_> {
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {
@@ -78,12 +79,6 @@ impl Parser<'_> {
 					self.pop_peek();
 					let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
 					Expr::Idiom(Idiom(vec![Part::Graph(graph)]))
-				} else if self.eat(t!("FUTURE")) {
-					// Casting should already have been parsed.
-					self.expect_closing_delimiter(t!(">"), token.span)?;
-					let next = expected!(self, t!("{")).span;
-					let block = self.parse_block(ctx, next).await?;
-					Expr::Future(Box::new(super::sql::Future(block)))
 				} else {
 					unexpected!(self, token, "expected either a `<-` or a future")
 				}
@@ -483,7 +478,9 @@ impl Parser<'_> {
 
 					let y = self.next_token_value::<f64>()?;
 					self.expect_closing_delimiter(t!(")"), start)?;
-					return Ok(Expr::Literal(Literal::Point(x, y)));
+					return Ok(Expr::Literal(Literal::Geometry(crate::val::Geometry::Point(
+						geo::Point::new(x, y),
+					))));
 				} else {
 					ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?
 				}

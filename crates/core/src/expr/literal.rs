@@ -12,13 +12,13 @@ use std::hash::{Hash, Hasher};
 /// regarding equality do not apply, i.e. if `a != b` then `Literal::Float(a)` could still be equal
 /// to `Literal::Float(b)` in the case of `NaN` floats for example. Also surrealql rules regarding
 /// number equality are not observed, 1f != 1dec.
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Literal {
 	None,
 	Null,
+	UnboundedRange,
 	Bool(bool),
 	Float(f64),
 	Integer(i64),
@@ -30,7 +30,7 @@ pub enum Literal {
 	Regex(Regex),
 	RecordId(RecordIdLit),
 	Array(Vec<Expr>),
-	Object(Vec<(String, Expr)>),
+	Object(Vec<ObjectEntry>),
 	Duration(Duration),
 	Datetime(Datetime),
 	Uuid(Uuid),

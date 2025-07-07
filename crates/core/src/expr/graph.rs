@@ -8,7 +8,7 @@ use crate::expr::table::Tables;
 use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyLit, Splits, Table};
 use crate::iam::ResourceKind;
 use crate::kvs::KeyEncode;
-use crate::val::{RecordId, RecordIdKey};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -141,14 +141,14 @@ impl Display for GraphSubjects {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum GraphSubject {
 	Table(Table),
 	Range {
 		table: Table,
-		range: RecordIdKeyRangeLit,
+		range: RecordIdKeyRange,
 	},
 }
 
@@ -160,9 +160,16 @@ impl GraphSubject {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Self> {
-		if let Self::Range(tb, rng) = self {
-			let rng = rng.compute(stk, ctx, opt, doc).await?;
-			Ok(Self::Range(tb, rng))
+		if let Self::Range {
+			table,
+			range,
+		} = self
+		{
+			let range = range.compute(stk, ctx, opt, doc).await?;
+			Ok(Self::Range {
+				table,
+				range,
+			})
 		} else {
 			Ok(self)
 		}
@@ -181,9 +188,12 @@ impl GraphSubject {
 				crate::key::graph::ftprefix(ns, db, tb, id, dir, &t.0),
 				crate::key::graph::ftsuffix(ns, db, tb, id, dir, &t.0),
 			),
-			Self::Range(t, r) => {
-				let beg = match &r.start {
-					Bound::Unbounded => crate::key::graph::ftprefix(ns, db, tb, id, dir, &t.0),
+			Self::Range {
+				table,
+				range,
+			} => {
+				let beg = match &range.start {
+					Bound::Unbounded => crate::key::graph::ftprefix(ns, db, tb, id, dir, &table.0),
 					Bound::Included(v) => crate::key::graph::new(
 						ns,
 						db,
@@ -191,7 +201,7 @@ impl GraphSubject {
 						id,
 						dir,
 						&RecordId {
-							table: t.0.clone(),
+							table: table.0.clone(),
 							key: v.to_owned(),
 						},
 					)
@@ -203,7 +213,7 @@ impl GraphSubject {
 						id,
 						dir,
 						&RecordId {
-							table: t.0.clone(),
+							table: table.0.clone(),
 							key: v.to_owned(),
 						},
 					)
@@ -214,8 +224,8 @@ impl GraphSubject {
 					}),
 				};
 				// Prepare the range end key
-				let end = match &r.end {
-					Bound::Unbounded => crate::key::graph::ftsuffix(ns, db, tb, id, dir, &t.0),
+				let end = match &range.end {
+					Bound::Unbounded => crate::key::graph::ftsuffix(ns, db, tb, id, dir, &table.0),
 					Bound::Excluded(v) => crate::key::graph::new(
 						ns,
 						db,
@@ -223,7 +233,7 @@ impl GraphSubject {
 						id,
 						dir,
 						&RecordId {
-							table: t.0.clone(),
+							table: table.0.clone(),
 							key: v.to_owned(),
 						},
 					)
@@ -235,7 +245,7 @@ impl GraphSubject {
 						id,
 						dir,
 						&RecordId {
-							table: t.0.clone(),
+							table: table.0.clone(),
 							key: v.to_owned(),
 						},
 					)
@@ -262,7 +272,10 @@ impl Display for GraphSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Table(tb) => Display::fmt(&tb, f),
-			Self::Range(tb, rng) => write!(f, "{tb}:{rng}"),
+			Self::Range {
+				table,
+				range,
+			} => write!(f, "{table}:{range}"),
 		}
 	}
 }

@@ -6,17 +6,67 @@ use futures::StreamExt;
 use nanoid::nanoid;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
 use ulid::Ulid;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Id")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	pub end: Bound<RecordIdKey>,
+}
+
+impl PartialOrd for RecordIdKeyRange {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for RecordIdKeyRange {
+	fn cmp(&self, other: &Self) -> Ordering {
+		fn compare_bounds(a: &Bound<RecordIdKey>, b: &Bound<RecordIdKey>) -> Ordering {
+			match a {
+				Bound::Unbounded => match b {
+					Bound::Unbounded => Ordering::Equal,
+					_ => Ordering::Less,
+				},
+				Bound::Included(a) => match b {
+					Bound::Unbounded => Ordering::Greater,
+					Bound::Included(b) => a.cmp(b),
+					Bound::Excluded(_) => Ordering::Less,
+				},
+				Bound::Excluded(a) => match b {
+					Bound::Excluded(b) => a.cmp(b),
+					_ => Ordering::Greater,
+				},
+			}
+		}
+		match compare_bounds(&self.start, &other.end) {
+			Ordering::Equal => compare_bounds(&self.end, &other.end),
+			x => x,
+		}
+	}
+}
+
+impl fmt::Display for RecordIdKeyRange {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self.start {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write!(f, "{x}")?,
+			Bound::Excluded(ref x) => write!(f, "{x}>")?,
+		}
+		write!(f, "..")?;
+		match self.end {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write!(f, "={x}")?,
+			Bound::Excluded(ref x) => write!(f, "{x}")?,
+		}
+		Ok(())
+	}
 }
 
 impl RecordIdKeyRange {
@@ -73,13 +123,14 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecordIdKey {
 	Number(i64),
+	//TODO: This should definitely be strand, not string as null bytes here can cause a lot of
+	//issues.
 	String(String),
 	Uuid(Uuid),
 	Object(Object),
 	Array(Array),
 	Range(Box<RecordIdKeyRange>),
 }
-
 impl RecordIdKey {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
@@ -134,13 +185,46 @@ impl RecordIdKey {
 	}
 }
 
+impl From<i64> for RecordIdKey {
+	fn from(value: i64) -> Self {
+		RecordIdKey::Number(value)
+	}
+}
+
+impl From<Strand> for RecordIdKey {
+	fn from(value: String) -> Self {
+		RecordIdKey::String(value)
+	}
+}
+
+impl From<Uuid> for RecordIdKey {
+	fn from(value: Uuid) -> Self {
+		RecordIdKey::Uuid(value)
+	}
+}
+impl From<Object> for RecordIdKey {
+	fn from(value: Object) -> Self {
+		RecordIdKey::Object(value)
+	}
+}
+impl From<Array> for RecordIdKey {
+	fn from(value: Array) -> Self {
+		RecordIdKey::Array(value)
+	}
+}
+impl From<Box<RecordIdKeyRange>> for RecordIdKey {
+	fn from(value: Box<RecordIdKeyRange>) -> Self {
+		RecordIdKey::Range(value)
+	}
+}
+
 impl PartialEq<Value> for RecordIdKey {
 	fn eq(&self, other: &Value) -> bool {
 		match self {
-			RecordIdKey::Number(a) => Value::Number(Number::Int(a)) == other,
+			RecordIdKey::Number(a) => Value::Number(Number::Int(*a)) == *other,
 			RecordIdKey::String(a) => {
 				if let Value::Strand(b) = other {
-					a == b
+					a.as_str() == b.as_str()
 				} else {
 					false
 				}
@@ -160,7 +244,7 @@ impl PartialEq<Value> for RecordIdKey {
 				}
 			}
 			RecordIdKey::Array(a) => {
-				if let Value::Object(b) = other {
+				if let Value::Array(b) = other {
 					a == b
 				} else {
 					false
@@ -168,11 +252,24 @@ impl PartialEq<Value> for RecordIdKey {
 			}
 			RecordIdKey::Range(a) => {
 				if let Value::Range(b) = other {
-					a == b
+					**a == **b
 				} else {
 					false
 				}
 			}
+		}
+	}
+}
+
+impl fmt::Display for RecordIdKey {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			RecordIdKey::Number(n) => write!(f, "{n}"),
+			RecordIdKey::String(v) => EscapeRid(v).fmt(f),
+			RecordIdKey::Uuid(uuid) => uuid.fmt(f),
+			RecordIdKey::Object(object) => object.fmt(f),
+			RecordIdKey::Array(array) => array.fmt(f),
+			RecordIdKey::Range(rid) => rid.fmt(f),
 		}
 	}
 }

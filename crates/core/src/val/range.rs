@@ -1,7 +1,10 @@
+use crate::expr;
 use crate::expr::kind::HasKind;
 use crate::val::Value;
 use crate::val::value::{Coerce, CoerceError};
 use revision::revisioned;
+use std::cmp::Ordering;
+use std::fmt;
 use std::ops::Bound;
 
 use super::value::CoerceErrorExt;
@@ -10,10 +13,59 @@ use super::value::CoerceErrorExt;
 ///
 /// Can be any kind of values, "a"..1 is allowed.
 #[revisioned(revision = 1)]
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,
+}
+
+impl PartialOrd for Range {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for Range {
+	fn cmp(&self, other: &Self) -> Ordering {
+		fn compare_bounds(a: &Bound<Value>, b: &Bound<Value>) -> Ordering {
+			match a {
+				Bound::Unbounded => match b {
+					Bound::Unbounded => Ordering::Equal,
+					_ => Ordering::Less,
+				},
+				Bound::Included(a) => match b {
+					Bound::Unbounded => Ordering::Greater,
+					Bound::Included(b) => a.cmp(b),
+					Bound::Excluded(_) => Ordering::Less,
+				},
+				Bound::Excluded(a) => match b {
+					Bound::Excluded(b) => a.cmp(b),
+					_ => Ordering::Greater,
+				},
+			}
+		}
+		match compare_bounds(&self.start, &other.end) {
+			Ordering::Equal => compare_bounds(&self.end, &other.end),
+			x => x,
+		}
+	}
+}
+
+impl fmt::Display for Range {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self.start {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write!(f, "{x}")?,
+			Bound::Excluded(ref x) => write!(f, "{x}>")?,
+		}
+		write!(f, "..")?;
+		match self.end {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write!(f, "={x}")?,
+			Bound::Excluded(ref x) => write!(f, "{x}")?,
+		}
+		Ok(())
+	}
 }
 
 impl Range {
@@ -56,6 +108,51 @@ impl Range {
 			start,
 			end,
 		})
+	}
+
+	pub fn into_literal(self) -> expr::Expr {
+		match (self.start, self.end) {
+			(Bound::Unbounded, Bound::Unbounded) => {
+				expr::Expr::Literal(expr::Literal::UnboundedRange)
+			}
+			(Bound::Included(x), Bound::Unbounded) => expr::Expr::Postfix {
+				op: expr::PostfixOperator::Range,
+				expr: Box::new(x.into_literal()),
+			},
+			(Bound::Excluded(x), Bound::Unbounded) => expr::Expr::Postfix {
+				op: expr::PostfixOperator::RangeSkip,
+				expr: Box::new(x.into_literal()),
+			},
+
+			(Bound::Unbounded, Bound::Included(y)) => expr::Expr::Prefix {
+				op: expr::PrefixOperator::RangeInclusive,
+				expr: Box::new(y.into_literal()),
+			},
+			(Bound::Included(x), Bound::Included(y)) => expr::Expr::Binary {
+				left: Box::new(x.into_literal()),
+				op: expr::BinaryOperator::RangeInclusive,
+				right: Box::new(y.into_literal()),
+			},
+			(Bound::Excluded(x), Bound::Included(y)) => expr::Expr::Binary {
+				left: Box::new(x.into_literal()),
+				op: expr::BinaryOperator::RangeSkipInclusive,
+				right: Box::new(y.into_literal()),
+			},
+			(Bound::Unbounded, Bound::Excluded(y)) => expr::Expr::Prefix {
+				op: expr::PrefixOperator::Range,
+				expr: Box::new(y.into_literal()),
+			},
+			(Bound::Included(x), Bound::Excluded(y)) => expr::Expr::Binary {
+				left: Box::new(x.into_literal()),
+				op: expr::BinaryOperator::Range,
+				right: Box::new(y.into_literal()),
+			},
+			(Bound::Excluded(x), Bound::Excluded(y)) => expr::Expr::Binary {
+				left: Box::new(x.into_literal()),
+				op: expr::BinaryOperator::RangeSkip,
+				right: Box::new(y.into_literal()),
+			},
+		}
 	}
 }
 

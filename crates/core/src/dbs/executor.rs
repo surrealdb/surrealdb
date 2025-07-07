@@ -85,13 +85,6 @@ impl Executor {
 				};
 				self.opt.force = force;
 			}
-			"FUTURES" => {
-				if stmt.what {
-					self.opt.set_futures(true);
-				} else {
-					self.opt.set_futures_never();
-				}
-			}
 			_ => {}
 		};
 		Ok(())

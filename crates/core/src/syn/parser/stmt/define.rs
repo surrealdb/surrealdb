@@ -21,13 +21,14 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Ident, Idioms, Index, Kind, Literal, Param, Permissions, Scoring, Strand,
-	TableType, access_type, table_type,
+	AccessType, Expr, Ident, Idioms, Index, Kind, Literal, Param, Permissions, Scoring, TableType,
+	access_type, table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Keyword, Token, TokenKind, t};
+use crate::val::Strand;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(

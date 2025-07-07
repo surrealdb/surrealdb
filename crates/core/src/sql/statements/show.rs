@@ -1,4 +1,5 @@
-use crate::sql::{Datetime, Table};
+use crate::sql::Table;
+use crate::val::Datetime;
 use crate::vs::VersionStamp;
 
 use std::fmt;

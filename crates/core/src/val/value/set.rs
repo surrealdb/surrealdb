@@ -117,7 +117,7 @@ impl Value {
 						}
 						Value::Array(arr) => match v {
 							Value::Range(x) => {
-								if let Some(v) = x.slice_mut(arr) {
+								if let Some(v) = x.coerce_to_typed::<i64>()?.slice_mut(arr) {
 									let path = iter.as_slice();
 									stk.scope(|scope| {
 										let futs = v.iter_mut().map(|v| {

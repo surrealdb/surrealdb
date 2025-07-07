@@ -63,7 +63,7 @@ impl<'a> IndexOperation<'a> {
 
 	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
 		let (ns, db) = self.opt.ns_db()?;
-		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
+		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, Some(&self.rid.key)))
 	}
 
 	async fn index_unique(&mut self) -> Result<()> {

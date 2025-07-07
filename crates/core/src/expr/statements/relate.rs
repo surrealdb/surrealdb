@@ -2,24 +2,23 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Data, FlowResultExt as _, Output, Timeout, Value};
+use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
 use anyhow::{Result, bail, ensure};
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug,  Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RelateStatement {
 	pub only: bool,
-	pub kind: Value,
-	pub from: Value,
-	pub with: Value,
+	pub kind: Expr,
+	pub from: Expr,
+	pub with: Expr,
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,

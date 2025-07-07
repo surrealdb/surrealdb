@@ -207,7 +207,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_hi_key(&self, id: RecordIdKeyLit) -> Result<Key> {
+	fn new_hi_key(&self, id: RecordIdKey) -> Result<Key> {
 		Hi::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),

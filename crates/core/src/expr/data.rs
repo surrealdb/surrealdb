@@ -97,13 +97,7 @@ impl Display for Data {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::EmptyExpression => Ok(()),
-			Self::SetExpression(v) => write!(
-				f,
-				"SET {}",
-				Fmt::comma_separated(
-					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
-				)
-			),
+			Self::SetExpression(v) => write!(f, "SET {}", Fmt::comma_separated(v.iter())),
 			Self::UnsetExpression(v) => write!(
 				f,
 				"UNSET {}",
@@ -124,13 +118,9 @@ impl Display for Data {
 					Fmt::comma_separated(v.iter().map(|(_, v)| v))
 				))))
 			),
-			Self::UpdateExpression(v) => write!(
-				f,
-				"ON DUPLICATE KEY UPDATE {}",
-				Fmt::comma_separated(
-					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
-				)
-			),
+			Self::UpdateExpression(v) => {
+				write!(f, "ON DUPLICATE KEY UPDATE {}", Fmt::comma_separated(v.iter()))
+			}
 		}
 	}
 }

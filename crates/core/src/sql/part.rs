@@ -94,7 +94,6 @@ impl fmt::Display for Part {
 			Part::Start(v) => write!(f, "{v}"),
 			Part::Field(v) => write!(f, ".{v}"),
 			Part::Flatten => f.write_str("…"),
-			Part::Index(v) => write!(f, "[{v}]"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),

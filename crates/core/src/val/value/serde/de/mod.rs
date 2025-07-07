@@ -1,4 +1,3 @@
-use crate::expr;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, Geometry, Number as ValNumber, Object, Strand, Uuid, Value,
 };

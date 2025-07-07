@@ -207,7 +207,7 @@ pub async fn db_access(
 												ns: Some(ns.clone()),
 												db: Some(db.clone()),
 												ac: Some(ac.clone()),
-												id: Some(rid.to_raw()),
+												id: Some(rid.into_raw_string()),
 												..Claims::default()
 											};
 											// AUTHENTICATE clause
@@ -630,7 +630,7 @@ pub async fn signin_bearer(
 		ac: Some(av.name.to_string()),
 		id: match &gr.subject {
 			access::Subject::User(user) => Some(user.into_raw_string()),
-			access::Subject::Record(rid) => Some(rid.to_raw()),
+			access::Subject::Record(rid) => Some(rid.into_raw_string()),
 		},
 		roles: match &gr.subject {
 			access::Subject::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),

@@ -1,7 +1,7 @@
-use crate::sql::File;
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Token, t};
+use crate::val::File;
 
 use std::mem;
 

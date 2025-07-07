@@ -14,17 +14,11 @@ use super::FlowResultExt as _;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Future")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Future(pub Block);
-
-impl From<Value> for Future {
-	fn from(v: Value) -> Self {
-		Future(Block::from(v))
-	}
-}
 
 impl Future {
 	pub fn read_only(&self) -> bool {
@@ -42,7 +36,7 @@ impl Future {
 		// Process the future if enabled
 		match opt.futures {
 			Futures::Enabled => {
-				stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return()?.ok()
+				stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return()
 			}
 			_ => Ok(self.clone().into()),
 		}

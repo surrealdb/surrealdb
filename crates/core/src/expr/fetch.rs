@@ -3,15 +3,18 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Idiom, Literal};
+use crate::expr::{Expr, Function, Idiom, Literal};
+use crate::fnc::args::FromArgs;
 use crate::syn;
-use crate::val::{Array, Value};
-use anyhow::{Result, bail};
+use crate::val::{Strand, Value};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
+
+use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -47,10 +50,10 @@ impl InfoStructure for Fetchs {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug,  Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Fetch(#[revision(start = 1)] pub Expr);
+pub struct Fetch(pub Expr);
 
 impl Fetch {
 	pub(crate) async fn compute(
@@ -60,8 +63,8 @@ impl Fetch {
 		opt: &Options,
 		idioms: &mut Vec<Idiom>,
 	) -> Result<()> {
-		let strand_or_idiom = |v: Value| match v {
-			Value::Strand(s) => Ok(Idiom::from(s.0)),
+		let strand_or_idiom = |v: Expr| match v {
+			Expr::Literal(Literal::Strand(s)) => Ok(Idiom::field(s.0)),
 			Expr::Idiom(i) => Ok(i.clone()),
 			v => Err(Error::InvalidFetch {
 				value: v,
@@ -74,65 +77,56 @@ impl Fetch {
 			}
 			Expr::Param(param) => {
 				let v = param.compute(stk, ctx, opt, None).await?;
-				idioms.push(strand_or_idiom(v)?);
+				idioms.push(syn::idiom(v.coerce_to::<Strand>()?.as_str())?.into());
 				Ok(())
 			}
 			Expr::FunctionCall(f) => {
-				if f.name() == Some("type::field") {
-					let v = match f.args().first().unwrap() {
-						Expr::Param(v) => v.compute(stk, ctx, opt, None).await?,
-						v => v.to_owned(),
-					};
-					idioms.push(strand_or_idiom(v)?);
-					Ok(())
-				} else if f.name() == Some("type::fields") {
-					// Get the first argument which is guaranteed to exist
-					let args = match f.args().first().unwrap() {
-						Expr::Param(v) => v.compute(stk, ctx, opt, None).await?,
-						v => v.to_owned(),
-					};
-					// This value is always an array, so we can convert it
-					let Array(args) = args.coerce_to()?;
-					// This value is always an array, so we can convert it
-					for v in args.into_iter() {
-						let i = match v {
-							Expr::Param(v) => {
-								strand_or_idiom(v.compute(stk, ctx, opt, None).await?)?
-							}
-							Expr::Literal(Literal::Strand(s)) => syn::idiom(s.as_str())?.into(),
-							Expr::Idiom(i) => i,
-							v => {
-								bail!(Error::InvalidFetch {
-									value: v,
-								})
-							}
-						};
-						idioms.push(i);
+				// NOTE: Behavior here changed with value inversion PR.
+				// Previously `type::field(a.b)` would produce a fetch `a.b`.
+				// This is somewhat weird because elsewhere this wouldn't work.
+				match f.receiver {
+					Function::Normal(x) if x == "type::field" => {
+						// Some manual reimplemenation of type::field to make it
+						// more efficient.
+						let mut arguments = Vec::new();
+						for arg in f.arguments {
+							arguments.push(arg.compute(stk, ctx, opt, None).await.catch_return()?);
+						}
+
+						// replicate the same error that would happen with normal
+						// function calls
+						let (arg,) = <(String,)>::from_args("type::field", arguments)?;
+
+						// manually do the implementation of type::field
+						let idiom: Idiom = syn::idiom(&arg)?.into();
+						idioms.push(idiom);
+						Ok(())
 					}
-					Ok(())
-				} else {
-					Err(anyhow::Error::new(Error::InvalidFetch {
-						value: Value::Function(f.clone()),
-					}))
+					Function::Normal(x) if x == "type::fields" => {
+						let mut arguments = Vec::new();
+						for arg in f.arguments {
+							arguments.push(arg.compute(stk, ctx, opt, None).await.catch_return()?);
+						}
+
+						// replicate the same error that would happen with normal
+						// function calls
+						let (args,) = <(Vec<String>,)>::from_args("type::fields", arguments)?;
+
+						// manually do the implementation of type::fields
+						for arg in args {
+							idioms.push(syn::idiom(&arg)?.into());
+						}
+						Ok(())
+					}
+					_ => Err(anyhow::Error::new(Error::InvalidFetch {
+						value: Expr::FunctionCall(f.clone()),
+					})),
 				}
 			}
 			v => Err(anyhow::Error::new(Error::InvalidFetch {
 				value: v.clone(),
 			})),
 		}
-	}
-}
-
-impl From<Value> for Fetch {
-	fn from(value: Value) -> Self {
-		Self(value)
-	}
-}
-
-impl Deref for Fetch {
-	type Target = Value;
-	fn deref(&self) -> &Self::Target {
-		&self.0
 	}
 }
 

@@ -23,18 +23,23 @@ use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
 use crate::gql::error::internal_error;
 use crate::gql::utils::{ErasedRecord, GQLTx, GqlValueUtils, field_val_erase_owned};
 
-macro_rules! order {
-	(asc, $field:expr_2021) => {{
-		let mut tmp = expr::Order::default();
-		tmp.value = $field.into();
-		tmp.direction = true;
-		tmp
-	}};
-	(desc, $field:expr_2021) => {{
-		let mut tmp = expr::Order::default();
-		tmp.value = $field.into();
-		tmp
-	}};
+fn order_asc<T>(t: T) -> expr::Order
+where
+	Value: From<T>,
+{
+	let mut tmp = expr::Order::default();
+	tmp.value = t.into();
+	tmp.direction = true;
+	tmp
+}
+
+fn order_desc<T>(t: T) -> expr::Order
+where
+	Value: From<T>,
+{
+	let mut tmp = expr::Order::default();
+	tmp.value = t.into();
+	tmp
 }
 
 macro_rules! limit_input {
@@ -141,10 +146,10 @@ pub async fn process_tbs(
 										return Err("Found both ASC and DESC in order".into());
 									}
 									(Some(GqlValue::Enum(a)), None) => {
-										orders.push(order!(asc, a.as_str()))
+										orders.push(order_asc(a.as_str()))
 									}
 									(None, Some(GqlValue::Enum(d))) => {
-										orders.push(order!(desc, d.as_str()))
+										orders.push(order_desc(d.as_str()))
 									}
 									(_, _) => {
 										break;

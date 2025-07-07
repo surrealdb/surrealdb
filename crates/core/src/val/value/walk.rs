@@ -56,7 +56,7 @@ impl Value {
 							v.iter()
 								.enumerate()
 								.flat_map(|(i, v)| {
-									v._walk(path.next(), prev.clone().push(Part::from(i)))
+									v._walk(path.next(), prev.clone().push(Part::index_int(i)))
 								})
 								.collect::<Vec<_>>()
 						}

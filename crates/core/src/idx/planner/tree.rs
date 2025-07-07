@@ -183,7 +183,7 @@ impl<'a> TreeBuilder<'a> {
 				let left_node = stk.run(|stk| self.eval_value(stk, group, left)).await?;
 				let right_node = stk.run(|stk| self.eval_value(stk, group, right)).await?;
 				// If both values are computable, then we can delegate the computation to the parent
-				if left == Node::Computable && right == Node::Computable {
+				if left_node == Node::Computable && right_node == Node::Computable {
 					return Ok(Node::Computable);
 				}
 				let exp = Arc::new(v.clone());
@@ -363,7 +363,7 @@ impl<'a> TreeBuilder<'a> {
 		idiom: &Arc<Idiom>,
 	) -> Result<Option<RecordOptions>> {
 		for field in fields.iter() {
-			if let Some(Kind::Record(tables)) = &field.kind {
+			if let Some(Kind::Record(tables)) = &field.field_kind {
 				if idiom.starts_with(&field.name.0) {
 					let (local_field, remote_field) = idiom.0.split_at(field.name.0.len());
 					if remote_field.is_empty() {

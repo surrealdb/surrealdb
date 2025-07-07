@@ -5,12 +5,12 @@ use crate::sql::statements::{
 	UpsertStatement,
 };
 use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, FunctionCall, Future, Idiom, Literal, Mock, Model,
-	Param, PostfixOperator, PrefixOperator, Table,
+	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param,
+	PostfixOperator, PrefixOperator, Table,
 };
-use std::{fmt, str};
+use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Expr {
 	Literal(Literal),
 
@@ -20,7 +20,6 @@ pub enum Expr {
 	Mock(Mock),
 	// TODO(3.0) maybe unbox? check size.
 	Block(Box<Block>),
-	Future(Box<Future>),
 	Constant(Constant),
 	Prefix {
 		op: PrefixOperator,

@@ -499,7 +499,10 @@ impl Value {
 
 	fn can_coerce_to_record(&self, val: &[Table]) -> bool {
 		match self {
-			Value::Thing(t) => t.is_record_type(val),
+			Value::Thing(t) => {
+				val.is_empty() || val.iter().any(|x| t.table == **x)
+				//t.is_record_type(val),
+			}
 			_ => false,
 		}
 	}
@@ -615,26 +618,30 @@ impl Value {
 
 	/// Try to coerce this value to a Record of a certain type
 	pub(crate) fn coerce_to_record_kind(self, val: &[Table]) -> Result<RecordId, CoerceError> {
-		match self {
+		let this = match self {
 			// Records are allowed if correct type
-			Value::Thing(v) if v.is_record_type(val) => Ok(v),
-			// Anything else raises an error
-			this => {
-				let mut kind = "record<".to_string();
-				for (idx, t) in val.iter().enumerate() {
-					if idx != 0 {
-						kind.push('|');
-					}
-					kind.push_str(t.as_str())
+			Value::Thing(v) => {
+				if val.is_empty() || val.iter().all(|x| **x == v.table) {
+					return Ok(v);
+				} else {
+					Value::Thing(v)
 				}
-				kind.push('>');
-
-				Err(CoerceError::InvalidKind {
-					from: this,
-					into: kind,
-				})
 			}
+			x => x,
+		};
+
+		let mut kind = "record<".to_string();
+		for (idx, t) in val.iter().enumerate() {
+			if idx != 0 {
+				kind.push('|');
+			}
+			kind.push_str(t.as_str())
 		}
+		kind.push('>');
+		Err(CoerceError::InvalidKind {
+			from: this,
+			into: kind,
+		})
 	}
 
 	/// Try to coerce this value to a `Geometry` of a certain type

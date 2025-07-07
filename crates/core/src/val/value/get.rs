@@ -12,7 +12,7 @@ use crate::expr::field::{Field, Fields};
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _};
+use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Literal};
 use crate::fnc::idiom;
 use crate::val::{RecordId, RecordIdKey, Value};
 use futures::future::try_join_all;
@@ -237,7 +237,7 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
-						Value::Thing(t) => match v.get(&t.to_raw()) {
+						Value::Thing(t) => match v.get(&t.into_raw_string()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
@@ -502,7 +502,9 @@ impl Value {
 							_ => {
 								let stm = SelectStatement {
 									expr: Fields::Select(vec![Field::All]),
-									what: vec![Expr::Literal(Value::Thing(val.into_literal()))],
+									what: vec![Expr::Literal(Literal::RecordId(
+										val.into_literal(),
+									))],
 									..SelectStatement::default()
 								};
 								let v =
