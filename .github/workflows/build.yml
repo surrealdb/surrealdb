@@ -103,7 +103,7 @@ jobs:
           target: builder
           push: false
           outputs: type=docker,dest=${{ needs.image.outputs.folder }}/${{ matrix.platform }}/surrealdb-builder.tar
-          tags: ${{ needs.image.outputs.name }}:${{ matrix.platform }}/${{ needs.image.outputs.tag }}
+          tags: ${{ matrix.platform }}/${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
 
@@ -223,7 +223,7 @@ jobs:
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                ${{ needs.image.outputs.name }}:linux/amd64/${{ needs.image.outputs.tag }} \
+                linux/amd64/${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }} \
                   --target x86_64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
@@ -270,7 +270,7 @@ jobs:
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                ${{ needs.image.outputs.name }}:linux/arm64/${{ needs.image.outputs.tag }} \
+                linux/arm64/${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }} \
                   --target aarch64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
