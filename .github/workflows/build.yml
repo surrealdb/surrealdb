@@ -102,7 +102,7 @@ jobs:
           file: ./docker/Dockerfile
           target: builder
           push: false
-          outputs: type=docker,dest=${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}.tar
+          outputs: type=docker,dest=${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
           tags: ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-${{ matrix.platform }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
@@ -213,7 +213,7 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
-              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-amd64.tar
+              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-amd64
 
               docker run \
                 --rm -t \
@@ -260,7 +260,7 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
-              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-arm64.tar
+              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-arm64
 
               docker run \
                 --rm -t \
@@ -330,9 +330,18 @@ jobs:
           toolchain: ${{ inputs.rust-version }}
           targets: ${{ matrix.arch }}
 
-      - name: Download builder image
+      - name: Download amd64 builder image
+        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
+          name: surrealdb-builder-${{ needs.image.outputs.tag }}-amd64
+          path: ${{ needs.image.outputs.folder }}
+
+      - name: Download arm64 builder image
+        if: ${{ matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        with:
+          name: surrealdb-builder-${{ needs.image.outputs.tag }}-arm64
           path: ${{ needs.image.outputs.folder }}
 
       - name: Output package versions
