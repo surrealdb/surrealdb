@@ -137,7 +137,7 @@ pub static PKG_VERSION: LazyLock<String> =
 
 /// Whether to enable Tokio Console
 pub static ENABLE_TOKIO_CONSOLE: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ENABLE_TOKIO_CONSOLE", bool, false);
+	lazy_env_parse!("SURREAL_TOKIO_CONSOLE_ENABLED", bool, false);
 
 /// The socket address that Tokio Console will bind on
 pub static TOKIO_CONSOLE_SOCKET_ADDR: LazyLock<Option<String>> =
