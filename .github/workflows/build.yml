@@ -93,6 +93,13 @@ jobs:
       - name: Setup artifact directory
         run: mkdir -p ${{ needs.image.outputs.folder }}
 
+      - name: Restore cache artifact (if exists)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        continue-on-error: true
+        with:
+          name: surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
+          path: ${{ needs.image.outputs.folder }}
+
       - name: Build & Push builder image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
         id: build
@@ -101,6 +108,8 @@ jobs:
           platforms: linux/${{ matrix.platform }}
           file: ./docker/Dockerfile
           target: builder
+          cache-from: type=local,src=${{ needs.image.outputs.folder }}
+          cache-to: type=local,dest=${{ needs.image.outputs.folder }}
           push: false
           outputs: type=docker,dest=${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
           tags: ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-${{ matrix.platform }}
@@ -112,7 +121,6 @@ jobs:
         with:
           name: surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
           path: ${{ needs.image.outputs.folder }}
-          retention-days: 1
 
   build:
     name: Build ${{ matrix.arch }} binary
