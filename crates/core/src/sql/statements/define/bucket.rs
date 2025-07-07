@@ -1,4 +1,5 @@
-use crate::sql::{Expr, Ident, Permission, Strand};
+use crate::sql::{Expr, Ident, Permission};
+use crate::val::Strand;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};

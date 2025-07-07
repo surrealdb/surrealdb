@@ -1,15 +1,15 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::order::Ordering;
-use crate::sql::{
-	Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start, Table,
-};
+use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
 use std::fmt::{self, Display, Formatter, Write};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+use super::Ident;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Graph {
 	pub dir: Dir,
 	pub expr: Option<Fields>,
-	pub what: GraphSubjects,
+	pub what: Vec<GraphSubject>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
@@ -27,18 +27,20 @@ impl Display for Graph {
 			&& self.expr.is_none()
 		{
 			Display::fmt(&self.dir, f)?;
-			match self.what.0.len() {
-				0 => f.write_char('?'),
-				_ => Display::fmt(&self.what, f),
+			if self.what.is_empty() {
+				f.write_char('?')
+			} else {
+				Fmt::comma_separated(self.what.iter()).fmt(f)
 			}
 		} else {
 			write!(f, "{}(", self.dir)?;
 			if let Some(ref expr) = self.expr {
 				write!(f, "SELECT {} FROM ", expr)?;
 			}
-			match self.what.0.len() {
-				0 => f.write_char('?'),
-				_ => Display::fmt(&self.what, f),
+			if self.what.is_empty() {
+				f.write_char('?')
+			} else {
+				Display::fmt(&Fmt::comma_separated(&self.what), f)
 			}?;
 			if let Some(ref v) = self.cond {
 				write!(f, " {v}")?
@@ -70,7 +72,7 @@ impl From<Graph> for crate::expr::Graph {
 	fn from(v: Graph) -> Self {
 		Self {
 			dir: v.dir.into(),
-			expr: v.expr.map(Into::into),
+			expr: v.expr.into_iter().map(From::from).collect(),
 			what: v.what.into(),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),
@@ -100,32 +102,11 @@ impl From<crate::expr::Graph> for Graph {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct GraphSubjects(pub Vec<GraphSubject>);
-
-impl From<GraphSubjects> for crate::expr::graph::GraphSubjects {
-	fn from(v: GraphSubjects) -> Self {
-		Self(v.0.into_iter().map(Into::into).collect())
-	}
-}
-impl From<crate::expr::graph::GraphSubjects> for GraphSubjects {
-	fn from(v: crate::expr::graph::GraphSubjects) -> Self {
-		Self(v.0.into_iter().map(Into::into).collect())
-	}
-}
-
-impl Display for GraphSubjects {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&Fmt::comma_separated(&self.0), f)
-	}
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum GraphSubject {
-	Table(Table),
-	Range(Table, RecordIdKeyRangeLit),
+	Table(Ident),
+	Range(Ident, RecordIdKeyRangeLit),
 }
 
 impl Display for GraphSubject {

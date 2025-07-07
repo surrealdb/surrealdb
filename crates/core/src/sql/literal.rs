@@ -1,8 +1,10 @@
+use std::fmt;
+
 use crate::sql::{Closure, Expr, RecordIdLit, Regex};
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Strand, Uuid};
 use rust_decimal::Decimal;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Literal {
 	None,
@@ -36,6 +38,7 @@ impl From<Literal> for crate::expr::Literal {
 		match value {
 			Literal::None => crate::expr::Literal::None,
 			Literal::Null => crate::expr::Literal::Null,
+			Literal::UnboundedRange => crate::expr::Literal::UnboundedRange,
 			Literal::Bool(x) => crate::expr::Literal::Bool(x),
 			Literal::Float(x) => crate::expr::Literal::Float(x),
 			Literal::Integer(x) => crate::expr::Literal::Integer(x),
@@ -67,6 +70,7 @@ impl From<crate::expr::Literal> for Literal {
 		match value {
 			crate::expr::Literal::None => Literal::None,
 			crate::expr::Literal::Null => Literal::Null,
+			crate::expr::Literal::UnboundedRange => Literal::UnboundedRange,
 			crate::expr::Literal::Bool(x) => Literal::Bool(x),
 			crate::expr::Literal::Float(x) => Literal::Float(x),
 			crate::expr::Literal::Integer(x) => Literal::Integer(x),
@@ -93,7 +97,7 @@ impl From<crate::expr::Literal> for Literal {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,
@@ -114,5 +118,11 @@ impl From<crate::expr::literal::ObjectEntry> for ObjectEntry {
 			key: value.key,
 			value: value.value.into(),
 		}
+	}
+}
+
+impl fmt::Display for ObjectEntry {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}: {}", self.key, self.value)
 	}
 }

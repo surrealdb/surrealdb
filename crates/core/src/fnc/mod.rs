@@ -74,7 +74,7 @@ pub async fn run(
 		|| name.eq("file::rename_if_not_exists")
 		|| name.eq("file::list")
 		|| name.eq("record::exists")
-		|| name.eq("record::refs")
+		//|| name.eq("record::refs")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
@@ -570,7 +570,7 @@ pub async fn asynchronous(
 		"http::delete" => http::delete(ctx).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
-		"record::refs" => record::refs((stk, ctx, opt, doc)).await,
+		//"record::refs" => record::refs((stk, ctx, opt, doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
@@ -947,7 +947,7 @@ pub async fn idiom(
 				"id" => record::id,
 				"table" => record::tb,
 				"tb" => record::tb,
-				"refs" => record::refs((stk, ctx, opt, doc)).await,
+				//"refs" => record::refs((stk, ctx, opt, doc)).await,
 
 
 				"is_array" => r#type::is::array,

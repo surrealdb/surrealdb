@@ -342,8 +342,7 @@ pub mod is {
 		// TODO: Fix once implemeted in parser.
 		let res = match RecordId::try_from(arg) {
 			Ok(t) => match tb {
-				Some(Value::Strand(tb)) => t.tb == *tb,
-				Some(Value::Table(tb)) => t.tb == tb.0,
+				Some(Value::Strand(tb) | Value::Table(tb)) => t.table.as_str() == tb.as_str(),
 				Some(_) => {
 					bail!(Error::InvalidArguments {
 						name: "string::is::record()".into(),

@@ -6,7 +6,7 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::expr::kind::{HasKind, KindLiteral};
-use crate::expr::{Ident, Kind, Regex, Table};
+use crate::expr::{Ident, Kind, Regex};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
@@ -324,7 +324,16 @@ impl Cast for Strand {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => match String::from_utf8(b.0) {
-				Ok(x) => Ok(Strand(x)),
+				Ok(x) => {
+					if let Some(x) = Strand::new(x) {
+						Ok(x)
+					} else {
+						Err(CastError::InvalidKind {
+							from: Value::Bytes(Bytes(x.into_bytes())),
+							into: "string".to_owned(),
+						})
+					}
+				}
 				Err(e) => Err(CastError::InvalidKind {
 					from: Value::Bytes(Bytes(e.into_bytes())),
 					into: "string".to_owned(),
@@ -350,7 +359,7 @@ impl Cast for String {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		Strand::cast(v).map(|x| x.0)
+		Strand::cast(v).map(|x| x.into_string())
 	}
 }
 
@@ -760,7 +769,7 @@ impl Value {
 		}
 	}
 
-	fn can_cast_to_record(&self, val: &[Table]) -> bool {
+	fn can_cast_to_record(&self, val: &[Ident]) -> bool {
 		match self {
 			Value::Thing(t) => t.is_record_type(val),
 			_ => false,
@@ -864,7 +873,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Record of a certain type
-	fn cast_to_record(self, val: &[Table]) -> Result<RecordId, CastError> {
+	fn cast_to_record(self, val: &[Ident]) -> Result<RecordId, CastError> {
 		match self {
 			Value::Thing(v) if v.is_record_type(val) => Ok(v),
 			Value::Strand(v) => match todo!() /*Thing::from_str(v.as_str())*/ {

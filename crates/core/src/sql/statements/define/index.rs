@@ -1,4 +1,5 @@
-use crate::sql::{Ident, Idioms, Index, Strand};
+use crate::sql::{Ident, Idioms, Index};
+use crate::val::Strand;
 use std::fmt::{self, Display};
 
 use super::DefineKind;

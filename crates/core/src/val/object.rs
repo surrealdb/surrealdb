@@ -14,8 +14,6 @@ use std::ops::{Deref, DerefMut};
 
 use super::FlowResult;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
-
 /// Invariant: Keys never contain NUL bytes.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

@@ -4,9 +4,7 @@ use crate::doc::CursorDoc;
 use crate::exe::try_join_all_buffered;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
-use crate::expr::table::Tables;
-use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyLit, Splits, Table};
-use crate::iam::ResourceKind;
+use crate::expr::{Cond, Dir, Fields, Groups, Ident, Idiom, Limit, RecordIdKeyRangeLit, Splits};
 use crate::kvs::KeyEncode;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 use anyhow::Result;
@@ -16,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Bound, Deref};
 
-use super::RecordIdKeyRangeLit;
 use super::fmt::Fmt;
 
 #[revisioned(revision = 1)]
@@ -26,7 +23,7 @@ use super::fmt::Fmt;
 pub struct Graph {
 	pub dir: Dir,
 	pub expr: Option<Fields>,
-	pub what: GraphSubjects,
+	pub what: Vec<GraphSubject>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
@@ -45,7 +42,7 @@ impl Graph {
 
 impl Display for Graph {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		if self.what.0.len() <= 1
+		if self.what.len() <= 1
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
@@ -62,7 +59,7 @@ impl Display for Graph {
 			}
 			match self.what.len() {
 				0 => f.write_char('?'),
-				_ => Display::fmt(&self.what, f),
+				_ => Fmt::comma_separated(self.what.iter()).fmt(f),
 			}?;
 			if let Some(ref v) = self.cond {
 				write!(f, " {v}")?
@@ -90,33 +87,7 @@ impl Display for Graph {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct GraphSubjects(pub Vec<GraphSubject>);
-
-impl From<Tables> for GraphSubjects {
-	fn from(tbs: Tables) -> Self {
-		Self(tbs.0.into_iter().map(GraphSubject::from).collect())
-	}
-}
-
 /*
-impl From<Table> for GraphSubjects {
-	fn from(v: Table) -> Self {
-		GraphSubjects(vec![GraphSubject::Table(v)])
-	}
-}
-*/
-
-impl Deref for GraphSubjects {
-	type Target = Vec<GraphSubject>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
 impl GraphSubjects {
 	pub(crate) async fn compute(
 		self,
@@ -126,7 +97,7 @@ impl GraphSubjects {
 		doc: Option<&CursorDoc>,
 	) -> Result<Self> {
 		stk.scope(|scope| {
-			let futs = self.0.into_iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc)));
+			let futs = self.into_iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc)));
 			try_join_all_buffered(futs)
 		})
 		.await
@@ -138,43 +109,20 @@ impl Display for GraphSubjects {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
-}
+}*/
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum GraphSubject {
-	Table(Table),
+	Table(Ident),
 	Range {
-		table: Table,
-		range: RecordIdKeyRange,
+		table: Ident,
+		range: RecordIdKeyRangeLit,
 	},
 }
 
 impl GraphSubject {
-	pub(crate) async fn compute(
-		self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Self> {
-		if let Self::Range {
-			table,
-			range,
-		} = self
-		{
-			let range = range.compute(stk, ctx, opt, doc).await?;
-			Ok(Self::Range {
-				table,
-				range,
-			})
-		} else {
-			Ok(self)
-		}
-	}
-
 	pub(crate) fn presuf(
 		&self,
 		ns: &str,
@@ -259,12 +207,6 @@ impl GraphSubject {
 				(beg, end)
 			}
 		}
-	}
-}
-
-impl From<Table> for GraphSubject {
-	fn from(x: Table) -> Self {
-		GraphSubject::Table(x)
 	}
 }
 

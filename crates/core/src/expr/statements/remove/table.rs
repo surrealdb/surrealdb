@@ -84,7 +84,7 @@ impl RemoveTableStatement {
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
 			// Process each foreign table
-			for ft in view.what.0.iter() {
+			for ft in view.what.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
 				txn.del(key).await?;

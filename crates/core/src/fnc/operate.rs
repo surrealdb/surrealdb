@@ -37,10 +37,11 @@ pub fn tco(a: Value, b: Value) -> Result<Value> {
 }
 
 pub fn nco(a: Value, b: Value) -> Result<Value> {
-	Ok(match a.is_some() {
-		true => a,
-		false => b,
-	})
+	if a.is_nullish() {
+		Ok(b)
+	} else {
+		Ok(a)
+	}
 }
 
 pub fn add(a: Value, b: Value) -> Result<Value> {
@@ -163,12 +164,12 @@ fn get_executor_and_thing<'a>(
 ) -> Option<(&'a QueryExecutor, &'a RecordId)> {
 	if let Some(thg) = &doc.rid {
 		if let Some(exe) = ctx.get_query_executor() {
-			if exe.is_table(&thg.tb) {
+			if exe.is_table(&thg.table) {
 				return Some((exe, thg.as_ref()));
 			}
 		}
 		if let Some(pla) = ctx.get_query_planner() {
-			if let Some(exe) = pla.get_query_executor(&thg.tb) {
+			if let Some(exe) = pla.get_query_executor(&thg.table) {
 				return Some((exe, thg));
 			}
 		}

@@ -11,8 +11,6 @@ use std::str;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
-
 #[revisioned(revision = 1)]
 #[derive(Clone)]
 #[non_exhaustive]
@@ -95,6 +93,7 @@ impl Display for Regex {
 	}
 }
 
+/*
 impl Serialize for Regex {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
@@ -145,7 +144,7 @@ impl<'de> Deserialize<'de> for Regex {
 
 		deserializer.deserialize_newtype_struct(TOKEN, RegexNewtypeVisitor)
 	}
-}
+}*/
 
 #[cfg(test)]
 mod tests {

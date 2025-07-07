@@ -27,7 +27,6 @@ pub(crate) mod field;
 pub(crate) mod filter;
 pub(crate) mod fmt;
 pub(crate) mod function;
-pub(crate) mod future;
 pub(crate) mod graph;
 pub(crate) mod group;
 pub(crate) mod id;
@@ -50,12 +49,10 @@ pub(crate) mod permission;
 pub(crate) mod plan;
 pub(crate) mod record_id;
 pub(crate) mod reference;
-pub(crate) mod regex;
 pub(crate) mod scoring;
 pub(crate) mod script;
 pub(crate) mod split;
 pub(crate) mod start;
-pub(crate) mod table;
 pub(crate) mod table_type;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
@@ -86,7 +83,6 @@ pub use self::fetch::{Fetch, Fetchs};
 pub use self::field::{Field, Fields};
 pub use self::filter::Filter;
 pub use self::function::{Function, FunctionCall};
-pub use self::future::Future;
 pub use self::graph::Graph;
 pub use self::group::{Group, Groups};
 pub use self::id::RecordIdKeyLit;
@@ -118,7 +114,6 @@ pub use self::statements::{
 	LiveStatement, RelateStatement, SelectStatement, SetStatement, UpdateStatement,
 	UpsertStatement,
 };
-pub use self::table::{Table, Tables};
 pub use self::table_type::{Relation, TableType};
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;

@@ -3,7 +3,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
-use crate::expr::Table;
+use crate::expr::Ident;
 use crate::expr::dir::Dir;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
@@ -79,7 +79,7 @@ pub(super) enum Collected {
 		o: Option<Value>,
 	},
 	RecordId(RecordId),
-	Yield(Table),
+	Yield(Ident),
 	Value(Value),
 	Defer(RecordId),
 	Mergeable(RecordId, Value),
@@ -251,7 +251,7 @@ impl Collected {
 	async fn process_yield(
 		opt: &Options,
 		txn: &Transaction,
-		v: Table,
+		v: Ident,
 		rid_only: bool,
 	) -> Result<Processed> {
 		// if it is skippable we only need the record id
@@ -458,7 +458,7 @@ pub(super) trait Collector {
 
 	fn iterator(&mut self) -> &mut Iterator;
 
-	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Table) -> Cow<'b, Context> {
+	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Ident) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
 			if let Some(exe) = qp.get_query_executor(&table.0) {
 				// We set the query executor matching the current table in the Context
@@ -585,7 +585,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		v: &Table,
+		v: &Ident,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -625,7 +625,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		v: &Table,
+		v: &Ident,
 		sc: ScanDirection,
 	) -> Result<()> {
 		// Get the transaction
@@ -663,7 +663,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &Table) -> Result<()> {
+	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &Ident) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
@@ -880,7 +880,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &Context,
 		opt: &Options,
-		table: &Table,
+		table: &Ident,
 		irf: IteratorRef,
 		rs: RecordStrategy,
 	) -> Result<()> {

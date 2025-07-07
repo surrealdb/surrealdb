@@ -1,5 +1,6 @@
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Ident, Idiom, Kind, Permissions, Strand};
+use crate::sql::{Expr, Ident, Idiom, Kind, Permissions};
+use crate::val::Strand;
 
 use std::fmt::{self, Display};
 

@@ -1,6 +1,6 @@
 use super::escape::EscapeKey;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
-use crate::sql::{Ident, Idiom, Table};
+use crate::sql::{Ident, Idiom};
 use crate::val::{Duration, Strand};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
@@ -42,7 +42,7 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A record type.
-	Record(Vec<Table>),
+	Record(Vec<Ident>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or `"polygon"`.
 	Geometry(Vec<String>),
@@ -66,7 +66,7 @@ pub enum Kind {
 	/// This can be used in the `Kind::Either` type to represent an enum.
 	Literal(KindLiteral),
 	/// A references type representing a link to another table or field.
-	References(Option<Table>, Option<Idiom>),
+	References(Option<Ident>, Option<Idiom>),
 	/// A file type.
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
@@ -142,7 +142,7 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::Uuid => Kind::Uuid,
 			crate::expr::Kind::Regex => Kind::Regex,
 			crate::expr::Kind::Record(tables) => {
-				Kind::Record(tables.into_iter().map(Into::<Table>::into).collect())
+				Kind::Record(tables.into_iter().map(From::from).collect())
 			}
 			crate::expr::Kind::Geometry(geometries) => {
 				Kind::Geometry(geometries.into_iter().collect())
@@ -164,7 +164,7 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::Range => Self::Range,
 			crate::expr::Kind::Literal(l) => Self::Literal(l.into()),
 			crate::expr::Kind::References(t, i) => {
-				Self::References(t.map(Into::into), i.map(Into::into))
+				Self::References(t.map(From::from), i.map(From::from))
 			}
 			crate::expr::Kind::File(k) => {
 				Kind::File(k.into_iter().map(Into::<Ident>::into).collect())

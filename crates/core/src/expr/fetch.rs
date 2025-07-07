@@ -64,7 +64,7 @@ impl Fetch {
 		idioms: &mut Vec<Idiom>,
 	) -> Result<()> {
 		let strand_or_idiom = |v: Expr| match v {
-			Expr::Literal(Literal::Strand(s)) => Ok(Idiom::field(s.0)),
+			Expr::Literal(Literal::Strand(s)) => Ok(Idiom::field(s.into())),
 			Expr::Idiom(i) => Ok(i.clone()),
 			v => Err(Error::InvalidFetch {
 				value: v,

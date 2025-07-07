@@ -2,7 +2,6 @@ use std::mem;
 
 use reblessive::Stk;
 
-use crate::sql::graph::GraphSubjects;
 use crate::sql::part::{DestructurePart, Recurse, RecurseInstruction};
 use crate::sql::{Dir, Expr, Field, Fields, Graph, Ident, Idiom, Literal, Param, Part};
 use crate::syn::error::{bail, syntax_error};
@@ -641,13 +640,13 @@ impl Parser<'_> {
 				let what = match token.kind {
 					t!("?") => {
 						self.pop_peek();
-						GraphSubjects::default()
+						Vec::new()
 					}
 					x if Self::kind_is_identifier(x) => {
 						let subject = self.parse_graph_subject(ctx).await?;
-						let mut subjects = GraphSubjects(vec![subject]);
+						let mut subjects = vec![subject];
 						while self.eat(t!(",")) {
-							subjects.0.push(self.parse_graph_subject(ctx).await?);
+							subjects.push(self.parse_graph_subject(ctx).await?);
 						}
 						subjects
 					}
@@ -702,7 +701,7 @@ impl Parser<'_> {
 				let subject = self.parse_graph_subject(ctx).await?;
 				Ok(Graph {
 					dir,
-					what: GraphSubjects(vec![subject]),
+					what: vec![subject],
 					..Default::default()
 				})
 			}

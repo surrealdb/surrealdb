@@ -30,7 +30,7 @@ use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
 use crate::kvs::{Key, KeyEncode as _, Val};
-use crate::val::RecordId;
+use crate::val::{RecordId, RecordIdKey};
 use anyhow::Result;
 use revision::Revisioned;
 use serde::Serialize;

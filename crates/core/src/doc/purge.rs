@@ -6,11 +6,10 @@ use crate::err::Error;
 use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
 //use crate::expr::edges::Edges;
-use crate::expr::graph::GraphSubjects;
 use crate::expr::paths::{EDGE, IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
-use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Idiom, Literal, Part};
+use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Graph, Idiom, Literal, Part};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode;
@@ -66,13 +65,19 @@ impl Document {
 					drop(txn);
 				}
 				_ => {
+					let what = vec![
+						Part::Start(Expr::Literal(Literal::RecordId(
+							(*rid).clone().into_literal(),
+						))),
+						Part::Graph(Graph {
+							dir: Dir::Both,
+							..Default::default()
+						}),
+					];
+
 					// Setup the delete statement
 					let stm = DeleteStatement {
-						what: vec![Value::from(Edges {
-							dir: Dir::Both,
-							from: rid.as_ref().clone(),
-							what: GraphSubjects::default(),
-						})],
+						what,
 						..DeleteStatement::default()
 					};
 					// Execute the delete statement
@@ -156,7 +161,7 @@ impl Document {
 										)),
 									}]),
 									// This is a self contained value, we can set it NONE
-									_ => Data::UnsetExpression(vec![fd.name.as_ref().into()]),
+									_ => Data::UnsetExpression(vec![fd.name.clone()]),
 								};
 
 								// Setup the delete statement

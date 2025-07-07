@@ -151,6 +151,22 @@ pub enum NearestNeighbor {
 	Approximate(u32, u32),
 }
 
+impl fmt::Display for NearestNeighbor {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			NearestNeighbor::KTree(k) => {
+				write!(f, "<|{k}|>")
+			}
+			NearestNeighbor::K(k, distance) => {
+				write!(f, "<|{k},{distance}|>")
+			}
+			NearestNeighbor::Approximate(k, ef) => {
+				write!(f, "<|{k},{ef}|>")
+			}
+		}
+	}
+}
+
 impl fmt::Display for BinaryOperator {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -195,17 +211,7 @@ impl fmt::Display for BinaryOperator {
 			Self::RangeInclusive => write!(f, "..="),
 			Self::RangeSkip => write!(f, ">.."),
 			Self::RangeSkipInclusive => write!(f, ">..="),
-			Self::NearestNeighbor(n) => match &**n {
-				NearestNeighbor::KTree(k) => {
-					write!(f, "<|{k}|>")
-				}
-				NearestNeighbor::K(k, distance) => {
-					write!(f, "<|{k},{distance}|>")
-				}
-				NearestNeighbor::Approximate(k, ef) => {
-					write!(f, "<|{k},{ef}|>")
-				}
-			},
+			Self::NearestNeighbor(n) => n.fmt(f),
 		}
 	}
 }

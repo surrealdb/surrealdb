@@ -270,14 +270,19 @@ impl Analyzer {
 		mut input: String,
 	) -> Result<Tokens> {
 		if let Some(function_name) = self.az.function.as_ref().map(|i| i.0.clone()) {
-			let fns = FunctionCall {
-				receiver: Function::Custom(function_name.clone()),
-				arguments: vec![Expr::Literal(Value::Strand(Strand(input)).into_literal())],
-			};
-
-			let val = fns.compute(stk, ctx, opt, None).await.catch_return()?;
+			let val = Function::Custom(function_name.clone())
+				// TODO: Null byte check
+				.compute(
+					stk,
+					ctx,
+					opt,
+					None,
+					Value::Strand(unsafe { Strand::new_unchecked(input) }),
+				)
+				.await
+				.catch_return()?;
 			if let Value::Strand(val) = val {
-				input = val.0;
+				input = val.into_string();
 			} else {
 				bail!(Error::InvalidFunction {
 					name: function_name,

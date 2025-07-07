@@ -1,5 +1,5 @@
 use super::Content;
-use crate::val::{self, Value};
+use crate::val::{self, Value, value::serde as ser};
 use anyhow::Result;
 use serde::Deserialize;
 use serde::de::IntoDeserializer;
@@ -8,7 +8,7 @@ use serde_content::{Data, Expected, Unexpected};
 pub(super) fn to_value(content: Content) -> Result<Value> {
 	match content {
 		Content::Struct(v) => match v.name.as_ref() {
-			val::strand::TOKEN => val::Strand::deserialize(Content::Struct(v).into_deserializer())
+			ser::STRAND_TOKEN => val::Strand::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
 			/*
@@ -17,43 +17,41 @@ pub(super) fn to_value(content: Content) -> Result<Value> {
 					.map(Into::into)
 					.map_err(Into::into)
 			}*/
-			val::range::TOKEN => val::Range::deserialize(Content::Struct(v).into_deserializer())
+			ser::RANGE_TOKEN => val::Range::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			val::regex::TOKEN => val::Regex::deserialize(Content::Struct(v).into_deserializer())
+			ser::REGEX_TOKEN => val::Regex::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			val::table::TOKEN => expr::Table::deserialize(Content::Struct(v).into_deserializer())
+			ser::TABLE_TOKEN => val::Strand::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			val::thing::TOKEN => val::RecordId::deserialize(Content::Struct(v).into_deserializer())
+			ser::THING_TOKEN => val::RecordId::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			val::object::TOKEN => val::Object::deserialize(Content::Struct(v).into_deserializer())
+			ser::OBJECT_TOKEN => val::Object::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			val::array::TOKEN => val::Array::deserialize(Content::Struct(v).into_deserializer())
+			ser::ARRAY_TOKEN => val::Array::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			val::uuid::TOKEN => val::Uuid::deserialize(Content::Struct(v).into_deserializer())
+			ser::UUID_TOKEN => val::Uuid::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
-			val::datetime::TOKEN => {
+			ser::DATETIME_TOKEN => {
 				val::Datetime::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			val::duration::TOKEN => {
+			ser::DURATION_TOKEN => {
 				val::Duration::deserialize(Content::Struct(v).into_deserializer())
 					.map(Into::into)
 					.map_err(Into::into)
 			}
-			val::closure::TOKEN => {
-				val::Closure::deserialize(Content::Struct(v).into_deserializer())
-					.map(Into::into)
-					.map_err(Into::into)
-			}
-			val::file::TOKEN => val::File::deserialize(Content::Struct(v).into_deserializer())
+			ser::CLOSURE_TOKEN => val::Closure::deserialize(Content::Struct(v).into_deserializer())
+				.map(Into::into)
+				.map_err(Into::into),
+			ser::FILE_TOKEN => val::File::deserialize(Content::Struct(v).into_deserializer())
 				.map(Into::into)
 				.map_err(Into::into),
 			_ => match v.data {

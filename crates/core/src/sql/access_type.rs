@@ -45,15 +45,6 @@ pub trait Jwt {
 	fn jwt(&self) -> &JwtAccess;
 }
 
-impl Default for AccessType {
-	fn default() -> Self {
-		// Access type defaults to the most specific
-		Self::Record(RecordAccess {
-			..Default::default()
-		})
-	}
-}
-
 impl Jwt for AccessType {
 	fn jwt(&self) -> &JwtAccess {
 		match self {
@@ -128,25 +119,6 @@ pub struct JwtAccess {
 	pub issue: Option<JwtAccessIssue>,
 }
 
-impl Default for JwtAccess {
-	fn default() -> Self {
-		// Defaults to HS512 with a randomly generated key
-		let alg = Algorithm::Hs512;
-		let key = DefineAccessStatement::random_key();
-		// By default the access method can verify and issue tokens
-		Self {
-			verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
-				alg,
-				key: key.clone(),
-			}),
-			issue: Some(JwtAccessIssue {
-				alg,
-				key,
-			}),
-		}
-	}
-}
-
 impl Jwt for JwtAccess {
 	fn jwt(&self) -> &JwtAccess {
 		self
@@ -195,17 +167,6 @@ pub struct JwtAccessIssue {
 	pub key: String,
 }
 
-impl Default for JwtAccessIssue {
-	fn default() -> Self {
-		Self {
-			// Defaults to HS512
-			alg: Algorithm::Hs512,
-			// Avoid defaulting to empty key
-			key: DefineAccessStatement::random_key(),
-		}
-	}
-}
-
 impl From<JwtAccessIssue> for crate::expr::access_type::JwtAccessIssue {
 	fn from(v: JwtAccessIssue) -> Self {
 		Self {
@@ -231,14 +192,6 @@ pub enum JwtAccessVerify {
 	Jwks(JwtAccessVerifyJwks),
 }
 
-impl Default for JwtAccessVerify {
-	fn default() -> Self {
-		Self::Key(JwtAccessVerifyKey {
-			..Default::default()
-		})
-	}
-}
-
 impl From<JwtAccessVerify> for crate::expr::access_type::JwtAccessVerify {
 	fn from(v: JwtAccessVerify) -> Self {
 		match v {
@@ -262,17 +215,6 @@ impl From<crate::expr::access_type::JwtAccessVerify> for JwtAccessVerify {
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
 	pub key: String,
-}
-
-impl Default for JwtAccessVerifyKey {
-	fn default() -> Self {
-		Self {
-			// Defaults to HS512
-			alg: Algorithm::Hs512,
-			// Avoid defaulting to empty key
-			key: DefineAccessStatement::random_key(),
-		}
-	}
 }
 
 impl From<JwtAccessVerifyKey> for crate::expr::access_type::JwtAccessVerifyKey {
@@ -322,19 +264,6 @@ pub struct RecordAccess {
 	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
 	pub bearer: Option<BearerAccess>,
-}
-
-impl Default for RecordAccess {
-	fn default() -> Self {
-		Self {
-			signup: None,
-			signin: None,
-			jwt: JwtAccess {
-				..Default::default()
-			},
-			bearer: None,
-		}
-	}
 }
 
 impl From<RecordAccess> for crate::expr::RecordAccess {

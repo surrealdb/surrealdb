@@ -8,7 +8,9 @@ pub fn entries((object,): (Object,)) -> Result<Value> {
 		object
 			.iter()
 			.map(|(k, v)| {
-				Value::Array(Array(vec![Value::Strand(Strand(k.to_owned())), v.to_owned()]))
+				let k = Value::Strand(unsafe { Strand::new_unchecked(k.to_owned()) });
+				let v = v.clone();
+				Value::Array(Array(vec![k, v]))
 			})
 			.collect(),
 	)))
@@ -77,7 +79,7 @@ pub fn keys((object,): (Object,)) -> Result<Value> {
 pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 	match targets {
 		Value::Strand(target) => {
-			object.remove(&target.0);
+			object.remove(&target);
 		}
 		Value::Array(targets) => {
 			let mut remove_targets = Vec::with_capacity(targets.len());
@@ -90,7 +92,7 @@ pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 						),
 					});
 				};
-				remove_targets.push(s.0);
+				remove_targets.push(s.to_string());
 			}
 			for target in remove_targets {
 				object.remove(&target);

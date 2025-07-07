@@ -130,18 +130,11 @@ impl Document {
 
 		// Loop over every field in the document
 		// NONE values should never be stored
-		// TODO: Verify identical behavior.
 		clean_none(self.current.doc.to_mut());
-		/* Below was the original implemenation which seemed horribly inefficient.
-		for fd in self.current.doc.every(None, true, ArrayBehaviour::Nested).iter() {
-			// NONE values should never be stored
-			if self.current.doc.pick(fd).is_none() {
-				self.current.doc.to_mut().cut(fd);
-			}
-		}*/
 		// Carry on
 		Ok(())
 	}
+
 	/// Processes `DEFINE FIELD` statements which
 	/// have been defined on the table for this
 	/// record. These fields are executed for
@@ -170,18 +163,16 @@ impl Document {
 			// Check if we should skip this field
 			let skipped = match skip {
 				// We are skipping a parent field
-				Some(inner) => {
-					// Check if this field is a child field
-					let skipped = fd.name.starts_with(inner);
-					// Let's stop skipping fields if not
-					if !skipped {
-						skip = None;
-					}
-					// Specify whether we should skip
-					skipped
-				}
+				// Check if this field is a child field
+				Some(inner) => fd.name.starts_with(inner),
 				None => false,
 			};
+
+			// Let's stop skipping fields if not
+			// Specify whether we should skip
+			if !skipped {
+				skip = None;
+			}
 
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
@@ -213,37 +204,37 @@ impl Document {
 					// document, and check if the new
 					// field value is now different to
 					// the old field value in any way.
-					if !self.is_new() && val.ne(&old) {
-						// Check the data clause type
-						match stm.data() {
-							// If the field is NONE, we assume
-							// that the field was ommitted when
-							// using a CONTENT clause, and we
-							// revert the value to the old value.
-							Some(Data::ContentExpression(_)) if val.is_none() => {
-								self.current
-									.doc
-									.to_mut()
-									.set(stk, ctx, opt, &k, old.as_ref().clone())
-									.await?;
-								continue;
-							}
-							// If the field has been modified
-							// and the user didn't use a CONTENT
-							// clause, then this should not be
-							// allowed, and we throw an error.
-							_ => {
-								bail!(Error::FieldReadonly {
-									field: fd.name.clone(),
-									thing: rid.to_string(),
-								});
+					if !self.is_new() {
+						if val.ne(&old) {
+							// Check the data clause type
+							match stm.data() {
+								// If the field is NONE, we assume
+								// that the field was ommitted when
+								// using a CONTENT clause, and we
+								// revert the value to the old value.
+								Some(Data::ContentExpression(_)) if val.is_none() => {
+									self.current
+										.doc
+										.to_mut()
+										.set(stk, ctx, opt, &k, old.as_ref().clone())
+										.await?;
+									continue;
+								}
+								// If the field has been modified
+								// and the user didn't use a CONTENT
+								// clause, then this should not be
+								// allowed, and we throw an error.
+								_ => {
+									bail!(Error::FieldReadonly {
+										field: fd.name.clone(),
+										thing: rid.to_string(),
+									});
+								}
 							}
 						}
-					}
-					// If this field was not modified then
-					// we can continue without needing to
-					// process the field in any other way.
-					else if !self.is_new() {
+						// If this field was not modified then
+						// we can continue without needing to
+						// process the field in any other way.
 						continue;
 					}
 				}
@@ -257,11 +248,10 @@ impl Document {
 					ctx,
 					opt,
 					old,
-					inp,
+					user_input: inp,
 				};
 				// Process a potential `references` TYPE
-				let res = field.process_refs_type().await?;
-				if let Some(v) = res {
+				if let Some(v) = field.process_refs_type().await? {
 					// We found a `references` TYPE
 					// No other clauses will be present, so no need to process them
 					val = v;
@@ -325,10 +315,10 @@ impl Document {
 			}
 
 			// Loop over each value in document
-			'val: for (_, val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+			for (_, val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
 				// Skip if the value is empty
 				if val.is_none() || val.is_empty_array() {
-					continue 'val;
+					continue;
 				}
 
 				// Prepare the field edit context
@@ -341,7 +331,7 @@ impl Document {
 					ctx,
 					opt,
 					old: val.into(),
-					inp: Value::None.into(),
+					user_input: Value::None.into(),
 				};
 
 				// Pass an empty value to delete all the existing references
@@ -371,7 +361,7 @@ struct FieldEditContext<'a> {
 	/// The initial value of the field before being modified
 	old: Arc<Value>,
 	/// The user input value of the field edited by the user
-	inp: Arc<Value>,
+	user_input: Arc<Value>,
 }
 
 enum RefAction<'a> {
@@ -465,7 +455,7 @@ impl FieldEditContext<'_> {
 				None => {
 					let mut ctx = MutableContext::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
-					ctx.add_value("input", self.inp.clone());
+					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
 					ctx.add_value("value", now);
 					ctx
@@ -501,7 +491,7 @@ impl FieldEditContext<'_> {
 				None => {
 					let mut ctx = MutableContext::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
-					ctx.add_value("input", self.inp.clone());
+					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
 					ctx.add_value("value", now);
 					ctx
@@ -543,7 +533,7 @@ impl FieldEditContext<'_> {
 				None => {
 					let mut ctx = MutableContext::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
-					ctx.add_value("input", self.inp.clone());
+					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
 					ctx.add_value("value", now.clone());
 					ctx
@@ -617,7 +607,7 @@ impl FieldEditContext<'_> {
 						None => {
 							let mut ctx = MutableContext::new(self.ctx);
 							ctx.add_value("before", self.old.clone());
-							ctx.add_value("input", self.inp.clone());
+							ctx.add_value("input", self.user_input.clone());
 							ctx.add_value("after", now.clone());
 							ctx.add_value("value", now);
 							ctx
@@ -777,7 +767,7 @@ impl FieldEditContext<'_> {
 	}
 
 	/// Process any `TYPE reference` clause for the field definition
-	async fn process_refs_type(&mut self) -> Result<Option<Value>> {
+	async fn process_refs_type(&mut self) -> Result<Option<Refs>> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
 		}
@@ -813,6 +803,6 @@ impl FieldEditContext<'_> {
 			_ => return Ok(None),
 		};
 
-		Ok(Some(Value::Refs(refs)))
+		Ok(Some(refs))
 	}
 }

@@ -7,8 +7,7 @@ use crate::expr::statements::define::{
 	DefineTableStatement,
 };
 use crate::expr::statements::live::LiveStatement;
-use crate::expr::table::Table;
-use crate::expr::{Base, FlowResultExt as _};
+use crate::expr::{Base, FlowResultExt as _, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
@@ -25,7 +24,7 @@ pub(crate) struct Document {
 	/// The record id of this document
 	pub(super) id: Option<Arc<RecordId>>,
 	/// The table that we should generate a record id from
-	pub(super) r#gen: Option<Table>,
+	pub(super) r#gen: Option<Ident>,
 	/// Whether this is the second iteration of the processing
 	pub(super) retry: bool,
 	pub(super) extras: Workable,
@@ -169,7 +168,7 @@ impl Document {
 	pub fn new(
 		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
-		r#gen: Option<Table>,
+		r#gen: Option<Ident>,
 		val: Arc<Value>,
 		extras: Workable,
 		retry: bool,

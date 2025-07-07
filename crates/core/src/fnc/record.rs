@@ -4,7 +4,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::paths::ID;
-use crate::expr::{FlowResultExt as _, Idiom, Kind, Part, Table, kind::KindLiteral};
+use crate::expr::{FlowResultExt as _, Idiom, Kind, Part, kind::KindLiteral};
 use crate::val::{Array, RecordId, Value};
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
@@ -24,13 +24,14 @@ pub async fn exists(
 }
 
 pub fn id((arg,): (RecordId,)) -> Result<Value> {
-	Ok(arg.key.into())
+	Ok(arg.key.into_value())
 }
 
 pub fn tb((arg,): (RecordId,)) -> Result<Value> {
 	Ok(arg.table.into())
 }
 
+/*
 pub async fn refs(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
 	(id, Optional(ft), Optional(ff)): (RecordId, Optional<String>, Optional<String>),
@@ -85,7 +86,7 @@ async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom)
 	};
 
 	// Check if the field is an array-like value and thus "containing" references
-	let is_contained = if let Some(kind) = &fd.kind {
+	let is_contained = if let Some(kind) = &fd.field_kind {
 		matches!(
 			kind.get_optional_inner_kind(),
 			Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(KindLiteral::Array(_))
@@ -100,4 +101,4 @@ async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom)
 	} else {
 		Ok(ff)
 	}
-}
+}*/

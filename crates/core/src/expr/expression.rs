@@ -7,10 +7,10 @@ use crate::expr::statements::{
 	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
 };
 use crate::expr::{
-	BinaryOperator, Block, Constant, FlowResult, FunctionCall, Future, Idiom, Literal, Mock, Model,
-	Param, PrefixOperator, Table, Value,
+	BinaryOperator, Block, Constant, FlowResult, FunctionCall, Future, Ident, Idiom, Literal, Mock,
+	Param, PrefixOperator,
 };
-use crate::val::Closure;
+use crate::val::{Closure, Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -24,10 +24,9 @@ use super::PostfixOperator;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Expr {
 	Literal(Literal),
-
 	Param(Param),
 	Idiom(Idiom),
-	Table(Table),
+	Table(Ident),
 	Mock(Mock),
 	Block(Box<Block>),
 	Future(Box<Future>),

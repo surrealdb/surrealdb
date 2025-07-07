@@ -1,18 +1,16 @@
 mod r#enum;
 mod r#struct;
 
-use crate::err::Error;
-use crate::val::{self, Bytes, Value};
+use crate::val::{self, Value};
 use anyhow::Result;
 use castaway::match_type;
 use serde::ser::Serialize;
-use serde_content::{Number, Serializer, Unexpected};
-use std::borrow::Cow;
-use std::collections::BTreeMap;
+use serde_content::Serializer;
 
-type Content = serde_content::Value<'static>;
+//type Content = serde_content::Value<'static>;
 
 /// Convert a `T` into `surrealdb::expr::Value` which is an enum that can represent any valid SQL data.
+/*
 pub fn to_value<T>(value: T) -> Result<Value>
 where
 	T: Serialize + 'static,
@@ -48,8 +46,9 @@ where
 		val::File as v => Ok(v.into()),
 		value => Serializer::new().serialize(value)?.try_into(),
 	})
-}
+}*/
 
+/*
 impl TryFrom<Content> for Value {
 	type Error = anyhow::Error;
 
@@ -92,8 +91,9 @@ impl TryFrom<Content> for Value {
 			Content::Tuple(v) => v.try_into(),
 		}
 	}
-}
+}*/
 
+/*
 impl TryFrom<Vec<Content>> for Value {
 	type Error = anyhow::Error;
 
@@ -149,6 +149,7 @@ impl TryFrom<(Cow<'static, str>, Content)> for Value {
 		Ok(Self::Object(val::Object(map)))
 	}
 }
+*/
 
 /*
 #[cfg(test)]

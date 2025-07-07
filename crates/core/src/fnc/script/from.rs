@@ -1,5 +1,5 @@
 use super::classes;
-use crate::val::{Array, Bytes, Datetime, Geometry, Object, RecordIdKey, Strand, Value};
+use crate::val::{Array, Bytes, Datetime, Geometry, Object, RecordIdKey, Value};
 use chrono::{TimeZone, Utc};
 use js::prelude::This;
 use js::{Coerced, Ctx, Error, Exception, FromAtom, FromJs};
@@ -18,7 +18,7 @@ fn try_object_to_geom(object: &Object) -> Option<Geometry> {
 		return None;
 	}
 
-	let Some(Value::Strand(Strand(key))) = object.get("type") else {
+	let Some(Value::Strand(key)) = object.get("type") else {
 		return None;
 	};
 

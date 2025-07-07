@@ -11,7 +11,7 @@ use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{Cond, Fields, Groups, Table};
+use crate::expr::{Cond, Fields, Groups, Ident};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
@@ -265,7 +265,7 @@ impl QueryPlanner {
 		&mut self,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
-		t: Table,
+		t: Ident,
 		gp: GrantedPermission,
 		it: &mut Iterator,
 	) -> Result<()> {
@@ -348,7 +348,7 @@ impl QueryPlanner {
 
 	fn add(
 		&mut self,
-		tb: Table,
+		tb: Ident,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,

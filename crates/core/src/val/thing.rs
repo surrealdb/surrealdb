@@ -13,7 +13,6 @@ use ulid::Ulid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Id")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
@@ -192,7 +191,7 @@ impl From<i64> for RecordIdKey {
 }
 
 impl From<Strand> for RecordIdKey {
-	fn from(value: String) -> Self {
+	fn from(value: Strand) -> Self {
 		RecordIdKey::String(value)
 	}
 }

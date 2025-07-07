@@ -278,7 +278,7 @@ impl Function {
 					// Check if scripting is allowed
 					ctx.check_allowed_scripting()?;
 					// Run the script function
-					fnc::script::run(ctx, opt, doc, &s.0, args).await
+					fnc::script::run(ctx, opt, doc, &s.0, args).await.map_err(ControlFlow::Err)
 				}
 				#[cfg(not(feature = "scripting"))]
 				{

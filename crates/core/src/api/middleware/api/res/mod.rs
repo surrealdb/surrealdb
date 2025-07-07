@@ -13,10 +13,7 @@ pub fn raw_body(
 	Ok(())
 }
 
-pub fn header(
-	context: &mut InvocationContext,
-	(Strand(name), value): (Strand, Value),
-) -> Result<()> {
+pub fn header(context: &mut InvocationContext, (name, value): (Strand, Value)) -> Result<()> {
 	let name: HeaderName = name.parse()?;
 	if let Value::None = value {
 		if let Some(v) = context.response_headers.as_mut() {

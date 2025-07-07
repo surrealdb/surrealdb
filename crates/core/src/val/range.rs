@@ -3,6 +3,7 @@ use crate::expr::kind::HasKind;
 use crate::val::Value;
 use crate::val::value::{Coerce, CoerceError};
 use revision::revisioned;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
@@ -13,7 +14,8 @@ use super::value::CoerceErrorExt;
 ///
 /// Can be any kind of values, "a"..1 is allowed.
 #[revisioned(revision = 1)]
-#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Range")]
 pub struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,

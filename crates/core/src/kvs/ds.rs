@@ -10,15 +10,14 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::Timestamp;
-use crate::dbs::{
-	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
-};
+use crate::dbs::{Attach, Capabilities, Executor, Notification, Options, Response, Session};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
 use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::trees::btree::BTree;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
@@ -785,7 +784,7 @@ impl Datastore {
 		&self,
 		txt: &str,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
@@ -797,7 +796,7 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<BTreeMap<String, Value>>,
 		query: S,
 	) -> Result<Vec<Response>>
 	where
@@ -897,7 +896,8 @@ impl Datastore {
 					}
 				}
 			}
-		});
+		})
+		.map(|x| x.into());
 
 		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
 	}
@@ -927,7 +927,7 @@ impl Datastore {
 		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>> {
 		//TODO: Insert planner here.
-		self.process_plan(ast.into(), sess, vars)
+		self.process_plan(ast.into(), sess, vars).await
 	}
 
 	pub async fn process_plan(
@@ -1096,8 +1096,13 @@ impl Datastore {
 		sess.context(&mut ctx);
 		// Store the query variables
 		vars.attach(&mut ctx)?;
+		let txn_type = if val.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
 		// Start a new transaction
-		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
 		// Freeze the context
@@ -1106,11 +1111,12 @@ impl Datastore {
 		let res =
 			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
-		match (res.is_ok(), val.writeable()) {
+		if res.is_ok() && txn_type == TransactionType::Write {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.commit().await?,
+			txn.commit().await?;
+		} else {
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.cancel().await?,
+			txn.cancel().await?;
 		};
 		// Return result
 		res

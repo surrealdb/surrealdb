@@ -1,4 +1,4 @@
-use crate::sql::duration::Duration;
+use crate::val::Duration;
 
 use std::fmt::{self, Display, Formatter};
 use std::{str, time};

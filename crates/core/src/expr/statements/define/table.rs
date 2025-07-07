@@ -117,7 +117,7 @@ impl DefineTableStatement {
 			let key = crate::key::table::all::new(ns, db, &self.name);
 			txn.delp(key).await?;
 			// Process each foreign table
-			for ft in view.what.0.iter() {
+			for ft in view.what.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
 				txn.set(key, revision::to_vec(self)?, None).await?;

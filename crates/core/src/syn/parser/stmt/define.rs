@@ -208,7 +208,8 @@ impl Parser<'_> {
 			kind,
 			name,
 			base,
-			roles: vec![Ident("Viewer".to_owned())], // New users get the viewer role by default
+			// Safety: "Viewer" does not contain a null byte
+			roles: vec![Ident::new_unchecked("Viewer".to_owned())], // New users get the viewer role by default
 			..DefineUserStatement::default()
 		};
 
@@ -1134,7 +1135,9 @@ impl Parser<'_> {
 					}
 
 					res.index = Index::Search(crate::sql::index::SearchParams {
-						az: analyzer.unwrap_or_else(|| Ident("like".to_owned())),
+						// Safety: "like" does not contain a null byte
+						az: analyzer
+							.unwrap_or_else(|| unsafe { Ident::new_unchecked("like".to_owned()) }),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 						doc_ids_order,

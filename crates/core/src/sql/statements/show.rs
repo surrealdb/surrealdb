@@ -1,4 +1,4 @@
-use crate::sql::Table;
+use crate::sql::Ident;
 use crate::val::Datetime;
 use crate::vs::VersionStamp;
 
@@ -48,7 +48,7 @@ impl From<crate::expr::statements::show::ShowSince> for ShowSince {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ShowStatement {
-	pub table: Option<Table>,
+	pub table: Option<Ident>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }

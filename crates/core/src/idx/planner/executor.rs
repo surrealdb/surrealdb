@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::index::{Distance, Index};
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom, Table};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
@@ -114,7 +114,7 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		table: &Table,
+		table: &Ident,
 		ios: Vec<(Arc<Expr>, IndexOption)>,
 		knns: KnnExpressions,
 		kbtes: KnnBruteForceExpressions,

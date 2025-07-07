@@ -1,7 +1,8 @@
 use crate::api::method::Method;
 use crate::api::path::Path;
+use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, pretty_indent};
-use crate::sql::{Expr, Strand};
+use crate::val::Strand;
 use std::fmt::{self, Display};
 
 use super::DefineKind;

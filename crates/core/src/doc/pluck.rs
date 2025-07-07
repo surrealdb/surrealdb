@@ -79,6 +79,9 @@ impl Document {
 			},
 			None => match stm {
 				Statement::Live(s) => {
+					// There was a if here which tested if the live statement had no selectors,
+					// which seems like it should never happen so I removed it.
+					/*
 					if s.expr.is_empty() {
 						// Process the permitted documents
 						let (initial, current) = if self.reduced(stk, ctx, opt, Both).await? {
@@ -90,18 +93,18 @@ impl Document {
 						let ops = initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default());
 						Ok(Operation::operations_to_value(ops))
 					} else {
-						// Process the permitted documents
-						let current = if self.reduced(stk, ctx, opt, Current).await? {
-							&self.current_reduced
-						} else {
-							&self.current
-						};
-						// Process the LIVE SELECT statement fields
-						s.expr
-							.compute(stk, ctx, opt, Some(current), false)
-							.await
-							.map_err(IgnoreError::from)
-					}
+					*/
+					// Process the permitted documents
+					let current = if self.reduced(stk, ctx, opt, Current).await? {
+						&self.current_reduced
+					} else {
+						&self.current
+					};
+					// Process the LIVE SELECT statement fields
+					s.expr
+						.compute(stk, ctx, opt, Some(current), false)
+						.await
+						.map_err(IgnoreError::from)
 				}
 				Statement::Select(s) => {
 					// Process the permitted documents

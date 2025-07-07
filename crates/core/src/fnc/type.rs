@@ -4,7 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{FlowResultExt as _, Idiom, Kind, Table};
+use crate::expr::{FlowResultExt as _, Ident, Idiom, Kind};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, Strand, Uuid, Value,
@@ -104,12 +104,12 @@ pub fn range((val,): (Value,)) -> Result<Value> {
 
 pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 	match tb {
-		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) if tb.is_empty() => {
+		Some(Value::Strand(tb) | Value::Table(tb)) if tb.is_empty() => {
 			Err(anyhow::Error::new(Error::TbInvalid {
-				value: tb,
+				value: tb.into_string(),
 			}))
 		}
-		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) => {
+		Some(Value::Strand(tb) | Value::Table(tb)) => {
 			rid.cast_to_kind(&Kind::Record(vec![tb.into()])).map_err(From::from)
 		}
 		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
@@ -135,10 +135,13 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 }
 
 pub fn table((val,): (Value,)) -> Result<Value> {
-	Ok(Value::Table(Table(match val {
-		Value::Thing(t) => t.tb,
-		v => v.as_string(),
-	})))
+	let strand = match val {
+		// TODO: null byte check.
+		Value::Thing(t) => unsafe { Strand::new_unchecked(t.table) },
+		// TODO: Handle null byte
+		v => unsafe { Strand::new_unchecked(v.as_string()) },
+	};
+	Value::Table(strand)
 }
 
 pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
@@ -274,10 +277,11 @@ pub mod is {
 	}
 
 	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
-		Ok(match table {
+		let res = match table {
 			Some(tb) => arg.is_record_type(&[Table(tb)]).into(),
 			None => arg.is_thing().into(),
-		})
+		};
+		Ok(res)
 	}
 
 	pub fn string((arg,): (Value,)) -> Result<Value> {

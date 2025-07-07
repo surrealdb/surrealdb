@@ -68,7 +68,7 @@ impl Default for DatabaseMutation {
 
 // Change is a set of mutations made to a table at the specific timestamp.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
 
@@ -185,7 +185,7 @@ impl Display for ChangeSet {
 
 // WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
 

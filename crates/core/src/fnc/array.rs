@@ -229,7 +229,7 @@ pub async fn filter(
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
 				for arg in array.into_iter() {
-					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if closure.compute(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						res.push(arg)
 					}
 				}

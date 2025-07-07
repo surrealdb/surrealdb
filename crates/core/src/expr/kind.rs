@@ -1,7 +1,7 @@
 use super::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Ident, Idiom, Literal, Part, Regex, Table, Value};
+use crate::expr::{Expr, Ident, Idiom, Literal, Part, Regex, Value};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Strand, Uuid,
@@ -16,7 +16,7 @@ use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq,  Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Kind {
@@ -53,7 +53,7 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A record type.
-	Record(Vec<Table>),
+	Record(Vec<Ident>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or `"polygon"`.
 	/// TODO(3.0): Change to use an enum
@@ -78,7 +78,7 @@ pub enum Kind {
 	/// This can be used in the `Kind::Either` type to represent an enum.
 	Literal(KindLiteral),
 	/// A references type representing a link to another table or field.
-	References(Option<Table>, Option<Idiom>),
+	References(Option<Ident>, Option<Idiom>),
 	/// A file type.
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
@@ -743,13 +743,13 @@ mod tests {
 	#[case::either(Kind::Either(vec![]), false)]
 	#[case::either(Kind::Either(vec![Kind::Bool]), false)]
 	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::String("a".into()))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Number(1.into()))]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Integer(1))]), false)]
 	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Duration(Duration::new(1, 0)))]), false)]
 	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Bool(true))]), false)]
 	#[case::range(Kind::Range, false)]
 	#[case::references(Kind::References(None, None), false)]
-	#[case::references(Kind::References(Some(Table("table".to_string())), None), false)]
-	#[case::references(Kind::References(Some(Table("table".to_string())), Some(Idiom(vec!["idiom".into()]))), false)]
+	#[case::references(Kind::References(Some(Ident::new("table".to_string()).unwrap()), None), false)]
+	#[case::references(Kind::References(Some(Ident::new("table".to_string()).unwrap()), Some(Idiom::field("idiom".to_owned()))), false)]
 	#[case::file(Kind::File(vec![]), false)]
 	#[case::file(Kind::File(vec![Ident("bucket".to_string())]), false)]
 	#[case::file(Kind::File(vec![Ident("bucket".to_string()), Ident("key".to_string())]), false)]

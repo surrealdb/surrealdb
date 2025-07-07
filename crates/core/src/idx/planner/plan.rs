@@ -1,5 +1,6 @@
+use crate::expr::operator::NearestNeighbor;
 use crate::expr::with::With;
-use crate::expr::{BinaryOperator, Expr, Idiom};
+use crate::expr::{self, BinaryOperator, Expr, Idiom};
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
@@ -413,13 +414,15 @@ impl IndexOption {
 				e.insert("value", v.as_ref().to_owned());
 			}
 			IndexOperator::Knn(a, k) => {
-				let op = Value::from(Operator::Knn(*k, None).to_string());
+				let expr = NearestNeighbor::KTree(*k).to_string();
+				let op = Value::from(expr);
 				let val = Value::Array(Array::from(a.as_ref().clone()));
 				e.insert("operator", op);
 				e.insert("value", val);
 			}
 			IndexOperator::Ann(a, k, ef) => {
-				let op = Value::from(Operator::Ann(*k, *ef).to_string());
+				let expr = NearestNeighbor::Approximate(*k, *ef).to_string();
+				let op = Value::from(expr);
 				let val = Value::Array(Array::from(a.as_ref().clone()));
 				e.insert("operator", op);
 				e.insert("value", val);
@@ -512,7 +515,7 @@ impl From<&RangeValue> for Value {
 
 #[derive(Default)]
 pub(super) struct Group {
-	ranges: HashMap<IndexReference, Vec<(Arc<Expression>, IndexOption)>>,
+	ranges: HashMap<IndexReference, Vec<(Arc<Expr>, IndexOption)>>,
 }
 
 impl Group {

@@ -360,28 +360,28 @@ pub trait RpcProtocolV1: RpcContext {
 			extract_args::<(Value, Option<Value>)>(params).ok_or(RpcError::InvalidParams)?;
 
 		// If value is a strand, handle it as if it was a table.
-		let what = match what{
+		let what = match what {
 			Value::Strand(x) => expr::Expr::Table(x),
-			x => expr::Expr::Literal(x.into_literal())
+			x => expr::Expr::Literal(x.into_literal()),
 		};
 
 		// Specify the SQL query string
-		let sql = expr::LiveStatement{
+		let sql = expr::LiveStatement {
 			expr: if diff.unwrap_or(Value::None).is_true() {
 				expr::Fields::default()
-			}else{
-				 expr::Fields::all()
+			} else {
+				expr::Fields::all()
 			},
-			what: match what{
+			what: match what {
 				value::Strand(x) => expr::Expr::Table(x),
-				x => expr::Expr::Literal(x.into_literal())
+				x => expr::Expr::Literal(x.into_literal()),
 			},
 			..Default::default()
 		};
 		// Specify the query parameters
 		let var = Some(self.session().parameters.clone());
-		let plan = LogicalPlan{
-			expressions: vec![expr::TopLevelExpr::Expr(sql)]
+		let plan = LogicalPlan {
+			expressions: vec![expr::TopLevelExpr::Expr(sql)],
 		};
 		// Execute the query on the database
 		let mut res = self.query_inner(plan, var).await?;
@@ -399,20 +399,20 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, ) = extract_args::<(Value,)>(params.0).ok_or(RpcError::InvalidParams)?;
+		let (what,) = extract_args::<(Value,)>(params.0).ok_or(RpcError::InvalidParams)?;
 
 		// If the what is a single record with a non range value, make it return only a single
 		// result.
-		let only = match what{
+		let only = match what {
 			Value::Thing(x) => !x.key.is_range(),
-			_ => false
+			_ => false,
 		};
 
 		// If value is a strand, handle it as if it was a table.
-		let what = match what{
+		let what = match what {
 			Value::Strand(x) => expr::Expr::Table(x),
-			x => expr::Expr::Literal(x.into_literal())
-		}
+			x => expr::Expr::Literal(x.into_literal()),
+		};
 
 		// Specify the SQL query string
 		let sql = expr::SelectStatement {
@@ -421,10 +421,9 @@ pub trait RpcProtocolV1: RpcContext {
 			what: vec![what].into(),
 			..Default::default()
 		};
-		let plan = LogicalPlan{
-			expressions: vec![expr::TopLevelExpr::Expr(sql)]
+		let plan = LogicalPlan {
+			expressions: vec![expr::TopLevelExpr::Expr(sql)],
 		};
-
 
 		// Specify the query parameters
 		let var = Some(self.session().parameters.clone());
@@ -451,13 +450,15 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) = extract_args::<(Value,Value)>(params).ok_or(RpcError::InvalidParams)?;
-		let into = match what{
+		let (what, data) = extract_args::<(Value, Value)>(params).ok_or(RpcError::InvalidParams)?;
+		let into = match what {
 			Value::Strand(x) => Some(expr::Expr::Table(x)),
-			x => if x.is_nullish(){
-				None
-			}else{
-				Some(expr::Expr::Literal(x.into_literal()))
+			x => {
+				if x.is_nullish() {
+					None
+				} else {
+					Some(expr::Expr::Literal(x.into_literal()))
+				}
 			}
 		};
 
@@ -490,19 +491,21 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) = extract_args::<(Value,Value)>(params).ok_or(RpcError::InvalidParams)?;
-		let into = match what{
+		let (what, data) = extract_args::<(Value, Value)>(params).ok_or(RpcError::InvalidParams)?;
+		let into = match what {
 			Value::Strand(x) => Some(expr::Expr::Table(x)),
-			x => if x.is_nullish(){
-				None
-			}else{
-				Some(expr::Expr::Literal(x.into_literal()))
+			x => {
+				if x.is_nullish() {
+					None
+				} else {
+					Some(expr::Expr::Literal(x.into_literal()))
+				}
 			}
 		};
 		// Specify the SQL query string
 		let sql = InsertStatement {
 			relation: true,
-			into ,
+			into,
 			data: crate::sql::Data::SingleExpression(data),
 			output: Some(Output::After),
 			..Default::default()
@@ -533,13 +536,13 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) = extract_args::<(Value,Option<Value>)>(params.0) else {
+		let (what, data) = extract_args::<(Value, Option<Value>)>(params.0) else {
 			return Err(RpcError::InvalidParams);
 		};
 
-		let what = match what{
+		let what = match what {
 			Value::Strand(x) => expr::Expr::Table(x),
-			x => expr::Expr::Literal(x.into_literal())
+			x => expr::Expr::Literal(x.into_literal()),
 		};
 
 		// Specify the SQL query string

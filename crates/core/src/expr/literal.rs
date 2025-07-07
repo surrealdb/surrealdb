@@ -1,5 +1,5 @@
 use crate::expr::{Expr, RecordIdLit};
-use crate::val::{Bytes, Closure, Datetime, Duration, File, Geometry, Strand, Uuid};
+use crate::val::{Bytes, Closure, Datetime, Duration, File, Geometry, Regex, Strand, Uuid};
 use revision::revisioned;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};

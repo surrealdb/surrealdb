@@ -353,7 +353,7 @@ impl Document {
 			table: fdc.ft.name.into_raw_string(),
 			key: RecordIdKey::Array(Array(fdc.group_ids)),
 		};
-		let what = vec![Expr::Literal(Literal::RecordId(thg.into_literal()))];
+		let what = vec![Expr::Literal(Literal::RecordId(thg.clone().into_literal()))];
 		let stm = UpsertStatement {
 			what,
 			data: Some(Data::SetExpression(set_ops)),

@@ -1,4 +1,4 @@
-use crate::sql::Duration;
+use crate::val::Duration;
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]

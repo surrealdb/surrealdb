@@ -4,10 +4,10 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::{
-	Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Table, Timeout, Value, Version,
+	Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Timeout, Value, Version,
 };
 use crate::idx::planner::RecordStrategy;
-use crate::val::RecordId;
+use crate::val::{RecordId, Strand};
 use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
@@ -188,7 +188,7 @@ fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 	}
 }
 
-fn gen_id(v: &Value, into: &Option<Table>) -> Result<RecordId> {
+fn gen_id(v: &Value, into: &Option<Strand>) -> Result<RecordId> {
 	match into {
 		Some(into) => v.rid().generate(into, true),
 		None => match v.rid() {

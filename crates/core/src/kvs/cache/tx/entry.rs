@@ -226,7 +226,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineParamStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Pas`].
-	pub(crate) fn try_into_pas(self) -> Result<Arc<[DefineParamStatement]>> {
+	pub(crate) fn try_into_pas(self) -> Result<Arc<[DefineParamStore]>> {
 		match self {
 			Entry::Pas(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Pas"),

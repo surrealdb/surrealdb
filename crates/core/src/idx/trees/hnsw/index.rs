@@ -117,7 +117,7 @@ impl HnswIndex {
 		if let Some(doc_id) = self.docs.remove(tx, id).await? {
 			// Ensure the layers are up-to-date
 			self.hnsw.check_state(tx).await?;
-			for v in content.iter().filter(|v| v.is_some()) {
+			for v in content.iter().filter(|v| !v.is_nullish()) {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;

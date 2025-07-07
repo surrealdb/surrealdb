@@ -1,5 +1,5 @@
-use crate::expr::Expr;
-use crate::val::RecordId;
+use crate::expr::{Expr, Ident};
+use crate::val::{Array, RecordId};
 use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 
 use super::statements::info::InfoStructure;
-use super::{Idiom, Table, Value};
+use super::{Idiom, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -74,7 +74,7 @@ impl InfoStructure for ReferenceDeleteStrategy {
 #[serde(rename = "$surrealdb::private::sql::Refs")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Refs(pub Vec<(Option<Table>, Option<Idiom>)>);
+pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);
 
 impl Refs {
 	pub(crate) async fn compute(
@@ -88,7 +88,7 @@ impl Refs {
 		}
 
 		// Collect an array of references
-		let arr: Array = match doc {
+		let arr = match doc {
 			// Check if the current document has specified an ID
 			Some(doc) => {
 				// Obtain a record id from the document
@@ -109,7 +109,7 @@ impl Refs {
 				}
 
 				// Convert the references into values
-				ids.into_iter().map(Value::Thing).collect()
+				Array(ids.into_iter().map(Value::Thing).collect::<Vec<_>>())
 			}
 			None => bail!(Error::InvalidRefsContext),
 		};

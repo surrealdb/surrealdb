@@ -1,19 +1,20 @@
+use crate::expr::Ident;
 use crate::sql::fmt::Fmt;
-use crate::sql::{Cond, Fields, Groups, Table};
+use crate::sql::{Cond, Fields, Groups};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct View {
 	pub expr: Fields,
-	pub what: Vec<Table>,
+	pub what: Vec<Ident>,
 	pub cond: Option<Cond>,
 	pub group: Option<Groups>,
 }
 
 impl fmt::Display for View {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "AS SELECT {} FROM {}", self.expr, Fmt::comma_seperated(self.what))?;
+		write!(f, "AS SELECT {} FROM {}", self.expr, Fmt::comma_seperated(self.what.iter()))?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}

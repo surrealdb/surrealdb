@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Base, Table, Value};
+use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
 use crate::vs::VersionStamp;
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq,  Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum ShowSince {
@@ -39,7 +39,7 @@ impl ShowSince {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct ShowStatement {
-	pub table: Option<Table>,
+	pub table: Option<Ident>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }

@@ -7,8 +7,7 @@ use crate::expr::id::{Gen, RecordIdKeyLit};
 use crate::expr::model::Model;
 use crate::expr::reference::Refs;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, FlowResult, Ident, Idiom, Kind, Part, Regex};
-use crate::sql::Table;
+use crate::expr::{self, FlowResult, Ident, Kind};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
@@ -30,6 +29,7 @@ pub mod geometry;
 pub mod number;
 pub mod object;
 pub mod range;
+pub mod regex;
 pub mod strand;
 pub mod thing;
 pub mod uuid;
@@ -45,12 +45,11 @@ pub use self::geometry::Geometry;
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::range::Range;
+pub use self::regex::Regex;
 pub use self::strand::Strand;
 pub use self::thing::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
 /// Marker type for value conversions from Value::None
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
@@ -222,7 +221,7 @@ impl Value {
 	}
 
 	/// Check if this Value is a Thing of a specific type
-	pub fn is_record_type(&self, types: &[Table]) -> bool {
+	pub fn is_record_type(&self, types: &[Ident]) -> bool {
 		match self {
 			Value::Thing(v) => v.is_record_type(types),
 			_ => false,
@@ -343,7 +342,7 @@ impl Value {
 
 				Some(Kind::Function(Some(args_kinds), returns_kind))
 			}
-			Value::Refs(_) => None,
+			//Value::Refs(_) => None,
 			Value::File(file) => Some(Kind::File(vec![Ident::from(file.bucket.as_str())])),
 		}
 	}
@@ -382,8 +381,10 @@ impl Value {
 			Self::Bytes(_) => "bytes",
 			Self::Range(_) => "range",
 			Self::Thing(_) => "thing",
-			Self::Closure(_) => todo!(),
-			Self::Range(_) => todo!(),
+			// TODO: Dubious types
+			Self::Table(_) => "table",
+			Self::Closure(_) => "closure",
+			Self::Range(_) => "range",
 		}
 	}
 
@@ -646,6 +647,7 @@ impl Value {
 			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
 			Value::Closure(closure) => expr::Expr::Literal(expr::Literal::Closure(closure)),
 			Value::Range(range) => range.into_literal(),
+			Value::Table(t) => expr::Expr::Table(t.into()),
 		}
 	}
 }
@@ -1038,12 +1040,6 @@ impl From<DateTime<Utc>> for Value {
 impl From<Point<f64>> for Value {
 	fn from(v: Point<f64>) -> Self {
 		Value::Geometry(Geometry::from(v))
-	}
-}
-
-impl From<uuid::Uuid> for Value {
-	fn from(v: uuid::Uuid) -> Self {
-		Value::Uuid(Uuid(v))
 	}
 }
 

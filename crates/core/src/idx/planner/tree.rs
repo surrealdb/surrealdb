@@ -4,7 +4,7 @@ use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::expr::{
-	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, Table, With,
+	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
 };
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
@@ -42,7 +42,7 @@ impl Tree {
 	pub(super) async fn build<'a>(
 		stk: &mut Stk,
 		stm_ctx: &'a StatementContext<'a>,
-		table: &'a Table,
+		table: &'a Ident,
 	) -> Result<Self> {
 		let mut b = TreeBuilder::new(stm_ctx, table);
 		if let Some(cond) = stm_ctx.cond {
@@ -66,10 +66,10 @@ impl Tree {
 
 struct TreeBuilder<'a> {
 	ctx: &'a StatementContext<'a>,
-	table: &'a Table,
+	table: &'a Ident,
 	first_order: Option<&'a Order>,
-	schemas: HashMap<Table, SchemaCache>,
-	idioms_indexes: HashMap<Table, HashMap<Arc<Idiom>, LocalIndexRefs>>,
+	schemas: HashMap<Ident, SchemaCache>,
+	idioms_indexes: HashMap<Ident, HashMap<Arc<Idiom>, LocalIndexRefs>>,
 	resolved_expressions: HashMap<Arc<Expr>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Node>,
 	index_map: IndexesMap,
@@ -97,7 +97,7 @@ pub(super) type LocalIndexRefs = Vec<(IndexReference, IdiomCol)>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Arc<Idiom>, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
-	fn new(ctx: &'a StatementContext<'a>, table: &'a Table) -> Self {
+	fn new(ctx: &'a StatementContext<'a>, table: &'a Ident) -> Self {
 		let with_indexes = match ctx.with {
 			Some(With::Index(ixs)) => Some(Vec::with_capacity(ixs.len())),
 			_ => None,
@@ -130,7 +130,7 @@ impl<'a> TreeBuilder<'a> {
 		}
 	}
 
-	async fn lazy_load_schema_resolver(&mut self, tx: &Transaction, table: &Table) -> Result<()> {
+	async fn lazy_load_schema_resolver(&mut self, tx: &Transaction, table: &Ident) -> Result<()> {
 		if self.schemas.contains_key(table) {
 			return Ok(());
 		}
@@ -323,7 +323,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(n)
 	}
 
-	fn resolve_indexes(&mut self, t: &Table, i: &Idiom, schema: &SchemaCache) -> LocalIndexRefs {
+	fn resolve_indexes(&mut self, t: &Ident, i: &Idiom, schema: &SchemaCache) -> LocalIndexRefs {
 		// Did we already resolve this idiom?
 		if let Some(m) = self.idioms_indexes.get(t) {
 			if let Some(irs) = m.get(i).cloned() {
@@ -369,7 +369,7 @@ impl<'a> TreeBuilder<'a> {
 					if remote_field.is_empty() {
 						return Ok(None);
 					}
-					let local_field = Idiom::from(local_field);
+					let local_field = Idiom(local_field.to_vec());
 					self.lazy_load_schema_resolver(tx, self.table).await?;
 					let locals;
 					if let Some(shema) = self.schemas.get(self.table).cloned() {
@@ -378,7 +378,7 @@ impl<'a> TreeBuilder<'a> {
 						return Ok(None);
 					}
 
-					let remote_field = Arc::new(Idiom::from(remote_field));
+					let remote_field = Arc::new(Idiom(remote_field.to_vec()));
 					let mut remotes = vec![];
 					for table in tables {
 						self.lazy_load_schema_resolver(tx, table).await?;
@@ -713,7 +713,7 @@ struct SchemaCache {
 }
 
 impl SchemaCache {
-	async fn new(opt: &Options, table: &Table, tx: &Transaction) -> Result<Self> {
+	async fn new(opt: &Options, table: &Ident, tx: &Transaction) -> Result<Self> {
 		let (ns, db) = opt.ns_db()?;
 		let indexes = tx.all_tb_indexes(ns, db, table).await?;
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;

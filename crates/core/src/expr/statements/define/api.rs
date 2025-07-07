@@ -22,7 +22,7 @@ use super::{CursorDoc, DefineKind};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineApiStatement {
 	pub kind: DefineKind,
-	pub path: Value,
+	pub path: Expr,
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: Option<ApiConfig>,
@@ -58,8 +58,10 @@ impl DefineApiStatement {
 				}
 			}
 		}
+
+		let path = self.path.compute(stk, ctx, opt, doc).await.catch_return()?;
 		// Process the statement
-		let path: Path = self.path.coerce_to::<String>()?.parse()?;
+		let path: Path = path.coerce_to::<String>()?.parse()?;
 		let name = path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
 		txn.get_or_add_ns(ns, opt.strict).await?;

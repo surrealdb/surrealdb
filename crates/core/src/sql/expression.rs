@@ -5,8 +5,8 @@ use crate::sql::statements::{
 	UpsertStatement,
 };
 use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param,
-	PostfixOperator, PrefixOperator, Table,
+	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
+	PostfixOperator, PrefixOperator,
 };
 use std::fmt;
 
@@ -16,7 +16,7 @@ pub enum Expr {
 
 	Param(Param),
 	Idiom(Idiom),
-	Table(Table),
+	Table(Ident),
 	Mock(Mock),
 	// TODO(3.0) maybe unbox? check size.
 	Block(Box<Block>),

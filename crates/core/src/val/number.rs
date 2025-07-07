@@ -12,8 +12,6 @@ use std::hash;
 use std::iter::{Product, Sum};
 use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 #[serde(rename = "$surrealdb::private::sql::Number")]

@@ -1,9 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::{Expr, FlowResultExt as _, Literal};
+use crate::expr::{Expr, FlowResultExt as _, Graph, Idiom, Literal, Part};
 //use crate::expr::edges::Edges;
 use crate::expr::field::{Field, Fields};
-use crate::expr::part::{Next, Part};
+use crate::expr::part::Next;
 use crate::expr::statements::select::SelectStatement;
 use crate::val::Value;
 use anyhow::Result;
@@ -40,13 +40,18 @@ impl Value {
 						return stk.run(|stk| v.fetch(stk, ctx, opt, iter.as_slice())).await;
 					}
 					Value::Thing(x) => {
+						let what = Expr::Idiom(Idiom(vec![
+							Part::Start(Expr::Literal(Literal::RecordId(x.clone().into_literal()))),
+							Part::Graph(Graph {
+								what: g.what.clone(),
+								dir: g.dir.clone(),
+								..Default::default()
+							}),
+						]));
+
 						let stm = SelectStatement {
 							expr: g.expr.clone().unwrap_or(Fields::all()),
-							what: vec![Value::from(Edges {
-								from: x.clone(),
-								dir: g.dir.clone(),
-								what: g.what.clone(),
-							})],
+							what: vec![what],
 							cond: g.cond.clone(),
 							limit: g.limit.clone(),
 							order: g.order.clone(),

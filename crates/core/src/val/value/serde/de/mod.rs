@@ -7,6 +7,7 @@ use serde_content::{Deserializer, Number, Serializer, Value as Content};
 use std::borrow::Cow;
 
 impl Value {
+	/*
 	fn into_content(self) -> Result<Content<'static>> {
 		let serializer = Serializer::new();
 		match self {
@@ -54,9 +55,10 @@ impl Value {
 			Value::Closure(v) => serializer.serialize(v).map_err(Into::into),
 			Value::File(v) => serializer.serialize(v).map_err(Into::into),
 		}
-	}
+	}*/
 }
 
+/*
 /// Deserializes a value `T` from `SurrealDB` [`Value`]
 pub fn from_value<T>(value: Value) -> Result<T>
 where
@@ -66,3 +68,4 @@ where
 	let deserializer = Deserializer::new(content).coerce_numbers();
 	T::deserialize(deserializer).map_err(Into::into)
 }
+*/

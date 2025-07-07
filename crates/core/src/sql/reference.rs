@@ -1,9 +1,7 @@
+use crate::sql::{Expr, Ident, Idiom};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use super::{Idiom, Table};
-use crate::sql::Expr;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -32,11 +30,8 @@ impl From<crate::expr::reference::Reference> for Reference {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::ReferenceDeleteStrategy")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ReferenceDeleteStrategy {
 	Reject,
 	Ignore,
@@ -101,12 +96,9 @@ impl From<crate::expr::reference::ReferenceDeleteStrategy> for ReferenceDeleteSt
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::Refs")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Refs(pub Vec<(Option<Table>, Option<Idiom>)>);
+pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);
 
 impl fmt::Display for Refs {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

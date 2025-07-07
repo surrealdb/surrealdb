@@ -2,7 +2,8 @@ use super::DefineKind;
 use crate::sql::escape::QuoteStr;
 use crate::sql::fmt::Fmt;
 use crate::sql::user::UserDuration;
-use crate::sql::{Base, Duration, Ident, Strand};
+use crate::sql::{Base, Ident};
+use crate::val::{Duration, Strand};
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
+use crate::val::RecordId;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -142,21 +143,26 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match &self.kind.compute(stk, &ctx, opt, doc).await.catch_return()? {
+				match self.kind.compute(stk, &ctx, opt, doc).await.catch_return()? {
 					// The relation has a specific record id
 					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w, None)),
 					// The relation does not have a specific record id
-					Value::Table(tb) => match &self.data {
+					Value::Table(tb) => match self.data {
 						// There is a data clause so check for a record id
 						Some(data) => {
 							let id = match data.rid(stk, &ctx, opt).await? {
 								Some(id) => id.generate(tb, false)?,
-								None => tb.generate(),
+								None => RecordId::random_for_table(tb.into_string()),
 							};
 							i.ingest(Iterable::Relatable(f, id, w, None))
 						}
 						// There is no data clause so create a record id
-						None => i.ingest(Iterable::Relatable(f, tb.generate(), w, None)),
+						None => i.ingest(Iterable::Relatable(
+							f,
+							RecordId::random_for_table(tb.into_string()),
+							w,
+							None,
+						)),
 					},
 					// The relation can not be any other type
 					v => {

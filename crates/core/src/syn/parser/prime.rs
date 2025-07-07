@@ -4,7 +4,7 @@ use super::mac::pop_glued;
 use super::{ParseResult, Parser};
 use crate::sql::{
 	Closure, Dir, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock, Param, Part,
-	Script, Table,
+	Script,
 };
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
@@ -199,7 +199,7 @@ impl Parser<'_> {
 						self.parse_builtin(ctx, token.span).await?
 					}
 					t!(":") => {
-						let str = self.next_token_value::<Ident>()?.0;
+						let str = self.next_token_value::<Ident>()?;
 						self.parse_record_id_or_range(ctx, str)
 							.await
 							.map(|x| Expr::Literal(Literal::RecordId(x)))?
@@ -222,9 +222,7 @@ impl Parser<'_> {
 		if self.peek_continues_idiom() {
 			match value {
 				Expr::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(ctx, x).await,
-				Expr::Table(Table(x)) => {
-					self.parse_remaining_value_idiom(ctx, vec![Part::Field(Ident(x))]).await
-				}
+				Expr::Table(x) => self.parse_remaining_value_idiom(ctx, vec![Part::Field(x)]).await,
 				x => self.parse_remaining_value_idiom(ctx, vec![Part::Start(x)]).await,
 			}
 		} else {

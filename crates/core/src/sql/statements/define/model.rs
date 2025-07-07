@@ -1,6 +1,7 @@
 use super::DefineKind;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Ident, Permission, Strand};
+use crate::sql::{Ident, Permission};
+use crate::val::Strand;
 use std::fmt::{self, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

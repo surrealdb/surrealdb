@@ -109,8 +109,7 @@ impl SelectStatement {
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
 		// Loop over the select targets
 		for w in self.what.iter() {
-			let v = w.compute(stk, &ctx, &opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await?;
+			i.prepare(stk, &ctx, &opt, doc, &mut planner, &stm_ctx, w).await?;
 		}
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);

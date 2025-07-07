@@ -9,8 +9,6 @@ use std::str::FromStr;
 
 use super::Datetime;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
-
 #[revisioned(revision = 1)]
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash,

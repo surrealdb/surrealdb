@@ -12,7 +12,7 @@ use crate::expr::field::{Field, Fields};
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Skip, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Literal};
+use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Graph, Idiom, Literal};
 use crate::fnc::idiom;
 use crate::val::{RecordId, RecordIdKey, Value};
 use futures::future::try_join_all;
@@ -430,100 +430,100 @@ impl Value {
 					// Clone the thing
 					let val = v.clone();
 					// Check how many path parts are remaining
-					match path.len() {
-						// No remote embedded fields, so just return this
-						0 => Ok(Value::Thing(val)),
-						// Remote embedded field, so fetch the thing
-						_ => match p {
-							// This is a graph traversal expression
-							Part::Graph(g) => {
-								let last_part = path.len() == 1;
-								let expr = g.expr.clone().unwrap_or(if last_part {
-									Fields::value_id()
-								} else {
-									Fields::all()
-								});
+					if path.is_empty() {
+						return Ok(Value::Thing(val));
+					}
 
-								let stm = SelectStatement {
-									expr,
-									what: vec![Value::from(Edges {
-										from: val,
-										dir: g.dir.clone(),
-										what: g.what.clone().compute(stk, ctx, opt, doc).await?,
-									})],
-									cond: g.cond.clone(),
-									limit: g.limit.clone(),
-									order: g.order.clone(),
-									split: g.split.clone(),
-									group: g.group.clone(),
-									start: g.start.clone(),
-									..SelectStatement::default()
-								};
+					match p {
+						// This is a graph traversal expression
+						Part::Graph(g) => {
+							let last_part = path.len() == 1;
+							let expr = g.expr.clone().unwrap_or(if last_part {
+								Fields::value_id()
+							} else {
+								Fields::all()
+							});
 
-								if last_part {
-									Ok(stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all())
-								} else {
-									let v = stk
-										.run(|stk| stm.compute(stk, ctx, opt, None))
-										.await?
-										.all();
-									let res = stk
-										.run(|stk| v.get(stk, ctx, opt, None, path.next()))
-										.await?;
-									// We only want to flatten the results if the next part
-									// is a graph or where part. Reason being that if we flatten
-									// fields, the results of those fields (which could be arrays)
-									// will be merged into each other. So [1, 2, 3], [4, 5, 6] would
-									// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
-									// as we have already checked the length of the path.
-									Ok(match path[1] {
-										Part::Graph(_) | Part::Where(_) => res.flatten(),
-										_ => res,
-									})
-								}
-							}
-							Part::Method(name, args) => {
-								let a = stk
-									.scope(|scope| {
-										try_join_all(args.iter().map(|v| {
-											scope.run(|stk| v.compute(stk, ctx, opt, doc))
-										}))
-									})
-									.await?;
-								let v = stk
-									.run(|stk| idiom(stk, ctx, opt, doc, v.clone().into(), name, a))
-									.await?;
-								stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
-							}
-							Part::Optional => {
-								stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
-							}
-							// This is a remote field expression
-							_ => {
-								let stm = SelectStatement {
-									expr: Fields::Select(vec![Field::All]),
-									what: vec![Expr::Literal(Literal::RecordId(
-										val.into_literal(),
-									))],
-									..SelectStatement::default()
-								};
+							let what = Expr::Idiom(Idiom(vec![
+								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
+								Part::Graph(Graph {
+									what: g.what.clone(),
+									dir: g.dir.clone(),
+									..Default::default()
+								}),
+							]));
+
+							let stm = SelectStatement {
+								expr,
+								what: vec![what],
+								cond: g.cond.clone(),
+								limit: g.limit.clone(),
+								order: g.order.clone(),
+								split: g.split.clone(),
+								group: g.group.clone(),
+								start: g.start.clone(),
+								..SelectStatement::default()
+							};
+
+							if last_part {
+								Ok(stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all())
+							} else {
 								let v =
-									stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
-
-								// .* on a record id means fetch the record's contents
-								// The above select statement results in an object, if
-								// we apply `.*` on that, we can an array with the record's
-								// values instead of just the content. Therefore, if we
-								// encounter the first part to be `.*`, we simply skip it here
-								let next = match path.first() {
-									Some(Part::All) => path.next(),
-									_ => path,
-								};
-
-								// Continue processing the path on the now fetched record
-								stk.run(|stk| v.get(stk, ctx, opt, None, next)).await
+									stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
+								let res =
+									stk.run(|stk| v.get(stk, ctx, opt, None, path.next())).await?;
+								// We only want to flatten the results if the next part
+								// is a graph or where part. Reason being that if we flatten
+								// fields, the results of those fields (which could be arrays)
+								// will be merged into each other. So [1, 2, 3], [4, 5, 6] would
+								// become [1, 2, 3, 4, 5, 6]. This slice access won't panic
+								// as we have already checked the length of the path.
+								Ok(match path[1] {
+									Part::Graph(_) | Part::Where(_) => res.flatten(),
+									_ => res,
+								})
 							}
-						},
+						}
+						Part::Method(name, args) => {
+							let a = stk
+								.scope(|scope| {
+									try_join_all(
+										args.iter().map(|v| {
+											scope.run(|stk| v.compute(stk, ctx, opt, doc))
+										}),
+									)
+								})
+								.await?;
+							let v = stk
+								.run(|stk| idiom(stk, ctx, opt, doc, v.clone().into(), name, a))
+								.await?;
+							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+						}
+						Part::Optional => {
+							stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
+						}
+						// This is a remote field expression
+						_ => {
+							let stm = SelectStatement {
+								expr: Fields::Select(vec![Field::All]),
+								what: vec![Expr::Literal(Literal::RecordId(val.into_literal()))],
+								..SelectStatement::default()
+							};
+							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
+
+							// .* on a record id means fetch the record's contents
+							// The above select statement results in an object, if
+							// we apply `.*` on that, we can an array with the record's
+							// values instead of just the content. Therefore, if we
+							// encounter the first part to be `.*`, we simply skip it here
+							let next = match path.first() {
+								Some(Part::All) => path.next(),
+								_ => path,
+							};
+
+							// Continue processing the path on the now fetched record
+							stk.run(|stk| v.get(stk, ctx, opt, None, next)).await
+						}
 					}
 				}
 				v => {

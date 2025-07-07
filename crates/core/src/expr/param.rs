@@ -3,9 +3,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Permission;
+use crate::expr::escape::EscapeIdent;
 use crate::expr::ident::Ident;
 use crate::iam::Action;
-use crate::val::Value;
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -15,37 +16,54 @@ use std::{fmt, str};
 
 use super::FlowResultExt as _;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Param")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Param(pub Ident);
+pub struct Param(String);
+
+impl Param {
+	/// Create a new identifier
+	///
+	/// This function checks if the string has a null byte, returns None if it has.
+	pub fn new(str: String) -> Option<Self> {
+		if str.contains('\0') {
+			return None;
+		}
+		Some(Self(str))
+	}
+
+	/// Create a new identifier
+	///
+	/// # Safety
+	/// Caller should ensure that the string does not contain a null byte.
+	pub unsafe fn new_unchecked(str: String) -> Self {
+		Self(str)
+	}
+
+	/// returns the identifier section of the parameter,
+	/// i.e. `$foo` without the `$` so: `foo`
+	pub fn ident(self) -> Ident {
+		// Safety: Param guarentees no null bytes within it's internal string.
+		unsafe { Ident::new_unchecked(self.0) }
+	}
+}
 
 impl From<Ident> for Param {
 	fn from(v: Ident) -> Self {
-		Self(v)
+		Self(v.to_string())
 	}
 }
 
-impl From<String> for Param {
-	fn from(v: String) -> Self {
-		Self(v.into())
-	}
-}
-
-impl From<&str> for Param {
-	fn from(v: &str) -> Self {
-		Self(v.into())
+impl From<Strand> for Param {
+	fn from(v: Strand) -> Self {
+		Self(v.into_string())
 	}
 }
 
 impl Deref for Param {
-	type Target = Ident;
+	type Target = str;
 	fn deref(&self) -> &Self::Target {
-		&self.0
+		self.0.as_str()
 	}
 }
 
@@ -121,6 +139,6 @@ impl Param {
 
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", &self.0.0)
+		write!(f, "${}", EscapeIdent(&self.0))
 	}
 }

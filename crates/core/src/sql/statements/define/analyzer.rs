@@ -1,6 +1,7 @@
+use crate::sql::Ident;
 use crate::sql::filter::Filter;
 use crate::sql::tokenizer::Tokenizer;
-use crate::sql::{Ident, Strand};
+use crate::val::Strand;
 
 use std::fmt::{self, Display};
 

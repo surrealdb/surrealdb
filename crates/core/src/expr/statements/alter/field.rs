@@ -79,7 +79,7 @@ impl AlterFieldStatement {
 		}
 
 		match self.kind {
-			AlterKind::Set(k) => df.field_kind = Some(k.clone()),
+			AlterKind::Set(ref k) => df.field_kind = Some(k.clone()),
 			AlterKind::Drop => df.field_kind = None,
 			AlterKind::None => {}
 		}
@@ -91,13 +91,13 @@ impl AlterFieldStatement {
 		}
 
 		match self.value {
-			AlterKind::Set(k) => df.value = Some(k.clone()),
+			AlterKind::Set(ref k) => df.value = Some(k.clone()),
 			AlterKind::Drop => df.value = None,
 			AlterKind::None => {}
 		}
 
 		match self.assert {
-			AlterKind::Set(k) => df.assert = Some(k.clone()),
+			AlterKind::Set(ref k) => df.assert = Some(k.clone()),
 			AlterKind::Drop => df.assert = None,
 			AlterKind::None => {}
 		}
@@ -114,13 +114,13 @@ impl AlterFieldStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(k) => df.comment = Some(k.clone()),
+			AlterKind::Set(ref k) => df.comment = Some(k.clone()),
 			AlterKind::Drop => df.comment = None,
 			AlterKind::None => {}
 		}
 
 		match self.reference {
-			AlterKind::Set(k) => {
+			AlterKind::Set(ref k) => {
 				df.reference = Some(k.clone());
 			}
 			AlterKind::Drop => df.reference = None,

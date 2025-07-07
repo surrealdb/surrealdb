@@ -1,6 +1,6 @@
 //! Stores Things of an HNSW index
-use crate::expr::RecordIdKeyLit;
 use crate::kvs::impl_key;
+use crate::val::RecordIdKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

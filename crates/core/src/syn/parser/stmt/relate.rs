@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::sql::statements::RelateStatement;
-use crate::sql::{Expr, Ident, Literal, Table};
+use crate::sql::{Expr, Ident, Literal};
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
@@ -111,7 +111,7 @@ impl Parser<'_> {
 		if self.peek_whitespace1().kind == t!(":") {
 			self.parse_record_id(ctx).await.map(|x| Expr::Literal(Literal::RecordId(x)))
 		} else {
-			self.next_token_value::<Ident>().map(|x| Expr::Table(Table(x.0)))
+			self.next_token_value().map(|x| Expr::Table(x))
 		}
 	}
 }

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::sql::kind::KindLiteral;
-use crate::sql::{Idiom, Kind, Table};
+use crate::sql::{Ident, Idiom, Kind};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
@@ -155,7 +155,7 @@ impl Parser<'_> {
 
 				let span = self.peek().span;
 				let (table, path) = if self.eat(t!("<")) {
-					let table: Option<Table> = Some(self.next_token_value()?);
+					let table: Option<Ident> = Some(self.next_token_value()?);
 					let path: Option<Idiom> = if self.eat(t!(",")) {
 						Some(self.parse_local_idiom(ctx).await?)
 					} else {

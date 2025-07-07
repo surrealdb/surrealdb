@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::Operation;
 use crate::expr::idiom::Idiom;
 use crate::val::{Closure, Value};
 use anyhow::Result;
@@ -22,7 +23,7 @@ pub async fn diff(
 	(val1, val2): (Value, Value),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
-		Ok(val1.diff(&val2, Idiom::default()).into())
+		Ok(Operation::operations_to_value(val1.diff(&val2, Idiom::default())))
 	} else {
 		Ok(Value::None)
 	}

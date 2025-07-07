@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::paths::{EDGE, IN, OUT};
 use crate::expr::{AssignOperator, FlowResultExt};
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, Strand, Value};
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
@@ -33,12 +33,13 @@ impl Document {
 					// There is a data clause so fetch a record id
 					Some(data) => match data.rid(stk, ctx, opt).await? {
 						// Generate a new id from the id field
-						Some(id) => id.generate(tb, false)?,
+						// TODO: Handle null byte
+						Some(id) => id.generate(tb.clone().into(), false)?,
 						// Generate a new random table id
-						None => RecordId::random_for_table(tb.0),
+						None => RecordId::random_for_table(tb.clone().into_string()),
 					},
 					// There is no data clause so create a record id
-					None => RecordId::random_for_table(tb.0),
+					None => RecordId::random_for_table(tb.clone().into_string()),
 				};
 				// The id field can not be a record range
 				ensure!(

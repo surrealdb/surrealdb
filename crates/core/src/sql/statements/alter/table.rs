@@ -1,5 +1,6 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{ChangeFeed, Ident, Kind, Permissions, Strand, TableType};
+use crate::sql::{ChangeFeed, Ident, Kind, Permissions, TableType};
+use crate::val::Strand;
 use anyhow::Result;
 
 use std::fmt::{self, Display, Write};

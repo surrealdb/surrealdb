@@ -1,9 +1,5 @@
-use crate::expr::Value;
-use crate::expr::cond::Cond;
-use crate::expr::field::Fields;
-use crate::expr::group::Groups;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::table::Tables;
+use crate::expr::{Cond, Fields, Groups, Ident, Value, fmt::Fmt};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -14,14 +10,14 @@ use std::fmt;
 #[non_exhaustive]
 pub struct View {
 	pub expr: Fields,
-	pub what: Tables,
+	pub what: Vec<Ident>,
 	pub cond: Option<Cond>,
 	pub group: Option<Groups>,
 }
 
 impl fmt::Display for View {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "AS SELECT {} FROM {}", self.expr, self.what)?;
+		write!(f, "AS SELECT {} FROM {}", self.expr, Fmt::comma_seperated(self.what.iter()))?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}

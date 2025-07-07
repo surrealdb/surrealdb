@@ -5,7 +5,7 @@ use std::fmt::{self};
 use std::hash::BuildHasher;
 
 use crate::expr::kind::{HasKind, KindLiteral};
-use crate::expr::{Ident, Kind, Regex, Table};
+use crate::expr::{Ident, Kind, Regex};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
@@ -497,7 +497,7 @@ impl Value {
 		}
 	}
 
-	fn can_coerce_to_record(&self, val: &[Table]) -> bool {
+	fn can_coerce_to_record(&self, val: &[Ident]) -> bool {
 		match self {
 			Value::Thing(t) => {
 				val.is_empty() || val.iter().any(|x| t.table == **x)
@@ -617,7 +617,7 @@ impl Value {
 	}
 
 	/// Try to coerce this value to a Record of a certain type
-	pub(crate) fn coerce_to_record_kind(self, val: &[Table]) -> Result<RecordId, CoerceError> {
+	pub(crate) fn coerce_to_record_kind(self, val: &[Ident]) -> Result<RecordId, CoerceError> {
 		let this = match self {
 			// Records are allowed if correct type
 			Value::Thing(v) => {

@@ -3,7 +3,7 @@ use std::mem;
 use rust_decimal::Decimal;
 
 use crate::sql::language::Language;
-use crate::sql::{Ident, Param, Regex, Table};
+use crate::sql::{Ident, Param, Regex};
 use crate::syn::error::syntax_error;
 use crate::syn::lexer::compound::{self, NumberKind};
 use crate::syn::parser::mac::unexpected;
@@ -29,22 +29,18 @@ impl TokenValue for Ident {
 			TokenKind::Identifier => {
 				parser.pop_peek();
 				let str = parser.lexer.string.take().unwrap();
-				Ok(Ident(str))
+				// Safety: lexer ensures no null bytes are present in the identifier.
+				Ok(unsafe { Ident::new_unchecked(str) })
 			}
 			x if Parser::kind_is_keyword_like(x) => {
 				let s = parser.pop_peek().span;
-				Ok(Ident(parser.lexer.span_str(s).to_owned()))
+				// Safety: lexer ensures no null bytes are present in the identifier.
+				Ok(unsafe { Ident::new_unchecked(parser.lexer.span_str(s).to_owned()) })
 			}
 			_ => {
 				unexpected!(parser, token, "an identifier");
 			}
 		}
-	}
-}
-
-impl TokenValue for Table {
-	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		parser.next_token_value::<Ident>().map(|x| Table(x.0))
 	}
 }
 
@@ -73,7 +69,8 @@ impl TokenValue for Param {
 			TokenKind::Parameter => {
 				parser.pop_peek();
 				let param = parser.lexer.string.take().unwrap();
-				Ok(Param(Ident(param)))
+				// Safety: Lexer guarentees no null bytes.
+				Ok(unsafe { Param::new_unchecked(param) })
 			}
 			_ => unexpected!(parser, peek, "a parameter"),
 		}
@@ -266,14 +263,17 @@ impl Parser<'_> {
 					}
 					_ => token.span,
 				};
-				Ok(Ident(self.lexer.span_str(span).to_owned()))
+				// Safety: Lexer guarentees no null bytes.
+				Ok(unsafe { Ident::new_unchecked(self.lexer.span_str(span).to_owned()) })
 			}
 			TokenKind::Identifier => {
 				let str = self.lexer.string.take().unwrap();
-				Ok(Ident(str))
+				// Safety: Lexer guarentees no null bytes.
+				Ok(unsafe { Ident::new_unchecked(str) })
 			}
 			x if Self::kind_is_keyword_like(x) => {
-				Ok(Ident(self.lexer.span_str(token.span).to_owned()))
+				// Safety: Lexer guarentees no null bytes.
+				Ok(unsafe { Ident::new_unchecked(self.lexer.span_str(token.span).to_owned()) })
 			}
 			_ => {
 				unexpected!(self, token, "an identifier");

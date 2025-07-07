@@ -128,7 +128,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(id.into())
+		Ok(Uuid(id).into())
 	}
 }
 

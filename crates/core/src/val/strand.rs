@@ -10,15 +10,13 @@ use std::ops::{
 };
 use std::str;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
-
 /// A string that doesn't contain NUL bytes.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Strand")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Strand(#[serde(with = "no_nul_bytes")] pub String);
+pub struct Strand(#[serde(with = "no_nul_bytes")] String);
 
 impl Strand {
 	/// Create a new strand, returns None if the string contains a null byte.
@@ -38,6 +36,10 @@ impl Strand {
 		// Check in debug mode if the variants
 		debug_assert!(!s.contains('\0'));
 		Strand(s)
+	}
+
+	pub fn into_string(self) -> String {
+		self.0
 	}
 }
 

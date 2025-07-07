@@ -31,7 +31,7 @@ impl Parser<'_> {
 	pub(crate) async fn parse_record_id_or_range(
 		&mut self,
 		stk: &mut Stk,
-		ident: String,
+		ident: Ident,
 	) -> ParseResult<RecordIdLit> {
 		expected_whitespace!(self, t!(":"));
 
@@ -48,7 +48,7 @@ impl Parser<'_> {
 				Bound::Unbounded
 			};
 			return Ok(RecordIdLit {
-				tb: ident,
+				tb: ident.into_string(),
 				id: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
 					start: Bound::Unbounded,
 					end,
@@ -83,7 +83,7 @@ impl Parser<'_> {
 				Bound::Unbounded
 			};
 			Ok(RecordIdLit {
-				tb: ident,
+				tb: ident.into_string(),
 				id: RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
 					start: beg,
 					end,
@@ -110,7 +110,7 @@ impl Parser<'_> {
 				Bound::Included(v) => v,
 			};
 			Ok(RecordIdLit {
-				tb: ident,
+				tb: ident.into_string(),
 				id,
 			})
 		}

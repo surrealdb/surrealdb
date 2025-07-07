@@ -1,4 +1,5 @@
-use crate::sql::{Base, Cond, Datetime, Duration, Ident, RecordIdLit, Strand, Uuid};
+use crate::sql::{Base, Cond, Ident, RecordIdLit};
+use crate::val::{Datetime, Duration, Strand, Uuid};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 

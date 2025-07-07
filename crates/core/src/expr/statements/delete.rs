@@ -55,8 +55,7 @@ impl DeleteStatement {
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the delete targets
 		for w in self.what.iter() {
-			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| {
+			i.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, w).await.map_err(|e| {
 				if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
 					let Ok(Error::InvalidStatementTarget {
 						value,
