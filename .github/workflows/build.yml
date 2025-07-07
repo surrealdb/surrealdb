@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [linux/amd64, linux/arm64]
+        platform: [amd64, arm64]
 
     steps:
       - name: Checkout sources
@@ -91,19 +91,19 @@ jobs:
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # (Actions must be pinned by commit hash) v3.10.0
 
       - name: Setup artifact directory
-        run: mkdir -p ${{ needs.image.outputs.folder }}/${{ matrix.platform }}
+        run: mkdir -p ${{ needs.image.outputs.folder }}
 
       - name: Build & Push builder image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
         id: build
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/${{ matrix.platform }}
           file: ./docker/Dockerfile
           target: builder
           push: false
-          outputs: type=docker,dest=${{ needs.image.outputs.folder }}/${{ matrix.platform }}/surrealdb-builder.tar
-          tags: ${{ matrix.platform }}/${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}
+          outputs: type=docker,dest=${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}.tar
+          tags: ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-${{ matrix.platform }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
 
@@ -213,7 +213,7 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
-              docker load -i ${{ needs.image.outputs.folder }}/linux/amd64/surrealdb-builder.tar
+              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-amd64.tar
 
               docker run \
                 --rm -t \
@@ -223,7 +223,7 @@ jobs:
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                linux/amd64/${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }} \
+                ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-amd64 \
                   --target x86_64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
@@ -260,7 +260,7 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
-              docker load -i ${{ needs.image.outputs.folder }}/linux/arm64/surrealdb-builder.tar
+              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-arm64.tar
 
               docker run \
                 --rm -t \
@@ -270,7 +270,7 @@ jobs:
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                linux/arm64/${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }} \
+                ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-arm64 \
                   --target aarch64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
