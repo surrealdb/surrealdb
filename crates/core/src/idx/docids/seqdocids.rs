@@ -3,7 +3,7 @@ use crate::err::Error;
 use crate::expr::Id;
 use crate::idx::docids::{DocId, Resolved};
 use crate::kvs::sequences::SequenceKey;
-use crate::kvs::{Key, Transaction};
+use crate::kvs::{Key, Transaction, Val};
 use anyhow::Result;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -20,16 +20,31 @@ impl SeqDocIds {
 		Self {
 			nid,
 			seq_key: Arc::new(SequenceKey::new_ft_doc_ids(ns, db, tb, ix)),
-			batch: 1000, // Make that configurable?
+			batch: 1000, // TODO ekeller: Make that configurable?
 		}
 	}
 
 	pub(in crate::idx) async fn get_doc_id(
 		&self,
-		_tx: &Transaction,
-		_doc_key: Key,
+		tx: &Transaction,
+		id: Id,
 	) -> Result<Option<DocId>> {
-		todo!()
+		let id_key = self.seq_key.new_id_key(id.clone())?;
+		if let Some(v) = tx.get(id_key, None).await? {
+			return Ok(Some(Self::val_to_doc_id(v)?));
+		}
+		Ok(None)
+	}
+
+	fn val_to_doc_id(val: Val) -> Result<DocId> {
+		// Validate the length and convert to array (zero copy)
+		let val: [u8; 8] = val.as_slice().try_into().map_err(|_| {
+			Error::Internal(format!(
+				"invalid stored DocId length: expected 8 bytes, got {}",
+				val.len()
+			))
+		})?;
+		Ok(u64::from_be_bytes(val))
 	}
 
 	pub(in crate::idx) async fn resolve_doc_id(&self, ctx: &Context, id: Id) -> Result<Resolved> {
@@ -37,14 +52,7 @@ impl SeqDocIds {
 		let tx = ctx.tx();
 		// Do we already have an ID?
 		if let Some(val) = tx.get(id_key.clone(), None).await? {
-			// Validate the length and convert to array (zero copy)
-			let val: [u8; 8] = val.as_slice().try_into().map_err(|_| {
-				Error::Internal(format!(
-					"invalid stored DocId length: expected 8 bytes, got {}",
-					val.len()
-				))
-			})?;
-			let doc_id: DocId = u64::from_be_bytes(val);
+			let doc_id = Self::val_to_doc_id(val)?;
 			return Ok(Resolved::Existing(doc_id));
 		}
 		// If not, let's get one from the sequence
@@ -84,11 +92,12 @@ impl SeqDocIds {
 #[cfg(test)]
 mod tests {
 	use crate::ctx::Context;
+	use crate::expr::Id;
 	use crate::idx::docids::seqdocids::SeqDocIds;
 	use crate::idx::docids::{DocId, Resolved};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
-	use crate::kvs::{Datastore, Key, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 	use uuid::Uuid;
 
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Context, SeqDocIds) {
@@ -104,10 +113,11 @@ mod tests {
 	}
 
 	async fn check_get_doc_key_id(ctx: &Context, d: &SeqDocIds, doc_id: DocId, key: &str) {
-		let key: Key = key.into();
 		let tx = ctx.tx();
-		assert_eq!(d.get_doc_key(&tx, doc_id).await.unwrap(), Some(key.clone()));
-		assert_eq!(d.get_doc_id(&tx, key).await.unwrap(), Some(doc_id));
+		let id: Id = key.into();
+		let k = revision::to_vec(&id).unwrap();
+		assert_eq!(d.get_doc_key(&tx, doc_id).await.unwrap(), Some(k));
+		assert_eq!(d.get_doc_id(&tx, key.into()).await.unwrap(), Some(doc_id));
 	}
 	#[tokio::test]
 	async fn test_resolve_doc_id() {

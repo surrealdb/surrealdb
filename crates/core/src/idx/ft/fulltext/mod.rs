@@ -13,7 +13,7 @@ use crate::idx::ft::offsets::Offset;
 use crate::idx::ft::postings::TermFrequency;
 use crate::key::index::dl::Dl;
 use crate::key::index::td::Td;
-use crate::kvs::{Key, Transaction};
+use crate::kvs::Transaction;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -69,8 +69,7 @@ impl FullTextIndex {
 		let mut set = HashSet::new();
 		let tx = ctx.tx();
 		// Get the doc id (if it exists)
-		let doc_key: Key = revision::to_vec(&rid.id)?;
-		let id = self.doc_ids.get_doc_id(&tx, doc_key).await?;
+		let id = self.doc_ids.get_doc_id(&tx, rid.id.clone()).await?;
 		if let Some(id) = id {
 			// Delete the terms
 			for tks in &tokens {
