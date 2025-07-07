@@ -48,7 +48,7 @@ defaults:
   run:
     shell: bash
 
-permissions: 
+permissions:
   contents: read
 
 jobs:
@@ -115,7 +115,7 @@ jobs:
         include:
           # MacOS amd64
           - arch: x86_64-apple-darwin
-            runner: macos-latest-xlarge
+            runner: macos-13
             file: surreal-${{ inputs.name }}.darwin-amd64
             build-step: |
               set -x
@@ -150,7 +150,7 @@ jobs:
 
           # MacOS arm64
           - arch: aarch64-apple-darwin
-            runner: macos-latest-xlarge
+            runner: macos-latest
             file: surreal-${{ inputs.name }}.darwin-arm64
             build-step: |
               set -x
