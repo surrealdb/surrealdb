@@ -64,7 +64,6 @@ jobs:
       name: ${{ steps.image.outputs.name }}
       tag: ${{ steps.image.outputs.tag }}
       dest: ${{ steps.image.outputs.dest }}
-      dest-output: ${{ steps.image.outputs.dest-output }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # Actions must be pinned by hash
@@ -103,7 +102,6 @@ jobs:
           echo "tag=${tag}" >> $GITHUB_OUTPUT
           dest=$(mktemp -d)
           echo "dest=${dest}" >> $GITHUB_OUTPUT
-          echo "dest-output='type=docker,dest=${dest}'" >> $GITHUB_OUTPUT
 
       - name: Build & Push builder image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
@@ -118,7 +116,7 @@ jobs:
             type=registry,ref=${{ steps.image.outputs.name }}:main
           cache-to: type=inline
           push: ${{ inputs.publish }}
-          outputs: ${{ !inputs.publish && steps.image.outputs.dest-output || '' }}
+          outputs: type=docker,dest=${{ steps.image.outputs.dest }}
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
