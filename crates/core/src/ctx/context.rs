@@ -2,8 +2,8 @@ use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
-use crate::ctx::reason::Reason;
-use crate::dbs::{Capabilities, Notification};
+use crate::ctx::reason::DoneReason;
+use crate::dbs::{Capabilities, Notification, Session, Variables};
 use crate::err::Error;
 use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
@@ -245,6 +245,31 @@ impl MutableContext {
 		Ok(ctx)
 	}
 
+	/// Attach a session to the context.
+	///
+	/// This will add the session's values and variables to the context.
+	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
+		self.add_values(session.values());
+		if !session.variables.is_empty() {
+			self.attach_variables(session.variables.clone())?;
+		}
+		Ok(())
+	}
+
+	/// Attach query-specific variables to the context.
+	/// These variables are in supplemental to the session variables.
+	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
+		for (key, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				return Err(Error::InvalidParam {
+					name: key.clone(),
+				});
+			}
+			self.add_value(key, val.into());
+		}
+		Ok(())
+	}
+
 	/// Freezes this context, allowing it to be used as a parent context.
 	pub(crate) fn freeze(self) -> Context {
 		Arc::new(self)
@@ -390,12 +415,12 @@ impl MutableContext {
 	/// We may not want to check for the deadline on every call.
 	/// An iteration loop may want to check it every 10 or 100 calls.
 	/// Eg.: ctx.done(count % 100 == 0)
-	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>> {
+	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<DoneReason>> {
 		match self.deadline {
 			Some(deadline) if deep_check && deadline <= Instant::now() => {
-				Ok(Some(Reason::Timedout))
+				Ok(Some(DoneReason::Timedout))
 			}
-			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
+			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(DoneReason::Canceled)),
 			_ => {
 				if deep_check && ALLOC.is_beyond_threshold() {
 					bail!(Error::QueryBeyondMemoryThreshold);
@@ -430,7 +455,7 @@ impl MutableContext {
 	/// Check if the context is not ok to continue, because it timed out.
 	pub(crate) async fn is_timedout(&self) -> Result<bool> {
 		yield_now!();
-		Ok(matches!(self.done(true)?, Some(Reason::Timedout)))
+		Ok(matches!(self.done(true)?, Some(DoneReason::Timedout)))
 	}
 
 	#[cfg(storage)]

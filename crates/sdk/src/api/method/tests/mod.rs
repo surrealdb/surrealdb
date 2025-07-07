@@ -5,18 +5,19 @@ mod protocol;
 mod server;
 mod types;
 
-use crate::api::Response as QueryResponse;
+use crate::QueryResults;
 use crate::api::Surreal;
 use crate::api::method::tests::types::AuthParams;
 use crate::api::opt::PatchOp;
 use crate::api::opt::auth::Database;
 use crate::api::opt::auth::Jwt;
 use crate::api::opt::auth::Namespace;
-use crate::api::opt::auth::Record;
+use crate::api::opt::auth::RecordCredentials;
 use crate::api::opt::auth::Root;
 use protocol::Client;
 use protocol::Test;
 use semver::Version;
+use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::LazyLock;
 use surrealdb_core::sql::statements::{BeginStatement, CommitStatement};
@@ -41,11 +42,11 @@ async fn api() {
 
 	// signup
 	let _: Jwt = DB
-		.signup(Record {
+		.signup(RecordCredentials {
 			namespace: "test-ns",
 			database: "test-db",
 			access: "access",
-			params: AuthParams {},
+			params: BTreeMap::new(),
 		})
 		.await
 		.unwrap();
@@ -76,11 +77,11 @@ async fn api() {
 		.await
 		.unwrap();
 	let _: Jwt = DB
-		.signin(Record {
+		.signin(RecordCredentials {
 			namespace: "test-ns",
 			database: "test-db",
 			access: "access",
-			params: AuthParams {},
+			params: BTreeMap::new(),
 		})
 		.await
 		.unwrap();
@@ -89,10 +90,10 @@ async fn api() {
 	let _: () = DB.authenticate(Jwt(String::new())).await.unwrap();
 
 	// query
-	let _: QueryResponse = DB.query("SELECT * FROM user").await.unwrap();
-	let _: QueryResponse =
+	let _: QueryResults = DB.query("SELECT * FROM user").await.unwrap();
+	let _: QueryResults =
 		DB.query("CREATE user:john SET name = $name").bind(("name", "John Doe")).await.unwrap();
-	let _: QueryResponse = DB
+	let _: QueryResults = DB
 		.query("CREATE user:john SET name = $name")
 		.bind(User {
 			id: "john".to_owned(),
@@ -100,13 +101,13 @@ async fn api() {
 		})
 		.await
 		.unwrap();
-	let _: QueryResponse = DB
-		.query(BeginStatement::default())
+	let _: QueryResults = DB
+		.query(BeginStatement::default().to_string())
 		.query("CREATE account:one SET balance = 135605.16")
 		.query("CREATE account:two SET balance = 91031.31")
 		.query("UPDATE account:one SET balance += 300.00")
 		.query("UPDATE account:two SET balance -= 300.00")
-		.query(CommitStatement::default())
+		.query(CommitStatement::default().to_string())
 		.await
 		.unwrap();
 

@@ -12,13 +12,14 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
+use surrealdb::Surreal;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
-use surrealdb::engine::any::{self, connect};
-use surrealdb::expr::{Uuid as CoreUuid, Value as CoreValue};
+use surrealdb::expr::{LogicalPlan, Param, Uuid};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
-use surrealdb::{Notification, Response, Value};
-use surrealdb_core::sql::{Param, SqlValue as CoreSqlValue, Statement};
+use surrealdb::{Notification, QueryResults, Value};
+use surrealdb_core::dbs::QueryResult;
+use surrealdb_core::sql::Statement;
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -71,10 +72,11 @@ pub async fn init(
 	// Capabilities configuration for local engines
 	let capabilities = capabilities.into_cli_capabilities();
 	let config = Config::new().capabilities(capabilities.clone().into());
-	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
+	let client = Surreal::connect(endpoint, 1024).await?;
+	let is_local = client.is_local();
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
-	let client = if username.is_some() && password.is_some() && !is_local {
+	if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
 			.with_username(username.as_deref())
@@ -82,25 +84,17 @@ pub async fn init(
 			.with_namespace(namespace.as_deref())
 			.with_database(database.as_deref());
 
-		let client = connect(endpoint).await?;
-
 		debug!("Signing in to the database engine at '{:?}' level", auth_level);
 		match auth_level {
 			CredentialsLevel::Root => client.signin(creds.root()?).await?,
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
 			CredentialsLevel::Database => client.signin(creds.database()?).await?,
 		};
-
-		client
 	} else if token.is_some() && !is_local {
-		let client = connect(endpoint).await?;
 		client.authenticate(token.unwrap()).await?;
-
-		client
 	} else {
 		debug!("Connecting to the database engine without authentication");
-		connect((endpoint, config)).await?
-	};
+	}
 
 	// Create a new terminal REPL
 	let mut rl = Editor::new().unwrap();
@@ -213,9 +207,10 @@ pub async fn init(
 					}
 				}
 
-				for var in &vars {
-					query.push(Statement::Value(CoreSqlValue::Param(Param::from(var.as_str()))))
-				}
+				// TODO: STU: WTF is this?
+				// for var in &vars {
+				// 	query.push(Statement::Value(Value::Param(Param::from(var.as_str()))))
+				// }
 
 				// Extract the namespace and database from the current prompt
 				let (prompt_ns, prompt_db) = split_prompt(&prompt);
@@ -227,7 +222,7 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let mut result = client.query(query).with_stats().await;
+				let mut result = client.query(line).with_stats().await;
 
 				if let Ok(WithStats(res)) = &mut result {
 					for (i, n) in vars.into_iter().enumerate() {
@@ -276,116 +271,125 @@ pub async fn init(
 fn process(
 	pretty: bool,
 	json: bool,
-	res: surrealdb::Result<WithStats<Response>>,
+	res: surrealdb::Result<WithStats<QueryResults>>,
 ) -> Result<String> {
 	// Check query response for an error
 	let mut response = res?;
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
-	let mut vec = Vec::<(Stats, Value)>::with_capacity(num_statements);
+	let mut vec = Vec::with_capacity(num_statements);
 	for index in 0..num_statements {
-		let (stats, result) = response.take(index).ok_or_else(|| {
+		let query_result = response.take::<Value>(index).ok_or_else(|| {
 			anyhow!("Expected some result for a query with index {index}, but found none")
 		})?;
-		let output = result.unwrap_or_else(|e| Value::from_inner(CoreValue::from(e.to_string())));
-		vec.push((stats, output));
+		// let output = query_result.result.unwrap_or_else(|e| Value::from(e.to_string()));
+		vec.push(query_result);
 	}
 
 	tokio::spawn(async move {
-		let mut stream = match response.into_inner().stream::<Value>(()) {
-			Ok(stream) => stream,
-			Err(error) => {
-				print(Err(error));
-				return;
-			}
-		};
-		while let Some(Notification {
-			query_id,
-			action,
-			data,
-			..
-		}) = stream.next().await
-		{
-			let message = match (json, pretty) {
-				// Don't prettify the SurrealQL response
-				(false, false) => {
-					let value = CoreValue::from(map! {
-						String::from("id") => CoreValue::from(CoreUuid::from(query_id)),
-						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-						String::from("result") => data.into_inner(),
-					});
-					value.to_string()
-				}
-				// Yes prettify the SurrealQL response
-				(false, true) => format!(
-					"-- Notification (action: {action:?}, live query ID: {query_id})\n{data:#}"
-				),
-				// Don't pretty print the JSON response
-				(true, false) => {
-					let value = CoreValue::from(map! {
-						String::from("id") => CoreValue::from(CoreUuid::from(query_id)),
-						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-						String::from("result") => data.into_inner(),
-					});
-					value.into_json().to_string()
-				}
-				// Yes prettify the JSON response
-				(true, true) => {
-					let mut buf = Vec::new();
-					let mut serializer = serde_json::Serializer::with_formatter(
-						&mut buf,
-						PrettyFormatter::with_indent(b"\t"),
-					);
-					data.into_inner().into_json().serialize(&mut serializer).unwrap();
-					let output = String::from_utf8(buf).unwrap();
-					format!(
-						"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
-					)
-				}
-			};
-			print(Ok(format!("\n{message}")));
-		}
+		todo!("STU: FIX THIS");
+		// let mut stream = match response.into_inner().stream::<Value>(()) {
+		// 	Ok(stream) => stream,
+		// 	Err(error) => {
+		// 		print(Err(error));
+		// 		return;
+		// 	}
+		// };
+		// while let Some(Notification {
+		// 	query_id,
+		// 	action,
+		// 	data,
+		// 	..
+		// }) = stream.next().await
+		// {
+		// 	let message = match (json, pretty) {
+		// 		// Don't prettify the SurrealQL response
+		// 		(false, false) => {
+		// 			let value = Value::from(map! {
+		// 				String::from("id") => Value::from(Uuid::from(query_id)),
+		// 				String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
+		// 				String::from("result") => data.into_inner(),
+		// 			});
+		// 			value.to_string()
+		// 		}
+		// 		// Yes prettify the SurrealQL response
+		// 		(false, true) => format!(
+		// 			"-- Notification (action: {action:?}, live query ID: {query_id})\n{data:#}"
+		// 		),
+		// 		// Don't pretty print the JSON response
+		// 		(true, false) => {
+		// 			let value = Value::from(map! {
+		// 				String::from("id") => Value::from(Uuid::from(query_id)),
+		// 				String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
+		// 				String::from("result") => data,
+		// 			});
+		// 			value.into_json().to_string()
+		// 		}
+		// 		// Yes prettify the JSON response
+		// 		(true, true) => {
+		// 			let mut buf = Vec::new();
+		// 			let mut serializer = serde_json::Serializer::with_formatter(
+		// 				&mut buf,
+		// 				PrettyFormatter::with_indent(b"\t"),
+		// 			);
+		// 			data.into_json().serialize(&mut serializer).unwrap();
+		// 			let output = String::from_utf8(buf).unwrap();
+		// 			format!(
+		// 				"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
+		// 			)
+		// 		}
+		// 	};
+		// 	print(Ok(format!("\n{message}")));
+		// }
 	});
 
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
 		(false, false) => {
-			CoreValue::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>())
+			Value::from(vec.into_iter().map(|x| x.result.unwrap_or_default()).collect::<Vec<_>>())
 				.to_string()
 		}
 		// Yes prettify the SurrealQL response
 		(false, true) => vec
 			.into_iter()
 			.enumerate()
-			.map(|(index, (stats, value))| {
+			.map(|(index, query_result)| {
 				let query_num = index + 1;
-				let execution_time = stats.execution_time.unwrap_or_default();
+				// TODO: STU: unwrap_or_default() is probably not right.
+				let value = query_result.result.unwrap_or_default();
+				let execution_time = query_result.stats.execution_duration;
 				format!("-- Query {query_num} (execution time: {execution_time:?})\n{value:#}",)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),
 		// Don't pretty print the JSON response
 		(true, false) => {
-			let value =
-				CoreValue::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>());
+			let value = Value::from(
+				vec.into_iter()
+					.into_iter()
+					.map(|v| v.result.unwrap_or_default())
+					.collect::<Vec<_>>(),
+			);
 			serde_json::to_string(&value.into_json()).unwrap()
 		}
 		// Yes prettify the JSON response
 		(true, true) => vec
 			.into_iter()
 			.enumerate()
-			.map(|(index, (stats, value))| {
+			.map(|(index, query_result)| {
 				let mut buf = Vec::new();
 				let mut serializer = serde_json::Serializer::with_formatter(
 					&mut buf,
 					PrettyFormatter::with_indent(b"\t"),
 				);
-				value.into_inner().into_json().serialize(&mut serializer).unwrap();
+				// TODO: STU: unwrap_or_default() is probably not right.
+				let value = query_result.result.unwrap_or_default();
+				value.into_json().serialize(&mut serializer).unwrap();
 				let output = String::from_utf8(buf).unwrap();
 				let query_num = index + 1;
-				let execution_time = stats.execution_time.unwrap_or_default();
+				let execution_time = query_result.stats.execution_duration;
 				format!("-- Query {query_num} (execution time: {execution_time:?}\n{output:#}",)
 			})
 			.collect::<Vec<String>>()

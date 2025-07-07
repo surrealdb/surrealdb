@@ -2,6 +2,7 @@ use crate::expr::{Object, Uuid, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};
+use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -22,6 +23,33 @@ impl Display for Action {
 			Action::Update => write!(f, "UPDATE"),
 			Action::Delete => write!(f, "DELETE"),
 			Action::Killed => write!(f, "KILLED"),
+		}
+	}
+}
+
+impl TryFrom<rpc_proto::Action> for Action {
+	type Error = anyhow::Error;
+
+	fn try_from(value: rpc_proto::Action) -> Result<Self, Self::Error> {
+		match value {
+			rpc_proto::Action::Create => Ok(Action::Create),
+			rpc_proto::Action::Update => Ok(Action::Update),
+			rpc_proto::Action::Delete => Ok(Action::Delete),
+			rpc_proto::Action::Killed => Ok(Action::Killed),
+			unexpected => Err(anyhow::anyhow!("Unknown Action type: {unexpected:?}")),
+		}
+	}
+}
+
+impl TryFrom<Action> for rpc_proto::Action {
+	type Error = anyhow::Error;
+
+	fn try_from(value: Action) -> Result<Self, Self::Error> {
+		match value {
+			Action::Create => Ok(rpc_proto::Action::Create),
+			Action::Update => Ok(rpc_proto::Action::Update),
+			Action::Delete => Ok(rpc_proto::Action::Delete),
+			Action::Killed => Ok(rpc_proto::Action::Killed),
 		}
 	}
 }
@@ -62,5 +90,21 @@ impl Notification {
 			record,
 			result,
 		}
+	}
+}
+
+impl TryFrom<rpc_proto::LiveResponse> for Notification {
+	type Error = anyhow::Error;
+
+	fn try_from(value: rpc_proto::LiveResponse) -> Result<Self, Self::Error> {
+		todo!()
+	}
+}
+
+impl TryFrom<Notification> for rpc_proto::LiveResponse {
+	type Error = anyhow::Error;
+
+	fn try_from(value: Notification) -> Result<Self, Self::Error> {
+		todo!()
 	}
 }

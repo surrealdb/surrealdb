@@ -1,58 +1,69 @@
-use crate::dbs;
-use crate::dbs::Notification;
+use std::borrow::Cow;
+
+use crate::dbs::{self, ResponseData};
+use crate::dbs::{Failure, Notification};
 use crate::expr;
 use crate::expr::Value;
+use crate::protocol::ToFlatbuffers;
 use revision::revisioned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::error::Error;
+use std::fmt;
+use uuid::Uuid;
 
-/// The data returned by the database
-// The variants here should be in exactly the same order as `crate::engine::remote::ws::Data`
-// In future, they will possibly be merged to avoid having to keep them in sync.
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize)]
-#[non_exhaustive]
-pub enum Data {
-	/// Generally methods return a `expr::Value`
-	Other(Value),
-	/// The query methods, `query` and `query_with` return a `Vec` of responses
-	Query(Vec<dbs::Response>),
-	/// Live queries return a notification
-	Live(Notification),
-	// Add new variants here
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Response {
+	pub id: Option<String>,
+	pub data: ResponseData,
 }
 
-impl From<Value> for Data {
-	fn from(v: Value) -> Self {
-		Data::Other(v)
+impl Response {
+	pub fn success(id: Option<String>, data: impl Into<ResponseData>) -> Self {
+		Self {
+			id,
+			data: data.into(),
+		}
+	}
+
+	pub fn failure(id: Option<String>, err: Failure) -> Self {
+		Self {
+			id,
+			data: ResponseData::Results(vec![dbs::QueryResult {
+				stats: dbs::QueryStats::default(),
+				values: Err(err),
+			}]),
+		}
+	}
+
+	pub fn collect_errors(&self) -> Option<anyhow::Error> {
+		if let ResponseData::Results(results) = &self.data {
+			let mut errors = Vec::new();
+			for result in results {
+				if let Err(err) = &result.values {
+					errors.push(err.clone());
+				}
+			}
+			if !errors.is_empty() {
+				return Some(anyhow::anyhow!("Errors occurred: {:?}", errors));
+			}
+		}
+		None
 	}
 }
 
-impl From<String> for Data {
-	fn from(v: String) -> Self {
-		Data::Other(Value::from(v))
-	}
+pub trait IntoRpcResponse {
+	fn into_response(self, id: Option<String>) -> Response;
 }
 
-impl From<Notification> for Data {
-	fn from(n: Notification) -> Self {
-		Data::Live(n)
-	}
-}
-
-impl From<Vec<dbs::Response>> for Data {
-	fn from(v: Vec<dbs::Response>) -> Self {
-		Data::Query(v)
-	}
-}
-
-impl TryFrom<Data> for Value {
-	type Error = anyhow::Error;
-
-	fn try_from(val: Data) -> Result<Self, Self::Error> {
-		match val {
-			Data::Query(v) => expr::to_value(v),
-			Data::Live(v) => expr::to_value(v),
-			Data::Other(v) => Ok(v),
+impl<T, E> IntoRpcResponse for Result<T, E>
+where
+	T: Into<ResponseData>,
+	E: Into<Failure>,
+{
+	fn into_response(self, id: Option<String>) -> Response {
+		match self {
+			Ok(v) => Response::success(id, v.into()),
+			Err(err) => Response::failure(id, err.into()),
 		}
 	}
 }

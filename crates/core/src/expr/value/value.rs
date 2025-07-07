@@ -16,7 +16,7 @@ use crate::expr::{
 	id::{Gen, Id},
 	model::Model,
 };
-use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind, from_value, to_value};
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -25,8 +25,8 @@ use geo::Point;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as Json;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -35,10 +35,194 @@ use std::ops::{Bound, Deref};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
+pub trait TryFromValue: Sized {
+	/// Try to convert a Value into this type
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self>;
+}
+
+impl<T> TryFromValue for Option<T>
+where
+	T: TryFromValue,
+{
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::None | Value::Null => Ok(None),
+			v => T::try_from_value(v).map(Some),
+		}
+	}
+}
+
+impl TryFromValue for Value {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		Ok(value)
+	}
+}
+
+impl TryFromValue for semver::Version {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Strand(s) => Ok(semver::Version::parse(&s.0)?),
+			_ => Err(Error::UnexpectedType {
+				expected: "version",
+				actual: value.kindof(),
+			}
+			.into()),
+		}
+	}
+}
+
+impl TryFromValue for String {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Strand(s) => Ok(s.0),
+			Value::Uuid(u) => Ok(u.to_raw()),
+			Value::Datetime(d) => Ok(d.to_raw()),
+			v => Err(Error::UnexpectedType {
+				expected: "string",
+				actual: v.kindof(),
+			}
+			.into()),
+		}
+	}
+}
+
+impl TryFromValue for uuid::Uuid {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Uuid(u) => Ok(u.0),
+			unexpected => Err(Error::UnexpectedType {
+				expected: "uuid",
+				actual: unexpected.kindof(),
+			}
+			.into()),
+		}
+	}
+}
+
+macro_rules! impl_try_from_value_for_int {
+	($t:ty) => {
+		impl TryFromValue for $t {
+			#[inline]
+			fn try_from_value(value: Value) -> Result<Self> {
+				match value {
+					Value::Number(Number::Int(v)) => Ok(v as Self),
+					Value::Number(Number::Float(v)) => Ok(v as Self),
+					Value::Number(Number::Decimal(v)) => Ok(v.to_i64().unwrap() as Self),
+					v => Err(Error::UnexpectedType {
+						expected: stringify!($t),
+						actual: v.kindof(),
+					}.into()),
+				}
+			}
+		}
+	};
+	($($t:ty),+ $(,)?) => {
+		$(impl_try_from_value_for_int!($t);)+
+	};
+}
+
+macro_rules! impl_try_from_value_for_float {
+	($t:ty) => {
+		impl TryFromValue for $t {
+			#[inline]
+			fn try_from_value(value: Value) -> Result<Self> {
+				match value {
+					Value::Number(Number::Float(v)) => Ok(v as Self),
+					Value::Number(Number::Int(v)) => Ok(v as Self),
+					Value::Number(Number::Decimal(v)) => Ok(v.to_f64().unwrap() as Self),
+					v => Err(Error::UnexpectedType {
+						expected: stringify!($t),
+						actual: v.kindof(),
+					}.into()),
+				}
+			}
+		}
+	};
+	($($t:ty),+ $(,)?) => {
+		$(impl_try_from_value_for_float!($t);)+
+	};
+}
+
+impl TryFromValue for bool {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Bool(b) => Ok(b),
+			v => Err(Error::UnexpectedType {
+				expected: "bool",
+				actual: v.kindof(),
+			}
+			.into()),
+		}
+	}
+}
+
+impl_try_from_value_for_int!(i8, i16, i32, i64, isize);
+impl_try_from_value_for_int!(u8, u16, u32, u64, usize);
+impl_try_from_value_for_float!(f32, f64);
+
+impl TryFromValue for () {
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::None | Value::Null => Ok(()),
+			v => Err(Error::UnexpectedType {
+				expected: "unit",
+				actual: v.kindof(),
+			}
+			.into()),
+		}
+	}
+}
+
+impl<T> TryFromValue for Vec<T>
+where
+	T: TryFromValue,
+{
+	#[inline]
+	fn try_from_value(value: Value) -> Result<Self> {
+		match value {
+			Value::Array(arr) => arr.into_iter().map(T::try_from_value).collect::<Result<Vec<_>>>(),
+			Value::None | Value::Null => Ok(Vec::new()),
+			v => Ok(vec![T::try_from_value(v)?]),
+		}
+	}
+}
+
+pub trait TryFromValueContent: Sized {
+	fn try_from_value_content(value: Value) -> Result<Self>;
+}
+
+impl<T> TryFromValueContent for T
+where
+	T: DeserializeOwned,
+{
+	fn try_from_value_content(value: Value) -> Result<Self> {
+		from_value(value)
+	}
+}
+
+// impl<T> TryFromValueContent for T
+// where
+// 	T: DeserializeOwned,
+// 	{
+// 	fn try_from_value(value: Value) -> Result<Self> {
+// 		let content = value.into_content()?;
+// 		let deserializer = Deserializer::new(content).coerce_numbers();
+// 		T::deserialize(deserializer).map_err(Into::into)
+
+// 	}
+// }
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Values(pub Vec<Value>);
 
 impl<V> From<V> for Values
@@ -118,6 +302,8 @@ pub enum Value {
 	Geometry(Geometry),
 	Bytes(Bytes),
 	Thing(Thing),
+	File(File),
+
 	// These Value types are un-computed values
 	// and are not used in query responses sent
 	// to the client. These types need to be
@@ -146,7 +332,6 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	Refs(Refs),
-	File(File),
 	// Add new variants here
 }
 
@@ -181,6 +366,10 @@ impl Value {
 	/// Create an empty Object Value
 	pub fn base() -> Self {
 		Value::Object(Object::default())
+	}
+
+	pub fn uuid(uuid: uuid::Uuid) -> Self {
+		Value::Uuid(Uuid(uuid))
 	}
 
 	// -----------------------------------
@@ -436,6 +625,13 @@ impl Value {
 		}
 	}
 
+	pub fn into_vec(self) -> Vec<Value> {
+		match self {
+			Value::Array(v) => v.0,
+			_ => vec![self],
+		}
+	}
+
 	/// Try to convert this Value into a set of JSONPatch operations
 	pub fn to_operations(&self) -> Result<Vec<Operation>> {
 		match self {
@@ -458,8 +654,8 @@ impl Value {
 	///
 	/// This converts certain types like `Thing` into their simpler formats
 	/// instead of the format used internally by SurrealDB.
-	pub fn into_json(self) -> Json {
-		self.into()
+	pub fn into_json(self) -> serde_json::Value {
+		serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
 	}
 
 	// -----------------------------------

@@ -1,14 +1,14 @@
+use crate::dbs::ResponseData;
 #[cfg(not(target_family = "wasm"))]
 use crate::gql::SchemaCache;
+use crate::rpc::request::Command;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-use super::Data;
 use super::Method;
 use super::RpcError;
-use super::RpcProtocolV1;
-use super::RpcProtocolV2;
+use super::RpcProtocolV3;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::sql::Array;
@@ -24,7 +24,7 @@ pub trait RpcContext {
 	/// Mutable access to the current session for this RPC context
 	fn set_session(&self, session: Arc<Session>);
 	/// The version information for this RPC context
-	fn version_data(&self) -> Data;
+	fn version_data(&self) -> ResponseData;
 
 	// ------------------------------
 	// Realtime
@@ -65,21 +65,15 @@ pub trait RpcContext {
 	// ------------------------------
 
 	/// Executes a method on this RPC implementation
-	async fn execute(
-		&self,
-		version: Option<u8>,
-		txn: Option<Uuid>,
-		method: Method,
-		params: Array,
-	) -> Result<Data, RpcError>
+	async fn execute(&self, command: Command) -> Result<ResponseData, RpcError>
 	where
-		Self: RpcProtocolV1,
-		Self: RpcProtocolV2,
+		Self: RpcProtocolV3,
 	{
-		match version {
-			Some(1) => RpcProtocolV1::execute(self, method, params).await,
-			Some(2) => RpcProtocolV2::execute(self, txn, method, params).await,
-			_ => RpcProtocolV1::execute(self, method, params).await,
-		}
+		RpcProtocolV3::execute(self, command).await
+		// match version {
+		// 	Some(3) => RpcProtocolV3::execute(self, command).await,
+		// 	// Some(1) => RpcProtocolV1::execute(self, method, params).await,
+		// 	_ => return Err(RpcError::Thrown(format!("Unsupported RPC version: {version:?}"))),
+		// }
 	}
 }

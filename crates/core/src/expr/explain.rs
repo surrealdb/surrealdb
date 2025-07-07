@@ -17,3 +17,9 @@ impl fmt::Display for Explain {
 		Ok(())
 	}
 }
+
+impl From<bool> for Explain {
+	fn from(b: bool) -> Self {
+		Explain(b)
+	}
+}

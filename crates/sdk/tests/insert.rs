@@ -24,7 +24,7 @@ async fn insert_statement_object_single() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val =
 		SqlValue::parse("[{ id: `test-table`:tester, test: true, something: 'other' }]").into();
 	assert_eq!(tmp, val);
@@ -53,7 +53,7 @@ async fn insert_statement_object_multiple() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{ id: test:1, test: true, something: 'other' },
@@ -76,7 +76,7 @@ async fn insert_statement_values_single() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: test:tester, test: true, something: 'other' }]").into();
 	assert_eq!(tmp, val);
 	//
@@ -93,7 +93,7 @@ async fn insert_statement_values_multiple() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{ id: test:1, test: true, something: 'other' },
@@ -116,7 +116,7 @@ async fn insert_statement_values_retable_id() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{ id: test:1, test: true, something: 'other' },
@@ -140,11 +140,11 @@ async fn insert_statement_on_duplicate_key() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: test:tester, test: true, something: 'other' }]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: test:tester, test: true, something: 'else' }]").into();
 	assert_eq!(tmp, val);
 	//
@@ -227,7 +227,7 @@ async fn insert_statement_output() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ something: 'other' }]").into();
 	assert_eq!(tmp, val);
 	//
@@ -247,18 +247,18 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
 	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-10"));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
 	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-11"));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
 	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-12"));
 	//
@@ -709,11 +709,11 @@ async fn insert_relation() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[{ id: person:1 }, { id: person:2 }, { id: person:3 }]").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"
 		[
@@ -728,7 +728,7 @@ async fn insert_relation() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"
 		[
@@ -748,7 +748,7 @@ async fn insert_relation() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"
 		[
@@ -763,7 +763,7 @@ async fn insert_relation() -> Result<()> {
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"
 		[

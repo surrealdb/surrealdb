@@ -5,7 +5,7 @@ use crate::cli::abstraction::{
 use anyhow::{Result, bail};
 use clap::Args;
 use futures_util::StreamExt;
-use surrealdb::engine::any::{self, connect};
+use surrealdb::Surreal;
 use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Args, Debug)]
@@ -57,10 +57,11 @@ pub async fn init(
 		},
 	}: ExportCommandArguments,
 ) -> Result<()> {
-	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
+	let client = Surreal::connect(endpoint, 1024).await?;
+	let is_local = client.is_local();
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
-	let client = if username.is_some() && password.is_some() && !is_local {
+	if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
 			.with_username(username.as_deref())
@@ -68,24 +69,16 @@ pub async fn init(
 			.with_namespace(namespace.as_str())
 			.with_database(database.as_str());
 
-		let client = connect(endpoint).await?;
-
 		debug!("Signing in to the database engine at '{:?}' level", auth_level);
 		match auth_level {
 			CredentialsLevel::Root => client.signin(creds.root()?).await?,
 			CredentialsLevel::Namespace => client.signin(creds.namespace()?).await?,
 			CredentialsLevel::Database => client.signin(creds.database()?).await?,
 		};
-
-		client
 	} else if token.is_some() && !is_local {
-		let client = connect(endpoint).await?;
 		client.authenticate(token.unwrap()).await?;
-
-		client
 	} else {
 		debug!("Connecting to the database engine without authentication");
-		connect(endpoint).await?
 	};
 
 	// Parse model version

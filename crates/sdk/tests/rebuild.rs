@@ -31,11 +31,11 @@ async fn rebuild_index_statement() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 14);
 	for i in 0..3 {
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap_or_else(|_| panic!("{i}"));
 	}
 	// Check infos output
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 				events: {},
@@ -49,11 +49,11 @@ async fn rebuild_index_statement() -> Result<()> {
 	);
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	for _ in 0..8 {
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 	}
 	// Check infos output
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"{
 				events: {},
@@ -69,7 +69,7 @@ async fn rebuild_index_statement() -> Result<()> {
 	);
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	// Check record is found
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{

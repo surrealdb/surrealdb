@@ -227,8 +227,6 @@ pub fn synchronous(
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
-		"encoding::cbor::decode" => encoding::cbor::decode,
-		"encoding::cbor::encode" => encoding::cbor::encode,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
@@ -1646,7 +1644,7 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::expr::Value;
+				use crate::{dbs::Variables, expr::Value};
 
 				let name = name.replace("::", ".");
 				let sql =
@@ -1656,8 +1654,8 @@ mod tests {
 					.unwrap()
 					.with_capabilities(Capabilities::all());
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
-				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
-				let tmp = res.remove(0).result.unwrap();
+				let res = &mut dbs.execute(&sql, &ses, Variables::default()).await.unwrap();
+				let tmp = res.remove(0).values.unwrap();
 				if tmp == Value::from("object") {
 					// Assume this function is superseded by a module of the same name.
 				} else if tmp != Value::from("function") {

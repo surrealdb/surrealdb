@@ -2,7 +2,7 @@ use crate::cli::abstraction::OptionalDatabaseConnectionArguments;
 use crate::env::RELEASE;
 use anyhow::Result;
 use clap::Args;
-use surrealdb::engine::any::connect;
+use surrealdb::Surreal;
 
 #[derive(Args, Debug)]
 pub struct VersionCommandArguments {
@@ -31,7 +31,7 @@ pub async fn init(
 
 async fn get_server_version_string(endpoint: String) -> Result<String> {
 	// Connect to the database engine
-	let client = connect(endpoint).await?;
+	let client = Surreal::connect(endpoint, 1024).await?;
 	// Query database version info
 	let server_version = client.version().await?;
 	// Convert version info to formatted string

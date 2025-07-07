@@ -462,7 +462,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	// validate create response
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let expected_record = SqlValue::parse(
 		"[
 			{
@@ -478,7 +478,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 	let res =
 		&mut dbs.execute("LIVE SELECT * FROM person WHERE condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	let live_id = res.remove(0).result?;
+	let live_id = res.remove(0).values?;
 	let live_id = match live_id {
 		Value::Uuid(id) => id,
 		_ => panic!("expected uuid"),
@@ -487,7 +487,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 	// Validate delete response
 	let res = &mut dbs.execute("DELETE person:test_true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 
