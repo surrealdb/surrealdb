@@ -276,7 +276,6 @@ jobs:
       rust-version: ${{ inputs.rust-version }}
       onnx-version: ${{ inputs.onnx-version }}
       extra-features: ${{ inputs.extra-features }}
-      publish: ${{ inputs.publish }}
       upload: true
     secrets: inherit
 
