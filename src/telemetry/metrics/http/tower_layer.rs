@@ -261,6 +261,9 @@ pub fn on_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsE
 	// Record the duration of the request.
 	super::record_request_duration(tracker);
 
+	// Increment the request counter
+	super::record_request_count(tracker);
+
 	// Record the request size if known
 	if let Some(size) = tracker.request_size {
 		super::record_request_size(tracker, size)

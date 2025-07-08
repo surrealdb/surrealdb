@@ -12,10 +12,14 @@ pub(super) static TIKV_KEYSPACE: LazyLock<Option<String>> =
 pub(super) static TIKV_REQUEST_TIMEOUT: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_TIKV_REQUEST_TIMEOUT", u64, 10);
 
-/// Whether to use asynchronous transactioncommit
+/// Whether to use asynchronous transaction commit
 pub(super) static TIKV_ASYNC_COMMIT: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_TIKV_ASYNC_COMMIT", bool, true);
 
 /// Whether to use one-phase transaction commit
 pub(super) static TIKV_ONE_PHASE_COMMIT: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_TIKV_ONE_PHASE_COMMIT", bool, true);
+
+/// Limits the maximum size of a decoded message - default value to 4MB
+pub(super) static TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE", usize, 4 * 1024 * 1024);
