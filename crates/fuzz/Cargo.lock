@@ -3136,6 +3136,7 @@ dependencies = [
  "hex",
  "http",
  "ipnet",
+ "joaat",
  "jsonwebtoken",
  "lexicmp",
  "linfa-linalg",
