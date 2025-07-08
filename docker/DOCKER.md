@@ -102,6 +102,13 @@ You can find a comprehensive list of all the available environment variables in 
 docker run --rm surrealdb/surrealdb:latest start --help
 ```
 
+The image contains timezone data. Specify the required timezone with the `TZ`
+environment variable:
+
+```bash
+docker run -e TZ=Europe/London surrealdb/surrealdb:latest start
+```
+
 SurrealDB can be executed as a non-root user for added security. This ensures that exploiting certain vulnerabilities in the SurrealDB process does not immediately result in privileged access to the container. When doing this, ensure that any files required by SurrealDB are mounted to the container in a volume and that are accessible to that non-root user through their ownership and permissions.
 
 Here is an example of running the container with a persistent volume as a non-root user with Docker Compose:

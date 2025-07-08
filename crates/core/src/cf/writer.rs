@@ -176,7 +176,7 @@ mod tests {
 
 		// Let the db remember the timestamp for the current versionstamp
 		// so that we can replay change feeds from the timestamp later.
-		ds.changefeed_process_at(ts.0.timestamp().try_into().unwrap()).await.unwrap();
+		ds.changefeed_process_at(None, ts.0.timestamp().try_into().unwrap()).await.unwrap();
 
 		//
 		// Write things to the table.
@@ -336,7 +336,7 @@ mod tests {
 		assert_eq!(r, want);
 
 		// Now we should see the gc_all results
-		ds.changefeed_process_at((ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
+		ds.changefeed_process_at(None, (ts.0.timestamp() + 5).try_into().unwrap()).await.unwrap();
 
 		let tx7 = ds.transaction(Write, Optimistic).await.unwrap();
 		let r = crate::cf::read(&tx7, NS, DB, Some(TB), ShowSince::Timestamp(ts), Some(10))
@@ -350,13 +350,13 @@ mod tests {
 	async fn scan_picks_up_from_offset() {
 		// Given we have 2 entries in change feeds
 		let ds = init(false).await;
-		ds.changefeed_process_at(5).await.unwrap();
+		ds.changefeed_process_at(None, 5).await.unwrap();
 		let _id1 = record_change_feed_entry(
 			ds.transaction(Write, Optimistic).await.unwrap(),
 			"First".to_string(),
 		)
 		.await;
-		ds.changefeed_process_at(10).await.unwrap();
+		ds.changefeed_process_at(None, 10).await.unwrap();
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let vs1 = tx.get_versionstamp_from_timestamp(5, NS, DB).await.unwrap().unwrap();
 		let vs2 = tx.get_versionstamp_from_timestamp(10, NS, DB).await.unwrap().unwrap();

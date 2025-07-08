@@ -11,6 +11,6 @@ value = "NONE"
 value = "1"
 
 */
-$a = 1;
+let $a = 1;
 DEFINE PARAM $a VALUE 2;
 $a
