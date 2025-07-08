@@ -1,10 +1,8 @@
 use crate::Surreal;
 
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 
-use std::borrow::Cow;
 use std::future::IntoFuture;
 use surrealdb_core::expr::Value;
 use surrealdb_protocol::proto::rpc::v1::{SetRequest, SetResponse};

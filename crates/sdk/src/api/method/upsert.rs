@@ -1,22 +1,18 @@
 use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::opt::PatchOp;
-use crate::opt::PatchOps;
 
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 
-use crate::opt::KeyRange;
 use anyhow::Context;
 use futures::StreamExt;
-use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
 use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::expr::{Value, to_value as to_core_value};
+use surrealdb_core::expr::Value;
 use surrealdb_core::sql::statements::UpsertStatement;
 use surrealdb_protocol::QueryResponseValueStream;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;

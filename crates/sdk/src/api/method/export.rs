@@ -1,27 +1,18 @@
 use crate::Surreal;
-use crate::api::Error;
-use crate::api::ExtraFeatures;
 use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::conn::MlExportConfig;
 use crate::api::method::BoxFuture;
 use crate::method::ExportConfig as Config;
-use crate::method::Model;
 
 use async_channel::Receiver;
 use futures::Stream;
 use futures::StreamExt;
-use semver::Version;
-use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
 use surrealdb_protocol::proto::rpc::v1::{ExportSqlRequest, export_sql_request};
-use surrealdb_protocol::proto::v1::NullValue;
 use tokio::io::AsyncWriteExt;
 
 /// A database export future
@@ -119,7 +110,7 @@ impl<T> IntoFuture for Export<PathBuf, T> {
 	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-	fn into_future(mut self) -> Self::IntoFuture {
+	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut client = self.client.client.clone();
 

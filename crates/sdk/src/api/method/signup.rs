@@ -1,12 +1,9 @@
 use crate::Surreal;
 
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 
 use crate::opt::auth::Jwt;
-use anyhow::Context;
-use std::borrow::Cow;
 use std::future::IntoFuture;
 use surrealdb_protocol::proto::rpc::v1::SignupRequest;
 

@@ -1,19 +1,15 @@
 use crate::{Result, error::Api as ApiError};
 use anyhow::anyhow;
-use chrono::{DateTime, Utc};
 use revision::revisioned;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use std::{
 	cmp::{Ordering, PartialEq, PartialOrd},
 	fmt,
-	ops::{Deref, Index},
-	str::FromStr,
+	ops::Deref,
 };
 use surrealdb_core::{
 	dbs::Action,
-	expr::{Array, Datetime, Id, Number, Object, Thing as RecordId, TryFromValue, Value},
-	sql::SqlValue,
-	syn,
+	expr::{Array, Id, Number, Object, TryFromValue, Value},
 };
 use uuid::Uuid;
 

@@ -1,4 +1,3 @@
-use crate::api::QueryResults;
 use serde::Serialize;
 use std::io;
 use std::path::PathBuf;

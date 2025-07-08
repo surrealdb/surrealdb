@@ -3,16 +3,14 @@ use crate::Surreal;
 use crate::opt::CreatableResource;
 
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use anyhow::anyhow;
 use futures::StreamExt;
-use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{Data, TryFromValue};
-use surrealdb_core::expr::{Value, to_value as to_core_value};
+use surrealdb_core::expr::Value;
 use surrealdb_core::sql::statements::CreateStatement;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;

@@ -4,9 +4,8 @@ use crate::{
 };
 use std::ops::{self, Bound};
 use surrealdb_core::expr::{
-	Array, Edges, Id, IdRange, Object, Table as CoreTable, Thing as RecordId, Value, Values,
+	Edges, IdRange, Object, Table as CoreTable, Thing as RecordId, Value, Values,
 };
-use surrealdb_core::sql::Table as SqlTable;
 
 /// A wrapper type to assert that you ment to use a string as a table name.
 ///

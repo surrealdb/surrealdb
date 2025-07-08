@@ -121,14 +121,19 @@ impl SurrealDB {
 		// Log the specified server capabilities
 		debug!("Server capabilities: {capabilities}");
 		// Parse and setup the desired kv datastore
-		let dbs = Datastore::new(&uri)
-			.await?
+		let mut dbs = Datastore::new(&uri).await?;
+
+		dbs = dbs
 			.with_strict_mode(strict_mode)
 			.with_query_timeout(query_timeout)
 			.with_transaction_timeout(transaction_timeout)
 			.with_auth_enabled(!unauthenticated)
-			.with_temporary_directory(temporary_directory)
 			.with_capabilities(capabilities);
+
+		#[cfg(storage)]
+		{
+			dbs = dbs.with_temporary_directory(temporary_directory);
+		}
 
 		let ds = Arc::new(dbs);
 

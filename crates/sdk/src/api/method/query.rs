@@ -1,40 +1,19 @@
-use super::live;
 use super::transaction::WithTransaction;
 use crate::Surreal;
-use crate::api::ExtraFeatures;
 use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt;
-use crate::method::Commit;
-use crate::method::Stats;
 use crate::method::WithStats;
 use crate::opt::IntoVariables;
-use crate::value::Notification;
-use anyhow::bail;
-use anyhow::{Context as AnyhowContext, anyhow};
+use anyhow::Context as AnyhowContext;
 use futures::StreamExt;
-use futures::future::Either;
-use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
-use surrealdb_core::dbs::ResponseData;
 use surrealdb_core::dbs::Variables;
-use surrealdb_core::dbs::{self, Failure};
 use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::expr::{Object, Value, to_value as to_core_value};
-use surrealdb_core::rpc;
-use surrealdb_core::sql;
-use surrealdb_core::sql::Statement;
 use surrealdb_protocol::proto::rpc::v1::QueryError as QueryErrorProto;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use surrealdb_protocol::proto::rpc::v1::QueryResponse;
@@ -123,7 +102,7 @@ impl IntoFuture for Query
 					query_results.results.insert(query_index, QueryResult::default());
 				}
 
-				let mut query_result = query_results.results.get_mut(&query_index).unwrap();
+				let query_result = query_results.results.get_mut(&query_index).unwrap();
 
 				if let Some(stats) = stats {
 					query_result.stats = stats.try_into()?;

@@ -3,10 +3,8 @@ use surrealdb_protocol::proto::rpc::v1::{UnsetRequest, UnsetResponse};
 use crate::Surreal;
 
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 
-use std::borrow::Cow;
 use std::future::IntoFuture;
 
 /// An unset future

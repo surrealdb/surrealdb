@@ -3,28 +3,16 @@
 use crate::Result;
 use anyhow::Context;
 use anyhow::ensure;
-use method::BoxFuture;
 use semver::BuildMetadata;
 use semver::Version;
 use semver::VersionReq;
 use std::fmt;
 use std::fmt::Debug;
-use std::future::IntoFuture;
-use std::marker::PhantomData;
-use std::sync::Arc;
-use std::sync::OnceLock;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 use tokio::sync::watch;
 
 use anyhow::bail;
-use hyper_util::rt::TokioIo;
 use std::collections::HashSet;
-use tokio_util::bytes::Bytes;
-use tonic::body::BoxBody;
-use tonic::client::GrpcService;
-use tonic::codegen::{Body, StdError};
-use tonic::transport::Uri;
-use tower::service_fn;
 
 // impl<T> Connection for T
 // where
@@ -323,7 +311,7 @@ impl Surreal {
 	) -> Result<Self> {
 		let endpoint = endpoint.try_into().context("Failed to parse endpoint")?;
 		let config = endpoint.config.clone();
-		let mut features: HashSet<ExtraFeatures> = HashSet::new();
+		let features: HashSet<ExtraFeatures> = HashSet::new();
 
 		let endpoint_kind = endpoint.url.scheme().parse::<EndpointKind>()?;
 		match endpoint_kind {

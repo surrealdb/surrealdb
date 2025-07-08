@@ -3,12 +3,8 @@ use crate::api::Surreal;
 use crate::api::method::BoxFuture;
 use crate::api::method::Cancel;
 use crate::api::method::Commit;
-use crate::method::Query;
-use crate::opt;
-use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::ops::Deref;
-use surrealdb_core::dbs::Variables;
 use surrealdb_core::sql::statements::BeginStatement;
 
 /// A beginning of a transaction

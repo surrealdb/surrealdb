@@ -1,16 +1,8 @@
-use super::Raw;
-use crate::{
-	api::{QueryResults, Result, err::Error},
-	method,
-};
-use anyhow::{Context, bail};
-use futures::future::Either;
-use futures::stream::select_all;
-use std::borrow::Cow;
-use std::mem;
+use crate::api::{QueryResults, Result};
+use anyhow::bail;
 use surrealdb_core::expr::statements::*;
 use surrealdb_core::{
-	dbs::{QueryStats, Variables},
+	dbs::Variables,
 	expr::{TryFromValue, Value},
 };
 use surrealdb_protocol::proto::rpc::v1::QueryStats as QueryStatsProto;

@@ -1,22 +1,14 @@
 use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::api::method::live::Subscribe;
-use crate::opt::RangeableResource;
 
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
-use crate::method::Live;
-use crate::opt::KeyRange;
-use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::expr::Value;
 use surrealdb_core::sql::statements::SelectStatement;
-use surrealdb_protocol::QueryResponseValueStream;
 use surrealdb_protocol::TryFromQueryStream;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;

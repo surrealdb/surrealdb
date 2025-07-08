@@ -2,7 +2,6 @@ use surrealdb_protocol::proto::rpc::v1::AuthenticateRequest;
 
 use crate::Surreal;
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::auth::Jwt;
 use std::future::IntoFuture;

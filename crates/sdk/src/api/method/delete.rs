@@ -1,21 +1,15 @@
 use super::transaction::WithTransaction;
 use crate::Surreal;
-use crate::opt::RangeableResource;
 
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 
-use crate::opt::KeyRange;
 use anyhow::Context;
 use futures::StreamExt;
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
-use surrealdb_core::sql::SqlValues;
 use surrealdb_core::sql::statements::DeleteStatement;
 use surrealdb_protocol::QueryResponseValueStream;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;

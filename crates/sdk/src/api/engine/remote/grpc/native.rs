@@ -1,44 +1,17 @@
-use crate::api::ExtraFeatures;
 use crate::api::Result;
-use crate::api::Surreal;
-use crate::api::conn::{self, Command, Request};
-use crate::api::engine::remote::grpc::PING_INTERVAL;
-use crate::api::engine::remote::{deserialize_flatbuffers, serialize_flatbuffers};
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
-use crate::engine::IntervalStream;
-use crate::opt::WaitFor;
-use async_channel::Receiver;
-use futures::SinkExt;
-use futures::StreamExt;
 use futures::stream::{SplitSink, SplitStream};
-use prost::Message as _;
-use revision::revisioned;
-use serde::Deserialize;
-use std::collections::HashSet;
-use std::collections::hash_map::Entry;
-use std::sync::atomic::AtomicI64;
-use surrealdb_core::dbs::ResponseData;
-use surrealdb_core::expr::Value;
-use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
-use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 use tokio::net::TcpStream;
-use tokio::sync::watch;
-use tokio::time;
-use tokio::time::MissedTickBehavior;
 use tokio_tungstenite::Connector;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::error::Error as WsError;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use trice::Instant;
 
 pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
 pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB

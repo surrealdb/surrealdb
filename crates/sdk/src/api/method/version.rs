@@ -1,11 +1,9 @@
-use anyhow::Context;
 use surrealdb_protocol::proto::rpc::v1::VersionRequest;
 
 use crate::Surreal;
 
 use crate::api::Result;
 use crate::api::method::BoxFuture;
-use surrealdb_core::expr::{TryFromValue, Value};
 
 use std::future::IntoFuture;
 

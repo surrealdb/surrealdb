@@ -1,38 +1,22 @@
 use crate::Surreal;
-use crate::api::ExtraFeatures;
 use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::method::Live;
-use crate::method::Query;
-use crate::method::Select;
 use crate::opt::Resource;
-use crate::opt::SubscribableResource;
 use crate::value::Notification;
-use async_channel::Receiver;
 use futures::Stream;
 use futures::StreamExt;
-use serde::de::DeserializeOwned;
 use std::error::Error as StdError;
 use std::fmt::Debug;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
 use surrealdb_core::dbs::{Action, Notification as CoreNotification};
 use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::expr::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, Table, Thing, Value,
-};
 use surrealdb_core::sql::statements::LiveStatement;
 use surrealdb_protocol::proto::rpc::v1::SubscribeRequest;
 use surrealdb_protocol::proto::v1::Value as ValueProto;
 use uuid::Uuid;
 
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
 
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
@@ -82,7 +66,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		let Subscribe {
 			client,
-			txn,
+			
 			resource,
 			..
 		} = self;

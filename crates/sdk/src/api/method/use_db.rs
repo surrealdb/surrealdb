@@ -3,11 +3,8 @@ use surrealdb_protocol::proto::rpc::v1::{UseRequest, UseResponse};
 use crate::Surreal;
 
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 
-use crate::opt::WaitFor;
-use std::borrow::Cow;
 use std::future::IntoFuture;
 
 #[derive(Debug)]

@@ -3,11 +3,9 @@ use surrealdb_protocol::proto::rpc::v1::UseRequest;
 use crate::Surreal;
 
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::method::UseDb;
 
-use std::borrow::Cow;
 use std::future::IntoFuture;
 
 /// Stores the namespace to use
@@ -35,7 +33,7 @@ impl IntoFuture for UseNs {
 	type Output = Result<()>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-	fn into_future(mut self) -> Self::IntoFuture {
+	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut client = self.client.client.clone();
 			let client = &mut client;

@@ -1,14 +1,10 @@
 use crate::Surreal;
 use crate::opt::InsertableResource;
-use crate::opt::Resource;
 
 use crate::api::Result;
-use crate::api::conn::Command;
 
 use anyhow::Context;
 use futures::StreamExt;
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;

@@ -1,11 +1,9 @@
 use super::MlExportConfig;
-use crate::{Result, opt::Resource};
+use crate::Result;
 use async_channel::Sender;
 use bincode::Options;
 use revision::Revisioned;
-use semver::Op;
 use serde::{Serialize, ser::SerializeMap as _};
-use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
 use surrealdb_core::dbs::Notification;
@@ -15,14 +13,10 @@ use surrealdb_core::expr::{Array, Object, Query, Value};
 use surrealdb_core::expr::{Data, Fields, Values};
 use surrealdb_core::iam::{SigninParams, SignupParams};
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::protocol::{FromFlatbuffers, ToFlatbuffers};
 #[allow(unused_imports)]
 use surrealdb_core::sql::{Object as SqlObject, Query as SqlQuery, SqlValue};
-use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use uuid::Uuid;
 
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::expr::Table;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Request {
