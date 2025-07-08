@@ -1,9 +1,11 @@
+mod console;
 mod logs;
 pub mod metrics;
 pub mod traces;
 
 use crate::cli::LogFormat;
 use crate::cli::validator::parser::tracing::CustomFilter;
+use crate::cnf::ENABLE_TOKIO_CONSOLE;
 use anyhow::Result;
 use opentelemetry::KeyValue;
 use opentelemetry::global;
@@ -181,7 +183,7 @@ impl Builder {
 		// Setup telemetry layer
 		let registry = registry.with(telemetry_layer);
 		// Setup file logging if enabled
-		Ok(if self.log_file_enabled {
+		let (file_layer, guards) = if self.log_file_enabled {
 			// Create the file appender based on rotation setting
 			let file_appender = {
 				// Parse the path and name
@@ -203,13 +205,39 @@ impl Builder {
 			// Create the file destination layer
 			let file_filter = self.file_filter.clone().unwrap_or_else(|| self.filter.clone());
 			let file_layer = logs::file(file_filter, file, self.log_file_format)?;
-			// Setup logging layer
-			let registry = registry.with(file_layer);
-			// Return the registry
-			(Box::new(registry), vec![stdout_guard, stderr_guard, file_guard])
+			(Some(file_layer), vec![stdout_guard, stderr_guard, file_guard])
 		} else {
-			// Return the registry
-			(Box::new(registry), vec![stdout_guard, stderr_guard])
+			(None, vec![stdout_guard, stderr_guard])
+		};
+		Ok(match (file_layer, *ENABLE_TOKIO_CONSOLE) {
+			(Some(file_layer), true) => {
+				// Setup logging layer
+				let registry = registry.with(file_layer);
+				// Create the Tokio Console destination layer
+				let console_layer = console::new()?;
+				// Setup the Tokio Console layer
+				let registry = registry.with(console_layer);
+				// Return the registry
+				(Box::new(registry), guards)
+			}
+			(Some(file_layer), false) => {
+				// Setup logging layer
+				let registry = registry.with(file_layer);
+				// Return the registry
+				(Box::new(registry), guards)
+			}
+			(None, true) => {
+				// Create the Tokio Console destination layer
+				let console_layer = console::new()?;
+				// Setup the Tokio Console layer
+				let registry = registry.with(console_layer);
+				// Return the registry
+				(Box::new(registry), guards)
+			}
+			(None, false) => {
+				// Return the registry
+				(Box::new(registry), guards)
+			}
 		})
 	}
 }
