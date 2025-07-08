@@ -30,12 +30,12 @@ pub(crate) struct Analyzer {
 
 pub(in crate::idx) type TermsList = Vec<Option<(TermId, TermLen)>>;
 
-pub(in crate::idx) struct TermsSet {
+pub(in crate::idx) struct TermIdSet {
 	set: HashSet<TermId>,
 	has_unknown_terms: bool,
 }
 
-impl TermsSet {
+impl TermIdSet {
 	/// If the query TermsSet contains terms that are unknown in the index
 	/// of if there is no terms in the set then
 	/// we are sure that it does not match any document
@@ -43,7 +43,7 @@ impl TermsSet {
 		!(self.has_unknown_terms || self.set.is_empty())
 	}
 
-	pub(in crate::idx) fn is_subset(&self, other: &TermsSet) -> bool {
+	pub(in crate::idx) fn is_subset(&self, other: &TermIdSet) -> bool {
 		if self.has_unknown_terms {
 			return false;
 		}
@@ -66,7 +66,7 @@ impl Analyzer {
 		opt: &Options,
 		t: &Terms,
 		content: String,
-	) -> Result<(TermsList, TermsSet)> {
+	) -> Result<(TermsList, TermIdSet)> {
 		let tokens = self.generate_tokens(stk, ctx, opt, FilteringStage::Querying, content).await?;
 		// We extract the term ids
 		let mut list = Vec::with_capacity(tokens.list().len());
@@ -75,7 +75,7 @@ impl Analyzer {
 		let tx = ctx.tx();
 		let mut has_unknown_terms = false;
 		for token in tokens.list() {
-			// Tokens can contains duplicated, not need to evaluate them again
+			// Tokens can contain duplicates, not need to evaluate them again
 			if unique_tokens.insert(token) {
 				// Is the term known in the index?
 				let opt_term_id = t.get_term_id(&tx, tokens.get_token_string(token)?).await?;
@@ -90,11 +90,21 @@ impl Analyzer {
 		drop(tx);
 		Ok((
 			list,
-			TermsSet {
+			TermIdSet {
 				set,
 				has_unknown_terms,
 			},
 		))
+	}
+
+	pub(super) async fn extract_query_terms(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		content: String,
+	) -> Result<Tokens> {
+		self.generate_tokens(stk, ctx, opt, FilteringStage::Querying, content).await
 	}
 
 	pub(in crate::idx) async fn extract_indexing_terms(
@@ -104,7 +114,7 @@ impl Analyzer {
 		opt: &Options,
 		t: &Terms,
 		content: Value,
-	) -> Result<TermsSet> {
+	) -> Result<TermIdSet> {
 		let mut tv = Vec::new();
 		self.analyze_value(stk, ctx, opt, content, FilteringStage::Indexing, &mut tv).await?;
 		let mut set = HashSet::new();
@@ -119,7 +129,7 @@ impl Analyzer {
 				}
 			}
 		}
-		Ok(TermsSet {
+		Ok(TermIdSet {
 			set,
 			has_unknown_terms,
 		})

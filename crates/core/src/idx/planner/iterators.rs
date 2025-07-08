@@ -4,8 +4,8 @@ use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Array, Ident, Number, Thing, Value};
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::ft::search::{HitsIterator, SearchIndex};
-use crate::idx::ft::termdocs::TermsDocs;
+use crate::idx::ft::search::termdocs::TermsDocs;
+use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
@@ -1349,7 +1349,7 @@ impl UniqueJoinThingIterator {
 pub(crate) struct SearchMatchesThingIterator {
 	irf: IteratorRef,
 	hits_left: usize,
-	hits: Option<HitsIterator>,
+	hits: Option<SearchHitsIterator>,
 }
 
 impl SearchMatchesThingIterator {

@@ -9,12 +9,12 @@ use crate::expr::{
 };
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
-use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
+use crate::idx::ft::analyzer::{Analyzer, TermIdSet, TermsList};
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::ft::scorer::BM25Scorer;
+use crate::idx::ft::search::termdocs::TermsDocs;
 use crate::idx::ft::search::{MatchRef, SearchIndex};
-use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::terms::Terms;
 use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
@@ -1270,7 +1270,7 @@ struct InnerSearchEntry {
 	index_option: IndexOption,
 	doc_ids: Arc<RwLock<BTreeDocIds>>,
 	analyzer: Analyzer,
-	query_terms_set: TermsSet,
+	query_terms_set: TermIdSet,
 	query_terms_list: TermsList,
 	terms: Arc<RwLock<Terms>>,
 	terms_docs: TermsDocs,

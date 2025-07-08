@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 pub(in crate::idx) type TermsDocs = Arc<Vec<Option<(TermId, RoaringTreemap)>>>;
 
-pub(super) struct TermDocs {
+pub(in crate::idx) struct TermDocs {
 	index_key_base: IndexKeyBase,
 }
 

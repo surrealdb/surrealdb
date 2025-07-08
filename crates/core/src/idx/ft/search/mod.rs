@@ -1,3 +1,5 @@
+pub(in crate::idx) mod termdocs;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::SearchParams;
@@ -5,13 +7,13 @@ use crate::expr::statements::DefineAnalyzerStatement;
 use crate::expr::{Idiom, Object, Scoring, Thing, Value};
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
-use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
+use crate::idx::ft::analyzer::{Analyzer, TermIdSet, TermsList};
 use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::idx::ft::offsets::Offsets;
 use crate::idx::ft::postings::Postings;
 use crate::idx::ft::scorer::BM25Scorer;
-use crate::idx::ft::termdocs::{TermDocs, TermsDocs};
+use crate::idx::ft::search::termdocs::{TermDocs, TermsDocs};
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
@@ -346,7 +348,7 @@ impl SearchIndex {
 		ctx: &Context,
 		opt: &Options,
 		query_string: String,
-	) -> anyhow::Result<(TermsList, TermsSet)> {
+	) -> anyhow::Result<(TermsList, TermIdSet)> {
 		let t = self.terms.read().await;
 		let res = self.analyzer.extract_querying_terms(stk, ctx, opt, &t, query_string).await?;
 		Ok(res)
@@ -376,7 +378,7 @@ impl SearchIndex {
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
 		terms_docs: TermsDocs,
-	) -> anyhow::Result<Option<HitsIterator>> {
+	) -> anyhow::Result<Option<SearchHitsIterator>> {
 		let mut hits: Option<RoaringTreemap> = None;
 		for opt_term_docs in terms_docs.iter() {
 			if let Some((_, term_docs)) = opt_term_docs {
@@ -391,7 +393,7 @@ impl SearchIndex {
 		}
 		if let Some(hits) = hits {
 			if !hits.is_empty() {
-				return Ok(Some(HitsIterator::new(self.doc_ids.clone(), hits)));
+				return Ok(Some(SearchHitsIterator::new(self.index_key_base.clone(), hits)));
 			}
 		}
 		Ok(None)
@@ -486,15 +488,15 @@ impl SearchIndex {
 	}
 }
 
-pub(crate) struct HitsIterator {
-	doc_ids: Arc<RwLock<BTreeDocIds>>,
+pub(crate) struct SearchHitsIterator {
+	ikb: IndexKeyBase,
 	iter: IntoIter,
 }
 
-impl HitsIterator {
-	fn new(doc_ids: Arc<RwLock<BTreeDocIds>>, hits: RoaringTreemap) -> Self {
+impl SearchHitsIterator {
+	fn new(ikb: IndexKeyBase, hits: RoaringTreemap) -> Self {
 		Self {
-			doc_ids,
+			ikb,
 			iter: hits.into_iter(),
 		}
 	}
@@ -512,11 +514,10 @@ impl HitsIterator {
 		&mut self,
 		tx: &Transaction,
 	) -> anyhow::Result<Option<(Thing, DocId)>> {
-		let di = self.doc_ids.read().await;
 		for doc_id in self.iter.by_ref() {
-			if let Some(doc_key) = di.get_doc_key(tx, doc_id).await? {
-				drop(di);
-				return Ok(Some((revision::from_slice(&doc_key)?, doc_id)));
+			let doc_id_key = self.ikb.new_bi_key(doc_id)?;
+			if let Some(v) = tx.get(doc_id_key, None).await? {
+				return Ok(Some((revision::from_slice(&v)?, doc_id)));
 			}
 		}
 		Ok(None)
@@ -532,7 +533,7 @@ mod tests {
 	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
-	use crate::idx::ft::search::{HitsIterator, SearchIndex};
+	use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::{Statement, statements::DefineStatement};
 	use crate::syn;
@@ -543,7 +544,7 @@ mod tests {
 
 	async fn check_hits(
 		ctx: &Context,
-		hits: Option<HitsIterator>,
+		hits: Option<SearchHitsIterator>,
 		scr: BM25Scorer,
 		e: Vec<(&Thing, Option<Score>)>,
 	) {
@@ -570,7 +571,7 @@ mod tests {
 		opt: &Options,
 		fti: &SearchIndex,
 		qs: &str,
-	) -> (Option<HitsIterator>, BM25Scorer) {
+	) -> (Option<SearchHitsIterator>, BM25Scorer) {
 		let (term_list, _) =
 			fti.extract_querying_terms(stk, ctx, opt, qs.to_string()).await.unwrap();
 		let tx = ctx.tx();
