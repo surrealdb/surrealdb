@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Array, Ident, Number, Thing, Value};
 use crate::idx::docids::DocId;
+use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::ft::search::{HitsIterator, SearchIndex};
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::planner::plan::RangeValue;
@@ -119,7 +120,8 @@ pub(crate) enum ThingIterator {
 	UniqueRangeReverse(UniqueRangeReverseThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
-	Matches(MatchesThingIterator),
+	SearchMatches(SearchMatchesThingIterator),
+	FullTextMatches(FullTextMatchesThingIterator),
 	Knn(KnnIterator),
 	Multiples(Box<MultipleIterators>),
 }
@@ -142,7 +144,8 @@ impl ThingIterator {
 			Self::UniqueRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::IndexUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_batch(ctx, txn, size).await,
-			Self::Matches(i) => i.next_batch(ctx, txn, size).await,
+			Self::SearchMatches(i) => i.next_batch(ctx, txn, size).await,
+			Self::FullTextMatches(i) => i.next_batch(ctx, txn, size).await,
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
@@ -167,7 +170,8 @@ impl ThingIterator {
 			Self::UniqueRangeReverse(i) => i.next_count(txn, size).await,
 			Self::IndexUnion(i) => i.next_count(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_count(ctx, txn, size).await,
-			Self::Matches(i) => i.next_count(ctx, txn, size).await,
+			Self::SearchMatches(i) => i.next_count(ctx, txn, size).await,
+			Self::FullTextMatches(i) => i.next_count(ctx, txn, size).await,
 			Self::Knn(i) => i.next_count(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
@@ -1342,19 +1346,19 @@ impl UniqueJoinThingIterator {
 	}
 }
 
-pub(crate) struct MatchesThingIterator {
+pub(crate) struct SearchMatchesThingIterator {
 	irf: IteratorRef,
 	hits_left: usize,
 	hits: Option<HitsIterator>,
 }
 
-impl MatchesThingIterator {
+impl SearchMatchesThingIterator {
 	pub(super) async fn new(
 		irf: IteratorRef,
-		fti: &SearchIndex,
+		si: &SearchIndex,
 		terms_docs: TermsDocs,
 	) -> Result<Self> {
-		let hits = fti.new_hits_iterator(terms_docs)?;
+		let hits = si.new_hits_iterator(terms_docs)?;
 		let hits_left = if let Some(h) = &hits {
 			h.len()
 		} else {
@@ -1417,6 +1421,26 @@ impl MatchesThingIterator {
 		} else {
 			Ok(0)
 		}
+	}
+}
+
+pub(crate) struct FullTextMatchesThingIterator {}
+
+impl FullTextMatchesThingIterator {
+	pub(super) async fn new(irf: IteratorRef, fti: &FullTextIndex) -> Result<Self> {
+		todo!()
+	}
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		ctx: &Context,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<B> {
+		todo!()
+	}
+
+	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
+		todo!()
 	}
 }
 
