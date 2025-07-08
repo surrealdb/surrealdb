@@ -262,7 +262,12 @@ impl Document {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
+					if !e
+						.compute(stk, ctx, opt, Some(doc))
+						.await
+						.catch_return()
+						.is_ok_and(|x| x.is_truthy())
+					{
 						return Err(IgnoreError::Ignore);
 					}
 				}

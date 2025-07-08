@@ -10,7 +10,7 @@ on:
         type: string
         description: "Build metadata"
       release-branch:
-        required: true
+        required: false
         type: string
         description: "Release branch"
       rust-version:
@@ -48,13 +48,39 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
-  docker-builder:
-    name: Prepare docker builder
+  image:
+    name: Prepare image variables
     runs-on: ubuntu-latest
     outputs:
       name: ${{ steps.image.outputs.name }}
       tag: ${{ steps.image.outputs.tag }}
+      folder: ${{ steps.image.outputs.folder }}
+    steps:
+      - name: Prepare docker image name
+        id: image
+        run: |
+          set -x
+
+          echo "name=surrealdb-builder" >> $GITHUB_OUTPUT
+
+          tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
+
+          folder=$(mktemp -d)
+          echo "folder=${folder}" >> $GITHUB_OUTPUT
+
+  docker-builder:
+    name: Prepare docker builder
+    needs: image
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [amd64, arm64]
+
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # Actions must be pinned by hash
@@ -64,55 +90,48 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # (Actions must be pinned by commit hash) v3.10.0
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
+      - name: Setup artifact directory
+        run: mkdir -p ${{ needs.image.outputs.folder }}
+
+      - name: Restore cache artifact (if exists)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        continue-on-error: true
         with:
-          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # (Actions must be pinned by commit hash) v2.0.1
-
-      - name: Prepare docker image name
-        id: image
-        run: |
-          set -x
-
-          # (Actions must be pinned by commit hash) Use the github branch name so we can use modified builders on custom branches
-          tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
-
-          echo "name=${{ steps.login-ecr.outputs.registry }}/surrealdb-builder" >> $GITHUB_OUTPUT
-          echo "tag=${tag}" >> $GITHUB_OUTPUT
+          name: surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
+          path: ${{ needs.image.outputs.folder }}
 
       - name: Build & Push builder image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # (Actions must be pinned by commit hash) v5.4.0
         id: build
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.platform }}
           file: ./docker/Dockerfile
           target: builder
-          cache-from: |
-            type=registry,ref=${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
-            type=registry,ref=${{ steps.image.outputs.name }}:main
-          cache-to: type=inline
-          push: true
-          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
+          cache-from: type=local,src=${{ needs.image.outputs.folder }}
+          cache-to: type=local,dest=${{ needs.image.outputs.folder }}
+          push: false
+          outputs: type=docker,dest=${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
+          tags: ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-${{ matrix.platform }}
           build-args: |
             RUST_VERSION=${{ inputs.rust-version }}
 
+      - name: Upload builder image
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
+        with:
+          name: surrealdb-builder-${{ needs.image.outputs.tag }}-${{ matrix.platform }}
+          path: ${{ needs.image.outputs.folder }}
+
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [docker-builder]
+    needs: [image, docker-builder]
     strategy:
       fail-fast: false
       matrix:
         include:
           # MacOS amd64
           - arch: x86_64-apple-darwin
-            runner: macos-latest-xlarge
+            runner: macos-13
             file: surreal-${{ inputs.name }}.darwin-amd64
             build-step: |
               set -x
@@ -147,7 +166,7 @@ jobs:
 
           # MacOS arm64
           - arch: aarch64-apple-darwin
-            runner: macos-latest-xlarge
+            runner: macos-latest
             file: surreal-${{ inputs.name }}.darwin-arm64
             build-step: |
               set -x
@@ -202,16 +221,17 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
+              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-amd64
+
               docker run \
                 --rm -t \
-                --pull always \
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
                 -e RUSTFLAGS="${RUSTFLAGS}" \
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-amd64 \
                   --target x86_64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
@@ -248,16 +268,17 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
+              docker load -i ${{ needs.image.outputs.folder }}/surrealdb-builder-${{ needs.image.outputs.tag }}-arm64
+
               docker run \
                 --rm -t \
-                --pull always \
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
                 -e RUSTFLAGS="${RUSTFLAGS}" \
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                ${{ needs.image.outputs.name }}:${{ needs.image.outputs.tag }}-arm64 \
                   --target aarch64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
@@ -317,18 +338,19 @@ jobs:
           toolchain: ${{ inputs.rust-version }}
           targets: ${{ matrix.arch }}
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
-        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
+      - name: Download amd64 builder image
+        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
         with:
-          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          name: surrealdb-builder-${{ needs.image.outputs.tag }}-amd64
+          path: ${{ needs.image.outputs.folder }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
-        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # (Actions must be pinned by commit hash) v2.0.1
+      - name: Download arm64 builder image
+        if: ${{ matrix.arch == 'aarch64-unknown-linux-gnu' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        with:
+          name: surrealdb-builder-${{ needs.image.outputs.tag }}-arm64
+          path: ${{ needs.image.outputs.folder }}
 
       - name: Output package versions
         run: |
