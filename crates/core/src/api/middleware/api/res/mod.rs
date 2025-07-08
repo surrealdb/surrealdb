@@ -2,15 +2,15 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::{
 	api::context::InvocationContext,
-	err::Error,
+	expr::{Object, Strand, Value},
 	fnc::args::Optional,
-	sql::{Object, Strand, Value},
 };
+use anyhow::Result;
 
 pub fn raw_body(
 	context: &mut InvocationContext,
 	(Optional(raw),): (Optional<bool>,),
-) -> Result<(), Error> {
+) -> Result<()> {
 	context.response_body_raw = raw.unwrap_or(true);
 	Ok(())
 }
@@ -18,7 +18,7 @@ pub fn raw_body(
 pub fn header(
 	context: &mut InvocationContext,
 	(Strand(name), value): (Strand, Value),
-) -> Result<(), Error> {
+) -> Result<()> {
 	let name: HeaderName = name.parse()?;
 	if let Value::None = value {
 		if let Some(v) = context.response_headers.as_mut() {
@@ -39,7 +39,7 @@ pub fn header(
 	Ok(())
 }
 
-pub fn headers(context: &mut InvocationContext, (headers,): (Object,)) -> Result<(), Error> {
+pub fn headers(context: &mut InvocationContext, (headers,): (Object,)) -> Result<()> {
 	let mut unset: Vec<String> = Vec::new();
 	let mut headermap = HeaderMap::new();
 

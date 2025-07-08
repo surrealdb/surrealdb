@@ -1,10 +1,8 @@
-use crate::err::Error;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 
-impl Value {
-	pub fn clear(&mut self) -> Result<(), Error> {
-		*self = Value::None;
-		Ok(())
+impl SqlValue {
+	pub fn clear(&mut self) {
+		*self = SqlValue::None;
 	}
 }
 
@@ -16,9 +14,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn clear_value() {
-		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::None;
-		val.clear().unwrap();
+		let mut val = SqlValue::parse("{ test: { other: null, something: 123 } }");
+		let res = SqlValue::None;
+		val.clear();
 		assert_eq!(res, val);
 	}
 }

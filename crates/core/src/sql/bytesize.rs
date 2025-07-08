@@ -1,6 +1,6 @@
 use crate::err::Error;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
+
+use anyhow::{Result, bail, ensure};
 use num_traits::CheckedAdd;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -9,8 +9,8 @@ use std::iter::{Peekable, Sum};
 use std::ops;
 use std::str::{Chars, FromStr};
 
-use super::value::{TryAdd, TrySub};
 use super::Strand;
+use super::value::TryAdd;
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -65,11 +65,9 @@ impl Bytesize {
 		Bytesize(b)
 	}
 
-	pub fn parse(input: impl Into<String>) -> Result<Self, Error> {
+	pub fn parse(input: impl Into<String>) -> Result<Self> {
 		let input = input.into().trim().to_lowercase();
-		if input.is_empty() {
-			return Err(Error::InvalidBytesize);
-		}
+		ensure!(!input.is_empty(), Error::InvalidBytesize);
 
 		let mut chars: Peekable<Chars> = input.chars().peekable();
 		let mut total = Bytesize::new(0);
@@ -97,7 +95,7 @@ impl Bytesize {
 			if unit != 'b' {
 				match chars.next() {
 					Some('b') => (),
-					_ => return Err(Error::InvalidBytesize),
+					_ => bail!(Error::InvalidBytesize),
 				}
 			}
 
@@ -108,15 +106,13 @@ impl Bytesize {
 				'g' => Bytesize::gb(value),
 				't' => Bytesize::tb(value),
 				'p' => Bytesize::pb(value),
-				_ => return Err(Error::InvalidBytesize),
+				_ => bail!(Error::InvalidBytesize),
 			};
 
 			total = total.try_add(bytesize)?;
 		}
 
-		if total == Bytesize::new(0) {
-			return Err(Error::InvalidBytesize);
-		}
+		ensure!(total != Bytesize::new(0), Error::InvalidBytesize);
 
 		Ok(total)
 	}
@@ -195,10 +191,11 @@ impl ops::Add for Bytesize {
 
 impl TryAdd for Bytesize {
 	type Output = Self;
-	fn try_add(self, other: Self) -> Result<Self, Error> {
+	fn try_add(self, other: Self) -> Result<Self> {
 		self.0
 			.checked_add(other.0)
 			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} + {other}")))
+			.map_err(anyhow::Error::new)
 			.map(Bytesize::new)
 	}
 }
@@ -221,10 +218,11 @@ impl<'b> ops::Add<&'b Bytesize> for &Bytesize {
 
 impl<'b> TryAdd<&'b Bytesize> for &Bytesize {
 	type Output = Bytesize;
-	fn try_add(self, other: &'b Bytesize) -> Result<Bytesize, Error> {
+	fn try_add(self, other: &'b Bytesize) -> Result<Bytesize> {
 		self.0
 			.checked_add(other.0)
 			.ok_or_else(|| Error::ArithmeticOverflow(format!("{self} + {other}")))
+			.map_err(anyhow::Error::new)
 			.map(Bytesize::new)
 	}
 }
@@ -239,16 +237,6 @@ impl ops::Sub for Bytesize {
 	}
 }
 
-impl TrySub for Bytesize {
-	type Output = Self;
-	fn try_sub(self, other: Self) -> Result<Self, Error> {
-		self.0
-			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
-			.map(Bytesize::new)
-	}
-}
-
 impl<'b> ops::Sub<&'b Bytesize> for &Bytesize {
 	type Output = Bytesize;
 	fn sub(self, other: &'b Bytesize) -> Bytesize {
@@ -256,16 +244,6 @@ impl<'b> ops::Sub<&'b Bytesize> for &Bytesize {
 			Some(v) => Bytesize::new(v),
 			None => Bytesize::default(),
 		}
-	}
-}
-
-impl<'b> TrySub<&'b Bytesize> for &Bytesize {
-	type Output = Bytesize;
-	fn try_sub(self, other: &'b Bytesize) -> Result<Bytesize, Error> {
-		self.0
-			.checked_sub(other.0)
-			.ok_or_else(|| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
-			.map(Bytesize::new)
 	}
 }
 
@@ -284,12 +262,6 @@ impl<'a> Sum<&'a Self> for Bytesize {
 		I: Iterator<Item = &'a Self>,
 	{
 		iter.fold(Bytesize::default(), |a, b| &a + b)
-	}
-}
-
-impl InfoStructure for Bytesize {
-	fn structure(self) -> Value {
-		self.to_string().into()
 	}
 }
 

@@ -1,9 +1,9 @@
 use std::fmt;
 
 use clap::{
-	arg,
+	ArgMatches, Command, ValueEnum, arg,
 	builder::{EnumValueParser, PossibleValue},
-	command, value_parser, ArgMatches, Command, ValueEnum,
+	command, value_parser,
 };
 use semver::Version;
 
@@ -21,9 +21,15 @@ impl ValueEnum for ResultsMode {
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
 		match self {
-			ResultsMode::Default => Some(PossibleValue::new("default").help("Do not change any tests")),
-			ResultsMode::Accept => Some(PossibleValue::new("accept").help("Write the results of tests which do not have results specified as the expected results")),
-			ResultsMode::Overwrite => Some(PossibleValue::new("overwrite").help("Overwrite the results of tests which do not have results and those that failed")),
+			ResultsMode::Default => {
+				Some(PossibleValue::new("default").help("Do not change any tests"))
+			}
+			ResultsMode::Accept => Some(PossibleValue::new("accept").help(
+				"Write the results of tests which do not have results specified as the expected results",
+			)),
+			ResultsMode::Overwrite => Some(PossibleValue::new("overwrite").help(
+				"Overwrite the results of tests which do not have results and those that failed",
+			)),
 		}
 	}
 }

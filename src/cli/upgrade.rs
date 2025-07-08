@@ -1,12 +1,11 @@
 use crate::cli::version_client;
 use crate::cli::version_client::VersionClient;
 use crate::cnf::PKG_VERSION;
-use crate::err::Error;
+use anyhow::{Context as _, Result, bail, ensure};
 use clap::Args;
 use semver::{Comparator, Op, Version};
 use std::borrow::Cow;
 use std::fs;
-use std::io::{Error as IoError, ErrorKind};
 use std::ops::Deref;
 use std::path::Path;
 use std::process::Command;
@@ -39,7 +38,7 @@ pub struct UpgradeCommandArguments {
 
 impl UpgradeCommandArguments {
 	/// Get the version string to download based on the user preference
-	async fn version(&self) -> Result<Cow<'_, str>, Error> {
+	async fn version(&self) -> Result<Cow<'_, str>> {
 		// Convert the version to lowercase, if supplied
 		let version = self.version.as_deref().map(str::to_ascii_lowercase);
 		let client = version_client::new(None)?;
@@ -61,18 +60,16 @@ impl UpgradeCommandArguments {
 	}
 }
 
-pub(crate) fn parse_version(input: &str) -> Result<Version, Error> {
+pub(crate) fn parse_version(input: &str) -> Result<Version> {
 	// Remove the `v` prefix, if supplied
 	let version = input.strip_prefix('v').unwrap_or(input);
 	// Parse the version
-	let comp = Comparator::parse(version)
-		.map_err(|_| Error::Other(format!("Invalid version `{input}`",)))?;
+	let comp = Comparator::parse(version)?;
 	// See if a supported operation was requested
-	if !matches!(comp.op, Op::Exact | Op::Caret) {
-		return Err(Error::Other(format!(
-			"Unsupported version `{version}`. Only exact matches are supported."
-		)));
-	}
+	ensure!(
+		matches!(comp.op, Op::Exact | Op::Caret),
+		"Unsupported version `{version}`. Only exact matches are supported."
+	);
 	// Build and return the version if supported
 	match (comp.minor, comp.patch) {
 		(Some(minor), Some(patch)) => {
@@ -80,33 +77,25 @@ pub(crate) fn parse_version(input: &str) -> Result<Version, Error> {
 			version.pre = comp.pre;
 			Ok(version)
 		}
-		_ => Err(Error::Other(format!(
-			"Unsupported version `{version}`. Please specify a full version, like `v1.2.1`."
-		))),
+		_ => {
+			bail!("Unsupported version `{version}`. Please specify a full version, like `v1.2.1`.")
+		}
 	}
 }
 
-pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
+pub async fn init(args: UpgradeCommandArguments) -> Result<()> {
 	// Upgrading overwrites the existing executable
 	let exe = std::env::current_exe()?;
 
 	// Check if we have write permissions
 	let metadata = fs::metadata(&exe)?;
 	let permissions = metadata.permissions();
-	if permissions.readonly() {
-		return Err(Error::Io(IoError::new(
-			ErrorKind::PermissionDenied,
-			"executable is read-only",
-		)));
-	}
+	ensure!(!permissions.readonly(), "executable is read-only");
 	#[cfg(unix)]
 	if std::os::unix::fs::MetadataExt::uid(&metadata) == 0
 		&& !nix::unistd::Uid::effective().is_root()
 	{
-		return Err(Error::Io(IoError::new(
-			ErrorKind::PermissionDenied,
-			"executable is owned by root; try again with sudo",
-		)));
+		bail!("executable is owned by root; try again with sudo")
 	}
 
 	// Compare old and new versions
@@ -133,10 +122,7 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 		"aarch64" => "arm64",
 		"x86_64" => "amd64",
 		_ => {
-			return Err(Error::Io(IoError::new(
-				ErrorKind::Unsupported,
-				format!("unsupported arch {arch}"),
-			)));
+			bail!("Unsupported architecture '{arch}'")
 		}
 	};
 
@@ -145,10 +131,7 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 		"macos" => ("darwin", "tgz"),
 		"windows" => ("windows", "exe"),
 		_ => {
-			return Err(Error::Io(IoError::new(
-				ErrorKind::Unsupported,
-				format!("unsupported OS {os}"),
-			)));
+			bail!("Unsupported operating system '{os}'")
 		}
 	};
 
@@ -160,17 +143,16 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 
 	let response = reqwest::get(&url).await?;
 
-	if !response.status().is_success() {
-		return Err(Error::Io(IoError::other(format!(
-			"received status {} when downloading from {url}",
-			response.status()
-		))));
-	}
+	ensure!(
+		response.status().is_success(),
+		"received status {} when downloading executable from {url}",
+		response.status()
+	);
 
-	let binary = response.bytes().await?;
+	let binary = response.bytes().await.context("Failed to download executable")?;
 
 	// Create a temporary file path
-	let tmp_dir = tempfile::tempdir()?;
+	let tmp_dir = tempfile::tempdir().context("Failed to create temporary directory")?;
 	let mut tmp_path = tmp_dir.path().join(download_filename);
 
 	// Download to a temp file to avoid writing to a running exe file
@@ -186,13 +168,13 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 			.arg(&tmp_path)
 			.arg("-C")
 			.arg(tmp_dir.path())
-			.output()?;
-		if !output.status.success() {
-			return Err(Error::Io(IoError::other(format!(
-				"failed to unarchive: {}",
-				output.status
-			))));
-		}
+			.output()
+			.context("Failed to run 'tar' executable")?;
+		ensure!(
+			output.status.success(),
+			"failed to extract exectuable from tar archive: {}",
+			output.status
+		);
 
 		// focus on the extracted path
 		tmp_path = tmp_dir.path().join("surreal");
@@ -213,17 +195,18 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<(), Error> {
 }
 
 /// Replace exe at `to` with contents of `from`
-fn replace_exe(from: &Path, to: &Path) -> Result<(), IoError> {
+fn replace_exe(from: &Path, to: &Path) -> Result<()> {
 	if cfg!(windows) {
 		fs::rename(to, to.with_extension("old.exe"))?;
 	} else {
-		fs::remove_file(to)?;
+		fs::remove_file(to).context("Could not remove old executable file")?;
 	}
 	// Rename works when from and to are on the same file system/device, but
 	// fall back to copy if they're not
-	fs::rename(from, to).or_else(|_| {
+	if fs::rename(from, to).is_err() {
 		// Don't worry about deleting the file as the tmp directory will
 		// be deleted automatically
-		fs::copy(from, to).map(|_| ())
-	})
+		fs::copy(from, to).context("Failed to new executable to location of old executable")?;
+	}
+	Ok(())
 }

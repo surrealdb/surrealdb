@@ -2,12 +2,12 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn use_statement_set_ns() -> Result<(), Error> {
+async fn use_statement_set_ns() -> Result<()> {
 	let sql = "
 		SELECT * FROM $session.ns, session::ns(), $session.db, session::db();
 		USE NS my_ns;
@@ -19,21 +19,21 @@ async fn use_statement_set_ns() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['test', 'test', 'test', 'test']");
+	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['my_ns', 'my_ns', 'test', 'test']");
+	let val = SqlValue::parse("['my_ns', 'my_ns', 'test', 'test']").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn use_statement_set_db() -> Result<(), Error> {
+async fn use_statement_set_db() -> Result<()> {
 	let sql = "
 		SELECT * FROM $session.ns, session::ns(), $session.db, session::db();
 		USE DB my_db;
@@ -45,21 +45,21 @@ async fn use_statement_set_db() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['test', 'test', 'test', 'test']");
+	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['test', 'test', 'my_db', 'my_db']");
+	let val = SqlValue::parse("['test', 'test', 'my_db', 'my_db']").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn use_statement_set_both() -> Result<(), Error> {
+async fn use_statement_set_both() -> Result<()> {
 	let sql = "
 		SELECT * FROM $session.ns, session::ns(), $session.db, session::db();
 		USE NS my_ns DB my_db;
@@ -71,14 +71,14 @@ async fn use_statement_set_both() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['test', 'test', 'test', 'test']");
+	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['my_ns', 'my_ns', 'my_db', 'my_db']");
+	let val = SqlValue::parse("['my_ns', 'my_ns', 'my_db', 'my_db']").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

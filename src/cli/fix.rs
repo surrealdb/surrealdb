@@ -1,5 +1,5 @@
 use crate::dbs;
-use crate::err::Error;
+use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any;
 
@@ -16,7 +16,7 @@ pub async fn init(
 	FixCommandArguments {
 		path,
 	}: FixCommandArguments,
-) -> Result<(), Error> {
+) -> Result<()> {
 	// Clean the path
 	let endpoint = any::__into_endpoint(path)?;
 	let path = if endpoint.path.is_empty() {

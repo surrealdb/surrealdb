@@ -111,8 +111,8 @@ mod ws {
 	use futures::poll;
 	use std::pin::pin;
 	use std::task::Poll;
-	use surrealdb::opt::auth::Root;
 	use surrealdb::Surreal;
+	use surrealdb::opt::auth::Root;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 
@@ -194,8 +194,8 @@ mod http {
 	use surrealdb::engine::remote::http::Client;
 	use surrealdb::engine::remote::http::Http;
 
-	use surrealdb::opt::auth::Root;
 	use surrealdb::Surreal;
+	use surrealdb::opt::auth::Root;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 
@@ -227,18 +227,18 @@ mod http {
 
 #[cfg(feature = "kv-mem")]
 mod mem {
+	use surrealdb::RecordIdKey;
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::Mem;
+	use surrealdb::error::Db as DbError;
 	use surrealdb::iam;
-	use surrealdb::opt::capabilities::Capabilities;
-	use surrealdb::opt::capabilities::ExperimentalFeature;
 	use surrealdb::opt::Config;
 	use surrealdb::opt::Resource;
-	use surrealdb::RecordIdKey;
-	use surrealdb::{error::Db as DbError, Error};
+	use surrealdb::opt::capabilities::Capabilities;
+	use surrealdb::opt::capabilities::ExperimentalFeature;
 
-	use surrealdb::opt::auth::Root;
 	use surrealdb::Surreal;
+	use surrealdb::opt::auth::Root;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 
@@ -284,13 +284,14 @@ mod mem {
 	#[test_log::test(tokio::test)]
 	async fn cant_sign_into_default_root_account() {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
-		let Error::Db(DbError::InvalidAuth) = db
+		let Some(DbError::InvalidAuth) = db
 			.signin(Root {
 				username: ROOT_USER,
 				password: ROOT_PASS,
 			})
 			.await
 			.unwrap_err()
+			.downcast_ref()
 		else {
 			panic!("unexpected successful login");
 		};
@@ -305,11 +306,11 @@ mod mem {
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.use_ns("namespace").use_db("database").await.unwrap();
 		let res = db.create(Resource::from("item:foo")).await;
-		let Error::Db(DbError::IamError(iam::Error::NotAllowed {
+		let Some(DbError::IamError(iam::Error::NotAllowed {
 			actor: _,
 			action: _,
 			resource: _,
-		})) = res.unwrap_err()
+		})) = res.unwrap_err().downcast_ref()
 		else {
 			panic!("expected permissions error");
 		};
@@ -354,9 +355,9 @@ mod rocksdb {
 	use surrealdb::engine::local::RocksDb;
 	use surrealdb::opt::capabilities::Capabilities;
 
-	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
+	use surrealdb::opt::Config;
+	use surrealdb::opt::auth::Root;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 	use ulid::Ulid;
@@ -404,10 +405,10 @@ mod tikv {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::TiKv;
 
+	use surrealdb::Surreal;
+	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::capabilities::Capabilities;
-	use surrealdb::opt::Config;
-	use surrealdb::Surreal;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 
@@ -442,10 +443,10 @@ mod fdb {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::FDb;
 
+	use surrealdb::Surreal;
+	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::capabilities::Capabilities;
-	use surrealdb::opt::Config;
-	use surrealdb::Surreal;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 
@@ -476,9 +477,9 @@ mod surrealkv {
 	use surrealdb::engine::local::SurrealKv;
 	use surrealdb::opt::capabilities::Capabilities;
 
-	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
+	use surrealdb::opt::Config;
+	use surrealdb::opt::auth::Root;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 	use ulid::Ulid;
@@ -529,9 +530,9 @@ mod surrealkv_versioned {
 	use surrealdb::engine::local::SurrealKv;
 	use surrealdb::opt::capabilities::Capabilities;
 
-	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::Config;
 	use surrealdb::Surreal;
+	use surrealdb::opt::Config;
+	use surrealdb::opt::auth::Root;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 	use ulid::Ulid;
@@ -579,8 +580,8 @@ mod surrealkv_versioned {
 mod any {
 	use surrealdb::engine::any::Any;
 
-	use surrealdb::opt::auth::Root;
 	use surrealdb::Surreal;
+	use surrealdb::opt::auth::Root;
 	use tokio::sync::Semaphore;
 	use tokio::sync::SemaphorePermit;
 

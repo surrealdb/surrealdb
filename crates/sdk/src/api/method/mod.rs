@@ -1,14 +1,13 @@
 //! Methods to use when interacting with a SurrealDB instance
-use self::query::ValidQuery;
-use crate::api::opt;
-use crate::api::opt::auth;
-use crate::api::opt::auth::Credentials;
-use crate::api::opt::auth::Jwt;
-use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::OnceLockExt;
 use crate::api::Surreal;
+use crate::api::opt;
+use crate::api::opt::IntoEndpoint;
+use crate::api::opt::auth;
+use crate::api::opt::auth::Credentials;
+use crate::api::opt::auth::Jwt;
 use crate::opt::IntoExportDestination;
 use crate::opt::WaitFor;
 use serde::Serialize;
@@ -19,8 +18,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use surrealdb_core::sql::to_value as to_core_value;
-use surrealdb_core::sql::Value as CoreValue;
+use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::expr::to_value as to_core_value;
 use surrealdb_core::syn;
 
 pub(crate) mod live;
@@ -46,6 +45,7 @@ mod select;
 mod set;
 mod signin;
 mod signup;
+mod transaction;
 mod unset;
 mod update;
 mod upsert;
@@ -57,17 +57,8 @@ mod version;
 mod tests;
 
 pub use authenticate::Authenticate;
-/// Not supported yet
-#[doc(hidden)]
 pub use begin::Begin;
-/// Not supported yet
-#[doc(hidden)]
-pub use begin::Transaction;
-/// Not supported yet
-#[doc(hidden)]
 pub use cancel::Cancel;
-/// Not supported yet
-#[doc(hidden)]
 pub use commit::Commit;
 pub use content::Content;
 pub use create::Create;
@@ -91,6 +82,7 @@ pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
 use tokio::sync::watch;
+pub use transaction::Transaction;
 pub use unset::Unset;
 pub use update::Update;
 pub use upsert::Upsert;
@@ -120,6 +112,9 @@ pub struct ExportConfig;
 
 /// Live query marker type
 pub struct Live;
+
+/// Relation marker type
+pub struct Relation;
 
 /// Responses returned with statistics
 #[derive(Debug)]
@@ -259,6 +254,12 @@ where
 		}
 	}
 
+	pub fn transaction(&self) -> Begin<C> {
+		Begin {
+			client: self.clone(),
+		}
+	}
+
 	/// Switch to a specific namespace
 	///
 	/// # Examples
@@ -334,7 +335,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: to_core_value(value).map_err(Into::into),
+			value: to_core_value(value),
 		}
 	}
 
@@ -645,28 +646,13 @@ where
 			Some(surql) => self.inner.router.extract().and_then(|router| {
 				let capabilities = &router.config.capabilities;
 				syn::parse_with_capabilities(surql, capabilities)
-					.map_err(Into::into)
-					.and_then(opt::query::into_query::Sealed::into_query)
+					.map(opt::into_query::Sealed::into_query)
 			}),
-			None => query.into_query(),
+			None => Ok(query.into_query()),
 		};
-		let inner = match result {
-			Ok(query) => Ok(ValidQuery::Normal {
-				query,
-				register_live_queries: true,
-				bindings: Default::default(),
-			}),
-			Err(crate::Error::Api(crate::api::err::Error::RawQuery(query))) => {
-				Ok(ValidQuery::Raw {
-					query,
-					bindings: Default::default(),
-				})
-			}
-			Err(error) => Err(error),
-		};
-
 		Query {
-			inner,
+			txn: None,
+			inner: result.map(|x| x.0),
 			client: Cow::Borrowed(self),
 		}
 	}
@@ -712,6 +698,7 @@ where
 	/// ```
 	pub fn select<O>(&self, resource: impl IntoResource<O>) -> Select<C, O> {
 		Select {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -767,6 +754,7 @@ where
 	/// ```
 	pub fn create<R>(&self, resource: impl CreateResource<R>) -> Create<C, R> {
 		Create {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -912,6 +900,7 @@ where
 	/// ```
 	pub fn insert<O>(&self, resource: impl IntoResource<O>) -> Insert<C, O> {
 		Insert {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -1070,6 +1059,7 @@ where
 	/// ```
 	pub fn upsert<O>(&self, resource: impl IntoResource<O>) -> Upsert<C, O> {
 		Upsert {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -1228,6 +1218,7 @@ where
 	/// ```
 	pub fn update<O>(&self, resource: impl IntoResource<O>) -> Update<C, O> {
 		Update {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -1260,6 +1251,7 @@ where
 	/// ```
 	pub fn delete<O>(&self, resource: impl IntoResource<O>) -> Delete<C, O> {
 		Delete {
+			txn: None,
 			client: Cow::Borrowed(self),
 			resource: resource.into_resource(),
 			response_type: PhantomData,
@@ -1293,13 +1285,13 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// // Specify no args by not calling `.args()`
-	/// let foo = db.run("fn::foo").await?; // fn::foo()
+	/// let foo: usize = db.run("fn::foo").await?; // fn::foo()
 	/// // A single value will be turned into one argument
-	/// let bar = db.run("fn::bar").args(42).await?; // fn::bar(42)
+	/// let bar: usize = db.run("fn::bar").args(42).await?; // fn::bar(42)
 	/// // Arrays are treated as single arguments
-	/// let count = db.run("count").args(vec![1,2,3]).await?;
+	/// let count: usize = db.run("count").args(vec![1,2,3]).await?;
 	/// // Specify multiple args using a tuple
-	/// let two = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
+	/// let two: usize = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
 	///
 	/// # Ok(())
 	/// # }

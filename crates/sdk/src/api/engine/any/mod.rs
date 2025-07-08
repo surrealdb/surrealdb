@@ -133,12 +133,12 @@ mod native;
 #[cfg(target_family = "wasm")]
 mod wasm;
 
-use crate::api::err::Error;
-use crate::api::opt::Config;
-use crate::api::opt::Endpoint;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::api::err::Error;
+use crate::api::opt::Config;
+use crate::api::opt::Endpoint;
 use crate::opt::path_to_string;
 use std::marker::PhantomData;
 use url::Url;
@@ -307,12 +307,12 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 
-	use surrealdb_core::sql::Object;
+	use surrealdb_core::expr::Object;
 
 	use super::*;
+	use crate::Value;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
-	use crate::Value;
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {

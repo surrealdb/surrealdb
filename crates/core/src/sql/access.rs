@@ -1,4 +1,4 @@
-use crate::sql::{escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes, Duration, Id, Ident, Thing};
+use crate::sql::{Duration, Id, Ident, Thing, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -30,6 +30,26 @@ impl Default for AccessDuration {
 			token: Some(Duration::from_hours(1).expect("1 hour should fit in a duration")),
 			// By default, sessions do not expire
 			session: None,
+		}
+	}
+}
+
+impl From<AccessDuration> for crate::expr::access::AccessDuration {
+	fn from(v: AccessDuration) -> Self {
+		Self {
+			grant: v.grant.map(Into::into),
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::access::AccessDuration> for AccessDuration {
+	fn from(v: crate::expr::access::AccessDuration) -> Self {
+		Self {
+			grant: v.grant.map(Into::into),
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
 		}
 	}
 }

@@ -1,10 +1,10 @@
 mod common;
 
 mod graphql_integration {
-	use std::{str::FromStr, time::Duration};
+	use std::time::Duration;
 
 	macro_rules! assert_equal_arrs {
-		($lhs: expr, $rhs: expr) => {
+		($lhs: expr_2021, $rhs: expr_2021) => {
 			let lhs = $lhs.as_array().unwrap().iter().collect::<std::collections::HashSet<_>>();
 			let rhs = $rhs.as_array().unwrap().iter().collect::<std::collections::HashSet<_>>();
 			assert_eq!(lhs, rhs)
@@ -93,7 +93,7 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
+			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
 					"foo": [
@@ -108,7 +108,7 @@ mod graphql_integration {
 					]
 				}
 			});
-			assert_eq!(expected.to_string(), body)
+			assert_eq!(expected, body)
 		}
 
 		// test limit
@@ -119,7 +119,7 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
+			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
 					"foo": [
@@ -130,7 +130,7 @@ mod graphql_integration {
 					]
 				}
 			});
-			assert_eq!(expected.to_string(), body)
+			assert_eq!(expected, body)
 		}
 
 		// test start
@@ -141,7 +141,7 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
+			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
 					"foo": [
@@ -152,7 +152,7 @@ mod graphql_integration {
 					]
 				}
 			});
-			assert_eq!(expected.to_string(), body)
+			assert_eq!(expected, body)
 		}
 
 		// test order
@@ -163,7 +163,7 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
+			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
 					"foo": [
@@ -176,7 +176,7 @@ mod graphql_integration {
 					]
 				}
 			});
-			assert_eq!(expected.to_string(), body)
+			assert_eq!(expected, body)
 		}
 
 		// test filter
@@ -187,7 +187,7 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
+			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
 					"foo": [
@@ -197,7 +197,7 @@ mod graphql_integration {
 					]
 				}
 			});
-			assert_eq!(expected.to_string(), body)
+			assert_eq!(expected, body)
 		}
 
 		Ok(())
@@ -266,10 +266,10 @@ mod graphql_integration {
 				.send()
 				.await?;
 			// assert_eq!(res.status(), 200);
-			let body = res.text().await?;
+			let body = res.json::<serde_json::Value>().await?;
 			let expected =
 				json!({"data":{"foo":[{"id":"foo:1","val":42},{"id":"foo:2","val":43}]}});
-			assert_eq!(expected.to_string(), body);
+			assert_eq!(expected, body);
 		}
 
 		// check partial access
@@ -299,9 +299,9 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
+			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({"data":{"foo":[{"id":"foo:1","val":42}]}});
-			assert_eq!(expected.to_string(), body);
+			assert_eq!(expected, body);
 		}
 		Ok(())
 	}
@@ -356,8 +356,7 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			let res_obj = serde_json::Value::from_str(&body).unwrap();
+			let res_obj: serde_json::Value = res.json().await?;
 			let fields = &res_obj["data"]["__schema"]["queryType"]["fields"];
 			let expected_fields = json!(
 				[
@@ -401,8 +400,7 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			let res_obj = serde_json::Value::from_str(&body).unwrap();
+			let res_obj = res.json::<serde_json::Value>().await?;
 			let fields = &res_obj["data"]["__schema"]["queryType"]["fields"];
 			let expected_fields = json!(
 				[
@@ -472,7 +470,7 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
+			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 			  "data": {
 				"fn_foo": {
@@ -485,7 +483,7 @@ mod graphql_integration {
 				  }
 			  }
 			});
-			assert_eq!(expected.to_string(), body)
+			assert_eq!(expected, body)
 		}
 
 		{
@@ -495,14 +493,14 @@ mod graphql_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
+			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 			  "data": {
 				"fn_num": 42,
 				"fn_double": 42
 			  }
 			});
-			assert_eq!(expected.to_string(), body)
+			assert_eq!(expected, body)
 		}
 
 		Ok(())

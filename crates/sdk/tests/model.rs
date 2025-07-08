@@ -2,12 +2,12 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn model_count() -> Result<(), Error> {
+async fn model_count() -> Result<()> {
 	let sql = "
 		CREATE |test:1000| SET time = time::now();
 		SELECT count() FROM test GROUP ALL;
@@ -21,18 +21,19 @@ async fn model_count() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[{
 			count: 1000
 		}]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn model_range() -> Result<(), Error> {
+async fn model_range() -> Result<()> {
 	let sql = "
 		CREATE |test:101..1100| SET time = time::now();
 		SELECT count() FROM test GROUP ALL;
@@ -46,11 +47,12 @@ async fn model_range() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[{
 			count: 1000
 		}]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

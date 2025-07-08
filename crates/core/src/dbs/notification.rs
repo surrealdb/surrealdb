@@ -1,4 +1,4 @@
-use crate::sql::{Object, Uuid, Value};
+use crate::expr::{Object, Uuid, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display};

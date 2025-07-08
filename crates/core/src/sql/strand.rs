@@ -1,4 +1,5 @@
 use crate::err::Error;
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -54,6 +55,18 @@ impl From<&str> for Strand {
 	}
 }
 
+impl From<Strand> for crate::expr::Strand {
+	fn from(v: Strand) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<crate::expr::Strand> for Strand {
+	fn from(v: crate::expr::Strand) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Deref for Strand {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {
@@ -98,15 +111,15 @@ impl ops::Add for Strand {
 
 impl TryAdd for Strand {
 	type Output = Self;
-	fn try_add(mut self, other: Self) -> Result<Self, Error> {
+	fn try_add(mut self, other: Self) -> Result<Self> {
 		if self.0.try_reserve(other.len()).is_ok() {
 			self.0.push_str(other.as_str());
 			Ok(self)
 		} else {
-			Err(Error::InsufficientReserve(format!(
+			Err(anyhow::Error::new(Error::InsufficientReserve(format!(
 				"additional string of length {} bytes",
 				other.0.len()
-			)))
+			))))
 		}
 	}
 }
@@ -114,8 +127,8 @@ impl TryAdd for Strand {
 // serde(with = no_nul_bytes) will (de)serialize with no NUL bytes.
 pub(crate) mod no_nul_bytes {
 	use serde::{
-		de::{self, Visitor},
 		Deserializer, Serializer,
+		de::{self, Visitor},
 	};
 	use std::fmt;
 

@@ -1,12 +1,12 @@
 use crate::{
 	sql::{
-		language::Language, Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table,
-		Uuid,
+		Bytes, Datetime, Duration, File, Ident, Param, Regex, Strand, Table, Uuid,
+		language::Language,
 	},
 	syn::{
 		lexer::compound,
-		parser::{mac::unexpected, ParseResult, Parser},
-		token::{self, t, TokenKind},
+		parser::{ParseResult, Parser, mac::unexpected},
+		token::{self, TokenKind, t},
 	},
 };
 
@@ -249,7 +249,7 @@ mod test {
 
 			assert_eq!(
 				r,
-				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::Value::Idiom(
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Idiom(
 					sql::Idiom(vec![Part::Field(Ident(ident.to_string()))])
 				))]))
 			)

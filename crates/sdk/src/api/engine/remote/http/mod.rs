@@ -1,34 +1,36 @@
 //! HTTP engine
+use crate::Value;
+use crate::api::Connect;
+use crate::api::Result;
+use crate::api::Surreal;
 use crate::api::conn::Command;
 use crate::api::conn::DbResponse;
 use crate::api::conn::RequestData;
 use crate::api::conn::RouterRequest;
 use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
-use crate::api::Connect;
-use crate::api::Result;
-use crate::api::Surreal;
 use crate::engine::remote::Response;
 use crate::headers::AUTH_DB;
 use crate::headers::AUTH_NS;
 use crate::headers::DB;
 use crate::headers::NS;
 use crate::opt::IntoEndpoint;
-use crate::Value;
 use futures::TryStreamExt;
 use indexmap::IndexMap;
-use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
+use reqwest::RequestBuilder;
 use reqwest::header::ACCEPT;
 use reqwest::header::CONTENT_TYPE;
-use reqwest::RequestBuilder;
+use reqwest::header::HeaderMap;
+use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde::Serialize;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{
-	from_value as from_core_value, statements::OutputStatement, Object as CoreObject, Param, Query,
-	Statement, Value as CoreValue,
+use surrealdb_core::expr::{
+	Object as CoreObject, Value as CoreValue, from_value as from_core_value,
 };
+use surrealdb_core::sql::Statement;
+use surrealdb_core::sql::statements::OutputStatement;
+use surrealdb_core::sql::{Param, Query, SqlValue as CoreSqlValue};
 use url::Url;
 
 #[cfg(not(target_family = "wasm"))]
@@ -301,11 +303,13 @@ async fn router(
 ) -> Result<DbResponse> {
 	match req.command {
 		Command::Query {
+			txn,
 			query,
 			mut variables,
 		} => {
 			variables.extend(vars.clone());
 			let req = Command::Query {
+				txn,
 				query,
 				variables,
 			}
@@ -356,23 +360,25 @@ async fn router(
 				.into());
 			};
 
-			if let Ok(Credentials {
-				user,
-				pass,
-				ns,
-				db,
-			}) = from_core_value(credentials.into())
-			{
-				*auth = Some(Auth::Basic {
+			match from_core_value(credentials.into()) {
+				Ok(Credentials {
 					user,
 					pass,
 					ns,
 					db,
-				});
-			} else {
-				*auth = Some(Auth::Bearer {
-					token: value.to_raw_string(),
-				});
+				}) => {
+					*auth = Some(Auth::Basic {
+						user,
+						pass,
+						ns,
+						db,
+					});
+				}
+				_ => {
+					*auth = Some(Auth::Bearer {
+						token: value.to_raw_string(),
+					});
+				}
 			}
 
 			Ok(DbResponse::Other(value))
@@ -401,11 +407,12 @@ async fn router(
 			value,
 		} => {
 			let mut output_stmt = OutputStatement::default();
-			output_stmt.what = CoreValue::Param(Param::from(key.clone()));
+			output_stmt.what = CoreSqlValue::Param(Param::from(key.clone()));
 			let query = Query::from(Statement::Output(output_stmt));
 			let mut variables = CoreObject::default();
 			variables.insert(key.clone(), value);
 			let req = Command::Query {
+				txn: None,
 				query,
 				variables,
 			}

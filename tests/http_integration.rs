@@ -5,7 +5,7 @@ mod http_integration {
 	use std::time::Duration;
 
 	use http::header::HeaderValue;
-	use http::{header, Method};
+	use http::{Method, header};
 	use reqwest::Client;
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
@@ -13,7 +13,7 @@ mod http_integration {
 	use test_log::test;
 	use ulid::Ulid;
 
-	use super::common::{self, StartServerArguments, PASS, USER};
+	use super::common::{self, PASS, StartServerArguments, USER};
 
 	#[test(tokio::test)]
 	async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
@@ -1770,21 +1770,21 @@ mod http_integration {
 			let stmt: sql::Statement = {
 				let mut tmp = sql::statements::CreateStatement::default();
 				let rid = sql::thing("foo:42").unwrap();
-				let mut tmp_values = sql::Values::default();
+				let mut tmp_values = sql::SqlValues::default();
 				tmp_values.0 = vec![rid.into()];
 				tmp.what = tmp_values;
 				sql::Statement::Create(tmp)
 			};
 
 			let mut obj = sql::Object::default();
-			obj.insert("email".to_string(), sql::Value::Query(stmt.into()));
+			obj.insert("email".to_string(), sql::SqlValue::Query(stmt.into()));
 			obj.insert("pass".to_string(), "foo".into());
 			request.insert(
 				"params".to_string(),
-				sql::Value::Array(vec![sql::Value::Object(obj)].into()),
+				sql::SqlValue::Array(vec![sql::SqlValue::Object(obj)].into()),
 			);
 
-			let req: sql::Value = sql::Value::Object(request);
+			let req: sql::SqlValue = sql::SqlValue::Object(request);
 
 			let req = sql::serde::serialize(&req).unwrap();
 

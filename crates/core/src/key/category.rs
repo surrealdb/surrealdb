@@ -28,6 +28,8 @@ pub enum Category {
 	Namespace,
 	/// crate::key::root::us                 /!us{us}
 	User,
+	/// crate::key::root::tl                 /!tl{tl}
+	TaskLease,
 	///
 	/// ------------------------------
 	///
@@ -246,6 +248,7 @@ impl Display for Category {
 			Self::Ref => "Ref",
 			Self::SequenceState => "SequenceState",
 			Self::SequenceBatch => "SequenceBatch",
+			Self::TaskLease => "TaskLease",
 		};
 		write!(f, "{}", name)
 	}

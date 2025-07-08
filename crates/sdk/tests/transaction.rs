@@ -2,12 +2,12 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn transaction_basic() -> Result<(), Error> {
+async fn transaction_basic() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -20,30 +20,32 @@ async fn transaction_basic() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:tobie,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:jaime,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn transaction_with_return() -> Result<(), Error> {
+async fn transaction_with_return() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -57,19 +59,20 @@ async fn transaction_with_return() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			tobie: person:tobie,
 			jaime: person:jaime,
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn transaction_with_failure() -> Result<(), Error> {
+async fn transaction_with_failure() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -104,7 +107,7 @@ async fn transaction_with_failure() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn transaction_with_failure_and_return() -> Result<(), Error> {
+async fn transaction_with_failure_and_return() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -143,7 +146,7 @@ async fn transaction_with_failure_and_return() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn transaction_with_throw() -> Result<(), Error> {
+async fn transaction_with_throw() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;
@@ -178,7 +181,7 @@ async fn transaction_with_throw() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn transaction_with_throw_and_return() -> Result<(), Error> {
+async fn transaction_with_throw_and_return() -> Result<()> {
 	let sql = "
 		BEGIN;
 		CREATE person:tobie;

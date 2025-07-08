@@ -1,12 +1,12 @@
-use crate::err::Error;
+use crate::expr::with::With;
+use crate::expr::{Array, Expression, Idiom, Number, Object};
+use crate::expr::{Operator, Value};
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
-use crate::sql::with::With;
-use crate::sql::{Array, Expression, Idiom, Number, Object};
-use crate::sql::{Operator, Value};
+use anyhow::Result;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
@@ -40,7 +40,7 @@ impl PlanBuilder {
 	pub(super) async fn build(
 		ctx: &StatementContext<'_>,
 		p: PlanBuilderParameters,
-	) -> Result<Plan, Error> {
+	) -> Result<Plan> {
 		let mut b = PlanBuilder {
 			has_indexes: false,
 			non_range_indexes: Default::default(),
@@ -141,7 +141,7 @@ impl PlanBuilder {
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
 		granted_permission: GrantedPermission,
-	) -> Result<Plan, Error> {
+	) -> Result<Plan> {
 		// Evaluate the record strategy
 		let rs = ctx.check_record_strategy(false, granted_permission)?;
 		// Evaluate the scan direction
@@ -588,9 +588,10 @@ impl UnionRangeQueryBuilder {
 
 #[cfg(test)]
 mod tests {
+	use crate::expr::{Array, Idiom, Value};
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-	use crate::sql::{Array, Idiom, Value};
+	use crate::sql::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 	use std::collections::HashSet;
 	use std::sync::Arc;
@@ -601,14 +602,14 @@ mod tests {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::parse("test").into()),
+			Some(Idiom::from(SqlIdiom::parse("test")).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::parse("test").into()),
+			Some(Idiom::from(SqlIdiom::parse("test")).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);

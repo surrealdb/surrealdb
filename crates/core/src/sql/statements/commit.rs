@@ -13,3 +13,15 @@ impl fmt::Display for CommitStatement {
 		f.write_str("COMMIT TRANSACTION")
 	}
 }
+
+impl From<CommitStatement> for crate::expr::statements::commit::CommitStatement {
+	fn from(_: CommitStatement) -> Self {
+		Self
+	}
+}
+
+impl From<crate::expr::statements::commit::CommitStatement> for CommitStatement {
+	fn from(_: crate::expr::statements::commit::CommitStatement) -> Self {
+		Self
+	}
+}

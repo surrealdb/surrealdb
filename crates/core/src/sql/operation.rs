@@ -1,5 +1,5 @@
 use crate::sql::idiom::Idiom;
-use crate::sql::value::Value;
+use crate::sql::value::SqlValue;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -11,18 +11,18 @@ use serde::{Deserialize, Serialize};
 pub enum Operation {
 	Add {
 		path: Idiom,
-		value: Value,
+		value: SqlValue,
 	},
 	Remove {
 		path: Idiom,
 	},
 	Replace {
 		path: Idiom,
-		value: Value,
+		value: SqlValue,
 	},
 	Change {
 		path: Idiom,
-		value: Value,
+		value: SqlValue,
 	},
 	Copy {
 		path: Idiom,
@@ -34,6 +34,6 @@ pub enum Operation {
 	},
 	Test {
 		path: Idiom,
-		value: Value,
+		value: SqlValue,
 	},
 }

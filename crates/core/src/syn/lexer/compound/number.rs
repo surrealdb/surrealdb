@@ -10,16 +10,16 @@ use rust_decimal::Decimal;
 
 use crate::{
 	sql::{
+		Number,
 		duration::{
 			SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK,
 			SECONDS_PER_YEAR,
 		},
-		Number,
 	},
 	syn::{
-		error::{bail, syntax_error, SyntaxError},
+		error::{SyntaxError, bail, syntax_error},
 		lexer::Lexer,
-		token::{t, Span, Token, TokenKind},
+		token::{Span, Token, TokenKind, t},
 	},
 };
 

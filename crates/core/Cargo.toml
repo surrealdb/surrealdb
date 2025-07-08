@@ -109,6 +109,7 @@ tikv = { workspace = true, optional = true }
 addr.workspace = true
 ahash.workspace = true
 ammonia.workspace = true
+anyhow.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
 async-executor.workspace = true
@@ -122,7 +123,6 @@ bincode.workspace = true
 blake3.workspace = true
 bytes.workspace = true
 castaway.workspace = true
-cedar-policy.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
@@ -159,7 +159,7 @@ rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 rust-stemmers.workspace = true
 scrypt.workspace = true
 semver = { workspace = true, features = ["serde"] }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive","rc"] }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true

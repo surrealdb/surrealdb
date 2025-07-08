@@ -1,8 +1,8 @@
+use crate::sql::SqlValue;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
 use crate::sql::fmt::pretty_sequence_item;
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::Value;
+
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
@@ -121,15 +121,25 @@ impl Display for Permissions {
 	}
 }
 
-impl InfoStructure for Permissions {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"select".to_string() => self.select.structure(),
-			"create".to_string() => self.create.structure(),
-			"update".to_string() => self.update.structure(),
-			// TODO(gguillemas): Do not show this value for fields in 3.0.0.
-			"delete".to_string() => self.delete.structure(),
-		})
+impl From<Permissions> for crate::expr::Permissions {
+	fn from(v: Permissions) -> Self {
+		crate::expr::Permissions {
+			select: v.select.into(),
+			create: v.create.into(),
+			update: v.update.into(),
+			delete: v.delete.into(),
+		}
+	}
+}
+
+impl From<crate::expr::Permissions> for Permissions {
+	fn from(v: crate::expr::Permissions) -> Self {
+		Permissions {
+			select: v.select.into(),
+			create: v.create.into(),
+			update: v.update.into(),
+			delete: v.delete.into(),
+		}
 	}
 }
 
@@ -166,7 +176,7 @@ pub enum Permission {
 	None,
 	#[default]
 	Full,
-	Specific(Value),
+	Specific(SqlValue),
 }
 
 impl Permission {
@@ -188,17 +198,27 @@ impl Display for Permission {
 		match self {
 			Self::None => f.write_str("NONE"),
 			Self::Full => f.write_str("FULL"),
-			Self::Specific(ref v) => write!(f, "WHERE {v}"),
+			Self::Specific(v) => write!(f, "WHERE {v}"),
 		}
 	}
 }
 
-impl InfoStructure for Permission {
-	fn structure(self) -> Value {
-		match self {
-			Permission::None => Value::Bool(false),
-			Permission::Full => Value::Bool(true),
-			Permission::Specific(v) => v.to_string().into(),
+impl From<Permission> for crate::expr::Permission {
+	fn from(v: Permission) -> Self {
+		match v {
+			Permission::None => crate::expr::Permission::None,
+			Permission::Full => crate::expr::Permission::Full,
+			Permission::Specific(v) => crate::expr::Permission::Specific(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::Permission> for Permission {
+	fn from(v: crate::expr::Permission) -> Self {
+		match v {
+			crate::expr::Permission::None => Self::None,
+			crate::expr::Permission::Full => Self::Full,
+			crate::expr::Permission::Specific(v) => Self::Specific(v.into()),
 		}
 	}
 }

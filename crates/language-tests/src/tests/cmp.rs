@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, ops::Bound, sync::LazyLock};
 
 use rust_decimal::Decimal;
-use surrealdb_core::sql::{
+use surrealdb_core::expr::{
 	Array, Block, Bytes, Cast, Closure, Constant, Datetime, Duration, Edges, Expression, File,
 	Function, Future, Geometry, Id, IdRange, Idiom, Mock, Model, Number, Object, Param, Query,
 	Range, Regex, Subquery, Thing, Uuid, Value,
@@ -105,7 +105,7 @@ macro_rules! impl_roughly_eq_enum {
     };
 
 
-    (@match_pattern $this:expr, $other:expr, $ty_name:ident, $config:ident, $name:ident) => {
+    (@match_pattern $this:expr_2021, $other:expr_2021, $ty_name:ident, $config:ident, $name:ident) => {
         if let $ty_name::$name = $this{
             if let $ty_name::$name = $other{
                 return true
@@ -114,17 +114,17 @@ macro_rules! impl_roughly_eq_enum {
         }
     };
 
-    (@match_pattern $this:expr, $other:expr, $ty_name:ident, $config:ident, $name:ident($($field:ident),* $(,)?)) => {
+    (@match_pattern $this:expr_2021, $other:expr_2021, $ty_name:ident, $config:ident, $name:ident($($field:ident),* $(,)?)) => {
         #[expect(non_camel_case_types)]
         struct $name<$($field,)*> {
             $($field: $field),*
         }
 
-        if let $ty_name::$name($(ref $field),*) = $this{
+        if let $ty_name::$name($($field),*) = $this{
             let __tmp = $name{
                 $($field,)*
             };
-            if let $ty_name::$name($(ref $field),*) = $other {
+            if let $ty_name::$name($($field),*) = $other {
                 return true $(&& __tmp.$field.roughly_equal($field,$config))*;
             }else{
                 return false
