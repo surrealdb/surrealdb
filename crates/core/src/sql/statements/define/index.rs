@@ -1,16 +1,7 @@
-#[cfg(target_family = "wasm")]
-use crate::dbs::Force;
-
-#[cfg(target_family = "wasm")]
-use crate::sql::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::sql::{Ident, Idioms, Index, Strand};
-#[cfg(target_family = "wasm")]
-use crate::sql::{Output, SqlValues};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-#[cfg(target_family = "wasm")]
-use std::sync::Arc;
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

@@ -14,9 +14,9 @@ value = "'OK'"
 
 BEGIN;
 
-$COUNT = 1000;
-$RANGE = 10;
-$SAMPLE = 5;
+let $COUNT = 1000;
+let $RANGE = 10;
+let $SAMPLE = 5;
 
 FOR $i in 0..$RANGE {
     CREATE type::thing("result",$i) CONTENT { count: 0, };
