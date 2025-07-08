@@ -3,7 +3,7 @@ use crate::err::Error;
 use crate::expr::Id;
 use crate::idx::docids::{DocId, Resolved};
 use crate::kvs::sequences::SequenceKey;
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{Key, KeyEncode, Transaction, Val};
 use anyhow::Result;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -72,7 +72,7 @@ impl SeqDocIds {
 		Ok(Resolved::New(new_doc_id))
 	}
 
-	pub(in crate::idx) async fn get_doc_key(
+	pub(in crate::idx) async fn get_id_key(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
@@ -85,7 +85,13 @@ impl SeqDocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<()> {
-		tx.del(self.seq_key.new_bi_key(doc_id)?).await
+		let k: Key = self.seq_key.new_bi_key(doc_id)?.encode()?;
+		if let Some(v) = tx.get(k.clone(), None).await? {
+			let id: Id = revision::from_slice(&v)?;
+			tx.del(self.seq_key.new_id_key(id)?).await?;
+			tx.del(k).await?;
+		}
+		Ok(())
 	}
 }
 
@@ -95,16 +101,22 @@ mod tests {
 	use crate::expr::Id;
 	use crate::idx::docids::seqdocids::SeqDocIds;
 	use crate::idx::docids::{DocId, Resolved};
+	use crate::key::index::bi::Bi;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
 	use uuid::Uuid;
 
+	const TEST_NS: &str = "test_ns";
+	const TEST_DB: &str = "test_db";
+	const TEST_TB: &str = "test_tb";
+	const TEST_IX: &str = "test_ix";
+
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Context, SeqDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		ctx.set_transaction(tx.into());
-		let d = SeqDocIds::new(Uuid::nil(), "testns", "testdb", "testtb", "testix");
+		let d = SeqDocIds::new(Uuid::nil(), TEST_NS, TEST_DB, TEST_TB, TEST_IX);
 		(ctx.freeze(), d)
 	}
 
@@ -116,7 +128,7 @@ mod tests {
 		let tx = ctx.tx();
 		let id: Id = key.into();
 		let k = revision::to_vec(&id).unwrap();
-		assert_eq!(d.get_doc_key(&tx, doc_id).await.unwrap(), Some(k));
+		assert_eq!(d.get_id_key(&tx, doc_id).await.unwrap(), Some(k));
 		assert_eq!(d.get_doc_id(&tx, key.into()).await.unwrap(), Some(doc_id));
 	}
 	#[tokio::test]
@@ -202,7 +214,7 @@ mod tests {
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
 			d.remove_doc_id(&ctx.tx(), 2).await.unwrap();
-			d.remove_doc_id(&ctx.tx(), 1).await.unwrap();
+			d.remove_doc_id(&ctx.tx(), 0).await.unwrap();
 			finish(ctx).await;
 		}
 
@@ -257,6 +269,30 @@ mod tests {
 			assert_eq!(d.get_doc_id(&ctx.tx(), "Bar".into()).await.unwrap(), None);
 			assert_eq!(d.get_doc_id(&ctx.tx(), "Hello".into()).await.unwrap(), Some(2));
 			assert_eq!(d.get_doc_id(&ctx.tx(), "World".into()).await.unwrap(), Some(3));
+		}
+
+		// Remove remaining docs
+		{
+			let (ctx, d) = new_operation(&ds, Write).await;
+			d.remove_doc_id(&ctx.tx(), 1).await.unwrap();
+			d.remove_doc_id(&ctx.tx(), 2).await.unwrap();
+			d.remove_doc_id(&ctx.tx(), 3).await.unwrap();
+			finish(ctx).await;
+		}
+
+		// Check there's no ID and BI keys left
+		{
+			let (ctx, _) = new_operation(&ds, Read).await;
+			let tx = ctx.tx();
+			for id in ["Foo", "Bar", "Hello", "World"] {
+				let id =
+					crate::key::index::id::Id::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX, id.into());
+				assert!(!tx.exists(id, None).await.unwrap());
+			}
+			for doc_id in 0..=3 {
+				let bi = Bi::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX, doc_id);
+				assert!(!tx.exists(bi, None).await.unwrap());
+			}
 		}
 	}
 }
