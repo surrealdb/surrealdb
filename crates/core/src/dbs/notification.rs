@@ -139,7 +139,7 @@ impl TryFrom<rpc_proto::SubscribeResponse> for Notification {
 	#[inline]
 	fn try_from(proto: rpc_proto::SubscribeResponse) -> Result<Self, Self::Error> {
 		let notification = proto.notification.ok_or(anyhow::anyhow!("No notification found"))?;
-		Ok(notification.try_into()?)
+		notification.try_into()
 	}
 }
 

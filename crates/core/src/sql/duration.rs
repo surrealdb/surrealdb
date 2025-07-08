@@ -24,8 +24,6 @@ pub(crate) static SECONDS_PER_MINUTE: u64 = 60;
 pub(crate) static NANOSECONDS_PER_MILLISECOND: u32 = 1000000;
 pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
-
 #[revisioned(revision = 1)]
 #[derive(
 	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,

@@ -94,7 +94,7 @@ pub async fn signin(
 			password,
 		} => super::signin::db_user(kvs, session, namespace, database, username, password).await,
 		unexpected => {
-			return Err(anyhow!("Unexpected access type identifier: {:?}", unexpected));
+			Err(anyhow!("Unexpected access type identifier: {unexpected:?}"))
 		}
 	}
 

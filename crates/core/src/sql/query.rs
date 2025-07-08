@@ -18,9 +18,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Deref, DerefMut};
-use std::str;
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

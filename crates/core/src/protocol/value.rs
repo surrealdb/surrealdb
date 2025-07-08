@@ -65,7 +65,7 @@ impl TryFrom<ValueProto> for crate::expr::Value {
 			ValueInner::Geometry(v) => crate::expr::Value::Geometry(v.try_into()?),
 			ValueInner::Bytes(v) => crate::expr::Value::Bytes(v.into()),
 			ValueInner::RecordId(v) => crate::expr::Value::Thing(v.try_into()?),
-			ValueInner::File(v) => crate::expr::Value::File(v.try_into()?),
+			ValueInner::File(v) => crate::expr::Value::File(v.into()),
 		};
 
 		Ok(value)
@@ -99,7 +99,7 @@ impl TryFrom<crate::expr::Value> for ValueProto {
 				nanos: duration.0.subsec_nanos() as i32,
 			}),
 			Value::Datetime(datetime) => ValueInner::Datetime(TimestampProto {
-				seconds: datetime.0.timestamp() as i64,
+				seconds: datetime.0.timestamp(),
 				nanos: datetime.0.timestamp_subsec_nanos() as i32,
 			}),
 			Value::Uuid(uuid) => ValueInner::Uuid(uuid.try_into()?),
@@ -163,7 +163,7 @@ impl From<DurationProto> for crate::expr::Duration {
 impl From<crate::expr::Datetime> for TimestampProto {
 	fn from(datetime: crate::expr::Datetime) -> Self {
 		TimestampProto {
-			seconds: datetime.0.timestamp() as i64,
+			seconds: datetime.0.timestamp(),
 			nanos: datetime.0.timestamp_subsec_nanos() as i32,
 		}
 	}
@@ -362,7 +362,7 @@ impl TryFrom<IdProto> for crate::expr::Id {
 		};
 
 		Ok(match inner {
-			id_proto::Id::Int64(v) => crate::expr::Id::Number(v.into()),
+			id_proto::Id::Int64(v) => crate::expr::Id::Number(v),
 			id_proto::Id::String(v) => crate::expr::Id::String(v),
 			id_proto::Id::Uuid(v) => crate::expr::Id::Uuid(v.try_into()?),
 			id_proto::Id::Array(v) => crate::expr::Id::Array(v.try_into()?),
@@ -377,7 +377,7 @@ impl TryFrom<crate::expr::Id> for IdProto {
 		let inner = match id {
 			crate::expr::Id::Number(v) => id_proto::Id::Int64(v),
 			crate::expr::Id::String(v) => id_proto::Id::String(v),
-			crate::expr::Id::Uuid(v) => id_proto::Id::Uuid(v.0.try_into()?),
+			crate::expr::Id::Uuid(v) => id_proto::Id::Uuid(v.0.into()),
 			crate::expr::Id::Array(v) => id_proto::Id::Array(v.try_into()?),
 			crate::expr::Id::Generate(v) => {
 				return Err(anyhow::anyhow!(

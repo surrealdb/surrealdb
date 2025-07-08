@@ -92,8 +92,8 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
-	#[cfg(storage)]
 	// The temporary directory
+	#[allow(dead_code)]
 	temporary_directory: Option<Arc<PathBuf>>,
 	// Map of bucket connections
 	buckets: Arc<BucketConnections>,
@@ -471,10 +471,18 @@ impl Datastore {
 		self
 	}
 
-	#[cfg(storage)]
+
 	/// Set a temporary directory for ordering of large result sets
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
-		self.temporary_directory = path.map(Arc::new);
+		#[cfg(storage)]
+		{
+			self.temporary_directory = path.map(Arc::new);
+		}
+		#[cfg(not(storage))]
+		if path.is_some() {
+			warn!("Temporary directory is not supported in this build");
+		}
+
 		self
 	}
 

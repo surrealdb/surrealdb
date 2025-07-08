@@ -106,8 +106,8 @@ impl ResponseFormat {
 			Some("text/plain") | Some("application/octet-stream") => Ok(ResponseFormat::Raw),
 			Some("application/json") => Ok(ResponseFormat::Json),
 			Some("application/vnd.surrealdb.flatbuffers") => Ok(ResponseFormat::Ipc),
-			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
-			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
+			Some(_) => Err(Error::ApiError(ApiError::InvalidFormat)),
+			_ => Err(Error::ApiError(ApiError::MissingFormat)),
 		}
 	}
 }

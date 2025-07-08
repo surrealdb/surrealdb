@@ -9,7 +9,6 @@ use crate::rpc::V1Value;
 use anyhow::Context;
 use anyhow::anyhow;
 use chrono::DateTime;
-use chrono::TimeZone;
 use chrono::Utc;
 use revision::{Revisioned, revisioned};
 use serde::Deserialize;
@@ -254,7 +253,7 @@ impl QueryStats {
 		Self {
 			num_records: 0,
 			execution_duration: Utc::now()
-				.signed_duration_since(&start_time)
+				.signed_duration_since(start_time)
 				.to_std()
 				.expect("Duration should not be negative"),
 			start_time,
@@ -296,7 +295,7 @@ impl From<QueryStats> for v1::QueryStats {
 	fn from(stats: QueryStats) -> Self {
 		Self {
 			start_time: Some(prost_types::Timestamp {
-				seconds: stats.start_time.timestamp() as i64,
+				seconds: stats.start_time.timestamp(),
 				nanos: stats.start_time.timestamp_subsec_nanos() as i32,
 			}),
 			execution_duration: Some(prost_types::Duration {

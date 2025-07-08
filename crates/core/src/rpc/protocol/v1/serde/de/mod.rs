@@ -11,7 +11,9 @@ use serde_content::Value as Content;
 use std::borrow::Cow;
 
 impl V1Value {
-	fn into_content(self) -> Result<Content<'static>> {
+	/// Convert the value to a Serde Content representation which allows for using serde to translate
+	/// the value into a different type.
+	pub fn into_content(self) -> Result<Content<'static>> {
 		let serializer = Serializer::new();
 		match self {
 			V1Value::None => Ok(Content::Option(None)),
@@ -61,6 +63,7 @@ impl V1Value {
 }
 
 /// Deserializes a value `T` from `SurrealDB` [`Value`]
+#[expect(dead_code)]
 pub fn from_value<T>(value: V1Value) -> Result<T>
 where
 	T: DeserializeOwned,

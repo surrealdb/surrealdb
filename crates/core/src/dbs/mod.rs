@@ -50,27 +50,41 @@ mod file;
 #[cfg(test)]
 pub(crate) mod test;
 
-const TARGET: &str = "surrealdb_core::dbs";
-
+/// Arguments for the SurrealDB constructor.
 #[derive(Debug, Clone)]
 pub struct SurrealDBArgs {
+	/// The URI of the database to connect to.
 	pub uri: String,
+	/// Whether to run in strict mode.
 	pub strict_mode: bool,
+	/// The maximum duration for a query to run.
 	pub query_timeout: Option<Duration>,
+	/// The maximum duration for a transaction to run.
 	pub transaction_timeout: Option<Duration>,
+	/// Whether to run in unauthenticated mode.
 	pub unauthenticated: bool,
+	/// The capabilities of the database.
 	pub capabilities: Capabilities,
+	/// The temporary directory to use for the database.
 	pub temporary_directory: Option<PathBuf>,
+	/// The file to import into the database.
 	pub import_file: Option<PathBuf>,
+	/// The root user to use for the database.
 	pub root_user: Option<String>,
+	/// The root password to use for the database.
 	pub root_pass: Option<String>,
+	/// The interval at which node membership is refreshed.
 	pub node_membership_refresh_interval: Duration,
+	/// The interval at which node membership is checked.
 	pub node_membership_check_interval: Duration,
+	/// The interval at which node membership is cleaned up.
 	pub node_membership_cleanup_interval: Duration,
+	/// The interval at which the changefeed is garbage collected.
 	pub changefeed_gc_interval: Duration,
 }
 
-/// This is a wrapper around the Datastore. It is in charge of spawning the datastore and managing the lifecycle of the database.
+/// This is a wrapper around the Datastore. It is in charge of spawning the datastore and managing
+/// the lifecycle of the database.
 pub struct SurrealDB {
 	datastore: Arc<Datastore>,
 	cancellation_token: CancellationToken,
@@ -78,6 +92,7 @@ pub struct SurrealDB {
 }
 
 impl SurrealDB {
+	/// Start the SurrealDB server.
 	pub async fn start(
 		SurrealDBArgs {
 			uri,
@@ -112,28 +127,17 @@ impl SurrealDB {
 				"❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌"
 			);
 		}
-		// Warn about the impact of denying all capabilities
-		// if args.capabilities.get_deny_all() {
-		//     warn!(
-		//         "You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied."
-		//     );
-		// }
+
 		// Log the specified server capabilities
 		debug!("Server capabilities: {capabilities}");
 		// Parse and setup the desired kv datastore
-		let mut dbs = Datastore::new(&uri).await?;
-
-		dbs = dbs
+		let dbs = Datastore::new(&uri).await?
 			.with_strict_mode(strict_mode)
 			.with_query_timeout(query_timeout)
 			.with_transaction_timeout(transaction_timeout)
 			.with_auth_enabled(!unauthenticated)
-			.with_capabilities(capabilities);
-
-		#[cfg(storage)]
-		{
-			dbs = dbs.with_temporary_directory(temporary_directory);
-		}
+			.with_capabilities(capabilities)
+			.with_temporary_directory(temporary_directory);
 
 		let ds = Arc::new(dbs);
 
@@ -214,9 +218,16 @@ impl IntoFuture for SurrealDB {
 
 	fn into_future(mut self) -> Self::IntoFuture {
 		Box::pin(async move {
-			while let Some(result) = self.background_tasks.join_next().await {
-				if let Err(err) = result {
-					error!("Background task failed: {:?}", err);
+            loop {
+				tokio::select! {
+					_ = self.cancellation_token.cancelled() => {
+						break;
+					}
+					result = self.background_tasks.join_next() => {
+						if let Some(Err(err)) = result {
+							error!("Background task failed: {:?}", err);
+						}
+					}
 				}
 			}
 			Ok(())

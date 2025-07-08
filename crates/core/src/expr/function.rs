@@ -20,8 +20,6 @@ use std::fmt;
 
 use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
-
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]

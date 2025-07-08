@@ -3,8 +3,6 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Mock";
-
 #[non_exhaustive]
 pub struct IntoIter {
 	model: Mock,

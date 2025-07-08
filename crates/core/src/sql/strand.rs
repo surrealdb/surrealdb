@@ -10,8 +10,6 @@ use std::str;
 use super::escape::QuoteStr;
 use super::value::TryAdd;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
-
 /// A string that doesn't contain NUL bytes.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]

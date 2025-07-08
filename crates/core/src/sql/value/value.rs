@@ -29,8 +29,6 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Bound, Deref};
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -164,13 +162,6 @@ impl SqlValue {
 				end: fields.0.end,
 			})),
 		}))
-	}
-
-	pub(crate) fn get_field_value(&self, name: &str) -> SqlValue {
-		match self {
-			SqlValue::Object(v) => v.get(name).cloned().unwrap_or(SqlValue::None),
-			_ => SqlValue::None,
-		}
 	}
 }
 

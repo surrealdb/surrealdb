@@ -16,8 +16,6 @@ use std::{fmt, hash};
 
 use super::Object;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Geometry")]

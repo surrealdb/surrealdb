@@ -16,7 +16,7 @@ use crate::expr::{
 	id::{Gen, Id},
 	model::Model,
 };
-use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind, from_value};
+use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -25,7 +25,6 @@ use geo::Point;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -193,31 +192,6 @@ where
 		}
 	}
 }
-
-pub trait TryFromValueContent: Sized {
-	fn try_from_value_content(value: Value) -> Result<Self>;
-}
-
-impl<T> TryFromValueContent for T
-where
-	T: DeserializeOwned,
-{
-	fn try_from_value_content(value: Value) -> Result<Self> {
-		from_value(value)
-	}
-}
-
-// impl<T> TryFromValueContent for T
-// where
-// 	T: DeserializeOwned,
-// 	{
-// 	fn try_from_value(value: Value) -> Result<Self> {
-// 		let content = value.into_content()?;
-// 		let deserializer = Deserializer::new(content).coerce_numbers();
-// 		T::deserialize(deserializer).map_err(Into::into)
-
-// 	}
-// }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

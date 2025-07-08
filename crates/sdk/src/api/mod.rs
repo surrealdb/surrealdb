@@ -311,7 +311,7 @@ impl Surreal {
 	) -> Result<Self> {
 		let endpoint = endpoint.try_into().context("Failed to parse endpoint")?;
 		let config = endpoint.config.clone();
-		let features: HashSet<ExtraFeatures> = HashSet::new();
+		let mut features: HashSet<ExtraFeatures> = HashSet::new();
 
 		let endpoint_kind = endpoint.url.scheme().parse::<EndpointKind>()?;
 		match endpoint_kind {
@@ -335,7 +335,7 @@ impl Surreal {
 					let (client, server) = tokio::io::duplex(capacity);
 					let mut client = Some(client);
 					let channel = tonic::transport::Endpoint::try_from(endpoint.url.to_string())?
-						.connect_with_connector(service_fn(move |_: Uri| {
+						.connect_with_connector(tower::service_fn(move |_: http::Uri| {
 							let mut client = client.take();
 							async move {
 								if let Some(client) = client {

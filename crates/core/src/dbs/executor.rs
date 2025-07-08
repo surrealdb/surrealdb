@@ -579,7 +579,7 @@ impl Executor {
 			.map_err(|err| Failure::execution_failed(err.to_string()));
 
 		Ok(vec![QueryResult {
-			stats: QueryStats::from_start_time(started_at.into()),
+			stats: QueryStats::from_start_time(started_at),
 			values,
 		}])
 	}
@@ -635,10 +635,13 @@ impl Executor {
 						.execute_bare_statement(kvs, stmt)
 						.await
 						.map_err(|err| Failure::execution_failed(err.to_string()));
-					this.results.push(QueryResult {
-						stats: QueryStats::from_start_time(started_at),
-						values,
-					});
+
+					if !skip_success_results || values.is_err() {
+						this.results.push(QueryResult {
+							stats: QueryStats::from_start_time(started_at),
+							values,
+						});
+					}
 				}
 			}
 		}

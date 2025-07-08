@@ -73,7 +73,7 @@ impl V1QueryResponse {
 	) -> anyhow::Result<Self> {
 		let values = values.context("Query result is empty")?;
 		let values =
-			values.into_iter().map(|v| V1Value::try_from(v)).collect::<Result<Vec<_>, _>>()?;
+			values.into_iter().map(V1Value::try_from).collect::<Result<Vec<_>, _>>()?;
 		Ok(Self {
 			time: V1Duration(stats.execution_duration),
 			result: Ok(V1Value::Array(V1Array(values))),
@@ -783,7 +783,7 @@ impl TryFrom<String> for V1RecordId {
 	type Error = anyhow::Error;
 
 	fn try_from(value: String) -> Result<Self, Self::Error> {
-		Ok(Self::try_from(value.as_str())?)
+		Self::try_from(value.as_str())
 	}
 }
 

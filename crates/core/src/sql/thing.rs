@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Thing")]

@@ -161,8 +161,6 @@ pub use self::uuid::Uuid;
 pub use self::value::TryFromValue;
 pub use self::value::Value;
 pub use self::value::Values;
-pub use self::value::serde::from_value;
-pub use self::value::serde::to_value;
 pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;

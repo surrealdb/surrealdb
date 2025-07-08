@@ -12,8 +12,8 @@ impl TryFrom<AccessMethod> for rpc_proto::AccessMethod {
 				password,
 			} => Ok(rpc_proto::AccessMethod {
 				method: Some(MethodEnum::Root(rpc_proto::RootUserCredentials {
-					username: username.into(),
-					password: password.into(),
+					username,
+					password,
 				})),
 			}),
 			AccessMethod::NamespaceUser {
@@ -22,9 +22,9 @@ impl TryFrom<AccessMethod> for rpc_proto::AccessMethod {
 				password,
 			} => Ok(rpc_proto::AccessMethod {
 				method: Some(MethodEnum::NamespaceUser(rpc_proto::NamespaceUserCredentials {
-					namespace: namespace.into(),
-					username: username.into(),
-					password: password.into(),
+					namespace,
+					username,
+					password,
 				})),
 			}),
 			AccessMethod::DatabaseUser {
@@ -34,10 +34,10 @@ impl TryFrom<AccessMethod> for rpc_proto::AccessMethod {
 				password,
 			} => Ok(rpc_proto::AccessMethod {
 				method: Some(MethodEnum::DatabaseUser(rpc_proto::DatabaseUserCredentials {
-					namespace: namespace.into(),
-					database: database.into(),
-					username: username.into(),
-					password: password.into(),
+					namespace,
+					database,
+					username,
+					password,
 				})),
 			}),
 			AccessMethod::NamespaceAccess {
@@ -46,9 +46,9 @@ impl TryFrom<AccessMethod> for rpc_proto::AccessMethod {
 				key,
 			} => Ok(rpc_proto::AccessMethod {
 				method: Some(MethodEnum::Namespace(rpc_proto::NamespaceAccessCredentials {
-					namespace: namespace.into(),
-					access: access_name.into(),
-					key: key.into(),
+					namespace,
+					access: access_name,
+					key,
 				})),
 			}),
 			AccessMethod::DatabaseAccess {
@@ -59,10 +59,10 @@ impl TryFrom<AccessMethod> for rpc_proto::AccessMethod {
 				refresh_token,
 			} => Ok(rpc_proto::AccessMethod {
 				method: Some(MethodEnum::Database(rpc_proto::DatabaseAccessCredentials {
-					namespace: namespace.into(),
-					database: database.into(),
-					access: access_name.into(),
-					key: key.into(),
+					namespace,
+					database,
+					access: access_name,
+					key,
 					refresh: refresh_token.unwrap_or_default(),
 				})),
 			}),
@@ -70,7 +70,7 @@ impl TryFrom<AccessMethod> for rpc_proto::AccessMethod {
 				token,
 			} => Ok(rpc_proto::AccessMethod {
 				method: Some(MethodEnum::AccessToken(rpc_proto::AccessToken {
-					token: token.into(),
+					token,
 				})),
 			}),
 		}
@@ -87,34 +87,34 @@ impl TryFrom<rpc_proto::AccessMethod> for AccessMethod {
 		};
 		match method {
 			MethodEnum::Root(credentials) => Ok(AccessMethod::RootUser {
-				username: credentials.username.into(),
-				password: credentials.password.into(),
+				username: credentials.username,
+				password: credentials.password,
 			}),
 			MethodEnum::NamespaceUser(credentials) => Ok(AccessMethod::NamespaceUser {
-				namespace: credentials.namespace.into(),
-				username: credentials.username.into(),
-				password: credentials.password.into(),
+				namespace: credentials.namespace,
+				username: credentials.username,
+				password: credentials.password,
 			}),
 			MethodEnum::DatabaseUser(credentials) => Ok(AccessMethod::DatabaseUser {
-				namespace: credentials.namespace.into(),
-				database: credentials.database.into(),
-				username: credentials.username.into(),
-				password: credentials.password.into(),
+				namespace: credentials.namespace,
+				database: credentials.database,
+				username: credentials.username,
+				password: credentials.password,
 			}),
 			MethodEnum::Namespace(credentials) => Ok(AccessMethod::NamespaceAccess {
-				namespace: credentials.namespace.into(),
-				access_name: credentials.access.into(),
-				key: credentials.key.into(),
+				namespace: credentials.namespace,
+				access_name: credentials.access,
+				key: credentials.key,
 			}),
 			MethodEnum::Database(credentials) => Ok(AccessMethod::DatabaseAccess {
-				namespace: credentials.namespace.into(),
-				database: credentials.database.into(),
-				access_name: credentials.access.into(),
-				key: credentials.key.into(),
-				refresh_token: credentials.refresh.into(),
+				namespace: credentials.namespace,
+				database: credentials.database,
+				access_name: credentials.access,
+				key: credentials.key,
+				refresh_token: Some(credentials.refresh),
 			}),
 			MethodEnum::AccessToken(credentials) => Ok(AccessMethod::AccessToken {
-				token: credentials.token.into(),
+				token: credentials.token,
 			}),
 		}
 	}

@@ -7,7 +7,6 @@ mod response;
 
 pub mod format;
 pub mod request;
-pub(crate) mod statement_options;
 
 pub use context::RpcContext;
 pub use error::RpcError;

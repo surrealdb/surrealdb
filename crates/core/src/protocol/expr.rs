@@ -343,7 +343,7 @@ impl FromFlatbuffers for std::time::Duration {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let seconds = input.seconds();
-		let nanos = input.nanos() as u32;
+		let nanos = input.nanos();
 		Ok(std::time::Duration::new(seconds, nanos))
 	}
 }
@@ -394,7 +394,7 @@ impl FromFlatbuffers for DateTime<Utc> {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let seconds = input.seconds();
-		let nanos = input.nanos() as u32;
+		let nanos = input.nanos();
 		DateTime::<Utc>::from_timestamp(seconds, nanos)
 			.ok_or_else(|| anyhow::anyhow!("Invalid timestamp format"))
 	}
@@ -615,7 +615,7 @@ impl ToFlatbuffers for Object {
 
 			let object_item = proto_fb::KeyValue::create(
 				builder,
-				&&proto_fb::KeyValueArgs {
+				&proto_fb::KeyValueArgs {
 					key: Some(key_fb),
 					value: Some(value_fb),
 				},
@@ -830,7 +830,7 @@ impl FromFlatbuffers for Geometry {
 					.geometry_as_collection()
 					.ok_or_else(|| anyhow::anyhow!("Expected GeometryCollection"))?;
 				let geometries_reader = collection.geometries().context("Geometries is not set")?;
-				let mut geometries = Vec::with_capacity(geometries_reader.len() as usize);
+				let mut geometries = Vec::with_capacity(geometries_reader.len());
 				for geometry in geometries_reader {
 					geometries.push(Geometry::from_fb(geometry)?);
 				}
@@ -1434,8 +1434,8 @@ impl ToFlatbuffers for Recurse {
 				let range_value = proto_fb::RangeSpec::create(
 					builder,
 					&proto_fb::RangeSpecArgs {
-						start: start.clone(),
-						end: end.clone(),
+						start: *start,
+						end: *end,
 					},
 				);
 
@@ -2021,7 +2021,7 @@ impl ToFlatbuffers for Dir {
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
-		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+		_builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
 		match self {
 			Dir::In => proto_fb::GraphDirection::In,
@@ -2236,10 +2236,7 @@ impl ToFlatbuffers for Field {
 				alias,
 			} => {
 				let expr = expr.to_fb(builder);
-				let alias = match alias {
-					Some(a) => Some(a.to_fb(builder)),
-					None => None,
-				};
+				let alias = alias.as_ref().map(|a| a.to_fb(builder));
 				let single_field = proto_fb::SingleField::create(
 					builder,
 					&proto_fb::SingleFieldArgs {
@@ -2270,7 +2267,7 @@ impl FromFlatbuffers for Field {
 				let single_field = input.field_as_single().context("Expected SingleField")?;
 				let expr =
 					Value::from_fb(single_field.expr().context("Missing expr in SingleField")?)?;
-				let alias = single_field.alias().map(|a| Idiom::from_fb(a)).transpose()?;
+				let alias = single_field.alias().map(Idiom::from_fb).transpose()?;
 				Ok(Field::Single {
 					expr,
 					alias,
@@ -2458,7 +2455,7 @@ impl ToFlatbuffers for Operator {
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
-		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+		_builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> Self::Output<'bldr> {
 		match self {
 			Operator::Neg => proto_fb::Operator::Neg,
@@ -2501,8 +2498,6 @@ impl ToFlatbuffers for Operator {
 			Operator::NoneInside => proto_fb::Operator::NoneInside,
 			Operator::Outside => proto_fb::Operator::Outside,
 			Operator::Intersects => proto_fb::Operator::Intersects,
-			Operator::AnyInside => proto_fb::Operator::AnyInside,
-			Operator::NoneInside => proto_fb::Operator::NoneInside,
 			Operator::Knn(_, _) => panic!("KNN operator not supported"),
 			Operator::Ann(_, _) => panic!("ANN operator not supported"),
 			Operator::Matches(_) => panic!("Matches not supported"),
@@ -2765,7 +2760,7 @@ impl FromFlatbuffers for Data {
 				Ok(Data::UpdateExpression(SetMultiExpr::from_fb(params)?))
 			}
 			unexpected => {
-				return Err(anyhow::anyhow!("Unexpected data contents: {:?}", unexpected));
+				Err(anyhow::anyhow!("Unexpected data contents: {unexpected:?}"))
 			}
 		}
 	}
@@ -2962,12 +2957,9 @@ impl TryFrom<Idiom> for proto::Idiom {
 	}
 }
 
-impl TryFrom<prost_types::Duration> for Timeout {
-	type Error = anyhow::Error;
-
-	fn try_from(value: prost_types::Duration) -> Result<Self, Self::Error> {
-		let duration = Duration::try_from(value)?;
-		Ok(Timeout(duration))
+impl From<prost_types::Duration> for Timeout {
+	fn from(value: prost_types::Duration) -> Self {
+		Timeout(Duration::from(value))
 	}
 }
 

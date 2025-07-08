@@ -67,7 +67,7 @@ pub trait RpcContext {
 	async fn execute(
 		&self,
 		version: Option<u8>,
-		txn: Option<Uuid>,
+		_txn: Option<Uuid>,
 		method: Method,
 		params: V1Array,
 	) -> Result<V1Data, RpcError>
@@ -76,7 +76,7 @@ pub trait RpcContext {
 	{
 		match version {
 			Some(1) => RpcProtocolV1::execute(self, method, params).await,
-			_ => return Err(RpcError::Thrown(format!("Unsupported RPC version: {version:?}"))),
+			_ => Err(RpcError::Thrown(format!("Unsupported RPC version: {version:?}"))),
 		}
 	}
 }

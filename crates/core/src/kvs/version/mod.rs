@@ -1,8 +1,6 @@
 use crate::err::Error;
 use anyhow::Result;
 
-mod fixes;
-
 #[derive(Copy, Debug, Clone)]
 pub struct Version(u16);
 

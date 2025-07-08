@@ -27,6 +27,7 @@ const TAG_STRING_DECIMAL: u64 = 10;
 const TAG_CUSTOM_DATETIME: u64 = 12;
 const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
+#[allow(dead_code)]
 const TAG_FUTURE: u64 = 15;
 
 // Ranges (49->51 is unassigned)

@@ -1,7 +1,5 @@
 pub use self::value::*;
 
-pub(super) mod serde;
-
 #[expect(clippy::module_inception)]
 mod value;
 

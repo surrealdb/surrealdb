@@ -16,7 +16,7 @@ use crate::rpc::protocol::v1::types::QueryType;
 use crate::rpc::protocol::v1::types::V1QueryResponse;
 use crate::{
 	dbs::capabilities::MethodTarget,
-	expr::{Object as ExprObject, Value as ExprValue},
+	expr::{Value as ExprValue},
 	rpc::args::Take,
 	sql::{
 		Array as SqlArray, Fields, Function, Model, Output, Query, Strand as SqlStrand,
@@ -813,8 +813,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Specify the query variables
 		let vars = match vars {
-			ExprValue::Object(v) => {
-				let mut v: ExprObject = v.into();
+			ExprValue::Object(mut v) => {
 				Some(Variables(mrg! {v.0, self.session().variables.0}))
 			}
 			ExprValue::None | ExprValue::Null => Some(self.session().variables.clone()),
