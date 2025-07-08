@@ -1,11 +1,11 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use core::fmt;
 use futures::{SinkExt, StreamExt};
 use revision::revisioned;
 use std::{future::Future, path::Path, process::Stdio, time::Duration};
 use surrealdb_core::{
 	dbs::{self, Status},
-	sql::Value,
+	expr::Value,
 };
 use tokio::{
 	io::AsyncReadExt,
@@ -14,15 +14,14 @@ use tokio::{
 	select,
 };
 use tokio_tungstenite::{
-	connect_async,
+	MaybeTlsStream, WebSocketStream, connect_async,
 	tungstenite::{
+		Message,
 		handshake::client::generate_key,
 		http::header::{
 			CONNECTION, HOST, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION,
 		},
-		Message,
 	},
-	MaybeTlsStream, WebSocketStream,
 };
 
 use crate::{
@@ -31,8 +30,8 @@ use crate::{
 };
 
 use super::{
-	protocol::{ProxyObject, ProxyValue},
 	Config,
+	protocol::{ProxyObject, ProxyValue},
 };
 
 #[revisioned(revision = 1)]
@@ -277,23 +276,24 @@ impl SurrealConnection {
 			};
 			let message = message.context("Surrealdb connection error")?;
 
-			let data =
-				match message {
-					Message::Ping(x) => {
-						self.socket.send(Message::Pong(x)).await?;
-						continue;
-					}
-					Message::Text(_) => {
-						bail!("Recieved a text message from the database, expecting only binary messages")
-					}
-					Message::Binary(x) => x,
-					Message::Pong(_) => continue,
-					// Documentation says we don't get this message.
-					Message::Frame(_) => unreachable!(),
-					Message::Close(_) => {
-						bail!("Websocket connection to database closed early")
-					}
-				};
+			let data = match message {
+				Message::Ping(x) => {
+					self.socket.send(Message::Pong(x)).await?;
+					continue;
+				}
+				Message::Text(_) => {
+					bail!(
+						"Recieved a text message from the database, expecting only binary messages"
+					)
+				}
+				Message::Binary(x) => x,
+				Message::Pong(_) => continue,
+				// Documentation says we don't get this message.
+				Message::Frame(_) => unreachable!(),
+				Message::Close(_) => {
+					bail!("Websocket connection to database closed early")
+				}
+			};
 
 			let response = revision::from_slice::<Response>(&data)
 				.context("Failed to deserialize response")?;

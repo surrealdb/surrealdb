@@ -3,18 +3,18 @@ use reblessive::Stk;
 use crate::sql::statements::remove::RemoveSequenceStatement;
 use crate::{
 	sql::{
+		Param,
 		statements::{
-			remove::{RemoveAnalyzerStatement, RemoveBucketStatement},
 			RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
 			RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
 			RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveUserStatement,
+			remove::{RemoveAnalyzerStatement, RemoveBucketStatement},
 		},
-		Param,
 	},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
 			ParseResult, Parser,
+			mac::{expected, unexpected},
 		},
 		token::t,
 	},

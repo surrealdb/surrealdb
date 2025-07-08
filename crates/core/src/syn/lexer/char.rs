@@ -1,7 +1,7 @@
 use crate::syn::{
 	error::syntax_error,
 	lexer::Lexer,
-	token::{t, Token, TokenKind},
+	token::{Token, TokenKind, t},
 };
 
 impl Lexer<'_> {

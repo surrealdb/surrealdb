@@ -1,6 +1,6 @@
 use crate::dbs::node::Timestamp;
-use crate::sql;
-use sql::Duration;
+use crate::expr;
+use expr::Duration;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 #[cfg(not(target_family = "wasm"))]

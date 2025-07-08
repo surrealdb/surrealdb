@@ -10,7 +10,7 @@ mod cli_integration {
 	use common::Format;
 	#[cfg(unix)]
 	use common::Socket;
-	use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+	use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 	use serde::{Deserialize, Serialize};
 	#[cfg(unix)]
 	use serde_json::json;
@@ -24,7 +24,7 @@ mod cli_integration {
 	use tracing::info;
 	use ulid::Ulid;
 
-	use super::common::{self, StartServerArguments, PASS, USER};
+	use super::common::{self, PASS, StartServerArguments, USER};
 
 	#[test]
 	fn version_command() {
@@ -101,7 +101,9 @@ mod cli_integration {
 
 		info!("* Export to stdout");
 		{
-			let args = format!("export --conn http://{addr} {creds} --ns {ns} --db {db} - --only --tables thing --records");
+			let args = format!(
+				"export --conn http://{addr} {creds} --ns {ns} --db {db} - --only --tables thing --records"
+			);
 			let output = common::run(&args)
 				.output()
 				.unwrap_or_else(|_| panic!("failed to run stdout export: {args}"));
@@ -913,7 +915,9 @@ mod cli_integration {
 			));
 			// Modify the resource that was imported.
 			common::run(&args)
-				.input("DEFINE ACCESS OVERWRITE admin ON ROOT TYPE JWT URL 'https://www.example.com/jwks.json'")
+				.input(
+					"DEFINE ACCESS OVERWRITE admin ON ROOT TYPE JWT URL 'https://www.example.com/jwks.json'",
+				)
 				.output()
 				.expect("success");
 			// Verify that the resource has been modified correctly.
@@ -955,8 +959,9 @@ mod cli_integration {
 				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
 			let output = common::run(&args).input("INFO FOR NAMESPACE").output().expect("success");
 			assert!(output.contains(r#"DEFINE USER test ON NAMESPACE PASSHASH"#));
-			let args =
-				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns} --database {db}");
+			let args = format!(
+				"sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns} --database {db}"
+			);
 			let output = common::run(&args).input("SELECT * FROM user").output().expect("success");
 			assert!(output.contains(r#"{ id: user:1 }"#));
 			server.finish().unwrap();
@@ -1059,17 +1064,17 @@ mod cli_integration {
 				.unwrap();
 			let output = remove_debug_info(output).replace('\n', "");
 			let allowed = [
-					// Delete these
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
-					// Keep these
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-					"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
-				];
+				// Delete these
+				"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
+				"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+				"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+				"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
+				// Keep these
+				"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
+				"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+				"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+				"[[{ changes: [{ define_table: { name: 'thing' } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
+			];
 			allowed
 				.into_iter()
 				.find(|case| {
@@ -1374,7 +1379,9 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		info!("* When capabilities are denied globally, but a function family is allowed specifically");
+		info!(
+			"* When capabilities are denied globally, but a function family is allowed specifically"
+		);
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-all --allow-funcs string::len".to_owned(),
@@ -1419,7 +1426,9 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		info!("* When capabilities are allowed globally, but a function family is denied specifically");
+		info!(
+			"* When capabilities are allowed globally, but a function family is denied specifically"
+		);
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--allow-all --deny-funcs string::lowercase".to_owned(),
@@ -1503,7 +1512,9 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		info!("* When functions are both allowed and denied specifically but denies are more specific");
+		info!(
+			"* When functions are both allowed and denied specifically but denies are more specific"
+		);
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--allow-funcs string --deny-funcs string::lowercase".to_owned(),
@@ -1531,7 +1542,9 @@ mod cli_integration {
 			server.finish().unwrap();
 		}
 
-		info!("* When functions are both allowed and denied specifically but allows are more specific");
+		info!(
+			"* When functions are both allowed and denied specifically but allows are more specific"
+		);
 		{
 			let (addr, mut server) = common::start_server(StartServerArguments {
 				args: "--deny-funcs string --allow-funcs string::lowercase".to_owned(),

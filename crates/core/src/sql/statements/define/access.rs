@@ -1,13 +1,7 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{access::AccessDuration, AccessType, Base, Ident, Strand, Value};
+use crate::sql::{AccessType, Base, Ident, SqlValue, Strand, access::AccessDuration};
 
-use rand::distributions::Alphanumeric;
 use rand::Rng;
+use rand::distributions::Alphanumeric;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -21,7 +15,7 @@ pub struct DefineAccessStatement {
 	pub base: Base,
 	pub kind: AccessType,
 	#[revision(start = 2)]
-	pub authenticate: Option<Value>,
+	pub authenticate: Option<SqlValue>,
 	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
 	pub if_not_exists: bool,
@@ -54,124 +48,6 @@ impl DefineAccessStatement {
 			}
 		};
 		das
-	}
-}
-
-impl DefineAccessStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
-		// Check the statement type
-		match &self.base {
-			Base::Root => {
-				// Fetch the transaction
-				let txn = ctx.tx();
-				// Check if access method already exists
-				if txn.get_root_access(&self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite {
-						return Err(Error::AccessRootAlreadyExists {
-							ac: self.name.to_string(),
-						});
-					}
-				}
-				// Process the statement
-				let key = crate::key::root::ac::new(&self.name);
-				txn.set(
-					key,
-					revision::to_vec(&DefineAccessStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
-						..self.clone()
-					})?,
-					None,
-				)
-				.await?;
-				// Clear the cache
-				txn.clear();
-				// Ok all good
-				Ok(Value::None)
-			}
-			Base::Ns => {
-				// Fetch the transaction
-				let txn = ctx.tx();
-				// Check if the definition exists
-				if txn.get_ns_access(opt.ns()?, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite {
-						return Err(Error::AccessNsAlreadyExists {
-							ac: self.name.to_string(),
-							ns: opt.ns()?.into(),
-						});
-					}
-				}
-				// Process the statement
-				let key = crate::key::namespace::ac::new(opt.ns()?, &self.name);
-				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-				txn.set(
-					key,
-					revision::to_vec(&DefineAccessStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
-						..self.clone()
-					})?,
-					None,
-				)
-				.await?;
-				// Clear the cache
-				txn.clear();
-				// Ok all good
-				Ok(Value::None)
-			}
-			Base::Db => {
-				// Fetch the transaction
-				let txn = ctx.tx();
-				// Check if the definition exists
-				let (ns, db) = opt.ns_db()?;
-				if txn.get_db_access(ns, db, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite {
-						return Err(Error::AccessDbAlreadyExists {
-							ac: self.name.to_string(),
-							ns: ns.into(),
-							db: db.into(),
-						});
-					}
-				}
-				// Process the statement
-				let key = crate::key::database::ac::new(ns, db, &self.name);
-				txn.get_or_add_ns(ns, opt.strict).await?;
-				txn.get_or_add_db(ns, db, opt.strict).await?;
-				txn.set(
-					key,
-					revision::to_vec(&DefineAccessStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
-						..self.clone()
-					})?,
-					None,
-				)
-				.await?;
-				// Clear the cache
-				txn.clear();
-				// Ok all good
-				Ok(Value::None)
-			}
-			// Other levels are not supported
-			_ => Err(Error::InvalidLevel(self.base.to_string())),
-		}
 	}
 }
 
@@ -229,19 +105,32 @@ impl Display for DefineAccessStatement {
 	}
 }
 
-impl InfoStructure for DefineAccessStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"base".to_string() => self.base.structure(),
-			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
-			"duration".to_string() => Value::from(map!{
-				"session".to_string() => self.duration.session.into(),
-				"grant".to_string(), if self.kind.can_issue_grants() => self.duration.grant.into(),
-				"token".to_string(), if self.kind.can_issue_tokens() => self.duration.token.into(),
-			}),
-			"kind".to_string() => self.kind.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatement {
+	fn from(v: DefineAccessStatement) -> Self {
+		crate::expr::statements::DefineAccessStatement {
+			name: v.name.into(),
+			base: v.base.into(),
+			kind: v.kind.into(),
+			authenticate: v.authenticate.map(Into::into),
+			duration: v.duration.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatement {
+	fn from(v: crate::expr::statements::DefineAccessStatement) -> Self {
+		DefineAccessStatement {
+			name: v.name.into(),
+			base: v.base.into(),
+			kind: v.kind.into(),
+			authenticate: v.authenticate.map(Into::into),
+			duration: v.duration.into(),
+			comment: v.comment.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
 	}
 }

@@ -17,19 +17,6 @@ pub struct File {
 }
 
 impl File {
-	pub(crate) fn new(bucket: String, key: String) -> Self {
-		let key = if key.starts_with("/") {
-			key
-		} else {
-			format!("/{key}")
-		};
-
-		Self {
-			bucket,
-			key,
-		}
-	}
-
 	/// Check if this File belongs to a certain bucket type
 	pub fn is_bucket_type(&self, types: &[Ident]) -> bool {
 		types.is_empty() || types.iter().any(|buc| buc.0 == self.bucket)
@@ -59,4 +46,21 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 			}
 		})
 		.collect::<String>()
+}
+
+impl From<File> for crate::expr::File {
+	fn from(v: File) -> Self {
+		Self {
+			bucket: v.bucket,
+			key: v.key,
+		}
+	}
+}
+impl From<crate::expr::File> for File {
+	fn from(v: crate::expr::File) -> Self {
+		Self {
+			bucket: v.bucket,
+			key: v.key,
+		}
+	}
 }

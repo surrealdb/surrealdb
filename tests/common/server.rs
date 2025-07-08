@@ -1,7 +1,7 @@
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use rcgen::CertifiedKey;
-use std::collections::btree_set::Iter;
 use std::collections::HashMap;
+use std::collections::btree_set::Iter;
 use std::error::Error;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -297,7 +297,9 @@ pub async fn start_server(
 		let port: u16 = rng.gen_range(13000..24000);
 		let addr = format!("127.0.0.1:{port}");
 
-		let start_args = format!("start --bind {addr} {path} --no-banner --log trace --user {USER} --pass {PASS} {extra_args}");
+		let start_args = format!(
+			"start --bind {addr} {path} --no-banner --log trace --user {USER} --pass {PASS} {extra_args}"
+		);
 
 		info!("starting server with args: {start_args}");
 

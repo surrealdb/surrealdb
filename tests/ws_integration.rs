@@ -23,7 +23,7 @@ mod ws_integration {
 }
 
 use assert_fs::TempDir;
-use common::{Format, Socket, StartServerArguments, DB, NS, PASS, USER};
+use common::{DB, Format, NS, PASS, Socket, StartServerArguments, USER};
 use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 use std::future::Future;
@@ -2295,7 +2295,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 macro_rules! define_include_tests {
 	( $( $( #[$m:meta] )* $test_name:ident),* $(,)? ) => {
 		macro_rules! include_tests {
-			($server:expr, $format:expr) => {
+			($server:expr_2021, $format:expr_2021) => {
 				$(
 					$(#[$m])*
 					async fn $test_name(){

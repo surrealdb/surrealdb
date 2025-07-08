@@ -1,10 +1,11 @@
 mod helpers;
 mod parse;
 use helpers::Test;
+use surrealdb::Result;
 use surrealdb::{err::Error, syn::error::RenderedError};
 
 #[tokio::test]
-async fn idiom_chain_part_optional() -> Result<(), Error> {
+async fn idiom_chain_part_optional() -> Result<()> {
 	let sql = r#"
 		{}.prop.is_bool();
 		{}.prop?.is_bool();
@@ -14,7 +15,7 @@ async fn idiom_chain_part_optional() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_index_expression() -> Result<(), Error> {
+async fn idiom_index_expression() -> Result<()> {
 	let sql = r#"
 		[1,2,3,4][1 + 1];
 	"#;
@@ -23,7 +24,7 @@ async fn idiom_index_expression() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_index_call() -> Result<(), Error> {
+async fn idiom_index_call() -> Result<()> {
 	let sql = r#"
 		DEFINE FUNCTION fn::foo() {
 			return 1 + 1;
@@ -35,7 +36,7 @@ async fn idiom_index_call() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_index_range() -> Result<(), Error> {
+async fn idiom_index_range() -> Result<()> {
 	let sql = r#"
 		[1,2,3,4][1..2];
 		[1,2,3,4][1..=2];
@@ -58,7 +59,7 @@ async fn idiom_index_range() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_array_nested_prop_continues_as_array() -> Result<(), Error> {
+async fn idiom_array_nested_prop_continues_as_array() -> Result<()> {
 	let sql = r#"
     	[{x:2}].x[0];
     	[{x:2}].x.at(0);
@@ -68,7 +69,7 @@ async fn idiom_array_nested_prop_continues_as_array() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_select_all_from_nested_array_prop() -> Result<(), Error> {
+async fn idiom_select_all_from_nested_array_prop() -> Result<()> {
 	let sql = r#"
     	CREATE a:1, a:2;
         RELATE a:1->edge:1->a:2;
@@ -85,7 +86,7 @@ async fn idiom_select_all_from_nested_array_prop() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_graph_with_filter_should_be_flattened() -> Result<(), Error> {
+async fn idiom_graph_with_filter_should_be_flattened() -> Result<()> {
 	let sql = r#"
     	CREATE person:1, person:2, person:3;
 		RELATE person:1->likes:1->person:2;
@@ -118,7 +119,7 @@ async fn idiom_graph_with_filter_should_be_flattened() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_optional_after_value_should_pass_through() -> Result<(), Error> {
+async fn idiom_optional_after_value_should_pass_through() -> Result<()> {
 	let sql = r#"
 		none?;
 		null?;
@@ -171,7 +172,7 @@ async fn idiom_optional_after_value_should_pass_through() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_recursion_graph() -> Result<(), Error> {
+async fn idiom_recursion_graph() -> Result<()> {
 	let sql = r#"
 		INSERT INTO person [
 			{ id: person:tobie, name: 'Tobie' },
@@ -307,7 +308,7 @@ async fn idiom_recursion_graph() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_recursion_record_links() -> Result<(), Error> {
+async fn idiom_recursion_record_links() -> Result<()> {
 	let sql = r#"
 		INSERT [
 			{ id: planet:earth, 		name: 'Earth', 				contains: [country:us, country:canada] },
@@ -816,7 +817,7 @@ async fn idiom_recursion_record_links() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_recursion_path_elimination() -> Result<(), Error> {
+async fn idiom_recursion_path_elimination() -> Result<()> {
 	let sql = r#"
 		INSERT [
 			{ id: a:1, name: 'One',   links: [a:2, a:3] },
@@ -880,7 +881,7 @@ async fn idiom_recursion_path_elimination() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_recursion_repeat_recurse_nested_destructure() -> Result<(), Error> {
+async fn idiom_recursion_repeat_recurse_nested_destructure() -> Result<()> {
 	let sql = r#"
 		INSERT [
 			{ id: a:1, name: 'One',   links: { a: [a:2, a:3] } },
@@ -958,7 +959,7 @@ async fn idiom_recursion_repeat_recurse_nested_destructure() -> Result<(), Error
 }
 
 #[tokio::test]
-async fn idiom_recursion_limits() -> Result<(), Error> {
+async fn idiom_recursion_limits() -> Result<()> {
 	let sql = r#"
 		FOR $i IN 1..=300 {
 			UPSERT type::thing('a', $i) SET link = type::thing('a', $i + 1);
@@ -985,7 +986,7 @@ async fn idiom_recursion_limits() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_object_dot_star() -> Result<(), Error> {
+async fn idiom_object_dot_star() -> Result<()> {
 	let sql = r#"
 		{ a: 1, b: 2 }.*;
 
@@ -1028,12 +1029,14 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 		.expect_val("[1, 2]")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
-		.expect_error("Couldn't coerce value for field `obj[*]` of `test:1`: Expected `number` but found `'a'`")?
+		.expect_error(
+			"Couldn't coerce value for field `obj[*]` of `test:1`: Expected `number` but found `'a'`",
+		)?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
 		.expect_val("NONE")?
 		.expect_error(
-			"Couldn't coerce value for field `emails.address` of `user:1`: Expected `string` but found `9`"
+			"Couldn't coerce value for field `emails.address` of `user:1`: Expected `string` but found `9`",
 		)?
 		.expect_val(
 			"[
@@ -1125,7 +1128,7 @@ async fn idiom_object_dot_star() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_function_argument_computation() -> Result<(), Error> {
+async fn idiom_function_argument_computation() -> Result<()> {
 	let sql = r#"
 		LET $str = "abc";
 		"abcdef".starts_with($str);
@@ -1154,7 +1157,7 @@ async fn idiom_function_argument_computation() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_recursion_shortest_path() -> Result<(), Error> {
+async fn idiom_recursion_shortest_path() -> Result<()> {
 	let sql = r#"
 		INSERT [
 			{ id: a:1, links: [a:2, a:4] },
@@ -1200,8 +1203,8 @@ async fn idiom_recursion_shortest_path() -> Result<(), Error> {
 macro_rules! expect_parse_error {
 	($query:expr, $error:expr) => {{
 		let res = Test::new($query).await;
-		match res {
-			Err(Error::InvalidQuery(RenderedError {
+		match res.unwrap_err().downcast() {
+			Ok(Error::InvalidQuery(RenderedError {
 				errors,
 				..
 			})) => match errors.first() {
@@ -1214,7 +1217,7 @@ macro_rules! expect_parse_error {
 }
 
 #[tokio::test]
-async fn idiom_recursion_invalid_instruction() -> Result<(), Error> {
+async fn idiom_recursion_invalid_instruction() -> Result<()> {
 	expect_parse_error!(
 		"a:1.{..+invalid}",
 		"Unexpected instruction `invalid` expected `path`, `collect` or `shortest`"
@@ -1232,7 +1235,7 @@ async fn idiom_recursion_invalid_instruction() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn idiom_recursion_instruction_plan_conflict() -> Result<(), Error> {
+async fn idiom_recursion_instruction_plan_conflict() -> Result<()> {
 	let sql = r#"
 		a:1.{..+path}.{ id, links: links.@ };
 	"#;

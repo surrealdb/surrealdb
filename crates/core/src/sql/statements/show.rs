@@ -1,9 +1,4 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::{Base, Datetime, Table, Value};
+use crate::sql::{Datetime, Table};
 use crate::vs::VersionStamp;
 
 use revision::revisioned;
@@ -32,6 +27,26 @@ impl ShowSince {
 	}
 }
 
+impl From<ShowSince> for crate::expr::statements::show::ShowSince {
+	fn from(v: ShowSince) -> Self {
+		match v {
+			ShowSince::Timestamp(v) => Self::Timestamp(v.into()),
+			ShowSince::Versionstamp(v) => Self::Versionstamp(v),
+		}
+	}
+}
+
+impl From<crate::expr::statements::show::ShowSince> for ShowSince {
+	fn from(v: crate::expr::statements::show::ShowSince) -> Self {
+		match v {
+			crate::expr::statements::show::ShowSince::Timestamp(v) => {
+				ShowSince::Timestamp(v.into())
+			}
+			crate::expr::statements::show::ShowSince::Versionstamp(v) => ShowSince::Versionstamp(v),
+		}
+	}
+}
+
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -41,35 +56,6 @@ pub struct ShowStatement {
 	pub table: Option<Table>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
-}
-
-impl ShowStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::View, ResourceKind::Table, &Base::Db)?;
-		// Get the transaction
-		let txn = ctx.tx();
-		// Process the show query
-		let (ns, db) = opt.ns_db()?;
-		let r = crate::cf::read(
-			&txn,
-			ns,
-			db,
-			self.table.as_deref().map(String::as_str),
-			self.since.clone(),
-			self.limit,
-		)
-		.await?;
-		// Return the changes
-		let a: Vec<Value> = r.iter().cloned().map(|x| x.into_value()).collect();
-		Ok(a.into())
-	}
 }
 
 impl fmt::Display for ShowStatement {
@@ -87,5 +73,25 @@ impl fmt::Display for ShowStatement {
 			write!(f, " LIMIT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl From<ShowStatement> for crate::expr::statements::ShowStatement {
+	fn from(v: ShowStatement) -> Self {
+		crate::expr::statements::ShowStatement {
+			table: v.table.map(Into::into),
+			since: v.since.into(),
+			limit: v.limit,
+		}
+	}
+}
+
+impl From<crate::expr::statements::ShowStatement> for ShowStatement {
+	fn from(v: crate::expr::statements::ShowStatement) -> Self {
+		ShowStatement {
+			table: v.table.map(Into::into),
+			since: v.since.into(),
+			limit: v.limit,
+		}
 	}
 }

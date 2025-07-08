@@ -6,7 +6,7 @@
   features = with util.features;
     [ default storage-tikv ]
     ++ pkgs.lib.lists.optional (util.fdbSupported pkgs.fdbPackages)
-    [ storage-fdb-7_1 ];
+    [ storage-fdb-7_3 ];
 
   buildSpec = with pkgs;
     let crossCompiling = !util.isNative target;

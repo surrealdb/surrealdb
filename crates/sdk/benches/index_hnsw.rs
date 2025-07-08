@@ -1,20 +1,20 @@
 use criterion::measurement::WallTime;
-use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion, Throughput};
+use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use flate2::read::GzDecoder;
 use reblessive::TreeStack;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
-use surrealdb::sql::index::Distance;
+use surrealdb::expr::index::Distance;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::expr::index::{HnswParams, VectorType};
+use surrealdb_core::expr::{Array, Id, Number, Thing, Value, value};
+use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};
 use surrealdb_core::idx::trees::hnsw::index::HnswIndex;
-use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::kvs::LockType::Optimistic;
 use surrealdb_core::kvs::TransactionType::{Read, Write};
 use surrealdb_core::kvs::{Datastore, Transaction};
-use surrealdb_core::sql::index::{HnswParams, VectorType};
-use surrealdb_core::sql::{value, Array, Id, Number, Thing, Value};
 use tokio::runtime::{Builder, Runtime};
 
 const EF_CONSTRUCTION: u16 = 150;
@@ -197,7 +197,9 @@ fn convert_array_to_vec_number(a: Array) -> Vec<Number> {
 async fn init_datastore(session: &Session, with_index: bool) -> Datastore {
 	let ds = Datastore::new("memory").await.unwrap();
 	if with_index {
-		let sql = format!("DEFINE INDEX ix ON e FIELDS r HNSW DIMENSION {DIMENSION} DIST EUCLIDEAN TYPE F32 EFC {EF_CONSTRUCTION} M {M};");
+		let sql = format!(
+			"DEFINE INDEX ix ON e FIELDS r HNSW DIMENSION {DIMENSION} DIST EUCLIDEAN TYPE F32 EFC {EF_CONSTRUCTION} M {M};"
+		);
 		ds.execute(&sql, session, None).await.expect(&sql);
 	}
 	ds

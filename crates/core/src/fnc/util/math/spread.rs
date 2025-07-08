@@ -1,4 +1,4 @@
-use crate::sql::number::Number;
+use crate::expr::number::Number;
 
 pub trait Spread {
 	/// Gets the extent to which a distribution is stretched

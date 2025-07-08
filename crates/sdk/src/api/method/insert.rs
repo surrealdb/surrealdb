@@ -1,19 +1,21 @@
+use super::transaction::WithTransaction;
+use crate::Surreal;
+use crate::Value;
+use crate::api::Connection;
+use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::method::Content;
 use crate::api::opt::Resource;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::method::OnceLockExt;
-use crate::Surreal;
-use crate::Value;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{to_value as to_core_value, Object as CoreObject, Value as CoreValue};
+use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
+use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
 use super::validate_data;
@@ -22,9 +24,20 @@ use super::validate_data;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Insert<'r, C: Connection, R> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) response_type: PhantomData<R>,
+}
+
+impl<C, R> WithTransaction for Insert<'_, C, R>
+where
+	C: Connection,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 impl<C, R> Insert<'_, C, R>
@@ -44,6 +57,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Insert {
+				txn,
 				client,
 				resource,
 				..
@@ -68,6 +82,7 @@ macro_rules! into_future {
 					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
 				};
 				let cmd = Command::Insert {
+					txn,
 					what: Some(table.to_string()),
 					data: data.into(),
 				};
@@ -121,11 +136,15 @@ where
 	where
 		D: Serialize + 'static,
 	{
-		Content::from_closure(self.client, || {
+		Content::from_closure(self.client, self.txn, || {
 			let mut data = to_core_value(data)?;
-			validate_data(&data, "Tried to insert non-object-like data as content, only structs and objects are supported")?;
+			validate_data(
+				&data,
+				"Tried to insert non-object-like data as content, only structs and objects are supported",
+			)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::Insert {
+					txn: self.txn,
 					what: Some(table),
 					data,
 				}),
@@ -142,6 +161,7 @@ where
 						}
 
 						Ok(Command::Insert {
+							txn: self.txn,
 							what: Some(thing.tb),
 							data,
 						})
@@ -152,6 +172,7 @@ where
 				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
 				Resource::Range(_) => Err(Error::InsertOnRange.into()),
 				Resource::Unspecified => Ok(Command::Insert {
+					txn: self.txn,
 					what: None,
 					data,
 				}),
@@ -172,9 +193,13 @@ where
 	{
 		InsertRelation::from_closure(self.client, || {
 			let mut data = to_core_value(data)?;
-			validate_data(&data, "Tried to insert non-object-like data as relation data, only structs and objects are supported")?;
+			validate_data(
+				&data,
+				"Tried to insert non-object-like data as relation data, only structs and objects are supported",
+			)?;
 			match self.resource? {
 				Resource::Table(table) => Ok(Command::InsertRelation {
+					txn: self.txn,
 					what: Some(table),
 					data,
 				}),
@@ -191,12 +216,14 @@ where
 						}
 
 						Ok(Command::InsertRelation {
+							txn: self.txn,
 							what: Some(thing.tb),
 							data,
 						})
 					}
 				}
 				Resource::Unspecified => Ok(Command::InsertRelation {
+					txn: self.txn,
 					what: None,
 					data,
 				}),

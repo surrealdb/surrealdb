@@ -1,6 +1,6 @@
 use js::{
-	module::{Declarations, Exports, ModuleDef},
 	Result,
+	module::{Declarations, Exports, ModuleDef},
 };
 
 /// Get the target system architecture

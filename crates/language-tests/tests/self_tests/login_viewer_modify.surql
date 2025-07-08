@@ -1,6 +1,6 @@
 /**
 [env]
-login = { role = "viewer", level = "root" }
+auth = { level = "viewer" }
 
 [test]
 

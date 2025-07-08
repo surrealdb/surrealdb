@@ -1,4 +1,4 @@
-use crate::sql::{escape::EscapeIdent, Id, Thing};
+use crate::sql::{Id, Thing, escape::EscapeIdent};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -75,6 +75,24 @@ impl fmt::Display for Mock {
 			Mock::Range(tb, b, e) => {
 				write!(f, "|{}:{}..{}|", EscapeIdent(tb), b, e)
 			}
+		}
+	}
+}
+
+impl From<Mock> for crate::expr::Mock {
+	fn from(v: Mock) -> Self {
+		match v {
+			Mock::Count(tb, c) => crate::expr::Mock::Count(tb, c),
+			Mock::Range(tb, b, e) => crate::expr::Mock::Range(tb, b, e),
+		}
+	}
+}
+
+impl From<crate::expr::Mock> for Mock {
+	fn from(v: crate::expr::Mock) -> Self {
+		match v {
+			crate::expr::Mock::Count(tb, c) => Mock::Count(tb, c),
+			crate::expr::Mock::Range(tb, b, e) => Mock::Range(tb, b, e),
 		}
 	}
 }

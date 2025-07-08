@@ -2,12 +2,12 @@ mod helpers;
 mod parse;
 use std::time::{Duration, Instant};
 
-use helpers::{new_ds, Test};
-use surrealdb::err::Error;
+use helpers::{Test, new_ds};
+use surrealdb::Result;
 use surrealdb_core::dbs::Session;
 
 #[tokio::test]
-async fn statement_timeouts() -> Result<(), Error> {
+async fn statement_timeouts() -> Result<()> {
 	let sql = "
 		CREATE ONLY person:ok CONTENT { test: true };
 		CREATE person:test CONTENT { test: true } TIMEOUT 0s;
@@ -36,7 +36,7 @@ async fn statement_timeouts() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn query_timeout() -> Result<(), Error> {
+async fn query_timeout() -> Result<()> {
 	let sql = "
 		FOR $i in 0..1000000000{
 			FOR $i in 0..1000000000{

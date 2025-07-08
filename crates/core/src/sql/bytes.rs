@@ -2,8 +2,8 @@ use hex;
 use revision::revisioned;
 use serde::de::SeqAccess;
 use serde::{
-	de::{self, Visitor},
 	Deserialize, Serialize,
+	de::{self, Visitor},
 };
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
@@ -29,6 +29,18 @@ impl From<Vec<u8>> for Bytes {
 impl From<Bytes> for Vec<u8> {
 	fn from(val: Bytes) -> Self {
 		val.0
+	}
+}
+
+impl From<Bytes> for crate::expr::Bytes {
+	fn from(v: Bytes) -> Self {
+		crate::expr::Bytes(v.0)
+	}
+}
+
+impl From<crate::expr::Bytes> for Bytes {
+	fn from(v: crate::expr::Bytes) -> Self {
+		Bytes(v.0)
 	}
 }
 
@@ -102,11 +114,11 @@ impl<'de> Deserialize<'de> for Bytes {
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::{Bytes, Value};
+	use crate::sql::{Bytes, SqlValue};
 
 	#[test]
 	fn serialize() {
-		let val = Value::Bytes(Bytes(vec![1, 2, 3, 5]));
+		let val = SqlValue::Bytes(Bytes(vec![1, 2, 3, 5]));
 		let serialized: Vec<u8> = revision::to_vec(&val).unwrap();
 		println!("{serialized:?}");
 		let deserialized = revision::from_slice(&serialized).unwrap();

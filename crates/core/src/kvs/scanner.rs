@@ -1,21 +1,22 @@
-use super::tx::Transaction;
 use super::Key;
 use super::Val;
+use super::tx::Transaction;
 use crate::err::Error;
 use crate::idx::planner::ScanDirection;
-use futures::stream::Stream;
+use anyhow::Result;
 use futures::Future;
 use futures::FutureExt;
+use futures::stream::Stream;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 #[cfg(not(target_family = "wasm"))]
-type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a + Send>>;
+type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>>> + 'a + Send>>;
 
 #[cfg(target_family = "wasm")]
-type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>, Error>> + 'a>>;
+type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>>> + 'a>>;
 
 pub(super) struct Scanner<'a, I> {
 	/// The store which started this range scan
@@ -60,12 +61,7 @@ impl<'a, I> Scanner<'a, I> {
 		}
 	}
 
-	fn next_poll<S, K>(
-		&mut self,
-		cx: &mut Context,
-		scan: S,
-		key: K,
-	) -> Poll<Option<Result<I, Error>>>
+	fn next_poll<S, K>(&mut self, cx: &mut Context, scan: S, key: K) -> Poll<Option<Result<I>>>
 	where
 		S: Fn(Range<Key>, u32) -> FutureResult<'a, I>,
 		K: Fn(&I) -> &Key,
@@ -116,7 +112,9 @@ impl<'a, I> Scanner<'a, I> {
 							}
 							// Get the last element of the results
 							let last = v.last().ok_or_else(|| {
-								fail!("Expected the last key-value pair to not be none")
+								Error::unreachable(
+									"Expected the last key-value pair to not be none",
+								)
 							})?;
 							match self.sc {
 								ScanDirection::Forward => {
@@ -150,11 +148,8 @@ impl<'a, I> Scanner<'a, I> {
 }
 
 impl Stream for Scanner<'_, (Key, Val)> {
-	type Item = Result<(Key, Val), Error>;
-	fn poll_next(
-		mut self: Pin<&mut Self>,
-		cx: &mut Context,
-	) -> Poll<Option<Result<(Key, Val), Error>>> {
+	type Item = Result<(Key, Val)>;
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<(Key, Val)>>> {
 		let (store, version) = (self.store, self.version);
 		match self.sc {
 			ScanDirection::Forward => self.next_poll(
@@ -173,8 +168,8 @@ impl Stream for Scanner<'_, (Key, Val)> {
 }
 
 impl Stream for Scanner<'_, Key> {
-	type Item = Result<Key, Error>;
-	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<Key, Error>>> {
+	type Item = Result<Key>;
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<Key>>> {
 		let (store, version) = (self.store, self.version);
 		match self.sc {
 			ScanDirection::Forward => self.next_poll(

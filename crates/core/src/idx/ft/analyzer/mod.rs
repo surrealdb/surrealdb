@@ -1,6 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::statements::DefineAnalyzerStatement;
+use crate::expr::{FlowResultExt as _, Value};
+use crate::expr::{Function, Strand};
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::doclength::DocLength;
@@ -8,9 +11,7 @@ use crate::idx::ft::offsets::{Offset, OffsetRecords};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, TermLen, Terms};
 use crate::idx::trees::store::IndexStores;
-use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::{FlowResultExt as _, Value};
-use crate::sql::{Function, Strand};
+use anyhow::{Result, bail};
 use filter::Filter;
 use reblessive::tree::Stk;
 use std::collections::hash_map::Entry;
@@ -51,7 +52,7 @@ impl TermsSet {
 }
 
 impl Analyzer {
-	pub(crate) fn new(ixs: &IndexStores, az: Arc<DefineAnalyzerStatement>) -> Result<Self, Error> {
+	pub(crate) fn new(ixs: &IndexStores, az: Arc<DefineAnalyzerStatement>) -> Result<Self> {
 		Ok(Self {
 			filters: Arc::new(Filter::try_from(ixs, &az.filters)?),
 			az,
@@ -65,7 +66,7 @@ impl Analyzer {
 		opt: &Options,
 		t: &Terms,
 		content: String,
-	) -> Result<(TermsList, TermsSet), Error> {
+	) -> Result<(TermsList, TermsSet)> {
 		let tokens = self.generate_tokens(stk, ctx, opt, FilteringStage::Querying, content).await?;
 		// We extract the term ids
 		let mut list = Vec::with_capacity(tokens.list().len());
@@ -103,7 +104,7 @@ impl Analyzer {
 		opt: &Options,
 		t: &Terms,
 		content: Value,
-	) -> Result<TermsSet, Error> {
+	) -> Result<TermsSet> {
 		let mut tv = Vec::new();
 		self.analyze_value(stk, ctx, opt, content, FilteringStage::Indexing, &mut tv).await?;
 		let mut set = HashSet::new();
@@ -134,7 +135,7 @@ impl Analyzer {
 		opt: &Options,
 		terms: &mut Terms,
 		field_content: Vec<Value>,
-	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>), Error> {
+	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>)> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
@@ -176,7 +177,7 @@ impl Analyzer {
 		opt: &Options,
 		terms: &mut Terms,
 		content: Vec<Value>,
-	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>), Error> {
+	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>)> {
 		let mut dl = 0;
 		// Let's first collect all the inputs, and collect the tokens.
 		// We need to store them because everything after is zero-copy
@@ -220,7 +221,7 @@ impl Analyzer {
 		content: Vec<Value>,
 		stage: FilteringStage,
 		tks: &mut Vec<Tokens>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		for v in content {
 			self.analyze_value(stk, ctx, opt, v, stage, tks).await?;
 		}
@@ -236,7 +237,7 @@ impl Analyzer {
 		val: Value,
 		stage: FilteringStage,
 		tks: &mut Vec<Tokens>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		match val {
 			Value::Strand(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s.0).await?),
 			Value::Number(n) => {
@@ -267,14 +268,14 @@ impl Analyzer {
 		opt: &Options,
 		stage: FilteringStage,
 		mut input: String,
-	) -> Result<Tokens, Error> {
+	) -> Result<Tokens> {
 		if let Some(function_name) = self.az.function.as_ref().map(|i| i.0.clone()) {
 			let fns = Function::Custom(function_name.clone(), vec![Value::Strand(Strand(input))]);
 			let val = fns.compute(stk, ctx, opt, None).await.catch_return()?;
 			if let Value::Strand(val) = val {
 				input = val.0;
 			} else {
-				return Err(Error::InvalidFunction {
+				bail!(Error::InvalidFunction {
 					name: function_name,
 					message: "The function should return a string.".to_string(),
 				});
@@ -299,7 +300,7 @@ impl Analyzer {
 		ctx: &Context,
 		opt: &Options,
 		input: String,
-	) -> Result<Value, Error> {
+	) -> Result<Value> {
 		self.generate_tokens(stk, ctx, opt, FilteringStage::Indexing, input).await?.try_into()
 	}
 }
@@ -313,7 +314,7 @@ mod tests {
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
 	use crate::{
-		sql::{statements::DefineStatement, Statement},
+		sql::{Statement, statements::DefineStatement},
 		syn,
 	};
 	use std::sync::Arc;
@@ -326,10 +327,10 @@ mod tests {
 		let ctx = ctx.freeze();
 
 		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
-		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0 .0.pop() else {
+		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0.0.pop() else {
 			panic!()
 		};
-		let a = Analyzer::new(ctx.get_index_stores(), Arc::new(az)).unwrap();
+		let a = Analyzer::new(ctx.get_index_stores(), Arc::new(az.into())).unwrap();
 
 		let mut stack = reblessive::TreeStack::new();
 

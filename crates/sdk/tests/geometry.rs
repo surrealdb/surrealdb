@@ -2,12 +2,12 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn geometry_point() -> Result<(), Error> {
+async fn geometry_point() -> Result<()> {
 	let sql = "
 		UPSERT city:london SET centre = (-0.118092, 51.509865);
 		SELECT * FROM city:london;
@@ -18,7 +18,7 @@ async fn geometry_point() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"centre": {
@@ -28,11 +28,12 @@ async fn geometry_point() -> Result<(), Error> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"centre": {
@@ -42,14 +43,15 @@ async fn geometry_point() -> Result<(), Error> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn geometry_polygon() -> Result<(), Error> {
+async fn geometry_polygon() -> Result<()> {
 	let sql = "
 		UPSERT city:london SET area = {
 			type: 'Polygon',
@@ -75,7 +77,7 @@ async fn geometry_polygon() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -93,11 +95,12 @@ async fn geometry_polygon() -> Result<(), Error> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -115,11 +118,12 @@ async fn geometry_polygon() -> Result<(), Error> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -137,14 +141,15 @@ async fn geometry_polygon() -> Result<(), Error> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn geometry_multipoint() -> Result<(), Error> {
+async fn geometry_multipoint() -> Result<()> {
 	let sql = "
 		UPSERT city:london SET points = {
 			type: 'MultiPoint',
@@ -168,7 +173,7 @@ async fn geometry_multipoint() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"points": {
@@ -181,11 +186,12 @@ async fn geometry_multipoint() -> Result<(), Error> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"points": {
@@ -198,11 +204,12 @@ async fn geometry_multipoint() -> Result<(), Error> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"points": {
@@ -215,14 +222,15 @@ async fn geometry_multipoint() -> Result<(), Error> {
 				"id": r"city:london"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn geometry_multipolygon() -> Result<(), Error> {
+async fn geometry_multipolygon() -> Result<()> {
 	let sql = "
 		UPSERT university:oxford SET area = {
 			type: 'MultiPolygon',
@@ -246,7 +254,7 @@ async fn geometry_multipolygon() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -263,11 +271,12 @@ async fn geometry_multipolygon() -> Result<(), Error> {
 				"id": r"university:oxford"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -284,11 +293,12 @@ async fn geometry_multipolygon() -> Result<(), Error> {
 				"id": r"university:oxford"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				"area": {
@@ -305,14 +315,15 @@ async fn geometry_multipolygon() -> Result<(), Error> {
 				"id": r"university:oxford"
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn geometry_inner_access() -> Result<(), Error> {
+async fn geometry_inner_access() -> Result<()> {
 	let sql = "
 		SELECT type, coordinates[0] as lng, coordinates[1] AS lat FROM type::point([-0.118092, 51.509865]);
 		SELECT type, coordinates[0] as lng, coordinates[1] AS lat FROM (-0.118092, 51.509865);
@@ -351,7 +362,7 @@ async fn geometry_inner_access() -> Result<(), Error> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				lat: 51.509865,
@@ -359,11 +370,12 @@ async fn geometry_inner_access() -> Result<(), Error> {
 				type: 'Point'
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				lat: 51.509865,
@@ -371,11 +383,12 @@ async fn geometry_inner_access() -> Result<(), Error> {
 				type: 'Point'
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				coordinates: [
@@ -404,11 +417,12 @@ async fn geometry_inner_access() -> Result<(), Error> {
 				]
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		r#"[
 			{
 				coordinates: [
@@ -465,7 +479,8 @@ async fn geometry_inner_access() -> Result<(), Error> {
 				]
 			}
 		]"#,
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

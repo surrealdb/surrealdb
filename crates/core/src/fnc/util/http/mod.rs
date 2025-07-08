@@ -1,12 +1,18 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::sql::{Bytes, Object, Strand, Value};
+use crate::expr::{Bytes, Object, Strand, Value};
 use crate::syn;
 
+use anyhow::{Context as _, Result, bail};
 use reqwest::header::CONTENT_TYPE;
+#[cfg(not(target_family = "wasm"))]
+use reqwest::redirect::Attempt;
 #[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
+#[cfg(not(target_family = "wasm"))]
+use tokio::runtime::Handle;
+use tokio::task;
 use url::Url;
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
@@ -22,21 +28,23 @@ fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
 	}
 }
 
-async fn decode_response(res: Response) -> Result<Value, Error> {
+async fn decode_response(res: Response) -> Result<Value> {
 	match res.error_for_status() {
 		Ok(res) => match res.headers().get(CONTENT_TYPE) {
 			Some(mime) => match mime.to_str() {
 				Ok(v) if v.starts_with("application/json") => {
-					let txt = res.text().await?;
-					let val = syn::json(&txt)?;
-					Ok(val)
+					let txt = res.text().await.map_err(Error::from)?;
+					let val = syn::json(&txt)
+						.context("Failed to parse JSON response")
+						.map_err(|e| Error::Http(e.to_string()))?;
+					Ok(val.into())
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
-					let bytes = res.bytes().await?;
+					let bytes = res.bytes().await.map_err(Error::from)?;
 					Ok(Value::Bytes(Bytes(bytes.into())))
 				}
 				Ok(v) if v.starts_with("text") => {
-					let txt = res.text().await?;
+					let txt = res.text().await.map_err(Error::from)?;
 					let val = txt.into();
 					Ok(val)
 				}
@@ -45,12 +53,12 @@ async fn decode_response(res: Response) -> Result<Value, Error> {
 			_ => Ok(Value::None),
 		},
 		Err(err) => match err.status() {
-			Some(s) => Err(Error::Http(format!(
+			Some(s) => bail!(Error::Http(format!(
 				"{} {}",
 				s.as_u16(),
 				s.canonical_reason().unwrap_or_default(),
 			))),
-			None => Err(Error::Http(err.to_string())),
+			None => bail!(Error::Http(err.to_string())),
 		},
 	}
 }
@@ -61,29 +69,40 @@ async fn request(
 	uri: Strand,
 	body: Option<Value>,
 	opts: impl Into<Object>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
-	ctx.check_allowed_net(&url)?;
+	ctx.check_allowed_net(&url).await?;
 	// Set a default client with no timeout
+
 	let builder = Client::builder();
 
 	#[cfg(not(target_family = "wasm"))]
 	let builder = {
 		let count = *crate::cnf::MAX_HTTP_REDIRECTS;
 		let ctx_clone = ctx.clone();
-		builder.redirect(Policy::custom(move |attempt| {
-			if let Err(e) = ctx_clone.check_allowed_net(attempt.url()) {
+		let policy = Policy::custom(move |attempt: Attempt| {
+			let check = task::block_in_place(|| {
+				Handle::current().block_on(ctx_clone.check_allowed_net(attempt.url()))
+			});
+			if let Err(e) = check {
 				return attempt.error(e);
 			}
 			if attempt.previous().len() >= count {
 				return attempt.stop();
 			}
 			attempt.follow()
-		}))
+		});
+		let b = builder.redirect(policy);
+		b.dns_resolver(std::sync::Arc::new(
+			crate::fnc::http::resolver::FilteringResolver::from_capabilities(
+				ctx.get_capabilities(),
+			),
+		))
 	};
 
 	let cli = builder.build()?;
+
 	let is_head = matches!(method, Method::HEAD);
 	// Start a new HEAD request
 	let mut req = cli.request(method.clone(), url);
@@ -104,8 +123,8 @@ async fn request(
 	// Send the request and wait
 	let res = match ctx.timeout() {
 		#[cfg(not(target_family = "wasm"))]
-		Some(d) => req.timeout(d).send().await?,
-		_ => req.send().await?,
+		Some(d) => req.timeout(d).send().await.map_err(Error::from)?,
+		_ => req.send().await.map_err(Error::from)?,
 	};
 
 	if is_head {
@@ -113,12 +132,12 @@ async fn request(
 		match res.error_for_status() {
 			Ok(_) => Ok(Value::None),
 			Err(err) => match err.status() {
-				Some(s) => Err(Error::Http(format!(
+				Some(s) => bail!(Error::Http(format!(
 					"{} {}",
 					s.as_u16(),
 					s.canonical_reason().unwrap_or_default(),
 				))),
-				None => Err(Error::Http(err.to_string())),
+				None => bail!(Error::Http(err.to_string())),
 			},
 		}
 	} else {
@@ -127,11 +146,11 @@ async fn request(
 	}
 }
 
-pub async fn head(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+pub async fn head(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::HEAD, uri, None, opts).await
 }
 
-pub async fn get(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+pub async fn get(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::GET, uri, None, opts).await
 }
 
@@ -140,7 +159,7 @@ pub async fn put(
 	uri: Strand,
 	body: Value,
 	opts: impl Into<Object>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	request(ctx, Method::PUT, uri, Some(body), opts).await
 }
 
@@ -149,7 +168,7 @@ pub async fn post(
 	uri: Strand,
 	body: Value,
 	opts: impl Into<Object>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	request(ctx, Method::POST, uri, Some(body), opts).await
 }
 
@@ -158,10 +177,10 @@ pub async fn patch(
 	uri: Strand,
 	body: Value,
 	opts: impl Into<Object>,
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	request(ctx, Method::PATCH, uri, Some(body), opts).await
 }
 
-pub async fn delete(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+pub async fn delete(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::DELETE, uri, None, opts).await
 }

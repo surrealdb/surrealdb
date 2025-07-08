@@ -57,9 +57,9 @@ use self::token_buffer::TokenBuffer;
 use crate::{
 	sql::{self, Bytes, Datetime, Duration, File, Strand, Uuid},
 	syn::{
-		error::{bail, SyntaxError},
-		lexer::{compound::NumberKind, Lexer},
-		token::{t, Span, Token, TokenKind},
+		error::{SyntaxError, bail},
+		lexer::{Lexer, compound::NumberKind},
+		token::{Span, Token, TokenKind, t},
 	},
 };
 use bytes::BytesMut;
@@ -83,7 +83,7 @@ mod token_buffer;
 
 pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
 
-use super::error::{syntax_error, RenderedError};
+use super::error::{RenderedError, syntax_error};
 
 #[cfg(test)]
 pub mod test;

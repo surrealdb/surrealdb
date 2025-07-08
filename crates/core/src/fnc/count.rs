@@ -1,8 +1,8 @@
 use super::args::Optional;
-use crate::err::Error;
-use crate::sql::value::Value;
+use crate::expr::value::Value;
+use anyhow::Result;
 
-pub fn count((Optional(arg),): (Optional<Value>,)) -> Result<Value, Error> {
+pub fn count((Optional(arg),): (Optional<Value>,)) -> Result<Value> {
 	Ok(arg
 		.map(|val| match val {
 			Value::Array(v) => v.iter().filter(|v| v.is_truthy()).count().into(),
