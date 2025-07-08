@@ -27,7 +27,6 @@ use wasmtimer::std::Instant;
 #[cfg(target_family = "wasm")]
 use wasmtimer::tokio::Interval;
 
-
 // // used in http and all local engines.
 // #[allow(dead_code)]
 // pub(crate) fn resource_to_sql_values(r: Resource) -> SqlValues {

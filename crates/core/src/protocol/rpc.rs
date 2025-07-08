@@ -1,4 +1,3 @@
-
 use crate::iam::AccessMethod;
 use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 

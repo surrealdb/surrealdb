@@ -98,7 +98,7 @@
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod grpc;
 
-use crate::api::{Result};
+use crate::api::Result;
 use anyhow::Context;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;

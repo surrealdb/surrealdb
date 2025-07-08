@@ -1,4 +1,3 @@
-
 use crate::sql::{Data, SqlValue};
 
 use super::RpcError;

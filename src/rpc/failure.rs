@@ -1,4 +1,3 @@
-
 // #[derive(Clone, Debug, Serialize)]
 // pub struct Failure {
 // 	pub(crate) code: i64,

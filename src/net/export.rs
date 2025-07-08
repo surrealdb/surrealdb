@@ -1,4 +1,3 @@
-
 use super::AppState;
 use super::error::ResponseError;
 use super::headers::ContentType;

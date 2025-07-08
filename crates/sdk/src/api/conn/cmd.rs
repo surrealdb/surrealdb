@@ -17,7 +17,6 @@ use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::sql::{Object as SqlObject, Query as SqlQuery, SqlValue};
 use uuid::Uuid;
 
-
 #[derive(Debug, Clone)]
 pub(crate) struct Request {
 	pub(crate) id: String,

@@ -10,8 +10,9 @@ use surrealdb_protocol::proto::prost_types::{
 
 use surrealdb_protocol::proto::v1::{
 	Array as ArrayProto, File as FileProto, Geometry as GeometryProto, Id as IdProto,
-	NullValue as NullValueProto, Object as ObjectProto, RecordId as RecordIdProto, Uuid as UuidProto, Value as ValueProto,
-	geometry as geometry_proto, id as id_proto, value as value_proto,
+	NullValue as NullValueProto, Object as ObjectProto, RecordId as RecordIdProto,
+	Uuid as UuidProto, Value as ValueProto, geometry as geometry_proto, id as id_proto,
+	value as value_proto,
 };
 
 use crate::expr::{Number, Value};

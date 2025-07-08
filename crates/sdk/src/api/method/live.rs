@@ -17,7 +17,6 @@ use surrealdb_protocol::proto::rpc::v1::SubscribeRequest;
 use surrealdb_protocol::proto::v1::Value as ValueProto;
 use uuid::Uuid;
 
-
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
@@ -66,7 +65,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		let Subscribe {
 			client,
-			
+
 			resource,
 			..
 		} = self;

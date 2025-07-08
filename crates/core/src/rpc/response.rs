@@ -1,4 +1,3 @@
-
 use crate::dbs::{Failure, Notification};
 use crate::rpc::protocol::v1;
 use crate::rpc::protocol::v1::types::{V1QueryResponse, V1Value};
