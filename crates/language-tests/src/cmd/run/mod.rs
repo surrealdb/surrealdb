@@ -332,7 +332,7 @@ async fn run_test_with_dbs(
 ) -> Result<TestTaskResult> {
 	let config = &set[id].config;
 
-	let session = util::session_from_test_config(config);
+	let mut session = util::session_from_test_config(config);
 
 	let timeout_duration = config
 		.env
@@ -368,6 +368,24 @@ async fn run_test_with_dbs(
 				import.to_string(),
 				format!("Failed to run import: `{e}`"),
 			));
+		}
+	}
+
+	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref()) {
+		if let Err(e) =
+			surrealdb_core::iam::signup::signup(dbs, &mut session, signup_vars.0.clone().into())
+				.await
+		{
+			return Ok(TestTaskResult::SignupError(e));
+		}
+	}
+
+	if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref()) {
+		if let Err(e) =
+			surrealdb_core::iam::signin::signin(dbs, &mut session, signin_vars.0.clone().into())
+				.await
+		{
+			return Ok(TestTaskResult::SigninError(e));
 		}
 	}
 

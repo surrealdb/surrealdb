@@ -34,46 +34,46 @@ mod tests {
 
 	#[tokio::test]
 	async fn decrement_none() {
-		let idi = Idiom::parse("other");
-		let mut val = Value::parse("{ test: 100 }");
-		let res = Value::parse("{ test: 100, other: -10 }");
+		let idi: Idiom = SqlIdiom::parse("other").into();
+		let val: Value = SqlValue::parse("{ test: 100 }").into();
+		let res: Value = SqlValue::parse("{ test: 100, other: -10 }").into();
 		val.dec(&idi, Value::from(10));
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn decrement_number() {
-		let idi = Idiom::parse("test");
-		let mut val = Value::parse("{ test: 100 }");
-		let res = Value::parse("{ test: 90 }");
+		let idi: Idiom = SqlIdiom::parse("test").into();
+		let val: Value = SqlValue::parse("{ test: 100 }").into();
+		let res: Value = SqlValue::parse("{ test: 90 }").into();
 		val.dec(&idi, Value::from(10));
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn decrement_array_number() {
-		let idi = Idiom::parse("test[1]");
-		let mut val = Value::parse("{ test: [100, 200, 300] }");
-		let res = Value::parse("{ test: [100, 190, 300] }");
+		let idi: Idiom = SqlIdiom::parse("test[1]").into();
+		let val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
+		let res: Value = SqlValue::parse("{ test: [100, 190, 300] }").into();
 		val.dec(&idi, Value::from(10));
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn decrement_array_value() {
-		let idi = Idiom::parse("test");
-		let mut val = Value::parse("{ test: [100, 200, 300] }");
-		let res = Value::parse("{ test: [100, 300] }");
+		let idi: Idiom = SqlIdiom::parse("test").into();
+		let val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
+		let res: Value = SqlValue::parse("{ test: [100, 300] }").into();
 		val.dec(&idi, Value::from(200));
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn decrement_array_array() {
-		let idi = Idiom::parse("test");
-		let mut val = Value::parse("{ test: [100, 200, 300] }");
-		let res = Value::parse("{ test: [200] }");
-		val.dec(&idi, Value::parse("[100, 300]"));
+		let idi: Idiom = SqlIdiom::parse("test").into();
+		let val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
+		let res: Value = SqlValue::parse("{ test: [200] }").into();
+		val.dec(&idi, SqlValue::parse("[100, 300]"));
 		assert_eq!(res, val);
 	}
 }

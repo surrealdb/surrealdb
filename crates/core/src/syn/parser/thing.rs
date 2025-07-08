@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::{
-	expr::{
+	sql::{
 		Id, Ident, Param, Range, Thing,
 		graph::GraphSubject,
 		id::{Gen, range::IdRange},
@@ -370,9 +370,9 @@ mod tests {
 	use reblessive::Stack;
 
 	use super::*;
-	use crate::expr::Value;
-	use crate::expr::array::Array;
-	use crate::expr::object::Object;
+	use crate::sql::SqlValue;
+	use crate::sql::array::Array;
+	use crate::sql::object::Object;
 	use crate::syn::Parse as _;
 	use crate::syn::parser::ParserSettings;
 
@@ -473,8 +473,8 @@ mod tests {
 	#[test]
 	fn thing_string() {
 		let sql = "r'test:001'";
-		let res = Value::parse(sql);
-		let Value::Thing(out) = res else {
+		let res = SqlValue::parse(sql);
+		let SqlValue::Thing(out) = res else {
 			panic!()
 		};
 		assert_eq!("test:1", format!("{}", out));
@@ -487,8 +487,8 @@ mod tests {
 		);
 
 		let sql = "r'test:001'";
-		let res = Value::parse(sql);
-		let Value::Thing(out) = res else {
+		let res = SqlValue::parse(sql);
+		let SqlValue::Thing(out) = res else {
 			panic!()
 		};
 		assert_eq!("test:1", format!("{}", out));
@@ -542,8 +542,8 @@ mod tests {
 			Thing {
 				tb: String::from("test"),
 				id: Id::from(Object::from(map! {
-					"location".to_string() => Value::from("GBR"),
-					"year".to_string() => Value::from(2022),
+					"location".to_string() => SqlValue::from("GBR"),
+					"year".to_string() => SqlValue::from(2022),
 				})),
 			}
 		);
@@ -559,14 +559,14 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: Id::from(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
+				id: Id::from(Array::from(vec![SqlValue::from("GBR"), SqlValue::from(2022)])),
 			}
 		);
 	}
 
 	#[test]
 	fn weird_things() {
-		use crate::expr;
+		use crate::sql;
 
 		fn assert_ident_parses_correctly(ident: &str) {
 			let thing = format!("t:{}", ident);
@@ -593,8 +593,8 @@ mod tests {
 
 			assert_eq!(
 				r,
-				expr::Query(expr::Statements(vec![expr::Statement::Value(expr::Value::Thing(
-					expr::Thing {
+				sql::Query(sql::Statements(vec![sql::Statement::Value(sql::SqlValue::Thing(
+					sql::Thing {
 						tb: "t".to_string(),
 						id: Id::from(ident.to_string())
 					}

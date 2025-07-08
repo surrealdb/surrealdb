@@ -1,12 +1,14 @@
 mod parse;
 use parse::Parse;
+use surrealdb_core::iam::Level;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
+use surrealdb::expr::Value;
 use surrealdb::iam::Role;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn upsert_merge_and_content() -> Result<()> {
@@ -24,25 +26,27 @@ async fn upsert_merge_and_content() -> Result<()> {
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Tobie',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Jaime',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -58,7 +62,7 @@ async fn upsert_merge_and_content() -> Result<()> {
 	));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
@@ -66,7 +70,8 @@ async fn upsert_merge_and_content() -> Result<()> {
 				age: 50,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -112,24 +117,26 @@ async fn upsert_simple_with_input() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -139,14 +146,15 @@ async fn upsert_simple_with_input() -> Result<()> {
 	));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Jaime',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -156,25 +164,27 @@ async fn upsert_simple_with_input() -> Result<()> {
 	));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -221,7 +231,7 @@ async fn upsert_with_return_clause() -> Result<()> {
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 18,
@@ -229,11 +239,12 @@ async fn upsert_with_return_clause() -> Result<()> {
 				name: 'John'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 18,
@@ -241,33 +252,36 @@ async fn upsert_with_return_clause() -> Result<()> {
 				name: 'John'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				new_age: 30,
 				old_age: 25
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 35,
 				name: 'John'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 35,
@@ -275,7 +289,8 @@ async fn upsert_with_return_clause() -> Result<()> {
 				name: 'John'
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -298,13 +313,14 @@ async fn upsert_new_record_with_table() -> Result<()> {
 	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				count: 1,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -342,13 +358,14 @@ async fn upsert_new_records_with_table_and_unique_index() -> Result<()> {
 	assert!(tmp.is_err());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				count: 1,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -391,7 +408,7 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 1,
@@ -403,11 +420,12 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 				id: person:test
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 2,
@@ -418,11 +436,12 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 				id: person:test
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 3,
@@ -433,11 +452,12 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 				id: person:test
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 4,
@@ -448,7 +468,8 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 				id: person:test
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -464,115 +485,124 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 // Permissions
 //
 
+fn level_root() -> Level {
+	Level::Root
+}
+fn level_ns() -> Level {
+	Level::Namespace("NS".to_owned())
+}
+fn level_db() -> Level {
+	Level::Database("NS".to_owned(), "DB".to_owned())
+}
 async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
 		(
-			(().into(), Role::Owner),
+			(level_root(), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at root level should be able to update a record",
 		),
 		(
-			(().into(), Role::Editor),
+			(level_root(), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at root level should be able to update a record",
 		),
 		(
-			(().into(), Role::Viewer),
+			(level_root(), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at root level should not be able to update a record",
 		),
 		// Namespace level
 		(
-			(("NS",).into(), Role::Owner),
+			(level_ns(), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at namespace level should be able to update a record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Owner),
+			(level_ns(), Role::Owner),
 			("OTHER_NS", "DB"),
 			false,
 			"owner at namespace level should not be able to update a record on another namespace",
 		),
 		(
-			(("NS",).into(), Role::Editor),
+			(level_ns(), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at namespace level should be able to update a record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Editor),
+			(level_ns(), Role::Editor),
 			("OTHER_NS", "DB"),
 			false,
 			"editor at namespace level should not be able to update a record on another namespace",
 		),
 		(
-			(("NS",).into(), Role::Viewer),
+			(level_ns(), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at namespace level should not be able to update a record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Viewer),
+			(level_ns(), Role::Viewer),
 			("OTHER_NS", "DB"),
 			false,
 			"viewer at namespace level should not be able to update a record on another namespace",
 		),
 		// Database level
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(level_db(), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at database level should be able to update a record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(level_db(), Role::Owner),
 			("NS", "OTHER_DB"),
 			false,
 			"owner at database level should not be able to update a record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(level_db(), Role::Owner),
 			("OTHER_NS", "DB"),
 			false,
 			"owner at database level should not be able to update a record on another namespace even if the database name matches",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(level_db(), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at database level should be able to update a record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(level_db(), Role::Editor),
 			("NS", "OTHER_DB"),
 			false,
 			"editor at database level should not be able to update a record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(level_db(), Role::Editor),
 			("OTHER_NS", "DB"),
 			false,
 			"editor at database level should not be able to update a record on another namespace even if the database name matches",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(level_db(), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at database level should not be able to update a record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(level_db(), Role::Viewer),
 			("NS", "OTHER_DB"),
 			false,
 			"viewer at database level should not be able to update a record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(level_db(), Role::Viewer),
 			("OTHER_NS", "DB"),
 			false,
 			"viewer at database level should not be able to update a record on another namespace even if the database name matches",
@@ -592,9 +622,9 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(), "{}", msg);
 			} else if res.is_ok() {
-				assert!(res.unwrap() == Value::parse("[]"), "{}", msg);
+				assert!(res.unwrap() == SqlValue::parse("[]").into(), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -618,7 +648,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
@@ -631,7 +661,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
@@ -644,7 +674,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 
@@ -653,7 +683,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			if should_succeed {
-				assert!(res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.unwrap() != SqlValue::parse("[]").into(), "{}", msg);
 
 				// Verify the update was persisted
 				let mut resp = ds
@@ -668,7 +698,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				let res = res.unwrap().to_string();
 				assert!(res.contains("Name"), "{}: {:?}", msg, res);
 			} else {
-				assert!(res.unwrap() == Value::parse("[]"), "{}", msg);
+				assert!(res.unwrap() == SqlValue::parse("[]").into(), "{}", msg);
 
 				// Verify the update was not persisted
 				let mut resp = ds
@@ -735,7 +765,11 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -744,7 +778,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == Value::parse("[]"),
+			res.unwrap() == SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should not be able to select if the table has no permissions"
 		);
@@ -783,7 +817,11 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -792,7 +830,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -843,7 +881,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to create the table"
 		);
@@ -864,7 +902,11 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -873,7 +915,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to update a record if the table has no permissions"
 		);
@@ -912,7 +954,11 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -921,7 +967,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Value::parse("[]"),
+			res.unwrap() != SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -983,7 +1029,7 @@ async fn upsert_none_removes_field() -> Result<()> {
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:1,
@@ -993,18 +1039,20 @@ async fn upsert_none_removes_field() -> Result<()> {
 				}
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: test:1,
 				b: {}
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).output();
@@ -1014,7 +1062,7 @@ async fn upsert_none_removes_field() -> Result<()> {
 	assert!(tmp.is_ok(), "failed to create field: {:?}", tmp);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: flex:1,
@@ -1023,18 +1071,20 @@ async fn upsert_none_removes_field() -> Result<()> {
 				}
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: flex:1,
 				obj: {}
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

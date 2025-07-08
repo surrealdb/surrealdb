@@ -49,6 +49,7 @@ pub mod mem;
 pub mod obs;
 pub mod options;
 pub mod rpc;
+pub mod sql;
 pub mod str;
 pub mod syn;
 pub mod vs;

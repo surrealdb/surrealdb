@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use reblessive::Stk;
 
 use crate::{
-	expr::{Block, Geometry, Object, Strand, Value},
+	sql::{Block, Geometry, Object, SqlValue, Strand},
 	syn::{
 		error::bail,
 		lexer::compound,
@@ -22,11 +22,11 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		start: Span,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		if self.eat(t!("}")) {
 			// empty object, just return
 			enter_object_recursion!(_this = self => {
-				return Ok(Value::Object(Object::default()));
+				return Ok(SqlValue::Object(Object::default()));
 			})
 		}
 
@@ -38,7 +38,7 @@ impl Parser<'_> {
 		}
 
 		// not an object so instead parse as a block.
-		self.parse_block(ctx, start).await.map(Box::new).map(Value::Block)
+		self.parse_block(ctx, start).await.map(Box::new).map(SqlValue::Block)
 	}
 
 	async fn parse_object_or_geometry_after_type(
@@ -46,14 +46,14 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		start: Span,
 		key: String,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		expected!(self, t!(":"));
 		// for it to be geometry the next value must be a strand like.
 		let (t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand)) = self.peek_kind() else {
 			return self
 				.parse_object_from_key(ctx, key, BTreeMap::new(), start)
 				.await
-				.map(Value::Object);
+				.map(SqlValue::Object);
 		};
 
 		// We know it is a strand so check if the type is one of the allowe geometry types.
@@ -75,7 +75,7 @@ impl Parser<'_> {
 					key,
 					type_value,
 					Geometry::array_to_point,
-					|x| Value::Geometry(Geometry::Point(x)),
+					|x| SqlValue::Geometry(Geometry::Point(x)),
 				)
 				.await
 			}
@@ -86,7 +86,7 @@ impl Parser<'_> {
 					key,
 					type_value,
 					Geometry::array_to_line,
-					|x| Value::Geometry(Geometry::Line(x)),
+					|x| SqlValue::Geometry(Geometry::Line(x)),
 				)
 				.await
 			}
@@ -97,7 +97,7 @@ impl Parser<'_> {
 					key,
 					type_value,
 					Geometry::array_to_polygon,
-					|x| Value::Geometry(Geometry::Polygon(x)),
+					|x| SqlValue::Geometry(Geometry::Polygon(x)),
 				)
 				.await
 			}
@@ -108,7 +108,7 @@ impl Parser<'_> {
 					key,
 					type_value,
 					Geometry::array_to_multipoint,
-					|x| Value::Geometry(Geometry::MultiPoint(x)),
+					|x| SqlValue::Geometry(Geometry::MultiPoint(x)),
 				)
 				.await
 			}
@@ -119,7 +119,7 @@ impl Parser<'_> {
 					key,
 					type_value,
 					Geometry::array_to_multiline,
-					|x| Value::Geometry(Geometry::MultiLine(x)),
+					|x| SqlValue::Geometry(Geometry::MultiLine(x)),
 				)
 				.await
 			}
@@ -130,7 +130,7 @@ impl Parser<'_> {
 					key,
 					type_value,
 					Geometry::array_to_multipolygon,
-					|x| Value::Geometry(Geometry::MultiPolygon(x)),
+					|x| SqlValue::Geometry(Geometry::MultiPolygon(x)),
 				)
 				.await
 			}
@@ -140,11 +140,11 @@ impl Parser<'_> {
 					return self
 						.parse_object_from_map(
 							ctx,
-							BTreeMap::from([(key, Value::Strand(type_value.into()))]),
+							BTreeMap::from([(key, SqlValue::Strand(type_value.into()))]),
 							start,
 						)
 						.await
-						.map(Value::Object);
+						.map(SqlValue::Object);
 				}
 
 				let coord_key = self.parse_object_key()?;
@@ -155,11 +155,11 @@ impl Parser<'_> {
 						.parse_object_from_key(
 							ctx,
 							coord_key,
-							BTreeMap::from([(key, Value::Strand(type_value.into()))]),
+							BTreeMap::from([(key, SqlValue::Strand(type_value.into()))]),
 							start,
 						)
 						.await
-						.map(Value::Object);
+						.map(SqlValue::Object);
 				}
 
 				expected!(self, t!(":"));
@@ -176,25 +176,25 @@ impl Parser<'_> {
 							.parse_object_from_map(
 								ctx,
 								BTreeMap::from([
-									(key, Value::Strand(type_value.into())),
+									(key, SqlValue::Strand(type_value.into())),
 									(coord_key, value),
 								]),
 								start,
 							)
 							.await
-							.map(Value::Object);
+							.map(SqlValue::Object);
 					}
 					self.pop_peek();
 				}
 
 				// try to convert to the right value.
-				if let Value::Array(x) = value {
+				if let SqlValue::Array(x) = value {
 					// test first to avoid a cloning.
-					if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
+					if x.iter().all(|x| matches!(x, SqlValue::Geometry(_))) {
 						let geometries =
 							x.0.into_iter()
 								.map(|x| {
-									if let Value::Geometry(x) = x {
+									if let SqlValue::Geometry(x) = x {
 										x
 									} else {
 										unreachable!()
@@ -202,30 +202,30 @@ impl Parser<'_> {
 								})
 								.collect();
 
-						return Ok(Value::Geometry(Geometry::Collection(geometries)));
+						return Ok(SqlValue::Geometry(Geometry::Collection(geometries)));
 					}
 
-					return Ok(Value::Object(Object(BTreeMap::from([
-						(key, Value::Strand(type_value.into())),
-						(coord_key, Value::Array(x)),
+					return Ok(SqlValue::Object(Object(BTreeMap::from([
+						(key, SqlValue::Strand(type_value.into())),
+						(coord_key, SqlValue::Array(x)),
 					]))));
 				}
 
 				// Couldn't convert so it is a normal object.
-				Ok(Value::Object(Object(BTreeMap::from([
-					(key, Value::Strand(type_value.into())),
+				Ok(SqlValue::Object(Object(BTreeMap::from([
+					(key, SqlValue::Strand(type_value.into())),
 					(coord_key, value),
 				]))))
 			}
 			// key was not one of the allowed keys so it is a normal object.
 			_ => {
-				let object = BTreeMap::from([(key, Value::Strand(type_value.into()))]);
+				let object = BTreeMap::from([(key, SqlValue::Strand(type_value.into()))]);
 
 				if self.eat(t!(",")) {
-					self.parse_object_from_map(ctx, object, start).await.map(Value::Object)
+					self.parse_object_from_map(ctx, object, start).await.map(SqlValue::Object)
 				} else {
 					self.expect_closing_delimiter(t!("}"), start)?;
-					Ok(Value::Object(Object(object)))
+					Ok(SqlValue::Object(Object(object)))
 				}
 			}
 		}
@@ -236,7 +236,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		start: Span,
 		key: String,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		expected!(self, t!(":"));
 
 		// found coordinates field, next must be a coordinates value but we don't know
@@ -246,12 +246,12 @@ impl Parser<'_> {
 		if !self.eat(t!(",")) {
 			// no comma object must end early.
 			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
+			return Ok(SqlValue::Object(Object(BTreeMap::from([(key, value)]))));
 		}
 
 		if self.eat(t!("}")) {
 			// object ends early.
-			return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
+			return Ok(SqlValue::Object(Object(BTreeMap::from([(key, value)]))));
 		}
 
 		let type_key = self.parse_object_key()?;
@@ -261,7 +261,7 @@ impl Parser<'_> {
 			return self
 				.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
 				.await
-				.map(Value::Object);
+				.map(SqlValue::Object);
 		}
 		expected!(self, t!(":"));
 
@@ -270,7 +270,7 @@ impl Parser<'_> {
 			return self
 				.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
 				.await
-				.map(Value::Object);
+				.map(SqlValue::Object);
 		};
 
 		let type_value = self.next_token_value::<Strand>()?.0;
@@ -281,47 +281,47 @@ impl Parser<'_> {
 				if let t!("}") = self.peek().kind {
 					if let Some(point) = Geometry::array_to_point(&value) {
 						self.pop_peek();
-						return Ok(Value::Geometry(Geometry::Point(point)));
+						return Ok(SqlValue::Geometry(Geometry::Point(point)));
 					}
 				}
 			}
 			"LineString" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_line(&value) {
+					if let Some(line) = Geometry::array_to_line(&value) {
 						self.pop_peek();
-						return Ok(Value::Geometry(Geometry::Line(point)));
+						return Ok(SqlValue::Geometry(Geometry::Line(line)));
 					}
 				}
 			}
 			"Polygon" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_polygon(&value) {
+					if let Some(polygon) = Geometry::array_to_polygon(&value) {
 						self.pop_peek();
-						return Ok(Value::Geometry(Geometry::Polygon(point)));
+						return Ok(SqlValue::Geometry(Geometry::Polygon(polygon)));
 					}
 				}
 			}
 			"MultiPoint" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_multipolygon(&value) {
+					if let Some(points) = Geometry::array_to_multipoint(&value) {
 						self.pop_peek();
-						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
+						return Ok(SqlValue::Geometry(Geometry::MultiPoint(points)));
 					}
 				}
 			}
 			"MultiLineString" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_multiline(&value) {
+					if let Some(multiline) = Geometry::array_to_multiline(&value) {
 						self.pop_peek();
-						return Ok(Value::Geometry(Geometry::MultiLine(point)));
+						return Ok(SqlValue::Geometry(Geometry::MultiLine(multiline)));
 					}
 				}
 			}
 			"MultiPolygon" => {
 				if let t!("}") = self.peek().kind {
-					if let Some(point) = Geometry::array_to_multipolygon(&value) {
+					if let Some(polygons) = Geometry::array_to_multipolygon(&value) {
 						self.pop_peek();
-						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
+						return Ok(SqlValue::Geometry(Geometry::MultiPolygon(polygons)));
 					}
 				}
 			}
@@ -333,19 +333,19 @@ impl Parser<'_> {
 
 		if !ate_comma {
 			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([
+			return Ok(SqlValue::Object(Object(BTreeMap::from([
 				(key, value),
-				(type_key, Value::Strand(type_value.into())),
+				(type_key, SqlValue::Strand(type_value.into())),
 			]))));
 		}
 
 		self.parse_object_from_map(
 			ctx,
-			BTreeMap::from([(key, value), (type_key, Value::Strand(type_value.into()))]),
+			BTreeMap::from([(key, value), (type_key, SqlValue::Strand(type_value.into()))]),
 			start,
 		)
 		.await
-		.map(Value::Object)
+		.map(SqlValue::Object)
 	}
 
 	async fn parse_object_or_geometry_after_geometries(
@@ -353,7 +353,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		start: Span,
 		key: String,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		// 'geometries' key can only happen in a GeometryCollection, so try to parse that.
 		expected!(self, t!(":"));
 
@@ -362,7 +362,7 @@ impl Parser<'_> {
 		// if the object ends here, it is not a geometry.
 		if !self.eat(t!(",")) || self.peek_kind() == t!("}") {
 			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([(key, value)]))));
+			return Ok(SqlValue::Object(Object(BTreeMap::from([(key, value)]))));
 		}
 
 		// parse the next objectkey
@@ -373,7 +373,7 @@ impl Parser<'_> {
 			return self
 				.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
 				.await
-				.map(Value::Object);
+				.map(SqlValue::Object);
 		}
 		expected!(self, t!(":"));
 		// check if the next key is a strand.
@@ -382,29 +382,29 @@ impl Parser<'_> {
 			return self
 				.parse_object_from_key(ctx, type_key, BTreeMap::from([(key, value)]), start)
 				.await
-				.map(Value::Object);
+				.map(SqlValue::Object);
 		};
 
 		let type_value = self.next_token_value::<Strand>()?.0;
 		let ate_comma = self.eat(t!(","));
 
 		if type_value == "GeometryCollection" && self.eat(t!("}")) {
-			if let Value::Array(ref x) = value {
-				if x.iter().all(|x| matches!(x, Value::Geometry(_))) {
-					let Value::Array(x) = value else {
+			if let SqlValue::Array(ref x) = value {
+				if x.iter().all(|x| matches!(x, SqlValue::Geometry(_))) {
+					let SqlValue::Array(x) = value else {
 						unreachable!()
 					};
 					let geometries = x
 						.into_iter()
 						.map(|x| {
-							if let Value::Geometry(x) = x {
+							if let SqlValue::Geometry(x) = x {
 								x
 							} else {
 								unreachable!()
 							}
 						})
 						.collect();
-					return Ok(Value::Geometry(Geometry::Collection(geometries)));
+					return Ok(SqlValue::Geometry(Geometry::Collection(geometries)));
 				}
 			}
 		}
@@ -414,26 +414,30 @@ impl Parser<'_> {
 
 		if !ate_comma {
 			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([
+			return Ok(SqlValue::Object(Object(BTreeMap::from([
 				(key, value),
-				(type_key, Value::Strand(type_value.into())),
+				(type_key, SqlValue::Strand(type_value.into())),
 			]))));
 		}
 
 		self.parse_object_from_map(
 			ctx,
-			BTreeMap::from([(key, value), (type_key, Value::Strand(type_value.into()))]),
+			BTreeMap::from([(key, value), (type_key, SqlValue::Strand(type_value.into()))]),
 			start,
 		)
 		.await
-		.map(Value::Object)
+		.map(SqlValue::Object)
 	}
 
 	/// Parse a production starting with an `{` as either an object or a geometry.
 	///
 	/// This function tries to match an object to an geometry like object and if it is unable
 	/// fallsback to parsing normal objects.
-	async fn parse_object_or_geometry(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Value> {
+	async fn parse_object_or_geometry(
+		&mut self,
+		ctx: &mut Stk,
+		start: Span,
+	) -> ParseResult<SqlValue> {
 		// empty object was already matched previously so next must be a key.
 		let key = self.parse_object_key()?;
 		// the order of fields of a geometry does not matter so check if it is any of geometry like keys
@@ -448,7 +452,7 @@ impl Parser<'_> {
 				expected!(self, t!(":"));
 				self.parse_object_from_key(ctx, key, BTreeMap::new(), start)
 					.await
-					.map(Value::Object)
+					.map(SqlValue::Object)
 			}
 		}
 	}
@@ -461,17 +465,17 @@ impl Parser<'_> {
 		strand: String,
 		capture: F,
 		map: Fm,
-	) -> ParseResult<Value>
+	) -> ParseResult<SqlValue>
 	where
-		F: FnOnce(&Value) -> Option<R>,
-		Fm: FnOnce(R) -> Value,
+		F: FnOnce(&SqlValue) -> Option<R>,
+		Fm: FnOnce(R) -> SqlValue,
 	{
 		if !self.eat(t!(",")) {
 			// there is not second field. not a geometry
 			self.expect_closing_delimiter(t!("}"), start)?;
-			return Ok(Value::Object(Object(BTreeMap::from([(
+			return Ok(SqlValue::Object(Object(BTreeMap::from([(
 				key,
-				Value::Strand(strand.into()),
+				SqlValue::Strand(strand.into()),
 			)]))));
 		}
 		let coord_key = self.parse_object_key()?;
@@ -482,11 +486,11 @@ impl Parser<'_> {
 				.parse_object_from_key(
 					ctx,
 					coord_key,
-					BTreeMap::from([(key, Value::Strand(strand.into()))]),
+					BTreeMap::from([(key, SqlValue::Strand(strand.into()))]),
 					start,
 				)
 				.await
-				.map(Value::Object);
+				.map(SqlValue::Object);
 		}
 		expected!(self, t!(":"));
 		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
@@ -503,17 +507,17 @@ impl Parser<'_> {
 			return self
 				.parse_object_from_map(
 					ctx,
-					BTreeMap::from([(key, Value::Strand(strand.into())), (coord_key, value)]),
+					BTreeMap::from([(key, SqlValue::Strand(strand.into())), (coord_key, value)]),
 					start,
 				)
 				.await
-				.map(Value::Object);
+				.map(SqlValue::Object);
 		}
 
 		let Some(v) = capture(&value) else {
 			// failed to match the geometry value, just a plain object.
-			return Ok(Value::Object(Object(BTreeMap::from([
-				(key, Value::Strand(strand.into())),
+			return Ok(SqlValue::Object(Object(BTreeMap::from([
+				(key, SqlValue::Strand(strand.into())),
 				(coord_key, value),
 			]))));
 		};
@@ -525,7 +529,7 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		key: String,
-		mut map: BTreeMap<String, Value>,
+		mut map: BTreeMap<String, SqlValue>,
 		start: Span,
 	) -> ParseResult<Object> {
 		let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
@@ -552,7 +556,7 @@ impl Parser<'_> {
 	async fn parse_object_from_map(
 		&mut self,
 		ctx: &mut Stk,
-		mut map: BTreeMap<String, Value>,
+		mut map: BTreeMap<String, SqlValue>,
 		start: Span,
 	) -> ParseResult<Object> {
 		loop {
@@ -596,7 +600,7 @@ impl Parser<'_> {
 
 	/// Parse a single entry in the object, i.e. `field: value + 1` in the object `{ field: value +
 	/// 1 }`
-	async fn parse_object_entry(&mut self, ctx: &mut Stk) -> ParseResult<(String, Value)> {
+	async fn parse_object_entry(&mut self, ctx: &mut Stk) -> ParseResult<(String, SqlValue)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));
 		let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
@@ -645,14 +649,14 @@ mod test {
 	#[test]
 	fn block_value() {
 		let sql = "{ 80 }";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(sql, out.to_string())
 	}
 
 	#[test]
 	fn block_ifelse() {
 		let sql = "{ RETURN IF true THEN 50 ELSE 40 END; }";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(sql, out.to_string())
 	}
 
@@ -669,7 +673,7 @@ mod test {
 	END;
 
 }"#;
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(sql, format!("{:#}", out))
 	}
 }
@@ -682,8 +686,8 @@ mod tests {
 	#[test]
 	fn simple() {
 		let sql = "(-0.118092, 51.509865)";
-		let out = Value::parse(sql);
-		assert!(matches!(out, Value::Geometry(_)));
+		let out = SqlValue::parse(sql);
+		assert!(matches!(out, SqlValue::Geometry(_)));
 		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
 	}
 
@@ -693,8 +697,8 @@ mod tests {
 			type: 'Point',
 			coordinates: [-0.118092, 51.509865]
 		}"#;
-		let out = Value::parse(sql);
-		assert!(matches!(out, Value::Geometry(_)));
+		let out = SqlValue::parse(sql);
+		assert!(matches!(out, SqlValue::Geometry(_)));
 		assert_eq!("(-0.118092, 51.509865)", format!("{}", out));
 	}
 
@@ -710,8 +714,8 @@ mod tests {
 				]
 			]
 		}"#;
-		let out = Value::parse(sql);
-		assert!(matches!(out, Value::Geometry(_)));
+		let out = SqlValue::parse(sql);
+		assert!(matches!(out, SqlValue::Geometry(_)));
 		assert_eq!(
 			"{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }",
 			format!("{}", out)
@@ -735,8 +739,8 @@ mod tests {
 				]
 			]
 		}"#;
-		let out = Value::parse(sql);
-		assert!(matches!(out, Value::Geometry(_)));
+		let out = SqlValue::parse(sql);
+		assert!(matches!(out, SqlValue::Geometry(_)));
 		assert_eq!(
 			"{ type: 'Polygon', coordinates: [[[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]], [[-0.38314819, 51.37692386], [0.1785278, 51.37692386], [0.1785278, 51.6146057], [-0.38314819, 51.6146057], [-0.38314819, 51.37692386]]] }",
 			format!("{}", out)

@@ -1,8 +1,8 @@
 use reblessive::Stk;
 
 use crate::{
-	expr::{
-		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, Table, Value,
+	sql::{
+		Dir, Edges, Field, Fields, Graph, Ident, Idiom, Param, Part, SqlValue, Table,
 		graph::GraphSubjects,
 		part::{DestructurePart, Recurse, RecurseInstruction},
 	},
@@ -150,7 +150,7 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 		start: Vec<Part>,
-	) -> ParseResult<Value> {
+	) -> ParseResult<SqlValue> {
 		let mut res = start;
 		loop {
 			match self.peek_kind() {
@@ -204,7 +204,7 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		Ok(Value::Idiom(Idiom(res)))
+		Ok(SqlValue::Idiom(Idiom(res)))
 	}
 
 	/// Parse a graph idiom and possibly rewrite the starting value to be an edge whenever the
@@ -214,7 +214,7 @@ impl Parser<'_> {
 		ctx: &mut Stk,
 		res: &mut Vec<Part>,
 		dir: Dir,
-	) -> ParseResult<Option<Value>> {
+	) -> ParseResult<Option<SqlValue>> {
 		let graph = ctx.run(|ctx| self.parse_graph(ctx, dir)).await?;
 		// the production `Thing Graph` is reparsed as an edge if the graph does not contain an
 		// alias or a condition.
@@ -229,13 +229,13 @@ impl Parser<'_> {
 			&& graph.expr.is_none()
 		{
 			match std::mem::replace(&mut res[0], Part::All) {
-				Part::Value(Value::Thing(t)) | Part::Start(Value::Thing(t)) => {
+				Part::Value(SqlValue::Thing(t)) | Part::Start(SqlValue::Thing(t)) => {
 					let edge = Edges {
 						dir: graph.dir,
 						from: t,
 						what: graph.what,
 					};
-					let value = Value::Edges(Box::new(edge));
+					let value = SqlValue::Edges(Box::new(edge));
 
 					if !self.peek_continues_idiom() {
 						return Ok(Some(value));
@@ -334,7 +334,7 @@ impl Parser<'_> {
 				t!(":") => {
 					self.pop_peek();
 					let idiom = match self.parse_value_inherit(ctx).await? {
-						Value::Idiom(x) => x,
+						SqlValue::Idiom(x) => x,
 						v => Idiom(vec![Part::Start(v)]),
 					};
 					DestructurePart::Aliased(field, idiom)
@@ -431,10 +431,10 @@ impl Parser<'_> {
 				let token = self.peek();
 				let expects = match token.kind {
 					TokenKind::Parameter => {
-						Value::from(self.next_token_value::<Param>()?)
+						SqlValue::from(self.next_token_value::<Param>()?)
 					},
 					x if Parser::kind_is_identifier(x) => {
-						Value::from(self.parse_thing(ctx).await?)
+						SqlValue::from(self.parse_thing(ctx).await?)
 					}
 					_ => {
 						unexpected!(self, token, "a param or thing");
@@ -498,7 +498,7 @@ impl Parser<'_> {
 			}
 			_ => {
 				let value = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
-				if let Value::Number(x) = value {
+				if let SqlValue::Number(x) = value {
 					Part::Index(x)
 				} else {
 					Part::Value(value)
@@ -621,7 +621,7 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects to be at the start of a what list.
-	pub(super) async fn parse_what_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Value>> {
+	pub(super) async fn parse_what_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<SqlValue>> {
 		let mut res = vec![self.parse_what_value(ctx).await?];
 		while self.eat(t!(",")) {
 			res.push(self.parse_what_value(ctx).await?)
@@ -633,12 +633,12 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects to be at the start of a what value
-	pub(super) async fn parse_what_value(&mut self, ctx: &mut Stk) -> ParseResult<Value> {
+	pub(super) async fn parse_what_value(&mut self, ctx: &mut Stk) -> ParseResult<SqlValue> {
 		let start = self.parse_what_primary(ctx).await?;
 		if start.can_start_idiom() && self.peek_continues_idiom() {
 			let start = match start {
-				Value::Table(Table(x)) => vec![Part::Field(Ident(x))],
-				Value::Idiom(Idiom(x)) => x,
+				SqlValue::Table(Table(x)) => vec![Part::Field(Ident(x))],
+				SqlValue::Idiom(Idiom(x)) => x,
 				x => vec![Part::Start(x)],
 			};
 
@@ -752,7 +752,7 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use crate::expr::{Expression, Id, Number, Object, Operator, Param, Strand, Thing};
+	use crate::sql::{Expression, Id, Number, Object, Operator, Param, Strand, Thing};
 	use crate::syn::Parse;
 
 	use super::*;
@@ -760,70 +760,70 @@ mod tests {
 	#[test]
 	fn graph_in() {
 		let sql = "<-likes";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("<-likes", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_out() {
 		let sql = "->likes";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->likes", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_both() {
 		let sql = "<->likes";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("<->likes", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_multiple() {
 		let sql = "->(likes, follows)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->(likes, follows)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_aliases() {
 		let sql = "->(likes, follows AS connections)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->(likes, follows AS connections)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_conditions() {
 		let sql = "->(likes, follows WHERE influencer = true)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->(likes, follows WHERE influencer = true)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_conditions_aliases() {
 		let sql = "->(likes, follows WHERE influencer = true AS connections)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->(likes, follows WHERE influencer = true AS connections)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_select() {
 		let sql = "->(SELECT amount FROM likes WHERE amount > 10)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->(SELECT amount FROM likes WHERE amount > 10)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_select_wildcard() {
 		let sql = "->(SELECT * FROM likes WHERE amount > 10)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->(SELECT * FROM likes WHERE amount > 10)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_select_where_order() {
 		let sql = "->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			"->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount\n)",
 			format!("{}", out)
@@ -833,7 +833,7 @@ mod tests {
 	#[test]
 	fn graph_select_where_order_limit() {
 		let sql = "->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount LIMIT 1)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			"->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount\n LIMIT 1)",
 			format!("{}", out)
@@ -843,94 +843,94 @@ mod tests {
 	#[test]
 	fn graph_select_limit() {
 		let sql = "->(SELECT amount FROM likes LIMIT 1)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->(SELECT amount FROM likes LIMIT 1)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_select_order() {
 		let sql = "->(SELECT amount FROM likes ORDER BY amount)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->(SELECT amount FROM likes ORDER BY amount\n)", format!("{}", out));
 	}
 
 	#[test]
 	fn graph_select_order_limit() {
 		let sql = "->(SELECT amount FROM likes ORDER BY amount LIMIT 1)";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("->(SELECT amount FROM likes ORDER BY amount\n LIMIT 1)", format!("{}", out));
 	}
 
 	#[test]
 	fn idiom_normal() {
 		let sql = "test";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test", format!("{}", out));
-		assert_eq!(out, Value::from(Idiom(vec![Part::from("test")])));
+		assert_eq!(out, SqlValue::from(Idiom(vec![Part::from("test")])));
 	}
 
 	#[test]
 	fn idiom_quoted_backtick() {
 		let sql = "`test`";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test", format!("{}", out));
-		assert_eq!(out, Value::from(Idiom(vec![Part::from("test")])));
+		assert_eq!(out, SqlValue::from(Idiom(vec![Part::from("test")])));
 	}
 
 	#[test]
 	fn idiom_quoted_brackets() {
 		let sql = "⟨test⟩";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test", format!("{}", out));
-		assert_eq!(out, Value::from(Idiom(vec![Part::from("test")])));
+		assert_eq!(out, SqlValue::from(Idiom(vec![Part::from("test")])));
 	}
 
 	#[test]
 	fn idiom_nested() {
 		let sql = "test.temp";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test.temp", format!("{}", out));
-		assert_eq!(out, Value::from(Idiom(vec![Part::from("test"), Part::from("temp")])));
+		assert_eq!(out, SqlValue::from(Idiom(vec![Part::from("test"), Part::from("temp")])));
 	}
 
 	#[test]
 	fn idiom_nested_quoted() {
 		let sql = "test.`some key`";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test.`some key`", format!("{}", out));
-		assert_eq!(out, Value::from(Idiom(vec![Part::from("test"), Part::from("some key")])));
+		assert_eq!(out, SqlValue::from(Idiom(vec![Part::from("test"), Part::from("some key")])));
 	}
 
 	#[test]
 	fn idiom_nested_array_all() {
 		let sql = "test.temp[*]";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test.temp[*]", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![Part::from("test"), Part::from("temp"), Part::All]))
+			SqlValue::from(Idiom(vec![Part::from("test"), Part::from("temp"), Part::All]))
 		);
 	}
 
 	#[test]
 	fn idiom_nested_array_last() {
 		let sql = "test.temp[$]";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test.temp[$]", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![Part::from("test"), Part::from("temp"), Part::Last]))
+			SqlValue::from(Idiom(vec![Part::from("test"), Part::from("temp"), Part::Last]))
 		);
 	}
 
 	#[test]
 	fn idiom_nested_array_value() {
 		let sql = "test.temp[*].text";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test.temp[*].text", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
+			SqlValue::from(Idiom(vec![
 				Part::from("test"),
 				Part::from("temp"),
 				Part::All,
@@ -942,17 +942,17 @@ mod tests {
 	#[test]
 	fn idiom_nested_array_question() {
 		let sql = "test.temp[? test = true].text";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test.temp[WHERE test = true].text", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
+			SqlValue::from(Idiom(vec![
 				Part::from("test"),
 				Part::from("temp"),
-				Part::Where(Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
+				Part::Where(SqlValue::Expression(Box::new(Expression::Binary {
+					l: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
 					o: Operator::Equal,
-					r: Value::Bool(true)
+					r: SqlValue::Bool(true)
 				}))),
 				Part::from("text")
 			]))
@@ -962,17 +962,17 @@ mod tests {
 	#[test]
 	fn idiom_nested_array_condition() {
 		let sql = "test.temp[WHERE test = true].text";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("test.temp[WHERE test = true].text", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
+			SqlValue::from(Idiom(vec![
 				Part::from("test"),
 				Part::from("temp"),
-				Part::Where(Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
+				Part::Where(SqlValue::Expression(Box::new(Expression::Binary {
+					l: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
 					o: Operator::Equal,
-					r: Value::Bool(true)
+					r: SqlValue::Bool(true)
 				}))),
 				Part::from("text")
 			]))
@@ -982,11 +982,11 @@ mod tests {
 	#[test]
 	fn idiom_start_param_local_field() {
 		let sql = "$test.temporary[0].embedded…";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("$test.temporary[0].embedded…", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
+			SqlValue::from(Idiom(vec![
 				Part::Start(Param::from("test").into()),
 				Part::from("temporary"),
 				Part::Index(Number::Int(0)),
@@ -999,11 +999,11 @@ mod tests {
 	#[test]
 	fn idiom_start_thing_remote_traversal() {
 		let sql = "person:test.friend->like->person";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("person:test.friend->like->person", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
+			SqlValue::from(Idiom(vec![
 				Part::Start(Thing::from(("person", "test")).into()),
 				Part::from("friend"),
 				Part::Graph(Graph {
@@ -1023,35 +1023,35 @@ mod tests {
 	#[test]
 	fn part_all() {
 		let sql = "{}[*]";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("{  }[*]", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![Part::Start(Value::from(Object::default())), Part::All]))
+			SqlValue::from(Idiom(vec![Part::Start(SqlValue::from(Object::default())), Part::All]))
 		);
 	}
 
 	#[test]
 	fn part_last() {
 		let sql = "{}[$]";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("{  }[$]", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![Part::Start(Value::from(Object::default())), Part::Last]))
+			SqlValue::from(Idiom(vec![Part::Start(SqlValue::from(Object::default())), Part::Last]))
 		);
 	}
 
 	#[test]
 	fn part_param() {
 		let sql = "{}[$param]";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("{  }[$param]", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
-				Part::Start(Value::from(Object::default())),
-				Part::Value(Value::Param(Param::from("param")))
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::from(Object::default())),
+				Part::Value(SqlValue::Param(Param::from("param")))
 			]))
 		);
 	}
@@ -1059,34 +1059,40 @@ mod tests {
 	#[test]
 	fn part_flatten() {
 		let sql = "{}...";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("{  }…", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![Part::Start(Value::from(Object::default())), Part::Flatten]))
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::from(Object::default())),
+				Part::Flatten
+			]))
 		);
 	}
 
 	#[test]
 	fn part_flatten_ellipsis() {
 		let sql = "{}…";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("{  }…", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![Part::Start(Value::from(Object::default())), Part::Flatten]))
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::from(Object::default())),
+				Part::Flatten
+			]))
 		);
 	}
 
 	#[test]
 	fn part_number() {
 		let sql = "{}[0]";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("{  }[0]", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
-				Part::Start(Value::from(Object::default())),
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::from(Object::default())),
 				Part::Index(Number::from(0))
 			]))
 		);
@@ -1095,16 +1101,16 @@ mod tests {
 	#[test]
 	fn part_expression_question() {
 		let sql = "{}[?test = true]";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("{  }[WHERE test = true]", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
-				Part::Start(Value::from(Object::default())),
-				Part::Where(Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::from(Object::default())),
+				Part::Where(SqlValue::Expression(Box::new(Expression::Binary {
+					l: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
 					o: Operator::Equal,
-					r: Value::Bool(true)
+					r: SqlValue::Bool(true)
 				}))),
 			]))
 		);
@@ -1113,16 +1119,16 @@ mod tests {
 	#[test]
 	fn part_expression_condition() {
 		let sql = "{}[WHERE test = true]";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!("{  }[WHERE test = true]", format!("{}", out));
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
-				Part::Start(Value::from(Object::default())),
-				Part::Where(Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::from(Object::default())),
+				Part::Where(SqlValue::Expression(Box::new(Expression::Binary {
+					l: SqlValue::Idiom(Idiom(vec![Part::Field(Ident("test".to_string()))])),
 					o: Operator::Equal,
-					r: Value::Bool(true)
+					r: SqlValue::Bool(true)
 				}))),
 			]))
 		);
@@ -1131,11 +1137,11 @@ mod tests {
 	#[test]
 	fn idiom_thing_number() {
 		let sql = "test:1.foo";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
-				Part::Start(Value::Thing(Thing {
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::Thing(Thing {
 					tb: "test".to_owned(),
 					id: Id::from(1),
 				})),
@@ -1147,15 +1153,15 @@ mod tests {
 	#[test]
 	fn idiom_thing_index() {
 		let sql = "test:1['foo']";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
-				Part::Start(Value::Thing(Thing {
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::Thing(Thing {
 					tb: "test".to_owned(),
 					id: Id::from(1),
 				})),
-				Part::Value(Value::Strand(Strand("foo".to_owned()))),
+				Part::Value(SqlValue::Strand(Strand("foo".to_owned()))),
 			]))
 		);
 	}
@@ -1163,11 +1169,11 @@ mod tests {
 	#[test]
 	fn idiom_thing_all() {
 		let sql = "test:1.*";
-		let out = Value::parse(sql);
+		let out = SqlValue::parse(sql);
 		assert_eq!(
 			out,
-			Value::from(Idiom(vec![
-				Part::Start(Value::Thing(Thing {
+			SqlValue::from(Idiom(vec![
+				Part::Start(SqlValue::Thing(Thing {
 					tb: "test".to_owned(),
 					id: Id::from(1),
 				})),

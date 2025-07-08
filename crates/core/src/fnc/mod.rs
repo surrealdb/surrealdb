@@ -1589,7 +1589,7 @@ mod tests {
 	use crate::dbs::Capabilities;
 	use crate::{
 		dbs::capabilities::ExperimentalTarget,
-		expr::{Function, Query, Statement, Value, statements::OutputStatement},
+		sql::{Function, Query, SqlValue, Statement, statements::OutputStatement},
 	};
 
 	#[tokio::test]
@@ -1630,7 +1630,7 @@ mod tests {
 			if let Ok(Query(mut x)) = res {
 				match x.0.pop() {
 					Some(Statement::Output(OutputStatement {
-						what: Value::Function(x),
+						what: SqlValue::Function(x),
 						..
 					})) => match *x {
 						Function::Normal(parsed_name, _) => {

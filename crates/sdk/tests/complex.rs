@@ -8,7 +8,8 @@ use helpers::with_enough_stack;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
+use surrealdb_core::expr::Value;
 
 #[test]
 fn self_referential_field() -> Result<()> {
@@ -118,7 +119,7 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
 		}
 		//
 		let tmp = res.next().unwrap()?;
-		let val = Value::parse("[ { fut: [42] } ]");
+		let val = SqlValue::parse("[ { fut: [42] } ]").into();
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -158,13 +159,14 @@ fn ok_graph_traversal_depth() -> Result<()> {
 			//
 			match tmp {
 				Ok(res) => {
-					let val = Value::parse(&format!(
+					let val = SqlValue::parse(&format!(
 						"[
 							{{
 								res: [node:{n}],
 							}}
 						]"
-					));
+					))
+					.into();
 					assert_eq!(res, val);
 				}
 				Err(res) => {
@@ -195,7 +197,7 @@ fn ok_cast_chain_depth() -> Result<()> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap()?;
-		let val = Value::from(vec![Value::from(5)]);
+		let val = Value::from(vec![SqlValue::from(5)]);
 		assert_eq!(tmp, val);
 		//
 		Ok(())
