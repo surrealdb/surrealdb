@@ -90,7 +90,7 @@ rec {
     let
       hasBuildMetadata = buildMetadata != "";
       plus = optionalString hasBuildMetadata "+";
-    in "${cargoToml.package.version}${plus}${buildMetadata}";
+    in "${cargoToml.workspace.package.version}${plus}${buildMetadata}";
 
   SURREAL_BUILD_METADATA = buildMetadata;
 }

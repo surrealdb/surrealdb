@@ -1,6 +1,6 @@
 use crate::syn::{
-	error::{bail, SyntaxError},
-	lexer::{unicode::is_identifier_continue, Lexer},
+	error::{SyntaxError, bail},
+	lexer::{Lexer, unicode::is_identifier_continue},
 	token::{Token, TokenKind},
 };
 use std::mem;

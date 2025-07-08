@@ -1,7 +1,7 @@
-use crate::sql::{Expression, Number, Thing};
+use crate::expr::{Expression, Number, Thing};
 use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -146,7 +146,7 @@ impl KnnBruteForceResults {
 	pub(crate) fn get_dist(&self, pos: usize, thg: &Thing) -> Option<Number> {
 		if let Some(result) = self.0.get(thg.tb.as_str()) {
 			if let Some(things) = result.res.get(pos) {
-				return things.get(thg).cloned();
+				return things.get(thg).copied();
 			}
 		}
 		None

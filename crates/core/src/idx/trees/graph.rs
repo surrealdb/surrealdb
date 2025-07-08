@@ -1,9 +1,9 @@
-use crate::err::Error;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::ElementId;
 use ahash::HashMap;
 #[cfg(test)]
 use ahash::HashSet;
+use anyhow::Result;
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::hash_map::Entry;
 use std::fmt::Debug;
@@ -78,7 +78,7 @@ where
 		}
 	}
 
-	pub(super) fn to_val(&self) -> Result<BytesMut, Error> {
+	pub(super) fn to_val(&self) -> Result<BytesMut> {
 		let mut buf = BytesMut::new();
 		buf.put_u32(self.nodes.len() as u32);
 		for (&e, s) in &self.nodes {
@@ -91,7 +91,7 @@ where
 		Ok(buf)
 	}
 
-	pub(super) fn reload(&mut self, val: &[u8]) -> Result<(), Error> {
+	pub(super) fn reload(&mut self, val: &[u8]) -> Result<()> {
 		let mut buf = BytesMut::from(val);
 		self.nodes.clear();
 		let len = buf.get_u32() as usize;
@@ -124,7 +124,7 @@ where
 		for (n, e) in g {
 			let edges: HashSet<ElementId> = e.into_iter().collect();
 			let n_edges: Option<HashSet<ElementId>> =
-				self.get_edges(&n).map(|e| e.iter().cloned().collect());
+				self.get_edges(&n).map(|e| e.iter().copied().collect());
 			assert_eq!(n_edges, Some(edges), "{n:?}");
 		}
 	}
@@ -186,7 +186,7 @@ mod tests {
 		let res = g.remove_node_and_bidirectional_edges(&2);
 		assert_eq!(
 			res.map(|v| {
-				let mut v: Vec<ElementId> = v.iter().cloned().collect();
+				let mut v: Vec<ElementId> = v.iter().copied().collect();
 				v.sort();
 				v
 			}),

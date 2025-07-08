@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 
 use js::{
+	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
 	class::{JsClass, OwnedBorrow, Readable, Trace},
 	prelude::{Coerced, Opt},
-	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
 };
 use reblessive::tree::Stk;
 
@@ -11,10 +11,9 @@ use crate::{
 	ctx::Context,
 	dbs::{Attach, Options},
 	doc::CursorDoc,
-	sql::FlowResultExt as _,
+	expr::FlowResultExt as _,
 };
 
-#[allow(clippy::module_inception)]
 mod classes;
 
 use crate::ctx::MutableContext;

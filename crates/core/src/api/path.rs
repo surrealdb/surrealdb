@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	err::Error,
-	sql::{
-		fmt::{fmt_separated_by, Fmt},
+	expr::{
 		Kind, Object, Value,
+		fmt::{Fmt, fmt_separated_by},
 	},
 	syn,
 };
@@ -153,8 +153,11 @@ impl FromStr for Path {
 							inner.push(c);
 						}
 
-						kind =
-							Some(syn::kind(&inner).map_err(|e| Error::InvalidPath(e.to_string()))?);
+						kind = Some(
+							syn::kind(&inner)
+								.map_err(|e| Error::InvalidPath(e.to_string()))?
+								.into(),
+						);
 
 						break 'segment;
 					}

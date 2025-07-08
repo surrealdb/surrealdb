@@ -3,31 +3,36 @@ use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-#[cfg(feature = "http")]
-use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
+use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::cache::ds::DatastoreCache;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
+use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
-use crate::sql::value::Value;
+use anyhow::{Result, bail};
 use async_channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-#[cfg(storage)]
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use trice::Instant;
+
+#[cfg(feature = "http")]
+use crate::dbs::capabilities::NetTarget;
 #[cfg(feature = "http")]
 use url::Url;
+
+#[cfg(not(target_family = "wasm"))]
+use crate::kvs::IndexBuilder;
+
+#[cfg(storage)]
+use std::path::PathBuf;
 
 pub type Context = Arc<MutableContext>;
 
@@ -56,6 +61,8 @@ pub struct MutableContext {
 	// The index concurrent builders
 	#[cfg(not(target_family = "wasm"))]
 	index_builder: Option<IndexBuilder>,
+	// The sequences
+	sequences: Option<Sequences>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 	#[cfg(storage)]
@@ -111,6 +118,7 @@ impl MutableContext {
 			cache: None,
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: None,
+			sequences: None,
 			#[cfg(storage)]
 			temporary_directory: None,
 			transaction: None,
@@ -134,6 +142,7 @@ impl MutableContext {
 			cache: parent.cache.clone(),
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
+			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
@@ -160,6 +169,7 @@ impl MutableContext {
 			cache: parent.cache.clone(),
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
+			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
@@ -186,6 +196,7 @@ impl MutableContext {
 			index_stores: from.index_stores.clone(),
 			cache: from.cache.clone(),
 			index_builder: from.index_builder.clone(),
+			sequences: from.sequences.clone(),
 			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
 			transaction: None,
@@ -196,15 +207,17 @@ impl MutableContext {
 	}
 
 	/// Creates a new context from a configured datastore.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
 		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
-		cache: Arc<DatastoreCache>,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
+		sequences: Sequences,
+		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: Arc<BucketConnections>,
-	) -> Result<MutableContext, Error> {
+	) -> Result<MutableContext> {
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
@@ -219,6 +232,7 @@ impl MutableContext {
 			cache: Some(cache),
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: Some(index_builder),
+			sequences: Some(sequences),
 			#[cfg(storage)]
 			temporary_directory,
 			transaction: None,
@@ -237,9 +251,11 @@ impl MutableContext {
 	}
 
 	/// Unfreezes this context, allowing it to be edited and configured.
-	pub(crate) fn unfreeze(ctx: Context) -> Result<MutableContext, Error> {
-		Arc::into_inner(ctx)
-			.ok_or_else(|| fail!("Tried to unfreeze a Context with multiple references"))
+	pub(crate) fn unfreeze(ctx: Context) -> Result<MutableContext> {
+		let Some(x) = Arc::into_inner(ctx) else {
+			fail!("Tried to unfreeze a Context with multiple references")
+		};
+		Ok(x)
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -356,6 +372,11 @@ impl MutableContext {
 		self.index_builder.as_ref()
 	}
 
+	/// Return the sequences manager
+	pub(crate) fn get_sequences(&self) -> Option<&Sequences> {
+		self.sequences.as_ref()
+	}
+
 	// Get the current datastore cache
 	pub(crate) fn get_cache(&self) -> Option<Arc<DatastoreCache>> {
 		self.cache.clone()
@@ -369,7 +390,7 @@ impl MutableContext {
 	/// We may not want to check for the deadline on every call.
 	/// An iteration loop may want to check it every 10 or 100 calls.
 	/// Eg.: ctx.done(count % 100 == 0)
-	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>, Error> {
+	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>> {
 		match self.deadline {
 			Some(deadline) if deep_check && deadline <= Instant::now() => {
 				Ok(Some(Reason::Timedout))
@@ -377,7 +398,7 @@ impl MutableContext {
 			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
 			_ => {
 				if deep_check && ALLOC.is_beyond_threshold() {
-					return Err(Error::QueryBeyondMemoryThreshold);
+					bail!(Error::QueryBeyondMemoryThreshold);
 				}
 				match &self.parent {
 					Some(ctx) => ctx.done(deep_check),
@@ -388,7 +409,7 @@ impl MutableContext {
 	}
 
 	/// Check if the context is ok to continue.
-	pub(crate) async fn is_ok(&self, deep_check: bool) -> Result<bool, Error> {
+	pub(crate) async fn is_ok(&self, deep_check: bool) -> Result<bool> {
 		if deep_check {
 			yield_now!();
 		}
@@ -399,7 +420,7 @@ impl MutableContext {
 	///
 	/// Returns true when the query is canceled or if check_deadline is true when the query
 	/// deadline is met.
-	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool, Error> {
+	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool> {
 		if deep_check {
 			yield_now!();
 		}
@@ -407,7 +428,7 @@ impl MutableContext {
 	}
 
 	/// Check if the context is not ok to continue, because it timed out.
-	pub(crate) async fn is_timedout(&self) -> Result<bool, Error> {
+	pub(crate) async fn is_timedout(&self) -> Result<bool> {
 		yield_now!();
 		Ok(matches!(self.done(true)?, Some(Reason::Timedout)))
 	}
@@ -452,48 +473,103 @@ impl MutableContext {
 	}
 
 	/// Get the capabilities for this context
-	#[allow(dead_code)]
 	pub(crate) fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.capabilities.clone()
 	}
 
 	/// Check if scripting is allowed
-	#[allow(dead_code)]
-	pub(crate) fn check_allowed_scripting(&self) -> Result<(), Error> {
+	#[cfg_attr(not(feature = "scripting"), expect(dead_code))]
+	pub(crate) fn check_allowed_scripting(&self) -> Result<()> {
 		if !self.capabilities.allows_scripting() {
 			warn!("Capabilities denied scripting attempt");
-			return Err(Error::ScriptingNotAllowed);
+			bail!(Error::ScriptingNotAllowed);
 		}
 		trace!("Capabilities allowed scripting");
 		Ok(())
 	}
 
 	/// Check if a function is allowed
-	pub(crate) fn check_allowed_function(&self, target: &str) -> Result<(), Error> {
+	pub(crate) fn check_allowed_function(&self, target: &str) -> Result<()> {
 		if !self.capabilities.allows_function_name(target) {
 			warn!("Capabilities denied function execution attempt, target: '{target}'");
-			return Err(Error::FunctionNotAllowed(target.to_string()));
+			bail!(Error::FunctionNotAllowed(target.to_string()));
 		}
 		trace!("Capabilities allowed function execution, target: '{target}'");
 		Ok(())
 	}
 
-	/// Check if a network target is allowed
+	/// Checks if the provided URL's network target is allowed based on current capabilities.
+	///
+	/// This function performs a validation to ensure that the outgoing network connection
+	/// specified by the provided `url` is permitted. It checks the resolved network targets
+	/// associated with the URL and ensures that all targets adhere to the configured
+	/// capabilities.
+	///
+	/// # Features
+	/// The function is only available if the `http` feature is enabled.
+	///
+	/// # Parameters
+	/// - `url`: A reference to a [`Url`] object representing the target endpoint to check.
+	///
+	/// # Returns
+	/// This function returns a [`Result<()>`]:
+	/// - On success, it returns `Ok(())` indicating the network target is allowed.
+	/// - On failure, it returns an error wrapped in the [`Error`] type:
+	///   - `NetTargetNotAllowed` if the target is not permitted.
+	///   - `InvalidUrl` if the provided URL is invalid.
+	///
+	/// # Behavior
+	/// 1. Extracts the host and port information from the URL.
+	/// 2. Constructs a [`NetTarget`] object and checks if it is allowed by the current
+	///    network capabilities.
+	/// 3. If the network target resolves to multiple targets (e.g., DNS resolution), each
+	///    target is validated individually.
+	/// 4. Logs a warning and prevents the connection if the target is denied by the
+	///    capabilities.
+	///
+	/// # Logging
+	/// - Logs a warning message if the network target is denied.
+	/// - Logs a trace message if the network target is permitted.
+	///
+	/// # Errors
+	/// - `NetTargetNotAllowed`: Returned if any of the resolved targets are not allowed.
+	/// - `InvalidUrl`: Returned if the URL does not have a valid host.
+	///
 	#[cfg(feature = "http")]
-	pub(crate) fn check_allowed_net(&self, url: &Url) -> Result<(), Error> {
+	pub(crate) async fn check_allowed_net(&self, url: &Url) -> Result<()> {
+		let match_any_deny_net = |t| {
+			if self.capabilities.matches_any_deny_net(t) {
+				warn!("Capabilities denied outgoing network connection attempt, target: '{t}'");
+				bail!(Error::NetTargetNotAllowed(t.to_string()));
+			}
+			Ok(())
+		};
 		match url.host() {
 			Some(host) => {
-				let target = &NetTarget::Host(host.to_owned(), url.port_or_known_default());
-				if !self.capabilities.allows_network_target(target) {
+				let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
+				// Check the domain name (if any) matches the allow list
+				let host_allowed = self.capabilities.matches_any_allow_net(&target);
+				if !host_allowed {
 					warn!(
 						"Capabilities denied outgoing network connection attempt, target: '{target}'"
 					);
-					return Err(Error::NetTargetNotAllowed(target.to_string()));
+					bail!(Error::NetTargetNotAllowed(target.to_string()));
+				}
+				// Check against the deny list
+				match_any_deny_net(&target)?;
+				// Resolve the domain name to a vector of IP addresses
+				#[cfg(not(target_family = "wasm"))]
+				let targets = target.resolve().await?;
+				#[cfg(target_family = "wasm")]
+				let targets = target.resolve()?;
+				for t in &targets {
+					// For each IP address resolved, check it is allowed
+					match_any_deny_net(t)?;
 				}
 				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 				Ok(())
 			}
-			_ => Err(Error::InvalidUrl(url.to_string())),
+			_ => bail!(Error::InvalidUrl(url.to_string())),
 		}
 	}
 
@@ -507,7 +583,7 @@ impl MutableContext {
 		ns: &str,
 		db: &str,
 		bu: &str,
-	) -> Result<Arc<dyn ObjectStore>, Error> {
+	) -> Result<Arc<dyn ObjectStore>> {
 		// Do we have a buckets context?
 		if let Some(buckets) = &self.buckets {
 			// Attempt to obtain an existing bucket connection
@@ -531,7 +607,37 @@ impl MutableContext {
 				Ok(store)
 			}
 		} else {
-			Err(Error::BucketUnavailable(bu.into()))
+			bail!(Error::BucketUnavailable(bu.into()))
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "http")]
+	use crate::ctx::MutableContext;
+	#[cfg(feature = "http")]
+	use crate::dbs::Capabilities;
+	#[cfg(feature = "http")]
+	use crate::dbs::capabilities::{NetTarget, Targets};
+	#[cfg(feature = "http")]
+	use std::str::FromStr;
+	#[cfg(feature = "http")]
+	use url::Url;
+
+	#[cfg(feature = "http")]
+	#[tokio::test]
+	async fn test_context_check_allowed_net() {
+		let cap = Capabilities::all().without_network_targets(Targets::Some(
+			[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+		));
+		let mut ctx = MutableContext::background();
+		ctx.capabilities = cap.into();
+		let ctx = ctx.freeze();
+		let r = ctx.check_allowed_net(&Url::parse("http://localhost").unwrap()).await;
+		assert_eq!(
+			r.err().unwrap().to_string(),
+			"Access to network target '127.0.0.1/32' is not allowed"
+		);
 	}
 }

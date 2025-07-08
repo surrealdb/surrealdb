@@ -52,6 +52,7 @@ pub(crate) mod param;
 pub(crate) mod part;
 pub(crate) mod paths;
 pub(crate) mod permission;
+pub(crate) mod planner;
 pub(crate) mod query;
 pub(crate) mod range;
 pub(crate) mod reference;
@@ -81,6 +82,7 @@ pub mod serde;
 pub mod statements;
 
 use crate::err::Error;
+use anyhow::Result;
 
 pub use self::access::Access;
 pub use self::access::Accesses;
@@ -116,8 +118,8 @@ pub use self::geometry::Geometry;
 pub use self::graph::Graph;
 pub use self::group::Group;
 pub use self::group::Groups;
-pub use self::id::range::IdRange;
 pub use self::id::Id;
+pub use self::id::range::IdRange;
 pub use self::ident::Ident;
 pub use self::idiom::Idiom;
 pub use self::idiom::Idioms;
@@ -127,6 +129,7 @@ pub use self::kind::Literal;
 pub use self::limit::Limit;
 pub use self::mock::Mock;
 pub use self::model::Model;
+pub use self::number::DecimalExt;
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::operation::Operation;
@@ -156,10 +159,10 @@ pub use self::thing::Thing;
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
 pub use self::uuid::Uuid;
+pub use self::value::SqlValue;
+pub use self::value::SqlValues;
 pub use self::value::serde::from_value;
 pub use self::value::serde::to_value;
-pub use self::value::Value;
-pub use self::value::Values;
 pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;
@@ -181,13 +184,13 @@ pub type FlowResult<T> = Result<T, ControlFlow>;
 pub enum ControlFlow {
 	Break,
 	Continue,
-	Return(Value),
-	Err(Box<Error>),
+	Return(SqlValue),
+	Err(anyhow::Error),
 }
 
-impl From<Error> for ControlFlow {
-	fn from(error: Error) -> Self {
-		ControlFlow::Err(Box::new(error))
+impl From<anyhow::Error> for ControlFlow {
+	fn from(error: anyhow::Error) -> Self {
+		ControlFlow::Err(error)
 	}
 }
 
@@ -197,15 +200,17 @@ pub trait FlowResultExt {
 	///
 	/// If the error value is either `ControlFlow::Break` or `ControlFlow::Continue` it will
 	/// instead create an error that break/continue was used within an invalid location.
-	fn catch_return(self) -> Result<Value, Error>;
+	fn catch_return(self) -> Result<SqlValue, anyhow::Error>;
 }
 
-impl FlowResultExt for FlowResult<Value> {
-	fn catch_return(self) -> Result<Value, Error> {
+impl FlowResultExt for FlowResult<SqlValue> {
+	fn catch_return(self) -> Result<SqlValue, anyhow::Error> {
 		match self {
-			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => Err(Error::InvalidControlFlow),
+			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+				Err(anyhow::Error::new(Error::InvalidControlFlow))
+			}
 			Err(ControlFlow::Return(x)) => Ok(x),
-			Err(ControlFlow::Err(e)) => Err(*e),
+			Err(ControlFlow::Err(e)) => Err(e),
 			Ok(x) => Ok(x),
 		}
 	}

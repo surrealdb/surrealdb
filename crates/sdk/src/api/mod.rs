@@ -1,5 +1,7 @@
 //! Functionality for connecting to local and remote databases
 
+use crate::Result;
+use anyhow::ensure;
 use method::BoxFuture;
 use semver::BuildMetadata;
 use semver::Version;
@@ -21,15 +23,14 @@ macro_rules! transparent_wrapper{
 		#[repr(transparent)]
 		$vis struct $name($field_vis $inner);
 
+		#[allow(dead_code)]
 		impl $name{
 			#[doc(hidden)]
-			#[allow(dead_code)]
 			pub fn from_inner(inner: $inner) -> Self{
 				$name(inner)
 			}
 
 			#[doc(hidden)]
-			#[allow(dead_code)]
 			pub fn from_inner_ref(inner: &$inner) -> &Self{
 				unsafe{
 					std::mem::transmute::<&$inner,&$name>(inner)
@@ -37,7 +38,6 @@ macro_rules! transparent_wrapper{
 			}
 
 			#[doc(hidden)]
-			#[allow(dead_code)]
 			pub fn from_inner_mut(inner: &mut $inner) -> &mut Self{
 				unsafe{
 					std::mem::transmute::<&mut $inner,&mut $name>(inner)
@@ -45,19 +45,16 @@ macro_rules! transparent_wrapper{
 			}
 
 			#[doc(hidden)]
-			#[allow(dead_code)]
 			pub fn into_inner(self) -> $inner{
 				self.0
 			}
 
 			#[doc(hidden)]
-			#[allow(dead_code)]
 			pub fn into_inner_ref(&self) -> &$inner{
 				&self.0
 			}
 
 			#[doc(hidden)]
-			#[allow(dead_code)]
 			pub fn into_inner_mut(&mut self) -> &mut $inner{
 				&mut self.0
 			}
@@ -86,11 +83,13 @@ macro_rules! impl_serialize_wrapper {
 			fn serialize_revisioned<W: std::io::Write>(
 				&self,
 				w: &mut W,
-			) -> Result<(), revision::Error> {
+			) -> std::result::Result<(), revision::Error> {
 				self.0.serialize_revisioned(w)
 			}
 
-			fn deserialize_revisioned<R: std::io::Read>(r: &mut R) -> Result<Self, revision::Error>
+			fn deserialize_revisioned<R: std::io::Read>(
+				r: &mut R,
+			) -> std::result::Result<Self, revision::Error>
 			where
 				Self: Sized,
 			{
@@ -99,7 +98,7 @@ macro_rules! impl_serialize_wrapper {
 		}
 
 		impl ::serde::Serialize for $ty {
-			fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
 			where
 				S: ::serde::ser::Serializer,
 			{
@@ -108,7 +107,7 @@ macro_rules! impl_serialize_wrapper {
 		}
 
 		impl<'de> ::serde::de::Deserialize<'de> for $ty {
-			fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+			fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
 			where
 				D: ::serde::de::Deserializer<'de>,
 			{
@@ -136,16 +135,13 @@ use self::opt::WaitFor;
 
 pub use method::query::Response;
 
-/// A specialized `Result` type
-pub type Result<T> = std::result::Result<T, crate::Error>;
-
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
 
 const SUPPORTED_VERSIONS: (&str, &str) = (">=1.2.0, <4.0.0", "20230701.55918b7c");
 
 /// Connection trait implemented by supported engines
-pub trait Connection: conn::Connection {}
+pub trait Connection: conn::Sealed {}
 
 /// The future returned when creating a new SurrealDB instance
 #[derive(Debug)]
@@ -233,9 +229,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			// Avoid establishing another connection if already connected
-			if self.surreal.inner.router.get().is_some() {
-				return Err(Error::AlreadyConnected.into());
-			}
+			ensure!(self.surreal.inner.router.get().is_none(), Error::AlreadyConnected);
 			let endpoint = self.address?;
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
 			let client = Client::connect(endpoint, self.capacity).await?;
@@ -335,19 +329,21 @@ where
 		let req = VersionReq::parse(versions).expect("valid supported versions");
 		let build_meta = BuildMetadata::new(build_meta).expect("valid supported build metadata");
 		let server_build = &version.build;
-		if !req.matches(version) {
-			return Err(Error::VersionMismatch {
+		ensure!(
+			req.matches(version),
+			Error::VersionMismatch {
 				server_version: version.clone(),
 				supported_versions: versions.to_owned(),
 			}
-			.into());
-		} else if !server_build.is_empty() && server_build < &build_meta {
-			return Err(Error::BuildMetadataMismatch {
+		);
+
+		ensure!(
+			server_build.is_empty() || server_build >= &build_meta,
+			Error::BuildMetadataMismatch {
 				server_metadata: server_build.clone(),
 				supported_metadata: build_meta,
 			}
-			.into());
-		}
+		);
 		Ok(())
 	}
 }

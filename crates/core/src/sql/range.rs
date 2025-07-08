@@ -1,14 +1,11 @@
 use super::kind::HasKind;
 use super::value::{Coerce, CoerceError, CoerceErrorExt as _};
-use super::{Array, FlowResult, Id};
+use super::{Array, Id};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::{Subquery, Value};
+use crate::sql::SqlValue;
+use crate::sql::operator::BindingPower;
 use crate::syn;
-use reblessive::tree::Stk;
+use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -24,8 +21,8 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Range {
-	pub beg: Bound<Value>,
-	pub end: Bound<Value>,
+	pub beg: Bound<SqlValue>,
+	pub end: Bound<SqlValue>,
 }
 
 impl Range {
@@ -136,6 +133,40 @@ impl Range {
 	}
 }
 
+impl From<Range> for crate::expr::Range {
+	fn from(value: Range) -> Self {
+		crate::expr::Range {
+			beg: match value.beg {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match value.end {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		}
+	}
+}
+
+impl From<crate::expr::Range> for Range {
+	fn from(value: crate::expr::Range) -> Self {
+		Range {
+			beg: match value.beg {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match value.end {
+				Bound::Included(v) => Bound::Included(v.into()),
+				Bound::Excluded(v) => Bound::Excluded(v.into()),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		}
+	}
+}
+
 /// A range but with specific value types.
 #[derive(Clone, Debug)]
 pub struct TypedRange<T> {
@@ -153,7 +184,7 @@ impl TypedRange<i64> {
 			_ => {}
 		}
 
-		Some(Array(self.map(Value::from).collect()))
+		Some(Array(self.map(SqlValue::from).collect()))
 	}
 }
 
@@ -226,12 +257,12 @@ impl Iterator for TypedRange<i64> {
 
 impl<T> From<TypedRange<T>> for Range
 where
-	Value: From<T>,
+	SqlValue: From<T>,
 {
 	fn from(value: TypedRange<T>) -> Self {
 		Range {
-			beg: value.beg.map(Value::from),
-			end: value.end.map(Value::from),
+			beg: value.beg.map(SqlValue::from),
+			end: value.end.map(SqlValue::from),
 		}
 	}
 }
@@ -248,43 +279,21 @@ impl FromStr for Range {
 
 impl Range {
 	/// Construct a new range
-	pub fn new(beg: Bound<Value>, end: Bound<Value>) -> Self {
+	pub fn new(beg: Bound<SqlValue>, end: Bound<SqlValue>) -> Self {
 		Self {
 			beg,
 			end,
 		}
 	}
 
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		Ok(Value::Range(Box::new(Range {
-			beg: match &self.beg {
-				Bound::Included(v) => Bound::Included(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Excluded(v) => Bound::Excluded(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Unbounded => Bound::Unbounded,
-			},
-			end: match &self.end {
-				Bound::Included(v) => Bound::Included(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Excluded(v) => Bound::Excluded(v.compute(stk, ctx, opt, doc).await?),
-				Bound::Unbounded => Bound::Unbounded,
-			},
-		})))
-	}
-
 	/// Validate that a Range contains only computed Values
-	pub fn validate_computed(&self) -> Result<(), Error> {
+	pub fn validate_computed(&self) -> Result<()> {
 		match &self.beg {
-			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
 			Bound::Unbounded => {}
 		}
 		match &self.end {
-			Bound::Included(ref v) | Bound::Excluded(ref v) => v.validate_computed()?,
+			Bound::Included(v) | Bound::Excluded(v) => v.validate_computed()?,
 			Bound::Unbounded => {}
 		}
 
@@ -354,23 +363,43 @@ impl Ord for Range {
 
 impl fmt::Display for Range {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		fn bound_value(v: &Value) -> Value {
-			if v.can_be_range_bound() {
-				v.to_owned()
-			} else {
-				Value::Subquery(Box::new(Subquery::Value(v.to_owned())))
-			}
-		}
-
 		match &self.beg {
 			Bound::Unbounded => write!(f, ""),
-			Bound::Included(v) => write!(f, "{}", bound_value(v)),
-			Bound::Excluded(v) => write!(f, "{}>", bound_value(v)),
+			Bound::Included(v) => {
+				// We also () if the binding power is equal. This is because range has no defined
+				// associativity. a..b..c is ambigous and could either be (a..b)..c or a..(b..c).
+				// The syntax explicitly left this undefined and thus a..b..c without params is a
+				// syntax error so we have to () any child range expression.
+				if BindingPower::for_value(v) <= BindingPower::Range {
+					write!(f, "({})", v)
+				} else {
+					write!(f, "{}", v)
+				}
+			}
+			Bound::Excluded(v) => {
+				if BindingPower::for_value(v) <= BindingPower::Range {
+					write!(f, "({})>", v)
+				} else {
+					write!(f, "{}>", v)
+				}
+			}
 		}?;
 		match &self.end {
 			Bound::Unbounded => write!(f, ".."),
-			Bound::Excluded(v) => write!(f, "..{}", bound_value(v)),
-			Bound::Included(v) => write!(f, "..={}", bound_value(v)),
+			Bound::Excluded(v) => {
+				if BindingPower::for_value(v) <= BindingPower::Range {
+					write!(f, "..({})", v)
+				} else {
+					write!(f, "..{}", v)
+				}
+			}
+			Bound::Included(v) => {
+				if BindingPower::for_value(v) <= BindingPower::Range {
+					write!(f, "..=({})", v)
+				} else {
+					write!(f, "..={}", v)
+				}
+			}
 		}?;
 		Ok(())
 	}

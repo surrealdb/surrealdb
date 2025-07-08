@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings", condition = { env_not_set = [
+RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
 BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = [
@@ -57,9 +57,10 @@ category = "CI - CHECK"
 command = "cargo"
 args = [
     "clippy",
+    "--workspace",
     "--all-targets",
     "--features",
-    "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,storage-fdb-7_1",
+    "${ALL_FEATURES}",
     "--tests",
     "--benches",
     "--bins",
@@ -73,9 +74,11 @@ category = "CI - CHECK"
 command = "cargo"
 args = [
     "clippy",
+    "--workspace",
     "--all-targets",
+    "--release",
     "--features",
-    "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml,storage-fdb-7_1",
+    "${ALL_FEATURES}",
     "--tests",
     "--benches",
     "--bins",
@@ -85,6 +88,11 @@ args = [
 ]
 
 [tasks.ci-check-wasm]
+# Note: On Mac, Apple ships its own version of LLVM which does not cross-compile to WASM.
+# To build this on a Mac, you need to install the upstream LLVM Clang.
+# Steps:
+# 1. Install LLVM from Homebrew: `brew install llvm`
+# 2. Add the LLVM bin directory to your PATH: `echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zshrc`
 category = "CI - CHECK"
 command = "cargo"
 env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js"' }
@@ -276,7 +284,7 @@ run_task = { name = [
 ], fork = true }
 
 [tasks.ci-database-upgrade]
-env = { _TEST_FEATURES = "storage-rocksdb", RUSTFLAGS = "-D warnings --cfg docker" }
+env = { _TEST_FEATURES = "storage-rocksdb", RUSTFLAGS = "-D warnings --cfg docker --cfg tokio_unstable" }
 category = "CI - DATABASE UPGRADE TESTS"
 run_task = { name = ["test-database-upgrade"], fork = true }
 
@@ -427,6 +435,21 @@ run_task = { name = [
     "clear-fdb",
     "test-api-integration",
 ], fork = true, parallel = false }
+
+[tasks.ci-api-integration-all]
+category = "CI - INTEGRATION TESTS"
+description = "Run all integration tests"
+dependencies = [
+    "ci-api-integration-mem",
+    "ci-api-integration-file",
+    "ci-api-integration-rocksdb",
+    "ci-api-integration-surrealkv",
+    "ci-api-integration-tikv",
+    "ci-api-integration-fdb-7_1",
+    "ci-api-integration-fdb-7_3",
+    "ci-api-integration-http",
+    "ci-api-integration-ws",
+]
 
 #
 # Services

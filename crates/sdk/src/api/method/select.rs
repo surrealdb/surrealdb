@@ -1,26 +1,39 @@
+use super::transaction::WithTransaction;
+use crate::Surreal;
+use crate::Value;
+use crate::api::Connection;
+use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::method::OnceLockExt;
 use crate::api::opt::Resource;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::method::Live;
 use crate::opt::KeyRange;
-use crate::Surreal;
-use crate::Value;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use uuid::Uuid;
 
 /// A select future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Select<'r, C: Connection, R, T = ()> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) response_type: PhantomData<R>,
 	pub(super) query_type: PhantomData<T>,
+}
+
+impl<C, R, T> WithTransaction for Select<'_, C, R, T>
+where
+	C: Connection,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 impl<C, R, T> Select<'_, C, R, T>
@@ -40,6 +53,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Select {
+				txn,
 				client,
 				resource,
 				..
@@ -48,6 +62,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Select {
+						txn,
 						what: resource?,
 					})
 					.await
@@ -164,6 +179,7 @@ where
 	/// ```
 	pub fn live(self) -> Select<'r, C, R, Live> {
 		Select {
+			txn: self.txn,
 			client: self.client,
 			resource: self.resource,
 			response_type: self.response_type,

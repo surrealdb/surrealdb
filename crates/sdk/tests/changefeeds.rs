@@ -2,20 +2,22 @@ mod parse;
 
 use chrono::DateTime;
 
+use anyhow::anyhow;
 use helpers::new_ds;
 use parse::Parse;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
+use surrealdb::expr::Value;
 use surrealdb::kvs::Datastore;
 use surrealdb::kvs::LockType::Optimistic;
 use surrealdb::kvs::TransactionType::Write;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 use surrealdb_core::vs::VersionStamp;
 
 mod helpers;
 
 #[test_log::test(tokio::test)]
-async fn database_change_feeds() -> Result<(), Error> {
+async fn database_change_feeds() -> Result<()> {
 	// This is a unique shared identifier
 	let identifier = "alpaca";
 	let ns = format!("namespace_{identifier}");
@@ -48,11 +50,11 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns(ns.as_str()).with_db(db.as_str());
 	let mut current_time = 0u64;
-	dbs.changefeed_process_at(current_time).await?;
+	dbs.changefeed_process_at(None, current_time).await?;
 	let res = &mut dbs.execute(sql.as_str(), &ses, None).await?;
 	// Increment by a second (sic)
 	current_time += 1;
-	dbs.changefeed_process_at(current_time).await?;
+	dbs.changefeed_process_at(None, current_time).await?;
 	assert_eq!(res.len(), 3);
 	// DEFINE DATABASE
 	let tmp = res.remove(0).result;
@@ -74,7 +76,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 		.map(|(vs1, vs2)| {
 			let vs1 = vs1.into_u128();
 			let vs2 = vs2.into_u128();
-			Value::parse(
+			SqlValue::parse(
 				format!(
 					r#"[
 						{{ versionstamp: {}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
@@ -84,6 +86,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 				)
 				.as_str(),
 			)
+			.into()
 		})
 		.collect();
 
@@ -93,30 +96,31 @@ async fn database_change_feeds() -> Result<(), Error> {
 		sql2: &str,
 		ses: &Session,
 		cf_val_arr: &[Value],
-	) -> Result<(), String> {
+	) -> Result<()> {
 		let res = &mut dbs.execute(sql2, ses, None).await?;
 		assert_eq!(res.len(), 3);
 		// UPDATE CONTENT
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = SqlValue::parse(
 			"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-		);
+		)
+		.into();
 		Some(&tmp)
 			.filter(|x| *x == &val)
 			.map(|_v| ())
-			.ok_or(format!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
+			.ok_or_else(|| anyhow!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
-		let val = Value::parse("[]");
+		let val = SqlValue::parse("[]").into();
 		Some(&tmp)
 			.filter(|x| *x == &val)
 			.map(|_v| ())
-			.ok_or(format!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
+			.ok_or_else(|| anyhow!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
 		cf_val_arr
@@ -124,15 +128,17 @@ async fn database_change_feeds() -> Result<(), Error> {
 			.find(|x| *x == &tmp)
 			// We actually dont want to capture if its found
 			.map(|_v| ())
-			.ok_or(format!(
-				"Expected SHOW CHANGES value not found:\n{}\nin:\n{}",
-				tmp,
-				cf_val_arr
-					.iter()
-					.map(|vs| vs.to_string())
-					.reduce(|left, right| format!("{}\n{}", left, right))
-					.unwrap()
-			))?;
+			.ok_or_else(|| {
+				anyhow!(
+					"Expected SHOW CHANGES value not found:\n{}\nin:\n{}",
+					tmp,
+					cf_val_arr
+						.iter()
+						.map(|vs| vs.to_string())
+						.reduce(|left, right| format!("{}\n{}", left, right))
+						.unwrap()
+				)
+			})?;
 		Ok(())
 	}
 
@@ -157,7 +163,7 @@ async fn database_change_feeds() -> Result<(), Error> {
 	";
 	// This is neccessary to mark a point in time that can be GC'd
 	current_time += 1;
-	dbs.changefeed_process_at(current_time).await?;
+	dbs.changefeed_process_at(None, current_time).await?;
 	let tx = dbs.transaction(Write, Optimistic).await?;
 	tx.cancel().await?;
 
@@ -168,17 +174,17 @@ async fn database_change_feeds() -> Result<(), Error> {
 	let one_hour_in_secs = 3600;
 	current_time += one_hour_in_secs;
 	current_time += 1;
-	dbs.changefeed_process_at(current_time).await?;
+	dbs.changefeed_process_at(None, current_time).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val: Value = SqlValue::parse("[]").into();
 	assert_eq!(val, tmp);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn table_change_feeds() -> Result<(), Error> {
+async fn table_change_feeds() -> Result<()> {
 	let sql = "
         DEFINE TABLE person CHANGEFEED 1h;
 		DEFINE FIELD name ON TABLE person
@@ -208,9 +214,9 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let ses = Session::owner().with_ns("test-tb-cf").with_db("test-tb-cf");
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
-	dbs.changefeed_process_at(start_ts).await?;
+	dbs.changefeed_process_at(None, start_ts).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	dbs.changefeed_process_at(end_ts).await?;
+	dbs.changefeed_process_at(None, end_ts).await?;
 	assert_eq!(res.len(), 10);
 	// DEFINE TABLE
 	let tmp = res.remove(0).result;
@@ -220,14 +226,15 @@ async fn table_change_feeds() -> Result<(), Error> {
 	tmp.unwrap();
 	// UPDATE CONTENT
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	// UPDATE REPLACE
 	let tmp = res.remove(0).result;
@@ -237,14 +244,15 @@ async fn table_change_feeds() -> Result<(), Error> {
 	));
 	// UPDATE MERGE
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Jaime',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	// UPDATE SET
 	let tmp = res.remove(0).result;
@@ -254,18 +262,19 @@ async fn table_change_feeds() -> Result<(), Error> {
 	));
 	// UPDATE SET
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: person:test,
 				name: 'Name: Tobie',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	// DELETE
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	// CREATE
 	let _tmp = res.remove(0).result?;
@@ -298,7 +307,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 					vs5.into_u128(),
 					vs6.into_u128(),
 				);
-				Value::parse(
+				SqlValue::parse(
 					format!(
 						r#"[
 						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person' }} }} ] }},
@@ -310,7 +319,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 						]"#
 					)
 					.as_str(),
-				)
+				).into()
 			})
 			.collect();
 	assert!(
@@ -327,7 +336,7 @@ async fn table_change_feeds() -> Result<(), Error> {
 	let sql = "
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-	dbs.changefeed_process_at(end_ts + 3599).await?;
+	dbs.changefeed_process_at(None, end_ts + 3599).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	assert!(
@@ -341,17 +350,17 @@ async fn table_change_feeds() -> Result<(), Error> {
 			.unwrap()
 	);
 	// GC after 1hs
-	dbs.changefeed_process_at(end_ts + 3600).await?;
+	dbs.changefeed_process_at(None, end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn changefeed_with_ts() -> Result<(), Error> {
+async fn changefeed_with_ts() -> Result<()> {
 	let db = new_ds().await?;
 	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
 	// Enable change feeds
@@ -362,7 +371,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	// Save timestamp 1
 	let ts1_dt = "2023-08-01T00:00:00Z";
 	let ts1 = DateTime::parse_from_rfc3339(ts1_dt).unwrap();
-	db.changefeed_process_at(ts1.timestamp().try_into().unwrap()).await.unwrap();
+	db.changefeed_process_at(None, ts1.timestamp().try_into().unwrap()).await.unwrap();
 	// Create and update users
 	let sql = "
         CREATE user:amos SET name = 'Amos';
@@ -376,7 +385,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	}
 	let sql = format!("UPDATE {table} SET name = 'Doe'");
 	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
-	let expected = Value::parse(
+	let expected = SqlValue::parse(
 		"[
 		{
 			id: user:amos,
@@ -387,7 +396,8 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 			name: 'Doe',
 		},
 	]",
-	);
+	)
+	.into();
 	assert_eq!(users, expected);
 	let sql = format!("SELECT * FROM {table}");
 	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
@@ -411,7 +421,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 		{
 			define_table: {
@@ -423,7 +433,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE user:amos
-	let a = array.get(1).unwrap();
+	let a = &array[1];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -433,7 +443,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 		{
 			update: {
@@ -446,7 +456,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE user:jane
-	let a = array.get(2).unwrap();
+	let a = &array[2];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -457,7 +467,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 					{
 						 update: {
@@ -470,7 +480,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE user:amos
-	let a = array.get(3).unwrap();
+	let a = &array[3];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -481,7 +491,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 		{
 			update: {
@@ -494,7 +504,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 		.unwrap()
 	);
 	// UPDATE table
-	let a = array.get(4).unwrap();
+	let a = &array[4];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -505,7 +515,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 		{
 			update: {
@@ -526,7 +536,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	// Save timestamp 2
 	let ts2_dt = "2023-08-01T00:00:05Z";
 	let ts2 = DateTime::parse_from_rfc3339(ts2_dt).unwrap();
-	db.changefeed_process_at(ts2.timestamp().try_into().unwrap()).await.unwrap();
+	db.changefeed_process_at(None, ts2.timestamp().try_into().unwrap()).await.unwrap();
 	//
 	// Show changes using timestamp 1
 	//
@@ -548,7 +558,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::sql::value(
+		surrealdb::expr::value(
 			"[
 					{
 						 update: {
@@ -563,7 +573,7 @@ async fn changefeed_with_ts() -> Result<(), Error> {
 	// Save timestamp 3
 	let ts3_dt = "2023-08-01T00:00:10Z";
 	let ts3 = DateTime::parse_from_rfc3339(ts3_dt).unwrap();
-	db.changefeed_process_at(ts3.timestamp().try_into().unwrap()).await.unwrap();
+	db.changefeed_process_at(None, ts3.timestamp().try_into().unwrap()).await.unwrap();
 	//
 	// Show changes using timestamp 3
 	//

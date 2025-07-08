@@ -1,17 +1,19 @@
 use crate::cli::CF;
-use crate::err::Error;
+use anyhow::Result;
 use clap::Args;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
-use surrealdb::dbs::Session;
 use surrealdb::kvs::Datastore;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
+
+const TARGET: &str = "surreal::dbs";
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
@@ -358,6 +360,44 @@ impl DbsCapabilities {
 		self.allow_http.clone().unwrap_or(Targets::All) // HTTP is enabled by default for the server
 	}
 
+	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
+		// If there was a global deny, we allow if there is a general allow or some specific allows for experimental features
+		if self.deny_all {
+			return self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None);
+		}
+
+		// If there was a general deny for experimental features, we allow if there are specific targets
+		if let Some(Targets::All) = self.deny_experimental {
+			match &self.allow_experimental {
+				Some(t @ Targets::Some(_)) => return t.clone(),
+				_ => return Targets::None,
+			}
+		}
+
+		// If there are no high level denies, we allow the provided Experimental features
+		// If nothing was provided, we deny Experimental targets by default (Targets::None)
+		self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None) // Experimental targets are disabled by default for the server
+	}
+
+	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
+		// If there was a general deny for arbitrary queries, we allow if there are specific allows for arbitrary query subjects
+		if let Some(Targets::All) = self.deny_arbitrary_query {
+			match &self.allow_arbitrary_query {
+				Some(t @ Targets::Some(_)) => return t.clone(),
+				_ => return Targets::None,
+			}
+		}
+
+		// If there are no high level denies but there is a global allow, we allow arbitrary queries
+		if self.allow_all {
+			return Targets::All;
+		}
+
+		// If there are no high level denies, we allow the provided arbitrary query subjects
+		// If nothing was provided, we allow arbitrary queries by default (Targets::All)
+		self.allow_arbitrary_query.as_ref().cloned().unwrap_or(Targets::All) // arbitrary queries are enabled by default for the server
+	}
+
 	fn get_deny_funcs(&self) -> Targets<FuncTarget> {
 		// Allowed functions already consider a global deny and a general deny for functions
 		// On top of what is explicitly allowed, we deny what is specifically denied
@@ -402,35 +442,23 @@ impl DbsCapabilities {
 		}
 	}
 
-	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
-		match &self.allow_experimental {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::None,
-		}
-	}
-
 	fn get_deny_experimental(&self) -> Targets<ExperimentalTarget> {
-		match &self.deny_experimental {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::None,
-		}
-	}
-
-	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		match &self.allow_arbitrary_query {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::All,
+		// Allowed experimental targets already consider a global deny and a general deny for experimental targets
+		// On top of what is explicitly allowed, we deny what is specifically denied
+		if let Some(t @ Targets::Some(_)) = &self.deny_experimental {
+			t.clone()
+		} else {
+			Targets::None
 		}
 	}
 
 	fn get_deny_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
-		match &self.deny_arbitrary_query {
-			Some(t @ Targets::Some(_)) => t.clone(),
-			Some(_) => Targets::None,
-			None => Targets::None,
+		// Allowed arbitrary queryies already consider a global deny and a general deny for arbitr
+		// On top of what is explicitly allowed, we deny what is specifically denied
+		if let Some(t @ Targets::Some(_)) = &self.deny_arbitrary_query {
+			t.clone()
+		} else {
+			Targets::None
 		}
 	}
 
@@ -463,6 +491,8 @@ impl From<DbsCapabilities> for Capabilities {
 	}
 }
 
+/// Initialise the database server
+#[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 pub async fn init(
 	StartCommandDbsOptions {
 		strict_mode,
@@ -473,7 +503,7 @@ pub async fn init(
 		temporary_directory,
 		import_file,
 	}: StartCommandDbsOptions,
-) -> Result<Datastore, Error> {
+) -> Result<Datastore> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Log specified strict mode
@@ -488,11 +518,15 @@ pub async fn init(
 	}
 	// Log whether authentication is disabled
 	if unauthenticated {
-		warn!("❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌");
+		warn!(
+			"❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌"
+		);
 	}
 	// Warn about the impact of denying all capabilities
 	if capabilities.get_deny_all() {
-		warn!("You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied.");
+		warn!(
+			"You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied."
+		);
 	}
 	// Convert the capabilities
 	let capabilities = capabilities.into();
@@ -512,12 +546,18 @@ pub async fn init(
 	dbs.check_version().await?;
 	// Import file at start, if provided
 	if let Some(file) = import_file {
-		info!("Importing data from file: {:?}", file);
+		// Log the startup import path
+		info!(target: TARGET, file = ?file, "Importing data from file");
+		// Read the full file contents
 		let sql = fs::read_to_string(file)?;
-		dbs.import(&sql, &Session::owner()).await?;
+		// Execute the SurrealQL file
+		dbs.startup(&sql, &Session::owner()).await?;
 	}
 	// Setup initial server auth credentials
 	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
+		// Log the initialisation of credentials
+		info!(target: TARGET, user = %user, "Initialising credentials");
+		// Initialise the credentials
 		dbs.initialise_credentials(user, pass).await?;
 	}
 	// Bootstrap the datastore
@@ -526,7 +566,8 @@ pub async fn init(
 	Ok(dbs)
 }
 
-pub async fn fix(path: String) -> Result<(), Error> {
+/// Performs a database fix
+pub async fn fix(path: String) -> Result<()> {
 	// Parse and setup the desired kv datastore
 	let dbs = Arc::new(Datastore::new(&path).await?);
 	// Ensure the storage version is up-to-date to prevent corruption
@@ -534,7 +575,9 @@ pub async fn fix(path: String) -> Result<(), Error> {
 	// Apply fixes
 	version.fix(dbs).await?;
 	// Log success
-	println!("Database storage version was updated successfully. Please carefully read back logs to see if any manual changes need to be applied");
+	println!(
+		"Database storage version was updated successfully. Please carefully read back logs to see if any manual changes need to be applied"
+	);
 	// All ok
 	Ok(())
 }
@@ -542,12 +585,11 @@ pub async fn fix(path: String) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
 	use std::str::FromStr;
-
 	use surrealdb::iam::verify::verify_root_creds;
 	use surrealdb::kvs::{LockType::*, TransactionType::*};
 	use test_log::test;
 	use wiremock::matchers::path;
-	use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+	use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
 	use super::*;
 	use surrealdb::opt::auth::Root;
@@ -601,15 +643,22 @@ mod tests {
 		)
 	}
 
-	#[test(tokio::test)]
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_capabilities() {
 		let server1 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
+				.and(path("/"))
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(1);
+
+			let get2 = Mock::given(method("GET"))
+				.and(path("/test"))
 				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
 				.expect(1);
 
 			s.register(get).await;
+			s.register(get2).await;
 			s
 		};
 
@@ -643,7 +692,7 @@ mod tests {
 		// (Datastore, Session, Query, Succeeds, Response Contains)
 		let cases = vec![
 			//
-			// Functions and Networking are allowed
+			// 0 - Functions and Networking are allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -657,7 +706,7 @@ mod tests {
 				"SUCCESS".to_string(),
 			),
 			//
-			// Scripting is allowed
+			// 1 - Scripting is allowed
 			//
 			(
 				Datastore::new("memory")
@@ -670,7 +719,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// Scripting is not allowed
+			// 2 - Scripting is not allowed
 			//
 			(
 				Datastore::new("memory")
@@ -683,7 +732,7 @@ mod tests {
 				"Scripting functions are not allowed".to_string(),
 			),
 			//
-			// Anonymous actor when guest access is allowed and auth is enabled, succeeds
+			// 3 - Anonymous actor when guest access is allowed and auth is enabled, succeeds
 			//
 			(
 				Datastore::new("memory")
@@ -697,7 +746,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// Anonymous actor when guest access is not allowed and auth is enabled, throws error
+			// 4 - Anonymous actor when guest access is not allowed and auth is enabled, throws error
 			//
 			(
 				Datastore::new("memory")
@@ -711,7 +760,7 @@ mod tests {
 				"Not enough permissions to perform this action".to_string(),
 			),
 			//
-			// Anonymous actor when guest access is not allowed and auth is disabled, succeeds
+			// 5 - Anonymous actor when guest access is not allowed and auth is disabled, succeeds
 			//
 			(
 				Datastore::new("memory")
@@ -725,7 +774,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// Authenticated user when guest access is not allowed and auth is enabled, succeeds
+			// 6 - Authenticated user when guest access is not allowed and auth is enabled, succeeds
 			//
 			(
 				Datastore::new("memory")
@@ -738,8 +787,30 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
+			// 7 - Specific experimental feature enabled
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_experimental(ExperimentalTarget::RecordReferences.into()),
+				),
+				Session::owner().with_ns("test").with_db("test"),
+				"DEFINE FIELD a ON allow_record TYPE record REFERENCE".to_string(),
+				true,
+				"NONE".to_string(),
+			),
+			// 8 - Specific experimental feature disabled
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.without_experimental(ExperimentalTarget::RecordReferences.into()),
+				),
+				Session::owner().with_ns("test").with_db("test"),
+				"DEFINE FIELD a ON deny_record TYPE record REFERENCE".to_string(),
+				false,
+				"Experimental capability `record_references` is not enabled".to_string(),
+			),
 			//
-			// Some functions are not allowed
+			// 9 - Some functions are not allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -756,6 +827,7 @@ mod tests {
 				false,
 				"Function 'string::len' is not allowed".to_string(),
 			),
+			// 10 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -771,6 +843,7 @@ mod tests {
 				true,
 				"a".to_string(),
 			),
+			// 11 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -787,7 +860,7 @@ mod tests {
 				"Function 'time::now' is not allowed".to_string(),
 			),
 			//
-			// Some net targets are not allowed
+			// 12 - Some net targets are not allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -809,6 +882,7 @@ mod tests {
 				false,
 				format!("Access to network target '{}' is not allowed", server1.address()),
 			),
+			// 13 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -829,6 +903,7 @@ mod tests {
 				false,
 				"Access to network target '1.1.1.1:80' is not allowed".to_string(),
 			),
+			// 14 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -850,13 +925,12 @@ mod tests {
 				"SUCCESS".to_string(),
 			),
 			(
-				// Ensure redirect fails
+				// 15 - Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server3.address().to_string()).unwrap()
-							].into(),
+							[NetTarget::from_str(&server3.address().to_string()).unwrap()].into(),
 						))
 						.without_network_targets(Targets::<NetTarget>::Some(
 							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
@@ -865,7 +939,73 @@ mod tests {
 				Session::owner(),
 				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
-				format!("here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",server3.uri()),
+				format!(
+					"There was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
+					server3.uri()
+				),
+			),
+			(
+				// 16 - Ensure connecting via localhost succeed
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All),
+				),
+				Session::owner(),
+				format!("RETURN http::get('http://localhost:{}/test')", server1.address().port()),
+				true,
+				"SUCCESS".to_string(),
+			),
+			// - 17
+			(
+				// Ensure redirect fails
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All)
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str("127.0.0.1/0").unwrap()].into(),
+						)),
+				),
+				Session::owner(),
+				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
+				false,
+				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
+			),
+			// 18 - Ensure redirect succeed
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str("blog.manel.in").unwrap()].into(),
+						))
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[
+								NetTarget::from_str("0.0.0.0/8").unwrap(),
+								NetTarget::from_str("10.0.0.0/8").unwrap(),
+								NetTarget::from_str("10.18.0.0/16").unwrap(),
+								NetTarget::from_str("10.2.0.0/16").unwrap(),
+								NetTarget::from_str("100.64.0.0/10").unwrap(),
+								NetTarget::from_str("127.0.0.0/8").unwrap(),
+								NetTarget::from_str("169.254.0.0/16").unwrap(),
+								NetTarget::from_str("172.16.0.0/12").unwrap(),
+								NetTarget::from_str("172.20.0.0/16").unwrap(),
+								NetTarget::from_str("192.0.0.0/24").unwrap(),
+								NetTarget::from_str("192.168.0.0/16").unwrap(),
+								NetTarget::from_str("192.88.99.0/24").unwrap(),
+								NetTarget::from_str("198.18.0.0/15").unwrap(),
+								NetTarget::from_str("::1/128").unwrap(),
+								NetTarget::from_str("fc00::/7").unwrap(),
+								NetTarget::from_str("fc00::/8").unwrap(),
+							]
+							.into(),
+						)),
+				),
+				Session::owner(),
+				"RETURN http::get('https://blog.manel.in/')".to_string(),
+				true,
+				"<!DOCTYPE html>".to_string(),
 			),
 		];
 
@@ -902,5 +1042,31 @@ mod tests {
 		server1.verify().await;
 		server2.verify().await;
 		server3.verify().await;
+	}
+
+	#[test]
+	fn test_dbs_capabilities_target_all() {
+		let caps = DbsCapabilities {
+			allow_all: false,
+			allow_scripting: false,
+			allow_guests: false,
+			allow_funcs: None,
+			allow_experimental: Some(Targets::All),
+			allow_arbitrary_query: Some(Targets::All),
+			allow_net: None,
+			allow_rpc: None,
+			allow_http: None,
+			deny_all: false,
+			deny_scripting: false,
+			deny_guests: false,
+			deny_funcs: None,
+			deny_experimental: None,
+			deny_arbitrary_query: None,
+			deny_net: None,
+			deny_rpc: None,
+			deny_http: None,
+		};
+		assert_eq!(caps.get_allow_experimental(), Targets::All);
+		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
 	}
 }

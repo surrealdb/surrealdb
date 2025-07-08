@@ -10,12 +10,12 @@ use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
 use crate::err::Error;
+use crate::expr;
+use crate::expr::Bytesize;
+use crate::expr::Value;
 use crate::rpc::format::cbor;
 use crate::rpc::format::json;
 use crate::rpc::format::revision;
-use crate::sql;
-use crate::sql::Bytesize;
-use crate::sql::Value;
 
 use super::context::InvocationContext;
 use super::err::ApiError;
@@ -48,7 +48,7 @@ impl ApiBody {
 	}
 
 	// The `max` variable is unused in WASM only
-	#[allow(unused_variables)]
+	#[cfg_attr(target_family = "wasm", expect(unused_variables))]
 	pub async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
 		match self {
 			#[cfg(not(target_family = "wasm"))]
@@ -81,9 +81,12 @@ impl ApiBody {
 		ctx: &InvocationContext,
 		invocation: &ApiInvocation,
 	) -> Result<Value, Error> {
-		#[allow(irrefutable_let_patterns)] // For WASM this is the only pattern
+		#[cfg_attr(
+			target_family = "wasm",
+			expect(irrefutable_let_patterns, reason = "For WASM this is the only pattern.")
+		)]
 		if let ApiBody::Native(value) = self {
-			let max = ctx.request_body_max.to_owned().unwrap_or(Bytesize::MAX);
+			let max = ctx.request_body_max.unwrap_or(Bytesize::MAX);
 			let size = std::mem::size_of_val(&value);
 
 			if size > max.0 as usize {
@@ -91,15 +94,15 @@ impl ApiBody {
 			}
 
 			if ctx.request_body_raw {
-				Ok(value.coerce_to::<sql::Bytes>()?.into())
+				Ok(value.coerce_to::<expr::Bytes>()?.into())
 			} else {
 				Ok(value)
 			}
 		} else {
-			let bytes = self.stream(ctx.request_body_max.to_owned()).await?;
+			let bytes = self.stream(ctx.request_body_max).await?;
 
 			if ctx.request_body_raw {
-				Ok(Value::Bytes(crate::sql::Bytes(bytes)))
+				Ok(Value::Bytes(crate::expr::Bytes(bytes)))
 			} else {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
@@ -108,10 +111,10 @@ impl ApiBody {
 					Some("application/json") => json::parse_value(&bytes),
 					Some("application/cbor") => cbor::parse_value(bytes),
 					Some("application/surrealdb") => revision::parse_value(bytes),
-					_ => return Ok(Value::Bytes(crate::sql::Bytes(bytes))),
+					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
 				};
 
-				parsed.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
+				parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
 			}
 		}
 	}

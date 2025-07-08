@@ -8,7 +8,7 @@ FROM docker.io/rockylinux:8 AS builder
 RUN yum install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
 
 # Install rust
-ARG RUST_VERSION=1.82.0
+ARG RUST_VERSION=1.84.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup.sh
 RUN bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -25,6 +25,15 @@ COPY docker/builder-entrypoint.sh /builder-entrypoint.sh
 RUN chmod +x /builder-entrypoint.sh
 
 ENTRYPOINT ["/builder-entrypoint.sh"]
+
+###
+# STAGE: tzdata
+# This stage is used to install the timezone files
+###
+
+FROM cgr.dev/chainguard/wolfi-base AS tzdata
+
+RUN apk add --no-cache tzdata
 
 ###
 # Final Images
@@ -44,6 +53,10 @@ ARG ARTIFACT_PREFIX
 USER root
 
 COPY ${ARTIFACT_PREFIX}.${TARGETOS}-${TARGETARCH}/surreal /surreal
+
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
 RUN chmod +x /surreal
 
@@ -69,6 +82,10 @@ ARG TARGETPLATFORM
 
 COPY --from=dev-ci /surreal /surreal
 
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
+
 COPY --from=dev-ci /data /data
 
 COPY --from=dev-ci /logs /logs
@@ -87,6 +104,10 @@ FROM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev
 ARG SURREALDB_BINARY=target/release/surreal
 
 COPY ${SURREALDB_BINARY} /surreal
+
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
 USER root
 
@@ -111,6 +132,10 @@ ENTRYPOINT ["/surreal"]
 FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod
 
 COPY --from=dev /surreal /surreal
+
+COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
+
+COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
 COPY --from=dev /data /data
 

@@ -1,0 +1,8 @@
+# Clippy configuration.
+# https://doc.rust-lang.org/clippy/lint_configuration.html
+
+disallowed-methods = [
+  { path = "rust_decimal::Decimal::from_str_exact", reason = "Must use a normalized method to ensure decimal values are represented consistently." },
+  { path = "rust_decimal::Decimal::from_str", reason = "Must use a normalized method to ensure decimal values are represented consistently." },
+  { path = "rust_decimal::Decimal::parse", reason = "Must use a normalized method to ensure decimal values are represented consistently." },
+]

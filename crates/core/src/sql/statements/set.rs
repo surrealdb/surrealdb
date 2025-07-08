@@ -1,11 +1,6 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::{ControlFlow, FlowResult, Value};
-use crate::{cnf::PROTECTED_PARAM_NAMES, sql::Kind};
+use crate::sql::Kind;
+use crate::sql::SqlValue;
 
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -16,46 +11,9 @@ use std::fmt;
 #[non_exhaustive]
 pub struct SetStatement {
 	pub name: String,
-	pub what: Value,
+	pub what: SqlValue,
 	#[revision(start = 2)]
 	pub kind: Option<Kind>,
-}
-
-impl SetStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.what.writeable()
-	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		// Check if the variable is a protected variable
-		match PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {
-			// The variable isn't protected and can be stored
-			false => {
-				let result = self.what.compute(stk, ctx, opt, doc).await?;
-				match self.kind {
-					Some(ref kind) => result
-						.coerce_to_kind(kind)
-						.map_err(|e| Error::SetCoerce {
-							name: self.name.to_string(),
-							error: Box::new(e),
-						})
-						.map_err(ControlFlow::from),
-					None => Ok(result),
-				}
-			}
-			// The user tried to set a protected variable
-			true => Err(ControlFlow::from(Error::InvalidParam {
-				name: self.name.to_owned(),
-			})),
-		}
-	}
 }
 
 impl fmt::Display for SetStatement {
@@ -66,6 +24,26 @@ impl fmt::Display for SetStatement {
 		}
 		write!(f, " = {}", self.what)?;
 		Ok(())
+	}
+}
+
+impl From<SetStatement> for crate::expr::statements::SetStatement {
+	fn from(v: SetStatement) -> Self {
+		crate::expr::statements::SetStatement {
+			name: v.name,
+			what: v.what.into(),
+			kind: v.kind.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::statements::SetStatement> for SetStatement {
+	fn from(v: crate::expr::statements::SetStatement) -> Self {
+		SetStatement {
+			name: v.name,
+			what: v.what.into(),
+			kind: v.kind.map(Into::into),
+		}
 	}
 }
 

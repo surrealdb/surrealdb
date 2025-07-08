@@ -23,7 +23,7 @@ mod ws_integration {
 }
 
 use assert_fs::TempDir;
-use common::{Format, Socket, StartServerArguments, DB, NS, PASS, USER};
+use common::{DB, Format, NS, PASS, Socket, StartServerArguments, USER};
 use http::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 use std::future::Future;
@@ -692,6 +692,7 @@ pub async fn live_query(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_string(), "result: {res:?}");
+	assert!(res[0]["type"].is_string(), "type: {res:?}");
 	let live1 = res[0]["result"].as_str().unwrap();
 	// Send LIVE command
 	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
@@ -700,6 +701,7 @@ pub async fn live_query(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_string(), "result: {res:?}");
+	assert!(res[0]["type"].is_string(), "type: {res:?}");
 	let live2 = res[0]["result"].as_str().unwrap();
 	// Create a new test record
 	let res =
@@ -840,6 +842,7 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_string(), "result: {res:?}");
+	assert!(res[0]["type"].is_string(), "type: {res:?}");
 	let live2 = res[0]["result"].as_str().unwrap();
 	// Create a new test record
 	let res =
@@ -880,6 +883,18 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = socket.send_request("kill", json!([live1])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_null(), "result: {res:?}");
+	// Wait some time for all messages to arrive, and then search for the notification message
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	// Check for second live query notifcation
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live1}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res.as_object().unwrap();
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["action"], "KILLED", "result: {res:?}");
 	// Create a new test record
 	let res =
 		socket.send_request("query", json!(["CREATE tester:two SET name = 'two'"])).await.unwrap();
@@ -909,6 +924,19 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = res["result"].as_array().unwrap();
 	assert_eq!(res.len(), 1, "result: {res:?}");
 	assert!(res[0]["result"].is_null(), "result: {res:?}");
+	assert!(res[0]["type"].is_string(), "type: {res:?}");
+	// Wait some time for all messages to arrive, and then search for the notification message
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	// Check for second live query notifcation
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live2));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live2}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res.as_object().unwrap();
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["action"], "KILLED", "result: {res:?}");
 	// Create a new test record
 	let res =
 		socket.send_request("query", json!(["CREATE tester:tre SET name = 'two'"])).await.unwrap();
@@ -919,6 +947,42 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	// Wait some time for all messages to arrive, and then search for the notification message
 	let msgs = socket.receive_all_other_messages(0, Duration::from_secs(1)).await.unwrap();
 	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+pub async fn live_table_removal(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Send LIVE command
+	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_string(), "result: {res:?}");
+	let live1 = res["result"].as_str().unwrap();
+	// Remove table
+	let res = socket.send_request("query", json!(["REMOVE TABLE tester"])).await.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 1, "result: {res:?}");
+	// Wait some time for all messages to arrive, and then search for the notification message
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	// Check for second live query notifcation
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live1));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live1}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res.as_object().unwrap();
+	assert!(res["result"].is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["action"], "KILLED", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
 }
@@ -2231,7 +2295,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 macro_rules! define_include_tests {
 	( $( $( #[$m:meta] )* $test_name:ident),* $(,)? ) => {
 		macro_rules! include_tests {
-			($server:expr, $format:expr) => {
+			($server:expr_2021, $format:expr_2021) => {
 				$(
 					$(#[$m])*
 					async fn $test_name(){
@@ -2288,6 +2352,8 @@ define_include_tests! {
 	live_rpc,
 	#[test_log::test(tokio::test)]
 	kill,
+	#[test_log::test(tokio::test)]
+	live_table_removal,
 	#[test_log::test(tokio::test)]
 	live_second_connection,
 	#[test_log::test(tokio::test)]

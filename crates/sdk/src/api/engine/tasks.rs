@@ -20,7 +20,7 @@ type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Se
 #[cfg(target_family = "wasm")]
 type Task = Pin<Box<()>>;
 
-pub struct Tasks(#[allow(dead_code)] Vec<Task>);
+pub struct Tasks(#[cfg_attr(target_family = "wasm", expect(dead_code))] Vec<Task>);
 
 impl Tasks {
 	#[cfg(target_family = "wasm")]
@@ -149,13 +149,13 @@ fn spawn_task_changefeed_cleanup(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.changefeed_gc_interval;
+	let gc_interval = opts.changefeed_gc_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
-		trace!("Running changefeed garbage collection every {delay:?}");
+		trace!("Running changefeed garbage collection every {gc_interval:?}");
 		// Create a new time-based interval ticket
-		let mut ticker = interval_ticker(delay).await;
+		let mut ticker = interval_ticker(gc_interval).await;
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
@@ -164,7 +164,7 @@ fn spawn_task_changefeed_cleanup(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.changefeed_process().await {
+					if let Err(e) = dbs.changefeed_process(&gc_interval).await {
 						error!("Error running changefeed garbage collection: {e}");
 					}
 				}

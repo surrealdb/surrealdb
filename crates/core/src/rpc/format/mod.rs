@@ -6,8 +6,8 @@ pub mod revision;
 use ::revision::Revisioned;
 use serde::Serialize;
 
-use super::{request::Request, RpcError};
-use crate::sql::Value;
+use super::{RpcError, request::Request};
+use crate::{expr::Value, sql::SqlValue};
 
 pub const PROTOCOLS: [&str; 4] = [
 	"json",     // For basic JSON serialisation
@@ -67,7 +67,7 @@ impl Format {
 	}
 
 	/// Process a request using the specified format
-	pub fn parse_value(&self, val: impl Into<Vec<u8>>) -> Result<Value, RpcError> {
+	pub fn parse_value(&self, val: impl Into<Vec<u8>>) -> Result<SqlValue, RpcError> {
 		let val = val.into();
 		match self {
 			Self::Json => json::parse_value(&val),

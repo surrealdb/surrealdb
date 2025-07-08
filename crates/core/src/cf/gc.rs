@@ -1,14 +1,14 @@
-use crate::err::Error;
 use crate::key::change;
 use crate::key::debug::Sprintable;
 use crate::kvs::Transaction;
+use crate::kvs::tasklease::LeaseHandler;
 use crate::vs::VersionStamp;
+use anyhow::Result;
 use std::str;
 
 // gc_all_at deletes all change feed entries that become stale at the given timestamp.
-#[allow(unused)]
-#[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
-pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
+#[instrument(level = "trace", target = "surrealdb::core::cfs", skip(lh, tx))]
+pub async fn gc_all_at(lh: Option<&LeaseHandler>, tx: &Transaction, ts: u64) -> Result<()> {
 	// Fetch all namespaces
 	let nss = tx.all_ns().await?;
 	// Loop over each namespace
@@ -16,7 +16,11 @@ pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
 		// Trace for debugging
 		trace!("Performing garbage collection on {} for timestamp {ts}", ns.name);
 		// Process the namespace
-		gc_ns(tx, ts, &ns.name).await?;
+		gc_ns(lh, tx, ts, &ns.name).await?;
+		// Possibly renew the lease
+		if let Some(lh) = lh {
+			lh.try_maintain_lease().await?;
+		}
 		// Pause execution
 		yield_now!();
 	}
@@ -24,9 +28,8 @@ pub async fn gc_all_at(tx: &Transaction, ts: u64) -> Result<(), Error> {
 }
 
 // gc_ns deletes all change feed entries in the given namespace that are older than the given watermark.
-#[allow(unused)]
-#[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
-pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
+#[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx, lh))]
+pub async fn gc_ns(lh: Option<&LeaseHandler>, tx: &Transaction, ts: u64, ns: &str) -> Result<()> {
 	// Fetch all databases
 	let dbs = tx.all_db(ns).await?;
 	// Loop over each database
@@ -63,6 +66,10 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 		if let Some(watermark_vs) = watermark_vs {
 			gc_range(tx, ns, &db.name, watermark_vs).await?;
 		}
+		// Possibly renew the lease
+		if let Some(lh) = lh {
+			lh.try_maintain_lease().await?;
+		}
 		// Yield execution
 		yield_now!();
 	}
@@ -71,7 +78,7 @@ pub async fn gc_ns(tx: &Transaction, ts: u64, ns: &str) -> Result<(), Error> {
 
 // gc_db deletes all change feed entries in the given database that are older than the given watermark.
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
-pub async fn gc_range(tx: &Transaction, ns: &str, db: &str, vt: VersionStamp) -> Result<(), Error> {
+pub async fn gc_range(tx: &Transaction, ns: &str, db: &str, vt: VersionStamp) -> Result<()> {
 	// Calculate the range
 	let beg = change::prefix_ts(ns, db, VersionStamp::ZERO)?;
 	let end = change::prefix_ts(ns, db, vt)?;

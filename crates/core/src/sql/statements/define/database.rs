@@ -1,10 +1,4 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
-use crate::sql::statements::info::InfoStructure;
-use crate::sql::{changefeed::ChangeFeed, Base, Ident, Strand, Value};
+use crate::sql::{Ident, Strand, changefeed::ChangeFeed};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -23,60 +17,6 @@ pub struct DefineDatabaseStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
-}
-
-impl DefineDatabaseStatement {
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
-		// Get the NS
-		let ns = opt.ns()?;
-		// Fetch the transaction
-		let txn = ctx.tx();
-		// Check if the definition exists
-		if txn.get_db(ns, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite {
-				return Err(Error::DbAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::namespace::db::new(ns, &self.name);
-		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineDatabaseStatement {
-				id: if self.id.is_none() && nsv.id.is_some() {
-					Some(txn.lock().await.get_next_db_id(nsv.id.unwrap()).await?)
-				} else {
-					None
-				},
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear();
-		}
-		// Clear the cache
-		txn.clear();
-		// Ok all good
-		Ok(Value::None)
-	}
 }
 
 impl Display for DefineDatabaseStatement {
@@ -99,11 +39,28 @@ impl Display for DefineDatabaseStatement {
 	}
 }
 
-impl InfoStructure for DefineDatabaseStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseStatement {
+	fn from(v: DefineDatabaseStatement) -> Self {
+		crate::expr::statements::DefineDatabaseStatement {
+			id: v.id,
+			name: v.name.into(),
+			comment: v.comment.map(Into::into),
+			changefeed: v.changefeed.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
+	}
+}
+
+impl From<crate::expr::statements::DefineDatabaseStatement> for DefineDatabaseStatement {
+	fn from(v: crate::expr::statements::DefineDatabaseStatement) -> Self {
+		DefineDatabaseStatement {
+			id: v.id,
+			name: v.name.into(),
+			comment: v.comment.map(Into::into),
+			changefeed: v.changefeed.map(Into::into),
+			if_not_exists: v.if_not_exists,
+			overwrite: v.overwrite,
+		}
 	}
 }

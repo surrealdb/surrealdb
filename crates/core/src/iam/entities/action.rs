@@ -1,8 +1,4 @@
-use std::str::FromStr;
-
-use cedar_policy::{Entity, EntityId, EntityTypeName, EntityUid};
-
-use crate::{dbs::Statement, sql::permission::PermissionKind};
+use crate::{dbs::Statement, expr::permission::PermissionKind};
 
 // TODO(sgirones): For now keep it simple. In the future, we will allow for custom roles and policies using a more exhaustive list of actions and resources.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
@@ -24,21 +20,6 @@ impl std::fmt::Display for Action {
 impl Action {
 	pub fn id(&self) -> String {
 		self.to_string()
-	}
-}
-
-impl std::convert::From<&Action> for EntityUid {
-	fn from(action: &Action) -> Self {
-		EntityUid::from_type_name_and_id(
-			EntityTypeName::from_str("Action").unwrap(),
-			EntityId::from_str(&action.id()).unwrap(),
-		)
-	}
-}
-
-impl std::convert::From<&Action> for Entity {
-	fn from(action: &Action) -> Self {
-		Entity::new(action.into(), Default::default(), Default::default())
 	}
 }
 

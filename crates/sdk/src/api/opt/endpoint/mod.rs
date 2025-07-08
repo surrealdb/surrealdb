@@ -16,16 +16,15 @@ mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
-use crate::api::err::Error;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::api::err::Error;
 use url::Url;
 
 use super::Config;
 
 /// A server address used to connect to the server
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // used by the embedded and remote connections
 pub struct Endpoint {
 	#[doc(hidden)]
 	pub url: Url,
@@ -53,11 +52,15 @@ impl Endpoint {
 }
 
 /// A trait for converting inputs to a server address object
-pub trait IntoEndpoint<Scheme> {
-	/// The client implied by this scheme and address combination
-	type Client: Connection;
-	/// Converts an input into a server address object
-	fn into_endpoint(self) -> Result<Endpoint>;
+pub trait IntoEndpoint<Scheme>: into_endpoint::Sealed<Scheme> {}
+
+pub(crate) mod into_endpoint {
+	pub trait Sealed<Scheme> {
+		/// The client implied by this scheme and address combination
+		type Client: super::Connection;
+		/// Converts an input into a server address object
+		fn into_endpoint(self) -> super::Result<super::Endpoint>;
+	}
 }
 
 fn replace_tilde(path: &str) -> String {
@@ -72,7 +75,6 @@ fn replace_tilde(path: &str) -> String {
 	}
 }
 
-#[allow(dead_code)]
 pub(crate) fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) -> String {
 	use path_clean::PathClean;
 	use std::path::Path;

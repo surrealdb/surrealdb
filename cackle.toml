@@ -259,6 +259,7 @@ allow_proc_macro = true
 
 [pkg.pin-project-lite]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.unicode-ident]
 allow_unsafe = true
@@ -372,6 +373,9 @@ allow_unsafe = true
 [pkg.tracing-core]
 allow_unsafe = true
 
+[pkg.tracing-appender]
+allow_apis = ["fs"]
+
 [pkg.linux-raw-sys]
 allow_unsafe = true
 
@@ -410,11 +414,11 @@ allow_unsafe = true
 
 [pkg.tracing]
 allow_unsafe = true
-allow_apis = ["net"]
+allow_apis = ["fs", "net"]
 
 [pkg.tokio]
 allow_unsafe = true
-allow_apis = ["net", "process"]
+allow_apis = ["fs", "net", "process"]
 
 [pkg.regex-automata]
 allow_unsafe = true
@@ -557,6 +561,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.rustc_version]
+allow_apis = ["process"]
 
 [pkg.concurrent-queue]
 allow_unsafe = true
@@ -641,7 +646,7 @@ allow_unsafe = true
 
 [pkg.tokio-stream]
 allow_unsafe = true
-from.test.allow_apis = ["net"]
+allow_apis = ["net"]
 
 [pkg.deranged]
 allow_unsafe = true
@@ -695,6 +700,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.relative-path]
+allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.miette]
@@ -808,6 +814,9 @@ allow_unsafe = true
 allow_unsafe = true
 allow_apis = ["net"]
 
+[pkg.tracing-serde]
+allow_apis = ["net"]
+
 [pkg.arrayvec]
 allow_unsafe = true
 
@@ -900,6 +909,7 @@ allow_unsafe = true
 allow_apis = ["net"]
 
 [pkg.surreal]
+allow_unsafe = true
 allow_apis = ["fs", "net", "process"]
 build.allow_build_instructions = ["cargo:rustc-env=*"]
 
@@ -1319,3 +1329,53 @@ allow_proc_macro = true
 
 [pkg.fs-err]
 allow_apis = ["fs"]
+
+[pkg.derive-new]
+allow_proc_macro = true
+
+[pkg.async-recursion]
+allow_proc_macro = true
+
+[pkg.xattr]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.filetime]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.tar]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.ureq]
+allow_apis = ["net"]
+
+[pkg.zip]
+allow_apis = ["fs"]
+
+[pkg.ort]
+allow_apis = ["fs", "process"]
+
+[pkg.prometheus]
+allow_unsafe = true
+
+[pkg.take_mut]
+allow_unsafe = true
+
+[pkg.surrealdb-tikv-client]
+allow_unsafe = true
+allow_apis = ["fs", "net"]
+
+[pkg.rstest_macros]
+allow_apis = ["fs"]
+allow_proc_macro = true
+
+[pkg.hdrhistogram]
+allow_unsafe = true
+
+[pkg.console-subscriber]
+allow_apis = ["fs", "net"]
+
+[pkg.console-api]
+allow_apis = ["net"]

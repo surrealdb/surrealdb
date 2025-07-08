@@ -9,7 +9,7 @@ use path_clean::PathClean;
 use tokio::{fs::File, io::AsyncWriteExt};
 use url::Url;
 
-use crate::{cnf::FILE_ALLOWLIST, err::Error, sql::Datetime};
+use crate::{cnf::BUCKET_FOLDER_ALLOWLIST, err::Error, expr::Datetime};
 
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 
@@ -154,12 +154,12 @@ impl FileStore {
 /// Check if a path is allowed according to the allowlist
 fn is_path_allowed(path: &std::path::Path, lowercase_paths: bool) -> bool {
 	// If the allowlist is empty, nothing is allowed
-	if FILE_ALLOWLIST.is_empty() {
+	if BUCKET_FOLDER_ALLOWLIST.is_empty() {
 		return false;
 	}
 
 	// Check if the path is within any of the allowed paths
-	FILE_ALLOWLIST.iter().any(|allowed| {
+	BUCKET_FOLDER_ALLOWLIST.iter().any(|allowed| {
 		if lowercase_paths {
 			// Convert both paths to lowercase strings for case-insensitive comparison
 			let path_str = path.to_string_lossy().to_lowercase();

@@ -1,5 +1,5 @@
 use crate::common::expected::Expected;
-use http::{header, HeaderMap, StatusCode};
+use http::{HeaderMap, StatusCode, header};
 use reqwest::Client;
 use serde_json::Value as JsonValue;
 use std::time::{Duration, SystemTime};

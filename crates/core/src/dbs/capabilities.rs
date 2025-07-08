@@ -1,11 +1,14 @@
+use crate::iam::{Auth, Level};
+use crate::rpc::Method;
+use ipnet::IpNet;
 use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
-
-use crate::iam::{Auth, Level};
-use crate::rpc::Method;
-use ipnet::IpNet;
+#[cfg(all(target_family = "wasm", feature = "http"))]
+use std::net::ToSocketAddrs;
+#[cfg(all(not(target_family = "wasm"), feature = "http"))]
+use tokio::net::lookup_host;
 use url::Url;
 
 pub trait Target<Item: ?Sized = Self> {
@@ -183,7 +186,64 @@ impl std::str::FromStr for ExperimentalTarget {
 #[non_exhaustive]
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
-	IPNet(ipnet::IpNet),
+	IPNet(IpNet),
+}
+
+#[cfg(feature = "http")]
+impl NetTarget {
+	/// Resolves a `NetTarget` to its associated IP address representations.
+	///
+	/// This function performs an asynchronous resolution of a `NetTarget` enum instance. If the
+	/// `NetTarget` is of variant `Host`, it attempts to resolve the provided hostname and optional
+	/// port into a list of `IPNet` values. If the port is not provided, port 80 is used by default.
+	/// If the `NetTarget` is of variant `IPNet`, it simply returns an empty vector, as there is nothing
+	/// to resolve.
+	///
+	/// # Returns
+	/// - On success, this function returns a `Vec<Self>` where each resolved `NetTarget::Host` is
+	///   transformed into a `NetTarget::IPNet`.
+	/// - On error, it returns a `std::io::Error` indicating the issue during resolution.
+	///
+	/// # Variants
+	/// - `NetTarget::Host(h, p)`:
+	///    - Resolves the given hostname `h` with an optional port `p` (default is 80) to a list of IPs.
+	///    - Each resolved IP is converted into a `NetTarget::IPNet` value.
+	/// - `NetTarget::IPNet(_)`:
+	///    - Returns an empty vector, as `IPNet` does not require resolution.
+	///
+	/// # Errors
+	/// - Returns `std::io::Error` if there is an issue in the asynchronous DNS resolution process.
+	///
+	/// # Notes
+	/// - The function uses `lookup_host` for DNS resolution, which must be awaited.
+	/// - The optional port is replaced by port 80 as a default if not provided.
+	#[cfg(not(target_family = "wasm"))]
+	pub(crate) async fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
+		match self {
+			NetTarget::Host(h, p) => {
+				let r = lookup_host((h.to_string(), p.unwrap_or(80)))
+					.await?
+					.map(|a| NetTarget::IPNet(a.ip().into()))
+					.collect();
+				Ok(r)
+			}
+			NetTarget::IPNet(_) => Ok(vec![]),
+		}
+	}
+
+	#[cfg(target_family = "wasm")]
+	pub(crate) fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
+		match self {
+			NetTarget::Host(h, p) => {
+				let r = (h.to_string(), p.unwrap_or(80))
+					.to_socket_addrs()?
+					.map(|a| NetTarget::IPNet(a.ip().into()))
+					.collect();
+				Ok(r)
+			}
+			NetTarget::IPNet(_) => Ok(vec![]),
+		}
+	}
 }
 
 // impl display
@@ -531,10 +591,24 @@ pub struct Capabilities {
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
-            f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental, self.allow_arbitrary_query, self.deny_arbitrary_query,
-        )
+			f,
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
+			self.scripting,
+			self.guest_access,
+			self.live_query_notifications,
+			self.allow_funcs,
+			self.deny_funcs,
+			self.allow_net,
+			self.deny_net,
+			self.allow_rpc,
+			self.deny_rpc,
+			self.allow_http,
+			self.deny_http,
+			self.allow_experimental,
+			self.deny_experimental,
+			self.allow_arbitrary_query,
+			self.deny_arbitrary_query,
+		)
 	}
 }
 
@@ -737,12 +811,18 @@ impl Capabilities {
 		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
 	}
 
-	pub fn allows_query_name(&self, target: &str) -> bool {
-		self.allow_arbitrary_query.matches(target) && !self.deny_arbitrary_query.matches(target)
-	}
-
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
+	}
+
+	#[cfg(feature = "http")]
+	pub(crate) fn matches_any_allow_net(&self, target: &NetTarget) -> bool {
+		self.allow_net.matches(target)
+	}
+
+	#[cfg(feature = "http")]
+	pub(crate) fn matches_any_deny_net(&self, target: &NetTarget) -> bool {
+		self.deny_net.matches(target)
 	}
 
 	pub fn allows_rpc_method(&self, target: &MethodTarget) -> bool {
@@ -786,58 +866,90 @@ mod tests {
 	#[test]
 	fn test_net_target() {
 		// IPNet IPv4
-		assert!(NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("10.0.1.0/24").unwrap()));
-		assert!(NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("10.0.1.2").unwrap()));
-		assert!(!NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("20.0.1.0/24").unwrap()));
-		assert!(!NetTarget::from_str("10.0.0.0/8")
-			.unwrap()
-			.matches(&NetTarget::from_str("20.0.1.0").unwrap()));
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("10.0.1.0/24").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("10.0.1.2").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("20.0.1.0/24").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("20.0.1.0").unwrap())
+		);
 
 		// IPNet IPv6
-		assert!(NetTarget::from_str("2001:db8::1")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db8::1").unwrap()));
-		assert!(NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db8::1").unwrap()));
-		assert!(NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db8:abcd:12::/64").unwrap()));
-		assert!(!NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db9::1").unwrap()));
-		assert!(!NetTarget::from_str("2001:db8::/32")
-			.unwrap()
-			.matches(&NetTarget::from_str("2001:db9:abcd:12::1/64").unwrap()));
+		assert!(
+			NetTarget::from_str("2001:db8::1")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8::1").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8::1").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db8:abcd:12::/64").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db9::1").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("2001:db8::/32")
+				.unwrap()
+				.matches(&NetTarget::from_str("2001:db9:abcd:12::1/64").unwrap())
+		);
 
 		// Host domain with and without port
-		assert!(NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com:80").unwrap()));
-		assert!(!NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("www.example.com").unwrap()));
-		assert!(!NetTarget::from_str("example.com")
-			.unwrap()
-			.matches(&NetTarget::from_str("www.example.com:80").unwrap()));
-		assert!(NetTarget::from_str("example.com:80")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com:80").unwrap()));
-		assert!(!NetTarget::from_str("example.com:80")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com:443").unwrap()));
-		assert!(!NetTarget::from_str("example.com:80")
-			.unwrap()
-			.matches(&NetTarget::from_str("example.com").unwrap()));
+		assert!(
+			NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:80").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("www.example.com").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com")
+				.unwrap()
+				.matches(&NetTarget::from_str("www.example.com:80").unwrap())
+		);
+		assert!(
+			NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:80").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com:443").unwrap())
+		);
+		assert!(
+			!NetTarget::from_str("example.com:80")
+				.unwrap()
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
 
 		// Host IPv4 with and without port
 		assert!(
@@ -929,20 +1041,44 @@ mod tests {
 		assert!(NetTarget::from_str("[2001:db8::1").is_err());
 	}
 
+	#[tokio::test]
+	#[cfg(all(not(target_family = "wasm"), feature = "http"))]
+	async fn test_net_target_resolve_async() {
+		let r = NetTarget::from_str("localhost").unwrap().resolve().await.unwrap();
+		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
+		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
+	}
+
+	#[test]
+	#[cfg(all(target_family = "wasm", feature = "http"))]
+	fn test_net_target_resolve_sync() {
+		let r = NetTarget::from_str("localhost").unwrap().resolve().unwrap();
+		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
+		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
+	}
+
 	#[test]
 	fn test_method_target() {
-		assert!(MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("query").unwrap()));
-		assert!(MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("Query").unwrap()));
-		assert!(MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("QUERY").unwrap()));
-		assert!(!MethodTarget::from_str("query")
-			.unwrap()
-			.matches(&MethodTarget::from_str("ping").unwrap()));
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("query").unwrap())
+		);
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("Query").unwrap())
+		);
+		assert!(
+			MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("QUERY").unwrap())
+		);
+		assert!(
+			!MethodTarget::from_str("query")
+				.unwrap()
+				.matches(&MethodTarget::from_str("ping").unwrap())
+		);
 	}
 
 	#[test]
@@ -951,14 +1087,22 @@ mod tests {
 		assert!(Targets::<FuncTarget>::All.matches("http::get"));
 		assert!(!Targets::<NetTarget>::None.matches(&NetTarget::from_str("example.com").unwrap()));
 		assert!(!Targets::<FuncTarget>::None.matches("http::get"));
-		assert!(Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
-			.matches(&NetTarget::from_str("example.com").unwrap()));
-		assert!(!Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
-			.matches(&NetTarget::from_str("www.example.com").unwrap()));
-		assert!(Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches("http::get"));
-		assert!(!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
-			.matches("http::post"));
+		assert!(
+			Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
+				.matches(&NetTarget::from_str("example.com").unwrap())
+		);
+		assert!(
+			!Targets::<NetTarget>::Some([NetTarget::from_str("example.com").unwrap()].into())
+				.matches(&NetTarget::from_str("www.example.com").unwrap())
+		);
+		assert!(
+			Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
+				.matches("http::get")
+		);
+		assert!(
+			!Targets::<FuncTarget>::Some([FuncTarget::from_str("http::get").unwrap()].into())
+				.matches("http::post")
+		);
 	}
 
 	#[test]
@@ -1083,6 +1227,14 @@ mod tests {
 			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
 		}
 
+		// When all RPC methods are denied
+		{
+			let caps = Capabilities::default().without_rpc_methods(Targets::<MethodTarget>::All);
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("ping").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("select").unwrap()));
+			assert!(!caps.allows_rpc_method(&MethodTarget::from_str("query").unwrap()));
+		}
+
 		// When some RPC methods are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
@@ -1133,7 +1285,15 @@ mod tests {
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
 		}
 
-		// When some HTTP rotues are allowed and some are denied, deny overrides the allow rules
+		// When all HTTP routes are denied at the same time
+		{
+			let caps = Capabilities::default().without_http_routes(Targets::<RouteTarget>::All);
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
+			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+		}
+
+		// When some HTTP routes are allowed and some are denied, deny overrides the allow rules
 		{
 			let caps = Capabilities::default()
 				.with_http_routes(Targets::<RouteTarget>::Some(
@@ -1158,6 +1318,58 @@ mod tests {
 			assert!(caps.allows_http_route(&RouteTarget::from_str("key").unwrap()));
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
 			assert!(!caps.allows_http_route(&RouteTarget::from_str("rpc").unwrap()));
+		}
+
+		// When all arbitrary query targets are allowed
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::All)
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::None);
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When all arbitrary query targets are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::All)
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::All);
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When all arbitrary query targets are denied
+		{
+			let caps = Capabilities::default()
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::All);
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+
+		// When some arbitrary query targets are allowed and some are denied, deny overrides the allow rules
+		{
+			let caps = Capabilities::default()
+				.with_arbitrary_query(Targets::<ArbitraryQueryTarget>::Some(
+					[
+						ArbitraryQueryTarget::from_str("guest").unwrap(),
+						ArbitraryQueryTarget::from_str("record").unwrap(),
+					]
+					.into(),
+				))
+				.without_arbitrary_query(Targets::<ArbitraryQueryTarget>::Some(
+					[
+						ArbitraryQueryTarget::from_str("record").unwrap(),
+						ArbitraryQueryTarget::from_str("system").unwrap(),
+					]
+					.into(),
+				));
+
+			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
+			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
 		}
 	}
 }

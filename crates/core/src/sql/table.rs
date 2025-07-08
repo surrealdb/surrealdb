@@ -1,4 +1,4 @@
-use crate::sql::{escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes, Id, Ident, Thing};
+use crate::sql::{Id, Ident, Thing, escape::EscapeIdent, fmt::Fmt, strand::no_nul_bytes};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -32,6 +32,18 @@ impl Display for Tables {
 	}
 }
 
+impl From<Tables> for crate::expr::Tables {
+	fn from(v: Tables) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::Tables> for Tables {
+	fn from(v: crate::expr::Tables) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord)]
 #[serde(rename = "$surrealdb::private::sql::Table")]
@@ -57,6 +69,18 @@ impl From<Ident> for Table {
 	}
 }
 
+impl From<Table> for crate::expr::Table {
+	fn from(v: Table) -> Self {
+		crate::expr::Table(v.0)
+	}
+}
+
+impl From<crate::expr::Table> for Table {
+	fn from(v: crate::expr::Table) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Deref for Table {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {
@@ -67,7 +91,7 @@ impl Deref for Table {
 impl Table {
 	pub fn generate(&self) -> Thing {
 		Thing {
-			tb: self.0.to_owned(),
+			tb: self.0.clone(),
 			id: Id::rand(),
 		}
 	}

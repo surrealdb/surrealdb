@@ -1,5 +1,5 @@
 use crate::{
-	sql::{language::Language, Algorithm},
+	sql::{Algorithm, language::Language},
 	syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind},
 };
 use phf::{phf_map, phf_set};
@@ -48,6 +48,7 @@ pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("FALSE"),
 	UniCase::ascii("WHERE"),
 	UniCase::ascii("TABLE"),
+	UniCase::ascii("SEQUENCE"),
 };
 
 pub fn could_be_reserved(s: &str) -> bool {
@@ -75,6 +76,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("AUTHENTICATE") => TokenKind::Keyword(Keyword::Authenticate),
 	UniCase::ascii("AUTO") => TokenKind::Keyword(Keyword::Auto),
 	UniCase::ascii("BACKEND") => TokenKind::Keyword(Keyword::Backend),
+	UniCase::ascii("BATCH") => TokenKind::Keyword(Keyword::Batch),
 	UniCase::ascii("BEARER") => TokenKind::Keyword(Keyword::Bearer),
 	UniCase::ascii("BEFORE") => TokenKind::Keyword(Keyword::Before),
 	UniCase::ascii("BEGIN") => TokenKind::Keyword(Keyword::Begin),
@@ -222,6 +224,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("SC") => TokenKind::Keyword(Keyword::Scope),
 	UniCase::ascii("SEARCH") => TokenKind::Keyword(Keyword::Search),
 	UniCase::ascii("SELECT") => TokenKind::Keyword(Keyword::Select),
+	UniCase::ascii("SEQUENCE") => TokenKind::Keyword(Keyword::Sequence),
 	UniCase::ascii("SESSION") => TokenKind::Keyword(Keyword::Session),
 	UniCase::ascii("SET") => TokenKind::Keyword(Keyword::Set),
 	UniCase::ascii("SHOW") => TokenKind::Keyword(Keyword::Show),

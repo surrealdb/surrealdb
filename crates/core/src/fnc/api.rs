@@ -1,3 +1,4 @@
+use anyhow::Result;
 use http::HeaderMap;
 use reblessive::tree::Stk;
 use std::collections::BTreeMap;
@@ -6,8 +7,7 @@ use crate::{
 	api::{body::ApiBody, invocation::ApiInvocation, method::Method},
 	ctx::Context,
 	dbs::Options,
-	err::Error,
-	sql::{statements::FindApi, Object, Value},
+	expr::{Object, Value, statements::FindApi},
 };
 
 use super::args::Optional;
@@ -15,7 +15,7 @@ use super::args::Optional;
 pub async fn invoke(
 	(stk, ctx, opt): (&mut Stk, &Context, &Options),
 	(path, Optional(opts)): (String, Optional<Object>),
-) -> Result<Value, Error> {
+) -> Result<Value> {
 	let (body, method, query, headers) = if let Some(opts) = opts {
 		let body = match opts.get("body") {
 			Some(v) => v.to_owned(),
@@ -59,7 +59,7 @@ pub async fn invoke(
 		};
 
 		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await {
-			Ok(Some(v)) => v.0.try_into(),
+			Ok(Some(v)) => Ok(v.0.try_into()?),
 			Err(e) => Err(e),
 			_ => Ok(Value::None),
 		}

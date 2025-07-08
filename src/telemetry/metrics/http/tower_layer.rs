@@ -1,6 +1,6 @@
 use crate::cnf::TELEMETRY_NAMESPACE;
 use axum::extract::MatchedPath;
-use opentelemetry::{metrics::MetricsError, KeyValue};
+use opentelemetry::{KeyValue, metrics::MetricsError};
 use pin_project_lite::pin_project;
 use std::{
 	cell::Cell,
@@ -260,6 +260,9 @@ pub fn on_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsE
 
 	// Record the duration of the request.
 	super::record_request_duration(tracker);
+
+	// Increment the request counter
+	super::record_request_count(tracker);
 
 	// Record the request size if known
 	if let Some(size) = tracker.request_size {

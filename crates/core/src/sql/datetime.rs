@@ -1,8 +1,8 @@
-use crate::err::Error;
 use crate::sql::duration::Duration;
 use crate::sql::strand::Strand;
 use crate::syn;
-use chrono::{offset::LocalResult, DateTime, SecondsFormat, TimeZone, Utc};
+use anyhow::Result;
+use chrono::{DateTime, SecondsFormat, TimeZone, Utc, offset::LocalResult};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -12,7 +12,6 @@ use std::str;
 use std::str::FromStr;
 
 use super::escape::QuoteStr;
-use super::value::TrySub;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
@@ -86,6 +85,18 @@ impl TryFrom<(i64, u32)> for Datetime {
 	}
 }
 
+impl From<Datetime> for crate::expr::Datetime {
+	fn from(v: Datetime) -> Self {
+		crate::expr::Datetime(v.0)
+	}
+}
+
+impl From<crate::expr::Datetime> for Datetime {
+	fn from(v: crate::expr::Datetime) -> Self {
+		Self(v.0)
+	}
+}
+
 impl Deref for Datetime {
 	type Target = DateTime<Utc>;
 	fn deref(&self) -> &Self::Target {
@@ -108,6 +119,11 @@ impl Datetime {
 	pub fn to_i64(&self) -> Option<i64> {
 		self.0.timestamp_nanos_opt()
 	}
+
+	/// Convert to second timestamp.
+	pub fn to_secs(&self) -> i64 {
+		self.0.timestamp()
+	}
 }
 
 impl Display for Datetime {
@@ -123,15 +139,5 @@ impl ops::Sub<Self> for Datetime {
 			Ok(d) => Duration::from(d),
 			Err(_) => Duration::default(),
 		}
-	}
-}
-
-impl TrySub for Datetime {
-	type Output = Duration;
-	fn try_sub(self, other: Self) -> Result<Duration, Error> {
-		(self.0 - other.0)
-			.to_std()
-			.map_err(|_| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
-			.map(Duration::from)
 	}
 }

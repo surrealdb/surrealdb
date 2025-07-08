@@ -1,10 +1,10 @@
-use crate::err::Error;
+use crate::expr::filter::Filter as SqlFilter;
+use crate::expr::language::Language;
 use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::offsets::Position;
 use crate::idx::trees::store::IndexStores;
-use crate::sql::filter::Filter as SqlFilter;
-use crate::sql::language::Language;
+use anyhow::Result;
 use deunicode::deunicode;
 use rust_stemmers::{Algorithm, Stemmer};
 
@@ -24,7 +24,7 @@ pub(super) enum Filter {
 }
 
 impl Filter {
-	fn new(ixs: &IndexStores, f: &SqlFilter) -> Result<Self, Error> {
+	fn new(ixs: &IndexStores, f: &SqlFilter) -> Result<Self> {
 		let f = match f {
 			SqlFilter::Ascii => Filter::Ascii,
 			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
@@ -62,7 +62,7 @@ impl Filter {
 	pub(super) fn try_from(
 		ixs: &IndexStores,
 		fs: &Option<Vec<SqlFilter>>,
-	) -> Result<Option<Vec<Filter>>, Error> {
+	) -> Result<Option<Vec<Filter>>> {
 		if let Some(fs) = fs {
 			let mut r = Vec::with_capacity(fs.len());
 			for f in fs {
@@ -86,7 +86,7 @@ impl Filter {
 		mut t: Tokens,
 		f: &Option<Vec<Filter>>,
 		stage: FilteringStage,
-	) -> Result<Tokens, Error> {
+	) -> Result<Tokens> {
 		if let Some(filters) = f {
 			for filter in filters {
 				if filter.is_stage(stage) {

@@ -1,19 +1,19 @@
+use crate::Value;
 use crate::api;
-use crate::api::err::Error;
-use crate::api::method::query::Response;
-use crate::api::method::BoxFuture;
-use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::Value;
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::method::query::Response;
+use crate::api::opt::Endpoint;
 use async_channel::Receiver;
 use async_channel::Sender;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use surrealdb_core::sql::{from_value as from_core_value, Value as CoreValue};
+use surrealdb_core::expr::{Value as CoreValue, from_value as from_core_value};
 
 mod cmd;
 pub(crate) use cmd::Command;
@@ -23,16 +23,18 @@ pub(crate) use cmd::RouterRequest;
 use super::opt::Config;
 
 #[derive(Debug)]
-#[allow(dead_code)] // used by the embedded and remote connections
+#[allow(dead_code, reason = "Used by the embedded and remote connections.")]
 pub struct RequestData {
 	pub(crate) id: i64,
 	pub(crate) command: Command,
 }
 
 #[derive(Debug)]
-#[allow(dead_code)] // used by the embedded and remote connections
+#[allow(dead_code, reason = "Used by the embedded and remote connections.")]
 pub(crate) struct Route {
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: RequestData,
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) response: Sender<Result<DbResponse>>,
 }
 
@@ -105,7 +107,7 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			let value = self.recv(rx).await?;
-			from_core_value(value).map_err(Into::into)
+			from_core_value(value)
 		})
 	}
 
@@ -118,7 +120,7 @@ impl Router {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
 				CoreValue::None | CoreValue::Null => Ok(None),
-				value => from_core_value(value).map_err(Into::into),
+				value => from_core_value(value),
 			}
 		})
 	}
@@ -135,7 +137,7 @@ impl Router {
 				CoreValue::Array(array) => CoreValue::Array(array),
 				value => vec![value].into(),
 			};
-			from_core_value(value).map_err(Into::into)
+			from_core_value(value)
 		})
 	}
 
@@ -183,15 +185,14 @@ pub enum DbResponse {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MlExportConfig {
-	// fields are used in http and local non-wasm with ml features
-	#[allow(dead_code)]
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) name: String,
-	#[allow(dead_code)]
+	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) version: String,
 }
 
 /// Connection trait implemented by supported protocols
-pub trait Connection: Sized + Send + Sync + 'static {
+pub trait Sealed: Sized + Send + Sync + 'static {
 	/// Connect to the server
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>>
 	where

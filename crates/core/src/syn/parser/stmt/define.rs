@@ -1,40 +1,41 @@
 use reblessive::Stk;
 
 use crate::api::method::Method;
-use crate::api::middleware::RequestMiddleware;
+use crate::sql::SqlValue;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::index::HnswParams;
-use crate::sql::statements::define::config::api::ApiConfig;
-use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
-use crate::sql::statements::define::config::ConfigInner;
-use crate::sql::statements::define::{ApiAction, DefineBucketStatement, DefineConfigStatement};
 use crate::sql::statements::DefineApiStatement;
-use crate::sql::Value;
+use crate::sql::statements::define::config::ConfigInner;
+use crate::sql::statements::define::config::api::{ApiConfig, RequestMiddleware};
+use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
+use crate::sql::statements::define::{
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineSequenceStatement,
+};
 use crate::syn::error::bail;
 use crate::syn::token::Token;
 use crate::{
 	sql::{
-		access_type,
+		AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, SqlValues, Strand,
+		TableType, access_type,
 		base::Base,
 		filter::Filter,
 		index::{Distance, VectorType},
 		statements::{
-			define::config::graphql, DefineAccessStatement, DefineAnalyzerStatement,
-			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-			DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
+			DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
+			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+			DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+			DefineTableStatement, DefineUserStatement, define::config::graphql,
 		},
 		table_type,
 		tokenizer::Tokenizer,
-		user, AccessType, Ident, Idioms, Index, Kind, Param, Permissions, Scoring, Strand,
-		TableType, Values,
+		user,
 	},
 	syn::{
 		parser::{
-			mac::{expected, unexpected},
 			ParseResult, Parser,
+			mac::{expected, unexpected},
 		},
-		token::{t, Keyword, TokenKind},
+		token::{Keyword, TokenKind, t},
 	},
 };
 
@@ -67,6 +68,7 @@ impl Parser<'_> {
 			t!("ACCESS") => self.parse_define_access(ctx).await.map(DefineStatement::Access),
 			t!("CONFIG") => self.parse_define_config(ctx).await.map(DefineStatement::Config),
 			t!("BUCKET") => self.parse_define_bucket(ctx, next).await.map(DefineStatement::Bucket),
+			t!("SEQUENCE") => self.parse_define_sequence().map(DefineStatement::Sequence),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -853,7 +855,9 @@ impl Parser<'_> {
 							t!("PUT") => Method::Put,
 							t!("TRACE") => Method::Trace,
 							found => {
-								bail!("Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}");
+								bail!(
+									"Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}"
+								);
 							}
 						};
 
@@ -911,7 +915,7 @@ impl Parser<'_> {
 		let mut res = DefineEventStatement {
 			name,
 			what,
-			when: Value::Bool(true),
+			when: SqlValue::Bool(true),
 			if_not_exists,
 			overwrite,
 			..Default::default()
@@ -925,7 +929,7 @@ impl Parser<'_> {
 				}
 				t!("THEN") => {
 					self.pop_peek();
-					res.then = Values(vec![ctx.run(|ctx| self.parse_value_field(ctx)).await?]);
+					res.then = SqlValues(vec![ctx.run(|ctx| self.parse_value_field(ctx)).await?]);
 					while self.eat(t!(",")) {
 						res.then.0.push(ctx.run(|ctx| self.parse_value_field(ctx)).await?)
 					}
@@ -1456,6 +1460,38 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
+	pub fn parse_define_sequence(&mut self) -> ParseResult<DefineSequenceStatement> {
+		let (if_not_exists, overwrite) = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			(true, false)
+		} else if self.eat(t!("OVERWRITE")) {
+			(false, true)
+		} else {
+			(false, false)
+		};
+		let name = self.next_token_value()?;
+		let batch = if self.eat(t!("BATCH")) {
+			self.next_token_value()?
+		} else {
+			1000
+		};
+		let start = if self.eat(t!("START")) {
+			self.next_token_value()?
+		} else {
+			0
+		};
+		let timeout = self.try_parse_timeout()?;
+		Ok(DefineSequenceStatement {
+			name,
+			if_not_exists,
+			overwrite,
+			batch,
+			start,
+			timeout,
+		})
+	}
+
 	pub async fn parse_define_config(
 		&mut self,
 		stk: &mut Stk,
@@ -1495,7 +1531,7 @@ impl Parser<'_> {
 				t!("MIDDLEWARE") => {
 					self.pop_peek();
 
-					let mut middleware: Vec<(String, Vec<Value>)> = Vec::new();
+					let mut middleware: Vec<(String, Vec<SqlValue>)> = Vec::new();
 					// let mut parsed_custom = false;
 
 					loop {
@@ -1689,7 +1725,7 @@ impl Parser<'_> {
 								res.verify = access_type::JwtAccessVerify::Key(
 									access_type::JwtAccessVerifyKey {
 										alg,
-										key: key.to_owned(),
+										key: key.clone(),
 									},
 								);
 

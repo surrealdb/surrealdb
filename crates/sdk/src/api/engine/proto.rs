@@ -11,16 +11,6 @@ pub(crate) struct Failure {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-#[non_exhaustive]
-pub enum ResponseAction {
-	Create,
-	Update,
-	Delete,
-}
-
-#[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[doc(hidden)]

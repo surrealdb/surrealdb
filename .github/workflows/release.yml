@@ -2,26 +2,30 @@
 
 name: Release
 
-run-name: "Release '${{ inputs.branch }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
+run-name: "Release '${{ inputs.git-ref }}' (release type: ${{ inputs.release-type }}, publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
 
 on:
   workflow_dispatch:
     inputs:
-      branch:
+      git-ref:
         required: true
         type: string
-        description: "The github branch of this release"
         default: main
-      suffix:
-        required: true
+        description: "The git ref of this release"
+      release-type:
         type: string
-        default: metadata
-        description: "The suffix of the version, e.g. none, metadata, alpha.1 or beta.1"
+        default: nightly
+        description: "The type of release, e.g. release, patch, nightly, alpha.1 or beta.1"
       latest:
         required: false
         type: boolean
         default: false
-        description: "Consider this release as the latest one and update the Docker image tag and the binary pointer for the installers"
+        description: "Make this the latest release"
+      extra-features:
+        required: false
+        type: string
+        default: storage-tikv,http-compression,jwks,ml
+        description: "Extra features enabled in the binary"
       publish:
         required: false
         type: boolean
@@ -33,17 +37,20 @@ defaults:
     shell: bash
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release:
     name: Prepare release
+    permissions:
+      contents: write
+      pull-requests: write
     uses: ./.github/workflows/publish-version.yml
     with:
-      git-ref: ${{ inputs.branch }}
-      latest: ${{ inputs.latest }}
-      suffix: ${{ inputs.suffix }}
+      git-ref: ${{ inputs.git-ref }}
+      latest: ${{ inputs.latest && (inputs.release-type == 'patch' || inputs.release-type == 'release') }}
+      release-type: ${{ inputs.release-type }}
       publish: ${{ inputs.publish }}
-      create-release: ${{ inputs.publish }}
+      extra-features: ${{ inputs.extra-features }}
+      create-release: ${{ inputs.publish && inputs.release-type != 'nightly' }}
     secrets: inherit

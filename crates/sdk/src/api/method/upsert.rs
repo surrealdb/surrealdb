@@ -1,3 +1,8 @@
+use super::transaction::WithTransaction;
+use crate::Surreal;
+use crate::Value;
+use crate::api::Connection;
+use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::method::Content;
@@ -5,18 +10,15 @@ use crate::api::method::Merge;
 use crate::api::method::Patch;
 use crate::api::opt::PatchOp;
 use crate::api::opt::Resource;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::method::OnceLockExt;
 use crate::opt::KeyRange;
-use crate::Surreal;
-use crate::Value;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::sql::{to_value as to_core_value, Value as CoreValue};
+use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+use uuid::Uuid;
 
 use super::validate_data;
 
@@ -24,9 +26,20 @@ use super::validate_data;
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Upsert<'r, C: Connection, R> {
+	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) response_type: PhantomData<R>,
+}
+
+impl<C, R> WithTransaction for Upsert<'_, C, R>
+where
+	C: Connection,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 impl<C, R> Upsert<'_, C, R>
@@ -46,6 +59,7 @@ macro_rules! into_future {
 	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Upsert {
+				txn,
 				client,
 				resource,
 				..
@@ -54,6 +68,7 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::Upsert {
+						txn,
 						what: resource?,
 						data: None,
 					})
@@ -127,10 +142,13 @@ where
 	where
 		D: Serialize + 'static,
 	{
-		Content::from_closure(self.client, || {
+		Content::from_closure(self.client, self.txn, || {
 			let data = to_core_value(data)?;
 
-			validate_data(&data, "Tried to upsert non-object-like data as content, only structs and objects are supported")?;
+			validate_data(
+				&data,
+				"Tried to upsert non-object-like data as content, only structs and objects are supported",
+			)?;
 
 			let data = match data {
 				CoreValue::None => None,
@@ -138,6 +156,7 @@ where
 			};
 
 			Ok(Command::Upsert {
+				txn: self.txn,
 				what: self.resource?,
 				data,
 			})
@@ -150,6 +169,7 @@ where
 		D: Serialize,
 	{
 		Merge {
+			txn: self.txn,
 			client: self.client,
 			resource: self.resource,
 			content: data,
@@ -168,6 +188,7 @@ where
 		};
 		Patch {
 			patches,
+			txn: self.txn,
 			client: self.client,
 			resource: self.resource,
 			upsert: true,

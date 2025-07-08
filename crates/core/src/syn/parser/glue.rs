@@ -4,7 +4,7 @@ use crate::{
 	sql::{Datetime, Duration, Strand, Uuid},
 	syn::{
 		lexer::compound,
-		token::{t, Glued, Token, TokenKind},
+		token::{Glued, Token, TokenKind, t},
 	},
 };
 
