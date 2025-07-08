@@ -13,6 +13,7 @@ use surrealdb_core::expr::Array;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
 use surrealdb_core::sql::Function;
+use surrealdb_core::sql::Model;
 use surrealdb_core::sql::SqlValue;
 use surrealdb_core::sql::Statement;
 use surrealdb_protocol::QueryResponseValueStream;
@@ -53,20 +54,12 @@ where
 			let func: SqlValue = match name.strip_prefix("fn::") {
 				Some(name) => Function::Custom(name.to_owned(), args).into(),
 				None => match name.strip_prefix("ml::") {
-					#[cfg(feature = "ml")]
 					Some(name) => {
 						let mut tmp = Model::default();
 						name.clone_into(&mut tmp.name);
 						tmp.args = args;
-						tmp.version = _version
-							.ok_or(Error::Query("ML functions must have a version".to_string()))?;
+						tmp.version = version.context("ML functions must have a version")?;
 						tmp.into()
-					}
-					#[cfg(not(feature = "ml"))]
-					Some(_) => {
-						return Err(anyhow::anyhow!(
-							"tried to call an ML function `{name}` but the `ml` feature is not enabled"
-						));
 					}
 					None => Function::Normal(name, args).into(),
 				},

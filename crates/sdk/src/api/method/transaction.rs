@@ -13,6 +13,8 @@ use crate::opt::InsertableResource;
 use crate::opt::IntoQuery;
 use crate::opt::Resource;
 use surrealdb_core::expr::TryFromValue;
+use surrealdb_protocol::TryFromQueryStream;
+use surrealdb_protocol::proto::v1::Value as ValueProto;
 use uuid::Uuid;
 
 /// An ongoing transaction
@@ -44,9 +46,11 @@ impl Transaction {
 	}
 
 	/// See [Surreal::select]
-	pub fn select<R, RT>(&self, resource: R) -> Select<R, RT>
+	pub fn select<R, RT, RTItem>(&self, resource: R) -> Select<R, RT, RTItem>
 	where
 		R: Resource,
+		RT: TryFromQueryStream<RTItem>,
+		RTItem: TryFrom<ValueProto>,
 	{
 		self.client.select(resource).with_transaction(self.id)
 	}

@@ -166,25 +166,24 @@ impl From<PatchOp> for Value {
 #[must_use]
 pub struct PatchOps(pub Vec<PatchOp>);
 
-impl From<PatchOps> for PatchOp {
-	fn from(ops: PatchOps) -> Self {
-		todo!("STU: What is going on here?")
-		// let mut merged = PatchOp(Ok(Content::Seq(Vec::with_capacity(ops.0.len()))));
-		// for PatchOp(result) in ops.0 {
-		// 	if let Ok(Content::Seq(value)) = &mut merged.0 {
-		// 		match result {
-		// 			Ok(op) => value.push(op),
-		// 			Err(error) => {
-		// 				merged.0 = Err(error);
-		// 				// This operation produced an error, no need to continue
-		// 				break;
-		// 			}
-		// 		}
-		// 	}
-		// }
-		// merged
-	}
-}
+// impl From<PatchOps> for PatchOp {
+// 	fn from(ops: PatchOps) -> Self {
+// 		let mut merged = PatchOp(Ok(Content::Seq(Vec::with_capacity(ops.0.len()))));
+// 		for PatchOp(result) in ops.0 {
+// 			if let Ok(Content::Seq(value)) = &mut merged.0 {
+// 				match result {
+// 					Ok(op) => value.push(op),
+// 					Err(error) => {
+// 						merged.0 = Err(error);
+// 						// This operation produced an error, no need to continue
+// 						break;
+// 					}
+// 				}
+// 			}
+// 		}
+// 		merged
+// 	}
+// }
 
 impl PatchOps {
 	/// Prepare for multiple patch operations

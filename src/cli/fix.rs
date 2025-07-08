@@ -21,8 +21,5 @@ pub async fn init(
 	let client = Surreal::connect(path, 1024).await?;
 
 	// Fix the datastore, if applicable
-	todo!("STU: fix");
-	// dbs::fix(path).await?;
-	// All ok
-	Ok(())
+	Err(anyhow::anyhow!("Not implemented"))
 }

@@ -6,7 +6,7 @@ use std::fmt::{self, Debug, Display};
 use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "UPPERCASE")]
 #[non_exhaustive]
 pub enum Action {
@@ -16,6 +16,12 @@ pub enum Action {
 	#[revision(start = 2)]
 	Killed,
 }
+
+// impl Ord for Action {
+// 	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+// 		self.partial_cmp(other).unwrap()
+// 	}
+// }
 
 impl Display for Action {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

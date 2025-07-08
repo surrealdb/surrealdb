@@ -10,7 +10,7 @@ use std::{
 	str::FromStr,
 };
 use surrealdb_core::{
-	dbs::Action as CoreAction,
+	dbs::Action,
 	expr::{Array, Datetime, Id, Number, Object, Thing as RecordId, TryFromValue, Value},
 	sql::SqlValue,
 	syn,
@@ -225,30 +225,6 @@ impl fmt::Display for ConversionError {
 		)
 	}
 }
-
-/// The action performed on a record
-///
-/// This is used in live query notifications.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum Action {
-	Create,
-	Update,
-	Delete,
-}
-
-impl Action {
-	#[allow(dead_code, reason = "Used by other engines except the HTTP one")]
-	pub(crate) fn from_core(action: CoreAction) -> Self {
-		match action {
-			CoreAction::Create => Self::Create,
-			CoreAction::Update => Self::Update,
-			CoreAction::Delete => Self::Delete,
-			_ => panic!("unimplemented variant of action"),
-		}
-	}
-}
-
 /// A live query notification
 ///
 /// Live queries return a stream of notifications. The notification contains an `action` that triggered the change in the database record and `data` itself.

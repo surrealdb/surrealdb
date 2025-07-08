@@ -288,62 +288,63 @@ fn process(
 		vec.push((stats, value));
 	}
 
-	tokio::spawn(async move {
-		todo!("STU: FIX THIS");
-		// let mut stream = match response.into_inner().stream::<Value>(()) {
-		// 	Ok(stream) => stream,
-		// 	Err(error) => {
-		// 		print(Err(error));
-		// 		return;
-		// 	}
-		// };
-		// while let Some(Notification {
-		// 	query_id,
-		// 	action,
-		// 	data,
-		// 	..
-		// }) = stream.next().await
-		// {
-		// 	let message = match (json, pretty) {
-		// 		// Don't prettify the SurrealQL response
-		// 		(false, false) => {
-		// 			let value = Value::from(map! {
-		// 				String::from("id") => Value::from(Uuid::from(query_id)),
-		// 				String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-		// 				String::from("result") => data.into_inner(),
-		// 			});
-		// 			value.to_string()
-		// 		}
-		// 		// Yes prettify the SurrealQL response
-		// 		(false, true) => format!(
-		// 			"-- Notification (action: {action:?}, live query ID: {query_id})\n{data:#}"
-		// 		),
-		// 		// Don't pretty print the JSON response
-		// 		(true, false) => {
-		// 			let value = Value::from(map! {
-		// 				String::from("id") => Value::from(Uuid::from(query_id)),
-		// 				String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
-		// 				String::from("result") => data,
-		// 			});
-		// 			value.into_json().to_string()
-		// 		}
-		// 		// Yes prettify the JSON response
-		// 		(true, true) => {
-		// 			let mut buf = Vec::new();
-		// 			let mut serializer = serde_json::Serializer::with_formatter(
-		// 				&mut buf,
-		// 				PrettyFormatter::with_indent(b"\t"),
-		// 			);
-		// 			data.into_json().serialize(&mut serializer).unwrap();
-		// 			let output = String::from_utf8(buf).unwrap();
-		// 			format!(
-		// 				"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
-		// 			)
-		// 		}
-		// 	};
-		// 	print(Ok(format!("\n{message}")));
-		// }
-	});
+	// tokio::spawn(async move {
+	// 	todo!("STU: FIX THIS");
+
+	// 	let mut stream = match response.into_inner().stream::<Value>(()) {
+	// 		Ok(stream) => stream,
+	// 		Err(error) => {
+	// 			print(Err(error));
+	// 			return;
+	// 		}
+	// 	};
+	// 	while let Some(Notification {
+	// 		query_id,
+	// 		action,
+	// 		data,
+	// 		..
+	// 	}) = stream.next().await
+	// 	{
+	// 		let message = match (json, pretty) {
+	// 			// Don't prettify the SurrealQL response
+	// 			(false, false) => {
+	// 				let value = Value::from(map! {
+	// 					String::from("id") => Value::from(Uuid::from(query_id)),
+	// 					String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
+	// 					String::from("result") => data.into_inner(),
+	// 				});
+	// 				value.to_string()
+	// 			}
+	// 			// Yes prettify the SurrealQL response
+	// 			(false, true) => format!(
+	// 				"-- Notification (action: {action:?}, live query ID: {query_id})\n{data:#}"
+	// 			),
+	// 			// Don't pretty print the JSON response
+	// 			(true, false) => {
+	// 				let value = Value::from(map! {
+	// 					String::from("id") => Value::from(Uuid::from(query_id)),
+	// 					String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
+	// 					String::from("result") => data,
+	// 				});
+	// 				value.into_json().to_string()
+	// 			}
+	// 			// Yes prettify the JSON response
+	// 			(true, true) => {
+	// 				let mut buf = Vec::new();
+	// 				let mut serializer = serde_json::Serializer::with_formatter(
+	// 					&mut buf,
+	// 					PrettyFormatter::with_indent(b"\t"),
+	// 				);
+	// 				data.into_json().serialize(&mut serializer).unwrap();
+	// 				let output = String::from_utf8(buf).unwrap();
+	// 				format!(
+	// 					"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
+	// 				)
+	// 			}
+	// 		};
+	// 		print(Ok(format!("\n{message}")));
+	// 	}
+	// });
 
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {

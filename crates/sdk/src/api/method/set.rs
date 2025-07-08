@@ -7,7 +7,7 @@ use crate::api::method::BoxFuture;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use surrealdb_core::expr::Value;
-use surrealdb_protocol::proto::rpc::v1::SetRequest;
+use surrealdb_protocol::proto::rpc::v1::{SetRequest, SetResponse};
 
 /// A set future
 #[derive(Debug)]
@@ -19,10 +19,10 @@ pub struct Set {
 }
 
 impl IntoFuture for Set {
-	type Output = Result<()>;
+	type Output = Result<SetResponse>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-	fn into_future(mut self) -> Self::IntoFuture {
+	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut client = self.client.client.clone();
 			let client = &mut client;
@@ -34,7 +34,9 @@ impl IntoFuture for Set {
 				})
 				.await?;
 
-			todo!("STUB: Set future");
+			let response = response.into_inner();
+
+			Ok(response)
 		})
 	}
 }

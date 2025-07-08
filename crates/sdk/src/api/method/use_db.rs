@@ -1,4 +1,4 @@
-use surrealdb_protocol::proto::rpc::v1::UseRequest;
+use surrealdb_protocol::proto::rpc::v1::{UseRequest, UseResponse};
 
 use crate::Surreal;
 
@@ -21,10 +21,10 @@ pub struct UseDb {
 impl UseDb {}
 
 impl IntoFuture for UseDb {
-	type Output = Result<()>;
+	type Output = Result<UseResponse>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-	fn into_future(mut self) -> Self::IntoFuture {
+	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut client = self.client.client.clone();
 			let client = &mut client;
@@ -36,8 +36,9 @@ impl IntoFuture for UseDb {
 				})
 				.await?;
 
-			todo!("STUB: UseDb future");
-			Ok(())
+			let response = response.into_inner();
+
+			Ok(response)
 		})
 	}
 }

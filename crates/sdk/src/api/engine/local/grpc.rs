@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
-use futures::stream::BoxStream;
+use futures::{StreamExt, stream::BoxStream};
 use surrealdb_core::{
 	cnf::PKG_VERSION,
 	dbs::{Notification, QueryResult, Session, SessionId, Variables},
@@ -16,12 +16,12 @@ use surrealdb_core::{
 		},
 	},
 	gql::{Pessimistic, SchemaCache},
-	iam::SigninParams,
-	kvs::Datastore,
+	iam::{Action, ResourceKind, SigninParams, check::check_ns_db},
+	kvs::{Datastore, LockType, TransactionType, export::Config},
 	vars,
 };
 use surrealdb_protocol::proto::{
-	rpc::v1::{self as rpc_proto, SigninRequest},
+	rpc::v1::{self as rpc_proto, ExportMlModelResponse, SigninRequest},
 	v1 as proto,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -118,6 +118,8 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for SurrealDBGrpcSer
 	type QueryStream = BoxStream<'static, Result<rpc_proto::QueryResponse, tonic::Status>>;
 	type SubscribeStream = BoxStream<'static, Result<rpc_proto::SubscribeResponse, tonic::Status>>;
 	type ExportSqlStream = BoxStream<'static, Result<rpc_proto::ExportSqlResponse, tonic::Status>>;
+	type ExportMlModelStream =
+		BoxStream<'static, Result<rpc_proto::ExportMlModelResponse, tonic::Status>>;
 
 	async fn health(
 		&self,
@@ -358,7 +360,112 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for SurrealDBGrpcSer
 		&self,
 		request: tonic::Request<rpc_proto::ExportSqlRequest>,
 	) -> Result<tonic::Response<Self::ExportSqlStream>, tonic::Status> {
-		todo!("STU");
+		let (session_id, session) = self.load_session(&request)?;
+		let export_request = request.into_inner();
+		let config =
+			Config::try_from(export_request).map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+		let (response_tx, response_rx) = tokio::sync::mpsc::channel(1);
+
+		let (tx, rx) = async_channel::bounded(1);
+
+		let datastore = Arc::clone(&self.datastore);
+		tokio::spawn(async move {
+			let future = match datastore.export_with_config(&session, tx, config).await {
+				Ok(future) => future,
+				Err(err) => {
+					error!("Failed to call export SQL with config: {err}");
+					return;
+				}
+			};
+
+			if let Err(err) = future.await {
+				error!("Failed to export SQL: {err}");
+			}
+		});
+
+		tokio::spawn(async move {
+			loop {
+				match rx.recv().await {
+					Ok(bytes) => {
+						let proto = rpc_proto::ExportSqlResponse {
+							statement: std::str::from_utf8(&bytes).unwrap().to_string(),
+						};
+						if let Err(err) = response_tx.send(Ok(proto)).await {
+							error!("Failed to send bytes to client: {err}");
+							break;
+						}
+					}
+					Err(err) => {
+						error!("Failed to receive bytes from channel: {err}");
+						if let Err(err) =
+							response_tx.send(Err(tonic::Status::internal(err.to_string()))).await
+						{
+							error!("Failed to send error to client: {err}");
+							break;
+						}
+					}
+				}
+			}
+		});
+
+		let output_stream = ReceiverStream::new(response_rx);
+
+		Ok(tonic::Response::new(Box::pin(output_stream) as Self::ExportSqlStream))
+	}
+
+	async fn export_ml_model(
+		&self,
+		request: tonic::Request<rpc_proto::ExportMlModelRequest>,
+	) -> Result<tonic::Response<Self::ExportMlModelStream>, tonic::Status> {
+		let (session_id, session) = self.load_session(&request)?;
+		let rpc_proto::ExportMlModelRequest {
+			name,
+			version,
+		} = request.into_inner();
+
+		let (ns, db) = check_ns_db(&session).map_err(|e| tonic::Status::internal(e.to_string()))?;
+		self.datastore
+			.check(&session, Action::View, ResourceKind::Model.on_db(&ns, &db))
+			.map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+		let (tx, rx) = tokio::sync::mpsc::channel(1);
+
+		let kvs = Arc::clone(&self.datastore);
+		tokio::spawn(async move {
+			// Start a new readonly transaction
+			let txn = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+			// Attempt to get the model definition
+			let info = txn.get_db_model(&ns, &db, &name, &version).await?;
+			// Export the file data in to the store
+			let mut data = surrealdb_core::obs::stream(info.hash.clone()).await?;
+			// Process all stream values
+			while let Some(bytes) = data.next().await {
+				let bytes = match bytes {
+					Ok(bytes) => bytes,
+					Err(err) => {
+						tx.send(Err(tonic::Status::internal(err.to_string()))).await?;
+						break;
+					}
+				};
+
+				if let Err(err) = tx
+					.send(Ok(ExportMlModelResponse {
+						model: bytes.into(),
+					}))
+					.await
+				{
+					tx.send(Err(tonic::Status::internal(err.to_string()))).await?;
+					break;
+				}
+			}
+
+			Ok::<_, anyhow::Error>(())
+		});
+
+		let output_stream = ReceiverStream::new(rx);
+
+		Ok(tonic::Response::new(Box::pin(output_stream) as Self::ExportMlModelStream))
 	}
 
 	async fn query(

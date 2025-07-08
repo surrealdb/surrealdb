@@ -30,8 +30,10 @@ use surrealdb_core::expr::to_value as to_core_value;
 use surrealdb_core::iam::SigninParams;
 use surrealdb_core::iam::SignupParams;
 use surrealdb_core::syn;
+use surrealdb_protocol::TryFromQueryStream;
 use surrealdb_protocol::proto::rpc::v1::SignupRequest;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
+use surrealdb_protocol::proto::v1::Value as ValueProto;
 use tonic::transport::Body;
 
 pub(crate) mod live;
@@ -49,6 +51,7 @@ mod import;
 mod insert;
 mod insert_relation;
 mod invalidate;
+mod ml;
 mod run;
 mod select;
 mod set;
@@ -77,6 +80,7 @@ pub use health::Health;
 pub use import::Import;
 pub use insert::Insert;
 pub use invalidate::Invalidate;
+pub use ml::MlModel;
 pub use query::Query;
 pub use run::IntoFn;
 pub use run::Run;
@@ -668,16 +672,18 @@ impl Surreal {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<R, RT>(&self, resource: R) -> Select<R, RT>
+	pub fn select<R, RT, RTItem>(&self, resource: R) -> Select<R, RT, RTItem>
 	where
 		R: Resource,
+		RT: TryFromQueryStream<RTItem>,
+		RTItem: TryFrom<ValueProto>,
 	{
 		Select {
 			txn: None,
 			client: self.clone(),
 			resource,
 			response_type: PhantomData,
-			query_type: PhantomData,
+			response_item_type: PhantomData,
 		}
 	}
 
@@ -1389,12 +1395,12 @@ impl Surreal {
 			import_type: PhantomData,
 		}
 	}
-}
 
-fn ensure_values_are_objects(data: &Value) -> crate::Result<()> {
-	match data {
-		Value::Object(_) => Ok(()),
-		Value::Array(v) if v.iter().all(Value::is_object) => Ok(()),
-		_ => Err(crate::api::err::Error::InvalidParams("Tried to create non-object-like data as content, only structs and objects are supported".to_owned()).into()),
+	pub fn ml(&self, name: &str, version: semver::Version) -> MlModel {
+		MlModel {
+			client: self.clone(),
+			name: name.to_string(),
+			version,
+		}
 	}
 }

@@ -22,7 +22,7 @@ impl IntoFuture for Version {
 	type Output = Result<semver::Version>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-	fn into_future(mut self) -> Self::IntoFuture {
+	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut client = self.client.client.clone();
 			let client = &mut client;

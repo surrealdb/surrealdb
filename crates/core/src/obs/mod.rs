@@ -1,5 +1,3 @@
-#![cfg(feature = "ml")]
-
 //! This module defines the operations for object storage using the [object_store](https://docs.rs/object_store/latest/object_store/)
 //! crate. This will enable the user to store objects using local file storage, memory, or cloud storage such as S3 or GCS.
 use anyhow::Result;

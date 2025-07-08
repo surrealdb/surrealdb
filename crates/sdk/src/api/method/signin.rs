@@ -39,7 +39,13 @@ impl IntoFuture for Signin {
 				})
 				.await?;
 
-			todo!("STUB: Signin future");
+			let response = response.into_inner();
+
+			let value = response.value.ok_or(anyhow::anyhow!("No value found in response"))?;
+
+			let jwt = Jwt::try_from(value)?;
+
+			Ok(jwt)
 		})
 	}
 }

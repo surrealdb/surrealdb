@@ -326,6 +326,53 @@ impl QueryResults {
 		index.take(self)
 	}
 
+	// /// Takes and streams records returned from a `LIVE SELECT` query
+	// ///
+	// /// This is the counterpart to [Response::take] used to stream the results
+	// /// of a live query.
+	// ///
+	// /// # Examples
+	// ///
+	// /// ```no_run
+	// /// use serde::Deserialize;
+	// /// use surrealdb::Notification;
+	// /// use surrealdb::RecordId;
+	// /// use surrealdb::Value;
+	// ///
+	// /// #[derive(Debug, Deserialize)]
+	// /// struct User {
+	// ///     id: RecordId,
+	// ///     balance: String
+	// /// }
+	// ///
+	// /// # #[tokio::main]
+	// /// # async fn main() -> surrealdb::Result<()> {
+	// /// # let db = surrealdb::engine::any::connect("mem://").await?;
+	// /// #
+	// /// let mut response = db
+	// ///     // Stream all changes to the user table
+	// ///     .query("LIVE SELECT * FROM user")
+	// ///     .await?;
+	// ///
+	// /// // Stream the result of the live query at the given index
+	// /// // while deserialising into the User type
+	// /// let mut stream = response.stream::<Notification<User>>(0)?;
+	// ///
+	// /// // Stream raw values instead
+	// /// let mut stream = response.stream::<Value>(0)?;
+	// ///
+	// /// // Combine and stream all `LIVE SELECT` statements in this query
+	// /// let mut stream = response.stream::<Value>(())?;
+	// /// #
+	// /// # Ok(())
+	// /// # }
+	// /// ```
+	// ///
+	// /// Consume the stream the same way you would any other type that implements `futures::Stream`.
+	// pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
+	// 	index.query_stream(self)
+	// }
+
 	/// Take all errors from the query response
 	///
 	/// The errors are keyed by the corresponding index of the statement that failed.

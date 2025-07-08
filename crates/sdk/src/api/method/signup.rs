@@ -36,7 +36,13 @@ impl IntoFuture for Signup {
 
 			let response = client.signup(request).await?;
 
-			todo!("STUB: Signup future");
+			let response = response.into_inner();
+
+			let value = response.value.ok_or(anyhow::anyhow!("No value found in response"))?;
+
+			let jwt = Jwt::try_from(value)?;
+
+			Ok(jwt)
 		})
 	}
 }

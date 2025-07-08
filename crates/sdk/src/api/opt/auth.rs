@@ -8,6 +8,7 @@ use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
 use surrealdb_core::iam::AccessMethod;
 use surrealdb_core::iam::SignupParams;
+use surrealdb_protocol::proto::v1::Value as ValueProto;
 
 /// Credentials for authenticating with the server
 pub trait IntoAccessCredentials {
@@ -104,13 +105,16 @@ pub struct RecordCredentials<'a> {
 
 impl IntoAccessCredentials for RecordCredentials<'_> {
 	fn into_access_method(self) -> AccessMethod {
-		todo!("STU: TODO this");
-		// AccessMethod::Namespace(surrealdb_core::proto::surrealdb::rpc::Namespace {
-		// 	namespace: self.namespace.to_string(),
-		// 	db: self.database.to_string(),
-		// 	ac: self.access.to_string(),
-		// 	params: Some(self.params.into()),
-		// })
+		let key = self.params.get("key").map(|v| v.to_string()).expect("key is required");
+		let refresh_token = self.params.get("refresh_token").map(|v| v.to_string());
+
+		AccessMethod::DatabaseAccess {
+			namespace: self.namespace.to_string(),
+			database: self.database.to_string(),
+			access_name: self.access.to_string(),
+			key,
+			refresh_token,
+		}
 	}
 }
 
@@ -187,6 +191,18 @@ impl TryFromValue for Jwt {
 		match value {
 			Value::Strand(s) => Ok(Jwt(s.0)),
 			_ => Err(anyhow::anyhow!("Expected a string value, got {}", value.kindof())),
+		}
+	}
+}
+
+impl TryFrom<ValueProto> for Jwt {
+	type Error = anyhow::Error;
+
+	fn try_from(value: ValueProto) -> Result<Self, Self::Error> {
+		use surrealdb_protocol::proto::v1::value::Value as ValueInner;
+		match value.value {
+			Some(ValueInner::String(s)) => Ok(Jwt(s)),
+			unexpected => Err(anyhow::anyhow!("Expected a string value, got {:?}", unexpected)),
 		}
 	}
 }

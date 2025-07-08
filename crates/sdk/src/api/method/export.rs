@@ -183,7 +183,7 @@ impl<T> IntoFuture for Export<(), T> {
 #[derive(Debug, Clone)]
 #[must_use = "streams do nothing unless you poll them"]
 pub struct Backup {
-	rx: Pin<Box<Receiver<Result<Vec<u8>>>>>,
+	pub(super) rx: Pin<Box<Receiver<Result<Vec<u8>>>>>,
 }
 
 impl Stream for Backup {

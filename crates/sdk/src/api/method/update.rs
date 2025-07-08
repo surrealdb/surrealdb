@@ -10,6 +10,8 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 
 use crate::opt::KeyRange;
+use anyhow::Context;
+use futures::StreamExt;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::future::IntoFuture;
@@ -17,6 +19,8 @@ use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Value, to_value as to_core_value};
+use surrealdb_core::sql::statements::UpdateStatement;
+use surrealdb_protocol::QueryResponseValueStream;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;
 
@@ -57,19 +61,31 @@ where
 			data,
 			..
 		} = self;
+
+		let what = what.into_values();
+
 		Box::pin(async move {
-			let client = client.client;
+			let mut client = client.client.clone();
 
-			// let response = client.update(UpdateRequest {
-			// 	txn: txn.map(TryInto::try_into).transpose()?,
-			// 	what: what.into_values(),
-			// 	data: data.map(TryInto::try_into).transpose()?,
-			// 	..Default::default()
-			// }).await?;
-			// let response = response.into_inner();
+			let mut stmt = UpdateStatement::default();
+			stmt.what = what.into();
+			stmt.data = Some(data.try_into()?);
 
-			todo!("STUB: Update<R, RT> future");
-			// Ok(RT::try_from_value(response.data)?)
+			let response = client
+				.query(QueryRequest {
+					txn_id: txn.map(|id| id.into()),
+					query: stmt.to_string(),
+					variables: None,
+				})
+				.await?;
+
+			let mut stream = QueryResponseValueStream::new(response.into_inner());
+
+			let value = stream.next().await.context("No response from server")??;
+
+			let value: Value = Value::try_from(value)?;
+
+			Ok(RT::try_from_value(value)?)
 		})
 	}
 }

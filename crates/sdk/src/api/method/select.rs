@@ -1,5 +1,6 @@
 use super::transaction::WithTransaction;
 use crate::Surreal;
+use crate::api::method::live::Subscribe;
 use crate::opt::RangeableResource;
 
 use crate::api::Result;
@@ -9,24 +10,29 @@ use crate::api::opt::Resource;
 use crate::method::Live;
 use crate::opt::KeyRange;
 use std::borrow::Cow;
+use std::error::Error as StdError;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
+use surrealdb_core::sql::statements::SelectStatement;
+use surrealdb_protocol::QueryResponseValueStream;
+use surrealdb_protocol::TryFromQueryStream;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;
 
 /// A select future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Select<R: Resource, RT, T = ()> {
+pub struct Select<R: Resource, RT, RTItem> {
 	pub(super) client: Surreal,
 	pub(super) txn: Option<Uuid>,
 	pub(super) resource: R,
 	pub(super) response_type: PhantomData<RT>,
-	pub(super) query_type: PhantomData<T>,
+	pub(super) response_item_type: PhantomData<RTItem>,
 }
 
-impl<R, RT, T> WithTransaction for Select<R, RT, T>
+impl<R, RT, RTItem> WithTransaction for Select<R, RT, RTItem>
 where
 	R: Resource,
 {
@@ -42,10 +48,11 @@ macro_rules! into_future {
 	($method:ident) => {};
 }
 
-impl<R, RT> IntoFuture for Select<R, RT>
+impl<R, RT, RTItem> IntoFuture for Select<R, RT, RTItem>
 where
 	R: Resource,
-	RT: TryFromValue,
+	RT: TryFromQueryStream<RTItem>,
+	<RT as TryFromQueryStream<RTItem>>::Error: StdError + Send + Sync + 'static,
 {
 	type Output = Result<RT>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -57,8 +64,25 @@ where
 			resource,
 			..
 		} = self;
+
+		let what = resource.into_values();
+
 		Box::pin(async move {
-			todo!("STUB: Select<R, RT> future");
+			let mut client = client.client.clone();
+
+			let mut stmt = SelectStatement::default();
+			stmt.what = what.into();
+
+			let response = client
+				.query(QueryRequest {
+					txn_id: txn.map(|id| id.into()),
+					query: stmt.to_string(),
+					variables: None,
+				})
+				.await
+				.map_err(anyhow::Error::from)?;
+
+			Ok(RT::try_from_query_stream(response.into_inner()).await?)
 		})
 	}
 }
@@ -87,10 +111,10 @@ where
 // 	}
 // }
 
-impl<R, RT> Select<R, RT>
+impl<R, RT, RTItem> Select<R, RT, RTItem>
 where
 	R: Resource,
-	RT: TryFromValue,
+	RT: TryFromQueryStream<RTItem>,
 {
 	/// Turns a normal select query into a live query
 	///
@@ -139,13 +163,12 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn live(self) -> Select<R, RT, Live> {
-		Select {
+	pub fn live(self) -> Subscribe<R, RT> {
+		Subscribe {
 			txn: self.txn,
 			client: self.client,
 			resource: self.resource,
 			response_type: self.response_type,
-			query_type: PhantomData,
 		}
 	}
 }
