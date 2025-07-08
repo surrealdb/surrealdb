@@ -44,7 +44,7 @@ impl DefineAnalyzerStatement {
 		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::AzAlreadyExists {
 					name: self.name.to_string(),
 				});

@@ -78,7 +78,7 @@ impl DefineTableStatement {
 		if txn.get_tb(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::TbAlreadyExists {
 					name: self.name.to_string(),
 				});

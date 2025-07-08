@@ -560,7 +560,7 @@ impl Executor {
 		qry: Query,
 	) -> Result<Vec<Response>> {
 		let stream = futures::stream::iter(qry.into_iter().map(Ok));
-		Self::execute_stream(kvs, ctx, opt, stream).await
+		Self::execute_stream(kvs, ctx, opt, false, stream).await
 	}
 
 	pub async fn execute_plan(
@@ -592,6 +592,7 @@ impl Executor {
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
+		skip_success_results: bool,
 		stream: S,
 	) -> Result<Vec<Response>>
 	where
@@ -634,11 +635,13 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, stmt).await;
-					this.results.push(Response {
-						time: now.elapsed(),
-						result,
-						query_type,
-					});
+					if !skip_success_results || result.is_err() {
+						this.results.push(Response {
+							time: now.elapsed(),
+							result,
+							query_type,
+						});
+					}
 				}
 			}
 		}
@@ -648,94 +651,135 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
-	use crate::{dbs::Session, iam::Role, kvs::Datastore};
+	use crate::{
+		dbs::Session,
+		iam::{Level, Role},
+		kvs::Datastore,
+	};
 
 	#[tokio::test]
 	async fn check_execute_option_permissions() {
 		let tests = vec![
 			// Root level
 			(
-				Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB"),
+				Session::for_level(Level::Root, Role::Owner).with_ns("NS").with_db("DB"),
 				true,
 				"owner at root level should be able to set options",
 			),
 			(
-				Session::for_level(().into(), Role::Editor).with_ns("NS").with_db("DB"),
+				Session::for_level(Level::Root, Role::Editor).with_ns("NS").with_db("DB"),
 				true,
 				"editor at root level should be able to set options",
 			),
 			(
-				Session::for_level(().into(), Role::Viewer).with_ns("NS").with_db("DB"),
+				Session::for_level(Level::Root, Role::Viewer).with_ns("NS").with_db("DB"),
 				false,
 				"viewer at root level should not be able to set options",
 			),
 			// Namespace level
 			(
-				Session::for_level(("NS",).into(), Role::Owner).with_ns("NS").with_db("DB"),
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Owner)
+					.with_ns("NS")
+					.with_db("DB"),
 				true,
 				"owner at namespace level should be able to set options on its namespace",
 			),
 			(
-				Session::for_level(("NS",).into(), Role::Owner).with_ns("OTHER_NS").with_db("DB"),
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Owner)
+					.with_ns("OTHER_NS")
+					.with_db("DB"),
 				false,
 				"owner at namespace level should not be able to set options on another namespace",
 			),
 			(
-				Session::for_level(("NS",).into(), Role::Editor).with_ns("NS").with_db("DB"),
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Editor)
+					.with_ns("NS")
+					.with_db("DB"),
 				true,
 				"editor at namespace level should be able to set options on its namespace",
 			),
 			(
-				Session::for_level(("NS",).into(), Role::Editor).with_ns("OTHER_NS").with_db("DB"),
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Editor)
+					.with_ns("OTHER_NS")
+					.with_db("DB"),
 				false,
 				"editor at namespace level should not be able to set options on another namespace",
 			),
 			(
-				Session::for_level(("NS",).into(), Role::Viewer).with_ns("NS").with_db("DB"),
+				Session::for_level(Level::Namespace("NS".to_string()), Role::Viewer)
+					.with_ns("NS")
+					.with_db("DB"),
 				false,
 				"viewer at namespace level should not be able to set options on its namespace",
 			),
 			// Database level
 			(
-				Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB"),
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Owner,
+				)
+				.with_ns("NS")
+				.with_db("DB"),
 				true,
 				"owner at database level should be able to set options on its database",
 			),
 			(
-				Session::for_level(("NS", "DB").into(), Role::Owner)
-					.with_ns("NS")
-					.with_db("OTHER_DB"),
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Owner,
+				)
+				.with_ns("NS")
+				.with_db("OTHER_DB"),
 				false,
 				"owner at database level should not be able to set options on another database",
 			),
 			(
-				Session::for_level(("NS", "DB").into(), Role::Owner)
-					.with_ns("OTHER_NS")
-					.with_db("DB"),
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Owner,
+				)
+				.with_ns("OTHER_NS")
+				.with_db("DB"),
 				false,
 				"owner at database level should not be able to set options on another namespace even if the database name matches",
 			),
 			(
-				Session::for_level(("NS", "DB").into(), Role::Editor).with_ns("NS").with_db("DB"),
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Editor,
+				)
+				.with_ns("NS")
+				.with_db("DB"),
 				true,
 				"editor at database level should be able to set options on its database",
 			),
 			(
-				Session::for_level(("NS", "DB").into(), Role::Editor)
-					.with_ns("NS")
-					.with_db("OTHER_DB"),
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Editor,
+				)
+				.with_ns("NS")
+				.with_db("OTHER_DB"),
 				false,
 				"editor at database level should not be able to set options on another database",
 			),
 			(
-				Session::for_level(("NS", "DB").into(), Role::Editor)
-					.with_ns("OTHER_NS")
-					.with_db("DB"),
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Editor,
+				)
+				.with_ns("OTHER_NS")
+				.with_db("DB"),
 				false,
 				"editor at database level should not be able to set options on another namespace even if the database name matches",
 			),
 			(
-				Session::for_level(("NS", "DB").into(), Role::Viewer).with_ns("NS").with_db("DB"),
+				Session::for_level(
+					Level::Database("NS".to_string(), "DB".to_string()),
+					Role::Viewer,
+				)
+				.with_ns("NS")
+				.with_db("DB"),
 				false,
 				"viewer at database level should not be able to set options on its database",
 			),

@@ -303,11 +303,13 @@ async fn router(
 ) -> Result<DbResponse> {
 	match req.command {
 		Command::Query {
+			txn,
 			query,
 			mut variables,
 		} => {
 			variables.extend(vars.clone());
 			let req = Command::Query {
+				txn,
 				query,
 				variables,
 			}
@@ -410,6 +412,7 @@ async fn router(
 			let mut variables = CoreObject::default();
 			variables.insert(key.clone(), value);
 			let req = Command::Query {
+				txn: None,
 				query,
 				variables,
 			}
