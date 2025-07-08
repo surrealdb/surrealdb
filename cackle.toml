@@ -259,6 +259,7 @@ allow_proc_macro = true
 
 [pkg.pin-project-lite]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.unicode-ident]
 allow_unsafe = true
@@ -413,11 +414,11 @@ allow_unsafe = true
 
 [pkg.tracing]
 allow_unsafe = true
-allow_apis = ["net"]
+allow_apis = ["fs", "net"]
 
 [pkg.tokio]
 allow_unsafe = true
-allow_apis = ["net", "process"]
+allow_apis = ["fs", "net", "process"]
 
 [pkg.regex-automata]
 allow_unsafe = true
@@ -645,7 +646,7 @@ allow_unsafe = true
 
 [pkg.tokio-stream]
 allow_unsafe = true
-from.test.allow_apis = ["net"]
+allow_apis = ["net"]
 
 [pkg.deranged]
 allow_unsafe = true
@@ -1369,3 +1370,12 @@ allow_apis = ["fs", "net"]
 [pkg.rstest_macros]
 allow_apis = ["fs"]
 allow_proc_macro = true
+
+[pkg.hdrhistogram]
+allow_unsafe = true
+
+[pkg.console-subscriber]
+allow_apis = ["fs", "net"]
+
+[pkg.console-api]
+allow_apis = ["net"]
