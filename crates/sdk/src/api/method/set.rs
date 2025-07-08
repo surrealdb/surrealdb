@@ -14,7 +14,7 @@ use surrealdb_protocol::proto::rpc::v1::SetRequest;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Set {
 	pub(super) client: Surreal,
-	pub(super) key: String,
+	pub(super) name: String,
 	pub(super) value: Value,
 }
 
@@ -29,7 +29,7 @@ impl IntoFuture for Set {
 
 			let response = client
 				.set(SetRequest {
-					key: self.key,
+					name: self.name,
 					value: Some(self.value.try_into()?),
 				})
 				.await?;

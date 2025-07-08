@@ -6,32 +6,30 @@ use bytes::Bytes;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use surrealdb::rpc::RpcError;
 use surrealdb::rpc::format::Format;
-use surrealdb::rpc::request::Request;
+use surrealdb::rpc::request::V1Request;
 use surrealdb_core::dbs::Failure;
-use surrealdb_core::rpc::Response;
+use surrealdb_core::rpc::V1Response;
 
-impl TryFrom<&Accept> for Format {
-	type Error = anyhow::Error;
-
-	fn try_from(value: &Accept) -> Result<Self, Self::Error> {
+impl From<&Accept> for Format {
+	fn from(value: &Accept) -> Self {
 		match value {
-			Accept::ApplicationJson => Ok(Format::Json),
-			Accept::Surrealdb => Ok(Format::Protobuf),
-			unknown => Err(anyhow::anyhow!("Unsupported Accept format: {}", unknown.to_string())),
+			Accept::TextPlain => Format::Unsupported,
+			Accept::ApplicationJson => Format::Json,
+			Accept::ApplicationCbor => Format::Cbor,
+			Accept::ApplicationOctetStream => Format::Unsupported,
+			Accept::Surrealdb => Format::Bincode,
 		}
 	}
 }
 
-impl TryFrom<&ContentType> for Format {
-	type Error = anyhow::Error;
-
-	fn try_from(value: &ContentType) -> Result<Self, Self::Error> {
+impl From<&ContentType> for Format {
+	fn from(value: &ContentType) -> Self {
 		match value {
-			ContentType::ApplicationJson => Ok(Format::Json),
-			ContentType::Surrealdb => Ok(Format::Protobuf),
-			unsupported => {
-				Err(anyhow::anyhow!("Unsupported Content-Type format: {}", unsupported.to_string()))
-			}
+			ContentType::TextPlain => Format::Unsupported,
+			ContentType::ApplicationJson => Format::Json,
+			ContentType::ApplicationCbor => Format::Cbor,
+			ContentType::ApplicationOctetStream => Format::Unsupported,
+			ContentType::Surrealdb => Format::Bincode,
 		}
 	}
 }
@@ -40,26 +38,29 @@ impl From<&Format> for ContentType {
 	fn from(format: &Format) -> Self {
 		match format {
 			Format::Json => ContentType::ApplicationJson,
-			Format::Protobuf => ContentType::Surrealdb,
+			Format::Cbor => ContentType::ApplicationCbor,
+			Format::Unsupported => ContentType::ApplicationOctetStream,
+			Format::Bincode => ContentType::Surrealdb,
+			_ => ContentType::TextPlain,
 		}
 	}
 }
 
 pub trait WsFormat {
 	/// Process a WebSocket RPC request
-	fn req_ws(&self, msg: Message) -> Result<Request, Failure>;
+	fn req_ws(&self, msg: Message) -> Result<V1Request, Failure>;
 	/// Process a WebSocket RPC response
-	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure>;
+	fn res_ws(&self, res: V1Response) -> Result<(usize, Message), Failure>;
 }
 
 impl WsFormat for Format {
 	/// Process a WebSocket RPC request
-	fn req_ws(&self, msg: Message) -> Result<Request, Failure> {
+	fn req_ws(&self, msg: Message) -> Result<V1Request, Failure> {
 		let val = msg.into_data();
-		self.req(&val).map_err(Into::into)
+		self.req(val).map_err(Into::into)
 	}
 	/// Process a WebSocket RPC response
-	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
+	fn res_ws(&self, res: V1Response) -> Result<(usize, Message), Failure> {
 		let res = self.res(res).map_err(Failure::from)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be
@@ -75,18 +76,18 @@ impl WsFormat for Format {
 
 pub trait HttpFormat {
 	/// Process a HTTP RPC request
-	fn req_http(&self, body: Bytes) -> Result<Request, RpcError>;
+	fn req_http(&self, body: Bytes) -> Result<V1Request, RpcError>;
 	/// Process a HTTP RPC response
-	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError>;
+	fn res_http(&self, res: V1Response) -> Result<AxumResponse, RpcError>;
 }
 
 impl HttpFormat for Format {
 	/// Process a HTTP RPC request
-	fn req_http(&self, body: Bytes) -> Result<Request, RpcError> {
-		self.req(&body)
+	fn req_http(&self, body: Bytes) -> Result<V1Request, RpcError> {
+		self.req(body.to_vec())
 	}
 	/// Process a HTTP RPC response
-	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
+	fn res_http(&self, res: V1Response) -> Result<AxumResponse, RpcError> {
 		let res = self.res(res)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be

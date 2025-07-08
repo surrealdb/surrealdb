@@ -90,8 +90,13 @@ pub trait RangeableResource: Resource {
 }
 
 pub trait InsertableResource: Resource {
+	/// The name of the table to insert into.
 	fn table_name(&self) -> &str;
-	fn default_content(&self) -> Option<Value>;
+
+	/// Augment the data about to be inserted.
+	///
+	/// This is used to insert the id of the record into relationship insertions.
+	fn augment_data(&self, data: &mut Value) {}
 }
 
 pub trait CreatableResource: Resource {}
@@ -129,10 +134,6 @@ impl InsertableResource for String {
 	fn table_name(&self) -> &str {
 		self.as_str()
 	}
-
-	fn default_content(&self) -> Option<Value> {
-		None
-	}
 }
 
 impl RangeableResource for String {
@@ -150,10 +151,6 @@ impl InsertableResource for &str {
 	fn table_name(&self) -> &str {
 		self
 	}
-
-	fn default_content(&self) -> Option<Value> {
-		None
-	}
 }
 
 impl RangeableResource for &str {
@@ -170,10 +167,6 @@ impl RangeableResource for &str {
 impl InsertableResource for CoreTable {
 	fn table_name(&self) -> &str {
 		self.as_str()
-	}
-
-	fn default_content(&self) -> Option<Value> {
-		None
 	}
 }
 
@@ -204,10 +197,10 @@ impl InsertableResource for RecordId {
 		self.tb.as_str()
 	}
 
-	fn default_content(&self) -> Option<Value> {
-		let mut map = Object::default();
-		map.insert("id".to_string(), self.id.clone().into());
-		Some(Value::Object(map))
+	fn augment_data(&self, data: &mut Value) {
+		if let Value::Object(map) = data {
+			map.insert("id".to_string(), self.id.clone().into());
+		}
 	}
 }
 

@@ -1,7 +1,7 @@
 use crate::dbs::{Action, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::Value;
+use crate::expr::{Thing, Value};
 use crate::kvs::Live;
 use crate::{ctx::Context, expr::FlowResultExt as _, expr::Uuid};
 use anyhow::{Result, bail};
@@ -79,7 +79,7 @@ impl KillStatement {
 			chn.send(Notification {
 				id: lid.into(),
 				action: Action::Killed,
-				record: Value::None,
+				record: None,
 				result: Value::None,
 			})
 			.await?;

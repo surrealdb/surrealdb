@@ -207,7 +207,7 @@ impl Document {
 				.send(Notification {
 					id: lv.id,
 					action,
-					record: Value::Thing(rid.as_ref().clone()),
+					record: Some(rid.as_ref().clone()),
 					result,
 				})
 				.await;

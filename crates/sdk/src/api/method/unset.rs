@@ -14,7 +14,7 @@ use std::future::IntoFuture;
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Unset {
 	pub(super) client: Surreal,
-	pub(super) key: String,
+	pub(super) name: String,
 }
 
 impl Unset {}
@@ -30,7 +30,7 @@ impl IntoFuture for Unset {
 
 			let response = client
 				.unset(UnsetRequest {
-					key: self.key,
+					name: self.name,
 				})
 				.await?;
 

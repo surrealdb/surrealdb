@@ -9,7 +9,6 @@ pub enum Accept {
 	TextPlain,
 	ApplicationJson,
 	ApplicationCbor,
-	ApplicationProtobuf,
 	ApplicationOctetStream,
 	Surrealdb,
 }
@@ -20,7 +19,6 @@ impl std::fmt::Display for Accept {
 			Accept::TextPlain => write!(f, "text/plain"),
 			Accept::ApplicationJson => write!(f, "application/json"),
 			Accept::ApplicationCbor => write!(f, "application/cbor"),
-			Accept::ApplicationProtobuf => write!(f, "application/protobuf"),
 			Accept::ApplicationOctetStream => write!(f, "application/octet-stream"),
 			Accept::Surrealdb => write!(f, "application/surrealdb"),
 		}
@@ -44,7 +42,6 @@ impl Header for Accept {
 			"text/plain" => Ok(Accept::TextPlain),
 			"application/json" => Ok(Accept::ApplicationJson),
 			"application/cbor" => Ok(Accept::ApplicationCbor),
-			"application/protobuf" => Ok(Accept::ApplicationProtobuf),
 			"application/octet-stream" => Ok(Accept::ApplicationOctetStream),
 			"application/surrealdb" => Ok(Accept::Surrealdb),
 			// TODO: Support more (all?) mime-types

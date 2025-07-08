@@ -18,7 +18,8 @@ impl IntoFuture for Cancel {
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(CancelStatement::default().to_string()).await?;
+			let stmt = CancelStatement::default().to_string();
+			self.client.query(stmt).await?;
 			Ok(self.client)
 		})
 	}

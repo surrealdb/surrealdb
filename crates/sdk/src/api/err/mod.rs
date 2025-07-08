@@ -130,10 +130,6 @@ pub enum Error {
 		error: io::Error,
 	},
 
-	/// Tried to take only a single result when the query returned multiple records
-	#[error("Tried to take only a single result from a query that contains multiple")]
-	LossyTake(QueryResults),
-
 	/// The protocol or storage engine being used does not support backups on the architecture
 	/// it's running on
 	#[error("The protocol or storage engine does not support backups on this architecture")]

@@ -13,6 +13,7 @@ use crate::{
 	},
 	opt::{WaitFor, auth::Root},
 };
+use anyhow::Context;
 use async_channel::{Receiver, Sender};
 use futures::{StreamExt, stream::poll_fn};
 use std::{
@@ -86,8 +87,12 @@ pub(crate) async fn serve(
 			.add_service(service)
 			.serve_with_incoming(tokio_stream::once(Ok::<_, std::io::Error>(channel)))
 			.await
+			.context("Failed to serve gRPC server")
 	});
-	todo!("STU: Implement local native router");
+
+	server_task.await?
+
+	// todo!("STU: Implement local native router");
 
 	// let kvs = match address.config.capabilities.allows_live_query_notifications() {
 	// 	true => kvs.with_notifications(),

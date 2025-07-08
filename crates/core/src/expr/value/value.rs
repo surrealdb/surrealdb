@@ -37,7 +37,6 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
 pub trait TryFromValue: Sized {
 	/// Try to convert a Value into this type
-	#[inline]
 	fn try_from_value(value: Value) -> Result<Self>;
 }
 

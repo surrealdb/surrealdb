@@ -4,51 +4,109 @@ use crate::expr::{Data, Fetchs, Fields, TryFromValue, Value};
 use crate::iam::AccessMethod;
 use crate::iam::{SigninParams, SignupParams};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
+use crate::rpc::format::cbor::Cbor;
+use crate::rpc::protocol::v1::types::{V1Array, V1Number, V1Uuid, V1Value};
+use crate::rpc::{Method, RpcError};
 use serde::{Deserialize, Serialize};
 use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 
 use uuid::Uuid;
-
 pub static ID: &str = "id";
 pub static METHOD: &str = "method";
 pub static PARAMS: &str = "params";
 pub static VERSION: &str = "version";
 pub static TXN: &str = "txn";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Request {
-	pub id: Option<String>,
-	pub command: Command,
+#[derive(Debug)]
+pub struct V1Request {
+	pub id: Option<V1Value>,
+	pub version: Option<u8>,
+	pub txn: Option<Uuid>,
+	pub method: Method,
+	pub params: V1Array,
 }
 
-impl Request {
-	pub fn method(&self) -> String {
-		match &self.command {
-			Command::Health(_) => "health".to_string(),
-			Command::Version(_) => "version".to_string(),
-			Command::Ping(_) => "ping".to_string(),
-			Command::Info(_) => "info".to_string(),
-			Command::Use(_) => "use".to_string(),
-			Command::Signup(_) => "signup".to_string(),
-			Command::Signin(_) => "signin".to_string(),
-			Command::Authenticate(_) => "authenticate".to_string(),
-			Command::Invalidate(_) => "invalidate".to_string(),
-			Command::Create(_) => "create".to_string(),
-			Command::Reset(_) => "reset".to_string(),
-			Command::Kill(_) => "kill".to_string(),
-			Command::Live(_) => "live".to_string(),
-			Command::Set(_) => "set".to_string(),
-			Command::Unset(_) => "unset".to_string(),
-			Command::Select(_) => "select".to_string(),
-			Command::Insert(_) => "insert".to_string(),
-			Command::Upsert(_) => "upsert".to_string(),
-			Command::Update(_) => "update".to_string(),
-			Command::Delete(_) => "delete".to_string(),
-			Command::Query(_) => "query".to_string(),
-			Command::Relate(_) => "relate".to_string(),
-			Command::Run(_) => "run".to_string(),
-			Command::GraphQl(_) => "graphql".to_string(),
-		}
+impl TryFrom<Cbor> for V1Request {
+	type Error = RpcError;
+	fn try_from(val: Cbor) -> Result<Self, RpcError> {
+		V1Value::try_from(val).map_err(|err| RpcError::InvalidRequest(err.to_string()))?.try_into()
+	}
+}
+
+impl TryFrom<V1Value> for V1Request {
+	type Error = RpcError;
+	fn try_from(val: V1Value) -> Result<Self, RpcError> {
+		// Fetch the 'id' argument
+		let id = match val.get_field_value("id") {
+			V1Value::None => None,
+			V1Value::Null => Some(V1Value::Null),
+			V1Value::Uuid(v) => Some(V1Value::Uuid(v)),
+			V1Value::Number(v) => Some(V1Value::Number(v)),
+			V1Value::Strand(v) => Some(V1Value::Strand(v)),
+			V1Value::Datetime(v) => Some(V1Value::Datetime(v)),
+			unexpected => {
+				return Err(RpcError::InvalidRequest(format!("Unexpected id: {:?}", unexpected)));
+			}
+		};
+
+		// Fetch the 'version' argument
+		let version = match val.get_field_value(VERSION) {
+			V1Value::None => None,
+			V1Value::Null => None,
+			V1Value::Number(v) => match v {
+				V1Number::Int(1) => Some(1),
+				V1Number::Int(2) => Some(2),
+				unexpected => {
+					return Err(RpcError::InvalidRequest(format!(
+						"Unexpected version: {:?}",
+						unexpected
+					)));
+				}
+			},
+			unexpected => {
+				return Err(RpcError::InvalidRequest(format!(
+					"Unexpected version: {:?}",
+					unexpected
+				)));
+			}
+		};
+		// Fetch the 'txn' argument
+		let txn = match val.get_field_value(TXN) {
+			V1Value::None => None,
+			V1Value::Null => None,
+			V1Value::Uuid(x) => Some(x.0),
+			V1Value::Strand(x) => Some(
+				Uuid::try_parse(&x.0).map_err(|err| RpcError::InvalidRequest(err.to_string()))?,
+			),
+			unexpected => {
+				return Err(RpcError::InvalidRequest(format!("Unexpected txn: {:?}", unexpected)));
+			}
+		};
+		// Fetch the 'method' argument
+		let method = match val.get_field_value(METHOD) {
+			V1Value::Strand(v) => v.0,
+			unexpected => {
+				return Err(RpcError::InvalidRequest(format!(
+					"Unexpected method: {:?}",
+					unexpected
+				)));
+			}
+		};
+		// Fetch the 'params' argument
+		let params = match val.get_field_value(PARAMS) {
+			V1Value::Array(v) => v,
+			_ => V1Array::default(),
+		};
+		// Parse the specified method
+		let method = Method::parse_case_sensitive(method);
+		// Return the parsed request
+		Ok(V1Request {
+			id,
+			method,
+			params,
+			version,
+			txn,
+		})
 	}
 }
 

@@ -18,7 +18,8 @@ impl IntoFuture for Commit {
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(CommitStatement::default().to_string()).await?;
+			let stmt = CommitStatement::default().to_string();
+			self.client.query(stmt).await?;
 			Ok(self.client)
 		})
 	}

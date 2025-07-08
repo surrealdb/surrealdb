@@ -6,7 +6,6 @@ use crate::api::Surreal;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
-use crate::rpc::Response;
 use async_channel::Receiver;
 use async_channel::Sender;
 use chrono::DateTime;

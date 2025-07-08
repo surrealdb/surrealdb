@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::{Value, to_value as to_core_value};
-use surrealdb_protocol::proto::rpc::v1::UpdateRequest;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;
 
 /// An update future

@@ -103,7 +103,6 @@ impl TryFrom<rpc_proto::SignupRequest> for SignupParams {
 		})
 	}
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SigninParams {
 	pub access_method: AccessMethod,

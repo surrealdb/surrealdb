@@ -82,6 +82,7 @@ trice = { workspace = true, optional = true }
 arc-swap.workspace = true
 arrayvec.workspace = true
 anyhow.workspace = true
+async-stream.workspace = true
 bincode.workspace = true
 bytes.workspace = true
 async-channel.workspace = true

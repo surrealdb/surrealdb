@@ -4,12 +4,19 @@ use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 
+use anyhow::Context;
+use futures::StreamExt;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Array;
 use surrealdb_core::expr::TryFromValue;
-use surrealdb_protocol::proto::rpc::v1::RunFunctionRequest;
+use surrealdb_core::expr::Value;
+use surrealdb_core::sql::Function;
+use surrealdb_core::sql::SqlValue;
+use surrealdb_core::sql::Statement;
+use surrealdb_protocol::QueryResponseValueStream;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 
 /// A run future
 #[derive(Debug)]
@@ -38,20 +45,50 @@ where
 		} = self;
 
 		Box::pin(async move {
-			let client = client.client;
+			let mut client = client.client.clone();
 			let (name, version) = function?;
-			todo!("STUB: Run<R> future");
-			// let response = client.run_function(RunFunctionRequest {
-			// 	name,
-			// 	version,
-			// 	args: Some(args.try_into()?),
-			// 	..Default::default()
-			// }).await?;
 
-			// let response = response.into_inner();
+			let args = args.0.into_iter().map(|x| x.into()).collect::<Vec<_>>();
 
-			// todo!("STUB: Run<R> future");
-			// Ok(value)
+			let func: SqlValue = match name.strip_prefix("fn::") {
+				Some(name) => Function::Custom(name.to_owned(), args).into(),
+				None => match name.strip_prefix("ml::") {
+					#[cfg(feature = "ml")]
+					Some(name) => {
+						let mut tmp = Model::default();
+						name.clone_into(&mut tmp.name);
+						tmp.args = args;
+						tmp.version = _version
+							.ok_or(Error::Query("ML functions must have a version".to_string()))?;
+						tmp.into()
+					}
+					#[cfg(not(feature = "ml"))]
+					Some(_) => {
+						return Err(anyhow::anyhow!(
+							"tried to call an ML function `{name}` but the `ml` feature is not enabled"
+						));
+					}
+					None => Function::Normal(name, args).into(),
+				},
+			};
+
+			let stmt = Statement::Value(func).to_string();
+
+			let response = client
+				.query(QueryRequest {
+					query: stmt,
+					variables: None,
+					txn_id: None,
+				})
+				.await?;
+
+			let mut stream = QueryResponseValueStream::new(response.into_inner());
+
+			let value = stream.next().await.context("Failed to get value from stream")??;
+
+			let value: Value = value.try_into()?;
+
+			Ok(R::try_from_value(value)?)
 		})
 	}
 }

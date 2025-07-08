@@ -24,7 +24,8 @@ impl IntoFuture for Begin {
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(BeginStatement::default().to_string()).await?;
+			let stmt = BeginStatement::default().to_string();
+			self.client.query(stmt).await?;
 			Ok(Transaction {
 				client: self.client,
 			})

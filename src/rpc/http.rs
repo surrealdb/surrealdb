@@ -9,9 +9,12 @@ use surrealdb_core::expr::Array;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::RpcContext;
 use surrealdb_core::rpc::RpcError;
-use surrealdb_core::rpc::RpcProtocolV3;
+use surrealdb_core::rpc::RpcProtocolV1;
 use surrealdb_core::rpc::SetParams;
 use surrealdb_core::rpc::UnsetParams;
+use surrealdb_core::rpc::V1Array;
+use surrealdb_core::rpc::V1Data;
+use surrealdb_core::rpc::V1Value;
 use tokio::sync::Semaphore;
 
 use surrealdb_core::gql::{Pessimistic, SchemaCache};
@@ -52,11 +55,8 @@ impl RpcContext for Http {
 		// Do nothing as HTTP is stateless
 	}
 	/// The version information for this RPC context
-	fn version_data(&self) -> ResponseData {
-		ResponseData::Results(vec![QueryResult {
-			stats: QueryStats::default(),
-			values: Ok(vec![Value::Strand(format!("{PKG_NAME}-{}", *PKG_VERSION).into())]),
-		}])
+	fn version_data(&self) -> V1Data {
+		V1Data::Other(V1Value::Strand(format!("{PKG_NAME}-{}", *PKG_VERSION).into()))
 	}
 
 	// ------------------------------
@@ -78,38 +78,14 @@ impl RpcContext for Http {
 	}
 }
 
-// impl RpcProtocolV1 for Http {
-// 	/// Parameters can't be set or unset on HTTP RPC context
-// 	async fn set(&self, _params: Array) -> Result<ResponseData, RpcError> {
-// 		Err(RpcError::MethodNotFound)
-// 	}
-
-// 	/// Parameters can't be set or unset on HTTP RPC context
-// 	async fn unset(&self, _params: Array) -> Result<ResponseData, RpcError> {
-// 		Err(RpcError::MethodNotFound)
-// 	}
-// }
-
-// impl RpcProtocolV2 for Http {
-// 	/// Parameters can't be set or unset on HTTP RPC context
-// 	async fn set(&self, _params: Array) -> Result<ResponseData, RpcError> {
-// 		Err(RpcError::MethodNotFound)
-// 	}
-
-// 	/// Parameters can't be set or unset on HTTP RPC context
-// 	async fn unset(&self, _params: Array) -> Result<ResponseData, RpcError> {
-// 		Err(RpcError::MethodNotFound)
-// 	}
-// }
-
-impl RpcProtocolV3 for Http {
+impl RpcProtocolV1 for Http {
 	/// Parameters can't be set or unset on HTTP RPC context
-	async fn set(&self, _params: SetParams) -> Result<ResponseData, RpcError> {
+	async fn set(&self, _params: V1Array) -> Result<V1Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
 	/// Parameters can't be set or unset on HTTP RPC context
-	async fn unset(&self, _params: UnsetParams) -> Result<ResponseData, RpcError> {
+	async fn unset(&self, _params: V1Array) -> Result<V1Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 }

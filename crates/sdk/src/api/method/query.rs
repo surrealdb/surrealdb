@@ -23,6 +23,7 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
@@ -34,7 +35,11 @@ use surrealdb_core::expr::{Object, Value, to_value as to_core_value};
 use surrealdb_core::rpc;
 use surrealdb_core::sql;
 use surrealdb_core::sql::Statement;
+use surrealdb_protocol::proto::rpc::v1::QueryError as QueryErrorProto;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
+use surrealdb_protocol::proto::rpc::v1::QueryResponse;
+use surrealdb_protocol::proto::rpc::v1::QueryStats as QueryStatsProto;
+use surrealdb_protocol::proto::v1::Value as ValueProto;
 use uuid::Uuid;
 
 /// A query future
@@ -45,6 +50,7 @@ pub struct Query {
 	pub(crate) client: Surreal,
 	pub(crate) queries: Vec<String>,
 	pub(crate) variables: Variables,
+	// pub(crate) result_type: PhantomData<RT>,
 }
 
 impl WithTransaction for Query {
@@ -61,6 +67,7 @@ impl Query {
 			client,
 			queries: Vec::new(),
 			variables: Variables::default(),
+			// result_type: PhantomData,
 		}
 	}
 
@@ -72,8 +79,8 @@ impl Query {
 }
 
 impl IntoFuture for Query
-where
-	Self: Send + Sync + 'static,
+// where
+// RT: TryFromValue + Default + Send + Sync + 'static,
 {
 	type Output = Result<QueryResults>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -90,41 +97,51 @@ where
 
 			let response = client
 				.query(QueryRequest {
+					txn_id: self.txn.map(|id| id.try_into()).transpose()?,
 					query,
 					variables: Some(variables),
 				})
 				.await?;
 
-			let response = response.into_inner();
-			todo!("STU: Query::into_future");
+			let mut stream = response.into_inner();
 
-			// let mut stream = response.into_inner();
+			let mut query_results = QueryResults::with_capacity(num_statements);
 
-			// let mut query_results = QueryResults::with_capacity(num_statements);
-			// while let Some(result) = stream.next().await {
-			// 	let result = result?;
-			// 	let index = result.query_index as usize;
-			// 	let values = result.values.ok_or_else(|| anyhow::anyhow!("Missing values in query response"))?;
-			// 	// If this is the first result for the query index, create a new query result with the stats, otherwise extend the existing query result
-			// 	let mut query_result = query_results.results.entry(index).or_insert_with(dbs::QueryResult::default);
-			// 	if let Some(stats) = result.stats {
-			// 		// TODO: Only do this for the first result of the query index.
-			// 		query_result.stats = stats.try_into()?;
-			// 	}
-			// 	if let Ok(result_values) = &mut query_result.values {
-			// 		result_values.extend(values.values.into_iter().map(TryInto::try_into).collect::<Result<Vec<_>>>()?);
-			// 	}
-			// }
+			while let Some(result) = stream.next().await {
+				let result = result?;
+				let QueryResponse {
+					query_index,
+					batch_index,
+					stats,
+					error,
+					values,
+				} = result;
 
-			// Ok(query_results)
+				let query_index = query_index as usize;
+
+				if !query_results.results.contains_key(&query_index) {
+					query_results.results.insert(query_index, QueryResult::default());
+				}
+
+				let mut query_result = query_results.results.get_mut(&query_index).unwrap();
+
+				if let Some(stats) = stats {
+					query_result.stats = stats.try_into()?;
+				}
+
+				if let Some(error) = error {
+					query_result.error = Some(error);
+				}
+
+				query_result.values.extend(values);
+			}
+
+			Ok(query_results)
 		})
 	}
 }
 
-impl IntoFuture for WithStats<Query>
-where
-	Self: Send + Sync + 'static,
-{
+impl IntoFuture for WithStats<Query> {
 	type Output = Result<WithStats<QueryResults>>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
@@ -139,12 +156,7 @@ where
 impl Query {
 	/// Chains a query onto an existing query
 	pub fn query(mut self, surql: impl Into<String>) -> Self {
-		let client = self.client.clone();
-
-		let surql = surql.into();
-
-		self.queries.push(surql);
-
+		self.queries.push(surql.into());
 		self
 	}
 
@@ -200,10 +212,24 @@ impl Query {
 	}
 }
 
+#[derive(Debug, Default)]
+pub struct QueryResult {
+	pub stats: QueryStatsProto,
+	pub error: Option<QueryErrorProto>,
+	pub values: Vec<ValueProto>,
+}
+
+// #[derive(Debug, Default)]
+// pub struct TypedQueryResult<RT> {
+// 	pub stats: QueryStatsProto,
+// 	pub error: Option<QueryError>,
+// 	pub values: Vec<RT>,
+// }
+
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct QueryResults {
-	pub(crate) results: IndexMap<usize, dbs::QueryResult>,
+	pub(crate) results: IndexMap<usize, QueryResult>,
 }
 
 impl QueryResults {
@@ -212,12 +238,6 @@ impl QueryResults {
 			results: IndexMap::with_capacity(capacity),
 		}
 	}
-}
-
-#[derive(Debug)]
-pub struct QueryResult<R> {
-	pub stats: dbs::QueryStats,
-	pub result: Result<R>,
 }
 
 // impl<R> futures::Stream for QueryStream<Notification<R>>
@@ -299,11 +319,11 @@ impl QueryResults {
 	///
 	/// The indices are stable. Taking one index doesn't affect the numbering
 	/// of the other indices, so you can take them in any order you see fit.
-	pub fn take<R>(&mut self, index: impl opt::QueryAccessor<R>) -> Result<R>
+	pub fn take<RT>(&mut self, index: impl opt::QueryAccessor<RT>) -> Result<RT>
 	where
-		R: TryFromValue,
+		RT: TryFromValue,
 	{
-		index.query_result(self)
+		index.take(self)
 	}
 
 	/// Take all errors from the query response
@@ -326,16 +346,16 @@ impl QueryResults {
 	pub fn take_errors(&mut self) -> HashMap<usize, anyhow::Error> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.results {
-			if result.values.is_err() {
+			if let Some(error) = &result.error {
 				keys.push(*key);
 			}
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
 			if let Some(query_result) = self.results.swap_remove(&key) {
-				if let Err(error) = query_result.values {
+				if let Some(err) = query_result.error {
 					// If the result is an error, we insert it into the errors map
-					errors.insert(key, error.into());
+					errors.insert(key, err.into());
 				}
 			}
 		}
@@ -359,15 +379,15 @@ impl QueryResults {
 	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
 		for (key, result) in &self.results {
-			if result.values.is_err() {
+			if let Some(error) = &result.error {
 				first_error = Some(*key);
 				break;
 			}
 		}
 		if let Some(key) = first_error {
 			if let Some(query_result) = self.results.swap_remove(&key) {
-				if let Err(error) = query_result.values {
-					return Err(error.into());
+				if let Some(err) = query_result.error {
+					return Err(err.into());
 				}
 			}
 		}
@@ -457,16 +477,12 @@ impl WithStats<QueryResults> {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take<R>(&mut self, index: impl opt::QueryAccessor<R>) -> Option<QueryResult<R>>
-	where
-		R: TryFromValue,
-	{
-		let stats = index.stats(&self.0)?;
-		let result = index.query_result(&mut self.0);
-		Some(QueryResult {
-			stats,
-			result,
-		})
+	pub fn take<RT: TryFromValue>(
+		&mut self,
+		accessor: impl opt::QueryAccessor<RT>,
+	) -> Option<(QueryStatsProto, Result<RT>)> {
+		let stats = accessor.stats(&self.0)?;
+		Some((stats, accessor.take(&mut self.0)))
 	}
 
 	/// Take all errors from the query response
@@ -486,18 +502,18 @@ impl WithStats<QueryResults> {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take_errors(&mut self) -> HashMap<usize, dbs::QueryResult> {
+	pub fn take_errors(&mut self) -> HashMap<usize, QueryErrorProto> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.0.results {
-			if result.values.is_err() {
+			if result.error.is_some() {
 				keys.push(*key);
 			}
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
 			if let Some(query_result) = self.0.results.swap_remove(&key) {
-				if query_result.values.is_err() {
-					errors.insert(key, query_result);
+				if let Some(err) = query_result.error {
+					errors.insert(key, err.clone());
 				}
 			}
 		}

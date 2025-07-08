@@ -177,8 +177,13 @@ impl Command {
 				what,
 				..
 			} => {
-				todo!("STU");
-				// matches!(what, Value::Thing(_))
+				for value in what.iter() {
+					if matches!(value, Value::Thing(_)) {
+						return true;
+					}
+				}
+
+				false
 			}
 			Command::Insert {
 				data,

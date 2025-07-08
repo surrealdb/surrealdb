@@ -222,7 +222,8 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let mut result = client.query(line).with_stats().await;
+				let mut result: Result<WithStats<QueryResults>> =
+					client.query(line).with_stats().await;
 
 				if let Ok(WithStats(res)) = &mut result {
 					for (i, n) in vars.into_iter().enumerate() {
@@ -280,11 +281,11 @@ fn process(
 	// Prepare a single value from the query response
 	let mut vec = Vec::with_capacity(num_statements);
 	for index in 0..num_statements {
-		let query_result = response.take::<Value>(index).ok_or_else(|| {
+		let (stats, result) = response.take::<Value>(index).ok_or_else(|| {
 			anyhow!("Expected some result for a query with index {index}, but found none")
 		})?;
-		// let output = query_result.result.unwrap_or_else(|e| Value::from(e.to_string()));
-		vec.push(query_result);
+		let value = result.unwrap_or_else(|e| Value::from(e.to_string()));
+		vec.push((stats, value));
 	}
 
 	tokio::spawn(async move {
@@ -347,31 +348,22 @@ fn process(
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
-		(false, false) => {
-			Value::from(vec.into_iter().map(|x| x.result.unwrap_or_default()).collect::<Vec<_>>())
-				.to_string()
-		}
+		(false, false) => Value::from(vec.into_iter().map(|x| x.1).collect::<Vec<_>>()).to_string(),
 		// Yes prettify the SurrealQL response
 		(false, true) => vec
 			.into_iter()
 			.enumerate()
 			.map(|(index, query_result)| {
 				let query_num = index + 1;
-				// TODO: STU: unwrap_or_default() is probably not right.
-				let value = query_result.result.unwrap_or_default();
-				let execution_time = query_result.stats.execution_duration;
+				let value = query_result.1;
+				let execution_time = query_result.0.execution_duration;
 				format!("-- Query {query_num} (execution time: {execution_time:?})\n{value:#}",)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),
 		// Don't pretty print the JSON response
 		(true, false) => {
-			let value = Value::from(
-				vec.into_iter()
-					.into_iter()
-					.map(|v| v.result.unwrap_or_default())
-					.collect::<Vec<_>>(),
-			);
+			let value = Value::from(vec.into_iter().into_iter().map(|v| v.1).collect::<Vec<_>>());
 			serde_json::to_string(&value.into_json()).unwrap()
 		}
 		// Yes prettify the JSON response
@@ -384,12 +376,11 @@ fn process(
 					&mut buf,
 					PrettyFormatter::with_indent(b"\t"),
 				);
-				// TODO: STU: unwrap_or_default() is probably not right.
-				let value = query_result.result.unwrap_or_default();
+				let value = query_result.1;
 				value.into_json().serialize(&mut serializer).unwrap();
 				let output = String::from_utf8(buf).unwrap();
 				let query_num = index + 1;
-				let execution_time = query_result.stats.execution_duration;
+				let execution_time = query_result.0.execution_duration;
 				format!("-- Query {query_num} (execution time: {execution_time:?}\n{output:#}",)
 			})
 			.collect::<Vec<String>>()

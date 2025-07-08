@@ -6,10 +6,13 @@ use crate::expr::Value;
 use crate::protocol::ToFlatbuffers;
 
 use crate::rpc::RpcError;
+use crate::rpc::V1Value;
 use anyhow::Context;
+use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::TimeZone;
 use chrono::Utc;
+use revision::{Revisioned, revisioned};
 use serde::Deserialize;
 use serde::Serialize;
 use std::error::Error;
@@ -49,8 +52,8 @@ impl From<Notification> for ResponseData {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Failure {
-	pub(crate) code: i64,
-	pub(crate) message: Cow<'static, str>,
+	pub code: i64,
+	pub message: Cow<'static, str>,
 }
 
 impl Failure {
@@ -96,6 +99,31 @@ impl Failure {
 	pub fn custom(message: impl Into<Cow<'static, str>>) -> Self {
 		Self::new(-32000, message.into())
 	}
+
+	pub const PARSE_ERROR: Failure = Failure {
+		code: -32700,
+		message: Cow::Borrowed("Parse error"),
+	};
+
+	pub const INVALID_REQUEST: Failure = Failure {
+		code: -32600,
+		message: Cow::Borrowed("Invalid Request"),
+	};
+
+	pub const METHOD_NOT_FOUND: Failure = Failure {
+		code: -32601,
+		message: Cow::Borrowed("Method not found"),
+	};
+
+	pub const INVALID_PARAMS: Failure = Failure {
+		code: -32602,
+		message: Cow::Borrowed("Invalid params"),
+	};
+
+	pub const INTERNAL_ERROR: Failure = Failure {
+		code: -32603,
+		message: Cow::Borrowed("Internal error"),
+	};
 }
 
 impl Error for Failure {}
@@ -120,6 +148,58 @@ impl From<RpcError> for Failure {
 			},
 			message: Cow::Owned(err.to_string()),
 		}
+	}
+}
+
+impl From<Failure> for RpcError {
+	fn from(err: Failure) -> Self {
+		match err.code {
+			-32700 => RpcError::ParseError,
+			-32600 => RpcError::InvalidRequest(err.message.to_string()),
+			-32601 => RpcError::MethodNotFound,
+			-32602 => RpcError::InvalidParams,
+			other => {
+				RpcError::InternalError(anyhow!("Error code: {}, message: {}", other, err.message))
+			}
+		}
+	}
+}
+
+impl From<Failure> for V1Value {
+	fn from(err: Failure) -> Self {
+		map! {
+			String::from("code") => V1Value::from(err.code),
+			String::from("message") => V1Value::from(err.message.to_string()),
+		}
+		.into()
+	}
+}
+
+impl Revisioned for Failure {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		#[revisioned(revision = 1)]
+		#[derive(Clone, Debug, Serialize)]
+		struct Inner {
+			code: i64,
+			message: String,
+		}
+
+		let inner = Inner {
+			code: self.code,
+			message: self.message.as_ref().to_owned(),
+		};
+		inner.serialize_revisioned(writer)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
+		unreachable!("deserialization not supported for this type")
+	}
+
+	fn revision() -> u16 {
+		1
 	}
 }
 
@@ -208,7 +288,7 @@ impl TryFrom<v1::QueryStats> for QueryStats {
 			execution_duration: Duration::from_nanos(
 				execution_duration.seconds as u64 * 1_000_000_000 + execution_duration.nanos as u64,
 			),
-			num_records: stats.num_records,
+			num_records: stats.records_returned,
 		})
 	}
 }
@@ -224,7 +304,10 @@ impl From<QueryStats> for v1::QueryStats {
 				seconds: stats.execution_duration.as_secs() as i64,
 				nanos: stats.execution_duration.subsec_nanos() as i32,
 			}),
-			num_records: stats.num_records,
+			records_returned: stats.num_records,
+			bytes_returned: -1,
+			records_scanned: -1,
+			bytes_scanned: -1,
 		}
 	}
 }

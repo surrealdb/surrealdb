@@ -13,8 +13,10 @@ use crate::err::Error;
 use crate::expr;
 use crate::expr::Bytesize;
 use crate::expr::Value;
-use crate::protocol::FromFlatbuffers;
-use crate::rpc::format::Format;
+use crate::rpc::format::cbor;
+use crate::rpc::format::json;
+use crate::rpc::format::parse_expr_value_from_content_type;
+use crate::rpc::format::revision;
 
 use super::context::InvocationContext;
 use super::err::ApiError;
@@ -106,24 +108,8 @@ impl ApiBody {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
 
-				let fmt: Format = content_type
-					.map(|c| c.parse().map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure)))
-					.transpose()?
-					.unwrap_or(Format::Json);
-
-				let value = match fmt {
-					Format::Json => serde_json::from_slice(&bytes)
-						.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))?,
-					Format::Protobuf => {
-						todo!("STU: Remove protobuf from here and add back CBOR")
-					}
-				};
-				// let parsed = match content_type {
-				// 	Some("application/flatbuffer") => {
-				// 	},
-				// 	_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
-				// };
-
+				let value = parse_expr_value_from_content_type(content_type, bytes)
+					.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))?;
 				Ok(value)
 			}
 		}

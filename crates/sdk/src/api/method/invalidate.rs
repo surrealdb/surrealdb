@@ -1,4 +1,4 @@
-use surrealdb_protocol::proto::rpc::v1::InvalidateRequest;
+use surrealdb_protocol::proto::rpc::v1::{InvalidateRequest, QueryRequest};
 
 use crate::Surreal;
 

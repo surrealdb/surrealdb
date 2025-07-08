@@ -6,13 +6,15 @@ use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
-
+use anyhow::anyhow;
+use futures::StreamExt;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::{Data, TryFromValue};
 use surrealdb_core::expr::{Value, to_value as to_core_value};
-use surrealdb_protocol::proto::rpc::v1::CreateRequest;
+use surrealdb_core::sql::statements::CreateStatement;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;
 
 /// A record create future
@@ -54,8 +56,13 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let client = client.client;
 
+				let mut create_statement = CreateStatement {
+					what,
+					data,
+				};
+
 				let response = client
-					.create(CreateRequest {
+					.query(QueryRequest {
 						txn: txn.map(|id| id.to_string()),
 						what,
 						data,
@@ -88,17 +95,43 @@ where
 		let what = what.into_values();
 
 		Box::pin(async move {
-			let client = client.client;
+			let mut client = client.client;
 
-			todo!("STU: Implement CreateResponse");
-			// let response = client.create(CreateRequest {
-			// 	txn: txn.map(|id| id.try_into()).transpose()?,
-			// 	what: what.try_into()?,
-			// 	data: data.map(|data| data.try_into()).transpose()?,
-			// 	..Default::default()
-			// }).await?;
+			let mut create_statement = CreateStatement::default();
+			create_statement.what = what.into();
+			create_statement.data = Some(data.into());
 
-			// Ok(response.into())
+			let query = create_statement.to_string();
+
+			let response = client
+				.query(QueryRequest {
+					txn_id: txn.map(|id| id.try_into()).transpose()?,
+					query,
+					variables: None,
+				})
+				.await?;
+
+			let mut response = response.into_inner();
+
+			while let Some(result) = response.next().await {
+				let mut query_response = result?;
+
+				if let Some(err) = query_response.error {
+					return Err(anyhow!("{}", err.message));
+				}
+
+				if query_response.values.is_empty() {
+					return Err(anyhow!("No values returned"));
+				}
+
+				let value = query_response.values.remove(0);
+
+				let value = Value::try_from(value)?;
+
+				return RT::try_from_value(value);
+			}
+
+			Err(anyhow!("Failed to get response"))
 		})
 	}
 }

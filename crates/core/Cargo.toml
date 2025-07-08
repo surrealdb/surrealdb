@@ -172,6 +172,7 @@ subtle.workspace = true
 surrealdb-protocol.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 trice.workspace = true
 ulid = { workspace = true, features = ["serde"] }

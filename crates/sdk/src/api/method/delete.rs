@@ -2,19 +2,23 @@ use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::opt::RangeableResource;
 
-use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 
 use crate::opt::KeyRange;
+use anyhow::Context;
+use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
-use surrealdb_protocol::proto::rpc::v1::DeleteRequest;
+use surrealdb_core::sql::SqlValues;
+use surrealdb_core::sql::statements::DeleteStatement;
+use surrealdb_protocol::QueryResponseValueStream;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;
 
 /// A record delete future
@@ -55,7 +59,7 @@ where
 	R: Resource + 'static,
 	RT: TryFromValue,
 {
-	type Output = Result<Value>;
+	type Output = Result<RT, anyhow::Error>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
@@ -66,22 +70,29 @@ where
 			..
 		} = self;
 		Box::pin(async move {
-			let what = resource
-				.into_values()
-				.into_iter()
-				.map(TryInto::try_into)
-				.collect::<Result<Vec<_>>>()?;
+			let what = resource.into_values();
 			let client = &mut client.client;
 
-			let response = client
-				.delete(DeleteRequest {
-					txn: txn.map(|id| id.try_into()).transpose()?,
-					what,
-					..Default::default()
-				})
-				.await?;
+			let mut delete_statement = DeleteStatement::default();
+			delete_statement.what = what.into();
 
-			todo!("STU: Implement DeleteResponse");
+			let txn_id = txn.map(|id| id.try_into()).transpose()?;
+			let query = delete_statement.to_string();
+
+			let response = client
+				.query(QueryRequest {
+					txn_id,
+					query,
+					variables: None,
+				})
+				.await
+				.context("Failed to get response")?;
+			let mut response = QueryResponseValueStream::new(response.into_inner());
+
+			let first = response.next().await.context("Failed to get response")??;
+			let first: Value = first.try_into()?;
+			let first = RT::try_from_value(first)?;
+			return Ok(first);
 		})
 	}
 }

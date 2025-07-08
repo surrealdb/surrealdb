@@ -108,7 +108,7 @@ impl ToFlatbuffers for Value {
 				value: Some(d.to_fb(builder).as_union_value()),
 			},
 			Self::Datetime(dt) => proto_fb::ValueArgs {
-				value_type: proto_fb::ValueType::Timestamp,
+				value_type: proto_fb::ValueType::Datetime,
 				value: Some(dt.to_fb(builder).as_union_value()),
 			},
 			Self::Uuid(uuid) => proto_fb::ValueArgs {
@@ -193,10 +193,10 @@ impl FromFlatbuffers for Value {
 				let duration = Duration::from_fb(duration_value)?;
 				Ok(Value::Duration(duration))
 			}
-			proto_fb::ValueType::Timestamp => {
-				let timestamp_value =
-					input.value_as_timestamp().expect("Guaranteed to be a Timestamp");
-				let dt = DateTime::<Utc>::from_fb(timestamp_value)?;
+			proto_fb::ValueType::Datetime => {
+				let datetime_value =
+					input.value_as_datetime().expect("Guaranteed to be a Datetime");
+				let dt = DateTime::<Utc>::from_fb(datetime_value)?;
 				Ok(Value::Datetime(Datetime(dt)))
 			}
 			proto_fb::ValueType::Uuid => {
@@ -2642,21 +2642,42 @@ impl ToFlatbuffers for Data {
 				(proto_fb::DataContents::Value, single_fb.as_union_value())
 			}
 			Data::ValuesExpression(values) => {
-				// let mut items = Vec::with_capacity(values.len());
-				todo!("STU")
-				// for inner_values in values {
-				// 	for (idiom, value) in inner_values {
-				// 		let idiom_fb = idiom.to_fb(builder);
-				// 		let value_fb = value.to_fb(builder);
-				// 		items.push(proto_fb::SetExpr::create(
-				// 			builder,
-				// 			&proto_fb::SetExprArgs {
-				// 				idiom: Some(idiom_fb),
-				// 				operator: proto_fb::Operator::Equal,
-				// 	let value_fb = value.to_fb(builder);
-				// }
-				// let values_fb = builder.create_vector(&items);
-				// (proto_fb::DataContents::Values, values_fb.as_union_value())
+				let mut items = Vec::with_capacity(values.len());
+				for inner_values in values {
+					let mut inner_items = Vec::with_capacity(inner_values.len());
+					for (idiom, value) in inner_values {
+						let idiom_fb = idiom.to_fb(builder);
+						let value_fb = value.to_fb(builder);
+
+						inner_items.push(proto_fb::IdiomValuePair::create(
+							builder,
+							&proto_fb::IdiomValuePairArgs {
+								idiom: Some(idiom_fb),
+								value: Some(value_fb),
+							},
+						));
+					}
+					let inner_items = builder.create_vector(&inner_items);
+					items.push(proto_fb::ValuesExpr::create(
+						builder,
+						&proto_fb::ValuesExprArgs {
+							items: Some(inner_items),
+						},
+					));
+				}
+
+				let values_fb = builder.create_vector(&items);
+
+				(
+					proto_fb::DataContents::Values,
+					proto_fb::ValuesMultiExpr::create(
+						builder,
+						&proto_fb::ValuesMultiExprArgs {
+							items: Some(values_fb),
+						},
+					)
+					.as_union_value(),
+				)
 			}
 			Data::UpdateExpression(update) => {
 				let mut items = Vec::with_capacity(update.len());

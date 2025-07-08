@@ -82,12 +82,12 @@ pub async fn init(
 	};
 
 	// Parse model version
-	let version = match version.parse() {
-		Ok(version) => version,
-		Err(_) => {
-			bail!("`{version}` is not a valid semantic version")
-		}
-	};
+	// let version = match version.parse() {
+	// 	Ok(version) => version,
+	// 	Err(_) => {
+	// 		bail!("`{version}` is not a valid semantic version")
+	// 	}
+	// };
 
 	// Use the specified namespace / database
 	client.use_ns(namespace).use_db(database).await?;
@@ -95,15 +95,16 @@ pub async fn init(
 	debug!("Exporting data from the database");
 	if file == "-" {
 		// Prepare the backup
-		let mut backup = client.export(()).ml(&name, version).await?;
-		// Get a handle to standard output
-		let mut stdout = io::stdout();
-		// Write the backup to standard output
-		while let Some(bytes) = backup.next().await {
-			stdout.write_all(&bytes?).await?;
-		}
+		todo!("STU");
+		// let mut backup = client.export(()).ml(&name, version).await?;
+		// // Get a handle to standard output
+		// let mut stdout = io::stdout();
+		// // Write the backup to standard output
+		// while let Some(bytes) = backup.next().await {
+		// 	stdout.write_all(&bytes?).await?;
+		// }
 	} else {
-		client.export(file).ml(&name, version).await?;
+		// client.export(file).ml(&name, version).await?;
 	}
 	info!("The SurrealML file was exported successfully");
 	// All ok

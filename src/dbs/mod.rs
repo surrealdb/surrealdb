@@ -535,7 +535,6 @@ pub async fn init(
 	// Parse and setup the desired kv datastore
 	let dbs = Datastore::new(&opt.path)
 		.await?
-		.with_notifications()
 		.with_strict_mode(strict_mode)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)

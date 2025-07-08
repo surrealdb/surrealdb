@@ -12,7 +12,8 @@ pub(crate) mod statement_options;
 pub use context::RpcContext;
 pub use error::RpcError;
 pub use method::Method;
+pub use protocol::v1::types::*;
 pub use request::*;
 pub use response::*;
 
-pub use protocol::v3::RpcProtocolV3;
+pub use protocol::v1::RpcProtocolV1;

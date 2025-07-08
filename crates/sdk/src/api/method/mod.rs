@@ -24,6 +24,7 @@ use std::time::Duration;
 use surrealdb_core::dbs::Variables;
 use surrealdb_core::expr::Array;
 use surrealdb_core::expr::Data;
+use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
 use surrealdb_core::expr::to_value as to_core_value;
 use surrealdb_core::iam::SigninParams;
@@ -311,10 +312,10 @@ impl Surreal {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&self, key: impl Into<String>, value: impl Into<Value>) -> Set {
+	pub fn set(&self, name: impl Into<String>, value: impl Into<Value>) -> Set {
 		Set {
 			client: self.clone(),
-			key: key.into(),
+			name: name.into(),
 			value: value.into(),
 		}
 	}
@@ -351,10 +352,10 @@ impl Surreal {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn unset(&self, key: impl Into<String>) -> Unset {
+	pub fn unset(&self, name: impl Into<String>) -> Unset {
 		Unset {
 			client: self.clone(),
-			key: key.into(),
+			name: name.into(),
 		}
 	}
 
@@ -1352,8 +1353,7 @@ impl Surreal {
 		Export {
 			client: self.clone(),
 			target: target.into_export_destination(),
-			ml_config: None,
-			db_config: None,
+			export_request: Default::default(),
 			response: PhantomData,
 			export_type: PhantomData,
 		}

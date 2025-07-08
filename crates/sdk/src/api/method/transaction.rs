@@ -12,6 +12,7 @@ use crate::opt::CreatableResource;
 use crate::opt::InsertableResource;
 use crate::opt::IntoQuery;
 use crate::opt::Resource;
+use surrealdb_core::expr::TryFromValue;
 use uuid::Uuid;
 
 /// An ongoing transaction

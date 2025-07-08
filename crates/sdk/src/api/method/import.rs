@@ -10,6 +10,8 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
+use surrealdb_protocol::proto::rpc::v1::ImportSqlRequest;
+use tokio::io::AsyncBufReadExt;
 
 /// An database import future
 #[derive(Debug)]
@@ -39,25 +41,40 @@ impl<T> IntoFuture for Import<T> {
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			todo!("STU: Implement Import");
-			// let router = self.client.inner.router.extract()?;
-			// if !router.features.contains(&ExtraFeatures::Backup) {
-			// 	return Err(Error::BackupsNotSupported.into());
-			// }
+			let mut client = self.client.client.clone();
 
-			// if self.is_ml {
-			// 	return router
-			// 		.execute_unit(Command::ImportMl {
-			// 			path: self.file,
-			// 		})
-			// 		.await;
-			// }
+			let file = tokio::fs::File::open(self.file).await?;
 
-			// router
-			// 	.execute_unit(Command::ImportFile {
-			// 		path: self.file,
-			// 	})
-			// 	.await
+			let txn_id = uuid::Uuid::new_v4();
+
+			let outbound = async_stream::stream! {
+				let reader = tokio::io::BufReader::new(file);
+				let mut lines = reader.lines();
+
+				loop {
+					let line = match lines.next_line().await {
+						Ok(Some(line)) => line,
+						Ok(None) => break,
+						Err(err) => {
+							tracing::error!("Error reading line: {:?}", err);
+							break;
+						}
+					};
+
+					if line.is_empty() {
+						continue;
+					}
+
+					yield ImportSqlRequest {
+						txn_id: Some(txn_id.into()),
+						statement: line,
+					};
+				}
+			};
+
+			let _ = client.import_sql(tonic::Request::new(outbound)).await?;
+
+			Ok(())
 		})
 	}
 }

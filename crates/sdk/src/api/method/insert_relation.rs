@@ -1,14 +1,23 @@
 use crate::Surreal;
+use crate::opt::InsertableResource;
+use crate::opt::Resource;
 
 use crate::api::Result;
 use crate::api::conn::Command;
 
+use anyhow::Context;
+use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
+use surrealdb_core::sql::Data;
+use surrealdb_core::sql::Output;
+use surrealdb_core::sql::statements::InsertStatement;
+use surrealdb_protocol::QueryResponseValueStream;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 
 use super::BoxFuture;
 
@@ -17,27 +26,17 @@ use super::BoxFuture;
 ///
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct InsertRelation<R> {
+pub struct InsertRelation<R, RT> {
 	pub(super) client: Surreal,
-	pub(super) command: Result<Command>,
-	pub(super) response_type: PhantomData<R>,
+	pub(super) txn_id: Option<uuid::Uuid>,
+	pub(super) what: R,
+	pub(super) data: Value,
+	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<R> InsertRelation<R> {
-	pub(crate) fn from_closure<F>(client: Surreal, f: F) -> Self
-	where
-		F: FnOnce() -> Result<Command>,
-	{
-		InsertRelation {
-			client,
-			command: f(),
-			response_type: PhantomData,
-		}
-	}
-}
-
-impl<RT> IntoFuture for InsertRelation<RT>
+impl<R, RT> IntoFuture for InsertRelation<R, RT>
 where
+	R: InsertableResource,
 	RT: TryFromValue,
 {
 	type Output = Result<RT>;
@@ -46,13 +45,41 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		let InsertRelation {
 			client,
-			command,
+			what,
+			mut data,
+			txn_id,
 			..
 		} = self;
+
+		let table_name = what.table_name().to_string();
+		what.augment_data(&mut data);
+
 		Box::pin(async move {
-			todo!("STU: Implement InsertRelation::into_future");
-			// let router = client.inner.router.extract()?;
-			// router.$method(command?).await
+			let mut stmt = InsertStatement::default();
+			stmt.into = Some(surrealdb_core::sql::Table::from(table_name).into());
+			stmt.data = Data::SingleExpression(data.into());
+			stmt.output = Some(Output::After);
+			stmt.relation = true;
+
+			let mut client = client.client.clone();
+
+			let resp = client
+				.query(QueryRequest {
+					txn_id: txn_id.map(|id| id.into()),
+					query: stmt.to_string(),
+					variables: Default::default(),
+				})
+				.await?;
+
+			let mut stream = QueryResponseValueStream::new(resp.into_inner());
+
+			let first = stream.next().await.context("Failed to get first response")??;
+
+			let value: Value = first.try_into()?;
+
+			let value = RT::try_from_value(value)?;
+
+			Ok(value)
 		})
 	}
 }

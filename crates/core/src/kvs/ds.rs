@@ -80,7 +80,8 @@ pub struct Datastore {
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
 	// Whether this datastore enables live query notifications to subscribers.
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	notifications_sender: Sender<Notification>,
+	notifications_receiver: Receiver<Notification>,
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
@@ -246,23 +247,23 @@ impl Datastore {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_clock(path, None).await
+	pub async fn new(uri: &str) -> Result<Self> {
+		Self::new_with_clock(uri, None).await
 	}
 
 	#[allow(unused_variables)]
-	pub async fn new_with_clock(path: &str, clock: Option<Arc<SizedClock>>) -> Result<Datastore> {
+	pub async fn new_with_clock(uri: &str, clock: Option<Arc<SizedClock>>) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (flavor, clock): (Result<DatastoreFlavor>, Arc<SizedClock>) = match path {
+		let (flavor, clock): (Result<DatastoreFlavor>, Arc<SizedClock>) = match uri {
 			// Initiate an in-memory datastore
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store in {}", path);
+					info!(target: TARGET, "Starting kvs store in {}", uri);
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store in {}", path);
+					info!(target: TARGET, "Started kvs store in {}", uri);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
@@ -275,13 +276,13 @@ impl Datastore {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", uri);
 					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at {}", uri);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -294,12 +295,12 @@ impl Datastore {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", uri);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at {}", uri);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -372,7 +373,7 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
-				info!(target: TARGET, "Unable to load the specified datastore {}", path);
+				info!(target: TARGET, "Unable to load the specified datastore {}", uri);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}?;
@@ -382,6 +383,8 @@ impl Datastore {
 				clock,
 				flavor: Arc::new(flavor),
 			};
+			let (notifications_sender, notifications_receiver) =
+				async_channel::bounded(LQ_CHANNEL_SIZE);
 			Self {
 				id: Uuid::new_v4(),
 				transaction_factory: tf.clone(),
@@ -389,7 +392,8 @@ impl Datastore {
 				auth_enabled: false,
 				query_timeout: None,
 				transaction_timeout: None,
-				notification_channel: None,
+				notifications_sender,
+				notifications_receiver,
 				capabilities: Arc::new(Capabilities::default()),
 				index_stores: IndexStores::default(),
 				#[cfg(not(target_family = "wasm"))]
@@ -415,7 +419,8 @@ impl Datastore {
 			query_timeout: self.query_timeout,
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
-			notification_channel: self.notification_channel,
+			notifications_sender: self.notifications_sender,
+			notifications_receiver: self.notifications_receiver,
 			index_stores: Default::default(),
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
@@ -439,12 +444,6 @@ impl Datastore {
 	/// Specify whether this Datastore should run in strict mode
 	pub fn with_strict_mode(mut self, strict: bool) -> Self {
 		self.strict = strict;
-		self
-	}
-
-	/// Specify whether this datastore should enable live query notifications
-	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(async_channel::bounded(LQ_CHANNEL_SIZE));
 		self
 	}
 
@@ -1041,9 +1040,7 @@ impl Datastore {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notifications_sender.clone());
 		// Start an execution context
 		ctx.attach_session(sess)?;
 		// Store the query variables
@@ -1114,9 +1111,7 @@ impl Datastore {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notifications_sender.clone());
 		// Start an execution context
 		ctx.attach_session(sess)?;
 		// Store the query variables
@@ -1163,8 +1158,8 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<Notification>> {
-		self.notification_channel.as_ref().map(|v| v.1.clone())
+	pub fn notifications(&self) -> Receiver<Notification> {
+		self.notifications_receiver.clone()
 	}
 
 	/// Performs a database import from SQL
@@ -1261,9 +1256,7 @@ impl Datastore {
 			self.buckets.clone(),
 		)?;
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notifications_sender.clone());
 		Ok(ctx)
 	}
 

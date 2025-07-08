@@ -461,40 +461,16 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct SurrealKv;
 
-fn process(responses: Vec<QueryResult>) -> QueryResponse {
-	let mut map = IndexMap::with_capacity(responses.len());
-	for (index, query_result) in responses.into_iter().enumerate() {
-		map.insert(index, query_result);
-	}
-	QueryResponse {
-		results: map.into(),
-		..QueryResponse::new()
-	}
-}
-
-async fn take(one: bool, responses: Vec<QueryResult>) -> Result<Value> {
-	todo!("STU: take");
-	// if let Some(result) = process(responses).results.swap_remove(&0) {
-	// 	let value = result.result?;
-
-	// 	match one {
-	// 		true => match value {
-	// 			Value::Array(mut array) => {
-	// 				if let [ref mut value] = array[..] {
-	// 					return Ok(mem::replace(value, Value::None));
-	// 				}
-	// 			}
-	// 			Value::None | Value::Null => {}
-	// 			value => return Ok(value),
-	// 		},
-	// 		false => return Ok(value),
-	// 	}
-	// }
-	// match one {
-	// 	true => Ok(Value::None),
-	// 	false => Ok(Value::Array(Default::default())),
-	// }
-}
+// fn process(responses: Vec<QueryResult>) -> QueryResponse<Value> {
+// 	let mut map = IndexMap::with_capacity(responses.len());
+// 	for (index, query_result) in responses.into_iter().enumerate() {
+// 		map.insert(index, query_result);
+// 	}
+// 	QueryResponse {
+// 		results: map.into(),
+// 		..QueryResponse::new()
+// 	}
+// }
 
 #[cfg(not(target_family = "wasm"))]
 async fn export_file(

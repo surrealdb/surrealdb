@@ -16,6 +16,8 @@ use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::sql::SqlValue;
+use surrealdb_core::expr::Value;
+use surrealdb_core::iam::SignupParams;
 use tower_http::limit::RequestBodyLimitLayer;
 
 #[derive(Serialize)]
@@ -63,35 +65,35 @@ async fn handler(
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the provided data as JSON
-	match surrealdb::sql::json(data) {
-		// The provided value was an object
-		Ok(SqlValue::Object(vars)) => {
-			todo!("STU");
-			// match surrealdb::iam::signup::signup(kvs, &mut session, vars.0).await {
-			// 	// Authentication was successful
-			// 	Ok(v) => match accept.as_deref() {
-			// 		// Simple serialization
-			// 		Some(Accept::ApplicationJson) => {
-			// 			Ok(Output::json(&Success::new(v.token, v.refresh)))
-			// 		}
-			// 		Some(Accept::ApplicationCbor) => {
-			// 			Ok(Output::cbor(&Success::new(v.token, v.refresh)))
-			// 		}
-			// 		// Text serialization
-			// 		// NOTE: Only the token is returned in a plain text response.
-			// 		Some(Accept::TextPlain) => Ok(Output::Text(v.token.unwrap_or_default())),
-			// 		// Internal serialization
-			// 		Some(Accept::Surrealdb) => Ok(Output::full(&Success::new(v.token, v.refresh))),
-			// 		// Return nothing
-			// 		None => Ok(Output::None),
-			// 		// An incorrect content-type was requested
-			// 		_ => Err(NetError::InvalidType.into()),
-			// 	},
-			// 	// There was an error with authentication
-			// 	Err(err) => Err(ResponseError(err)),
-			// }
+
+	let v1_value =
+		surrealdb_core::rpc::format::json::parse_value(&body).map_err(|err| NetError::Request)?;
+
+	let signup_params = SignupParams::try_from(v1_value).map_err(|err| NetError::Request)?;
+
+	// The provided value was an object
+	let signup_data = surrealdb::iam::signup::signup(kvs, &mut session, signup_params)
+		.await
+		.map_err(ResponseError)?;
+
+	match accept.as_deref() {
+		// Simple serialization
+		Some(Accept::ApplicationJson) => {
+			Ok(Output::json(&Success::new(signup_data.token, signup_data.refresh)))
 		}
-		// The provided value was not an object
-		_ => Err(NetError::Request.into()),
+		Some(Accept::ApplicationCbor) => {
+			Ok(Output::cbor(&Success::new(signup_data.token, signup_data.refresh)))
+		}
+		// Text serialization
+		// NOTE: Only the token is returned in a plain text response.
+		Some(Accept::TextPlain) => Ok(Output::Text(signup_data.token.unwrap_or_default())),
+		// Internal serialization
+		Some(Accept::Surrealdb) => {
+			Ok(Output::full(&Success::new(signup_data.token, signup_data.refresh)))
+		}
+		// Return nothing
+		None => Ok(Output::None),
+		// An incorrect content-type was requested
+		_ => Err(NetError::InvalidType.into()),
 	}
 }

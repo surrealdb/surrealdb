@@ -334,8 +334,8 @@ impl MutableContext {
 
 	/// Add the LIVE query notification channel to the context, so that we
 	/// can send notifications to any subscribers.
-	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<Notification>>) {
-		self.notifications = chn.cloned()
+	pub(crate) fn add_notifications(&mut self, chn: Sender<Notification>) {
+		self.notifications = Some(chn);
 	}
 
 	pub(crate) fn set_query_planner(&mut self, qp: QueryPlanner) {

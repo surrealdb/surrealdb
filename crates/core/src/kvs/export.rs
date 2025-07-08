@@ -13,6 +13,7 @@ use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
 use std::fmt;
+use surrealdb_protocol::proto::rpc::v1::export_sql_request;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -182,6 +183,25 @@ impl TableConfig {
 			Self::All => true,
 			Self::None => false,
 			Self::Some(v) => v.iter().any(|v| v.eq(table)),
+		}
+	}
+}
+
+impl From<TableConfig> for export_sql_request::Tables {
+	fn from(value: TableConfig) -> Self {
+		use surrealdb_protocol::proto::v1::NullValue;
+		let selection = match value {
+			TableConfig::All => export_sql_request::tables::Selection::All(NullValue {}),
+			TableConfig::None => export_sql_request::tables::Selection::None(NullValue {}),
+			TableConfig::Some(v) => export_sql_request::tables::Selection::Selected(
+				export_sql_request::SelectedTables {
+					tables: v,
+				},
+			),
+		};
+
+		export_sql_request::Tables {
+			selection: Some(selection),
 		}
 	}
 }
