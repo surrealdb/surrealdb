@@ -6,8 +6,13 @@ use crate::syn;
 use anyhow::{Context as _, Result, bail};
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
+use reqwest::redirect::Attempt;
+#[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
+#[cfg(not(target_family = "wasm"))]
+use tokio::runtime::Handle;
+use tokio::task;
 use url::Url;
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
@@ -67,26 +72,37 @@ async fn request(
 ) -> Result<Value> {
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
-	ctx.check_allowed_net(&url)?;
+	ctx.check_allowed_net(&url).await?;
 	// Set a default client with no timeout
+
 	let builder = Client::builder();
 
 	#[cfg(not(target_family = "wasm"))]
 	let builder = {
 		let count = *crate::cnf::MAX_HTTP_REDIRECTS;
 		let ctx_clone = ctx.clone();
-		builder.redirect(Policy::custom(move |attempt| {
-			if let Err(e) = ctx_clone.check_allowed_net(attempt.url()) {
+		let policy = Policy::custom(move |attempt: Attempt| {
+			let check = task::block_in_place(|| {
+				Handle::current().block_on(ctx_clone.check_allowed_net(attempt.url()))
+			});
+			if let Err(e) = check {
 				return attempt.error(e);
 			}
 			if attempt.previous().len() >= count {
 				return attempt.stop();
 			}
 			attempt.follow()
-		}))
+		});
+		let b = builder.redirect(policy);
+		b.dns_resolver(std::sync::Arc::new(
+			crate::fnc::http::resolver::FilteringResolver::from_capabilities(
+				ctx.get_capabilities(),
+			),
+		))
 	};
 
 	let cli = builder.build()?;
+
 	let is_head = matches!(method, Method::HEAD);
 	// Start a new HEAD request
 	let mut req = cli.request(method.clone(), url);
