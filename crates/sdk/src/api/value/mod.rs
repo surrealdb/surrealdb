@@ -14,6 +14,7 @@ use surrealdb_core::{
 		Array as CoreArray, Datetime as CoreDatetime, Id as CoreId, Number as CoreNumber,
 		Thing as CoreThing, Value as CoreValue,
 	},
+	sql::SqlValue as CoreSqlValue,
 	syn,
 };
 use uuid::Uuid;
@@ -224,7 +225,7 @@ impl FromStr for Value {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		Ok(Value::from_inner(surrealdb_core::syn::value(s)?))
+		Ok(Value::from_inner(surrealdb_core::syn::value(s)?.into()))
 	}
 }
 
@@ -288,7 +289,7 @@ impl FromStr for RecordId {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		syn::thing(s).map(RecordId::from_inner)
+		syn::thing(s).map(|thing| RecordId::from_inner(CoreThing::from(thing)))
 	}
 }
 
@@ -423,6 +424,123 @@ impl Value {
 	/// Checks to see if a Value is a Value::None.
 	pub fn is_none(&self) -> bool {
 		matches!(&self, Value(CoreValue::None))
+	}
+}
+
+transparent_wrapper!(
+	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+	pub struct SqlValue(pub(crate) CoreSqlValue)
+);
+impl_serialize_wrapper!(SqlValue);
+
+impl SqlValue {
+	#[expect(dead_code)]
+	pub(crate) fn core_to_array(v: Vec<CoreSqlValue>) -> Vec<SqlValue> {
+		unsafe {
+			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<Vec<CoreSqlValue>, Vec<SqlValue>>(v)
+		}
+	}
+
+	#[expect(dead_code)]
+	pub(crate) fn core_to_array_ref(v: &Vec<CoreSqlValue>) -> &Vec<SqlValue> {
+		unsafe {
+			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<&Vec<CoreSqlValue>, &Vec<SqlValue>>(v)
+		}
+	}
+
+	#[expect(dead_code)]
+	pub(crate) fn core_to_array_mut(v: &mut Vec<CoreSqlValue>) -> &mut Vec<SqlValue> {
+		unsafe {
+			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<&mut Vec<CoreSqlValue>, &mut Vec<SqlValue>>(v)
+		}
+	}
+
+	#[expect(dead_code)]
+	pub(crate) fn array_to_core(v: Vec<SqlValue>) -> Vec<CoreSqlValue> {
+		unsafe {
+			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<Vec<SqlValue>, Vec<CoreSqlValue>>(v)
+		}
+	}
+
+	#[expect(dead_code)]
+	pub(crate) fn array_to_core_ref(v: &Vec<SqlValue>) -> &Vec<CoreSqlValue> {
+		unsafe {
+			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<&Vec<SqlValue>, &Vec<CoreSqlValue>>(v)
+		}
+	}
+
+	#[expect(dead_code)]
+	pub(crate) fn array_to_core_mut(v: &mut Vec<SqlValue>) -> &mut Vec<CoreSqlValue> {
+		unsafe {
+			// SAFETY: Because SqlValue is `repr(transparent)` transmuting between value and corevalue
+			// is safe.
+			std::mem::transmute::<&mut Vec<SqlValue>, &mut Vec<CoreSqlValue>>(v)
+		}
+	}
+}
+
+impl Index<usize> for SqlValue {
+	type Output = Self;
+
+	fn index(&self, index: usize) -> &Self::Output {
+		match &self.0 {
+			CoreSqlValue::Array(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&SqlValue(CoreSqlValue::None))
+			}
+			_ => &SqlValue(CoreSqlValue::None),
+		}
+	}
+}
+
+impl Index<&str> for SqlValue {
+	type Output = Self;
+
+	fn index(&self, index: &str) -> &Self::Output {
+		match &self.0 {
+			CoreSqlValue::Object(map) => {
+				map.0.get(index).map(Self::from_inner_ref).unwrap_or(&SqlValue(CoreSqlValue::None))
+			}
+			_ => &SqlValue(CoreSqlValue::None),
+		}
+	}
+}
+
+impl SqlValue {
+	/// Accesses the value found at a certain field
+	/// if an object, and a certain index if an array.
+	/// Will not err if no value is found at this point,
+	/// instead returning a SqlValue::None. If an Option<&SqlValue>
+	/// is desired, the .into_option() method can be used
+	/// to perform the conversion.
+	pub fn get<Idx>(&self, index: Idx) -> &SqlValue
+	where
+		SqlValue: Index<Idx, Output = SqlValue>,
+	{
+		self.index(index)
+	}
+
+	/// Converts a SqlValue into an Option<&SqlValue>, returning
+	/// a Some in all cases except SqlValue::None.
+	pub fn into_option(&self) -> Option<&SqlValue> {
+		match self {
+			SqlValue(CoreSqlValue::None) => None,
+			v => Some(v),
+		}
+	}
+
+	/// Checks to see if a SqlValue is a SqlValue::None.
+	pub fn is_none(&self) -> bool {
+		matches!(&self, SqlValue(CoreSqlValue::None))
 	}
 }
 

@@ -1,12 +1,17 @@
 use crate::kvs::Datastore;
+use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{LockType::*, TransactionType::*};
 use crate::vs::VersionStamp;
 use anyhow::Result;
 
 impl Datastore {
 	/// Saves the current timestamp for each database's current versionstamp.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub(crate) async fn changefeed_versionstamp(&self, ts: u64) -> Result<Option<VersionStamp>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, lh))]
+	pub(crate) async fn changefeed_versionstamp(
+		&self,
+		lh: Option<&LeaseHandler>,
+		ts: u64,
+	) -> Result<Option<VersionStamp>> {
 		// Store the latest versionstamp
 		let mut vs: Option<VersionStamp> = None;
 		// Create a new transaction
@@ -28,6 +33,12 @@ impl Datastore {
 				// to include {(ns, db): (ts, vs)} mapping, or we don't return it
 				vs = Some(txn.lock().await.set_timestamp_for_versionstamp(ts, ns, db).await?);
 			}
+			// Possibly renew the lease
+			if let Some(lh) = lh {
+				lh.try_maintain_lease().await?;
+			}
+			// Pause execution
+			yield_now!();
 		}
 		// Commit the changes
 		catch!(txn, txn.commit().await);
@@ -36,12 +47,16 @@ impl Datastore {
 	}
 
 	/// Deletes all change feed entries that are older than the timestamp.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub(crate) async fn changefeed_cleanup(&self, ts: u64) -> Result<()> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, lh))]
+	pub(crate) async fn changefeed_cleanup(
+		&self,
+		lh: Option<&LeaseHandler>,
+		ts: u64,
+	) -> Result<()> {
 		// Create a new transaction
 		let txn = self.transaction(Write, Optimistic).await?;
 		// Perform the garbage collection
-		catch!(txn, crate::cf::gc_all_at(&txn, ts).await);
+		catch!(txn, crate::cf::gc_all_at(lh, &txn, ts).await);
 		// Commit the changes
 		catch!(txn, txn.commit().await);
 		// Everything ok

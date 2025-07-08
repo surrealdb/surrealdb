@@ -83,6 +83,9 @@ impl Datastore {
 		};
 		// Set the default request timeout
 		let config = config.with_timeout(Duration::from_secs(*cnf::TIKV_REQUEST_TIMEOUT));
+		// Set the max decoding message size
+		let config =
+			config.with_grpc_max_decoding_message_size(*cnf::TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE);
 		// Create the client with the config
 		let client = TransactionClient::new_with_config(vec![path], config);
 		// Check for errors with the client
@@ -153,6 +156,10 @@ impl Datastore {
 impl super::api::Transaction for Transaction {
 	fn kind(&self) -> &'static str {
 		"tikv"
+	}
+
+	fn supports_reverse_scan(&self) -> bool {
+		true
 	}
 
 	/// Behaviour if unclosed

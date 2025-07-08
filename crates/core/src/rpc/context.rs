@@ -10,8 +10,8 @@ use super::RpcError;
 use super::RpcProtocolV1;
 use super::RpcProtocolV2;
 use crate::dbs::Session;
-use crate::expr::Array;
 use crate::kvs::Datastore;
+use crate::sql::Array;
 
 #[expect(async_fn_in_trait)]
 pub trait RpcContext {
@@ -68,6 +68,7 @@ pub trait RpcContext {
 	async fn execute(
 		&self,
 		version: Option<u8>,
+		txn: Option<Uuid>,
 		method: Method,
 		params: Array,
 	) -> Result<Data, RpcError>
@@ -77,7 +78,7 @@ pub trait RpcContext {
 	{
 		match version {
 			Some(1) => RpcProtocolV1::execute(self, method, params).await,
-			Some(2) => RpcProtocolV2::execute(self, method, params).await,
+			Some(2) => RpcProtocolV2::execute(self, txn, method, params).await,
 			_ => RpcProtocolV1::execute(self, method, params).await,
 		}
 	}

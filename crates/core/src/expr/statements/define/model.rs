@@ -45,7 +45,7 @@ impl DefineModelStatement {
 		if txn.get_db_model(ns, db, &self.name, &self.version).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::MlAlreadyExists {
 					name: self.name.to_string(),
 				});

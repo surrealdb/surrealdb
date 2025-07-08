@@ -31,24 +31,24 @@ use super::{ControlFlow, FlowResult};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Statements(pub Vec<Statement>);
+pub struct LogicalPlans(pub Vec<LogicalPlan>);
 
-impl Deref for Statements {
-	type Target = Vec<Statement>;
+impl Deref for LogicalPlans {
+	type Target = Vec<LogicalPlan>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
-impl IntoIterator for Statements {
-	type Item = Statement;
+impl IntoIterator for LogicalPlans {
+	type Item = LogicalPlan;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}
 }
 
-impl Display for Statements {
+impl Display for LogicalPlans {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(
 			&Fmt::one_line_separated(self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};")))),
@@ -61,7 +61,7 @@ impl Display for Statements {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub enum Statement {
+pub enum LogicalPlan {
 	Value(Value),
 	Analyze(AnalyzeStatement),
 	Begin(BeginStatement),
@@ -100,7 +100,7 @@ pub enum Statement {
 	Access(AccessStatement),
 }
 
-impl Statement {
+impl LogicalPlan {
 	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
@@ -147,7 +147,7 @@ impl Statement {
 			// All exports in SurrealDB 1.x are done with `UPDATE`, but
 			// because `UPDATE` works different in SurrealDB 2.x, we need
 			// to convert these statements into `UPSERT` statements.
-			(true, Self::Update(stm)) => &Statement::Upsert(UpsertStatement {
+			(true, Self::Update(stm)) => &LogicalPlan::Upsert(UpsertStatement {
 				only: stm.only,
 				what: stm.what.clone(),
 				with: stm.with.clone(),
@@ -204,7 +204,7 @@ impl Statement {
 	}
 }
 
-impl Display for Statement {
+impl Display for LogicalPlan {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(Pretty::from(f), "{v}"),

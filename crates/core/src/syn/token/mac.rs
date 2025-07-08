@@ -266,43 +266,43 @@ macro_rules! t {
 
 	// algorithms
 	("EDDSA") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::EdDSA)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::EdDSA)
 	};
 	("ES256") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Es256)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Es256)
 	};
 	("ES384") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Es384)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Es384)
 	};
 	("ES512") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Es512)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Es512)
 	};
 	("HS256") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Hs256)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Hs256)
 	};
 	("HS384") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Hs384)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Hs384)
 	};
 	("HS512") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Hs512)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Hs512)
 	};
 	("PS256") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Ps256)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Ps256)
 	};
 	("PS384") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Ps384)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Ps384)
 	};
 	("PS512") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Ps512)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Ps512)
 	};
 	("RS256") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Rs256)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Rs256)
 	};
 	("RS384") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Rs384)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Rs384)
 	};
 	("RS512") => {
-		$crate::syn::token::TokenKind::Algorithm($crate::expr::Algorithm::Rs512)
+		$crate::syn::token::TokenKind::Algorithm($crate::sql::Algorithm::Rs512)
 	};
 
 	// Distance

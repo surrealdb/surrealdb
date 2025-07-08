@@ -6,7 +6,7 @@ use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn define_foreign_table() -> Result<()> {
@@ -45,7 +45,7 @@ async fn define_foreign_table() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			events: {},
 			fields: {},
@@ -53,11 +53,11 @@ async fn define_foreign_table() -> Result<()> {
 			indexes: {},
 			lives: {},
 		}",
-	);
+	).into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 39,
@@ -65,11 +65,12 @@ async fn define_foreign_table() -> Result<()> {
 				score: 72,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 39,
@@ -81,11 +82,12 @@ async fn define_foreign_table() -> Result<()> {
 				total: 39
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 39,
@@ -93,11 +95,12 @@ async fn define_foreign_table() -> Result<()> {
 				score: 83,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 39,
@@ -109,11 +112,12 @@ async fn define_foreign_table() -> Result<()> {
 				total: 78
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 39,
@@ -121,11 +125,12 @@ async fn define_foreign_table() -> Result<()> {
 				score: 91,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 39,
@@ -137,14 +142,15 @@ async fn define_foreign_table() -> Result<()> {
 				total: 78
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
 	assert!(matches!(tmp.downcast_ref(), Some(Error::InvalidAggregation { .. })));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				age: 39,
@@ -156,7 +162,8 @@ async fn define_foreign_table() -> Result<()> {
 				total: 78
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -182,7 +189,7 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 	skip_ok(res, 5)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: monthly:[2024, 1],
@@ -191,11 +198,12 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 				month: 1,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				id: daily:[2024, 1, 1],
@@ -205,7 +213,8 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 				day: 1,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
