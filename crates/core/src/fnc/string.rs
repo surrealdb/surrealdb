@@ -383,14 +383,18 @@ pub mod is {
 
 pub mod similarity {
 
+	use std::sync::LazyLock;
+
 	use crate::expr::Value;
-	use crate::fnc::util::string::fuzzy::Fuzzy;
 	use anyhow::Result;
+	use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
+	static MATCHER: LazyLock<SkimMatcherV2> =
+		LazyLock::new(|| SkimMatcherV2::default().ignore_case());
 
 	use strsim;
 
-	pub fn fuzzy((a, b): (String, String)) -> Result<Value> {
-		Ok(a.as_str().fuzzy_score(b.as_str()).into())
+	pub fn fuzzy(arg: (String, String)) -> Result<Value> {
+		smithwaterman(arg)
 	}
 
 	/// Calculate the Jaro similarity between two strings
@@ -406,7 +410,7 @@ pub mod similarity {
 	}
 
 	pub fn smithwaterman((a, b): (String, String)) -> Result<Value> {
-		Ok(a.as_str().fuzzy_score(b.as_str()).into())
+		Ok(MATCHER.fuzzy_match(&a, &b).unwrap_or(0).into())
 	}
 
 	/// Calculate the Sørensen-Dice similarity between two strings
