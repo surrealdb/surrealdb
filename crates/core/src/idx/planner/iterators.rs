@@ -1427,19 +1427,24 @@ impl SearchMatchesThingIterator {
 pub(crate) struct FullTextMatchesThingIterator {}
 
 impl FullTextMatchesThingIterator {
-	pub(super) async fn new(irf: IteratorRef, fti: &FullTextIndex) -> Result<Self> {
+	pub(super) async fn new(_irf: IteratorRef, _fti: &FullTextIndex) -> Result<Self> {
 		todo!()
 	}
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
-		ctx: &Context,
-		tx: &Transaction,
-		limit: u32,
+		_ctx: &Context,
+		_tx: &Transaction,
+		_limit: u32,
 	) -> Result<B> {
 		todo!()
 	}
 
-	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
+	async fn next_count(
+		&mut self,
+		_ctx: &Context,
+		_tx: &Transaction,
+		_limit: u32,
+	) -> Result<usize> {
 		todo!()
 	}
 }

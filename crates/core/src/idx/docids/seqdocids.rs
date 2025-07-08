@@ -72,7 +72,7 @@ impl SeqDocIds {
 		Ok(Resolved::New(new_doc_id))
 	}
 
-	pub(in crate::idx) async fn get_id_key(
+	pub(in crate::idx) async fn _get_id_key(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
@@ -80,7 +80,7 @@ impl SeqDocIds {
 		tx.get(self.seq_key.new_bi_key(doc_id)?, None).await
 	}
 
-	pub(in crate::idx) async fn remove_doc_id(
+	pub(in crate::idx) async fn _remove_doc_id(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
@@ -128,7 +128,7 @@ mod tests {
 		let tx = ctx.tx();
 		let id: Id = key.into();
 		let k = revision::to_vec(&id).unwrap();
-		assert_eq!(d.get_id_key(&tx, doc_id).await.unwrap(), Some(k));
+		assert_eq!(d._get_id_key(&tx, doc_id).await.unwrap(), Some(k));
 		assert_eq!(d.get_doc_id(&tx, key.into()).await.unwrap(), Some(doc_id));
 	}
 	#[tokio::test]
@@ -213,8 +213,8 @@ mod tests {
 		// Remove non-existing doc 2 and doc 0 "Foo"
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			d.remove_doc_id(&ctx.tx(), 2).await.unwrap();
-			d.remove_doc_id(&ctx.tx(), 0).await.unwrap();
+			d._remove_doc_id(&ctx.tx(), 2).await.unwrap();
+			d._remove_doc_id(&ctx.tx(), 0).await.unwrap();
 			finish(ctx).await;
 		}
 
@@ -243,7 +243,7 @@ mod tests {
 		// Remove doc 1 "Bar"
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			d.remove_doc_id(&ctx.tx(), 1).await.unwrap();
+			d._remove_doc_id(&ctx.tx(), 1).await.unwrap();
 			finish(ctx).await;
 		}
 
@@ -274,9 +274,9 @@ mod tests {
 		// Remove remaining docs
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			d.remove_doc_id(&ctx.tx(), 1).await.unwrap();
-			d.remove_doc_id(&ctx.tx(), 2).await.unwrap();
-			d.remove_doc_id(&ctx.tx(), 3).await.unwrap();
+			d._remove_doc_id(&ctx.tx(), 1).await.unwrap();
+			d._remove_doc_id(&ctx.tx(), 2).await.unwrap();
+			d._remove_doc_id(&ctx.tx(), 3).await.unwrap();
 			finish(ctx).await;
 		}
 

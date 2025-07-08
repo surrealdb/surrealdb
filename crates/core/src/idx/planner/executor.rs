@@ -1007,7 +1007,7 @@ impl QueryExecutor {
 			if let Matches(_, _) = io.op() {
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
 				{
-					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
+					if let Some(PerExpressionEntry::FullText(_fte)) = self.0.exp_entries.get(exp) {
 						let it = FullTextMatchesThingIterator::new(ir, fti).await?;
 						return Ok(Some(ThingIterator::FullTextMatches(it)));
 					}
@@ -1067,11 +1067,11 @@ impl QueryExecutor {
 			Some(PerExpressionEntry::Search(se)) => {
 				let ix = se.0.index_option.ix_ref();
 				if self.0.table.eq(&ix.what.0) {
-					return self.search_matches_with_doc_id(ctx, thg, &se).await;
+					return self.search_matches_with_doc_id(ctx, thg, se).await;
 				}
-				return self.search_matches_with_value(stk, ctx, opt, &se, l, r).await;
+				self.search_matches_with_value(stk, ctx, opt, se, l, r).await
 			}
-			Some(PerExpressionEntry::FullText(fte)) => {
+			Some(PerExpressionEntry::FullText(_fte)) => {
 				todo!()
 			}
 			_ => {
@@ -1187,7 +1187,7 @@ impl QueryExecutor {
 				}
 			}
 			Some(PerMatchRefEntry::FullText(fte)) => {
-				if let Some(fti) = self.get_fulltext_index(fte) {
+				if let Some(_fti) = self.get_fulltext_index(fte) {
 					todo!()
 				}
 			}
@@ -1214,7 +1214,7 @@ impl QueryExecutor {
 					}
 				}
 				PerMatchRefEntry::FullText(fte) => {
-					if let Some(fti) = self.get_fulltext_index(fte) {
+					if let Some(_fti) = self.get_fulltext_index(fte) {
 						todo!()
 					}
 				}
@@ -1254,7 +1254,7 @@ impl QueryExecutor {
 						}
 					}
 				}
-				PerMatchRefEntry::FullText(fte) => {
+				PerMatchRefEntry::FullText(_fte) => {
 					todo!()
 				}
 			}
@@ -1315,13 +1315,13 @@ struct InnerFullTextEntry {
 
 impl FullTextEntry {
 	async fn new(
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		fti: &FullTextIndex,
+		_stk: &mut Stk,
+		_ctx: &Context,
+		_opt: &Options,
+		_fti: &FullTextIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _) = io.op() {
+		if let Matches(_qs, _) = io.op() {
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
 				io,
 			}))))
