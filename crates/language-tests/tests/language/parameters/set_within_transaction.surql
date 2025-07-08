@@ -21,15 +21,15 @@ value = "2"
 
 */
 
-$a = 0;
-$b = 0;
+let $a = 0;
+let $b = 0;
 
 BEGIN;
-$a = 1;
+let $a = 1;
 COMMIT;
 
 BEGIN;
-$b = 2;
+let $b = 2;
 CANCEL;
 
 $a;

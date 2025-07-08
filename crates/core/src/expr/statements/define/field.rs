@@ -81,7 +81,7 @@ impl DefineFieldStatement {
 		if txn.get_tb_field(ns, db, &self.what, &fd).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::FdAlreadyExists {
 					name: fd,
 				});

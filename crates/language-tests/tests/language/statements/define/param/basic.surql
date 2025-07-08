@@ -17,5 +17,5 @@ value = "2"
 
 DEFINE PARAM $a VALUE 1;
 $a;
-$a = 2;
+let $a = 2;
 $a;

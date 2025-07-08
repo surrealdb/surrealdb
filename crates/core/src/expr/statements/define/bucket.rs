@@ -43,7 +43,7 @@ impl DefineBucketStatement {
 		if txn.get_db_bucket(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
-			} else if !self.overwrite {
+			} else if !self.overwrite && !opt.import {
 				bail!(Error::BuAlreadyExists {
 					value: self.name.to_string(),
 				});

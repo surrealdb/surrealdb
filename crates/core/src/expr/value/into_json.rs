@@ -220,338 +220,292 @@ impl From<expr::Geometry> for Geometry {
 
 #[cfg(test)]
 mod tests {
-	mod into_json {
-		use crate::expr;
-		use crate::expr::Thing;
-		use crate::expr::Value;
-		use crate::expr::from_value;
-		use crate::sql;
-		use chrono::DateTime;
-		use chrono::Utc;
-		use geo::LineString;
-		use geo::MultiLineString;
-		use geo::MultiPoint;
-		use geo::MultiPolygon;
-		use geo::Point;
-		use geo::Polygon;
-		use geo::line_string;
-		use geo::point;
-		use geo::polygon;
-		use rust_decimal::Decimal;
-		use serde_json::Value as Json;
-		use serde_json::json;
-		use std::collections::BTreeMap;
-		use std::time::Duration;
-		use uuid::Uuid;
+	use crate::expr;
+	use crate::expr::Thing;
+	use crate::expr::Value;
+	use chrono::DateTime;
+	use chrono::Utc;
+	use geo::MultiLineString;
+	use geo::MultiPoint;
+	use geo::MultiPolygon;
+	use geo::line_string;
+	use geo::point;
+	use geo::polygon;
+	use rust_decimal::Decimal;
+	use serde_json::Value as Json;
+	use serde_json::json;
+	use std::collections::BTreeMap;
+	use std::time::Duration;
+	use uuid::Uuid;
 
-		#[test]
-		fn none_or_null() {
-			for value in [Value::None, Value::Null] {
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(null));
+	use rstest::rstest;
 
-				let response: Option<String> = from_value(value).unwrap();
-				assert_eq!(response, None);
-			}
-		}
-
-		#[test]
-		fn bool() {
-			for boolean in [true, false] {
-				let value = Value::Bool(boolean);
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(boolean));
-
-				let response: bool = from_value(value).unwrap();
-				assert_eq!(response, boolean);
-			}
-		}
-
-		#[test]
-		fn number_int() {
-			for num in [i64::MIN, 0, i64::MAX] {
-				let value = Value::Number(expr::Number::Int(num));
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(num));
-
-				let response: i64 = from_value(value).unwrap();
-				assert_eq!(response, num);
-			}
-		}
-
-		#[test]
-		fn number_float() {
-			for num in [f64::NEG_INFINITY, f64::MIN, 0.0, f64::MAX, f64::INFINITY, f64::NAN] {
-				let value = Value::Number(expr::Number::Float(num));
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(num));
-
-				let response: f64 = from_value(value).unwrap();
-				if response.is_finite() {
-					// Infinity numbers are not comparable
-					assert_eq!(response, num);
-				}
-			}
-		}
-
-		#[test]
-		fn number_decimal() {
-			for num in [i64::MIN, 0, i64::MAX] {
-				let num = Decimal::new(num, 0);
-				let value = Value::Number(expr::Number::Decimal(num));
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(num.to_string()));
-
-				let response: Decimal = from_value(value).unwrap();
-				assert_eq!(response, num);
-			}
-		}
-
-		#[test]
-		fn strand() {
-			for str in ["", "foo"] {
-				let value = Value::Strand(str.into());
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(str));
-
-				let response: String = from_value(value).unwrap();
-				assert_eq!(response, str);
-			}
-		}
-
-		#[test]
-		fn duration() {
-			for duration in [Duration::ZERO, Duration::MAX] {
-				let value = Value::Duration(duration.into());
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(expr::Duration(duration).to_raw()));
-
-				let response: Duration = from_value(value).unwrap();
-				assert_eq!(response, duration);
-			}
-		}
-
-		#[test]
-		fn datetime() {
-			for datetime in [DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC] {
-				let value = Value::Datetime(datetime.into());
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(datetime));
-
-				let response: DateTime<Utc> = from_value(value).unwrap();
-				assert_eq!(response, datetime);
-			}
-		}
-
-		#[test]
-		fn uuid() {
-			for uuid in [Uuid::nil(), Uuid::max()] {
-				let value = Value::Uuid(uuid.into());
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(uuid));
-
-				let response: Uuid = from_value(value).unwrap();
-				assert_eq!(response, uuid);
-			}
-		}
-
-		#[test]
-		fn array() {
-			for vec in [vec![], vec![true, false]] {
-				let value =
-					Value::Array(expr::Array(vec.iter().copied().map(Value::from).collect()));
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(vec));
-
-				let response: Vec<bool> = from_value(value).unwrap();
-				assert_eq!(response, vec);
-			}
-		}
-
-		#[test]
-		fn object() {
-			for map in [BTreeMap::new(), map!("done".to_owned() => true)] {
-				let value = Value::Object(expr::Object(
-					map.iter().map(|(key, value)| (key.clone(), Value::from(*value))).collect(),
-				));
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(map));
-
-				let response: BTreeMap<String, bool> = from_value(value).unwrap();
-				assert_eq!(response, map);
-			}
-		}
-
-		#[test]
-		fn geometry_point() {
-			let point = point! { x: 10., y: 20. };
-			let value = Value::Geometry(expr::Geometry::Point(point));
-
-			let simple_json = Json::from(value.clone());
-			assert_eq!(simple_json, json!({ "type": "Point", "coordinates": [10., 20.]}));
-
-			let response: Point = from_value(value).unwrap();
-			assert_eq!(response, point);
-		}
-
-		#[test]
-		fn geometry_line() {
-			let line_string = line_string![
-				( x: 0., y: 0. ),
-				( x: 10., y: 0. ),
-			];
-			let value = Value::Geometry(expr::Geometry::Line(line_string.clone()));
-
-			let simple_json = Json::from(value.clone());
-			assert_eq!(
-				simple_json,
-				json!({ "type": "LineString", "coordinates": [[0., 0.], [10., 0.]]})
-			);
-
-			let response: LineString = from_value(value).unwrap();
-			assert_eq!(response, line_string);
-		}
-
-		#[test]
-		fn geometry_polygon() {
-			let polygon = polygon![
+	#[rstest]
+	#[case::none(Value::None, json!(null), Value::Null)]
+	#[case::null(Value::Null, json!(null), Value::Null)]
+	#[case::bool(Value::Bool(true), json!(true), Value::Bool(true))]
+	#[case::bool(Value::Bool(false), json!(false), Value::Bool(false))]
+	#[case::number(
+		Value::Number(expr::Number::Int(i64::MIN)),
+		json!(i64::MIN),
+		Value::Number(expr::Number::Int(i64::MIN)),
+	)]
+	#[case::number(
+		Value::Number(expr::Number::Int(i64::MAX)),
+		json!(i64::MAX),
+		Value::Number(expr::Number::Int(i64::MAX)),
+	)]
+	#[case::number(
+		Value::Number(expr::Number::Float(1.23)),
+		json!(1.23),
+		Value::Number(expr::Number::Float(1.23)),
+	)]
+	#[case::number(
+		Value::Number(expr::Number::Float(f64::NEG_INFINITY)),
+		json!(null),
+		Value::Null,
+	)]
+	#[case::number(
+		Value::Number(expr::Number::Float(f64::MIN)),
+		json!(-1.7976931348623157e308),
+		Value::Number(expr::Number::Float(f64::MIN)),
+	)]
+	#[case::number(
+		Value::Number(expr::Number::Float(0.0)),
+		json!(0.0),
+		Value::Number(expr::Number::Float(0.0)),
+	)]
+	#[case::number(
+		Value::Number(expr::Number::Float(f64::MAX)),
+		json!(1.7976931348623157e308),
+		Value::Number(expr::Number::Float(f64::MAX)),
+	)]
+	#[case::number(
+		Value::Number(expr::Number::Float(f64::INFINITY)),
+		json!(null),
+		Value::Null,
+	)]
+	#[case::number(
+		Value::Number(expr::Number::Float(f64::NAN)),
+		json!(null),
+		Value::Null,
+	)]
+	#[case::number(
+		Value::Number(expr::Number::Decimal(Decimal::new(123, 2))),
+		json!("1.23"),
+		Value::Strand("1.23".into()),
+	)]
+	#[case::strand(
+		Value::Strand("".into()),
+		json!(""),
+		Value::Strand("".into()),
+	)]
+	#[case::strand(
+		Value::Strand("foo".into()),
+		json!("foo"),
+		Value::Strand("foo".into()),
+	)]
+	#[case::duration(
+		Value::Duration(expr::Duration(Duration::ZERO)),
+		json!("0ns"),
+		Value::Strand("0ns".into()),
+	)]
+	#[case::duration(
+		Value::Duration(expr::Duration(Duration::MAX)),
+		json!("584942417355y3w5d7h15s999ms999µs999ns"),
+		Value::Strand("584942417355y3w5d7h15s999ms999µs999ns".into()),
+	)]
+	#[case::datetime(
+		Value::Datetime(expr::Datetime(DateTime::<Utc>::MIN_UTC)),
+		json!("-262143-01-01T00:00:00Z"),
+		Value::Strand("-262143-01-01T00:00:00Z".into()),
+	)]
+	#[case::datetime(
+		Value::Datetime(expr::Datetime(DateTime::<Utc>::MAX_UTC)),
+		json!("+262142-12-31T23:59:59.999999999Z"),
+		Value::Strand("+262142-12-31T23:59:59.999999999Z".into()),
+	)]
+	#[case::uuid(
+		Value::Uuid(expr::Uuid(Uuid::nil())),
+		json!("00000000-0000-0000-0000-000000000000"),
+		Value::Strand("00000000-0000-0000-0000-000000000000".into()),
+	)]
+	#[case::uuid(
+		Value::Uuid(expr::Uuid(Uuid::max())),
+		json!("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+		Value::Strand("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
+	)]
+	#[case::bytes(
+		Value::Bytes(expr::Bytes(vec![])),
+		json!([]),
+		Value::Array(expr::Array(vec![])),
+	)]
+	#[case::bytes(
+		Value::Bytes(expr::Bytes(b"foo".to_vec())),
+		json!([102, 111, 111]),
+		Value::Array(expr::Array(vec![
+			Value::Number(expr::Number::Int(102)),
+			Value::Number(expr::Number::Int(111)),
+			Value::Number(expr::Number::Int(111)),
+		])),
+	)]
+	#[case::thing(
+		Value::Thing(Thing { tb: "foo".to_string(), id: "bar".into()}) ,
+		json!("foo:bar"),
+		Value::Thing(Thing { tb: "foo".to_string(), id: "bar".into()}) ,
+	)]
+	#[case::array(
+		Value::Array(expr::Array(vec![])),
+		json!([]),
+		Value::Array(expr::Array(vec![])),
+	)]
+	#[case::array(
+		Value::Array(expr::Array(vec![Value::Bool(true), Value::Bool(false)])),
+		json!([true, false]),
+		Value::Array(expr::Array(vec![Value::Bool(true), Value::Bool(false)])),
+	)]
+	#[case::object(
+		Value::Object(expr::Object(BTreeMap::new())),
+		json!({}),
+		Value::Object(expr::Object(BTreeMap::new())),
+	)]
+	#[case::object(
+		Value::Object(expr::Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
+		json!({"done": true}),
+		Value::Object(expr::Object(BTreeMap::from([("done".to_owned(), Value::Bool(true))]))),
+	)]
+	#[case::geometry_point(
+		Value::Geometry(expr::Geometry::Point(point! { x: 10., y: 20. })),
+		json!({ "type": "Point", "coordinates": [10., 20.]}),
+		Value::Geometry(expr::Geometry::Point(point! { x: 10., y: 20. })),
+	)]
+	#[case::geometry_line(
+		Value::Geometry(expr::Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])),
+		json!({ "type": "LineString", "coordinates": [[0., 0.], [10., 0.]]}),
+		Value::Geometry(expr::Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])),
+	)]
+	#[case::geometry_polygon(
+		Value::Geometry(expr::Geometry::Polygon(polygon![
+			(x: -111., y: 45.),
+			(x: -111., y: 41.),
+			(x: -104., y: 41.),
+			(x: -104., y: 45.),
+		])),
+		json!({ "type": "Polygon", "coordinates": [[
+			[-111., 45.],
+			[-111., 41.],
+			[-104., 41.],
+			[-104., 45.],
+			[-111., 45.],
+		]]}),
+		Value::Geometry(expr::Geometry::Polygon(polygon![
+			(x: -111., y: 45.),
+			(x: -111., y: 41.),
+			(x: -104., y: 41.),
+			(x: -104., y: 45.),
+		])),
+	)]
+	#[case::geometry_multi_point(
+		Value::Geometry(expr::Geometry::MultiPoint(MultiPoint::new(vec![
+			point! { x: 0., y: 0. },
+			point! { x: 1., y: 2. },
+		]))),
+		json!({ "type": "MultiPoint", "coordinates": [[0., 0.], [1., 2.]]}),
+		Value::Geometry(expr::Geometry::MultiPoint(MultiPoint::new(vec![
+			point! { x: 0., y: 0. },
+			point! { x: 1., y: 2. },
+		]))),
+	)]
+	#[case::geometry_multi_line(
+		Value::Geometry(
+			expr::Geometry::MultiLine(
+				MultiLineString::new(vec![
+					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
+				])
+			)
+		),
+		json!({ "type": "MultiLineString", "coordinates": [[[0., 0.], [1., 2.]]]}),
+		Value::Geometry(
+			expr::Geometry::MultiLine(
+				MultiLineString::new(vec![
+					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
+				])
+			)
+		),
+	)]
+	#[case::geometry_multi_polygon(
+		Value::Geometry(expr::Geometry::MultiPolygon(MultiPolygon::new(vec![
+			polygon![
 				(x: -111., y: 45.),
 				(x: -111., y: 41.),
 				(x: -104., y: 41.),
 				(x: -104., y: 45.),
-			];
-			let value = Value::Geometry(expr::Geometry::Polygon(polygon.clone()));
-
-			let simple_json = Json::from(value.clone());
-			assert_eq!(
-				simple_json,
-				json!({ "type": "Polygon", "coordinates": [[
-					[-111., 45.],
-					[-111., 41.],
-					[-104., 41.],
-					[-104., 45.],
-					[-111., 45.],
-				]]})
-			);
-
-			let response: Polygon = from_value(value).unwrap();
-			assert_eq!(response, polygon);
-		}
-
-		#[test]
-		fn geometry_multi_point() {
-			let multi_point: MultiPoint =
-				vec![point! { x: 0., y: 0. }, point! { x: 1., y: 2. }].into();
-			let value = Value::Geometry(expr::Geometry::MultiPoint(multi_point.clone()));
-
-			let simple_json = Json::from(value.clone());
-			assert_eq!(
-				simple_json,
-				json!({ "type": "MultiPoint", "coordinates": [[0., 0.], [1., 2.]]})
-			);
-
-			let response: MultiPoint = from_value(value).unwrap();
-			assert_eq!(response, multi_point);
-		}
-
-		#[test]
-		fn geometry_multi_line() {
-			let multi_line = MultiLineString::new(vec![line_string![
-					( x: 0., y: 0. ),
-					( x: 1., y: 2. ),
-			]]);
-			let value = Value::Geometry(expr::Geometry::MultiLine(multi_line.clone()));
-
-			let simple_json = Json::from(value.clone());
-			assert_eq!(
-				simple_json,
-				json!({ "type": "MultiLineString", "coordinates": [[[0., 0.], [1., 2.]]]})
-			);
-
-			let response: MultiLineString = from_value(value).unwrap();
-			assert_eq!(response, multi_line);
-		}
-
-		#[test]
-		fn geometry_multi_polygon() {
-			let multi_polygon: MultiPolygon = vec![polygon![
+			],
+		]))),
+		json!({ "type": "MultiPolygon", "coordinates": [[[
+			[-111., 45.],
+			[-111., 41.],
+			[-104., 41.],
+			[-104., 45.],
+			[-111., 45.],
+		]]]})
+	,	Value::Geometry(expr::Geometry::MultiPolygon(MultiPolygon::new(vec![
+			polygon![
 				(x: -111., y: 45.),
 				(x: -111., y: 41.),
 				(x: -104., y: 41.),
 				(x: -104., y: 45.),
-			]]
-			.into();
-			let value = Value::Geometry(expr::Geometry::MultiPolygon(multi_polygon.clone()));
+			],
+		]))),
+	)]
+	#[case::geometry_collection(
+		Value::Geometry(expr::Geometry::Collection(vec![])),
+		json!({
+			"type": "GeometryCollection",
+			"geometries": [],
+		}),
+		Value::Geometry(expr::Geometry::Collection(vec![])),
+	)]
+	#[case::geometry_collection_with_point(
+		Value::Geometry(expr::Geometry::Collection(vec![expr::Geometry::Point(point! { x: 10., y: 20. })])),
+		json!({
+		"type": "GeometryCollection",
+		"geometries": [ { "type": "Point", "coordinates": [10., 20.] } ],
+	}),
+		Value::Geometry(expr::Geometry::Collection(vec![expr::Geometry::Point(point! { x: 10., y: 20. })])),
+	)]
+	#[case::geometry_collection_with_line(
+		Value::Geometry(expr::Geometry::Collection(vec![expr::Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])])),
+		json!({
+			"type": "GeometryCollection",
+			"geometries": [ { "type": "LineString", "coordinates": [[0., 0.], [10., 0.]] } ],
+		}),
+		Value::Geometry(expr::Geometry::Collection(vec![expr::Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])])),
+	)]
 
-			let simple_json = Json::from(value.clone());
-			assert_eq!(
-				simple_json,
-				json!({ "type": "MultiPolygon", "coordinates": [[[
-					[-111., 45.],
-					[-111., 41.],
-					[-104., 41.],
-					[-104., 45.],
-					[-111., 45.],
-				]]]})
-			);
+	fn test_json(
+		#[case] value: Value,
+		#[case] expected: Json,
+		#[case] expected_deserialized: Value,
+	) {
+		let json_value = Json::from(value.clone());
+		assert_eq!(json_value, expected);
 
-			let response: MultiPolygon = from_value(value).unwrap();
-			assert_eq!(response, multi_polygon);
-		}
-
-		#[test]
-		fn geometry_collection() {
-			for geometries in [vec![], vec![expr::Geometry::Point(point! { x: 10., y: 20. })]] {
-				let value = Value::Geometry(geometries.clone().into());
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(
-					simple_json,
-					json!({
-						"type": "GeometryCollection",
-						"geometries": geometries.clone().into_iter().map(|geo| Json::from(Value::from(geo))).collect::<Vec<_>>(),
-					})
-				);
-
-				let response: Vec<expr::Geometry> = from_value(value).unwrap();
-				assert_eq!(response, geometries);
-			}
-		}
-
-		#[test]
-		fn bytes() {
-			for bytes in [vec![], b"foo".to_vec()] {
-				let value = Value::Bytes(expr::Bytes(bytes.clone()));
-
-				let simple_json = Json::from(value.clone());
-				assert_eq!(simple_json, json!(bytes));
-
-				let expr::Bytes(response) = from_value(value).unwrap();
-				assert_eq!(response, bytes);
-			}
-		}
-
-		#[test]
-		fn thing() {
-			let record_id = "foo:bar";
-			let thing: Thing = sql::thing(record_id).unwrap().into();
-			let value = Value::Thing(thing.clone());
-
-			let simple_json = Json::from(value.clone());
-			assert_eq!(simple_json, json!(record_id));
-
-			let response: expr::Thing = from_value(value).unwrap();
-			assert_eq!(response, thing);
-		}
+		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");
+		let deserialized_sql_value = crate::syn::value_legacy_strand(&json_str).unwrap();
+		let deserialized: Value = deserialized_sql_value.into();
+		assert_eq!(deserialized, expected_deserialized);
 	}
 }

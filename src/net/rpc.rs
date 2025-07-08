@@ -185,7 +185,7 @@ async fn post_handler(
 	match fmt.req_http(body) {
 		Ok(req) => {
 			// Execute the specified method
-			let res = RpcContext::execute(&rpc, req.version, req.method, req.params).await;
+			let res = RpcContext::execute(&rpc, req.version, req.txn, req.method, req.params).await;
 			// Return the HTTP response
 			Ok(fmt.res_http(res.into_response(None))?)
 		}

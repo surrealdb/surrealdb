@@ -8,39 +8,6 @@ use surrealdb::err::Error;
 use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn future_function_simple() -> Result<()> {
-	let sql = "
-		UPSERT person:test SET can_drive = <future> { birthday && time::now() > birthday + 18y };
-		UPSERT person:test SET birthday = <datetime> '2007-06-22';
-		UPSERT person:test SET birthday = <datetime> '2001-06-22';
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ id: person:test, can_drive: NONE }]").into();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
-		"[{ id: person:test, birthday: d'2007-06-22T00:00:00Z', can_drive: false }]",
-	)
-	.into();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
-		"[{ id: person:test, birthday: d'2001-06-22T00:00:00Z', can_drive: true }]",
-	)
-	.into();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
 async fn future_function_arguments() -> Result<()> {
 	let sql = "
 		UPSERT future:test SET

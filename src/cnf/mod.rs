@@ -134,3 +134,15 @@ pub static PKG_VERSION: LazyLock<String> =
 		}
 		_ => env!("CARGO_PKG_VERSION").to_owned(),
 	});
+
+/// Whether to enable Tokio Console
+pub static ENABLE_TOKIO_CONSOLE: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_TOKIO_CONSOLE_ENABLED", bool, false);
+
+/// The socket address that Tokio Console will bind on
+pub static TOKIO_CONSOLE_SOCKET_ADDR: LazyLock<Option<String>> =
+	lazy_env_parse!("SURREAL_TOKIO_CONSOLE_SOCKET_ADDR", Option<String>);
+
+/// How long, in seconds, to retain data for completed events (default: 60)
+pub static TOKIO_CONSOLE_RETENTION: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_TOKIO_CONSOLE_RETENTION", u64, 60);

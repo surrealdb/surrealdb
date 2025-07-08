@@ -12,6 +12,7 @@ use crate::sql::statements::{
 	},
 };
 use crate::sql::{Duration, Fields, Ident, Param};
+use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
 use crate::syn::token::{Glued, TokenKind, t};
@@ -217,7 +218,18 @@ impl Parser<'_> {
 			_ => {
 				// TODO: Provide information about keywords.
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-				Ok(Self::refine_stmt_value(value))
+				if let SqlValue::Expression(x) = &value {
+					if let Expression::Binary {
+						l: SqlValue::Param(ref x),
+						o: Operator::Equal,
+						..
+					} = **x
+					{
+						let span = token.span.covers(self.recent_span());
+						bail!("Variable declaration without `let` is deprecated", @span => "replace with `let {x} = ..`")
+					}
+				}
+				Ok(Statement::Value(value))
 			}
 		}
 	}
@@ -312,28 +324,6 @@ impl Parser<'_> {
 				let v = ctx.run(|ctx| self.parse_value_inherit(ctx)).await?;
 				Ok(Self::refine_entry_value(v))
 			}
-		}
-	}
-
-	/// Turns [Param] `=` [Value] into a set statment.
-	fn refine_stmt_value(value: SqlValue) -> Statement {
-		match value {
-			SqlValue::Expression(x) => {
-				if let Expression::Binary {
-					l: SqlValue::Param(x),
-					o: Operator::Equal,
-					r,
-				} = *x
-				{
-					return Statement::Set(crate::sql::statements::SetStatement {
-						name: x.0.0,
-						what: r,
-						kind: None,
-					});
-				}
-				Statement::Value(SqlValue::Expression(x))
-			}
-			_ => Statement::Value(value),
 		}
 	}
 

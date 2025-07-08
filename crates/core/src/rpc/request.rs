@@ -1,3 +1,5 @@
+use uuid::Uuid;
+
 use crate::rpc::Method;
 use crate::rpc::RpcError;
 use crate::rpc::format::cbor::Cbor;
@@ -9,11 +11,13 @@ pub static ID: &str = "id";
 pub static METHOD: &str = "method";
 pub static PARAMS: &str = "params";
 pub static VERSION: &str = "version";
+pub static TXN: &str = "txn";
 
 #[derive(Debug)]
 pub struct Request {
 	pub id: Option<SqlValue>,
 	pub version: Option<u8>,
+	pub txn: Option<Uuid>,
 	pub method: Method,
 	pub params: Array,
 }
@@ -50,6 +54,16 @@ impl TryFrom<SqlValue> for Request {
 			},
 			_ => return Err(RpcError::InvalidRequest),
 		};
+		// Fetch the 'txn' argument
+		let txn = match val.get_field_value(TXN) {
+			SqlValue::None => None,
+			SqlValue::Null => None,
+			SqlValue::Uuid(x) => Some(x.0),
+			SqlValue::Strand(x) => {
+				Some(Uuid::try_parse(&x.0).map_err(|_| RpcError::InvalidRequest)?)
+			}
+			_ => return Err(RpcError::InvalidRequest),
+		};
 		// Fetch the 'method' argument
 		let method = match val.get_field_value(METHOD) {
 			SqlValue::Strand(v) => v.to_raw(),
@@ -68,6 +82,7 @@ impl TryFrom<SqlValue> for Request {
 			method,
 			params,
 			version,
+			txn,
 		})
 	}
 }

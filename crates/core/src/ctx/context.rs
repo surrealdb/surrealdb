@@ -3,16 +3,12 @@ use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-#[cfg(feature = "http")]
-use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Notification};
 use crate::err::Error;
 use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::sequences::Sequences;
@@ -22,14 +18,21 @@ use async_channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-#[cfg(storage)]
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use trice::Instant;
+
+#[cfg(feature = "http")]
+use crate::dbs::capabilities::NetTarget;
 #[cfg(feature = "http")]
 use url::Url;
+
+#[cfg(not(target_family = "wasm"))]
+use crate::kvs::IndexBuilder;
+
+#[cfg(storage)]
+use std::path::PathBuf;
 
 pub type Context = Arc<MutableContext>;
 
@@ -495,17 +498,73 @@ impl MutableContext {
 		Ok(())
 	}
 
-	/// Check if a network target is allowed
+	/// Checks if the provided URL's network target is allowed based on current capabilities.
+	///
+	/// This function performs a validation to ensure that the outgoing network connection
+	/// specified by the provided `url` is permitted. It checks the resolved network targets
+	/// associated with the URL and ensures that all targets adhere to the configured
+	/// capabilities.
+	///
+	/// # Features
+	/// The function is only available if the `http` feature is enabled.
+	///
+	/// # Parameters
+	/// - `url`: A reference to a [`Url`] object representing the target endpoint to check.
+	///
+	/// # Returns
+	/// This function returns a [`Result<()>`]:
+	/// - On success, it returns `Ok(())` indicating the network target is allowed.
+	/// - On failure, it returns an error wrapped in the [`Error`] type:
+	///   - `NetTargetNotAllowed` if the target is not permitted.
+	///   - `InvalidUrl` if the provided URL is invalid.
+	///
+	/// # Behavior
+	/// 1. Extracts the host and port information from the URL.
+	/// 2. Constructs a [`NetTarget`] object and checks if it is allowed by the current
+	///    network capabilities.
+	/// 3. If the network target resolves to multiple targets (e.g., DNS resolution), each
+	///    target is validated individually.
+	/// 4. Logs a warning and prevents the connection if the target is denied by the
+	///    capabilities.
+	///
+	/// # Logging
+	/// - Logs a warning message if the network target is denied.
+	/// - Logs a trace message if the network target is permitted.
+	///
+	/// # Errors
+	/// - `NetTargetNotAllowed`: Returned if any of the resolved targets are not allowed.
+	/// - `InvalidUrl`: Returned if the URL does not have a valid host.
+	///
 	#[cfg(feature = "http")]
-	pub(crate) fn check_allowed_net(&self, url: &Url) -> Result<()> {
+	pub(crate) async fn check_allowed_net(&self, url: &Url) -> Result<()> {
+		let match_any_deny_net = |t| {
+			if self.capabilities.matches_any_deny_net(t) {
+				warn!("Capabilities denied outgoing network connection attempt, target: '{t}'");
+				bail!(Error::NetTargetNotAllowed(t.to_string()));
+			}
+			Ok(())
+		};
 		match url.host() {
 			Some(host) => {
-				let target = &NetTarget::Host(host.to_owned(), url.port_or_known_default());
-				if !self.capabilities.allows_network_target(target) {
+				let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
+				// Check the domain name (if any) matches the allow list
+				let host_allowed = self.capabilities.matches_any_allow_net(&target);
+				if !host_allowed {
 					warn!(
 						"Capabilities denied outgoing network connection attempt, target: '{target}'"
 					);
 					bail!(Error::NetTargetNotAllowed(target.to_string()));
+				}
+				// Check against the deny list
+				match_any_deny_net(&target)?;
+				// Resolve the domain name to a vector of IP addresses
+				#[cfg(not(target_family = "wasm"))]
+				let targets = target.resolve().await?;
+				#[cfg(target_family = "wasm")]
+				let targets = target.resolve()?;
+				for t in &targets {
+					// For each IP address resolved, check it is allowed
+					match_any_deny_net(t)?;
 				}
 				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 				Ok(())
@@ -550,5 +609,35 @@ impl MutableContext {
 		} else {
 			bail!(Error::BucketUnavailable(bu.into()))
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "http")]
+	use crate::ctx::MutableContext;
+	#[cfg(feature = "http")]
+	use crate::dbs::Capabilities;
+	#[cfg(feature = "http")]
+	use crate::dbs::capabilities::{NetTarget, Targets};
+	#[cfg(feature = "http")]
+	use std::str::FromStr;
+	#[cfg(feature = "http")]
+	use url::Url;
+
+	#[cfg(feature = "http")]
+	#[tokio::test]
+	async fn test_context_check_allowed_net() {
+		let cap = Capabilities::all().without_network_targets(Targets::Some(
+			[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+		));
+		let mut ctx = MutableContext::background();
+		ctx.capabilities = cap.into();
+		let ctx = ctx.freeze();
+		let r = ctx.check_allowed_net(&Url::parse("http://localhost").unwrap()).await;
+		assert_eq!(
+			r.err().unwrap().to_string(),
+			"Access to network target '127.0.0.1/32' is not allowed"
+		);
 	}
 }

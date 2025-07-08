@@ -1,3 +1,4 @@
+use super::transaction::WithTransaction;
 use super::{Stream, live};
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
@@ -27,13 +28,25 @@ use std::task::Poll;
 use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
 use surrealdb_core::sql;
 use surrealdb_core::sql::Statement;
+use uuid::Uuid;
 
 /// A query future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Query<'r, C: Connection> {
+	pub(crate) txn: Option<Uuid>,
 	pub(crate) client: Cow<'r, Surreal<C>>,
 	pub(crate) inner: Result<ValidQuery>,
+}
+
+impl<C> WithTransaction for Query<'_, C>
+where
+	C: Connection,
+{
+	fn with_transaction(mut self, id: Uuid) -> Self {
+		self.txn = Some(id);
+		self
+	}
 }
 
 #[derive(Debug)]
@@ -60,6 +73,7 @@ where
 		register_live_queries: bool,
 	) -> Self {
 		Query {
+			txn: None,
 			client,
 			inner: Ok(ValidQuery::Normal {
 				query,
@@ -75,10 +89,12 @@ where
 	{
 		match self.inner {
 			Ok(x) => Query {
+				txn: self.txn,
 				client: self.client,
 				inner: f(x),
 			},
 			x => Query {
+				txn: self.txn,
 				client: self.client,
 				inner: x,
 			},
@@ -88,6 +104,7 @@ where
 	/// Converts to an owned type which can easily be moved to a different thread
 	pub fn into_owned(self) -> Query<'static, C> {
 		Query {
+			txn: self.txn,
 			client: Cow::Owned(self.client.into_owned()),
 			inner: self.inner,
 		}
@@ -114,6 +131,7 @@ where
 					router
 						.execute_query(Command::RawQuery {
 							query,
+							txn: self.txn,
 							variables: bindings,
 						})
 						.await
@@ -157,6 +175,7 @@ where
 
 					let mut response = router
 						.execute_query(Command::Query {
+							txn: self.txn,
 							query,
 							variables: bindings,
 						})

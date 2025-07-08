@@ -50,11 +50,11 @@ async fn database_change_feeds() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns(ns.as_str()).with_db(db.as_str());
 	let mut current_time = 0u64;
-	dbs.changefeed_process_at(current_time).await?;
+	dbs.changefeed_process_at(None, current_time).await?;
 	let res = &mut dbs.execute(sql.as_str(), &ses, None).await?;
 	// Increment by a second (sic)
 	current_time += 1;
-	dbs.changefeed_process_at(current_time).await?;
+	dbs.changefeed_process_at(None, current_time).await?;
 	assert_eq!(res.len(), 3);
 	// DEFINE DATABASE
 	let tmp = res.remove(0).result;
@@ -163,7 +163,7 @@ async fn database_change_feeds() -> Result<()> {
 	";
 	// This is neccessary to mark a point in time that can be GC'd
 	current_time += 1;
-	dbs.changefeed_process_at(current_time).await?;
+	dbs.changefeed_process_at(None, current_time).await?;
 	let tx = dbs.transaction(Write, Optimistic).await?;
 	tx.cancel().await?;
 
@@ -174,7 +174,7 @@ async fn database_change_feeds() -> Result<()> {
 	let one_hour_in_secs = 3600;
 	current_time += one_hour_in_secs;
 	current_time += 1;
-	dbs.changefeed_process_at(current_time).await?;
+	dbs.changefeed_process_at(None, current_time).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val: Value = SqlValue::parse("[]").into();
@@ -214,9 +214,9 @@ async fn table_change_feeds() -> Result<()> {
 	let ses = Session::owner().with_ns("test-tb-cf").with_db("test-tb-cf");
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
-	dbs.changefeed_process_at(start_ts).await?;
+	dbs.changefeed_process_at(None, start_ts).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	dbs.changefeed_process_at(end_ts).await?;
+	dbs.changefeed_process_at(None, end_ts).await?;
 	assert_eq!(res.len(), 10);
 	// DEFINE TABLE
 	let tmp = res.remove(0).result;
@@ -336,7 +336,7 @@ async fn table_change_feeds() -> Result<()> {
 	let sql = "
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-	dbs.changefeed_process_at(end_ts + 3599).await?;
+	dbs.changefeed_process_at(None, end_ts + 3599).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	assert!(
@@ -350,7 +350,7 @@ async fn table_change_feeds() -> Result<()> {
 			.unwrap()
 	);
 	// GC after 1hs
-	dbs.changefeed_process_at(end_ts + 3600).await?;
+	dbs.changefeed_process_at(None, end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = SqlValue::parse("[]").into();
@@ -371,7 +371,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	// Save timestamp 1
 	let ts1_dt = "2023-08-01T00:00:00Z";
 	let ts1 = DateTime::parse_from_rfc3339(ts1_dt).unwrap();
-	db.changefeed_process_at(ts1.timestamp().try_into().unwrap()).await.unwrap();
+	db.changefeed_process_at(None, ts1.timestamp().try_into().unwrap()).await.unwrap();
 	// Create and update users
 	let sql = "
         CREATE user:amos SET name = 'Amos';
@@ -536,7 +536,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	// Save timestamp 2
 	let ts2_dt = "2023-08-01T00:00:05Z";
 	let ts2 = DateTime::parse_from_rfc3339(ts2_dt).unwrap();
-	db.changefeed_process_at(ts2.timestamp().try_into().unwrap()).await.unwrap();
+	db.changefeed_process_at(None, ts2.timestamp().try_into().unwrap()).await.unwrap();
 	//
 	// Show changes using timestamp 1
 	//
@@ -573,7 +573,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	// Save timestamp 3
 	let ts3_dt = "2023-08-01T00:00:10Z";
 	let ts3 = DateTime::parse_from_rfc3339(ts3_dt).unwrap();
-	db.changefeed_process_at(ts3.timestamp().try_into().unwrap()).await.unwrap();
+	db.changefeed_process_at(None, ts3.timestamp().try_into().unwrap()).await.unwrap();
 	//
 	// Show changes using timestamp 3
 	//
