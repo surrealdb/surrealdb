@@ -1,4 +1,7 @@
 /**
+[env]
+clean = true # Requires clean as we define data on the global root.
+
 [test]
 
 [[test.results]]
