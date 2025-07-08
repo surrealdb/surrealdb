@@ -44,7 +44,7 @@ pub(crate) enum Kvs {
 	SurrealKV,
 }
 
-// This type is unsused when no store is enabled.
+// This type is unused when no store is enabled.
 #[cfg_attr(not(test), expect(dead_code))]
 type ClockType = Arc<SizedClock>;
 
