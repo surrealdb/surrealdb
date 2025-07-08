@@ -1,16 +1,9 @@
-use std::borrow::Cow;
 
-use crate::dbs::{self, ResponseData};
 use crate::dbs::{Failure, Notification};
-use crate::expr;
-use crate::protocol::ToFlatbuffers;
 use crate::rpc::protocol::v1;
 use crate::rpc::protocol::v1::types::{V1QueryResponse, V1Value};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::error::Error;
-use std::fmt;
-use uuid::Uuid;
+use serde::Serialize;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize)]

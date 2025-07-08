@@ -9,11 +9,8 @@ use surrealdb_protocol::proto::prost_types::{
 };
 
 use surrealdb_protocol::proto::v1::{
-	Array as ArrayProto, Decimal as DecimalProto, File as FileProto, Geometry as GeometryProto,
-	GeometryCollection as GeometryCollectionProto, Id as IdProto, Line as LineProto,
-	MultiLine as MultiLineProto, MultiPoint as MultiPointProto, MultiPolygon as MultiPolygonProto,
-	NullValue as NullValueProto, Object as ObjectProto, Point as PointProto,
-	Polygon as PolygonProto, RecordId as RecordIdProto, Uuid as UuidProto, Value as ValueProto,
+	Array as ArrayProto, File as FileProto, Geometry as GeometryProto, Id as IdProto,
+	NullValue as NullValueProto, Object as ObjectProto, RecordId as RecordIdProto, Uuid as UuidProto, Value as ValueProto,
 	geometry as geometry_proto, id as id_proto, value as value_proto,
 };
 

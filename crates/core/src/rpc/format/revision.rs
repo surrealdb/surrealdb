@@ -2,7 +2,6 @@ use crate::rpc::RpcError;
 use crate::rpc::format::ResTrait;
 use crate::rpc::protocol::v1::types::V1Value;
 use crate::rpc::request::V1Request;
-use crate::sql::SqlValue;
 use revision::Revisioned;
 
 pub fn parse_value(val: Vec<u8>) -> Result<V1Value, RpcError> {

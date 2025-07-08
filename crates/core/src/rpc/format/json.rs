@@ -1,8 +1,6 @@
-use crate::expr::Value;
 use crate::rpc::RpcError;
 use crate::rpc::protocol::v1::types::V1Value;
 use crate::rpc::request::V1Request;
-use crate::sql::SqlValue;
 use crate::syn;
 
 mod convert;

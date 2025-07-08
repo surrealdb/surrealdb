@@ -1,29 +1,5 @@
-use anyhow::Context;
-use anyhow::anyhow;
-use std::str::FromStr;
-use std::{collections::BTreeMap, fmt::Display};
-use uuid::Uuid;
 
-use crate::dbs::Variables;
-use crate::expr::Data;
-use crate::expr::Duration;
-use crate::expr::Fetch;
-use crate::expr::Fetchs;
-use crate::expr::Fields;
-use crate::expr::Value;
 use crate::iam::AccessMethod;
-use crate::iam::SigninParams;
-use crate::iam::SignupParams;
-use crate::rpc::request::{
-	AuthenticateParams, CreateParams, DeleteParams, GraphQlParams, HealthParams, InfoParams,
-	InsertParams, InvalidateParams, KillParams, LiveParams, PingParams, QueryParams, RelateParams,
-	ResetParams, RunParams, SelectParams, SetParams, UnsetParams, UpdateParams, UpsertParams,
-	UseParams, VersionParams,
-};
-use crate::{
-	expr::access,
-	protocol::{FromFlatbuffers, ToFlatbuffers},
-};
 use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 
 impl TryFrom<AccessMethod> for rpc_proto::AccessMethod {

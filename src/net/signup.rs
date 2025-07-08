@@ -15,8 +15,6 @@ use bytes::Bytes;
 use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::sql::SqlValue;
-use surrealdb_core::expr::Value;
 use surrealdb_core::iam::SignupParams;
 use tower_http::limit::RequestBodyLimitLayer;
 

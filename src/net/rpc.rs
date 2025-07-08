@@ -14,7 +14,6 @@ use crate::rpc::format::HttpFormat;
 use crate::rpc::http::Http;
 use crate::rpc::websocket::Websocket;
 use crate::surrealdb_core::rpc::IntoRpcResponse;
-use anyhow::Context;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::routing::options;

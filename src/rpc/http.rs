@@ -1,17 +1,10 @@
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 use std::sync::Arc;
-use surrealdb::Value;
-use surrealdb_core::dbs::QueryResult;
-use surrealdb_core::dbs::QueryStats;
-use surrealdb_core::dbs::ResponseData;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::expr::Array;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::RpcContext;
 use surrealdb_core::rpc::RpcError;
 use surrealdb_core::rpc::RpcProtocolV1;
-use surrealdb_core::rpc::SetParams;
-use surrealdb_core::rpc::UnsetParams;
 use surrealdb_core::rpc::V1Array;
 use surrealdb_core::rpc::V1Data;
 use surrealdb_core::rpc::V1Value;

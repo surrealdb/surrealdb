@@ -23,17 +23,15 @@ use crate::sql::planner::SqlToLogical;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::statements::{OptionStatement, UseStatement};
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use chrono::Utc;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
-use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
-use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 

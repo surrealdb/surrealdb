@@ -1,4 +1,3 @@
-use crate::dbs;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::Surreal;

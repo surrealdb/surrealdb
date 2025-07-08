@@ -3,7 +3,6 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::sql::number::decimal::DecimalExt;
 use chrono::{DateTime, SecondsFormat, Utc};
 use std::collections::BTreeMap;
 use std::ops::Bound;

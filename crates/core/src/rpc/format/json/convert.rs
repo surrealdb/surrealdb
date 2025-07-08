@@ -1,6 +1,4 @@
 use crate::rpc::protocol::v1::types::{V1Array, V1Geometry, V1Number, V1Object, V1Value};
-use crate::sql;
-use crate::sql::constant::ConstantValue;
 use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value as JsonValue;

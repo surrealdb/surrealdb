@@ -1,4 +1,3 @@
-use std::ops::Deref;
 
 use super::AppState;
 use super::error::ResponseError;
@@ -19,7 +18,6 @@ use surrealdb::iam::Action::View;
 use surrealdb::iam::ResourceKind::Any;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb::kvs::export;
-use surrealdb_core::rpc::format::Format;
 
 pub(super) fn router<S>() -> Router<S>
 where

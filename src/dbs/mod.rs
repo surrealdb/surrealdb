@@ -3,9 +3,7 @@ use anyhow::Result;
 use clap::Args;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::Surreal;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,

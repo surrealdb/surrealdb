@@ -1,7 +1,5 @@
-use crate::dbs::ResponseData;
 #[cfg(not(target_family = "wasm"))]
 use crate::gql::SchemaCache;
-use crate::rpc::request::Command;
 use crate::rpc::response::V1Data;
 use std::sync::Arc;
 use tokio::sync::Semaphore;

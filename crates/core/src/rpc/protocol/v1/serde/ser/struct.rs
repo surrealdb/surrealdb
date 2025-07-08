@@ -1,5 +1,4 @@
 use super::Content;
-use crate::expr::Value;
 use crate::{
 	expr,
 	rpc::protocol::v1::types::{

@@ -2,7 +2,6 @@ use anyhow::Result;
 use anyhow::ensure;
 #[cfg(not(target_family = "wasm"))]
 use async_graphql::BatchRequest;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::dbs::Variables;
@@ -36,10 +35,7 @@ pub mod types;
 
 pub(in crate::rpc) use serde::to_value;
 
-use types::{
-	V1Array, V1Bytes, V1Datetime, V1Duration, V1Gen, V1Geometry, V1Id, V1IdRange, V1Number,
-	V1Object, V1RecordId, V1Strand, V1Uuid, V1Value,
-};
+use types::V1Value;
 
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocolV1: RpcContext {

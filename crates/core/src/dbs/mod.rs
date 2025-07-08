@@ -3,8 +3,6 @@
 //! glue between the API and the response. In this module we use channels as a transport layer
 //! and executors to process the operations. This module also gives a `context` to the transaction.
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -38,11 +36,9 @@ pub mod node;
 
 pub use self::capabilities::Capabilities;
 pub(crate) use self::executor::*;
-pub use self::interval::*;
 pub(crate) use self::iterator::*;
 pub use self::notification::*;
 pub use self::options::*;
-pub use self::response::*;
 pub use self::result::*;
 pub use self::session::*;
 pub(crate) use self::statement::*;

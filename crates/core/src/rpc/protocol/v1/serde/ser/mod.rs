@@ -2,8 +2,6 @@ mod r#enum;
 mod r#struct;
 
 use crate::err::Error;
-use crate::expr;
-use crate::expr::Bytes;
 use crate::rpc::protocol::v1::types::{
 	V1Array, V1Bytes, V1Datetime, V1Duration, V1File, V1Geometry, V1Number, V1Object, V1RecordId,
 	V1Strand, V1Uuid, V1Value,

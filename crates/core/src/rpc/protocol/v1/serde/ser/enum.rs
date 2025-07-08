@@ -1,7 +1,5 @@
 use super::Content;
 use crate::expr;
-use crate::expr::Object;
-use crate::expr::Value;
 use crate::rpc::protocol::v1::types::{V1Geometry, V1Number, V1Object, V1Value};
 use anyhow::Result;
 use serde::Deserialize;

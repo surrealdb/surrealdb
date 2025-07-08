@@ -1,7 +1,5 @@
-use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
 use anyhow::Result;
-use std::sync::Arc;
 
 mod fixes;
 

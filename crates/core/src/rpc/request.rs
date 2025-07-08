@@ -1,14 +1,11 @@
 use crate::dbs::Variables;
 use crate::expr::Duration;
-use crate::expr::{Data, Fetchs, Fields, TryFromValue, Value};
-use crate::iam::AccessMethod;
+use crate::expr::{Data, Fetchs, Fields, Value};
 use crate::iam::{SigninParams, SignupParams};
-use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use crate::rpc::format::cbor::Cbor;
-use crate::rpc::protocol::v1::types::{V1Array, V1Number, V1Uuid, V1Value};
+use crate::rpc::protocol::v1::types::{V1Array, V1Number, V1Value};
 use crate::rpc::{Method, RpcError};
 use serde::{Deserialize, Serialize};
-use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 
 use uuid::Uuid;
 pub static ID: &str = "id";

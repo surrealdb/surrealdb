@@ -22,7 +22,6 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb_core::dbs::Variables;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>

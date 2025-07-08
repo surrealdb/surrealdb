@@ -9,7 +9,7 @@ use super::{
 	response::{ApiResponse, ResponseFormat},
 };
 use crate::{
-	api::{Format, middleware::RequestMiddleware},
+	api::middleware::RequestMiddleware,
 	ctx::{Context, MutableContext},
 	dbs::{Options, Session},
 	expr::{

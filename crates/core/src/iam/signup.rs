@@ -12,13 +12,11 @@ use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
 use crate::iam::{Actor, Level};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use crate::protocol::FromFlatbuffers;
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 

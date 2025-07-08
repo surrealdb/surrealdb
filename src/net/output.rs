@@ -5,7 +5,6 @@ use http::StatusCode;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
 use serde_json::Value as Json;
-use surrealdb::expr;
 
 pub enum Output {
 	None,

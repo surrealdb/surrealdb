@@ -6,15 +6,13 @@ use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use surrealdb_protocol::proto::prost_types;
 
 use crate::expr::{
-	self, Array, Cond, Data, Datetime, Dir, Duration, Fetch, Fetchs, Field, Fields, File, Geometry,
+	Array, Cond, Data, Datetime, Dir, Duration, Fetch, Fetchs, Field, Fields, File, Geometry,
 	Graph, Group, Groups, Id, IdRange, Ident, Idiom, Limit, Number, Object, Operator, Order, Part,
-	Split, Splits, Start, Strand, Table, Thing, Timeout, Uuid, Value, idiom, table,
+	Split, Splits, Start, Strand, Table, Thing, Timeout, Uuid, Value, idiom,
 };
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
 use core::panic;
-use geo::Point;
-use num_traits::AsPrimitive;
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::ops::Bound;

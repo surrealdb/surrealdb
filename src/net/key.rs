@@ -17,7 +17,6 @@ use axum_extra::TypedHeader;
 use axum_extra::extract::Query;
 use bytes::Bytes;
 use serde::Deserialize;
-use std::collections::BTreeMap;
 use std::str;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;

@@ -1,6 +1,6 @@
 use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::ctx::MutableContext;
-use crate::dbs::{Session, Variables};
+use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::statements::access;
 use crate::expr::{Base, Ident, Thing, Value};

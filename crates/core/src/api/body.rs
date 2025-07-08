@@ -13,10 +13,7 @@ use crate::err::Error;
 use crate::expr;
 use crate::expr::Bytesize;
 use crate::expr::Value;
-use crate::rpc::format::cbor;
-use crate::rpc::format::json;
 use crate::rpc::format::parse_expr_value_from_content_type;
-use crate::rpc::format::revision;
 
 use super::context::InvocationContext;
 use super::err::ApiError;

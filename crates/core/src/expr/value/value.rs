@@ -16,7 +16,7 @@ use crate::expr::{
 	id::{Gen, Id},
 	model::Model,
 };
-use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind, from_value, to_value};
+use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind, from_value};
 use crate::fnc::util::string::fuzzy::Fuzzy;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};

@@ -15,7 +15,7 @@ use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::{AccessMethod, Auth};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Result, anyhow, bail, ensure};
 use chrono::Utc;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use md5::Digest;

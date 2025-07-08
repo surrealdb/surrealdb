@@ -1,14 +1,5 @@
-use std::collections::BTreeMap;
 
-use crate::{
-	dbs::Capabilities,
-	expr::Value,
-	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, SqlValue, Start, Timeout, Version},
-	syn::{
-		fetchs_with_capabilities, fields_with_capabilities, output_with_capabilities,
-		value_with_capabilities,
-	},
-};
+use crate::sql::{Data, SqlValue};
 
 use super::RpcError;
 

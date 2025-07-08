@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use crate::dbs::Notification;
 use crate::expr::Value;
-use crate::protocol::ToFlatbuffers;
 
 use crate::rpc::RpcError;
 use crate::rpc::V1Value;

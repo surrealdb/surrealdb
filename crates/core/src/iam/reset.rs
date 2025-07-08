@@ -1,6 +1,5 @@
 use super::Auth;
 use crate::dbs::{Session, Variables};
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub fn reset(session: &mut Session) {

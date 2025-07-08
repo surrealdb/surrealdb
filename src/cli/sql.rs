@@ -14,11 +14,9 @@ use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::Surreal;
 use surrealdb::dbs::Capabilities as CoreCapabilities;
-use surrealdb::expr::{LogicalPlan, Param, Uuid};
-use surrealdb::method::{Stats, WithStats};
+use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
-use surrealdb::{Notification, QueryResults, Value};
-use surrealdb_core::dbs::QueryResult;
+use surrealdb::{QueryResults, Value};
 use surrealdb_core::sql::Statement;
 
 #[derive(Args, Debug)]
@@ -186,7 +184,7 @@ pub async fn init(
 		}
 		// Complete the request
 		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
-			Ok(mut query) => {
+			Ok(query) => {
 				let mut namespace = None;
 				let mut database = None;
 				let mut vars = Vec::new();
