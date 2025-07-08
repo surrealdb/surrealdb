@@ -5,122 +5,134 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::{Action, Notification, Session};
+use surrealdb::expr::{Thing, Value};
 use surrealdb::iam::Role;
-use surrealdb::sql::{Thing, Value};
+use surrealdb::sql::SqlValue;
+use surrealdb_core::iam::Level;
 
 //
 // Permissions
 //
 
+fn level_root() -> Level {
+	Level::Root
+}
+fn level_ns() -> Level {
+	Level::Namespace("NS".to_owned())
+}
+fn level_db() -> Level {
+	Level::Database("NS".to_owned(), "DB".to_owned())
+}
+
 async fn common_permissions_checks(auth_enabled: bool) {
 	let tests = vec![
 		// Root level
 		(
-			(().into(), Role::Owner),
+			(level_root(), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at root level should be able to delete a record",
 		),
 		(
-			(().into(), Role::Editor),
+			(level_root(), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at root level should be able to delete a record",
 		),
 		(
-			(().into(), Role::Viewer),
+			(level_root(), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at root level should not be able to delete a record",
 		),
 		// Namespace level
 		(
-			(("NS",).into(), Role::Owner),
+			(level_ns(), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at namespace level should be able to delete a record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Owner),
+			(level_ns(), Role::Owner),
 			("OTHER_NS", "DB"),
 			false,
 			"owner at namespace level should not be able to delete a record on another namespace",
 		),
 		(
-			(("NS",).into(), Role::Editor),
+			(level_ns(), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at namespace level should be able to delete a record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Editor),
+			(level_ns(), Role::Editor),
 			("OTHER_NS", "DB"),
 			false,
 			"editor at namespace level should not be able to delete a record on another namespace",
 		),
 		(
-			(("NS",).into(), Role::Viewer),
+			(level_ns(), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at namespace level should not be able to delete a record on its namespace",
 		),
 		(
-			(("NS",).into(), Role::Viewer),
+			(level_ns(), Role::Viewer),
 			("OTHER_NS", "DB"),
 			false,
 			"viewer at namespace level should not be able to delete a record on another namespace",
 		),
 		// Database level
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(level_db(), Role::Owner),
 			("NS", "DB"),
 			true,
 			"owner at database level should be able to delete a record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(level_db(), Role::Owner),
 			("NS", "OTHER_DB"),
 			false,
 			"owner at database level should not be able to delete a record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Owner),
+			(level_db(), Role::Owner),
 			("OTHER_NS", "DB"),
 			false,
 			"owner at database level should not be able to delete a record on another namespace even if the database name matches",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(level_db(), Role::Editor),
 			("NS", "DB"),
 			true,
 			"editor at database level should be able to delete a record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(level_db(), Role::Editor),
 			("NS", "OTHER_DB"),
 			false,
 			"editor at database level should not be able to delete a record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Editor),
+			(level_db(), Role::Editor),
 			("OTHER_NS", "DB"),
 			false,
 			"editor at database level should not be able to delete a record on another namespace even if the database name matches",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(level_db(), Role::Viewer),
 			("NS", "DB"),
 			false,
 			"viewer at database level should not be able to delete a record on its database",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(level_db(), Role::Viewer),
 			("NS", "OTHER_DB"),
 			false,
 			"viewer at database level should not be able to delete a record on another database",
 		),
 		(
-			(("NS", "DB").into(), Role::Viewer),
+			(level_db(), Role::Viewer),
 			("OTHER_NS", "DB"),
 			false,
 			"viewer at database level should not be able to delete a record on another namespace even if the database name matches",
@@ -141,7 +153,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 
@@ -155,7 +167,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 
@@ -169,7 +181,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::parse("[]"),
+				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 
@@ -189,7 +201,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() == Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() == SqlValue::parse("[]").into(), "{}", msg);
 			} else {
 				// Verify the record has not been deleted in any DB
 				let mut resp = ds
@@ -201,7 +213,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(), "{}", msg);
 
 				let mut resp = ds
 					.execute(
@@ -212,7 +224,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(), "{}", msg);
 
 				let mut resp = ds
 					.execute(
@@ -223,7 +235,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(), "{}", msg);
 			}
 		}
 	}
@@ -258,7 +270,11 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -279,7 +295,7 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() != Value::parse("[]"),
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should not be able to delete a record if the table has no permissions"
 		);
@@ -300,7 +316,11 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -321,7 +341,7 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() == Value::parse("[]"),
+			res.is_ok() && res.unwrap() == SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to delete a record if the table has full permissions"
 		);
@@ -357,7 +377,11 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -378,7 +402,7 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() == Value::parse("[]"),
+			res.is_ok() && res.unwrap() == SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to delete a record if the table has no permissions"
 		);
@@ -399,7 +423,11 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
-		assert!(res.is_ok() && res.unwrap() != Value::parse("[]"), "{}", "failed to create record");
+		assert!(
+			res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+			"{}",
+			"failed to create record"
+		);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -420,7 +448,7 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() == Value::parse("[]"),
+			res.is_ok() && res.unwrap() == SqlValue::parse("[]").into(),
 			"{}",
 			"anonymous user should be able to delete a record if the table has full permissions"
 		);
@@ -435,14 +463,15 @@ async fn delete_filtered_live_notification() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	// validate create response
 	let tmp = res.remove(0).result?;
-	let expected_record = Value::parse(
+	let expected_record = SqlValue::parse(
 		"[
 			{
 				id: person:test_true,
 				condition: true,
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, expected_record);
 
 	// Validate live query response
@@ -459,7 +488,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 	let res = &mut dbs.execute("DELETE person:test_true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = SqlValue::parse("[]").into();
 	assert_eq!(tmp, val);
 
 	// Validate notification
@@ -471,12 +500,13 @@ async fn delete_filtered_live_notification() -> Result<()> {
 			live_id,
 			Action::Delete,
 			Value::Thing(Thing::from(("person", "test_true"))),
-			Value::parse(
+			SqlValue::parse(
 				"{
 					id: person:test_true,
 					condition: true,
 				}"
-			),
+			)
+			.into(),
 		)
 	);
 	Ok(())

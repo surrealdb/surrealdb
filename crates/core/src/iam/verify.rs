@@ -1,5 +1,6 @@
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::expr::Thing;
 use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
 use crate::expr::{Algorithm, Value, statements::DefineUserStatement};
 use crate::iam::access::{authenticate_generic, authenticate_record};
@@ -172,7 +173,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let mut rid = syn::thing(id)?;
+			let mut rid: Thing = syn::thing(id)?.into();
 			// Get the database access method
 			let de = tx.get_db_access(ns, db, ac).await?;
 			// Ensure that the transaction is cancelled
@@ -849,12 +850,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
-		use crate::expr::{
+		use crate::iam::Error as IamError;
+		use crate::sql::{
 			Base, Statement,
 			statements::{DefineUserStatement, define::DefineStatement},
 			user::UserDuration,
 		};
-		use crate::iam::Error as IamError;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",

@@ -20,6 +20,7 @@ use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
+use std::fmt::Display;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
@@ -1383,6 +1384,17 @@ impl Error {
 		let message = format!("{}:{}: {}", location.file(), location.line(), message);
 		Error::Unreachable(message)
 	}
+
+	/// Check if this error is related to schema checks
+	pub fn is_schema_related(&self) -> bool {
+		matches!(
+			self,
+			Error::FieldCoerce { .. }
+				| Error::FieldValue { .. }
+				| Error::FieldReadonly { .. }
+				| Error::FieldUndefined { .. }
+		)
+	}
 }
 
 impl From<Error> for String {
@@ -1544,15 +1556,18 @@ impl Serialize for Error {
 		serializer.serialize_str(self.to_string().as_str())
 	}
 }
-impl Error {
-	/// Check if this error is related to schema checks
-	pub fn is_schema_related(&self) -> bool {
-		matches!(
-			self,
-			Error::FieldCoerce { .. }
-				| Error::FieldValue { .. }
-				| Error::FieldReadonly { .. }
-				| Error::FieldUndefined { .. }
-		)
+
+impl serde::ser::Error for Error {
+	fn custom<T>(msg: T) -> Self
+	where
+		T: Display,
+	{
+		Self::Serialization(msg.to_string())
+	}
+}
+
+impl From<serde_content::Error> for Error {
+	fn from(error: serde_content::Error) -> Self {
+		Self::Serialization(error.to_string())
 	}
 }

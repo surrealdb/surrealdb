@@ -29,7 +29,7 @@ use surrealdb::rpc::Method;
 use surrealdb::rpc::RpcContext;
 use surrealdb::rpc::format::Format;
 use surrealdb::sql::Array;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 use surrealdb_core::rpc::RpcProtocolV1;
 use surrealdb_core::rpc::RpcProtocolV2;
 use tokio::sync::Semaphore;
@@ -353,7 +353,7 @@ impl Websocket {
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
 					span.record(
 						"rpc.request_id",
-						req.id.clone().map(Value::as_string).unwrap_or_default(),
+						req.id.clone().map(SqlValue::as_string).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(req.method.to_str()).with_size(len),
@@ -369,7 +369,7 @@ impl Websocket {
 							// Don't start processing if we are gracefully shutting down
 							if shutdown.is_cancelled() {
 								// Process the response
-								failure(req.id, Failure::custom(SERVER_SHUTTING_DOWN))
+								failure(req.id.map(Into::into), Failure::custom(SERVER_SHUTTING_DOWN))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -377,7 +377,7 @@ impl Websocket {
 							// Check to see whether we have available memory
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
-								failure(req.id, Failure::custom(SERVER_OVERLOADED))
+								failure(req.id.map(Into::into), Failure::custom(SERVER_OVERLOADED))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -385,8 +385,8 @@ impl Websocket {
 							// Otherwise process the request message
 							else {
 								// Process the message
-								Self::process_message(rpc.clone(), req.version, req.method, req.params).await
-									.into_response(req.id)
+								Self::process_message(rpc.clone(), req.version, req.txn, req.method, req.params).await
+									.into_response(req.id.map(Into::into))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -411,6 +411,7 @@ impl Websocket {
 	async fn process_message(
 		rpc: Arc<Websocket>,
 		version: Option<u8>,
+		txn: Option<Uuid>,
 		method: Method,
 		params: Array,
 	) -> Result<Data, Failure> {
@@ -420,7 +421,7 @@ impl Websocket {
 			return Err(Failure::METHOD_NOT_FOUND);
 		}
 		// Execute the specified method
-		RpcContext::execute(rpc.as_ref(), version, method, params).await.map_err(Into::into)
+		RpcContext::execute(rpc.as_ref(), version, txn, method, params).await.map_err(Into::into)
 	}
 
 	/// Reject a WebSocket message due to server overloading

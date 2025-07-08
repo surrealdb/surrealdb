@@ -11,7 +11,7 @@ use crate::expr::statements::SelectStatement;
 use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::UpsertStatement;
 use crate::expr::statements::{DefineStatement, RemoveStatement};
-use crate::expr::{Statement, Statements};
+use crate::expr::{LogicalPlan, LogicalPlans};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -27,100 +27,100 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Query";
 #[serde(rename = "$surrealdb::private::sql::Query")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Query(pub Statements);
+pub struct Query(pub LogicalPlans);
 
 impl From<DefineStatement> for Query {
 	fn from(s: DefineStatement) -> Self {
-		Query(Statements(vec![Statement::Define(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Define(s)]))
 	}
 }
 
 impl From<RemoveStatement> for Query {
 	fn from(s: RemoveStatement) -> Self {
-		Query(Statements(vec![Statement::Remove(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Remove(s)]))
 	}
 }
 
 impl From<SelectStatement> for Query {
 	fn from(s: SelectStatement) -> Self {
-		Query(Statements(vec![Statement::Select(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Select(s)]))
 	}
 }
 
 impl From<CreateStatement> for Query {
 	fn from(s: CreateStatement) -> Self {
-		Query(Statements(vec![Statement::Create(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Create(s)]))
 	}
 }
 
 impl From<UpsertStatement> for Query {
 	fn from(s: UpsertStatement) -> Self {
-		Query(Statements(vec![Statement::Upsert(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Upsert(s)]))
 	}
 }
 
 impl From<UpdateStatement> for Query {
 	fn from(s: UpdateStatement) -> Self {
-		Query(Statements(vec![Statement::Update(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Update(s)]))
 	}
 }
 
 impl From<RelateStatement> for Query {
 	fn from(s: RelateStatement) -> Self {
-		Query(Statements(vec![Statement::Relate(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Relate(s)]))
 	}
 }
 
 impl From<DeleteStatement> for Query {
 	fn from(s: DeleteStatement) -> Self {
-		Query(Statements(vec![Statement::Delete(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Delete(s)]))
 	}
 }
 
 impl From<InsertStatement> for Query {
 	fn from(s: InsertStatement) -> Self {
-		Query(Statements(vec![Statement::Insert(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Insert(s)]))
 	}
 }
 
 impl From<LiveStatement> for Query {
 	fn from(s: LiveStatement) -> Self {
-		Query(Statements(vec![Statement::Live(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Live(s)]))
 	}
 }
 
 impl From<KillStatement> for Query {
 	fn from(s: KillStatement) -> Self {
-		Query(Statements(vec![Statement::Kill(s)]))
+		Query(LogicalPlans(vec![LogicalPlan::Kill(s)]))
 	}
 }
 
 impl From<Function> for Query {
 	fn from(f: Function) -> Self {
-		Query(Statements(vec![Statement::Value(f.into())]))
+		Query(LogicalPlans(vec![LogicalPlan::Value(f.into())]))
 	}
 }
 
 impl From<Model> for Query {
 	fn from(m: Model) -> Self {
-		Query(Statements(vec![Statement::Value(m.into())]))
+		Query(LogicalPlans(vec![LogicalPlan::Value(m.into())]))
 	}
 }
 
-impl From<Statement> for Query {
-	fn from(s: Statement) -> Self {
-		Query(Statements(vec![s]))
+impl From<LogicalPlan> for Query {
+	fn from(s: LogicalPlan) -> Self {
+		Query(LogicalPlans(vec![s]))
 	}
 }
 
-impl From<Vec<Statement>> for Query {
-	fn from(s: Vec<Statement>) -> Self {
-		Query(Statements(s))
+impl From<Vec<LogicalPlan>> for Query {
+	fn from(s: Vec<LogicalPlan>) -> Self {
+		Query(LogicalPlans(s))
 	}
 }
 
 impl Deref for Query {
-	type Target = Vec<Statement>;
+	type Target = Vec<LogicalPlan>;
 	fn deref(&self) -> &Self::Target {
 		&self.0.0
 	}
@@ -133,7 +133,7 @@ impl DerefMut for Query {
 }
 
 impl IntoIterator for Query {
-	type Item = Statement;
+	type Item = LogicalPlan;
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()

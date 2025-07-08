@@ -153,8 +153,11 @@ impl FromStr for Path {
 							inner.push(c);
 						}
 
-						kind =
-							Some(syn::kind(&inner).map_err(|e| Error::InvalidPath(e.to_string()))?);
+						kind = Some(
+							syn::kind(&inner)
+								.map_err(|e| Error::InvalidPath(e.to_string()))?
+								.into(),
+						);
 
 						break 'segment;
 					}

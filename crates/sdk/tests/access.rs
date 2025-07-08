@@ -8,7 +8,8 @@ use regex::Regex;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::{Capabilities, Session};
 use surrealdb::iam::Role;
-use surrealdb::sql::{Base, Value};
+use surrealdb::sql::{Base, SqlValue};
+use surrealdb_core::iam::Level;
 use tokio::time::Duration;
 
 struct TestLevel {
@@ -787,6 +788,8 @@ async fn access_bearer_purge() {
 #[tokio::test]
 async fn permissions_access_grant() {
 	let test_levels = vec![Base::Root, Base::Ns, Base::Db];
+	let level_ns = Level::Namespace("NS".to_owned());
+	let level_db = Level::Database("NS".to_owned(), "DB".to_owned());
 
 	for level in &test_levels {
 		let base = level.to_string();
@@ -795,19 +798,19 @@ async fn permissions_access_grant() {
 		let tests = vec![
 			// Root level
 			(
-				(().into(), Role::Owner),
+				(Level::Root, Role::Owner),
 				("NS", "DB"),
 				true,
 				"owner at root level should be able to issue a grant",
 			),
 			(
-				(().into(), Role::Editor),
+				(Level::Root, Role::Editor),
 				("NS", "DB"),
 				false,
 				"editor at root level should not be able to issue a grant",
 			),
 			(
-				(().into(), Role::Viewer),
+				(Level::Root, Role::Viewer),
 				("NS", "DB"),
 				false,
 				"viewer at root level should not be able to issue a grant",
@@ -815,19 +818,19 @@ async fn permissions_access_grant() {
 			// Namespace level
 			match level {
 				Base::Db => (
-					(("NS",).into(), Role::Owner),
+					(level_ns.clone(), Role::Owner),
 					("NS", "DB"),
 					true,
 					"owner at namespace level should be able to issue a grant on its namespace",
 				),
 				Base::Ns => (
-					(("NS",).into(), Role::Owner),
+					(level_ns.clone(), Role::Owner),
 					("NS", "DB"),
 					true,
 					"owner at namespace level should be able to issue a grant on its namespace",
 				),
 				Base::Root => (
-					(("NS",).into(), Role::Owner),
+					(level_ns.clone(), Role::Owner),
 					("NS", "DB"),
 					false,
 					"owner at namespace level should not be able to issue a grant on its namespace",
@@ -835,31 +838,31 @@ async fn permissions_access_grant() {
 				_ => panic!("Invalid base"),
 			},
 			(
-				(("NS",).into(), Role::Owner),
+				(level_ns.clone(), Role::Owner),
 				("OTHER_NS", "DB"),
 				false,
 				"owner at namespace level should not be able to issue a grant on another namespace",
 			),
 			(
-				(("NS",).into(), Role::Editor),
+				(level_ns.clone(), Role::Editor),
 				("NS", "DB"),
 				false,
 				"editor at namespace level should not be able to issue a grant on its namespace",
 			),
 			(
-				(("NS",).into(), Role::Editor),
+				(level_ns.clone(), Role::Editor),
 				("OTHER_NS", "DB"),
 				false,
 				"editor at namespace level should not be able to issue a grant on another namespace",
 			),
 			(
-				(("NS",).into(), Role::Viewer),
+				(level_ns.clone(), Role::Viewer),
 				("NS", "DB"),
 				false,
 				"viewer at namespace level should not be able to issue a grant on its namespace",
 			),
 			(
-				(("NS",).into(), Role::Viewer),
+				(level_ns.clone(), Role::Viewer),
 				("OTHER_NS", "DB"),
 				false,
 				"viewer at namespace level should not be able to issue a grant on another namespace",
@@ -867,19 +870,19 @@ async fn permissions_access_grant() {
 			// Database level
 			match level {
 				Base::Db => (
-					(("NS", "DB").into(), Role::Owner),
+					(level_db.clone(), Role::Owner),
 					("NS", "DB"),
 					true,
 					"owner at database level should be able to issue a grant on its database",
 				),
 				Base::Ns => (
-					(("NS", "DB").into(), Role::Owner),
+					(level_db.clone(), Role::Owner),
 					("NS", "DB"),
 					false,
 					"owner at database level should not be able to issue a grant on its database",
 				),
 				Base::Root => (
-					(("NS", "DB").into(), Role::Owner),
+					(level_db.clone(), Role::Owner),
 					("NS", "DB"),
 					false,
 					"owner at database level should not be able to issue a grant on its database",
@@ -887,49 +890,49 @@ async fn permissions_access_grant() {
 				_ => panic!("Invalid base"),
 			},
 			(
-				(("NS", "DB").into(), Role::Owner),
+				(level_db.clone(), Role::Owner),
 				("NS", "OTHER_DB"),
 				false,
 				"owner at database level should not be able to issue a grant on another database",
 			),
 			(
-				(("NS", "DB").into(), Role::Owner),
+				(level_db.clone(), Role::Owner),
 				("OTHER_NS", "DB"),
 				false,
 				"owner at database level should not be able to issue a grant on another namespace even if the database name matches",
 			),
 			(
-				(("NS", "DB").into(), Role::Editor),
+				(level_db.clone(), Role::Editor),
 				("NS", "DB"),
 				false,
 				"editor at database level should not be able to issue a grant on its database",
 			),
 			(
-				(("NS", "DB").into(), Role::Editor),
+				(level_db.clone(), Role::Editor),
 				("NS", "OTHER_DB"),
 				false,
 				"editor at database level should not be able to issue a grant on another database",
 			),
 			(
-				(("NS", "DB").into(), Role::Editor),
+				(level_db.clone(), Role::Editor),
 				("OTHER_NS", "DB"),
 				false,
 				"editor at database level should not be able to issue a grant on another namespace even if the database name matches",
 			),
 			(
-				(("NS", "DB").into(), Role::Viewer),
+				(level_db.clone(), Role::Viewer),
 				("NS", "DB"),
 				false,
 				"viewer at database level should not be able to issue a grant on its database",
 			),
 			(
-				(("NS", "DB").into(), Role::Viewer),
+				(level_db.clone(), Role::Viewer),
 				("NS", "OTHER_DB"),
 				false,
 				"viewer at database level should not be able to issue a grant on another database",
 			),
 			(
-				(("NS", "DB").into(), Role::Viewer),
+				(level_db.clone(), Role::Viewer),
 				("OTHER_NS", "DB"),
 				false,
 				"viewer at database level should not be able to issue a grant on another namespace even if the database name matches",
@@ -942,14 +945,17 @@ async fn permissions_access_grant() {
 			let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 			let sess_setup = match test_level {
 				Base::Root => {
-					Session::for_level(().into(), Role::Owner).with_ns("NS").with_db("DB")
+					Session::for_level(Level::Root, Role::Owner).with_ns("NS").with_db("DB")
 				}
-				Base::Ns => {
-					Session::for_level(("NS",).into(), Role::Owner).with_ns("NS").with_db("DB")
-				}
-				Base::Db => {
-					Session::for_level(("NS", "DB").into(), Role::Owner).with_ns("NS").with_db("DB")
-				}
+				Base::Ns => Session::for_level(Level::Namespace("NS".to_owned()), Role::Owner)
+					.with_ns("NS")
+					.with_db("DB"),
+				Base::Db => Session::for_level(
+					Level::Database("NS".to_owned(), "DB".to_owned()),
+					Role::Owner,
+				)
+				.with_ns("NS")
+				.with_db("DB"),
 				_ => panic!("Invalid base"),
 			};
 			let statement_setup = format!(
@@ -973,7 +979,7 @@ async fn permissions_access_grant() {
 
 				if should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
-					assert_ne!(res.unwrap(), Value::parse("[]"), "{}", msg);
+					assert_ne!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
 				} else {
 					let err = res.unwrap_err().to_string();
 					assert!(

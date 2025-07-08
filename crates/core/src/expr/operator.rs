@@ -153,7 +153,6 @@ pub enum BindingPower {
 	AddSub,
 	MulDiv,
 	Power,
-	Cast,
 	Range,
 	Nullish,
 	Unary,

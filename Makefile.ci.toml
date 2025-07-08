@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings", condition = { env_not_set = [
+RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
 BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = [
@@ -60,7 +60,7 @@ args = [
     "--workspace",
     "--all-targets",
     "--features",
-    "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml",
+    "${ALL_FEATURES}",
     "--tests",
     "--benches",
     "--bins",
@@ -78,7 +78,7 @@ args = [
     "--all-targets",
     "--release",
     "--features",
-    "storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,storage-fdb,scripting,http,jwks,ml",
+    "${ALL_FEATURES}",
     "--tests",
     "--benches",
     "--bins",
@@ -284,7 +284,7 @@ run_task = { name = [
 ], fork = true }
 
 [tasks.ci-database-upgrade]
-env = { _TEST_FEATURES = "storage-rocksdb", RUSTFLAGS = "-D warnings --cfg docker" }
+env = { _TEST_FEATURES = "storage-rocksdb", RUSTFLAGS = "-D warnings --cfg docker --cfg tokio_unstable" }
 category = "CI - DATABASE UPGRADE TESTS"
 run_task = { name = ["test-database-upgrade"], fork = true }
 

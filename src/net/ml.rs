@@ -30,10 +30,10 @@ mod implementation {
 	use http::StatusCode;
 	use surrealdb_core::{
 		dbs::{Session, capabilities::RouteTarget},
-		expr::statements::{DefineModelStatement, DefineStatement},
 		iam::{Action, ResourceKind, check::check_ns_db},
 		kvs::{LockType, TransactionType},
 		ml::storage::surml_file::SurMlFile,
+		sql::statements::{DefineModelStatement, DefineStatement},
 	};
 
 	use crate::net::{
