@@ -193,6 +193,16 @@ impl LogicalPlan {
 				// Process the output value
 				return v.compute(stk, ctx, opt, doc).await;
 			}
+			Self::Cancel(_) => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+					"CANCEL cannot be used outside of a manual transaction".to_string(),
+				))));
+			}
+			Self::Commit(_) => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+					"COMMIT cannot be used outside of a manual transaction".to_string(),
+				))));
+			}
 			_ => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
 					format_args!("Unexpected statement type encountered: {self:?}"),
