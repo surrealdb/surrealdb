@@ -5,7 +5,7 @@ use std::fmt::Write;
 
 use super::fmt::{is_pretty, pretty_indent};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Part {
 	All,
@@ -270,7 +270,7 @@ impl From<crate::expr::part::Recurse> for Recurse {
 }
 // ------------------------------
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecurseInstruction {
 	Path {

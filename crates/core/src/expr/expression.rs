@@ -7,8 +7,8 @@ use crate::expr::statements::{
 	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
 };
 use crate::expr::{
-	BinaryOperator, Block, Constant, FlowResult, FunctionCall, Future, Ident, Idiom, Literal, Mock,
-	Param, PrefixOperator,
+	BinaryOperator, Block, Constant, FlowResult, FunctionCall, Ident, Idiom, Literal, Mock, Param,
+	PrefixOperator,
 };
 use crate::val::{Closure, Value};
 use reblessive::tree::Stk;
@@ -29,7 +29,6 @@ pub enum Expr {
 	Table(Ident),
 	Mock(Mock),
 	Block(Box<Block>),
-	Future(Box<Future>),
 	Constant(Constant),
 	Prefix {
 		op: PrefixOperator,
@@ -86,7 +85,6 @@ impl Expr {
 			| Expr::Info(_) => true,
 
 			Expr::Block(block) => block.read_only(),
-			Expr::Future(future) => future.read_only(),
 			Expr::Prefix {
 				expr,
 				..

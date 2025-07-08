@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
@@ -27,8 +27,8 @@ impl Display for DefineTableStatement {
 		write!(f, "DEFINE TABLE")?;
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;
@@ -39,18 +39,23 @@ impl Display for DefineTableStatement {
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
 				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(
-						f,
-						" IN {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
+					write!(f, " IN ",)?;
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							write!(f, " | ")?;
+						}
+						write!(f, "{}", k)?;
+					}
 				}
+
 				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(
-						f,
-						" OUT {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
+					write!(f, " OUT ",)?;
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							write!(f, " | ")?;
+						}
+						write!(f, "{}", k)?;
+					}
 				}
 				if rel.enforced {
 					write!(f, " ENFORCED")?;
@@ -91,7 +96,7 @@ impl Display for DefineTableStatement {
 impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatement {
 	fn from(v: DefineTableStatement) -> Self {
 		crate::expr::statements::DefineTableStatement {
-			kind: v.kind,
+			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
 			drop: v.drop,
@@ -112,7 +117,7 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatement {
 	fn from(v: crate::expr::statements::DefineTableStatement) -> Self {
 		DefineTableStatement {
-			kind: v.kind,
+			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
 			drop: v.drop,

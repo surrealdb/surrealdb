@@ -2,15 +2,15 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::expr::escape::EscapeIdent;
+use crate::expr::{Ident, escape::EscapeIdent};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug,  Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct UseStatement {
-	pub ns: Option<String>,
-	pub db: Option<String>,
+	pub ns: Option<Ident>,
+	pub db: Option<Ident>,
 }
 
 impl fmt::Display for UseStatement {

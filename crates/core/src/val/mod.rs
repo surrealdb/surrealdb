@@ -63,7 +63,6 @@ pub struct Null;
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Value {
 	#[default]
 	None,
@@ -272,7 +271,7 @@ impl Value {
 	/// Convert this Value into a String
 	pub fn as_string(self) -> String {
 		match self {
-			Value::Strand(v) => v.0,
+			Value::Strand(v) => v.into_string(),
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
@@ -282,7 +281,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn as_raw_string(self) -> String {
 		match self {
-			Value::Strand(v) => v.0,
+			Value::Strand(v) => v.into_string(),
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
@@ -296,7 +295,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			Value::Strand(v) => v.0.clone(),
+			Value::Strand(v) => v.clone().into_string(),
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
@@ -334,7 +333,11 @@ impl Value {
 			Value::Object(_) => Some(Kind::Object),
 			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
 			Value::Bytes(_) => Some(Kind::Bytes),
-			Value::Thing(thing) => Some(Kind::Record(vec![thing.tb.clone().into()])),
+			Value::Thing(thing) => {
+				// TODO: Null byte validity
+				let str = unsafe { Ident::new_unchecked(thing.table.clone()) };
+				Some(Kind::Record(vec![str]))
+			}
 			Value::Closure(closure) => {
 				let args_kinds =
 					closure.args.iter().map(|(_, kind)| kind.clone()).collect::<Vec<_>>();
@@ -343,7 +346,11 @@ impl Value {
 				Some(Kind::Function(Some(args_kinds), returns_kind))
 			}
 			//Value::Refs(_) => None,
-			Value::File(file) => Some(Kind::File(vec![Ident::from(file.bucket.as_str())])),
+			Value::File(file) => {
+				// TODO: Null byte validity
+				let str = unsafe { Ident::new_unchecked(file.bucket.clone()) };
+				Some(Kind::File(vec![str]))
+			}
 		}
 	}
 
@@ -506,11 +513,11 @@ impl Value {
 				_ => false,
 			},
 			Value::Object(v) => match other {
-				Value::Strand(w) => v.0.contains_key(&w.0),
+				Value::Strand(w) => v.0.contains_key(&w),
 				_ => false,
 			},
 			Value::Range(r) => {
-				let beg = match &r.beg {
+				let beg = match &r.start {
 					Bound::Unbounded => true,
 					Bound::Included(beg) => beg.le(other),
 					Bound::Excluded(beg) => beg.lt(other),
@@ -538,7 +545,7 @@ impl Value {
 					let Value::Strand(other_string) = s else {
 						return false;
 					};
-					this.0.contains(&other_string.0)
+					this.contains(&other_string)
 				})
 			}
 			Value::Array(v) => v.iter().all(|v| match self {
@@ -547,7 +554,7 @@ impl Value {
 				_ => false,
 			}),
 			Value::Strand(other_strand) => match self {
-				Value::Strand(s) => s.0.contains(&other_strand.0),
+				Value::Strand(s) => s.contains(&other_strand),
 				_ => false,
 			},
 			_ => false,
@@ -566,7 +573,7 @@ impl Value {
 					let Value::Strand(other_string) = s else {
 						return false;
 					};
-					this.0.contains(&other_string.0)
+					this.contains(&other_string)
 				})
 			}
 			Value::Array(v) => v.iter().any(|v| match self {
@@ -575,7 +582,7 @@ impl Value {
 				_ => false,
 			}),
 			Value::Strand(other_strand) => match self {
-				Value::Strand(s) => s.0.contains(&other_strand.0),
+				Value::Strand(s) => s.contains(&other_strand),
 				_ => false,
 			},
 			_ => false,
@@ -647,7 +654,7 @@ impl Value {
 			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
 			Value::Closure(closure) => expr::Expr::Literal(expr::Literal::Closure(closure)),
 			Value::Range(range) => range.into_literal(),
-			Value::Table(t) => expr::Expr::Table(t.into()),
+			Value::Table(t) => expr::Expr::Table(Ident::from_strand(t)),
 		}
 	}
 }
@@ -655,7 +662,7 @@ impl Value {
 impl fmt::Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
-		match self {
+		match &self {
 			Value::None => write!(f, "NONE"),
 			Value::Null => write!(f, "NULL"),
 			Value::Array(v) => write!(f, "{v}"),
@@ -1064,45 +1071,6 @@ impl From<BTreeMap<String, Value>> for Value {
 impl From<BTreeMap<&str, Value>> for Value {
 	fn from(v: BTreeMap<&str, Value>) -> Self {
 		Value::Object(Object::from(v))
-	}
-}
-
-impl From<RecordIdKeyRangeLit> for Value {
-	fn from(v: RecordIdKeyRangeLit) -> Self {
-		let start = match v.start {
-			Bound::Included(beg) => Bound::Included(Value::from(beg)),
-			Bound::Excluded(beg) => Bound::Excluded(Value::from(beg)),
-			Bound::Unbounded => Bound::Unbounded,
-		};
-
-		let end = match v.end {
-			Bound::Included(end) => Bound::Included(Value::from(end)),
-			Bound::Excluded(end) => Bound::Excluded(Value::from(end)),
-			Bound::Unbounded => Bound::Unbounded,
-		};
-
-		Value::Range(Box::new(Range {
-			start,
-			end,
-		}))
-	}
-}
-
-impl From<RecordIdKeyLit> for Value {
-	fn from(v: RecordIdKeyLit) -> Self {
-		match v {
-			RecordIdKeyLit::Number(v) => v.into(),
-			RecordIdKeyLit::String(v) => v.into(),
-			RecordIdKeyLit::Uuid(v) => v.into(),
-			RecordIdKeyLit::Array(v) => v.into(),
-			RecordIdKeyLit::Object(v) => v.into(),
-			RecordIdKeyLit::Generate(v) => match v {
-				Gen::Rand => RecordIdKeyLit::rand().into(),
-				Gen::Ulid => RecordIdKeyLit::ulid().into(),
-				Gen::Uuid => RecordIdKeyLit::uuid().into(),
-			},
-			RecordIdKeyLit::Range(v) => v.deref().to_owned().into(),
-		}
 	}
 }
 

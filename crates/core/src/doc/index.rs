@@ -32,7 +32,7 @@ impl Document {
 			Force::Index(ix)
 				if ix
 					.first()
-					.is_some_and(|ix| self.id.as_ref().is_some_and(|id| ix.what.0 == id.table)) =>
+					.is_some_and(|ix| self.id.as_ref().is_some_and(|id| **ix.what == id.table)) =>
 			{
 				ix.clone()
 			}

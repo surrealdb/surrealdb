@@ -3,7 +3,7 @@ use crate::val::{Datetime, Duration, Strand, Uuid};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.

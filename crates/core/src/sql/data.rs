@@ -2,7 +2,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::{AssignOperator, Expr, Idiom};
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Data {
 	EmptyExpression,
@@ -17,7 +17,7 @@ pub enum Data {
 	UpdateExpression(Vec<Assignment>),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Assignment {
 	pub place: Idiom,

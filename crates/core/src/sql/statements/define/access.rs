@@ -8,7 +8,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
@@ -81,7 +81,6 @@ impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatem
 	fn from(v: DefineAccessStatement) -> Self {
 		crate::expr::statements::DefineAccessStatement {
 			kind: v.kind.into(),
-			access_type: v.access_type.into(),
 			name: v.name.into(),
 			base: v.base.into(),
 			access_type: v.access_type.into(),
@@ -96,7 +95,6 @@ impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatem
 	fn from(v: crate::expr::statements::DefineAccessStatement) -> Self {
 		DefineAccessStatement {
 			kind: v.kind.into(),
-			access_type: v.access_type.into(),
 			name: v.name.into(),
 			base: v.base.into(),
 			access_type: v.access_type.into(),

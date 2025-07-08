@@ -1,7 +1,7 @@
 use crate::sql::Ident;
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct File {
 	pub bucket: String,

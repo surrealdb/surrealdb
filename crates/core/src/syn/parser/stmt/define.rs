@@ -21,8 +21,8 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Ident, Idioms, Index, Kind, Literal, Param, Permissions, Scoring, TableType,
-	access_type, table_type,
+	AccessType, Expr, Ident, Idioms, Index, JwtAccess, Kind, Literal, Param, Permissions, Scoring,
+	TableType, access_type, table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
@@ -41,8 +41,6 @@ impl Parser<'_> {
 			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(ctx).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user().map(DefineStatement::User),
-			t!("TOKEN") => self.parse_define_token().map(DefineStatement::Access),
-			t!("SCOPE") => self.parse_define_scope(ctx).await.map(DefineStatement::Access),
 			t!("PARAM") => self.parse_define_param(ctx).await.map(DefineStatement::Param),
 			t!("TABLE") => self.parse_define_table(ctx).await.map(DefineStatement::Table),
 			t!("API") => self.parse_define_api(ctx).await.map(DefineStatement::Api),
@@ -144,7 +142,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let param = self.next_token_value::<Param>()?.0;
+			let param = self.next_token_value::<Param>()?.ident();
 			expected!(self, t!(":"));
 			let kind = ctx.run(|ctx| self.parse_inner_kind(ctx)).await?;
 
@@ -209,7 +207,7 @@ impl Parser<'_> {
 			name,
 			base,
 			// Safety: "Viewer" does not contain a null byte
-			roles: vec![Ident::new_unchecked("Viewer".to_owned())], // New users get the viewer role by default
+			roles: vec![unsafe { Ident::new_unchecked("Viewer".to_owned()) }], // New users get the viewer role by default
 			..DefineUserStatement::default()
 		};
 
@@ -244,8 +242,7 @@ impl Parser<'_> {
 						// to avoid making breaking changes to the DefineUserStatement structure
 						// while still providing parsing feedback to users referencing unexistent roles.
 						// This list should be removed once arbitrary roles can be defined by users.
-						if !matches!(role.0.to_lowercase().as_str(), "viewer" | "editor" | "owner")
-						{
+						if !matches!(role.to_lowercase().as_str(), "viewer" | "editor" | "owner") {
 							unexpected!(self, token, "an existent role");
 						}
 						roles.push(role);
@@ -498,173 +495,6 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-
-		Ok(res)
-	}
-
-	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
-	pub fn parse_define_token(&mut self) -> ParseResult<DefineAccessStatement> {
-		let kind = if self.eat(t!("IF")) {
-			expected!(self, t!("NOT"));
-			expected!(self, t!("EXISTS"));
-			DefineKind::IfNotExists
-		} else if self.eat(t!("OVERWRITE")) {
-			DefineKind::Overwrite
-		} else {
-			DefineKind::Default
-		};
-		let name = self.next_token_value()?;
-		expected!(self, t!("ON"));
-		let base = self.parse_base(true)?;
-
-		let mut res = DefineAccessStatement {
-			name,
-			base: base.clone(),
-			kind,
-			..Default::default()
-		};
-
-		match base {
-			// DEFINE TOKEN ON SCOPE is now record access with JWT
-			Base::Sc(_) => {
-				res.base = Base::Db;
-				let mut ac = access_type::RecordAccess {
-					..Default::default()
-				};
-				ac.jwt.issue = None;
-				loop {
-					match self.peek_kind() {
-						t!("COMMENT") => {
-							self.pop_peek();
-							res.comment = Some(self.next_token_value()?);
-						}
-						// For backward compatibility, value is always expected after type
-						// This matches the display format of the legacy statement
-						t!("TYPE") => {
-							self.pop_peek();
-							let next = self.next();
-							match next.kind {
-								TokenKind::Algorithm(alg) => {
-									expected!(self, t!("VALUE"));
-									ac.jwt.verify = access_type::JwtAccessVerify::Key(
-										access_type::JwtAccessVerifyKey {
-											alg,
-											key: self.next_token_value::<Strand>()?.into_inner(),
-										},
-									);
-								}
-								TokenKind::Keyword(Keyword::Jwks) => {
-									expected!(self, t!("VALUE"));
-									ac.jwt.verify = access_type::JwtAccessVerify::Jwks(
-										access_type::JwtAccessVerifyJwks {
-											url: self.next_token_value::<Strand>()?.into_inner(),
-										},
-									);
-								}
-								_ => unexpected!(self, next, "a token algorithm or 'JWKS'"),
-							}
-						}
-						_ => break,
-					}
-				}
-				res.access_type = AccessType::Record(ac);
-			}
-			// DEFINE TOKEN anywhere else is now JWT access
-			_ => {
-				let mut ac = access_type::JwtAccess {
-					issue: None,
-					..Default::default()
-				};
-				loop {
-					match self.peek_kind() {
-						t!("COMMENT") => {
-							self.pop_peek();
-							res.comment = Some(self.next_token_value()?);
-						}
-						// For backward compatibility, value is always expected after type
-						// This matches the display format of the legacy statement
-						t!("TYPE") => {
-							self.pop_peek();
-							let next = self.next();
-							match next.kind {
-								TokenKind::Algorithm(alg) => {
-									expected!(self, t!("VALUE"));
-									ac.verify = access_type::JwtAccessVerify::Key(
-										access_type::JwtAccessVerifyKey {
-											alg,
-											key: self.next_token_value::<Strand>()?.into_inner(),
-										},
-									);
-								}
-								TokenKind::Keyword(Keyword::Jwks) => {
-									expected!(self, t!("VALUE"));
-									ac.verify = access_type::JwtAccessVerify::Jwks(
-										access_type::JwtAccessVerifyJwks {
-											url: self.next_token_value::<Strand>()?.into_inner(),
-										},
-									);
-								}
-								_ => unexpected!(self, next, "a token algorithm or 'JWKS'"),
-							}
-						}
-						_ => break,
-					}
-				}
-				res.access_type = AccessType::Jwt(ac);
-			}
-		}
-
-		Ok(res)
-	}
-
-	// TODO(gguillemas): Deprecated in 2.0.0. Drop this in 3.0.0 in favor of DEFINE ACCESS
-	pub async fn parse_define_scope(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<DefineAccessStatement> {
-		let kind = if self.eat(t!("IF")) {
-			expected!(self, t!("NOT"));
-			expected!(self, t!("EXISTS"));
-			DefineKind::IfNotExists
-		} else if self.eat(t!("OVERWRITE")) {
-			DefineKind::Overwrite
-		} else {
-			DefineKind::Default
-		};
-		let name = self.next_token_value()?;
-		let mut res = DefineAccessStatement {
-			name,
-			base: Base::Db,
-			kind,
-			..Default::default()
-		};
-		let mut ac = access_type::RecordAccess {
-			..Default::default()
-		};
-
-		loop {
-			match self.peek_kind() {
-				t!("COMMENT") => {
-					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
-				}
-				t!("SESSION") => {
-					self.pop_peek();
-					res.duration.session = Some(self.next_token_value()?);
-				}
-				t!("SIGNUP") => {
-					self.pop_peek();
-					ac.signup = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
-				}
-				t!("SIGNIN") => {
-					self.pop_peek();
-					ac.signin = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
-				}
-				_ => break,
-			}
-		}
-
-		res.access_type = AccessType::Record(ac);
 
 		Ok(res)
 	}
@@ -1380,11 +1210,11 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("fn"));
 					expected!(self, t!("::"));
-					let mut ident = self.next_token_value::<Ident>()?;
+					let mut ident = self.next_token_value::<Ident>()?.into_string();
 					while self.eat(t!("::")) {
 						let value = self.next_token_value::<Ident>()?;
-						ident.0.push_str("::");
-						ident.0.push_str(&*value);
+						ident.push_str("::");
+						ident.push_str(&*value);
 					}
 					res.function = Some(ident);
 				}
@@ -1543,13 +1373,13 @@ impl Parser<'_> {
 							}
 						};
 
-						let part = self.next_token_value::<Ident>()?;
-						name.push_str(part.0.to_lowercase().as_str());
+						let part = self.next_token_value::<Ident>()?.into_string();
+						name.push_str(part.to_lowercase().as_str());
 
 						while self.eat(t!("::")) {
 							let part = self.next_token_value::<Ident>()?;
 							name.push_str("::");
-							name.push_str(part.0.to_lowercase().as_str());
+							name.push_str(part.to_lowercase().as_str());
 						}
 
 						expected!(self, t!("("));
@@ -1643,7 +1473,7 @@ impl Parser<'_> {
 				x if Self::kind_is_identifier(x) => {
 					let name: Ident = self.next_token_value()?;
 					acc.push(TableConfig {
-						name: name.0,
+						name: name.into_string(),
 					});
 				}
 				_ => unexpected!(self, self.next(), "a table config"),
@@ -1694,12 +1524,10 @@ impl Parser<'_> {
 		let mut res = access_type::JwtAccess {
 			// By default, a JWT access method is only used to verify.
 			issue: None,
-			..Default::default()
+			verify: Default::default(),
 		};
 
-		let mut iss = access_type::JwtAccessIssue {
-			..Default::default()
-		};
+		let mut iss = access_type::JwtAccessIssue::default();
 
 		let peek = self.peek();
 		match peek.kind {
@@ -1711,7 +1539,7 @@ impl Parser<'_> {
 						let next = self.next();
 						match next.kind {
 							t!("KEY") => {
-								let key = self.next_token_value::<Strand>()?.into_inner();
+								let key = self.next_token_value::<Strand>()?.into_string();
 								res.verify = access_type::JwtAccessVerify::Key(
 									access_type::JwtAccessVerifyKey {
 										alg,
@@ -1739,7 +1567,7 @@ impl Parser<'_> {
 			}
 			t!("URL") => {
 				self.pop_peek();
-				let url = self.next_token_value::<Strand>()?.into_inner();
+				let url = self.next_token_value::<Strand>()?.into_string();
 				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
 					url,
 				});
@@ -1774,7 +1602,7 @@ impl Parser<'_> {
 					}
 					t!("KEY") => {
 						self.pop_peek();
-						let key = self.next_token_value::<Strand>()?.into_inner();
+						let key = self.next_token_value::<Strand>()?.into_string();
 						// If the algorithm is symmetric and a key is already defined, a different key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify {
 							if ver.alg.is_symmetric() && key != ver.key {

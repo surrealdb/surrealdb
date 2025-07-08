@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
@@ -18,8 +18,8 @@ impl Display for DefineSequenceStatement {
 		write!(f, "DEFINE SEQUENCE")?;
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
 		if let Some(ref v) = self.timeout {

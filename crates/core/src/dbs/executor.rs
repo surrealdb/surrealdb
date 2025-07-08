@@ -54,13 +54,13 @@ impl Executor {
 		if let Some(ns) = stmt.ns {
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
 			self.opt.set_ns(Some(ns.as_str().into()));
-			session.put(NS.as_ref(), ns.into());
+			session.put(NS.as_ref(), ns.into_strand().into());
 			ctx_ref.add_value("session", session.into());
 		}
 		if let Some(db) = stmt.db {
 			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
 			self.opt.set_db(Some(db.as_str().into()));
-			session.put(DB.as_ref(), db.into());
+			session.put(DB.as_ref(), db.into_strand().into());
 			ctx_ref.add_value("session", session.into());
 		}
 		Ok(())
@@ -70,23 +70,17 @@ impl Executor {
 		// Allowed to run?
 		self.opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
 		// Convert to uppercase
-		let mut name = stmt.name.0;
-		name.make_ascii_uppercase();
-		// Process the option
-		match name.as_str() {
-			"IMPORT" => {
-				self.opt.set_import(stmt.what);
-			}
-			"FORCE" => {
-				let force = if stmt.what {
-					Force::All
-				} else {
-					Force::None
-				};
-				self.opt.force = force;
-			}
-			_ => {}
-		};
+		if stmt.name.eq_ignore_ascii_case("IMPORT") {
+			self.opt.set_import(stmt.what);
+		} else if stmt.name.eq_ignore_ascii_case("FORCE") {
+			let force = if stmt.what {
+				Force::All
+			} else {
+				Force::None
+			};
+			self.opt.force = force;
+		}
+
 		Ok(())
 	}
 
@@ -124,7 +118,7 @@ impl Executor {
 								)
 							})
 							.map_err(anyhow::Error::new)?
-							.add_value(stm.name, val.into());
+							.add_value(stm.name.into_string(), val.into());
 						// Finalise transaction, returning nothing unless it couldn't commit
 						Ok(Value::None)
 					}

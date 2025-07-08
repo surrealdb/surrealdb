@@ -6,7 +6,7 @@ use crate::val::RecordIdKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -16,12 +16,12 @@ struct Prefix<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: RecordIdKeyLit,
+	pub id: RecordIdKey,
 }
 impl_key!(Prefix<'a>);
 
 impl<'a> Prefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKeyLit) -> Self {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -31,12 +31,12 @@ impl<'a> Prefix<'a> {
 			_c: b'*',
 			tb,
 			_d: b'&',
-			id: id.to_owned(),
+			id: id.clone(),
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
@@ -46,13 +46,13 @@ struct PrefixFt<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: RecordIdKeyLit,
+	pub id: RecordIdKey,
 	pub ft: &'a str,
 }
 impl_key!(PrefixFt<'a>);
 
 impl<'a> PrefixFt<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKeyLit, ft: &'a str) -> Self {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey, ft: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -62,13 +62,13 @@ impl<'a> PrefixFt<'a> {
 			_c: b'*',
 			tb,
 			_d: b'&',
-			id: id.to_owned(),
+			id: id.clone(),
 			ft,
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct PrefixFf<'a> {
 	__: u8,
 	_a: u8,
@@ -78,7 +78,7 @@ struct PrefixFf<'a> {
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
-	pub id: RecordIdKeyLit,
+	pub id: RecordIdKey,
 	pub ft: &'a str,
 	pub ff: &'a str,
 }
@@ -89,7 +89,7 @@ impl<'a> PrefixFf<'a> {
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
-		id: &RecordIdKeyLit,
+		id: &RecordIdKey,
 		ft: &'a str,
 		ff: &'a str,
 	) -> Self {
@@ -102,7 +102,7 @@ impl<'a> PrefixFf<'a> {
 			_c: b'*',
 			tb,
 			_d: b'&',
-			id: id.to_owned(),
+			id: id.clone(),
 			ft,
 			ff,
 		}
@@ -114,7 +114,7 @@ impl<'a> PrefixFf<'a> {
 // - all references for a given record, filtered by a origin table
 // - all references for a given record, filtered by a origin table and an origin field
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Ref<'a> {
 	__: u8,

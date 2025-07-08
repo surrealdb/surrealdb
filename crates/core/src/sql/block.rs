@@ -2,7 +2,7 @@ use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use std::fmt::{self, Display, Formatter, Write};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Block(pub Vec<Expr>);
 

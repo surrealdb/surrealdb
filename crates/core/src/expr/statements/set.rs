@@ -3,7 +3,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
+use crate::expr::{ControlFlow, Expr, FlowResult, Ident, Kind, Value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -15,7 +15,7 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct SetStatement {
-	pub name: String,
+	pub name: Ident,
 	pub what: Expr,
 	pub kind: Option<Kind>,
 }
@@ -34,26 +34,22 @@ impl SetStatement {
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
 		// Check if the variable is a protected variable
-		match PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {
-			// The variable isn't protected and can be stored
-			false => {
-				let result = self.what.compute(stk, ctx, opt, doc).await?;
-				match self.kind {
-					Some(ref kind) => result
-						.coerce_to_kind(kind)
-						.map_err(|e| Error::SetCoerce {
-							name: self.name.to_string(),
-							error: Box::new(e),
-						})
-						.map_err(anyhow::Error::new)
-						.map_err(ControlFlow::from),
-					None => Ok(result),
-				}
-			}
-			// The user tried to set a protected variable
-			true => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
-				name: self.name.clone(),
-			}))),
+		if PROTECTED_PARAM_NAMES.contains(&self.name.as_str()) {
+			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
+				name: self.name.clone().into_string(),
+			})));
+		}
+		let result = self.what.compute(stk, ctx, opt, doc).await?;
+		match self.kind {
+			Some(ref kind) => result
+				.coerce_to_kind(kind)
+				.map_err(|e| Error::SetCoerce {
+					name: self.name.to_string(),
+					error: Box::new(e),
+				})
+				.map_err(anyhow::Error::new)
+				.map_err(ControlFlow::from),
+			None => Ok(result),
 		}
 	}
 }

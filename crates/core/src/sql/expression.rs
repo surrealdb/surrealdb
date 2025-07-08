@@ -10,7 +10,7 @@ use crate::sql::{
 };
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug)]
 pub enum Expr {
 	Literal(Literal),
 

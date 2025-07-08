@@ -89,14 +89,14 @@ impl Display for Regex {
 	}
 }
 
-impl From<Regex> for crate::expr::Regex {
+impl From<Regex> for crate::val::Regex {
 	fn from(v: Regex) -> Self {
 		Self(v.0)
 	}
 }
 
-impl From<crate::expr::Regex> for Regex {
-	fn from(v: crate::expr::Regex) -> Self {
+impl From<crate::val::Regex> for Regex {
+	fn from(v: crate::val::Regex) -> Self {
 		Self(v.0)
 	}
 }

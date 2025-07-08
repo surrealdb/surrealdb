@@ -460,7 +460,7 @@ pub(super) trait Collector {
 
 	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b Ident) -> Cow<'b, Context> {
 		if let Some(qp) = ctx.get_query_planner() {
-			if let Some(exe) = qp.get_query_executor(&table.0) {
+			if let Some(exe) = qp.get_query_executor(table.as_str()) {
 				// We set the query executor matching the current table in the Context
 				// Avoiding search in the hashmap of the query planner for each doc
 				let mut ctx = MutableContext::new(ctx);
@@ -511,7 +511,7 @@ pub(super) trait Collector {
 				}
 				Iterable::Index(v, irf, rs) => {
 					if let Some(qp) = ctx.get_query_planner() {
-						if let Some(exe) = qp.get_query_executor(&v.0) {
+						if let Some(exe) = qp.get_query_executor(v.as_str()) {
 							// We set the query executor matching the current table in the Context
 							// Avoiding search in the hashmap of the query planner for each doc
 							let mut ctx = MutableContext::new(ctx);
@@ -886,7 +886,7 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
-		ctx.tx().check_ns_db_tb(ns, db, &table.0, opt.strict).await?;
+		ctx.tx().check_ns_db_tb(ns, db, table.as_str(), opt.strict).await?;
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(iterator) = exe.new_iterator(opt, irf).await? {
 				let txn = ctx.tx();

@@ -28,7 +28,7 @@ pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
@@ -257,10 +257,14 @@ impl GrantBearer {
 			random_string(1, &GRANT_BEARER_CHARACTER_POOL[10..]),
 			random_string(GRANT_BEARER_ID_LENGTH - 1, GRANT_BEARER_CHARACTER_POOL)
 		);
+		// Safety: id cannot contain a null byte guarenteed above.
+		let id = unsafe { Ident::new_unchecked(id) };
 		let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
+		// Safety: id cannot contain a null byte guarenteed above.
+		let key = unsafe { Ident::new_unchecked(format!("{prefix}-{id}-{secret}")) };
 		Self {
-			id: id.clone().into(),
-			key: format!("{prefix}-{id}-{secret}").into(),
+			id,
+			key,
 		}
 	}
 

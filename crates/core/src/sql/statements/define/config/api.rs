@@ -6,7 +6,7 @@ use crate::sql::{Expr, Permission};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RequestMiddleware(pub Vec<(String, Vec<Expr>)>);
 
@@ -26,7 +26,7 @@ impl From<crate::api::middleware::RequestMiddleware> for RequestMiddleware {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiConfig {
 	pub middleware: Option<RequestMiddleware>,

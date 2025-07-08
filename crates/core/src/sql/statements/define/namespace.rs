@@ -3,7 +3,7 @@ use crate::sql::Ident;
 use crate::val::Strand;
 use std::fmt::{self, Display};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
@@ -17,8 +17,8 @@ impl Display for DefineNamespaceStatement {
 		write!(f, "DEFINE NAMESPACE")?;
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {

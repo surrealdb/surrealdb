@@ -2,7 +2,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::{Expr, Idiom};
 use std::fmt::{self, Display, Formatter, Write};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
@@ -52,7 +52,7 @@ impl Display for Fields {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Field {
 	/// The `*` in `SELECT * FROM ...`

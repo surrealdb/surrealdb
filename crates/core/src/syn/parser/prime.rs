@@ -392,7 +392,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let param = self.next_token_value::<Param>()?.0;
+			let param = self.next_token_value::<Param>()?.ident();
 			let kind = if self.eat(t!(":")) {
 				if self.eat(t!("<")) {
 					let delim = self.last_span();

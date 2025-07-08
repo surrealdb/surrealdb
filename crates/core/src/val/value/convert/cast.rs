@@ -6,11 +6,11 @@ use geo::Point;
 use rust_decimal::Decimal;
 
 use crate::expr::kind::{HasKind, KindLiteral};
-use crate::expr::{Ident, Kind, Regex};
+use crate::expr::{Ident, Kind};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Strand, Uuid, Value,
+	RecordId, Regex, Strand, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -348,7 +348,8 @@ impl Cast for Strand {
 			Value::Strand(x) => Ok(x),
 			Value::Uuid(x) => Ok(x.to_raw().into()),
 			Value::Datetime(x) => Ok(x.to_raw().into()),
-			x => Ok(Strand(x.to_string())),
+			// TODO: Handle null bytes
+			x => Ok(unsafe { Strand::new_unchecked(x.to_string()) }),
 		}
 	}
 }

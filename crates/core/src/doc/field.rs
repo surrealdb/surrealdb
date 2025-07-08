@@ -382,7 +382,7 @@ impl FieldEditContext<'_> {
 					// See if we should check the inner type
 					if !kind.is_record() {
 						// Get the value of the ID only
-						let inner = id.key.into_value();
+						let inner = id.key.clone().into_value();
 
 						// Check the type of the ID part
 						inner.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {

@@ -72,7 +72,7 @@ impl SelectStatement {
 	pub(crate) fn read_only(&self) -> bool {
 		self.expr.read_only()
 			&& self.what.iter().all(|v| v.read_only())
-			&& self.cond.map(|x| x.0.read_only()).unwrap_or(true)
+			&& self.cond.as_ref().map(|x| x.0.read_only()).unwrap_or(true)
 	}
 
 	/// Process this type returning a computed simple Value
@@ -119,7 +119,7 @@ impl SelectStatement {
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 
 		if self.only {
-			if let Some(array) = res.into_array() {
+			if let Some(mut array) = res.into_array() {
 				ensure!(array.len() != 1, Error::SingleOnlyOutput);
 				return Ok(array.0.pop().unwrap());
 			}

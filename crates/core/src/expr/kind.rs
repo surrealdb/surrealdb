@@ -1,10 +1,10 @@
 use super::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Ident, Idiom, Literal, Part, Regex, Value};
+use crate::expr::{Expr, Ident, Idiom, Literal, Part, Value};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	Strand, Uuid,
+	Regex, Strand, Uuid,
 };
 
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
@@ -13,6 +13,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
+use std::hash::{Hash, Hasher};
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
@@ -206,7 +207,7 @@ impl Kind {
 						Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
 						Some(Part::Value(Expr::Literal(Literal::Integer(i)))) => {
 							if let Some(len) = len {
-								if i >= *len as usize {
+								if *i >= *len as i64 {
 									return false;
 								}
 							}
@@ -429,7 +430,7 @@ impl InfoStructure for Kind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum KindLiteral {
@@ -442,6 +443,96 @@ pub enum KindLiteral {
 	Object(BTreeMap<String, Kind>),
 	DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
 	Bool(bool),
+}
+
+impl PartialEq for KindLiteral {
+	fn eq(&self, other: &Self) -> bool {
+		match self {
+			KindLiteral::String(strand) => {
+				if let KindLiteral::String(other) = other {
+					strand == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Integer(x) => {
+				if let KindLiteral::Integer(other) = other {
+					x == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Float(x) => {
+				if let KindLiteral::Float(other) = other {
+					x.to_bits() == other.to_bits()
+				} else {
+					false
+				}
+			}
+			KindLiteral::Decimal(decimal) => {
+				if let KindLiteral::Decimal(other) = other {
+					decimal == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Duration(duration) => {
+				if let KindLiteral::Duration(other) = other {
+					duration == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Array(kinds) => {
+				if let KindLiteral::Array(other) = other {
+					kinds == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Object(btree_map) => {
+				if let KindLiteral::Object(other) = other {
+					btree_map == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::DiscriminatedObject(a, b) => {
+				if let KindLiteral::DiscriminatedObject(c, d) = other {
+					a == c && b == d
+				} else {
+					false
+				}
+			}
+			KindLiteral::Bool(a) => {
+				if let KindLiteral::Bool(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+		}
+	}
+}
+impl Eq for KindLiteral {}
+impl Hash for KindLiteral {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		std::mem::discriminant(self).hash(state);
+		match self {
+			KindLiteral::String(strand) => strand.hash(state),
+			KindLiteral::Integer(x) => x.hash(state),
+			KindLiteral::Float(x) => x.to_bits().hash(state),
+			KindLiteral::Decimal(decimal) => decimal.hash(state),
+			KindLiteral::Duration(duration) => duration.hash(state),
+			KindLiteral::Array(kinds) => kinds.hash(state),
+			KindLiteral::Object(btree_map) => btree_map.hash(state),
+			KindLiteral::DiscriminatedObject(a, b) => {
+				a.hash(state);
+				b.hash(state);
+			}
+			KindLiteral::Bool(x) => x.hash(state),
+		}
+	}
 }
 
 impl KindLiteral {
@@ -584,7 +675,7 @@ impl KindLiteral {
 			KindLiteral::Object(x) => match path.first() {
 				Some(Part::All) => x.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind)),
 				Some(Part::Field(k)) => {
-					if let Some(y) = x.get(&k.0) {
+					if let Some(y) = x.get(&k) {
 						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false
@@ -597,7 +688,7 @@ impl KindLiteral {
 					.iter()
 					.all(|o| o.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind))),
 				Some(Part::Field(k)) => discriminants.iter().all(|o| {
-					if let Some(y) = o.get(&k.0) {
+					if let Some(y) = o.get(&k) {
 						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false

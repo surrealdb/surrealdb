@@ -1,26 +1,51 @@
-mod field;
-mod sequence;
-mod table;
-
-pub use field::AlterFieldStatement;
-pub use sequence::AlterSequenceStatement;
-pub use table::AlterTableStatement;
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
 use anyhow::Result;
-
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+mod field;
+mod sequence;
+mod table;
+
+pub use field::{AlterDefault, AlterFieldStatement};
+pub use sequence::AlterSequenceStatement;
+pub use table::AlterTableStatement;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AlterKind<T> {
+	#[default]
+	None,
 	Set(T),
 	Drop,
-	None,
+}
+
+impl<T> Revisioned for AlterKind<T> {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		w: &mut W,
+	) -> std::result::Result<(), revision::Error> {
+		// TODO: implement this
+		todo!()
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(
+		r: &mut R,
+	) -> std::result::Result<Self, revision::Error>
+	where
+		Self: Sized,
+	{
+		todo!()
+	}
 }
 
 #[revisioned(revision = 1)]

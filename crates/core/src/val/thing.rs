@@ -153,7 +153,11 @@ impl RecordIdKey {
 	pub fn into_value(self) -> Value {
 		match self {
 			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
-			RecordIdKey::String(s) => Value::Strand(Strand(s)),
+			RecordIdKey::String(s) => {
+				//TODO: Null byte validity
+				let s = unsafe { Strand::new_unchecked(s) };
+				Value::Strand(s)
+			}
 			RecordIdKey::Uuid(u) => Value::Uuid(u),
 			RecordIdKey::Object(object) => Value::Object(object),
 			RecordIdKey::Array(array) => Value::Array(array),

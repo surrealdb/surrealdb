@@ -1,7 +1,7 @@
 use crate::sql::Ident;
 use std::fmt::{self, Display};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveModelStatement {
 	pub name: Ident,
@@ -16,7 +16,7 @@ impl Display for RemoveModelStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " ml::{}<{}>", self.name.0, self.version)?;
+		write!(f, " ml::{}<{}>", &*self.name, self.version)?;
 		Ok(())
 	}
 }

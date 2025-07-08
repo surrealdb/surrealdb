@@ -53,10 +53,11 @@ impl Function {
 	/// Convert function call to a field name
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
-			Self::Script(_) => Idiom::field("function".to_owned()),
-			Self::Normal(f) => Idiom::field(f.to_owned()),
-			Self::Custom(f) => Idiom::field(format!("fn::{f}")),
-			Self::Model(m) => Idiom::field(m.to_string()),
+			// Safety: "function" does not contain null bytes"
+			Self::Script(_) => Idiom::field(unsafe { Ident::new_unchecked("function".to_owned()) }),
+			Self::Normal(f) => Idiom::field(unsafe { Ident::new_unchecked(f.to_owned()) }),
+			Self::Custom(f) => Idiom::field(unsafe { Ident::new_unchecked(format!("fn::{f}")) }),
+			Self::Model(m) => Idiom::field(unsafe { Ident::new_unchecked(m.to_string()) }),
 		}
 	}
 	/// Checks if this function invocation is writable
@@ -179,13 +180,13 @@ impl Function {
 		args: Vec<Value>,
 	) -> FlowResult<Value> {
 		match self {
-			Function::Normal(ref s) => {
+			Function::Normal(s) => {
 				// Check this function is allowed
 				ctx.check_allowed_function(s)?;
 				// Run the normal function
 				Ok(fnc::run(stk, ctx, opt, doc, s, args).await?)
 			}
-			Function::Custom(ref s) => {
+			Function::Custom(s) => {
 				// Get the full name of this function
 				let name = format!("fn::{s}");
 				// Check this function is allowed
@@ -287,7 +288,7 @@ impl Function {
 					})))
 				}
 			}
-			Function::Model(ref m) => m.compute(stk, ctx, opt, doc, args).await,
+			Function::Model(m) => m.compute(stk, ctx, opt, doc, args).await,
 		}
 	}
 }

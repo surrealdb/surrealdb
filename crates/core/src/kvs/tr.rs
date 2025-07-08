@@ -31,7 +31,7 @@ pub enum Check {
 }
 
 /// Specifies whether the transaction is read-only or writeable.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum TransactionType {
 	Read,
 	Write,

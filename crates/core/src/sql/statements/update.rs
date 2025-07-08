@@ -1,7 +1,7 @@
 use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct UpdateStatement {
 	pub only: bool,
@@ -21,7 +21,7 @@ impl fmt::Display for UpdateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}
@@ -51,7 +51,7 @@ impl From<UpdateStatement> for crate::expr::statements::UpdateStatement {
 	fn from(v: UpdateStatement) -> Self {
 		crate::expr::statements::UpdateStatement {
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),
@@ -67,7 +67,7 @@ impl From<crate::expr::statements::UpdateStatement> for UpdateStatement {
 	fn from(v: crate::expr::statements::UpdateStatement) -> Self {
 		UpdateStatement {
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),

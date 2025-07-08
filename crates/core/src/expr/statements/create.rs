@@ -107,7 +107,7 @@ impl fmt::Display for CreateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", Fmt::comma_seperated(self.what.iter()))?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.data {
 			write!(f, " {v}")?
 		}

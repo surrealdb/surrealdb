@@ -1472,7 +1472,7 @@ fn get_execution_context<'a>(
 	if let Some(doc) = doc {
 		if let Some(thg) = &doc.rid {
 			if let Some(pla) = ctx.get_query_planner() {
-				if let Some(exe) = pla.get_query_executor(&thg.tb) {
+				if let Some(exe) = pla.get_query_executor(&thg.table) {
 					return Some((exe, doc, thg));
 				}
 			}

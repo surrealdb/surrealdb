@@ -5,6 +5,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ConfigKind, ResourceKind};
@@ -21,9 +22,8 @@ use std::fmt::{self, Display};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineConfigStatement {
+	pub kind: DefineKind,
 	pub inner: ConfigInner,
-	pub if_not_exists: bool,
-	pub overwrite: bool,
 }
 
 #[revisioned(revision = 1)]

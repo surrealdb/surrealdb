@@ -1,9 +1,8 @@
 use crate::sql::{Cond, Expr, Fetchs, Fields};
-
 use std::fmt;
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct LiveStatement {
 	pub expr: Fields,

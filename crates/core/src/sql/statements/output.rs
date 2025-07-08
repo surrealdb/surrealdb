@@ -3,7 +3,7 @@ use crate::sql::fetch::Fetchs;
 
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OutputStatement {
 	pub what: Expr,

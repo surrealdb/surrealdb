@@ -179,7 +179,7 @@ impl Iterator {
 				match v {
 					Value::Thing(x) => self.prepare_thing(planner, stm_ctx, x).await?,
 					Value::Object(x) if !stm_ctx.stm.is_select() => {
-						self.prepare_object(stm_ctx.stm, x).await?
+						self.prepare_object(stm_ctx.stm, x)?
 					}
 					v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 					v => {
@@ -211,12 +211,11 @@ impl Iterator {
 		if ctx.stm.is_deferable() {
 			self.ingest(Iterable::Yield(table))
 		} else {
-			match ctx.stm.is_guaranteed() {
-				false => planner.add_iterables(stk, ctx, table, p, self).await?,
-				true => {
-					self.guaranteed = Some(Iterable::Yield(table.clone()));
-					planner.add_iterables(stk, ctx, table, p, self).await?;
-				}
+			if !ctx.stm.is_guaranteed() {
+				planner.add_iterables(stk, ctx, table, p, self).await?
+			} else {
+				self.guaranteed = Some(Iterable::Yield(table.clone()));
+				planner.add_iterables(stk, ctx, table, p, self).await?;
 			}
 		}
 		// All ingested ok
@@ -254,7 +253,7 @@ impl Iterator {
 	) -> Result<()> {
 		ensure!(!ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Add the records to the iterator
-		for (count, v) in v.into_iter().enumerate() {
+		for (count, v) in v.clone().into_iter().enumerate() {
 			if ctx.stm.is_deferable() {
 				self.ingest(Iterable::Defer(v))
 			} else {
@@ -372,7 +371,7 @@ impl Iterator {
 		for v in v {
 			match v {
 				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-				Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v).await?,
+				Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
 				Expr::Idiom(x) => {
 					//edges
 					todo!()
@@ -381,7 +380,7 @@ impl Iterator {
 					let v = v.compute(stk, ctx, opt, doc).await.catch_return()?;
 					match v {
 						Value::Object(o) if !stm_ctx.stm.is_select() => {
-							self.prepare_object(stm_ctx.stm, v)?
+							self.prepare_object(stm_ctx.stm, o)?;
 						}
 						Value::Thing(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),

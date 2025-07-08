@@ -36,13 +36,35 @@ pub use api::ApiAction;
 
 use std::fmt::{self, Display};
 
+#[derive(Clone, Debug, Default)]
 pub enum DefineKind {
+	#[default]
 	Default,
 	Overwrite,
 	IfNotExists,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+impl From<crate::expr::statements::define::DefineKind> for DefineKind {
+	fn from(value: crate::expr::statements::define::DefineKind) -> Self {
+		match value {
+			crate::expr::statements::define::DefineKind::Default => DefineKind::Default,
+			crate::expr::statements::define::DefineKind::Overwrite => DefineKind::Overwrite,
+			crate::expr::statements::define::DefineKind::IfNotExists => DefineKind::IfNotExists,
+		}
+	}
+}
+
+impl From<DefineKind> for crate::expr::statements::define::DefineKind {
+	fn from(value: DefineKind) -> Self {
+		match value {
+			DefineKind::Default => crate::expr::statements::define::DefineKind::Default,
+			DefineKind::Overwrite => crate::expr::statements::define::DefineKind::Overwrite,
+			DefineKind::IfNotExists => crate::expr::statements::define::DefineKind::IfNotExists,
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),

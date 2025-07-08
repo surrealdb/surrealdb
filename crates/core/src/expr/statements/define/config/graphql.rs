@@ -89,16 +89,17 @@ impl From<String> for TableConfig {
 
 pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
 	match val {
-		Value::Strand(s) => Ok(s.0.into()),
-		Value::Table(n) => Ok(n.0.into()),
+		Value::Strand(s) => Ok(Ident::from_strand(s)),
+		Value::Table(n) => Ok(Ident::from_strand(n)),
 		Value::Idiom(ref i) => match &i[..] {
-			[Part::Field(n)] => Ok(n.into_raw_string().into()),
+			[Part::Field(n)] => Ok(n.clone()),
 			_ => Err(val),
 		},
 		_ => Err(val),
 	}
 }
 
+/*
 impl TryFrom<Value> for TableConfig {
 	type Error = Value;
 
@@ -110,7 +111,7 @@ impl TryFrom<Value> for TableConfig {
 			_ => Err(value),
 		}
 	}
-}
+}*/
 
 impl Display for TableConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

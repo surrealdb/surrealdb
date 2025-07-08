@@ -3,7 +3,7 @@ use crate::sql::index::Distance;
 use crate::sql::{Expr, Kind};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum PrefixOperator {
 	/// `!`
@@ -58,7 +58,7 @@ impl fmt::Display for PrefixOperator {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum PostfixOperator {
 	Range,
@@ -100,7 +100,7 @@ impl fmt::Display for PostfixOperator {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum BinaryOperator {
 	/// `-`

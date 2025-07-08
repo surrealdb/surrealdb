@@ -2,13 +2,11 @@ use crate::sql::Ident;
 use crate::sql::changefeed::ChangeFeed;
 use crate::val::Strand;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,
@@ -23,8 +21,8 @@ impl Display for DefineDatabaseStatement {
 		write!(f, "DEFINE DATABASE")?;
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {

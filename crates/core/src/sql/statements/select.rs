@@ -1,11 +1,10 @@
 use crate::sql::order::Ordering;
 use crate::sql::{
-	Cond, Explain, Expr, Fetchs, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Version,
-	With,
+	Cond, Explain, Expr, Fetchs, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, With,
 };
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
@@ -39,7 +38,7 @@ impl fmt::Display for SelectStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}
@@ -86,7 +85,7 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 			expr: v.expr.into(),
 			omit: v.omit.map(Into::into),
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),
@@ -110,7 +109,7 @@ impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 			expr: v.expr.into(),
 			omit: v.omit.map(Into::into),
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),

@@ -8,7 +8,7 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineApiStatement {
 	pub kind: DefineKind,
@@ -24,8 +24,8 @@ impl Display for DefineApiStatement {
 		write!(f, "DEFINE API")?;
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
@@ -84,7 +84,7 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct ApiDefinition {
 	pub id: Option<u32>,
@@ -102,7 +102,7 @@ impl Display for ApiDefinition {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiAction {
 	pub methods: Vec<Method>,
@@ -118,7 +118,6 @@ impl Display for ApiAction {
 			write!(f, "{}", config)?;
 		}
 		write!(f, "THEN {}", self.action)?;
-		drop(indent);
 		Ok(())
 	}
 }

@@ -201,7 +201,7 @@ impl Parser<'_> {
 	where
 		VP: ValueParseFunc,
 	{
-		let table = self.next_token_value::<Ident>()?.0;
+		let table = self.next_token_value::<Ident>()?;
 		expected!(self, t!(":"));
 		let peek = self.peek();
 		let key = match peek.kind {
@@ -266,8 +266,8 @@ impl Parser<'_> {
 				if self.settings.flexible_record_id {
 					let next = self.peek_whitespace1();
 					if Self::kind_is_identifier(next.kind) {
-						let ident = self.parse_flexible_ident()?.0;
-						RecordIdKey::String(ident);
+						let ident = self.parse_flexible_ident()?;
+						RecordIdKey::String(ident.into_string());
 					}
 				}
 
@@ -293,7 +293,7 @@ impl Parser<'_> {
 		};
 
 		Ok(RecordId {
-			table,
+			table: table.into_string(),
 			key,
 		})
 	}

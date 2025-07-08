@@ -77,7 +77,9 @@ impl Document {
 			Force::Table(tb)
 				if tb.first().is_some_and(|tb| {
 					tb.view.as_ref().is_some_and(|v| {
-						self.id.as_ref().is_some_and(|id| v.what.iter().any(|p| p.0 == id.table))
+						self.id
+							.as_ref()
+							.is_some_and(|id| v.what.iter().any(|p| **p == id.table.as_str()))
 					})
 				}) =>
 			{
@@ -591,9 +593,9 @@ impl Document {
 		val: Value,
 	) -> Result<()> {
 		// Key for the value count
-		let mut key_c = Idiom(vec![Part::Field(Ident("__".to_owned()))]);
-		key_c.0.push(Part::Field(Ident(key.to_hash())));
-		key_c.0.push(Part::Field(Ident("c".to_owned())));
+		let mut key_c = Idiom(vec![Part::field("__".to_owned()).unwrap()]);
+		key_c.0.push(Part::field(key.to_hash()).unwrap());
+		key_c.0.push(Part::field("c".to_owned()).unwrap());
 
 		match fdc.act {
 			FieldAction::Add => {
@@ -613,7 +615,7 @@ impl Document {
 								right: Box::new(Expr::Binary {
 									left: Box::new(Expr::Idiom(key.clone())),
 									op: BinaryOperator::MoreThan,
-									right: Box::new(val_lit),
+									right: Box::new(val_lit.clone()),
 								}),
 							},
 							val_lit,
@@ -668,9 +670,9 @@ impl Document {
 		val: Value,
 	) -> Result<()> {
 		// Key for the value count
-		let mut key_c = Idiom(vec![Part::Field(Ident("__".to_owned()))]);
-		key_c.0.push(Part::Field(Ident(key.to_hash())));
-		key_c.0.push(Part::Field(Ident("c".to_owned())));
+		let mut key_c = Idiom(vec![Part::field("__".to_owned()).unwrap()]);
+		key_c.0.push(Part::field(key.to_hash()).unwrap());
+		key_c.0.push(Part::field("c".to_owned()).unwrap());
 		//
 		match fdc.act {
 			FieldAction::Add => {
@@ -747,9 +749,9 @@ impl Document {
 		// Key for the value count
 
 		let key_c = Idiom(vec![
-			Part::Field(Ident("__".to_owned())),
-			Part::Field(Ident(key.to_hash())),
-			Part::Field(Ident("c".to_owned())),
+			Part::field("__".to_owned()).unwrap(),
+			Part::field(key.to_hash()).unwrap(),
+			Part::field("c".to_owned()).unwrap(),
 		]);
 		//
 		set_ops.push(Assignment {

@@ -33,7 +33,7 @@ impl From<DefineTableStatement> for Value {
 		if let Some(id) = v.id {
 			h.insert("id", id.into());
 		}
-		h.insert("name", v.name.0.into());
+		h.insert("name", v.name.into_strand().into());
 		Value::Object(Object::from(h))
 	}
 }

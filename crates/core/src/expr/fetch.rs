@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Function, Idiom, Literal};
+use crate::expr::{Expr, Function, Ident, Idiom, Literal};
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Strand, Value};
@@ -64,7 +64,7 @@ impl Fetch {
 		idioms: &mut Vec<Idiom>,
 	) -> Result<()> {
 		let strand_or_idiom = |v: Expr| match v {
-			Expr::Literal(Literal::Strand(s)) => Ok(Idiom::field(s.into())),
+			Expr::Literal(Literal::Strand(s)) => Ok(Idiom::field(Ident::from_strand(s))),
 			Expr::Idiom(i) => Ok(i.clone()),
 			v => Err(Error::InvalidFetch {
 				value: v,

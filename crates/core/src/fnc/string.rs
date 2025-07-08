@@ -81,11 +81,12 @@ pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value>
 				let increase = replace.len() - search.len();
 				limit(
 					"string::replace",
-					val.len()
-						.saturating_add(val.matches(&search.0).count().saturating_mul(increase)),
+					val.len().saturating_add(
+						val.matches(search.as_str()).count().saturating_mul(increase),
+					),
 				)?;
 			}
-			Ok(val.replace(&search.0, &replace).into())
+			Ok(val.replace(search.as_str(), &replace).into())
 		}
 		Value::Regex(search) => {
 			let mut new_val = String::with_capacity(val.len());
@@ -252,6 +253,7 @@ pub mod html {
 pub mod is {
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
+	use crate::syn;
 	use crate::val::{Datetime, RecordId, Value};
 	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;

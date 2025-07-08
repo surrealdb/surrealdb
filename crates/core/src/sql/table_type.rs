@@ -3,7 +3,7 @@ use std::fmt;
 use std::fmt::Display;
 
 /// The type of records stored by a table
-#[derive(Debug, Default, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum TableType {
 	#[default]
@@ -58,7 +58,7 @@ impl From<crate::expr::TableType> for TableType {
 	}
 }
 
-#[derive(Debug, Default, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Clone)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Relation {
 	pub from: Option<Kind>,

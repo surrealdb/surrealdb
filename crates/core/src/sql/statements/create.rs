@@ -1,7 +1,7 @@
-use crate::sql::{Data, Expr, Output, Timeout, Version};
+use crate::sql::{Data, Expr, Output, Timeout, fmt::Fmt};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
@@ -26,7 +26,7 @@ impl fmt::Display for CreateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.data {
 			write!(f, " {v}")?
 		}
@@ -50,7 +50,7 @@ impl From<CreateStatement> for crate::expr::statements::CreateStatement {
 	fn from(v: CreateStatement) -> Self {
 		crate::expr::statements::CreateStatement {
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.map(Into::into),
@@ -64,7 +64,7 @@ impl From<crate::expr::statements::CreateStatement> for CreateStatement {
 	fn from(v: crate::expr::statements::CreateStatement) -> Self {
 		CreateStatement {
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.map(Into::into),

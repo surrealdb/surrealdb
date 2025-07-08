@@ -149,7 +149,7 @@ impl RelateStatement {
 					// The relation does not have a specific record id
 					Value::Table(tb) => match self.data {
 						// There is a data clause so check for a record id
-						Some(data) => {
+						Some(ref data) => {
 							let id = match data.rid(stk, &ctx, opt).await? {
 								Some(id) => id.generate(tb, false)?,
 								None => RecordId::random_for_table(tb.into_string()),
@@ -184,7 +184,7 @@ impl RelateStatement {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
-				1 => Ok(a.remove(0)),
+				1 => Ok(a.pop()),
 				// There were no results
 				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
 			},

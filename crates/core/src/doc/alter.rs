@@ -34,7 +34,7 @@ impl Document {
 					Some(data) => match data.rid(stk, ctx, opt).await? {
 						// Generate a new id from the id field
 						// TODO: Handle null byte
-						Some(id) => id.generate(tb.clone().into(), false)?,
+						Some(id) => id.generate(tb.clone().into_strand(), false)?,
 						// Generate a new random table id
 						None => RecordId::random_for_table(tb.clone().into_string()),
 					},

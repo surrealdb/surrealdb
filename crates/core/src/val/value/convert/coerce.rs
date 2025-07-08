@@ -5,11 +5,11 @@ use std::fmt::{self};
 use std::hash::BuildHasher;
 
 use crate::expr::kind::{HasKind, KindLiteral};
-use crate::expr::{Ident, Kind, Regex};
+use crate::expr::{Ident, Kind};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Strand, Uuid, Value,
+	RecordId, Regex, Strand, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]

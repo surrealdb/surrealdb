@@ -254,7 +254,7 @@ impl Parser<'_> {
 		name: Ident,
 	) -> ParseResult<Part> {
 		let args = self.parse_function_args(ctx).await?;
-		Ok(Part::Method(name.0, args))
+		Ok(Part::Method(name.into_string(), args))
 	}
 	/// Parse the part after the `.{` in an idiom
 	pub(super) async fn parse_curly_part(&mut self, ctx: &mut Stk) -> ParseResult<Part> {
@@ -343,15 +343,15 @@ impl Parser<'_> {
 	) -> ParseResult<Option<RecurseInstruction>> {
 		let instruction = if self.eat(t!("+")) {
 			let kind = self.next_token_value::<Ident>()?;
-			if kind.0.eq_ignore_ascii_case("path") {
+			if kind.eq_ignore_ascii_case("path") {
 				let mut inclusive = false;
 				loop {
 					if self.eat(t!("+")) {
 						let kind = self.next_token_value::<Ident>()?;
-						if kind.0.eq_ignore_ascii_case("inclusive") {
+						if kind.eq_ignore_ascii_case("inclusive") {
 							inclusive = true
 						} else {
-							bail!("Unexpected option `{}` expected inclusive",kind.0, @self.last_span());
+							bail!("Unexpected option `{}` expected inclusive",kind, @self.last_span());
 						}
 					} else {
 						break;
@@ -360,15 +360,15 @@ impl Parser<'_> {
 				Some(RecurseInstruction::Path {
 					inclusive,
 				})
-			} else if kind.0.eq_ignore_ascii_case("collect") {
+			} else if kind.eq_ignore_ascii_case("collect") {
 				let mut inclusive = false;
 				loop {
 					if self.eat(t!("+")) {
 						let kind = self.next_token_value::<Ident>()?;
-						if kind.0.eq_ignore_ascii_case("inclusive") {
+						if kind.eq_ignore_ascii_case("inclusive") {
 							inclusive = true
 						} else {
-							bail!("Unexpected option `{}` expected inclusive",kind.0, @self.last_span());
+							bail!("Unexpected option `{}` expected inclusive",kind, @self.last_span());
 						}
 					} else {
 						break;
@@ -377,7 +377,7 @@ impl Parser<'_> {
 				Some(RecurseInstruction::Collect {
 					inclusive,
 				})
-			} else if kind.0.eq_ignore_ascii_case("shortest") {
+			} else if kind.eq_ignore_ascii_case("shortest") {
 				expected!(self, t!("="));
 				let token = self.peek();
 				let expects = match token.kind {
@@ -393,7 +393,7 @@ impl Parser<'_> {
 				loop {
 					if self.eat(t!("+")) {
 						let kind = self.next_token_value::<Ident>()?;
-						if kind.0.eq_ignore_ascii_case("inclusive") {
+						if kind.eq_ignore_ascii_case("inclusive") {
 							inclusive = true
 						} else {
 							bail!("Unexpected option `{}` expected inclusive",kind, @self.last_span());

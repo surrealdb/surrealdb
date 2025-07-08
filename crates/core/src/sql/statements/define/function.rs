@@ -4,7 +4,7 @@ use crate::sql::{Block, Ident, Kind, Permission};
 use crate::val::Strand;
 use std::fmt::{self, Display, Write};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFunctionStatement {
 	pub kind: DefineKind,
@@ -21,10 +21,10 @@ impl fmt::Display for DefineFunctionStatement {
 		write!(f, "DEFINE FUNCTION")?;
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " fn::{}(", self.name.0)?;
+		write!(f, " fn::{}(", &*self.name)?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;

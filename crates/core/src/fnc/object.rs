@@ -73,13 +73,22 @@ pub fn len((object,): (Object,)) -> Result<Value> {
 }
 
 pub fn keys((object,): (Object,)) -> Result<Value> {
-	Ok(Value::Array(Array(object.keys().map(|v| Value::Strand(Strand(v.to_owned()))).collect())))
+	Ok(Value::Array(Array(
+		object
+			.keys()
+			.map(|v| {
+				//TODO: Null bytes
+				let strand = unsafe { Strand::new_unchecked(v.clone()) };
+				Value::Strand(strand)
+			})
+			.collect(),
+	)))
 }
 
 pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 	match targets {
 		Value::Strand(target) => {
-			object.remove(&target);
+			object.remove(target.as_str());
 		}
 		Value::Array(targets) => {
 			let mut remove_targets = Vec::with_capacity(targets.len());

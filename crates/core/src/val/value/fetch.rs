@@ -85,7 +85,7 @@ impl Value {
 				},
 				Part::Field(f) => match this {
 					Value::Object(o) => {
-						let Some(x) = o.get_mut(f.0.as_str()) else {
+						let Some(x) = o.get_mut(f.as_str()) else {
 							return Ok(());
 						};
 						this = x;

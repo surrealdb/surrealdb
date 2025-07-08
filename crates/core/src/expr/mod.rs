@@ -104,7 +104,6 @@ pub use self::part::Part;
 pub use self::permission::{Permission, Permissions};
 pub use self::plan::{LogicalPlan, TopLevelExpr};
 pub use self::record_id::RecordIdLit;
-pub use self::regex::Regex;
 pub use self::scoring::Scoring;
 pub use self::script::Script;
 pub use self::split::{Split, Splits};

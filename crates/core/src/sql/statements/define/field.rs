@@ -7,7 +7,7 @@ use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Eq, PartialEq, Default)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DefineDefault {
 	#[default]
@@ -31,7 +31,7 @@ impl From<DefineDefault> for crate::expr::statements::define::DefineDefault {
 }
 
 impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
-	fn from(value: DefineDefault) -> Self {
+	fn from(value: crate::expr::statements::define::DefineDefault) -> Self {
 		match value {
 			crate::expr::statements::define::DefineDefault::None => DefineDefault::None,
 			crate::expr::statements::define::DefineDefault::Always(expr) => {
@@ -44,7 +44,7 @@ impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Default)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
@@ -68,23 +68,23 @@ impl Display for DefineFieldStatement {
 		write!(f, "DEFINE FIELD")?;
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
 		if self.flex {
 			write!(f, " FLEXIBLE")?
 		}
-		if let Some(ref v) = self.kind {
+		if let Some(ref v) = self.field_kind {
 			write!(f, " TYPE {v}")?
 		}
 
 		match self.default {
 			DefineDefault::None => {}
-			DefineDefault::Always(expr) => {
+			DefineDefault::Always(ref expr) => {
 				write!(f, " DEFAULT ALWAYS {expr}")?;
 			}
-			DefineDefault::Set(expr) => {
+			DefineDefault::Set(ref expr) => {
 				write!(f, " DEFAULT {expr}")?;
 			}
 		}

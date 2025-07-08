@@ -3,7 +3,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
@@ -30,7 +30,7 @@ impl From<crate::expr::reference::Reference> for Reference {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ReferenceDeleteStrategy {
 	Reject,
@@ -96,7 +96,7 @@ impl From<crate::expr::reference::ReferenceDeleteStrategy> for ReferenceDeleteSt
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);
 

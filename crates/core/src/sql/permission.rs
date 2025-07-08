@@ -4,7 +4,7 @@ use crate::sql::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
 use std::fmt::{self, Display, Formatter, Write};
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Permissions {
 	pub select: Permission,
@@ -136,7 +136,7 @@ impl From<crate::expr::Permissions> for Permissions {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum PermissionKind {
 	Select,
 	Create,
@@ -161,7 +161,7 @@ impl Display for PermissionKind {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Permission {
 	None,

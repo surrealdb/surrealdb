@@ -4,7 +4,7 @@ use crate::sql::{Closure, Expr, RecordIdLit, Regex};
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Strand, Uuid};
 use rust_decimal::Decimal;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Literal {
 	None,
@@ -97,7 +97,7 @@ impl From<crate::expr::Literal> for Literal {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,

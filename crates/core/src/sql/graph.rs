@@ -5,7 +5,7 @@ use std::fmt::{self, Display, Formatter, Write};
 
 use super::Ident;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default)]
 pub struct Graph {
 	pub dir: Dir,
 	pub expr: Option<Fields>,
@@ -73,7 +73,7 @@ impl From<Graph> for crate::expr::Graph {
 		Self {
 			dir: v.dir.into(),
 			expr: v.expr.into_iter().map(From::from).collect(),
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),
 			group: v.group.map(Into::into),
@@ -90,7 +90,7 @@ impl From<crate::expr::Graph> for Graph {
 		Graph {
 			dir: v.dir.into(),
 			expr: v.expr.map(Into::into),
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),
 			group: v.group.map(Into::into),
@@ -102,7 +102,7 @@ impl From<crate::expr::Graph> for Graph {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum GraphSubject {
 	Table(Ident),
@@ -122,7 +122,10 @@ impl From<GraphSubject> for crate::expr::graph::GraphSubject {
 	fn from(v: GraphSubject) -> Self {
 		match v {
 			GraphSubject::Table(tb) => Self::Table(tb.into()),
-			GraphSubject::Range(tb, rng) => Self::Range(tb.into(), rng.into()),
+			GraphSubject::Range(table, range) => Self::Range {
+				table: table.into(),
+				range: range.into(),
+			},
 		}
 	}
 }
@@ -131,7 +134,10 @@ impl From<crate::expr::graph::GraphSubject> for GraphSubject {
 	fn from(v: crate::expr::graph::GraphSubject) -> Self {
 		match v {
 			crate::expr::graph::GraphSubject::Table(tb) => Self::Table(tb.into()),
-			crate::expr::graph::GraphSubject::Range(tb, rng) => Self::Range(tb.into(), rng.into()),
+			crate::expr::graph::GraphSubject::Range {
+				table,
+				range,
+			} => Self::Range(table.into(), range.into()),
 		}
 	}
 }

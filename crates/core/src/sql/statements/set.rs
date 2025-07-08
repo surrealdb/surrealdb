@@ -1,11 +1,11 @@
-use crate::sql::{Expr, Kind};
+use crate::sql::{Expr, Ident, Kind};
 
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SetStatement {
-	pub name: String,
+	pub name: Ident,
 	pub what: Expr,
 	pub kind: Option<Kind>,
 }
@@ -24,7 +24,7 @@ impl fmt::Display for SetStatement {
 impl From<SetStatement> for crate::expr::statements::SetStatement {
 	fn from(v: SetStatement) -> Self {
 		crate::expr::statements::SetStatement {
-			name: v.name,
+			name: v.name.into(),
 			what: v.what.into(),
 			kind: v.kind.map(Into::into),
 		}
@@ -34,7 +34,7 @@ impl From<SetStatement> for crate::expr::statements::SetStatement {
 impl From<crate::expr::statements::SetStatement> for SetStatement {
 	fn from(v: crate::expr::statements::SetStatement) -> Self {
 		SetStatement {
-			name: v.name,
+			name: v.name.into(),
 			what: v.what.into(),
 			kind: v.kind.map(Into::into),
 		}

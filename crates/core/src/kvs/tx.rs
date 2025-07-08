@@ -4,16 +4,16 @@ use super::{Key, KeyEncode, Val, Version, util};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::expr::Permissions;
 use crate::expr::statements::define::{
 	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
 };
 use crate::expr::statements::{
 	AccessGrant, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineParamStore,
-	DefineTableStatement, DefineUserStatement, LiveStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStore, DefineTableStatement,
+	DefineUserStatement, LiveStatement,
 };
+use crate::expr::{Ident, Permissions};
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
@@ -1783,7 +1783,8 @@ impl Transaction {
 						..
 					}) if !strict => {
 						let val = DefineNamespaceStatement {
-							name: ns.to_owned().into(),
+							// TODO: Null byte validity
+							name: unsafe { Ident::new_unchecked(ns.to_owned()) },
 							..Default::default()
 						};
 						let val = {
@@ -1840,7 +1841,7 @@ impl Transaction {
 						}
 						// Next, dynamically define the database
 						let val = DefineDatabaseStatement {
-							name: db.to_owned().into(),
+							name: unsafe { Ident::new_unchecked(ns.to_owned()) },
 							..Default::default()
 						};
 						let val = {
@@ -1907,7 +1908,7 @@ impl Transaction {
 						}
 						// Next, dynamically define the table
 						let val = DefineTableStatement {
-							name: tb.to_owned().into(),
+							name: unsafe { Ident::new_unchecked(ns.to_owned()) },
 							permissions: Permissions::none(),
 							..Default::default()
 						};

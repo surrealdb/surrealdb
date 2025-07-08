@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
@@ -208,12 +208,12 @@ impl Display for Kind {
 				}
 			}
 			Kind::Set(k, l) => match (k, l) {
-				(k, None) if matches!(*k, Kind::Any) => write!(f, "set"),
+				(k, None) if matches!(**k, Kind::Any) => write!(f, "set"),
 				(k, None) => write!(f, "set<{k}>"),
 				(k, Some(l)) => write!(f, "set<{k}, {l}>"),
 			},
 			Kind::Array(k, l) => match (k, l) {
-				(k, None) if matches!(*k, Kind::Any) => write!(f, "array"),
+				(k, None) if matches!(**k, Kind::Any) => write!(f, "array"),
 				(k, None) => write!(f, "array<{k}>"),
 				(k, Some(l)) => write!(f, "array<{k}, {l}>"),
 			},

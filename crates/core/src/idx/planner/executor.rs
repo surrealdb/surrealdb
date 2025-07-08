@@ -241,7 +241,7 @@ impl InnerQueryExecutor {
 		}
 
 		Ok(Self {
-			table: table.0.clone(),
+			table: table.clone().into_string(),
 			ft_map,
 			mr_entries,
 			exp_entries,
@@ -967,7 +967,7 @@ impl QueryExecutor {
 	) -> Result<bool> {
 		if let Some(ft) = self.0.exp_entries.get(exp) {
 			let ix = ft.0.index_option.ix_ref();
-			if self.0.table.eq(&ix.what.0) {
+			if self.0.table == *ix.what {
 				return self.matches_with_doc_id(ctx, thg, ft).await;
 			}
 			return self.matches_with_value(stk, ctx, opt, ft, l, r).await;

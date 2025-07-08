@@ -84,7 +84,7 @@ impl From<&str> for Access {
 
 impl From<Ident> for Access {
 	fn from(v: Ident) -> Self {
-		Self(v.0)
+		Self(v.into_string())
 	}
 }
 

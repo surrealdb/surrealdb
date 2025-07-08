@@ -42,8 +42,8 @@ pub enum Part {
 
 impl Part {
 	/// Returns a part which is equivalent to `.bla` if called with string `bla`.
-	pub fn field(field: String) -> Self {
-		Part::Field(Ident(field))
+	pub fn field(field: String) -> Option<Self> {
+		Some(Part::Field(Ident::new(field)?))
 	}
 
 	/// Returns a part which is equivalent to `[1]` if called with integer `1`.

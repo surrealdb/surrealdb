@@ -34,6 +34,10 @@ impl Ident {
 		Ident(str)
 	}
 
+	pub fn from_strand(str: Strand) -> Self {
+		Ident(str.into_string())
+	}
+
 	/// Convert ident into a strand.
 	pub fn into_strand(self) -> Strand {
 		// Safety: both ident and Strand uphold the no-null byte invariant.
@@ -44,30 +48,7 @@ impl Ident {
 	pub fn into_string(self) -> String {
 		self.0
 	}
-}
 
-//TODO: Remove these once we start properly managing null bytes.
-impl From<String> for Ident {
-	fn from(v: String) -> Self {
-		Self(v)
-	}
-}
-
-//TODO: Remove these once we start properly managing null bytes.
-impl From<&str> for Ident {
-	fn from(v: &str) -> Self {
-		Self::from(String::from(v))
-	}
-}
-
-impl Deref for Ident {
-	type Target = String;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl Ident {
 	/// Convert the Ident to a raw String
 	pub fn into_raw_string(&self) -> String {
 		self.0.to_string()
@@ -91,6 +72,13 @@ impl Ident {
 	/// Checks if this field is the `geometries` field
 	pub(crate) fn is_geometries(&self) -> bool {
 		self.0.as_str() == "geometries"
+	}
+}
+
+impl Deref for Ident {
+	type Target = String;
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 

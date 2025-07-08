@@ -1,7 +1,7 @@
 use crate::sql::Ident;
 use std::fmt::{self, Display};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveFunctionStatement {
 	pub name: Ident,
@@ -15,7 +15,7 @@ impl Display for RemoveFunctionStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " fn::{}", self.name.0)?;
+		write!(f, " fn::{}", &*self.name)?;
 		Ok(())
 	}
 }

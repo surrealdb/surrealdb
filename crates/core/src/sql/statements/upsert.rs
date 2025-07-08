@@ -1,4 +1,4 @@
-use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
+use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With fmt::Fmt};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
@@ -21,7 +21,7 @@ impl fmt::Display for UpsertStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}
@@ -51,7 +51,7 @@ impl From<UpsertStatement> for crate::expr::statements::UpsertStatement {
 	fn from(v: UpsertStatement) -> Self {
 		Self {
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),
@@ -67,7 +67,7 @@ impl From<crate::expr::statements::UpsertStatement> for UpsertStatement {
 	fn from(v: crate::expr::statements::UpsertStatement) -> Self {
 		Self {
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),

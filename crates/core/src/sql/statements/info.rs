@@ -1,7 +1,7 @@
 use crate::sql::{Base, Expr, Ident};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and

@@ -239,7 +239,9 @@ impl Analyzer {
 		tks: &mut Vec<Tokens>,
 	) -> Result<()> {
 		match val {
-			Value::Strand(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s.0).await?),
+			Value::Strand(s) => {
+				tks.push(self.generate_tokens(stk, ctx, opt, stage, s.into_string()).await?)
+			}
 			Value::Number(n) => {
 				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_string()).await?)
 			}
@@ -269,7 +271,7 @@ impl Analyzer {
 		stage: FilteringStage,
 		mut input: String,
 	) -> Result<Tokens> {
-		if let Some(function_name) = self.az.function.as_ref().map(|i| i.0.clone()) {
+		if let Some(function_name) = self.az.function.as_ref().map(|i| i.as_str().to_owned()) {
 			let val = Function::Custom(function_name.clone())
 				// TODO: Null byte check
 				.compute(

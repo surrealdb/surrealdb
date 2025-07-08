@@ -156,8 +156,8 @@ impl Value {
 					Part::Where(w) => {
 						if path.len() == 1 {
 							let mut new_res = Vec::new();
-							for (i, v) in v.0.into_iter().enumerate() {
-								let cur = v.into();
+							for (i, v) in v.0.iter().enumerate() {
+								let cur = v.clone().into();
 								if !w
 									.compute(stk, ctx, opt, Some(&cur))
 									.await

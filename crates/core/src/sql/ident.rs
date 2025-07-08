@@ -61,13 +61,13 @@ impl Deref for Ident {
 
 impl From<crate::expr::Ident> for Ident {
 	fn from(v: crate::expr::Ident) -> Self {
-		Self(v.0)
+		Self(v.into_string())
 	}
 }
 
 impl From<Ident> for crate::expr::Ident {
 	fn from(v: Ident) -> Self {
-		Self(v.0)
+		Self(v.into_string())
 	}
 }
 

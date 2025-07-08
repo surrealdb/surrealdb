@@ -11,7 +11,7 @@ use std::str::FromStr;
 use super::Expr;
 
 /// The type of access methods available
-#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AccessType {
 	Record(RecordAccess),
@@ -257,7 +257,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks
 	}
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Hash, Clone)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
 	pub signup: Option<Expr>,
@@ -301,9 +301,7 @@ impl Default for BearerAccess {
 		Self {
 			kind: BearerAccessType::Bearer,
 			subject: BearerAccessSubject::User,
-			jwt: JwtAccess {
-				..Default::default()
-			},
+			jwt: JwtAccess::default(),
 		}
 	}
 }

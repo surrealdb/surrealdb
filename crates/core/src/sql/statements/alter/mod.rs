@@ -10,6 +10,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
+#[derive(Clone, Debug)]
 pub enum AlterKind<T> {
 	Set(T),
 	Drop,
@@ -48,8 +49,7 @@ where
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AlterStatement {
 	Table(AlterTableStatement),
@@ -96,7 +96,7 @@ mod tests {
 	#[test]
 	fn check_alter_serialize_table() {
 		let stm = AlterStatement::Table(AlterTableStatement {
-			name: Ident::from("test"),
+			name: Ident::new("test".to_owned()).unwrap(),
 			..Default::default()
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
@@ -106,7 +106,7 @@ mod tests {
 	#[test]
 	fn check_alter_serialize_sequence() {
 		let stm = AlterStatement::Sequence(AlterSequenceStatement {
-			name: Ident::from("test"),
+			name: Ident::new("test".to_owned()).unwrap(),
 			..Default::default()
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
@@ -116,8 +116,8 @@ mod tests {
 	#[test]
 	fn check_alter_serialize_field() {
 		let stm = AlterStatement::Field(AlterFieldStatement {
-			name: Idiom::from("test"),
-			what: Ident::from("test"),
+			name: Ident::new("test".to_owned()).unwrap(),
+			what: Ident::new("test".to_owned()).unwrap(),
 			..Default::default()
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();

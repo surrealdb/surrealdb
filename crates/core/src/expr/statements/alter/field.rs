@@ -19,15 +19,17 @@ use uuid::Uuid;
 
 use super::AlterKind;
 
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum AlterDefault {
+	#[default]
 	None,
 	Drop,
 	Always(Expr),
-	Change(Expr),
+	Set(Expr),
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AlterFieldStatement {
@@ -105,8 +107,8 @@ impl AlterFieldStatement {
 		match self.default {
 			AlterDefault::None => {}
 			AlterDefault::Drop => df.default = DefineDefault::None,
-			AlterDefault::Always(expr) => df.default = DefineDefault::Always(expr),
-			AlterDefault::Change(expr) => df.default = DefineDefault::Set(expr),
+			AlterDefault::Always(ref expr) => df.default = DefineDefault::Always(expr.clone()),
+			AlterDefault::Set(ref expr) => df.default = DefineDefault::Set(expr.clone()),
 		}
 
 		if let Some(permissions) = &self.permissions {
@@ -179,7 +181,7 @@ impl Display for AlterFieldStatement {
 		}
 
 		match self.kind {
-			AlterKind::Set(x) => write!(f, " TYPE {x}")?,
+			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,
 			AlterKind::Drop => write!(f, " DROP TYPE")?,
 			AlterKind::None => {}
 		}
@@ -191,35 +193,35 @@ impl Display for AlterFieldStatement {
 		}
 
 		match self.value {
-			AlterKind::Set(v) => write!(f, " VALUE {v}")?,
+			AlterKind::Set(ref v) => write!(f, " VALUE {v}")?,
 			AlterKind::Drop => write!(f, " DROP VALUE")?,
 			AlterKind::None => {}
 		}
 
 		match self.assert {
-			AlterKind::Set(v) => write!(f, " ASSERT {v}")?,
+			AlterKind::Set(ref v) => write!(f, " ASSERT {v}")?,
 			AlterKind::Drop => write!(f, " DROP ASSERT")?,
 			AlterKind::None => {}
 		}
 
 		match self.default {
 			AlterDefault::None => {}
-			AlterDefault::Drop => write!(f, " DROP DEFAULT"),
-			AlterDefault::Always(expr) => write!(f, "DEFAULT ALWAYS {expr}"),
-			AlterDefault::Change(expr) => write!(f, "DEFAULT {expr}"),
+			AlterDefault::Drop => write!(f, " DROP DEFAULT")?,
+			AlterDefault::Always(ref expr) => write!(f, "DEFAULT ALWAYS {expr}")?,
+			AlterDefault::Set(ref expr) => write!(f, "DEFAULT {expr}")?,
 		}
 		if let Some(permissions) = &self.permissions {
 			write!(f, "{permissions}")?;
 		}
 
 		match self.comment {
-			AlterKind::Set(v) => write!(f, " COMMENT {v}")?,
+			AlterKind::Set(ref v) => write!(f, " COMMENT {v}")?,
 			AlterKind::Drop => write!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}
 
 		match self.reference {
-			AlterKind::Set(v) => write!(f, " REFERENCE {v}")?,
+			AlterKind::Set(ref v) => write!(f, " REFERENCE {v}")?,
 			AlterKind::Drop => write!(f, " DROP REFERENCE")?,
 			AlterKind::None => {}
 		}

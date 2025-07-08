@@ -37,6 +37,12 @@ pub struct Assignment {
 	pub value: Expr,
 }
 
+impl fmt::Display for Assignment {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		write!(f, "{} {} {}", self.place, self.operator, self.value)
+	}
+}
+
 impl Default for Data {
 	fn default() -> Self {
 		Self::EmptyExpression

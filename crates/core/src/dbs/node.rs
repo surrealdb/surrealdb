@@ -1,5 +1,5 @@
 use crate::expr::statements::info::InfoStructure;
-use crate::val::Value;
+use crate::val::{Object, Value};
 use revision::{Error, revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -93,11 +93,11 @@ impl Display for Node {
 
 impl InfoStructure for Node {
 	fn structure(self) -> Value {
-		Value::Object(map! {
-			"id".to_string() => Value::Uuid(self.id),
+		Value::Object(Object(map! {
+			"id".to_string() => Value::Uuid(self.id.into()),
 			"seen".to_string() => self.hb.structure(),
 			"active".to_string() => Value::Bool(!self.gc),
-		})
+		}))
 	}
 }
 

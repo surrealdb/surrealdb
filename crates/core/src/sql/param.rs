@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::{fmt, str};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Param(pub String);
 
@@ -25,6 +25,10 @@ impl Param {
 	/// Caller should ensure that the string does not contain a null byte.
 	pub unsafe fn new_unchecked(str: String) -> Self {
 		Self(str)
+	}
+
+	pub fn ident(self) -> Ident {
+		unsafe { Ident::new_unchecked(self.0) }
 	}
 
 	// Convert into a string.

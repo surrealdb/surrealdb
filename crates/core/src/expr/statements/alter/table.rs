@@ -18,7 +18,7 @@ use std::ops::Deref;
 use super::AlterKind;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterTableStatement {
 	pub name: Ident,
@@ -79,7 +79,7 @@ impl AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(x) => dt.comment = Some(x),
+			AlterKind::Set(ref x) => dt.comment = Some(x.clone()),
 
 			AlterKind::Drop => dt.comment = None,
 			AlterKind::None => {}
@@ -122,18 +122,22 @@ impl Display for AlterTableStatement {
 				TableType::Relation(rel) => {
 					f.write_str(" RELATION")?;
 					if let Some(Kind::Record(kind)) = &rel.from {
-						write!(
-							f,
-							" IN {}",
-							kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-						)?;
+						write!(f, " IN ",)?;
+						for (idx, k) in kind.iter().enumerate() {
+							if idx != 0 {
+								" | ".fmt(f)?
+							}
+							k.fmt(f)?
+						}
 					}
 					if let Some(Kind::Record(kind)) = &rel.to {
-						write!(
-							f,
-							" OUT {}",
-							kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-						)?;
+						write!(f, " OUT ",)?;
+						for (idx, k) in kind.iter().enumerate() {
+							if idx != 0 {
+								" | ".fmt(f)?
+							}
+							k.fmt(f)?
+						}
 					}
 				}
 				TableType::Any => {
@@ -149,13 +153,13 @@ impl Display for AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(x) => writeln!(f, " COMMENT {x}")?,
+			AlterKind::Set(ref x) => writeln!(f, " COMMENT {x}")?,
 			AlterKind::Drop => writeln!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}
 
 		match self.changefeed {
-			AlterKind::Set(x) => writeln!(f, " CHANGEFEED {x}")?,
+			AlterKind::Set(ref x) => writeln!(f, " CHANGEFEED {x}")?,
 			AlterKind::Drop => writeln!(f, " DROP CHANGEFEED")?,
 			AlterKind::None => {}
 		}

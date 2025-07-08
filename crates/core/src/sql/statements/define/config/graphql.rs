@@ -4,7 +4,7 @@ use crate::sql::fmt::{Fmt, Pretty, pretty_indent};
 
 use crate::sql::{Expr, Ident, Part};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GraphQLConfig {
 	pub tables: TablesConfig,

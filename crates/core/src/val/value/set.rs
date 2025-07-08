@@ -71,7 +71,7 @@ impl Value {
 				}
 				Part::Field(f) => {
 					match place {
-						Value::Object(obj) => match obj.entry(f.0.clone()) {
+						Value::Object(obj) => match obj.entry(f.as_str().to_owned()) {
 							Entry::Vacant(x) => {
 								let v = x.insert(Value::None);
 								return Self::assign(stk, ctx, opt, v, val, iter.as_slice()).await;
@@ -100,7 +100,7 @@ impl Value {
 					match place {
 						Value::Object(obj) => {
 							let v = match v {
-								Value::Strand(x) => x.0.clone(),
+								Value::Strand(x) => x.as_str().to_owned(),
 								x => x.to_string(),
 							};
 
@@ -251,11 +251,11 @@ impl Value {
 		for p in path.iter().rev() {
 			let name = match p {
 				Part::Graph(x) => x.to_raw(),
-				Part::Field(f) => f.0.clone(),
+				Part::Field(f) => f.as_str().to_owned(),
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
-						Value::Strand(x) => x.0,
+						Value::Strand(x) => x.into_string(),
 						Value::Thing(x) => x.into_raw_string(),
 						Value::Number(x) => x.to_string(),
 						Value::Range(x) => x.to_string(),

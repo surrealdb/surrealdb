@@ -165,12 +165,12 @@ impl Parser<'_> {
 		&mut self,
 		ctx: &mut Stk,
 	) -> ParseResult<RecordIdLit> {
-		let ident = self.next_token_value::<Ident>()?.0;
+		let ident = self.next_token_value::<Ident>()?;
 		self.parse_record_id_or_range(ctx, ident).await
 	}
 
 	pub(crate) async fn parse_record_id(&mut self, ctx: &mut Stk) -> ParseResult<RecordIdLit> {
-		let ident = self.next_token_value::<Ident>()?.0;
+		let ident = self.next_token_value::<Ident>()?;
 		self.parse_record_id_from_ident(ctx, ident).await
 	}
 
@@ -261,7 +261,7 @@ impl Parser<'_> {
 				if self.settings.flexible_record_id {
 					let next = self.peek_whitespace1();
 					if Self::kind_is_identifier(next.kind) {
-						let ident = self.parse_flexible_ident()?.0;
+						let ident = self.parse_flexible_ident()?;
 						return Ok(RecordIdKeyLit::String(ident));
 					}
 				}
@@ -324,11 +324,11 @@ impl Parser<'_> {
 			}
 			_ => {
 				let ident = if self.settings.flexible_record_id {
-					self.parse_flexible_ident()?.0
+					self.parse_flexible_ident()?
 				} else {
-					self.next_token_value::<Ident>()?.0
+					self.next_token_value::<Ident>()?
 				};
-				Ok(RecordIdKeyLit::String(ident))
+				Ok(RecordIdKeyLit::String(ident.into_string()))
 			}
 		}
 	}

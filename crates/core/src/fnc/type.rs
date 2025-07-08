@@ -110,7 +110,7 @@ pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 			}))
 		}
 		Some(Value::Strand(tb) | Value::Table(tb)) => {
-			rid.cast_to_kind(&Kind::Record(vec![tb.into()])).map_err(From::from)
+			rid.cast_to_kind(&Kind::Record(vec![Ident::from_strand(tb)])).map_err(From::from)
 		}
 		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: "type::record".into(),
@@ -141,7 +141,7 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 		// TODO: Handle null byte
 		v => unsafe { Strand::new_unchecked(v.as_string()) },
 	};
-	Value::Table(strand)
+	Ok(Value::Table(strand))
 }
 
 pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
@@ -157,7 +157,11 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 				Value::Thing(v) => v.key,
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
-				Value::Number(v) => v.into(),
+				Value::Number(v) => match v {
+					Number::Int(x) => x.into(),
+					Number::Float(x) => x.to_string().into(),
+					Number::Decimal(x) => x.to_string().into(),
+				},
 				Value::Range(v) => v.deref().to_owned().try_into()?,
 				Value::Uuid(u) => u.into(),
 				ref v => {
@@ -187,9 +191,8 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 }
 
 pub mod is {
-	use crate::expr::table::Table;
 	use crate::fnc::args::Optional;
-	use crate::val::{Geometry, Value};
+	use crate::val::{Geometry, Strand, Value};
 	use anyhow::Result;
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
@@ -276,9 +279,9 @@ pub mod is {
 		Ok(arg.is_range().into())
 	}
 
-	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
+	pub fn record((arg, Optional(table)): (Value, Optional<Strand>)) -> Result<Value> {
 		let res = match table {
-			Some(tb) => arg.is_record_type(&[Table(tb)]).into(),
+			Some(tb) => arg.is_record_type(&[tb.into()]).into(),
 			None => arg.is_thing().into(),
 		};
 		Ok(res)

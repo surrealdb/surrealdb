@@ -1,10 +1,11 @@
+use crate::sql::fmt::Fmt;
 use crate::sql::{Expr, Ident};
 use crate::val::Strand;
 use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
@@ -20,10 +21,17 @@ impl Display for DefineEventStatement {
 		write!(f, "DEFINE EVENT",)?;
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {} WHEN {} THEN {}", self.name, self.what, self.when, self.then)?;
+		write!(
+			f,
+			" {} ON {} WHEN {} THEN {}",
+			self.name,
+			self.what,
+			self.when,
+			Fmt::comma_separated(&self.then)
+		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -38,7 +46,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			name: v.name.into(),
 			what: v.what.into(),
 			when: v.when.into(),
-			then: v.then.into(),
+			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.map(Into::into),
 		}
 	}
@@ -51,7 +59,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			name: v.name.into(),
 			what: v.what.into(),
 			when: v.when.into(),
-			then: v.then.into(),
+			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.map(Into::into),
 		}
 	}

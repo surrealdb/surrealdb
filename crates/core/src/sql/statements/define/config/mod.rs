@@ -12,7 +12,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineConfigStatement {
 	pub kind: DefineKind,
@@ -22,8 +22,8 @@ pub struct DefineConfigStatement {
 impl From<DefineConfigStatement> for crate::expr::statements::define::DefineConfigStatement {
 	fn from(v: DefineConfigStatement) -> Self {
 		crate::expr::statements::define::DefineConfigStatement {
-			inner: v.inner.into(),
 			kind: v.kind.into(),
+			inner: v.inner.into(),
 		}
 	}
 }
@@ -37,7 +37,7 @@ impl From<crate::expr::statements::define::DefineConfigStatement> for DefineConf
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ConfigInner {
 	GraphQL(GraphQLConfig),
@@ -69,11 +69,10 @@ impl ConfigInner {
 impl Display for DefineConfigStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE CONFIG")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 
 		write!(f, "{}", self.inner)?;

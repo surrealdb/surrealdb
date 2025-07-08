@@ -7,12 +7,12 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
-	pub function: Option<Ident>,
+	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Strand>,
@@ -21,11 +21,10 @@ pub struct DefineAnalyzerStatement {
 impl Display for DefineAnalyzerStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE ANALYZER")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
+			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref i) = self.function {
@@ -51,7 +50,7 @@ impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerSt
 		crate::expr::statements::DefineAnalyzerStatement {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			function: v.function.map(Into::into),
+			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
 			comment: v.comment.map(Into::into),
@@ -64,7 +63,7 @@ impl From<crate::expr::statements::DefineAnalyzerStatement> for DefineAnalyzerSt
 		DefineAnalyzerStatement {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			function: v.function.map(Into::into),
+			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
 			comment: v.comment.map(Into::into),
