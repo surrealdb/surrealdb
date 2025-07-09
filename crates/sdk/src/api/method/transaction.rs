@@ -107,7 +107,7 @@ where
 		final_query.0 .0.push(Statement::Begin(BeginStatement::default()));
 		final_query.0 .0.append(&mut self.statements);
 		final_query.0 .0.push(Statement::Commit(CommitStatement::default()));
-		let router = self.client.router.extract()?;
+		let router = self.client.inner.router.extract()?;
 		Ok(router
 			.execute_query(Command::Query {
 				query: final_query,
