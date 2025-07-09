@@ -48,7 +48,7 @@ async fn error_on_invalid_function() -> Result<()> {
 	let mut resp = dbs.process(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
 	let err = resp.pop().unwrap().values.unwrap_err();
-	if !matches!(err.downcast_ref(), Some(Error::InvalidFunction { .. })) {
+	if !matches!(err, Some(Error::InvalidFunction { .. })) {
 		panic!("returned wrong result {:#?}", err)
 	}
 	Ok(())
@@ -274,7 +274,7 @@ async fn function_record_table() -> Result<()> {
 	"#;
 	let mut test = Test::new(sql).await?;
 	//
-	let tmp = test.next()?.result?;
+	let tmp = test.next()?.first_value()?;
 	let val = Value::from("person");
 	assert_eq!(tmp, val);
 	//

@@ -1,4 +1,5 @@
 use surrealdb_protocol::proto::rpc::v1::UseRequest;
+use surrealdb_protocol::proto::rpc::v1::UseResponse;
 
 use crate::Surreal;
 
@@ -30,7 +31,7 @@ impl UseNs {
 }
 
 impl IntoFuture for UseNs {
-	type Output = Result<()>;
+	type Output = Result<UseResponse>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
@@ -44,8 +45,9 @@ impl IntoFuture for UseNs {
 					database: String::new(),
 				})
 				.await?;
+			let response = response.into_inner();
 
-			Ok(())
+			Ok(response)
 		})
 	}
 }

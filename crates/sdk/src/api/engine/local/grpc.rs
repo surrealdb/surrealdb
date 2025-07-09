@@ -7,29 +7,14 @@ use futures::{StreamExt, stream::BoxStream};
 use surrealdb_core::{
 	cnf::PKG_VERSION,
 	dbs::{Notification, QueryResult, Session, SessionId, Variables},
-	expr::{
-		Cond, Fields, Function, Limit, LogicalPlan, Model, Number, Start, Timeout, Value, Values,
-		Version,
-		statements::{
-			CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
-			RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
-		},
-	},
-	gql::{Pessimistic, SchemaCache},
-	iam::{Action, ResourceKind, SigninParams, check::check_ns_db},
+	expr::Value,
+	iam::{Action, ResourceKind, check::check_ns_db},
 	kvs::{Datastore, LockType, TransactionType, export::Config},
 	vars,
 };
-use surrealdb_protocol::proto::{
-	rpc::v1::{self as rpc_proto, ExportMlModelResponse, SigninRequest},
-	v1 as proto,
-};
+use surrealdb_protocol::proto::rpc::v1::{self as rpc_proto, ExportMlModelResponse};
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
-// TODO: Will need to map grpc subscription stream ID to their actual streams.
-// type Client
 
 type LiveQuerySender = tokio::sync::mpsc::Sender<Notification>;
 
@@ -50,37 +35,19 @@ impl ConnectionsState {
 }
 
 pub struct SurrealDBGrpcService {
-	/// The unique id of this gRPC connection
-	pub(crate) id: Uuid,
 	/// The live queries mapping from Live Query ID to the tx channel for the subscription stream.
 	pub(crate) connections_state: Arc<ConnectionsState>,
 	/// The datastore accessible to all gRPC connections
 	pub(crate) datastore: Arc<Datastore>,
 	/// The persistent session for this gRPC connection
 	pub(crate) sessions: Arc<DashMap<SessionId, ArcSwap<Session>>>,
-	/// A cancellation token called when shutting down the server
-	pub(crate) shutdown: CancellationToken,
-	/// A cancellation token for cancelling all spawned tasks
-	pub(crate) canceller: CancellationToken,
-	/// The GraphQL schema cache stored in advance
-	pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl SurrealDBGrpcService {
-	pub fn new(
-		id: Uuid,
-		datastore: Arc<Datastore>,
-		connections_state: Arc<ConnectionsState>,
-		canceller: CancellationToken,
-		shutdown: CancellationToken,
-	) -> Self {
+	pub fn new(datastore: Arc<Datastore>, connections_state: Arc<ConnectionsState>) -> Self {
 		Self {
-			id,
 			connections_state,
 			sessions: Arc::new(DashMap::new()),
-			shutdown,
-			canceller,
-			gql_schema: SchemaCache::new(Arc::clone(&datastore)),
 			datastore,
 		}
 	}
@@ -339,6 +306,9 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for SurrealDBGrpcSer
 		request: tonic::Request<rpc_proto::ResetRequest>,
 	) -> Result<tonic::Response<rpc_proto::ResetResponse>, tonic::Status> {
 		let (session_id, session) = self.load_session(&request)?;
+		// Check if the user is allowed to query
+		self.check_subject_permissions(&session)?;
+
 		// Clone the current session
 		let mut session = session.as_ref().clone();
 		// Reset the current session
@@ -353,14 +323,31 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for SurrealDBGrpcSer
 		&self,
 		request: tonic::Request<tonic::Streaming<rpc_proto::ImportSqlRequest>>,
 	) -> Result<tonic::Response<rpc_proto::ImportSqlResponse>, tonic::Status> {
-		todo!("STU");
+		let (_, session) = self.load_session(&request)?;
+		// Check if the user is allowed to query
+		self.check_subject_permissions(&session)?;
+
+		let mut incoming_stream = request.into_inner();
+
+		while let Some(request) = incoming_stream.next().await {
+			let rpc_proto::ImportSqlRequest {
+				statement,
+			} = request.map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+			self.datastore
+				.execute(&statement, &session, None)
+				.await
+				.map_err(|e| tonic::Status::internal(e.to_string()))?;
+		}
+
+		Ok(tonic::Response::new(rpc_proto::ImportSqlResponse {}))
 	}
 
 	async fn export_sql(
 		&self,
 		request: tonic::Request<rpc_proto::ExportSqlRequest>,
 	) -> Result<tonic::Response<Self::ExportSqlStream>, tonic::Status> {
-		let (session_id, session) = self.load_session(&request)?;
+		let (_, session) = self.load_session(&request)?;
 		let export_request = request.into_inner();
 		let config =
 			Config::try_from(export_request).map_err(|e| tonic::Status::internal(e.to_string()))?;
@@ -418,7 +405,7 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for SurrealDBGrpcSer
 		&self,
 		request: tonic::Request<rpc_proto::ExportMlModelRequest>,
 	) -> Result<tonic::Response<Self::ExportMlModelStream>, tonic::Status> {
-		let (session_id, session) = self.load_session(&request)?;
+		let (_, session) = self.load_session(&request)?;
 		let rpc_proto::ExportMlModelRequest {
 			name,
 			version,
@@ -472,9 +459,10 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for SurrealDBGrpcSer
 		&self,
 		request: tonic::Request<rpc_proto::QueryRequest>,
 	) -> Result<tonic::Response<Self::QueryStream>, tonic::Status> {
-		let (session_id, session) = self.load_session(&request)?;
+		let (_, session) = self.load_session(&request)?;
 		let rpc_proto::QueryRequest {
-			txn_id,
+			// TODO: Pass transaction id to execute.
+			txn_id: _,
 			query,
 			variables,
 		} = request.into_inner();
@@ -486,7 +474,7 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for SurrealDBGrpcSer
 
 		let datastore = Arc::clone(&self.datastore);
 		tokio::spawn(async move {
-			let mut res = match datastore.execute(&query, &session, variables).await {
+			let res = match datastore.execute(&query, &session, variables).await {
 				Ok(res) => res,
 				Err(err) => {
 					if let Err(err) = tx.send(Err(tonic::Status::internal(err.to_string()))).await {
@@ -557,7 +545,7 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for SurrealDBGrpcSer
 		&self,
 		request: tonic::Request<rpc_proto::SubscribeRequest>,
 	) -> std::result::Result<tonic::Response<Self::SubscribeStream>, tonic::Status> {
-		let (session_id, session) = self.load_session(&request)?;
+		let (_, session) = self.load_session(&request)?;
 
 		// Check if the user is allowed to query
 		self.check_subject_permissions(&session)
@@ -582,13 +570,13 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for SurrealDBGrpcSer
 		let values = first_query_result
 			.values
 			.as_ref()
-			.map_err(|err| tonic::Status::internal("Query Failed: {err:?}"))?;
+			.map_err(|err| tonic::Status::internal(format!("Query Failed: {err:?}")))?;
 		let first_value = values.first().ok_or_else(|| tonic::Status::internal("No values"))?;
 
 		let live_id = match first_value {
 			Value::Uuid(id) => id.0,
 			unexpected => {
-				return Err(tonic::Status::internal(format!("Unexpected value: {:?}", unexpected)));
+				return Err(tonic::Status::internal(format!("Unexpected value: {unexpected:?}")));
 			}
 		};
 

@@ -1503,7 +1503,7 @@ async fn select_order_by_rand_large() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	let _ = res.remove(0).values?;
 
-	let v = res.remove(0).values.unwrap();
+	let v = res.remove(0).take_first().unwrap();
 	let Value::Array(x) = v else {
 		panic!("not the right type");
 	};

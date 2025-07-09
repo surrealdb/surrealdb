@@ -4,7 +4,7 @@ mod r#struct;
 use crate::err::Error;
 use crate::rpc::protocol::v1::types::{
 	V1Array, V1Bytes, V1Datetime, V1Duration, V1File, V1Geometry, V1Number, V1Object, V1RecordId,
-	V1Strand, V1Uuid, V1Value,
+	V1Regex, V1Strand, V1Table, V1Uuid, V1Value,
 };
 use anyhow::Result;
 use castaway::match_type;
@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 type Content = serde_content::Value<'static>;
 
 /// Convert a `T` into `surrealdb::expr::V1Value` which is an enum that can represent any valid SQL data.
-pub(in crate::rpc) fn to_value<T>(value: T) -> Result<V1Value>
+pub fn to_value<T>(value: T) -> Result<V1Value>
 where
 	T: Serialize + 'static,
 {
@@ -44,8 +44,10 @@ where
 		geo_types::MultiPolygon as v => Ok(V1Value::Geometry(v.into())),
 		geo_types::Point as v => Ok(V1Value::Geometry(v.into())),
 		V1Bytes as v => Ok(v.into()),
+		V1Table as v => Ok(v.into()),
 		V1RecordId as v => Ok(v.into()),
 		V1File as v => Ok(v.into()),
+		V1Regex as v => Ok(v.into()),
 		value => Serializer::new().serialize(value)?.try_into(),
 	})
 }
@@ -153,14 +155,9 @@ impl TryFrom<(Cow<'static, str>, Content)> for V1Value {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::expr::Number;
-	use crate::expr::block::Entry;
-	use crate::expr::statements::CreateStatement;
-	use crate::expr::*;
+	use crate::rpc::V1Regex;
+	use crate::rpc::V1Table;
 	use crate::sql;
-	use ::serde::Serialize;
-	use graph::{GraphSubject, GraphSubjects};
-	use std::ops::Bound;
 
 	#[test]
 	fn value_none() {
@@ -191,19 +188,19 @@ mod tests {
 
 	#[test]
 	fn number() {
-		let number = Number::Int(Default::default());
+		let number = V1Number::Int(Default::default());
 		let value = to_value(number).unwrap();
 		let expected = V1Value::Number(number);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 
-		let number = Number::Float(Default::default());
+		let number = V1Number::Float(Default::default());
 		let value = to_value(number).unwrap();
 		let expected = V1Value::Number(number);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 
-		let number = Number::Decimal(Default::default());
+		let number = V1Number::Decimal(Default::default());
 		let value = to_value(number).unwrap();
 		let expected = V1Value::Number(number);
 		assert_eq!(value, expected);
@@ -212,7 +209,7 @@ mod tests {
 
 	#[test]
 	fn strand() {
-		let strand = Strand("foobar".to_owned());
+		let strand = V1Strand("foobar".to_owned());
 		let value = to_value(strand.clone()).unwrap();
 		let expected = V1Value::Strand(strand);
 		assert_eq!(value, expected);
@@ -233,7 +230,7 @@ mod tests {
 
 	#[test]
 	fn duration() {
-		let duration = Duration::default();
+		let duration = V1Duration::default();
 		let value = to_value(duration).unwrap();
 		let expected = V1Value::Duration(duration);
 		assert_eq!(value, expected);
@@ -242,7 +239,7 @@ mod tests {
 
 	#[test]
 	fn datetime() {
-		let datetime = Datetime::default();
+		let datetime = V1Datetime::default();
 		let value = to_value(datetime.clone()).unwrap();
 		let expected = V1Value::Datetime(datetime);
 		assert_eq!(value, expected);
@@ -251,7 +248,7 @@ mod tests {
 
 	#[test]
 	fn uuid() {
-		let uuid = Uuid::default();
+		let uuid = V1Uuid::default();
 		let value = to_value(uuid).unwrap();
 		let expected = V1Value::Uuid(uuid);
 		assert_eq!(value, expected);
@@ -260,7 +257,7 @@ mod tests {
 
 	#[test]
 	fn array() {
-		let array = Array::default();
+		let array = V1Array::default();
 		let value = to_value(array.clone()).unwrap();
 		let expected = V1Value::Array(array);
 		assert_eq!(value, expected);
@@ -269,7 +266,7 @@ mod tests {
 
 	#[test]
 	fn object() {
-		let object = Object::default();
+		let object = V1Object::default();
 		let value = to_value(object.clone()).unwrap();
 		let expected = V1Value::Object(object);
 		assert_eq!(value, expected);
@@ -278,7 +275,7 @@ mod tests {
 
 	#[test]
 	fn geometry() {
-		let geometry = Geometry::Collection(Vec::new());
+		let geometry = V1Geometry::Collection(Vec::new());
 		let value = to_value(geometry.clone()).unwrap();
 		let expected = V1Value::Geometry(geometry);
 		assert_eq!(value, expected);
@@ -287,7 +284,7 @@ mod tests {
 
 	#[test]
 	fn bytes() {
-		let bytes = Bytes("foobar".as_bytes().to_owned());
+		let bytes = V1Bytes("foobar".as_bytes().to_owned());
 		let value = to_value(bytes.clone()).unwrap();
 		let expected = V1Value::Bytes(bytes);
 		assert_eq!(value, expected);
@@ -295,26 +292,8 @@ mod tests {
 	}
 
 	#[test]
-	fn param() {
-		let param = Param::default();
-		let value = to_value(param.clone()).unwrap();
-		let expected = V1Value::Param(param);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn idiom() {
-		let idiom = Idiom::default();
-		let value = to_value(idiom.clone()).unwrap();
-		let expected = V1Value::Idiom(idiom);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
 	fn table() {
-		let table = Table("foo".to_owned());
+		let table = V1Table("foo".to_owned());
 		let value = to_value(table.clone()).unwrap();
 		let expected = V1Value::Table(table);
 		assert_eq!(value, expected);
@@ -323,7 +302,7 @@ mod tests {
 
 	#[test]
 	fn thing() {
-		let record_id: Thing = sql::thing("foo:bar").unwrap().into();
+		let record_id: V1RecordId = sql::thing("foo:bar").unwrap().try_into().unwrap();
 		let value = to_value(record_id.clone()).unwrap();
 		let expected = V1Value::RecordId(record_id);
 		assert_eq!(value, expected);
@@ -331,143 +310,10 @@ mod tests {
 	}
 
 	#[test]
-	fn model() {
-		let model = Mock::Count("foo".to_owned(), Default::default());
-		let value = to_value(model.clone()).unwrap();
-		let expected = V1Value::Mock(model);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
 	fn regex() {
-		let regex = "abc".parse::<Regex>().unwrap();
+		let regex = "abc".parse::<V1Regex>().unwrap();
 		let value = to_value(regex.clone()).unwrap();
 		let expected = V1Value::Regex(regex);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn block() {
-		let block: Box<Block> = Default::default();
-		let value = to_value(block.clone()).unwrap();
-		let expected = V1Value::Block(block);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn range() {
-		let range = Box::new(Range {
-			beg: Bound::Included("foo".into()),
-			end: Bound::Unbounded,
-		});
-		let value = to_value(range.clone()).unwrap();
-		let expected = V1Value::Range(range);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn edges() {
-		let edges = Box::new(Edges {
-			dir: Dir::In,
-			from: sql::thing("foo:bar").unwrap().into(),
-			what: GraphSubjects(vec![GraphSubject::Table(Table("foo".into()))]),
-		});
-		let value = to_value(edges.clone()).unwrap();
-		let expected = V1Value::Edges(edges);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn future() {
-		let future = Box::new(Future(V1Value::default().into()));
-		let value = to_value(future.clone()).unwrap();
-		let expected = V1Value::Future(future);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-
-		let future = Box::new(Future(Block(vec![Entry::Create(CreateStatement::default())])));
-		let value = to_value(future.clone()).unwrap();
-		let expected = V1Value::Future(future);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn constant() {
-		let constant = Constant::MathPi;
-		let value = to_value(constant.clone()).unwrap();
-		let expected = V1Value::Constant(constant);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn function() {
-		let function = Box::new(Function::Normal(Default::default(), Default::default()));
-		let value = to_value(function.clone()).unwrap();
-		let expected = V1Value::Function(function);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn query() {
-		let query: Query = sql::parse("SELECT * FROM foo").unwrap().into();
-		let value = to_value(query.clone()).unwrap();
-		let expected = V1Value::Query(query);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn subquery() {
-		let subquery = Box::new(Subquery::V1Value(V1Value::None));
-		let value = to_value(subquery.clone()).unwrap();
-		let expected = V1Value::Subquery(subquery);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn expression() {
-		let expression = Box::new(Expression::Binary {
-			l: "foo".into(),
-			o: Operator::Equal,
-			r: "Bar".into(),
-		});
-		let value = to_value(expression.clone()).unwrap();
-		let expected = V1Value::Expression(expression);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
-	fn unknown_struct() {
-		#[derive(Debug, Serialize)]
-		struct FooBar {
-			foo: String,
-			bar: i32,
-		}
-
-		let foo = "Foo";
-		let bar = Default::default();
-		let foo_bar = FooBar {
-			bar,
-			foo: foo.to_owned(),
-		};
-		let value = to_value(foo_bar).unwrap();
-		let expected = V1Value::Object(
-			map! {
-				"foo".to_owned() => V1Value::from(foo),
-				"bar".to_owned() => V1Value::from(bar),
-			}
-			.into(),
-		);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}

@@ -5694,6 +5694,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "tokio-util",
+ "tonic 0.12.3",
  "tower 0.4.13",
  "tower-http",
  "tower-service",

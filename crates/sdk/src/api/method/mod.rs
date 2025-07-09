@@ -143,7 +143,7 @@ impl Surreal {
 	// /// use surrealdb::engine::remote::ws::Client;
 	// ///
 	// /// // Creates a new static instance of the client
-	// /// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+	// /// static DB: LazyLock<Surreal> = LazyLock::new(Surreal::init);
 	// ///
 	// /// #[derive(Serialize, Deserialize)]
 	// /// struct Person {

@@ -1,7 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
 use surrealdb_core::dbs::Variables;
-use surrealdb_core::expr::Object;
 
 use crate::opt::IntoVariables;
 

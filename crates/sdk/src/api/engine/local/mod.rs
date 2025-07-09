@@ -144,64 +144,6 @@
 //! }
 //! ```
 
-use crate::api::conn::LiveQueryParams;
-use crate::api::err::Error;
-use crate::{
-	Result,
-	api::{
-		QueryResults as QueryResponse, Surreal,
-		conn::{Command, Request},
-	},
-	method::Stats,
-	opt::{IntoEndpoint, Table},
-};
-// use surrealdb_core::proto::surrealdb::rpc::{LiveParams, RawQueryParams, Request, UnsetParams};
-// use surrealdb_core::proto::surrealdb::rpc::request::Command;
-
-#[cfg(not(target_family = "wasm"))]
-use anyhow::bail;
-use async_channel::Sender;
-#[cfg(not(target_family = "wasm"))]
-use futures::stream::poll_fn;
-use indexmap::IndexMap;
-#[cfg(not(target_family = "wasm"))]
-use std::pin::pin;
-#[cfg(not(target_family = "wasm"))]
-use std::task::{Poll, ready};
-use std::{
-	collections::{BTreeMap, HashMap},
-	marker::PhantomData,
-	mem,
-	sync::Arc,
-};
-use surrealdb_core::dbs::{QueryResult, ResponseData, Variables};
-use surrealdb_core::expr::LogicalPlan;
-use surrealdb_core::expr::statements::{
-	CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
-	SelectStatement, UpdateStatement, UpsertStatement,
-};
-use surrealdb_core::expr::{Cond, Function};
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::{
-	dbs::{Notification, Session},
-	expr::{Data, Field, Output, Value},
-	iam,
-	kvs::Datastore,
-};
-use tokio::sync::RwLock;
-#[cfg(not(target_family = "wasm"))]
-use tokio_util::bytes::BytesMut;
-use uuid::Uuid;
-
-#[cfg(not(target_family = "wasm"))]
-use std::{future::Future, path::PathBuf};
-#[cfg(not(target_family = "wasm"))]
-use tokio::{
-	fs::OpenOptions,
-	io::{self, AsyncReadExt, AsyncWriteExt},
-};
-
 #[cfg(feature = "ml")]
 use surrealdb_core::expr::Model;
 
@@ -224,8 +166,6 @@ pub(crate) mod wasm;
 
 pub(crate) mod grpc;
 pub(crate) mod middleware;
-
-type LiveQueryMap = HashMap<Uuid, Sender<Notification>>;
 
 /// In-memory database
 ///
@@ -460,67 +400,3 @@ pub struct FDb;
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-surrealkv")))]
 #[derive(Debug)]
 pub struct SurrealKv;
-
-// fn process(responses: Vec<QueryResult>) -> QueryResponse<Value> {
-// 	let mut map = IndexMap::with_capacity(responses.len());
-// 	for (index, query_result) in responses.into_iter().enumerate() {
-// 		map.insert(index, query_result);
-// 	}
-// 	QueryResponse {
-// 		results: map.into(),
-// 		..QueryResponse::new()
-// 	}
-// }
-
-#[cfg(not(target_family = "wasm"))]
-async fn export_file(
-	kvs: &Datastore,
-	sess: &Session,
-	chn: async_channel::Sender<Vec<u8>>,
-	config: Option<DbExportConfig>,
-) -> Result<()> {
-	let res = match config {
-		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,
-		None => kvs.export(sess, chn).await?.await,
-	};
-
-	if let Err(error) = res {
-		if let Some(surrealdb_core::err::Error::Channel(message)) = error.downcast_ref() {
-			// This is not really an error. Just logging it for improved visibility.
-			trace!("{message}");
-			return Ok(());
-		}
-
-		return Err(error);
-	}
-	Ok(())
-}
-
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-async fn export_ml(
-	kvs: &Datastore,
-	sess: &Session,
-	chn: async_channel::Sender<Vec<u8>>,
-	MlExportConfig {
-		name,
-		version,
-	}: MlExportConfig,
-) -> Result<()> {
-	// Ensure a NS and DB are set
-	let (nsv, dbv) = check_ns_db(sess)?;
-	// Check the permissions level
-	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
-	// Start a new readonly transaction
-	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	// Attempt to get the model definition
-	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
-	// Export the file data in to the store
-	let mut data = crate::obs::stream(info.hash.clone()).await?;
-	// Process all stream values
-	while let Some(Ok(bytes)) = data.next().await {
-		if chn.send(bytes.to_vec()).await.is_err() {
-			break;
-		}
-	}
-	Ok(())
-}

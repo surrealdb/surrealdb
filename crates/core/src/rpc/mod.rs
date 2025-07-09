@@ -16,3 +16,4 @@ pub use request::*;
 pub use response::*;
 
 pub use protocol::v1::RpcProtocolV1;
+pub use protocol::v1::serde::{from_value, to_value};

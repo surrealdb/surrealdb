@@ -36,10 +36,6 @@ where
 
 impl<R, RT, T> Select<R, RT, T> where R: Resource {}
 
-macro_rules! into_future {
-	($method:ident) => {};
-}
-
 impl<R, RT, RTItem> IntoFuture for Select<R, RT, RTItem>
 where
 	R: Resource,

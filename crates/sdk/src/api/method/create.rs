@@ -4,7 +4,6 @@ use crate::opt::CreatableResource;
 
 use crate::api::Result;
 use crate::api::method::BoxFuture;
-use crate::api::opt::Resource;
 use anyhow::anyhow;
 use futures::StreamExt;
 use std::future::IntoFuture;
@@ -37,41 +36,6 @@ where
 }
 
 impl<R, RT> Create<R, RT> where R: CreatableResource {}
-
-macro_rules! into_future {
-	($method:ident) => {
-		fn into_future(self) -> Self::IntoFuture {
-			let Create {
-				txn,
-				client,
-				what,
-				data,
-				..
-			} = self;
-
-			let what = what.into_values();
-
-			Box::pin(async move {
-				let client = client.client;
-
-				let mut create_statement = CreateStatement {
-					what,
-					data,
-				};
-
-				let response = client
-					.query(QueryRequest {
-						txn: txn.map(|id| id.to_string()),
-						what,
-						data,
-					})
-					.await?;
-
-				Ok(response.into())
-			})
-		}
-	};
-}
 
 impl<R, RT> IntoFuture for Create<R, RT>
 where

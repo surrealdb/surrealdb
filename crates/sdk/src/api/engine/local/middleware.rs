@@ -5,7 +5,6 @@ use std::pin::Pin;
 use surrealdb_core::dbs::SessionId;
 use tower::{Layer, Service};
 
-use dashmap::DashMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Default)]

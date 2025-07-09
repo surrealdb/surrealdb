@@ -93,9 +93,7 @@ pub async fn signin(
 			username,
 			password,
 		} => super::signin::db_user(kvs, session, namespace, database, username, password).await,
-		unexpected => {
-			Err(anyhow!("Unexpected access type identifier: {unexpected:?}"))
-		}
+		unexpected => Err(anyhow!("Unexpected access type identifier: {unexpected:?}")),
 	}
 
 	// use crate::protocol::surrealdb::rpc::access::Inner as AccessInnerProto;

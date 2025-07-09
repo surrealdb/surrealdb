@@ -731,10 +731,6 @@ impl Capabilities {
 		self.guest_access
 	}
 
-	pub fn allows_live_query_notifications(&self) -> bool {
-		self.live_query_notifications
-	}
-
 	pub fn allows_function_name(&self, target: &str) -> bool {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
@@ -1043,18 +1039,6 @@ mod tests {
 		{
 			let caps = Capabilities::default().with_guest_access(false);
 			assert!(!caps.allows_guest_access());
-		}
-
-		// When live query notifications are allowed
-		{
-			let cap = Capabilities::default().with_live_query_notifications(true);
-			assert!(cap.allows_live_query_notifications());
-		}
-
-		// When live query notifications are disabled
-		{
-			let cap = Capabilities::default().with_live_query_notifications(false);
-			assert!(!cap.allows_live_query_notifications());
 		}
 
 		// When all nets are allowed

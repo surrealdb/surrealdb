@@ -18,7 +18,7 @@ use surrealdb::opt::{PatchOp, PatchOps};
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
 use surrealdb::{error::Api as ApiError, error::Db as DbError};
-use surrealdb_core::expr::{Id, Value};
+use surrealdb_core::expr::Id;
 use ulid::Ulid;
 
 use crate::api_integration::NS;
@@ -37,17 +37,17 @@ pub async fn connect(new_db: impl CreateDb) {
 pub async fn yuse(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	let item = Ulid::new().to_string();
-	let err = db.create(Resource::from(item.as_str())).await.unwrap_err();
+	let err = db.create(item.as_str()).await.unwrap_err();
 	if !err.to_string().contains("Specify a namespace to use") {
 		panic!("{:?}", err)
 	}
 	db.use_ns(NS).await.unwrap();
-	let err = db.create(Resource::from(item.as_str())).await.unwrap_err();
+	let err = db.create(item.as_str()).await.unwrap_err();
 	if !err.to_string().contains("Specify a database to use") {
 		panic!("{:?}", err)
 	}
 	db.use_db(item.as_str()).await.unwrap();
-	db.create(Resource::from(item)).await.unwrap();
+	db.create(item).await.unwrap();
 	drop(permit);
 }
 

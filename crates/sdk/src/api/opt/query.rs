@@ -96,35 +96,35 @@ impl query_accessor::Sealed<Value> for usize {
 	}
 }
 
-// impl<T> QueryAccessor<Option<T>> for usize where T: TryFromValue {}
-// impl<T> query_accessor::Sealed<Option<T>> for usize
-// where
-// 	T: TryFromValue,
-// {
-// 	fn query_result(self, results: &mut QueryResults<Option<T>>) -> Result<Option<T>> {
-// 		let mut values = match results.results.swap_remove(&self) {
-// 			Some(query_result) => query_result.values,
-// 			None => {
-// 				return Ok(None);
-// 			}
-// 		};
+impl<T> QueryAccessor<Option<T>> for usize where T: TryFromValue {}
+impl<T> query_accessor::Sealed<Option<T>> for usize
+where
+	T: TryFromValue,
+{
+	fn take(self, results: &mut QueryResults) -> Result<Option<T>> {
+		let mut values = match results.results.swap_remove(&self) {
+			Some(query_result) => query_result.values,
+			None => {
+				return Ok(None);
+			}
+		};
 
-// 		if values.is_empty() {
-// 			return Ok(None);
-// 		}
+		if values.is_empty() {
+			return Ok(None);
+		}
 
-// 		if values.len() > 1 {
-// 			return Err(Error::InternalError("Multiple values found for index".to_string()).into());
-// 		}
+		if values.len() > 1 {
+			bail!("Multiple values found for index {}", self);
+		}
 
-// 		let value = values.pop().unwrap();
-// 		Option::<T>::try_from_value(value)
-// 	}
+		let value = values.pop().unwrap().try_into()?;
+		Option::<T>::try_from_value(value)
+	}
 
-// 	fn stats(&self, results: &QueryResults<Option<T>>) -> Option<QueryStats> {
-// 		results.results.get(self).map(|x| x.stats.clone())
-// 	}
-// }
+	fn stats(&self, results: &QueryResults) -> Option<QueryStatsProto> {
+		results.results.get(self).map(|x| x.stats.clone())
+	}
+}
 
 // impl QueryAccessor<Value> for (usize, &str) {}
 // impl query_accessor::Sealed<Value> for (usize, &str) {

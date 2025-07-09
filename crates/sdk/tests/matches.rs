@@ -143,7 +143,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 	//
 	skip_ok(res, 3)?;
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).values?[0];
 	let val = SqlValue::parse(
 		"[
 					{
@@ -167,7 +167,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).values?[0];
 	let val = SqlValue::parse(
 		"[
 			{
@@ -385,7 +385,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 	//
 	skip_ok(res, 3)?;
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"[
 					{
@@ -409,7 +409,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -453,7 +453,7 @@ async fn select_where_matches_using_index_offsets() -> Result<()> {
 	//
 	skip_ok(res, 4)?;
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -490,7 +490,7 @@ async fn select_where_matches_using_index_and_score() -> Result<()> {
 	//
 	skip_ok(res, 6)?;
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -527,7 +527,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 	//
 	skip_ok(res, 7)?;
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -539,7 +539,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val: Value = SqlValue::parse("[]").into();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
@@ -577,7 +577,7 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 	//
 	skip_ok(res, 6)?;
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val_docs = SqlValue::parse(
 		"[
 				{
@@ -594,7 +594,7 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -640,10 +640,10 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 	Ok(())
 }
@@ -666,7 +666,7 @@ async fn select_where_matches_mixing_indexes() -> Result<()> {
 	//
 	skip_ok(res, 5)?;
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -701,7 +701,7 @@ async fn select_where_matches_mixing_indexes() -> Result<()> {
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"[
 				{

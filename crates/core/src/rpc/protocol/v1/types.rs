@@ -1,14 +1,17 @@
 use anyhow::Context;
+use regex::RegexBuilder;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::time;
+use std::{collections::BTreeMap, sync::LazyLock};
 
+use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 use crate::dbs::QueryResult;
+use quick_cache::sync::{Cache, GuardResult};
 use std::fmt::{self, Display, Formatter, Write};
 
 #[revisioned(revision = 1)]
@@ -72,8 +75,7 @@ impl V1QueryResponse {
 		query_type: QueryType,
 	) -> anyhow::Result<Self> {
 		let values = values.context("Query result is empty")?;
-		let values =
-			values.into_iter().map(V1Value::try_from).collect::<Result<Vec<_>, _>>()?;
+		let values = values.into_iter().map(V1Value::try_from).collect::<Result<Vec<_>, _>>()?;
 		Ok(Self {
 			time: V1Duration(stats.execution_duration),
 			result: Ok(V1Value::Array(V1Array(values))),
@@ -193,36 +195,7 @@ pub enum V1Value {
 	Model(Box<V1Model>),
 	File(V1File),
 	Table(V1Table),
-	// These Value types are un-computed values
-	// and are not used in query responses sent
-	// to the client. These types need to be
-	// computed, in order to convert them into
-	// one of the simple types listed above.
-	// These types are first computed into a
-	// simple type before being used in indexes.
-	// Param(Param),
-	// Idiom(Idiom),
-	// Table(Table),
-	// Mock(Mock),
-	// Regex(Regex),
-	// Cast(Box<Cast>),
-	// Block(Box<Block>),
-	// #[revision(end = 2, convert_fn = "convert_old_range", fields_name = "OldValueRangeFields")]
-	// Range(OldRange),
-	// #[revision(start = 2)]
-	// Range(Box<Range>),
-	// Edges(Box<Edges>),
-	// Future(Box<Future>),
-	// Constant(Constant),
-	// Function(Box<Function>),
-	// Subquery(Box<Subquery>),
-	// Expression(Box<Expression>),
-	// Query(Query),
-	// Model(Box<Model>),
-	// Closure(Box<Closure>),
-	// Refs(Refs),
-	// File(File),
-	// Add new variants here
+	Regex(V1Regex),
 }
 
 impl V1Value {
@@ -317,6 +290,18 @@ impl From<V1Datetime> for V1Value {
 	}
 }
 
+impl From<V1Regex> for V1Value {
+	fn from(v: V1Regex) -> Self {
+		Self::Regex(v)
+	}
+}
+
+impl From<regex::Regex> for V1Value {
+	fn from(v: regex::Regex) -> Self {
+		Self::Regex(V1Regex(v))
+	}
+}
+
 impl From<uuid::Uuid> for V1Value {
 	fn from(v: uuid::Uuid) -> Self {
 		Self::Uuid(V1Uuid(v))
@@ -401,6 +386,12 @@ impl From<V1Bytes> for V1Value {
 	}
 }
 
+impl From<V1Table> for V1Value {
+	fn from(v: V1Table) -> Self {
+		Self::Table(v)
+	}
+}
+
 impl From<V1RecordId> for V1Value {
 	fn from(v: V1RecordId) -> Self {
 		Self::RecordId(v)
@@ -481,6 +472,12 @@ impl From<String> for V1Strand {
 	}
 }
 
+impl From<&str> for V1Strand {
+	fn from(v: &str) -> Self {
+		Self(v.to_string())
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Duration")]
@@ -495,6 +492,12 @@ impl V1Duration {
 	/// Convert the Duration to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
+	}
+}
+
+impl From<time::Duration> for V1Duration {
+	fn from(v: time::Duration) -> Self {
+		Self(v)
 	}
 }
 
@@ -535,6 +538,18 @@ impl V1Datetime {
 	}
 }
 
+impl Default for V1Datetime {
+	fn default() -> Self {
+		Self(Utc::now())
+	}
+}
+
+impl From<DateTime<Utc>> for V1Datetime {
+	fn from(v: DateTime<Utc>) -> Self {
+		Self(v)
+	}
+}
+
 impl TryFrom<String> for V1Datetime {
 	type Error = anyhow::Error;
 	fn try_from(v: String) -> Result<Self, Self::Error> {
@@ -548,6 +563,57 @@ impl TryFrom<(i64, u32)> for V1Datetime {
 		Ok(Self(DateTime::from_timestamp(seconds, nanos).context("Invalid datetime")?))
 	}
 }
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct V1Regex(pub regex::Regex);
+
+impl V1Regex {
+	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/' delimiters.
+	pub fn regex(&self) -> &regex::Regex {
+		&self.0
+	}
+}
+
+pub(crate) fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
+	static REGEX_CACHE: LazyLock<Cache<String, regex::Regex>> =
+		LazyLock::new(|| Cache::new(REGEX_CACHE_SIZE.max(10)));
+	match REGEX_CACHE.get_value_or_guard(str, None) {
+		GuardResult::Value(v) => Ok(v),
+		GuardResult::Guard(g) => {
+			let re = RegexBuilder::new(str).size_limit(*REGEX_SIZE_LIMIT).build()?;
+			g.insert(re.clone()).ok();
+			Ok(re)
+		}
+		GuardResult::Timeout => {
+			warn!("Regex cache timeout");
+			RegexBuilder::new(str).size_limit(*REGEX_SIZE_LIMIT).build()
+		}
+	}
+}
+
+impl FromStr for V1Regex {
+	type Err = <regex::Regex as FromStr>::Err;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		if s.contains('\0') {
+			Err(regex::Error::Syntax("regex contained NUL byte".to_owned()))
+		} else {
+			regex_new(&s.replace("\\/", "/")).map(Self)
+		}
+	}
+}
+
+impl PartialEq for V1Regex {
+	fn eq(&self, other: &Self) -> bool {
+		let str_left = self.0.as_str();
+		let str_right = other.0.as_str();
+		str_left == str_right
+	}
+}
+
+impl Eq for V1Regex {}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -605,6 +671,12 @@ impl IntoIterator for V1Array {
 impl FromIterator<V1Value> for V1Array {
 	fn from_iter<T: IntoIterator<Item = V1Value>>(iter: T) -> Self {
 		Self(iter.into_iter().collect())
+	}
+}
+
+impl From<Vec<V1Value>> for V1Array {
+	fn from(v: Vec<V1Value>) -> Self {
+		Self(v)
 	}
 }
 
@@ -686,6 +758,12 @@ impl From<geo::MultiLineString<f64>> for V1Geometry {
 impl From<geo::MultiPolygon<f64>> for V1Geometry {
 	fn from(v: geo::MultiPolygon<f64>) -> Self {
 		Self::MultiPolygon(v)
+	}
+}
+
+impl From<Vec<V1Geometry>> for V1Geometry {
+	fn from(v: Vec<V1Geometry>) -> Self {
+		Self::Collection(v)
 	}
 }
 
@@ -1024,6 +1102,7 @@ impl Display for V1Value {
 			V1Value::Uuid(v) => write!(f, "{v}"),
 			V1Value::Model(v) => write!(f, "{v}"),
 			V1Value::File(v) => write!(f, "{v}"),
+			V1Value::Regex(v) => write!(f, "{v}"),
 		}
 	}
 }
@@ -1116,6 +1195,67 @@ impl Display for V1Duration {
 			write!(f, "{nano}ns")?;
 		}
 		Ok(())
+	}
+}
+
+impl Display for V1Regex {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		let t = self.0.to_string().replace('/', "\\/");
+		write!(f, "/{}/", &t)
+	}
+}
+
+impl Serialize for V1Regex {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		serializer.serialize_newtype_struct("$surrealdb::private::sql::Regex", self.0.as_str())
+	}
+}
+
+impl<'de> Deserialize<'de> for V1Regex {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		struct RegexNewtypeVisitor;
+
+		impl<'de> serde::de::Visitor<'de> for RegexNewtypeVisitor {
+			type Value = V1Regex;
+
+			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+				formatter.write_str("a regex newtype")
+			}
+
+			fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+			where
+				D: serde::Deserializer<'de>,
+			{
+				struct RegexVisitor;
+
+				impl serde::de::Visitor<'_> for RegexVisitor {
+					type Value = V1Regex;
+
+					fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+						formatter.write_str("a regex str")
+					}
+
+					fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+					where
+						E: serde::de::Error,
+					{
+						V1Regex::from_str(value)
+							.map_err(|_| serde::de::Error::custom("invalid regex"))
+					}
+				}
+
+				deserializer.deserialize_str(RegexVisitor)
+			}
+		}
+
+		deserializer
+			.deserialize_newtype_struct("$surrealdb::private::sql::Regex", RegexNewtypeVisitor)
 	}
 }
 

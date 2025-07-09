@@ -649,7 +649,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					)
 					.await
 					.unwrap();
-				let res = resp.remove(0).output();
+				let res = resp.remove(0).take_first();
 				let res = res.unwrap().to_string();
 				assert!(res.contains("Name"), "{}: {:?}", msg, res);
 			} else {
@@ -664,7 +664,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					)
 					.await
 					.unwrap();
-				let res = resp.remove(0).output();
+				let res = resp.remove(0).take_first();
 				let res = res.unwrap().to_string();
 				assert!(!res.contains("Name"), "{}: {:?}", msg, res);
 			}

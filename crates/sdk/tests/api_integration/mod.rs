@@ -121,9 +121,9 @@ mod ws {
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Client>) {
+	async fn new_db() -> (SemaphorePermit<'static>, Surreal) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
+		let db = Surreal::connect("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
 			password: ROOT_PASS,
@@ -202,7 +202,7 @@ mod http {
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Client>) {
+	async fn new_db() -> (SemaphorePermit<'static>, Surreal) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {

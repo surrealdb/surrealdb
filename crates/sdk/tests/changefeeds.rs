@@ -100,7 +100,7 @@ async fn database_change_feeds() -> Result<()> {
 		let res = &mut dbs.execute(sql2, ses, None).await?;
 		assert_eq!(res.len(), 3);
 		// UPDATE CONTENT
-		let tmp = res.remove(0).values?;
+		let tmp = res.remove(0).values?[0];
 		let val = SqlValue::parse(
 			"[
 			{

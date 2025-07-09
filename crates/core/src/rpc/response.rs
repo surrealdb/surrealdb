@@ -1,5 +1,4 @@
 use crate::dbs::{Failure, Notification};
-use crate::rpc::protocol::v1;
 use crate::rpc::protocol::v1::types::{V1QueryResponse, V1Value};
 use revision::revisioned;
 use serde::Serialize;
@@ -109,8 +108,8 @@ impl TryFrom<V1Data> for V1Value {
 
 	fn try_from(val: V1Data) -> Result<Self, Self::Error> {
 		match val {
-			V1Data::Query(v) => v1::to_value(v),
-			V1Data::Live(v) => v1::to_value(v),
+			V1Data::Query(v) => crate::rpc::to_value(v),
+			V1Data::Live(v) => crate::rpc::to_value(v),
 			V1Data::Other(v) => Ok(v),
 		}
 	}

@@ -92,6 +92,10 @@ pub struct SurrealDB {
 }
 
 impl SurrealDB {
+	pub fn kvs(&self) -> Arc<Datastore> {
+		Arc::clone(&self.datastore)
+	}
+
 	/// Start the SurrealDB server.
 	pub async fn start(
 		SurrealDBArgs {
@@ -110,6 +114,7 @@ impl SurrealDB {
 			node_membership_cleanup_interval,
 			changefeed_gc_interval,
 		}: SurrealDBArgs,
+		cancellation_token: CancellationToken,
 	) -> Result<Self> {
 		// Log specified strict mode
 		debug!("Database strict mode is {strict_mode}");
@@ -131,7 +136,8 @@ impl SurrealDB {
 		// Log the specified server capabilities
 		debug!("Server capabilities: {capabilities}");
 		// Parse and setup the desired kv datastore
-		let dbs = Datastore::new(&uri).await?
+		let dbs = Datastore::new(&uri)
+			.await?
 			.with_strict_mode(strict_mode)
 			.with_query_timeout(query_timeout)
 			.with_transaction_timeout(transaction_timeout)
@@ -152,8 +158,6 @@ impl SurrealDB {
 
 		// Bootstrap the datastore
 		ds.bootstrap().await?;
-
-		let cancellation_token = CancellationToken::new();
 
 		let mut background_tasks = JoinSet::new();
 		background_tasks.spawn(tasks::node_membership_refresh_task(
@@ -218,7 +222,7 @@ impl IntoFuture for SurrealDB {
 
 	fn into_future(mut self) -> Self::IntoFuture {
 		Box::pin(async move {
-            loop {
+			loop {
 				tokio::select! {
 					_ = self.cancellation_token.cancelled() => {
 						break;

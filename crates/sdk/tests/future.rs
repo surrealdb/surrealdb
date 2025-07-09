@@ -101,7 +101,7 @@ async fn concurrency() -> Result<()> {
 
 				let res = res.into_iter().next().unwrap();
 
-				let elapsed = res.time.as_millis() as usize;
+				let elapsed = res.stats.execution_duration.as_millis() as usize;
 
 				Ok(elapsed < TIMEOUT)
 			}

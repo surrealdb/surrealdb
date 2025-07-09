@@ -16,7 +16,7 @@ use crate::rpc::protocol::v1::types::QueryType;
 use crate::rpc::protocol::v1::types::V1QueryResponse;
 use crate::{
 	dbs::capabilities::MethodTarget,
-	expr::{Value as ExprValue},
+	expr::Value as ExprValue,
 	rpc::args::Take,
 	sql::{
 		Array as SqlArray, Fields, Function, Model, Output, Query, Strand as SqlStrand,
@@ -32,8 +32,6 @@ use crate::sql::SqlValue;
 pub(in crate::rpc) mod convert;
 pub(in crate::rpc) mod serde;
 pub mod types;
-
-pub(in crate::rpc) use serde::to_value;
 
 use types::V1Value;
 
@@ -223,7 +221,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Clear the current session
-		crate::iam::clear::clear(&mut session)?;
+		crate::iam::clear::clear(&mut session);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -813,9 +811,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Specify the query variables
 		let vars = match vars {
-			ExprValue::Object(mut v) => {
-				Some(Variables(mrg! {v.0, self.session().variables.0}))
-			}
+			ExprValue::Object(mut v) => Some(Variables(mrg! {v.0, self.session().variables.0})),
 			ExprValue::None | ExprValue::Null => Some(self.session().variables.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};

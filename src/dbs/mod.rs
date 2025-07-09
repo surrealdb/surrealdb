@@ -1,21 +1,25 @@
 use crate::cli::CF;
 use anyhow::Result;
 use clap::Args;
-use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
-use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
-use surrealdb::kvs::Datastore;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
+use surrealdb_core::dbs::{SurrealDB, SurrealDBArgs};
+use tokio_util::sync::CancellationToken;
 
 const TARGET: &str = "surreal::dbs";
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
+	#[arg(help = "Database path used for storing data")]
+	#[arg(env = "SURREAL_PATH", index = 1)]
+	#[arg(default_value = "memory")]
+	#[arg(value_parser = super::cli::validator::path_valid)]
+	path: String,
 	#[arg(help = "Whether strict mode is enabled on this database instance")]
 	#[arg(env = "SURREAL_STRICT", short = 's', long = "strict")]
 	#[arg(default_value_t = false)]
@@ -43,6 +47,105 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_IMPORT_FILE", long = "import-file")]
 	#[arg(value_parser = super::cli::validator::file_exists)]
 	import_file: Option<PathBuf>,
+	//
+	// Authentication
+	//
+	//
+	// Authentication
+	//
+	#[arg(
+		help = "The username for the initial database root user. Only if no other root user exists",
+		help_heading = "Authentication"
+	)]
+	#[arg(
+		env = "SURREAL_USER",
+		short = 'u',
+		long = "username",
+		visible_alias = "user",
+		requires = "password"
+	)]
+	username: Option<String>,
+	#[arg(
+		help = "The password for the initial database root user. Only if no other root user exists",
+		help_heading = "Authentication"
+	)]
+	#[arg(
+		env = "SURREAL_PASS",
+		short = 'p',
+		long = "password",
+		visible_alias = "pass",
+		requires = "username"
+	)]
+	password: Option<String>,
+
+	#[arg(
+		help = "The interval at which to refresh node registration information",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_REFRESH_INTERVAL", long = "node-membership-refresh-interval", value_parser = crate::cli::validator::duration)]
+	#[arg(default_value = "3s")]
+	node_membership_refresh_interval: Duration,
+	#[arg(
+		help = "The interval at which process and archive inactive nodes",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CHECK_INTERVAL", long = "node-membership-check-interval", value_parser = crate::cli::validator::duration)]
+	#[arg(default_value = "15s")]
+	node_membership_check_interval: Duration,
+	#[arg(
+		help = "The interval at which to process and cleanup archived nodes",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CLEANUP_INTERVAL", long = "node-membership-cleanup-interval", value_parser = crate::cli::validator::duration)]
+	#[arg(default_value = "300s")]
+	node_membership_cleanup_interval: Duration,
+	#[arg(
+		help = "The interval at which to perform changefeed garbage collection",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_CHANGEFEED_GC_INTERVAL", long = "changefeed-gc-interval", value_parser = crate::cli::validator::duration)]
+	#[arg(default_value = "10s")]
+	changefeed_gc_interval: Duration,
+}
+
+impl TryFrom<StartCommandDbsOptions> for SurrealDBArgs {
+	type Error = anyhow::Error;
+
+	fn try_from(opts: StartCommandDbsOptions) -> Result<Self, Self::Error> {
+		let StartCommandDbsOptions {
+			path,
+			strict_mode,
+			query_timeout,
+			transaction_timeout,
+			unauthenticated,
+			capabilities,
+			temporary_directory,
+			import_file,
+			username,
+			password,
+			node_membership_refresh_interval,
+			node_membership_check_interval,
+			node_membership_cleanup_interval,
+			changefeed_gc_interval,
+		} = opts;
+
+		Ok(SurrealDBArgs {
+			uri: path,
+			strict_mode,
+			query_timeout,
+			transaction_timeout,
+			unauthenticated,
+			capabilities: capabilities.into(),
+			temporary_directory,
+			import_file,
+			root_user: username,
+			root_pass: password,
+			node_membership_refresh_interval,
+			node_membership_check_interval,
+			node_membership_cleanup_interval,
+			changefeed_gc_interval,
+		})
+	}
 }
 
 #[derive(Args, Debug)]
@@ -493,75 +596,22 @@ impl From<DbsCapabilities> for Capabilities {
 /// Initialise the database server
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 pub async fn init(
-	StartCommandDbsOptions {
-		strict_mode,
-		query_timeout,
-		transaction_timeout,
-		unauthenticated,
-		capabilities,
-		temporary_directory,
-		import_file,
-	}: StartCommandDbsOptions,
-) -> Result<Datastore> {
+	opts: StartCommandDbsOptions,
+	cancellation_token: CancellationToken,
+) -> Result<SurrealDB> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
-	// Log specified strict mode
-	debug!("Database strict mode is {strict_mode}");
-	// Log specified query timeout
-	if let Some(v) = query_timeout {
-		debug!("Maximum query processing timeout is {v:?}");
-	}
-	// Log specified parse timeout
-	if let Some(v) = transaction_timeout {
-		debug!("Maximum transaction processing timeout is {v:?}");
-	}
-	// Log whether authentication is disabled
-	if unauthenticated {
-		warn!(
-			"❌🔒 IMPORTANT: Authentication is disabled. This is not recommended for production use. 🔒❌"
-		);
-	}
 	// Warn about the impact of denying all capabilities
-	if capabilities.get_deny_all() {
+	if opts.capabilities.get_deny_all() {
 		warn!(
 			"You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied."
 		);
 	}
-	// Convert the capabilities
-	let capabilities = capabilities.into();
-	// Log the specified server capabilities
-	debug!("Server capabilities: {capabilities}");
-	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path)
-		.await?
-		.with_strict_mode(strict_mode)
-		.with_query_timeout(query_timeout)
-		.with_transaction_timeout(transaction_timeout)
-		.with_auth_enabled(!unauthenticated)
-		.with_temporary_directory(temporary_directory)
-		.with_capabilities(capabilities);
-	// Ensure the storage version is up-to-date to prevent corruption
-	dbs.check_version().await?;
-	// Import file at start, if provided
-	if let Some(file) = import_file {
-		// Log the startup import path
-		info!(target: TARGET, file = ?file, "Importing data from file");
-		// Read the full file contents
-		let sql = fs::read_to_string(file)?;
-		// Execute the SurrealQL file
-		dbs.startup(&sql, &Session::owner()).await?;
-	}
-	// Setup initial server auth credentials
-	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
-		// Log the initialisation of credentials
-		info!(target: TARGET, user = %user, "Initialising credentials");
-		// Initialise the credentials
-		dbs.initialise_credentials(user, pass).await?;
-	}
-	// Bootstrap the datastore
-	dbs.bootstrap().await?;
-	// All ok
-	Ok(dbs)
+
+	let surrealdb_args = SurrealDBArgs::try_from(opts)?;
+	let surrealdb = SurrealDB::start(surrealdb_args, cancellation_token).await?;
+
+	Ok(surrealdb)
 }
 
 #[cfg(test)]
@@ -570,6 +620,8 @@ mod tests {
 
 	use surrealdb::iam::verify::verify_root_creds;
 	use surrealdb::kvs::{LockType::*, TransactionType::*};
+	use surrealdb_core::dbs::Session;
+	use surrealdb_core::kvs::Datastore;
 	use test_log::test;
 	use wiremock::matchers::path;
 	use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
@@ -973,7 +1025,7 @@ mod tests {
 			let res = res.unwrap().remove(0).output();
 			let res = if succeeds {
 				assert!(res.is_ok(), "Unexpected error for test case {idx}: {res:?}");
-				res.unwrap().to_string()
+				res.unwrap()[0].to_string()
 			} else {
 				assert!(res.is_err(), "Unexpected success for test case {idx}: {res:?}");
 				res.unwrap_err().to_string()

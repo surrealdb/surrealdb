@@ -41,8 +41,6 @@ impl<T> IntoFuture for Import<T> {
 
 			let file = tokio::fs::File::open(self.file).await?;
 
-			let txn_id = uuid::Uuid::new_v4();
-
 			let outbound = async_stream::stream! {
 				let reader = tokio::io::BufReader::new(file);
 				let mut lines = reader.lines();
@@ -62,7 +60,6 @@ impl<T> IntoFuture for Import<T> {
 					}
 
 					yield ImportSqlRequest {
-						txn_id: Some(txn_id.into()),
 						statement: line,
 					};
 				}

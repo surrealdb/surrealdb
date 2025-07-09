@@ -698,10 +698,7 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{
-		dbs::Variables,
-		iam::token::{Audience, HEADER},
-	};
+	use crate::iam::token::{Audience, HEADER};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{EncodingKey, encode};
@@ -799,7 +796,7 @@ mod tests {
 					level.level, roles_clause, duration_clause,
 				);
 
-				ds.execute(&define_user_query, &sess, Variables::default()).await.unwrap();
+				ds.execute(&define_user_query, &sess, None).await.unwrap();
 
 				let mut sess = Session {
 					ns: level.ns.map(String::from),
@@ -903,13 +900,9 @@ mod tests {
 			};
 
 			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(
-				Statement::Define(DefineStatement::User(user)).into(),
-				&sess,
-				Variables::default(),
-			)
-			.await
-			.unwrap();
+			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
+				.await
+				.unwrap();
 
 			let mut sess = Session {
 				ns: level.ns.map(String::from),
@@ -1013,7 +1006,7 @@ mod tests {
 				)
 				.as_str(),
 				&sess,
-				Variables::default(),
+				None,
 			)
 			.await
 			.unwrap();
@@ -1175,7 +1168,7 @@ mod tests {
 			)
 			.as_str(),
 			&sess,
-			Variables::default(),
+			None,
 		)
 		.await
 		.unwrap();
@@ -1253,7 +1246,7 @@ mod tests {
 			)
 			.as_str(),
 			&sess,
-			Variables::default(),
+			None,
 		)
 		.await
 		.unwrap();
@@ -1539,13 +1532,13 @@ mod tests {
 			let sess = Session::owner();
 
 			let sql = "DEFINE USER root ON ROOT PASSWORD 'root'";
-			ds.execute(sql, &sess, Variables::default()).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N; DEFINE USER ns ON NS PASSWORD 'ns'";
-			ds.execute(sql, &sess, Variables::default()).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N DB D; DEFINE USER db ON DB PASSWORD 'db'";
-			ds.execute(sql, &sess, Variables::default()).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 		}
 
 		// Accept ROOT user
@@ -1589,7 +1582,7 @@ mod tests {
 			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
 				.as_str(),
 			&sess,
-			Variables::default(),
+			None,
 		)
 		.await
 		.unwrap();
@@ -1721,7 +1714,7 @@ mod tests {
 					)
 					.as_str(),
 					&sess,
-					Variables::default(),
+					None,
 				)
 				.await
 				.unwrap();
@@ -1833,7 +1826,7 @@ mod tests {
 				)
 				.as_str(),
 				&sess,
-				Variables::default(),
+				None,
 			)
 			.await
 			.unwrap();
@@ -1897,7 +1890,7 @@ mod tests {
 				)
 				.as_str(),
 				&sess,
-				Variables::default(),
+				None,
 			)
 			.await
 			.unwrap();
@@ -1989,7 +1982,7 @@ mod tests {
     				CREATE user:1 SET enabled = false;
 				"#).as_str(),
 				&sess,
-				Variables::default(),
+				None,
 			)
 			.await
 			.unwrap();
@@ -2042,7 +2035,7 @@ mod tests {
 				)
 				.as_str(),
 				&sess,
-				Variables::default(),
+				None,
 			)
 			.await
 			.unwrap();

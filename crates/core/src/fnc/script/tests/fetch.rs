@@ -7,7 +7,7 @@ use wiremock::{
 
 use crate::{
 	dbs::{
-		Capabilities, Session, Variables,
+		Capabilities, Session,
 		capabilities::{NetTarget, Targets},
 	},
 	kvs::Datastore,
@@ -44,14 +44,14 @@ async fn test_fetch_get() {
     "#,
 		server.uri()
 	);
-	let res = ds.execute(&sql, &sess, Variables::default()).await;
+	let res = ds.execute(&sql, &sess, None).await;
 
 	let res = res.unwrap().remove(0).output().unwrap();
 
 	server.verify().await;
 
 	assert_eq!(
-		res.to_string(),
+		res[0].to_string(),
 		"{ body: 'some body once told me', status: 200f }",
 		"Unexpected result: {:?}",
 		res
@@ -91,7 +91,7 @@ async fn test_fetch_put() {
     "#,
 		server.uri()
 	);
-	let res = ds.execute(&sql, &sess, Variables::default()).await;
+	let res = ds.execute(&sql, &sess, None).await;
 
 	let res = res.unwrap().remove(0).output().unwrap();
 
@@ -141,7 +141,7 @@ async fn test_fetch_error() {
     "#,
 		server.uri()
 	);
-	let res = ds.execute(&sql, &sess, Variables::default()).await;
+	let res = ds.execute(&sql, &sess, None).await;
 
 	let res = res.unwrap().remove(0).output().unwrap();
 
@@ -189,7 +189,7 @@ async fn test_fetch_denied() {
     "#,
 		server.uri()
 	);
-	let res = ds.execute(&sql, &sess, Variables::default()).await;
+	let res = ds.execute(&sql, &sess, None).await;
 
 	let res = res.unwrap().remove(0).output().unwrap_err();
 

@@ -18,6 +18,7 @@ use crate::expr::{
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
 use crate::fnc::util::string::fuzzy::Fuzzy;
+use crate::rpc::V1Value;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -628,7 +629,8 @@ impl Value {
 	/// This converts certain types like `Thing` into their simpler formats
 	/// instead of the format used internally by SurrealDB.
 	pub fn into_json(self) -> serde_json::Value {
-		serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+		let v1_value: V1Value = self.try_into().unwrap();
+		v1_value.into_json()
 	}
 
 	// -----------------------------------

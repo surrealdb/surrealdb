@@ -152,7 +152,7 @@ impl InfoStructure for LiveStatement {
 
 #[cfg(test)]
 mod tests {
-	use crate::dbs::{Action, Capabilities, Notification, Session, Variables};
+	use crate::dbs::{Action, Capabilities, Notification, Session};
 	use crate::expr::Thing;
 	use crate::expr::Value;
 	use crate::kvs::Datastore;
@@ -163,15 +163,12 @@ mod tests {
 	use anyhow::Result;
 
 	pub async fn new_ds() -> Result<Datastore> {
-		Ok(Datastore::new("memory")
-			.await?
-			.with_capabilities(Capabilities::all())
-			.with_notifications())
+		Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()))
 	}
 
 	#[tokio::test]
 	async fn test_table_definition_is_created_for_live_query() {
-		let dbs = new_ds().await.unwrap().with_notifications();
+		let dbs = new_ds().await.unwrap();
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
@@ -183,10 +180,9 @@ mod tests {
 
 		// Initiate a live query statement
 		let lq_stmt = format!("LIVE SELECT * FROM {}", tb);
-		let live_query_response =
-			&mut dbs.execute(&lq_stmt, &ses, Variables::default()).await.unwrap();
+		let live_query_response = &mut dbs.execute(&lq_stmt, &ses, None).await.unwrap();
 
-		let live_id = live_query_response.remove(0).values.unwrap();
+		let live_id = live_query_response.remove(0).take_first().unwrap().try_into().unwrap();
 		let live_id = match live_id {
 			Value::Uuid(id) => id,
 			_ => panic!("expected uuid"),
@@ -201,8 +197,7 @@ mod tests {
 
 		// Initiate a Create record
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
-		let create_response =
-			&mut dbs.execute(&create_statement, &ses, Variables::default()).await.unwrap();
+		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
 		let expected_record: Value = SqlValue::parse(&format!(
 			"[{{
@@ -213,7 +208,7 @@ mod tests {
 		.into();
 
 		let tmp = create_response.remove(0).values.unwrap();
-		assert_eq!(tmp, expected_record);
+		assert_eq!(Value::from(tmp), expected_record);
 
 		// Create a new transaction to verify that the same table was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
@@ -223,14 +218,14 @@ mod tests {
 		tx.cancel().await.unwrap();
 
 		// Validate notification
-		let notifications = dbs.notifications().expect("expected notifications");
+		let notifications = dbs.notifications();
 		let notification = notifications.recv().await.unwrap();
 		assert_eq!(
 			notification,
 			Notification::new(
 				live_id,
 				Action::Create,
-				Value::Thing(Thing::from((tb, "test_true"))),
+				Some(Thing::from((tb, "test_true"))),
 				SqlValue::parse(&format!(
 					"{{
 						id: {tb}:test_true,
@@ -244,7 +239,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_table_exists_for_live_query() {
-		let dbs = new_ds().await.unwrap().with_notifications();
+		let dbs = new_ds().await.unwrap();
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
@@ -256,7 +251,7 @@ mod tests {
 
 		// Initiate a Create record
 		let create_statement = format!("CREATE {}:test_true SET condition = true", tb);
-		dbs.execute(&create_statement, &ses, Variables::default()).await.unwrap();
+		dbs.execute(&create_statement, &ses, None).await.unwrap();
 
 		// Create a new transaction and confirm that a new table is created.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
@@ -267,7 +262,7 @@ mod tests {
 
 		// Initiate a live query statement
 		let lq_stmt = format!("LIVE SELECT * FROM {}", tb);
-		dbs.execute(&lq_stmt, &ses, Variables::default()).await.unwrap();
+		dbs.execute(&lq_stmt, &ses, None).await.unwrap();
 
 		// Verify that the old table definition was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();

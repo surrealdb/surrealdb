@@ -8,11 +8,6 @@ use anyhow::Result;
 use clap::Args;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
-use surrealdb::Surreal;
-use surrealdb::engine::tasks;
-use surrealdb::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(feature = "ml")]
@@ -22,11 +17,6 @@ use surrealdb_core::ml::execution::session::set_environment;
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
-	#[arg(help = "Database path used for storing data")]
-	#[arg(env = "SURREAL_PATH", index = 1)]
-	#[arg(default_value = "memory")]
-	#[arg(value_parser = super::validator::path_valid)]
-	path: String,
 	#[arg(help = "Whether to hide the startup banner")]
 	#[arg(env = "SURREAL_NO_BANNER", long)]
 	#[arg(default_value_t = false)]
@@ -36,64 +26,6 @@ pub struct StartCommandArguments {
 	#[arg(value_parser = super::validator::key_valid)]
 	#[arg(hide = true)] // Not currently in use
 	key: Option<String>,
-	//
-	// Tasks
-	//
-	#[arg(
-		help = "The interval at which to refresh node registration information",
-		help_heading = "Database"
-	)]
-	#[arg(env = "SURREAL_NODE_MEMBERSHIP_REFRESH_INTERVAL", long = "node-membership-refresh-interval", value_parser = super::validator::duration)]
-	#[arg(default_value = "3s")]
-	node_membership_refresh_interval: Duration,
-	#[arg(
-		help = "The interval at which process and archive inactive nodes",
-		help_heading = "Database"
-	)]
-	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CHECK_INTERVAL", long = "node-membership-check-interval", value_parser = super::validator::duration)]
-	#[arg(default_value = "15s")]
-	node_membership_check_interval: Duration,
-	#[arg(
-		help = "The interval at which to process and cleanup archived nodes",
-		help_heading = "Database"
-	)]
-	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CLEANUP_INTERVAL", long = "node-membership-cleanup-interval", value_parser = super::validator::duration)]
-	#[arg(default_value = "300s")]
-	node_membership_cleanup_interval: Duration,
-	#[arg(
-		help = "The interval at which to perform changefeed garbage collection",
-		help_heading = "Database"
-	)]
-	#[arg(env = "SURREAL_CHANGEFEED_GC_INTERVAL", long = "changefeed-gc-interval", value_parser = super::validator::duration)]
-	#[arg(default_value = "10s")]
-	changefeed_gc_interval: Duration,
-	//
-	// Authentication
-	//
-	#[arg(
-		help = "The username for the initial database root user. Only if no other root user exists",
-		help_heading = "Authentication"
-	)]
-	#[arg(
-		env = "SURREAL_USER",
-		short = 'u',
-		long = "username",
-		visible_alias = "user",
-		requires = "password"
-	)]
-	username: Option<String>,
-	#[arg(
-		help = "The password for the initial database root user. Only if no other root user exists",
-		help_heading = "Authentication"
-	)]
-	#[arg(
-		env = "SURREAL_PASS",
-		short = 'p',
-		long = "password",
-		visible_alias = "pass",
-		requires = "username"
-	)]
-	password: Option<String>,
 	//
 	// Datastore connection
 	//
@@ -153,17 +85,10 @@ struct StartCommandWebTlsOptions {
 
 pub async fn init(
 	StartCommandArguments {
-		path,
-		username: user,
-		password: pass,
 		client_ip,
 		listen_addresses,
-		dbs,
+		dbs: dbs_opts,
 		web,
-		node_membership_refresh_interval,
-		node_membership_check_interval,
-		node_membership_cleanup_interval,
-		changefeed_gc_interval,
 		no_banner,
 		no_identification_headers,
 		..
@@ -173,30 +98,20 @@ pub async fn init(
 	if !no_banner {
 		println!("{LOGO}");
 	}
-	use anyhow::Context;
-	let client =
-		Surreal::connect(path.as_str(), 1024).await.context("Failed to connect to database")?;
+	// use anyhow::Context;
+	// let client =
+	// 	Surreal::connect(path.as_str(), 1024).await.context("Failed to connect to database")?;
 	// Extract the certificate and key
 	let (crt, key) = if let Some(val) = web {
 		(val.web_crt, val.web_key)
 	} else {
 		(None, None)
 	};
-	// Configure the engine
-	let engine = EngineOptions::default()
-		.with_node_membership_refresh_interval(node_membership_refresh_interval)
-		.with_node_membership_check_interval(node_membership_check_interval)
-		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
-		.with_changefeed_gc_interval(changefeed_gc_interval);
 	// Configure the config
 	let config = Config {
 		bind: listen_addresses.first().copied().unwrap(),
 		client_ip,
-		path,
-		user,
-		pass,
 		no_identification_headers,
-		engine,
 		crt,
 		key,
 	};
@@ -210,19 +125,28 @@ pub async fn init(
 	set_environment().context("Failed to initialize ML library")?;
 
 	// Create a token to cancel tasks
-	let canceller = CancellationToken::new();
+	let cancellation_token = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init(dbs).await?);
-	// Start the node agent
-	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
+	let surrealdb = dbs::init(dbs_opts, cancellation_token.clone()).await?;
 	// Start the web server
-	net::init(datastore.clone(), canceller.clone()).await?;
-	// Shutdown and stop closed tasks
-	canceller.cancel();
-	// Wait for background tasks to finish
-	nodetasks.resolve().await?;
-	// Shutdown the datastore
-	datastore.shutdown().await?;
+	let api_datastore = surrealdb.kvs();
+	let api_canceller = cancellation_token.clone();
+
+	tokio::select! {
+		result = tokio::spawn(async move { net::init(api_datastore, api_canceller).await }) => {
+			if let Err(e) = result {
+				error!("Failed to start web server: {:?}", e);
+				cancellation_token.cancel();
+			}
+		}
+		result = surrealdb.into_future() => {
+			if let Err(e) = result {
+				error!("Failed to start datastore: {:?}", e);
+				cancellation_token.cancel();
+			}
+		}
+	}
+
 	// All ok
 	Ok(())
 }

@@ -8,8 +8,6 @@ use crate::opt::IntoVariables;
 use anyhow::Context as AnyhowContext;
 use futures::StreamExt;
 use indexmap::IndexMap;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use surrealdb_core::dbs::Variables;
@@ -90,7 +88,7 @@ impl IntoFuture for Query
 				let result = result?;
 				let QueryResponse {
 					query_index,
-					batch_index,
+					batch_index: _,
 					stats,
 					error,
 					values,
@@ -372,7 +370,7 @@ impl QueryResults {
 	pub fn take_errors(&mut self) -> HashMap<usize, anyhow::Error> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.results {
-			if let Some(error) = &result.error {
+			if result.error.is_some() {
 				keys.push(*key);
 			}
 		}
@@ -405,7 +403,7 @@ impl QueryResults {
 	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
 		for (key, result) in &self.results {
-			if let Some(error) = &result.error {
+			if result.error.is_some() {
 				first_error = Some(*key);
 				break;
 			}
@@ -593,9 +591,11 @@ impl WithStats<QueryResults> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use serde::Deserialize;
+	use crate::Error;
+	use serde::{Deserialize, Serialize};
+	use surrealdb_core::dbs;
 	use surrealdb_core::expr::Value;
-	use surrealdb_core::expr::to_value;
+	use surrealdb_core::rpc::to_value;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {

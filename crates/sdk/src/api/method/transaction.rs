@@ -12,7 +12,6 @@ use crate::opt::CreatableResource;
 use crate::opt::InsertableResource;
 use crate::opt::IntoQuery;
 use crate::opt::Resource;
-use surrealdb_core::expr::TryFromValue;
 use surrealdb_protocol::TryFromQueryStream;
 use surrealdb_protocol::proto::v1::Value as ValueProto;
 use uuid::Uuid;

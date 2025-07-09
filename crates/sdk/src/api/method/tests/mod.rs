@@ -7,38 +7,36 @@ mod types;
 
 use crate::QueryResults;
 use crate::api::Surreal;
-use crate::api::method::tests::types::AuthParams;
 use crate::api::opt::PatchOp;
 use crate::api::opt::auth::Database;
 use crate::api::opt::auth::Jwt;
 use crate::api::opt::auth::Namespace;
 use crate::api::opt::auth::RecordCredentials;
 use crate::api::opt::auth::Root;
-use protocol::Client;
-use protocol::Test;
 use semver::Version;
 use std::collections::BTreeMap;
 use std::ops::Bound;
-use std::sync::LazyLock;
 use surrealdb_core::sql::statements::{BeginStatement, CommitStatement};
 use types::USER;
 use types::User;
 
-static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+// static DB: LazyLock<Surreal> = LazyLock::new(Surreal::init);
 
 #[tokio::test]
 async fn api() {
-	// connect to the mock server
-	DB.connect::<Test>(()).with_capacity(512).await.unwrap();
+	let DB = Surreal::connect("memory", 512).await.unwrap();
+
+	// // connect to the mock server
+	// DB.connect::<Test>(()).with_capacity(512).await.unwrap();
 
 	// health
-	let _: () = DB.health().await.unwrap();
+	let _ = DB.health().await.unwrap();
 
 	// invalidate
 	let _: () = DB.invalidate().await.unwrap();
 
 	// use
-	let _: () = DB.use_ns("test-ns").use_db("test-db").await.unwrap();
+	let _ = DB.use_ns("test-ns").use_db("test-db").await.unwrap();
 
 	// signup
 	let _: Jwt = DB
@@ -178,7 +176,10 @@ fn assert_send_sync(_: impl Send + Sync) {}
 #[test]
 fn futures_are_send_sync() {
 	assert_send_sync(async {
-		let db = Surreal::new::<Test>(()).await.unwrap();
+		let (channel, server_handle) = protocol::TestServer::serve().await;
+
+		let db = Surreal::new(channel, "test").await.unwrap();
+
 		db.signin(Root {
 			username: "root",
 			password: "root",

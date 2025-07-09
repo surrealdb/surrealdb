@@ -151,9 +151,9 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.execute("CREATE person:test", &Session::owner().with_ns("NS").with_db("DB"), None)
 				.await
 				.unwrap();
-			let res = resp.remove(0).output();
+			let res = resp.remove(0).take_first()?;
 			assert!(
-				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+				res.is_ok() && res != SqlValue::parse("[]").into(),
 				"unexpected error creating person record"
 			);
 
@@ -457,7 +457,7 @@ async fn check_permissions_auth_disabled() {
 
 #[tokio::test]
 async fn delete_filtered_live_notification() -> Result<()> {
-	let dbs = new_ds().await?.with_notifications();
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);

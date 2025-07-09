@@ -354,6 +354,7 @@ env_logger.workspace = true
 jsonwebtoken.workspace = true
 serial_test.workspace = true
 test-log = { workspace = true, features = ["trace"] }
+tonic.workspace = true
 ulid.workspace = true
 wiremock.workspace = true
 rstest.workspace = true

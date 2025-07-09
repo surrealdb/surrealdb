@@ -12,11 +12,11 @@ use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::Capabilities;
 use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
-use surrealdb_core::dbs::Response;
+use surrealdb_core::dbs::QueryResult;
 use surrealdb_core::expr::{Number, Value, value};
 
 pub async fn new_ds() -> Result<Datastore> {
-	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
+	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()))
 }
 
 #[allow(dead_code)]
@@ -187,7 +187,7 @@ pub fn with_enough_stack(fut: impl Future<Output = Result<()>> + Send + 'static)
 
 #[track_caller]
 #[allow(dead_code)]
-fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<()> {
+fn skip_ok_pos(res: &mut Vec<QueryResult>, pos: usize) -> Result<()> {
 	assert!(!res.is_empty(), "At position {pos} - No more result!");
 	let r = res.remove(0).result;
 	let _ = r.is_err_and(|e| {
@@ -200,7 +200,7 @@ fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<()> {
 /// This function will panic if there are not enough results in the vector or if an error occurs.
 #[track_caller]
 #[allow(dead_code)]
-pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<()> {
+pub fn skip_ok(res: &mut Vec<QueryResult>, skip: usize) -> Result<()> {
 	for i in 0..skip {
 		skip_ok_pos(res, i)?;
 	}
@@ -218,7 +218,7 @@ pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<()> {
 pub struct Test {
 	pub ds: Datastore,
 	pub session: Session,
-	pub responses: Vec<Response>,
+	pub responses: Vec<QueryResult>,
 	pos: usize,
 }
 
@@ -281,7 +281,7 @@ impl Test {
 	#[track_caller]
 	#[allow(dead_code)]
 	#[allow(clippy::should_implement_trait)]
-	pub fn next(&mut self) -> Result<Response> {
+	pub fn next(&mut self) -> Result<QueryResult> {
 		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
 		Ok(self.responses.remove(0))
@@ -292,7 +292,7 @@ impl Test {
 	/// The panic message will include the last position in the responses list before it was emptied.
 	#[track_caller]
 	pub fn next_value(&mut self) -> Result<Value> {
-		self.next()?.result
+		Ok(self.next()?.values?.pop().unwrap())
 	}
 
 	/// Skips a specified number of elements from the beginning of the `responses` vector
@@ -394,7 +394,7 @@ impl Test {
 		&mut self,
 		check: F,
 	) -> Result<&mut Self> {
-		let tmp = self.next()?.result;
+		let tmp = self.next()?.values;
 		match &tmp {
 			Ok(val) => {
 				panic!("At position {} - Expect error, but got OK: {val}", self.pos);

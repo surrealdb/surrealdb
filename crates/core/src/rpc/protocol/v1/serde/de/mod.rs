@@ -58,12 +58,12 @@ impl V1Value {
 			V1Value::File(v) => serializer.serialize(v).map_err(Into::into),
 			V1Value::Table(v) => serializer.serialize(v).map_err(Into::into),
 			V1Value::Model(v) => serializer.serialize(v).map_err(Into::into),
+			V1Value::Regex(v) => serializer.serialize(v).map_err(Into::into),
 		}
 	}
 }
 
 /// Deserializes a value `T` from `SurrealDB` [`Value`]
-#[expect(dead_code)]
 pub fn from_value<T>(value: V1Value) -> Result<T>
 where
 	T: DeserializeOwned,

@@ -29,6 +29,7 @@ impl From<V1Value> for serde_json::Value {
 			V1Value::Table(table) => json!(table),
 			V1Value::Model(model) => json!(model),
 			V1Value::File(file) => file.to_string().into(),
+			V1Value::Regex(regex) => json!(regex),
 		}
 	}
 }
@@ -195,9 +196,15 @@ impl From<V1Geometry> for Geometry {
 #[cfg(test)]
 mod tests {
 	mod into_json {
+		use crate::rpc::V1Array;
+		use crate::rpc::V1Bytes;
+		use crate::rpc::V1Geometry;
+		use crate::rpc::V1Number;
+		use crate::rpc::V1Object;
+		use crate::rpc::V1RecordId;
+		use crate::rpc::protocol::v1::serde::from_value;
 		use crate::rpc::protocol::v1::types::V1Value;
 		use crate::sql;
-		use crate::sql::from_value;
 		use chrono::DateTime;
 		use chrono::Utc;
 		use geo::LineString;
@@ -243,7 +250,7 @@ mod tests {
 		#[test]
 		fn number_int() {
 			for num in [i64::MIN, 0, i64::MAX] {
-				let value = V1Value::V1Number(sql::V1Number::Int(num));
+				let value = V1Value::Number(V1Number::Int(num));
 
 				let simple_json = Json::from(value.clone());
 				assert_eq!(simple_json, json!(num));
@@ -256,7 +263,7 @@ mod tests {
 		#[test]
 		fn number_float() {
 			for num in [f64::NEG_INFINITY, f64::MIN, 0.0, f64::MAX, f64::INFINITY, f64::NAN] {
-				let value = V1Value::V1Number(sql::V1Number::Float(num));
+				let value = V1Value::Number(V1Number::Float(num));
 
 				let simple_json = Json::from(value.clone());
 				assert_eq!(simple_json, json!(num));
@@ -273,7 +280,7 @@ mod tests {
 		fn number_decimal() {
 			for num in [i64::MIN, 0, i64::MAX] {
 				let num = Decimal::new(num, 0);
-				let value = V1Value::V1Number(sql::V1Number::Decimal(num));
+				let value = V1Value::Number(V1Number::Decimal(num));
 
 				let simple_json = Json::from(value.clone());
 				assert_eq!(simple_json, json!(num.to_string()));
@@ -286,7 +293,7 @@ mod tests {
 		#[test]
 		fn strand() {
 			for str in ["", "foo"] {
-				let value = V1Value::Strand(str.into());
+				let value = V1Value::Strand(str.to_string().into());
 
 				let simple_json = Json::from(value.clone());
 				assert_eq!(simple_json, json!(str));
@@ -339,7 +346,7 @@ mod tests {
 		fn array() {
 			for vec in [vec![], vec![true, false]] {
 				let value =
-					V1Value::Array(sql::Array(vec.iter().copied().map(V1Value::from).collect()));
+					V1Value::Array(V1Array(vec.iter().copied().map(V1Value::from).collect()));
 
 				let simple_json = Json::from(value.clone());
 				assert_eq!(simple_json, json!(vec));
@@ -352,7 +359,7 @@ mod tests {
 		#[test]
 		fn object() {
 			for map in [BTreeMap::new(), map!("done".to_owned() => true)] {
-				let value = V1Value::Object(sql::Object(
+				let value = V1Value::Object(V1Object(
 					map.iter().map(|(key, value)| (key.clone(), V1Value::from(*value))).collect(),
 				));
 
@@ -367,7 +374,7 @@ mod tests {
 		#[test]
 		fn geometry_point() {
 			let point = point! { x: 10., y: 20. };
-			let value = V1Value::Geometry(sql::Geometry::Point(point));
+			let value = V1Value::Geometry(V1Geometry::Point(point));
 
 			let simple_json = Json::from(value.clone());
 			assert_eq!(simple_json, json!({ "type": "Point", "coordinates": [10., 20.]}));
@@ -382,7 +389,7 @@ mod tests {
 				( x: 0., y: 0. ),
 				( x: 10., y: 0. ),
 			];
-			let value = V1Value::Geometry(sql::Geometry::Line(line_string.clone()));
+			let value = V1Value::Geometry(V1Geometry::Line(line_string.clone()));
 
 			let simple_json = Json::from(value.clone());
 			assert_eq!(
@@ -402,7 +409,7 @@ mod tests {
 				(x: -104., y: 41.),
 				(x: -104., y: 45.),
 			];
-			let value = V1Value::Geometry(sql::Geometry::Polygon(polygon.clone()));
+			let value = V1Value::Geometry(V1Geometry::Polygon(polygon.clone()));
 
 			let simple_json = Json::from(value.clone());
 			assert_eq!(
@@ -424,7 +431,7 @@ mod tests {
 		fn geometry_multi_point() {
 			let multi_point: MultiPoint =
 				vec![point! { x: 0., y: 0. }, point! { x: 1., y: 2. }].into();
-			let value = V1Value::Geometry(sql::Geometry::MultiPoint(multi_point.clone()));
+			let value = V1Value::Geometry(V1Geometry::MultiPoint(multi_point.clone()));
 
 			let simple_json = Json::from(value.clone());
 			assert_eq!(
@@ -442,7 +449,7 @@ mod tests {
 					( x: 0., y: 0. ),
 					( x: 1., y: 2. ),
 			]]);
-			let value = V1Value::Geometry(sql::Geometry::MultiLine(multi_line.clone()));
+			let value = V1Value::Geometry(V1Geometry::MultiLine(multi_line.clone()));
 
 			let simple_json = Json::from(value.clone());
 			assert_eq!(
@@ -463,7 +470,7 @@ mod tests {
 				(x: -104., y: 45.),
 			]]
 			.into();
-			let value = V1Value::Geometry(sql::Geometry::MultiPolygon(multi_polygon.clone()));
+			let value = V1Value::Geometry(V1Geometry::MultiPolygon(multi_polygon.clone()));
 
 			let simple_json = Json::from(value.clone());
 			assert_eq!(
@@ -483,7 +490,7 @@ mod tests {
 
 		#[test]
 		fn geometry_collection() {
-			for geometries in [vec![], vec![sql::Geometry::Point(point! { x: 10., y: 20. })]] {
+			for geometries in [vec![], vec![V1Geometry::Point(point! { x: 10., y: 20. })]] {
 				let value = V1Value::Geometry(geometries.clone().into());
 
 				let simple_json = Json::from(value.clone());
@@ -495,7 +502,7 @@ mod tests {
 					})
 				);
 
-				let response: Vec<sql::Geometry> = from_value(value).unwrap();
+				let response: Vec<V1Geometry> = from_value(value).unwrap();
 				assert_eq!(response, geometries);
 			}
 		}
@@ -503,12 +510,12 @@ mod tests {
 		#[test]
 		fn bytes() {
 			for bytes in [vec![], b"foo".to_vec()] {
-				let value = V1Value::Bytes(sql::Bytes(bytes.clone()));
+				let value = V1Value::Bytes(V1Bytes(bytes.clone()));
 
 				let simple_json = Json::from(value.clone());
 				assert_eq!(simple_json, json!(bytes));
 
-				let sql::Bytes(response) = from_value(value).unwrap();
+				let V1Bytes(response) = from_value(value).unwrap();
 				assert_eq!(response, bytes);
 			}
 		}
@@ -516,13 +523,13 @@ mod tests {
 		#[test]
 		fn thing() {
 			let record_id = "foo:bar";
-			let thing = sql::thing(record_id).unwrap();
-			let value = V1Value::Thing(thing.clone());
+			let thing: V1RecordId = sql::thing(record_id).unwrap().try_into().unwrap();
+			let value = V1Value::RecordId(thing.clone());
 
 			let simple_json = Json::from(value.clone());
 			assert_eq!(simple_json, json!(record_id));
 
-			let response: sql::Thing = from_value(value).unwrap();
+			let response: V1RecordId = from_value(value).unwrap();
 			assert_eq!(response, thing);
 		}
 	}

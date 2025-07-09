@@ -2759,9 +2759,7 @@ impl FromFlatbuffers for Data {
 				let params = input.contents_as_update().context("Missing update")?;
 				Ok(Data::UpdateExpression(SetMultiExpr::from_fb(params)?))
 			}
-			unexpected => {
-				Err(anyhow::anyhow!("Unexpected data contents: {unexpected:?}"))
-			}
+			unexpected => Err(anyhow::anyhow!("Unexpected data contents: {unexpected:?}")),
 		}
 	}
 }

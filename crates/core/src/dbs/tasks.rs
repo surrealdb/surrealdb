@@ -124,38 +124,3 @@ async fn interval_ticker(interval: Duration) -> IntervalStream {
 	interval.tick().await;
 	IntervalStream::new(interval)
 }
-
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod test {
-	use super::tasks;
-	use super::{Datastore, EngineOptions};
-	use std::sync::Arc;
-	use std::time::Duration;
-	use tokio_util::sync::CancellationToken;
-
-	#[test_log::test(tokio::test)]
-	pub async fn tasks_complete() {
-		let can = CancellationToken::new();
-		let opt = EngineOptions::default();
-		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		let tasks = tasks::init(dbs.clone(), can.clone(), &opt);
-		can.cancel();
-		tasks.resolve().await.unwrap();
-	}
-
-	#[test_log::test(tokio::test)]
-	pub async fn tasks_complete_channel_closed() {
-		let can = CancellationToken::new();
-		let opt = EngineOptions::default();
-		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		let tasks = tasks::init(dbs.clone(), can.clone(), &opt);
-		can.cancel();
-		tokio::time::timeout(Duration::from_secs(10), tasks.resolve())
-			.await
-			.map_err(|e| format!("Timed out after {e}"))
-			.unwrap()
-			.map_err(|e| format!("Resolution failed: {e}"))
-			.unwrap();
-	}
-}

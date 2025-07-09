@@ -1335,7 +1335,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let sql = r"DEFINE TABLE test;".to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
-	res.remove(0).values.unwrap();
+	res.remove(0).take_first().unwrap();
 	// Obtain the initial uuids
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let initial = txn.get_tb("test", "test", "test").await?;
@@ -1353,10 +1353,10 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	.to_owned();
 	let res = &mut ds.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
-	res.remove(0).values.unwrap();
-	res.remove(0).values.unwrap();
-	res.remove(0).values.unwrap();
-	res.remove(0).values.unwrap();
+	res.remove(0).take_first().unwrap();
+	res.remove(0).take_first().unwrap();
+	res.remove(0).take_first().unwrap();
+	res.remove(0).take_first().unwrap();
 	let lqid = res.remove(0).values?;
 	assert!(matches!(lqid, Value::Uuid(_)));
 	// Obtain the uuids after definitions
@@ -1383,11 +1383,11 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let vars = map! { "lqid".to_string() => lqid };
 	let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 	assert_eq!(res.len(), 5);
-	res.remove(0).values.unwrap();
-	res.remove(0).values.unwrap();
-	res.remove(0).values.unwrap();
-	res.remove(0).values.unwrap();
-	res.remove(0).values.unwrap();
+	res.remove(0).take_first().unwrap();
+	res.remove(0).take_first().unwrap();
+	res.remove(0).take_first().unwrap();
+	res.remove(0).take_first().unwrap();
+	res.remove(0).take_first().unwrap();
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 	let after_remove = txn.get_tb("test", "test", "test").await?;

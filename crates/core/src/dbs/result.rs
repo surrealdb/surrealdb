@@ -229,6 +229,10 @@ impl QueryResult {
 			values: Ok(vec![value]),
 		}
 	}
+
+	pub fn take_first(self) -> Result<Value, Failure> {
+		self.values.map(|mut v| v.remove(0))
+	}
 }
 
 impl Default for QueryResult {

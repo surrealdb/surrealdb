@@ -1,6 +1,7 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::err::Error;
+use crate::rpc::V1Value;
 use crate::sql::id::range::IdRange;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
@@ -459,7 +460,8 @@ impl SqlValue {
 	/// This converts certain types like `Thing` into their simpler formats
 	/// instead of the format used internally by SurrealDB.
 	pub fn into_json(self) -> Json {
-		serde_json::to_value(self).unwrap_or(Json::Null)
+		let v1_value: V1Value = self.try_into().unwrap();
+		v1_value.into_json()
 	}
 
 	// -----------------------------------

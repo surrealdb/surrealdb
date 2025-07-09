@@ -95,7 +95,7 @@ pub trait InsertableResource: Resource {
 	/// Augment the data about to be inserted.
 	///
 	/// This is used to insert the id of the record into relationship insertions.
-	fn augment_data(&self, data: &mut Value) {}
+	fn augment_data(&self, _data: &mut Value) {}
 }
 
 pub trait CreatableResource: Resource {}

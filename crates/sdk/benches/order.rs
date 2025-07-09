@@ -71,7 +71,7 @@ async fn run(i: &Input, q: &str, expected: usize) {
 	let mut r = i.dbs.execute(black_box(q), &i.ses, None).await.unwrap();
 	if cfg!(debug_assertions) {
 		assert_eq!(r.len(), 1);
-		match r.remove(0).values.unwrap() {
+		match r.remove(0).take_first().unwrap() {
 			Value::Array(a) => {
 				assert_eq!(a.len(), expected);
 			}

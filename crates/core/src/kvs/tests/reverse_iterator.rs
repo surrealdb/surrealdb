@@ -23,11 +23,11 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<QueryResult> {
 		SELECT v FROM i ORDER BY v DESC;"
 	);
 
-	let mut r = ds.execute(&sql, &Session::owner(), Variables::default()).await.unwrap();
+	let mut r = ds.execute(&sql, &Session::owner(), None).await.unwrap();
 	assert_eq!(r.len(), 8);
 	// Check the first statements are successful
 	for _ in 0..4 {
-		r.remove(0).values.unwrap();
+		r.remove(0).take_first().unwrap();
 	}
 	r
 }
@@ -75,7 +75,7 @@ pub async fn standard(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check_array_is_sorted(&r.remove(0).values.unwrap(), 3);
+	check_array_is_sorted(&r.remove(0).take_first().unwrap(), 3);
 	check(
 		r,
 		"[
@@ -97,7 +97,7 @@ pub async fn standard(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check_array_is_sorted(&r.remove(0).values.unwrap(), 1500);
+	check_array_is_sorted(&r.remove(0).take_first().unwrap(), 1500);
 }
 
 pub async fn unique(new_ds: impl CreateDs) {
@@ -124,7 +124,7 @@ pub async fn unique(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check_array_is_sorted(&r.remove(0).values.unwrap(), 3);
+	check_array_is_sorted(&r.remove(0).take_first().unwrap(), 3);
 	check(
 		r,
 		"[
@@ -146,7 +146,7 @@ pub async fn unique(new_ds: impl CreateDs) {
 			}
 		]",
 	);
-	check_array_is_sorted(&r.remove(0).values.unwrap(), 1500);
+	check_array_is_sorted(&r.remove(0).take_first().unwrap(), 1500);
 }
 
 pub async fn range(new_ds: impl CreateDs) {
@@ -163,7 +163,7 @@ pub async fn range(new_ds: impl CreateDs) {
 		SELECT * FROM t:[500]..[550] ORDER BY id DESC LIMIT 3;
 		SELECT * FROM t:[500]..=[550] ORDER BY id DESC LIMIT 3 EXPLAIN;
 	";
-	let mut r = ds.execute(sql, &Session::owner(), Variables::default()).await.unwrap();
+	let mut r = ds.execute(sql, &Session::owner(), None).await.unwrap();
 	//Check the result
 	for _ in 0..3 {
 		check(&mut r, "NONE");

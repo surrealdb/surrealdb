@@ -39,7 +39,6 @@ use dashmap::DashMap;
 use futures::{Future, Stream};
 use reblessive::TreeStack;
 use std::fmt;
-#[cfg(storage)]
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
@@ -400,7 +399,6 @@ impl Datastore {
 				index_builder: IndexBuilder::new(tf.clone()),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-				#[cfg(storage)]
 				temporary_directory: None,
 				cache: Arc::new(DatastoreCache::new()),
 				buckets: Arc::new(DashMap::new()),
@@ -426,7 +424,6 @@ impl Datastore {
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
-			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
@@ -470,7 +467,6 @@ impl Datastore {
 		self.capabilities = Arc::new(caps);
 		self
 	}
-
 
 	/// Set a temporary directory for ordering of large result sets
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
@@ -1155,13 +1151,13 @@ impl Datastore {
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?.with_notifications();
+	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
-	/// 	if let Some(channel) = ds.notifications() {
-	///     	while let Ok(v) = channel.recv().await {
-	///     	    println!("Received notification: {v}");
-	///     	}
-	/// 	}
+	/// 	let channel = ds.notifications();
+	///
+	///     while let Ok(v) = channel.recv().await {
+	///         println!("Received notification: {v}");
+	///     }
 	///     Ok(())
 	/// }
 	/// ```

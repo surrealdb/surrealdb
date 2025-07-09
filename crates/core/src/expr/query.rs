@@ -19,7 +19,6 @@ use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Deref, DerefMut};
 
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Query")]
