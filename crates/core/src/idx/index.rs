@@ -132,12 +132,7 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				let key = self.get_non_unique_index_key(&n)?;
-				if txn.putc(key, revision::to_vec(self.rid)?, None).await.is_err() {
-					let key = self.get_non_unique_index_key(&n)?;
-					let val = txn.get(key, None).await?.unwrap();
-					let rid: Thing = revision::from_slice(&val)?;
-					return self.err_index_exists(rid, n);
-				}
+				txn.set(key, revision::to_vec(self.rid)?, None).await?;
 			}
 		}
 		Ok(())
