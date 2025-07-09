@@ -1,10 +1,10 @@
 use crate::syn::{
-	error::{bail, syntax_error, SyntaxError},
+	error::{SyntaxError, bail, syntax_error},
 	lexer::{
-		unicode::{byte, chars},
 		Lexer,
+		unicode::{byte, chars},
 	},
-	token::{t, Token, TokenKind},
+	token::{Token, TokenKind, t},
 };
 
 impl Lexer<'_> {

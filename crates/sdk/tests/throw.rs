@@ -1,10 +1,10 @@
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::err::Error;
 
 #[tokio::test]
-async fn throw_basic() -> Result<(), Error> {
+async fn throw_basic() -> Result<()> {
 	let sql = "
 		THROW 'there was an error';
 	";
@@ -23,7 +23,7 @@ async fn throw_basic() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn throw_param() -> Result<(), Error> {
+async fn throw_param() -> Result<()> {
 	let sql = "
 		LET $err = 'there was an error';
 		THROW $err;
@@ -46,7 +46,7 @@ async fn throw_param() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn throw_value() -> Result<(), Error> {
+async fn throw_value() -> Result<()> {
 	let sql = "
 		LET $err = string::concat('found unexpected value: ', {
 			test: true

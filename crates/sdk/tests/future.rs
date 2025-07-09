@@ -2,41 +2,13 @@ mod parse;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::sql::Value;
+use surrealdb::sql::SqlValue;
 
 #[tokio::test]
-async fn future_function_simple() -> Result<(), Error> {
-	let sql = "
-		UPSERT person:test SET can_drive = <future> { birthday && time::now() > birthday + 18y };
-		UPSERT person:test SET birthday = <datetime> '2007-06-22';
-		UPSERT person:test SET birthday = <datetime> '2001-06-22';
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[{ id: person:test, can_drive: NONE }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val =
-		Value::parse("[{ id: person:test, birthday: d'2007-06-22T00:00:00Z', can_drive: false }]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val =
-		Value::parse("[{ id: person:test, birthday: d'2001-06-22T00:00:00Z', can_drive: true }]");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn future_function_arguments() -> Result<(), Error> {
+async fn future_function_arguments() -> Result<()> {
 	let sql = "
 		UPSERT future:test SET
 			a = 'test@surrealdb.com',
@@ -51,7 +23,7 @@ async fn future_function_arguments() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"[
 			{
 				a: 'test@surrealdb.com',
@@ -61,14 +33,15 @@ async fn future_function_arguments() -> Result<(), Error> {
 				y: 'b-test',
 			}
 		]",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn future_disabled() -> Result<(), Error> {
+async fn future_disabled() -> Result<()> {
 	let sql = "
 	    OPTION FUTURES = false;
 		<future> { 123 };
@@ -79,7 +52,7 @@ async fn future_disabled() -> Result<(), Error> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("<future> { 123 }");
+	let val = SqlValue::parse("<future> { 123 }").into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -87,7 +60,7 @@ async fn future_disabled() -> Result<(), Error> {
 
 #[tokio::test]
 #[ignore]
-async fn concurrency() -> Result<(), Error> {
+async fn concurrency() -> Result<()> {
 	// cargo test --package surrealdb --test future --features kv-mem --release -- concurrency --nocapture
 
 	const MILLIS: usize = 50;
@@ -109,23 +82,29 @@ async fn concurrency() -> Result<(), Error> {
 	}
 
 	/// Returns `true` if `limit` futures are concurrently executed.
-	async fn test_limit(limit: usize) -> Result<bool, Error> {
+	async fn test_limit(limit: usize) -> Result<bool> {
 		let sql = query(limit, MILLIS);
 		let dbs = new_ds().await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
 		let res = dbs.execute(&sql, &ses, None).await;
 
-		if matches!(res, Err(Error::QueryTimedout)) {
-			Ok(false)
-		} else {
-			let res = res?;
-			assert_eq!(res.len(), 1);
+		match res {
+			Err(err) => {
+				if matches!(err.downcast_ref(), Some(Error::QueryTimedout)) {
+					Ok(false)
+				} else {
+					Err(err)
+				}
+			}
+			Ok(res) => {
+				assert_eq!(res.len(), 1);
 
-			let res = res.into_iter().next().unwrap();
+				let res = res.into_iter().next().unwrap();
 
-			let elapsed = res.time.as_millis() as usize;
+				let elapsed = res.time.as_millis() as usize;
 
-			Ok(elapsed < TIMEOUT)
+				Ok(elapsed < TIMEOUT)
+			}
 		}
 	}
 

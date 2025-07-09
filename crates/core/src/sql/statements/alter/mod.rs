@@ -6,13 +6,6 @@ pub use field::AlterFieldStatement;
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
 
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::sql::value::Value;
-
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -29,33 +22,32 @@ pub enum AlterStatement {
 	Field(AlterFieldStatement),
 }
 
-impl AlterStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value, Error> {
-		match self {
-			Self::Table(ref v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Sequence(ref v) => v.compute(ctx, opt).await,
-			Self::Field(ref v) => v.compute(stk, ctx, opt, doc).await,
-		}
-	}
-}
-
 impl Display for AlterStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Table(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
+		}
+	}
+}
+
+impl From<AlterStatement> for crate::expr::statements::AlterStatement {
+	fn from(v: AlterStatement) -> Self {
+		match v {
+			AlterStatement::Table(v) => Self::Table(v.into()),
+			AlterStatement::Sequence(v) => Self::Sequence(v.into()),
+			AlterStatement::Field(v) => Self::Field(v.into()),
+		}
+	}
+}
+
+impl From<crate::expr::statements::AlterStatement> for AlterStatement {
+	fn from(v: crate::expr::statements::AlterStatement) -> Self {
+		match v {
+			crate::expr::statements::AlterStatement::Table(v) => Self::Table(v.into()),
+			crate::expr::statements::AlterStatement::Sequence(v) => Self::Sequence(v.into()),
+			crate::expr::statements::AlterStatement::Field(v) => Self::Field(v.into()),
 		}
 	}
 }

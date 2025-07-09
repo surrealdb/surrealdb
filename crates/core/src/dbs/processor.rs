@@ -3,13 +3,14 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
+use crate::expr::dir::Dir;
+use crate::expr::id::range::IdRange;
+use crate::expr::{Edges, Table, Thing, Value};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
 use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
-use crate::sql::dir::Dir;
-use crate::sql::id::range::IdRange;
-use crate::sql::{Edges, Table, Thing, Value};
+use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use std::borrow::Cow;
@@ -26,7 +27,7 @@ impl Iterable {
 		stm: &Statement<'_>,
 		ite: &mut Iterator,
 		dis: Option<&mut SyncDistinct>,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if self.iteration_stage_check(ctx) {
 			let txn = ctx.tx();
 			let mut coll = ConcurrentCollector {
@@ -94,7 +95,7 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		rid_only: bool,
-	) -> Result<Processed, Error> {
+	) -> Result<Processed> {
 		match self {
 			Self::Edge(key) => Self::process_edge(opt, txn, key, rid_only).await,
 			Self::RangeKey(key) => Self::process_range_key(key).await,
@@ -122,7 +123,7 @@ impl Collected {
 		txn: &Transaction,
 		key: Key,
 		rid_only: bool,
-	) -> Result<Processed, Error> {
+	) -> Result<Processed> {
 		// Parse the data from the store
 		let gra: graph::Graph = graph::Graph::decode(&key)?;
 		// Fetch the data from the store
@@ -145,7 +146,7 @@ impl Collected {
 		})
 	}
 
-	async fn process_range_key(key: Key) -> Result<Processed, Error> {
+	async fn process_range_key(key: Key) -> Result<Processed> {
 		let key = thing::Thing::decode(&key)?;
 		let val = Value::Null;
 		let rid = Thing::from((key.tb, key.id));
@@ -162,7 +163,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_table_key(key: Key) -> Result<Processed, Error> {
+	async fn process_table_key(key: Key) -> Result<Processed> {
 		let key = thing::Thing::decode(&key)?;
 		let rid = Thing::from((key.tb, key.id));
 		// Process the record
@@ -184,7 +185,7 @@ impl Collected {
 		w: Thing,
 		o: Option<Value>,
 		rid_only: bool,
-	) -> Result<Processed, Error> {
+	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		let val = if rid_only {
 			Operable::Value(Arc::new(Value::Null))
@@ -213,7 +214,7 @@ impl Collected {
 		txn: &Transaction,
 		v: Thing,
 		rid_only: bool,
-	) -> Result<Processed, Error> {
+	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		let val = if rid_only {
 			Arc::new(Value::Null)
@@ -243,7 +244,7 @@ impl Collected {
 		txn: &Transaction,
 		v: Table,
 		rid_only: bool,
-	) -> Result<Processed, Error> {
+	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
@@ -277,7 +278,7 @@ impl Collected {
 		txn: &Transaction,
 		v: Thing,
 		rid_only: bool,
-	) -> Result<Processed, Error> {
+	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
@@ -301,7 +302,7 @@ impl Collected {
 		v: Thing,
 		o: Value,
 		rid_only: bool,
-	) -> Result<Processed, Error> {
+	) -> Result<Processed> {
 		// if it is skippable we only need the record id
 		if !rid_only {
 			// Check that the table exists
@@ -320,7 +321,7 @@ impl Collected {
 		Ok(pro)
 	}
 
-	fn process_key_val(key: Key, val: Val) -> Result<Processed, Error> {
+	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
 		let key = thing::Thing::decode(&key)?;
 		let mut val: Value = revision::from_slice(&val)?;
 		let rid = Thing::from((key.tb, key.id));
@@ -364,7 +365,7 @@ impl Collected {
 		txn: &Transaction,
 		i: IndexItemRecord,
 		rid_only: bool,
-	) -> Result<Processed, Error> {
+	) -> Result<Processed> {
 		let (t, v, ir) = i.consume();
 		let v = if let Some(v) = v {
 			// The value may already be fetched by the KNN iterator to evaluate the condition
@@ -395,7 +396,7 @@ pub(super) struct ConcurrentCollector<'a> {
 	ite: &'a mut Iterator,
 }
 impl Collector for ConcurrentCollector<'_> {
-	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
+	async fn collect(&mut self, collected: Collected) -> Result<()> {
 		// if it is skippable don't need to process the document
 		if self.ite.skippable() == 0 {
 			let pro = collected.process(self.opt, self.txn, false).await?;
@@ -417,7 +418,7 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 }
 
 impl Collector for ConcurrentDistinctCollector<'_> {
-	async fn collect(&mut self, collected: Collected) -> Result<(), Error> {
+	async fn collect(&mut self, collected: Collected) -> Result<()> {
 		let skippable = self.coll.ite.skippable() > 0;
 		// If it is skippable, we just need to collect the record id (if any)
 		// to ensure that distinct can be checked.
@@ -441,7 +442,7 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 }
 
 pub(super) trait Collector {
-	async fn collect(&mut self, collected: Collected) -> Result<(), Error>;
+	async fn collect(&mut self, collected: Collected) -> Result<()>;
 
 	fn iterator(&mut self) -> &mut Iterator;
 
@@ -463,7 +464,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		opt: &Options,
 		iterable: Iterable,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		if ctx.is_ok(true).await? {
 			match iterable {
 				Iterable::Value(v) => {
@@ -530,7 +531,7 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		mut rng: Range<Key>,
 		sc: ScanDirection,
-	) -> Result<Option<Range<Key>>, Error> {
+	) -> Result<Option<Range<Key>>> {
 		let ite = self.iterator();
 		let skippable = ite.skippable();
 		if skippable == 0 {
@@ -574,7 +575,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		v: &Table,
 		sc: ScanDirection,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
@@ -614,7 +615,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		v: &Table,
 		sc: ScanDirection,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
@@ -650,12 +651,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_table_count(
-		&mut self,
-		ctx: &Context,
-		opt: &Options,
-		v: &Table,
-	) -> Result<(), Error> {
+	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &Table) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
@@ -677,7 +673,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		tb: &str,
 		r: IdRange,
-	) -> Result<(Vec<u8>, Vec<u8>), Error> {
+	) -> Result<(Vec<u8>, Vec<u8>)> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
 		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
@@ -711,7 +707,7 @@ pub(super) trait Collector {
 		tb: &str,
 		r: IdRange,
 		sc: ScanDirection,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
@@ -750,7 +746,7 @@ pub(super) trait Collector {
 		tb: &str,
 		r: IdRange,
 		sc: ScanDirection,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
@@ -787,7 +783,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		tb: &str,
 		r: IdRange,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
@@ -800,7 +796,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_edges(&mut self, ctx: &Context, opt: &Options, e: Edges) -> Result<(), Error> {
+	async fn collect_edges(&mut self, ctx: &Context, opt: &Options, e: Edges) -> Result<()> {
 		// Pull out options
 		let (ns, db) = opt.ns_db()?;
 		let tb = &e.from.tb;
@@ -875,7 +871,7 @@ pub(super) trait Collector {
 		table: &Table,
 		irf: IteratorRef,
 		rs: RecordStrategy,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		// Check that the table exists
 		let (ns, db) = opt.ns_db()?;
 		ctx.tx().check_ns_db_tb(ns, db, &table.0, opt.strict).await?;
@@ -896,12 +892,12 @@ pub(super) trait Collector {
 				// Everything ok
 				return Ok(());
 			} else {
-				return Err(Error::QueryNotExecutedDetail {
+				bail!(Error::QueryNotExecutedDetail {
 					message: "No iterator has been found.".to_string(),
 				});
 			}
 		}
-		Err(Error::QueryNotExecutedDetail {
+		bail!(Error::QueryNotExecutedDetail {
 			message: "No QueryExecutor has been found.".to_string(),
 		})
 	}
@@ -911,7 +907,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		txn: &Transaction,
 		mut iterator: ThingIterator,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		while !ctx.is_done(true).await? {
 			let records: Vec<IndexItemRecord> =
 				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
@@ -933,7 +929,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		txn: &Transaction,
 		mut iterator: ThingIterator,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		while !ctx.is_done(true).await? {
 			let records: Vec<IndexItemRecord> =
 				iterator.next_batch(ctx, txn, *NORMAL_FETCH_SIZE).await?;
@@ -955,7 +951,7 @@ pub(super) trait Collector {
 		ctx: &Context,
 		txn: &Transaction,
 		mut iterator: ThingIterator,
-	) -> Result<(), Error> {
+	) -> Result<()> {
 		let mut total_count = 0;
 		while !ctx.is_done(true).await? {
 			let count = iterator.next_count(ctx, txn, *NORMAL_FETCH_SIZE).await?;
@@ -974,7 +970,7 @@ impl Iterable {
 		txn: &Transaction,
 		opt: &Options,
 		thg: &Thing,
-	) -> Result<Arc<Value>, Error> {
+	) -> Result<Arc<Value>> {
 		// Fetch and parse the data from the store
 		let (ns, db) = opt.ns_db()?;
 		let val = txn.get_record(ns, db, &thg.tb, &thg.id, None).await?;

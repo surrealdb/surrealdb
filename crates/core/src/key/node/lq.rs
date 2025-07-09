@@ -1,8 +1,8 @@
 //! Stores a LIVE SELECT query definition on the cluster
-use crate::err::Error;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{impl_key, KeyEncode};
+use crate::kvs::{KeyEncode, impl_key};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -30,13 +30,13 @@ pub fn new(nd: Uuid, lq: Uuid) -> Lq {
 	Lq::new(nd, lq)
 }
 
-pub fn prefix(nd: Uuid) -> Result<Vec<u8>, Error> {
+pub fn prefix(nd: Uuid) -> Result<Vec<u8>> {
 	let mut k = super::all::new(nd).encode()?;
 	k.extend_from_slice(b"!lq\x00");
 	Ok(k)
 }
 
-pub fn suffix(nd: Uuid) -> Result<Vec<u8>, Error> {
+pub fn suffix(nd: Uuid) -> Result<Vec<u8>> {
 	let mut k = super::all::new(nd).encode()?;
 	k.extend_from_slice(b"!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	Ok(k)

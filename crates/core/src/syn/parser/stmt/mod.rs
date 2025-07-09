@@ -5,29 +5,30 @@ use crate::sql::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
+	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 	access::{
 		AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 		AccessStatementShow, Subject,
 	},
-	KillStatement, LiveStatement, OptionStatement, SetStatement, ThrowStatement,
 };
 use crate::sql::{Duration, Fields, Ident, Param};
+use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::enter_query_recursion;
-use crate::syn::token::{t, Glued, TokenKind};
+use crate::syn::token::{Glued, TokenKind, t};
 use crate::{
 	sql::{
+		Expression, Operator, SqlValue, Statement, Statements,
 		statements::{
-			analyze::AnalyzeStatement, BeginStatement, BreakStatement, CancelStatement,
-			CommitStatement, ContinueStatement, ForeachStatement, InfoStatement, OutputStatement,
-			UseStatement,
+			BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
+			ForeachStatement, InfoStatement, OutputStatement, UseStatement,
+			analyze::AnalyzeStatement,
 		},
-		Expression, Operator, Statement, Statements, Value,
 	},
 	syn::parser::mac::unexpected,
 };
 
-use super::{mac::expected, ParseResult, Parser};
+use super::{ParseResult, Parser, mac::expected};
 
 mod alter;
 mod create;
@@ -217,7 +218,18 @@ impl Parser<'_> {
 			_ => {
 				// TODO: Provide information about keywords.
 				let value = ctx.run(|ctx| self.parse_value_field(ctx)).await?;
-				Ok(Self::refine_stmt_value(value))
+				if let SqlValue::Expression(x) = &value {
+					if let Expression::Binary {
+						l: SqlValue::Param(ref x),
+						o: Operator::Equal,
+						..
+					} = **x
+					{
+						let span = token.span.covers(self.recent_span());
+						bail!("Variable declaration without `let` is deprecated", @span => "replace with `let {x} = ..`")
+					}
+				}
+				Ok(Statement::Value(value))
 			}
 		}
 	}
@@ -315,44 +327,22 @@ impl Parser<'_> {
 		}
 	}
 
-	/// Turns [Param] `=` [Value] into a set statment.
-	fn refine_stmt_value(value: Value) -> Statement {
+	fn refine_entry_value(value: SqlValue) -> Entry {
 		match value {
-			Value::Expression(x) => {
+			SqlValue::Expression(x) => {
 				if let Expression::Binary {
-					l: Value::Param(x),
-					o: Operator::Equal,
-					r,
-				} = *x
-				{
-					return Statement::Set(crate::sql::statements::SetStatement {
-						name: x.0 .0,
-						what: r,
-						kind: None,
-					});
-				}
-				Statement::Value(Value::Expression(x))
-			}
-			_ => Statement::Value(value),
-		}
-	}
-
-	fn refine_entry_value(value: Value) -> Entry {
-		match value {
-			Value::Expression(x) => {
-				if let Expression::Binary {
-					l: Value::Param(x),
+					l: SqlValue::Param(x),
 					o: Operator::Equal,
 					r,
 				} = *x
 				{
 					return Entry::Set(crate::sql::statements::SetStatement {
-						name: x.0 .0,
+						name: x.0.0,
 						what: r,
 						kind: None,
 					});
 				}
-				Entry::Value(Value::Expression(x))
+				Entry::Value(SqlValue::Expression(x))
 			}
 			_ => Entry::Value(value),
 		}
@@ -631,9 +621,9 @@ impl Parser<'_> {
 		let peek = self.peek();
 		let id = match peek.kind {
 			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
-				self.next_token_value().map(Value::Uuid)?
+				self.next_token_value().map(SqlValue::Uuid)?
 			}
-			t!("$param") => self.next_token_value().map(Value::Param)?,
+			t!("$param") => self.next_token_value().map(SqlValue::Param)?,
 			_ => unexpected!(self, peek, "a UUID or a parameter"),
 		};
 		Ok(KillStatement {
@@ -657,8 +647,8 @@ impl Parser<'_> {
 		};
 		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
-			t!("$param") => Value::Param(self.next_token_value()?),
-			_ => Value::Table(self.next_token_value()?),
+			t!("$param") => SqlValue::Param(self.next_token_value()?),
+			_ => SqlValue::Table(self.next_token_value()?),
 		};
 		let cond = self.try_parse_condition(stk).await?;
 		let fetch = self.try_parse_fetch(stk).await?;
@@ -740,7 +730,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `LET` to already be consumed.
 	pub(super) async fn parse_let_stmt(&mut self, ctx: &mut Stk) -> ParseResult<SetStatement> {
-		let name = self.next_token_value::<Param>()?.0 .0;
+		let name = self.next_token_value::<Param>()?.0.0;
 		let kind = if self.eat(t!(":")) {
 			Some(self.parse_inner_kind(ctx).await?)
 		} else {
@@ -786,7 +776,9 @@ impl Parser<'_> {
 			TokenKind::Glued(_) => {
 				// This panic can be upheld within this function, just make sure you don't call
 				// glue here and the `next()` before this peek should eat any glued value.
-				panic!("A glued number token would truncate the timestamp so no gluing is allowed before this production.");
+				panic!(
+					"A glued number token would truncate the timestamp so no gluing is allowed before this production."
+				);
 			}
 			_ => unexpected!(self, next, "a version stamp or a date-time"),
 		};

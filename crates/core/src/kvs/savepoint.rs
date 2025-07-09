@@ -3,8 +3,8 @@
 	expect(dead_code, reason = "This is only used in FoundationDB and TiKV")
 )]
 
-use crate::err::Error;
 use crate::kvs::{Key, Val};
+use anyhow::Result;
 use std::collections::{HashMap, VecDeque};
 
 type SavePoint = HashMap<Key, SavedValue>;
@@ -59,12 +59,12 @@ impl SavePoints {
 		self.current.is_some()
 	}
 
-	pub(super) fn pop(&mut self) -> Result<SavePoint, Error> {
+	pub(super) fn pop(&mut self) -> Result<SavePoint> {
 		if let Some(c) = self.current.take() {
 			self.current = self.stack.pop_back();
 			Ok(c)
 		} else {
-			Err(fail!("No current SavePoint"))
+			fail!("No current SavePoint")
 		}
 	}
 

@@ -41,10 +41,9 @@ pub trait RpcContext {
 	fn handle_kill(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
 		async { unimplemented!("handle_kill function must be implemented if LQ_SUPPORT = true") }
 	}
+
 	/// Handles the cleanup of live queries
-	fn cleanup_lqs(&self) -> impl std::future::Future<Output = ()> + Send {
-		async { unimplemented!("cleanup_lqs function must be implemented if LQ_SUPPORT = true") }
-	}
+	fn cleanup_lqs(&self) -> impl std::future::Future<Output = ()> + Send;
 
 	// ------------------------------
 	// GraphQL
@@ -68,6 +67,7 @@ pub trait RpcContext {
 	async fn execute(
 		&self,
 		version: Option<u8>,
+		txn: Option<Uuid>,
 		method: Method,
 		params: Array,
 	) -> Result<Data, RpcError>
@@ -77,7 +77,7 @@ pub trait RpcContext {
 	{
 		match version {
 			Some(1) => RpcProtocolV1::execute(self, method, params).await,
-			Some(2) => RpcProtocolV2::execute(self, method, params).await,
+			Some(2) => RpcProtocolV2::execute(self, txn, method, params).await,
 			_ => RpcProtocolV1::execute(self, method, params).await,
 		}
 	}

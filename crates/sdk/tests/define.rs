@@ -4,20 +4,23 @@ use parse::Parse;
 
 mod helpers;
 use helpers::*;
+use surrealdb_core::expr::Value;
+use surrealdb_core::iam::Level;
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
+use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
+use surrealdb::expr::{Idiom, Part};
 use surrealdb::iam::Role;
 use surrealdb::kvs::{LockType, TransactionType};
-use surrealdb::sql::Idiom;
-use surrealdb::sql::{Part, Value};
+use surrealdb::sql::SqlValue;
 use test_log::test;
 use tracing::info;
 
 #[tokio::test]
-async fn define_statement_namespace() -> Result<(), Error> {
+async fn define_statement_namespace() -> Result<()> {
 	let sql = "
 		DEFINE NAMESPACE test;
 		INFO FOR ROOT;
@@ -31,7 +34,7 @@ async fn define_statement_namespace() -> Result<(), Error> {
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			namespaces: { test: 'DEFINE NAMESPACE test' },
@@ -51,14 +54,15 @@ async fn define_statement_namespace() -> Result<(), Error> {
 			},
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn define_statement_database() -> Result<(), Error> {
+async fn define_statement_database() -> Result<()> {
 	let sql = "
 		DEFINE DATABASE test;
 		INFO FOR NS;
@@ -72,20 +76,21 @@ async fn define_statement_database() -> Result<(), Error> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
-	);
+	)
+	.into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
 
 #[tokio::test]
-async fn define_statement_event_when_event() -> Result<(), Error> {
+async fn define_statement_event_when_event() -> Result<()> {
 	let sql = "
 		DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
@@ -123,7 +128,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_event_when_logic() -> Result<(), Error> {
+async fn define_statement_event_when_logic() -> Result<()> {
 	let sql = "
 		DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (
 			CREATE activity SET user = $this, value = $after.email, action = $event
@@ -165,7 +170,7 @@ async fn define_statement_index_concurrently_building_status(
 	skip_def: usize,
 	initial_size: usize,
 	appended_size: usize,
-) -> Result<(), Error> {
+) -> Result<()> {
 	let session = Session::owner().with_ns("test").with_db("test");
 	let ds = new_ds().await?;
 	// Populate initial records
@@ -276,7 +281,7 @@ async fn define_statement_index_concurrently_building_status(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn define_statement_index_concurrently_building_status_standard() -> Result<(), Error> {
+async fn define_statement_index_concurrently_building_status_standard() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE INDEX test ON user FIELDS email CONCURRENTLY",
 		1,
@@ -287,8 +292,7 @@ async fn define_statement_index_concurrently_building_status_standard() -> Resul
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn define_statement_index_concurrently_building_status_standard_overwrite(
-) -> Result<(), Error> {
+async fn define_statement_index_concurrently_building_status_standard_overwrite() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE INDEX OVERWRITE test ON user FIELDS email CONCURRENTLY",
 		1,
@@ -299,7 +303,7 @@ async fn define_statement_index_concurrently_building_status_standard_overwrite(
 }
 
 #[test(tokio::test)]
-async fn define_statement_index_concurrently_building_status_full_text() -> Result<(), Error> {
+async fn define_statement_index_concurrently_building_status_full_text() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
@@ -311,8 +315,7 @@ async fn define_statement_index_concurrently_building_status_full_text() -> Resu
 }
 
 #[test(tokio::test)]
-async fn define_statement_index_concurrently_building_status_full_text_overwrite(
-) -> Result<(), Error> {
+async fn define_statement_index_concurrently_building_status_full_text_overwrite() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX OVERWRITE test ON user FIELDS email SEARCH ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
@@ -323,7 +326,7 @@ async fn define_statement_index_concurrently_building_status_full_text_overwrite
 }
 
 #[tokio::test]
-async fn define_statement_analyzer() -> Result<(), Error> {
+async fn define_statement_analyzer() -> Result<()> {
 	let sql = r#"
 		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
@@ -363,7 +366,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_search_index() -> Result<(), Error> {
+async fn define_statement_search_index() -> Result<()> {
 	let sql = r#"
 		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
 		CREATE blog:3 SET title = 'This blog is going to be deleted';
@@ -386,7 +389,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	}
 
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = SqlValue::parse(
 		"{
 			events: {},
 			fields: {},
@@ -426,7 +429,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_user_root() -> Result<(), Error> {
+async fn define_statement_user_root() -> Result<()> {
 	let sql = "
 		DEFINE USER test ON ROOT PASSWORD 'test';
 
@@ -445,15 +448,17 @@ async fn define_statement_user_root() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
 
-	assert!(define_str
-		.strip_prefix('\"')
-		.unwrap()
-		.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$"));
+	assert!(
+		define_str
+			.strip_prefix('\"')
+			.unwrap()
+			.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$")
+	);
 	Ok(())
 }
 
 #[tokio::test]
-async fn define_statement_user_ns() -> Result<(), Error> {
+async fn define_statement_user_ns() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner();
 
@@ -473,30 +478,33 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 	res.next().unwrap().result.unwrap();
 	res.next().unwrap().result.unwrap();
 
-	assert!(res
-		.next()
-		.unwrap()
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res
-		.next()
-		.unwrap()
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
-	assert!(res
-		.next()
-		.unwrap()
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$"));
+	assert!(
+		res.next()
+			.unwrap()
+			.result
+			.as_ref()
+			.unwrap()
+			.to_string()
+			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+	);
+	assert!(
+		res.next()
+			.unwrap()
+			.result
+			.as_ref()
+			.unwrap()
+			.to_string()
+			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+	);
+	assert!(
+		res.next()
+			.unwrap()
+			.result
+			.as_ref()
+			.unwrap()
+			.to_string()
+			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+	);
 
 	assert_eq!(
 		res.next().unwrap().result.as_ref().unwrap_err().to_string(),
@@ -515,7 +523,7 @@ async fn define_statement_user_ns() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_user_db() -> Result<(), Error> {
+async fn define_statement_user_db() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner();
 
@@ -541,24 +549,30 @@ async fn define_statement_user_db() -> Result<(), Error> {
 		"The user 'test' does not exist in the namespace 'ns'"
 	); // User doesn't exist at the NS level
 
-	assert!(res[3]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
-	assert!(res[4]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
-	assert!(res[5]
-		.result
-		.as_ref()
-		.unwrap()
-		.to_string()
-		.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$"));
+	assert!(
+		res[3]
+			.result
+			.as_ref()
+			.unwrap()
+			.to_string()
+			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
+	);
+	assert!(
+		res[4]
+			.result
+			.as_ref()
+			.unwrap()
+			.to_string()
+			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
+	);
+	assert!(
+		res[5]
+			.result
+			.as_ref()
+			.unwrap()
+			.to_string()
+			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
+	);
 
 	// If it tries to create a NS user without specifying a NS, it should fail
 	let sql = "
@@ -589,6 +603,16 @@ where
 // Permissions
 //
 
+fn level_root() -> Level {
+	Level::Root
+}
+fn level_ns() -> Level {
+	Level::Namespace("NS".to_owned())
+}
+fn level_db() -> Level {
+	Level::Database("NS".to_owned(), "DB".to_owned())
+}
+
 #[tokio::test]
 async fn permissions_checks_define_ns() {
 	let scenario = HashMap::from([
@@ -604,26 +628,26 @@ async fn permissions_checks_define_ns() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), false),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -643,30 +667,29 @@ async fn permissions_checks_define_db() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
-	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
-	assert!(res.is_ok(), "{}", res.unwrap_err());
+	iam_check_cases(test_cases.iter(), &scenario, check_results).await.unwrap();
 }
 
 #[tokio::test]
@@ -679,32 +702,36 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"]
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -721,32 +748,36 @@ async fn permissions_checks_define_analyzer() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, sequences: { }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {}, tables: {  }, users: {  } }"]
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, sequences: { }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {}, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -768,26 +799,26 @@ async fn permissions_checks_define_access_root() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), false),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), false),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), false),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -804,32 +835,34 @@ async fn permissions_checks_define_access_ns() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, databases: {  }, users: {  } }"]
-    ];
+		vec![
+			"{ accesses: { access: \"DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, databases: {  }, users: {  } }",
+		],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), false),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), false),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -846,32 +879,36 @@ async fn permissions_checks_define_access_db() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"]
-    ];
+		vec![
+			"{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), false),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), false),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -882,7 +919,10 @@ async fn permissions_checks_define_access_db() {
 async fn permissions_checks_define_user_root() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
+		(
+			"test",
+			"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h",
+		),
 		("check", "INFO FOR ROOT"),
 	]);
 
@@ -893,26 +933,26 @@ async fn permissions_checks_define_user_root() {
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), false),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), false),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), false),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), false),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -923,38 +963,43 @@ async fn permissions_checks_define_user_root() {
 async fn permissions_checks_define_user_ns() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
+		(
+			"test",
+			"DEFINE USER user ON NS PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h",
+		),
 		("check", "INFO FOR NS"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-		vec!["{ accesses: {  }, databases: {  }, users: {  } }"]
-    ];
+		vec![
+			"{ accesses: {  }, databases: {  }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }",
+		],
+		vec!["{ accesses: {  }, databases: {  }, users: {  } }"],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), false),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), false),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -965,38 +1010,45 @@ async fn permissions_checks_define_user_ns() {
 async fn permissions_checks_define_user_db() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h"),
+		(
+			"test",
+			"DEFINE USER user ON DB PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h",
+		),
 		("check", "INFO FOR DB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }"],
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"]
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\" } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), false),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), false),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -1007,38 +1059,45 @@ async fn permissions_checks_define_user_db() {
 async fn permissions_checks_define_access_record() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 12h"),
+		(
+			"test",
+			"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 12h",
+		),
 		("check", "INFO FOR DB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"]
-    ];
+		vec![
+			"{ accesses: { account: \"DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), false),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), false),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), false),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -1055,32 +1114,36 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, sequences: { }, tables: {  }, users: {  } }"],
-		vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"]
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, sequences: { }, tables: {  }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -1094,32 +1157,36 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"]
-    ];
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }",
+		],
+		vec![
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+		],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -1136,32 +1203,34 @@ async fn permissions_checks_define_event() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
-    ];
+		vec![
+			"{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
+		],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -1178,32 +1247,34 @@ async fn permissions_checks_define_field() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
-    ];
+		vec![
+			"{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }",
+		],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -1220,32 +1291,34 @@ async fn permissions_checks_define_index() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
-		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
-    ];
+		vec![
+			"{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }",
+		],
+		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+	];
 
 	let test_cases = [
 		// Root level
-		((().into(), Role::Owner), ("NS", "DB"), true),
-		((().into(), Role::Editor), ("NS", "DB"), true),
-		((().into(), Role::Viewer), ("NS", "DB"), false),
+		((level_root(), Role::Owner), ("NS", "DB"), true),
+		((level_root(), Role::Editor), ("NS", "DB"), true),
+		((level_root(), Role::Viewer), ("NS", "DB"), false),
 		// Namespace level
-		((("NS",).into(), Role::Owner), ("NS", "DB"), true),
-		((("NS",).into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Editor), ("NS", "DB"), true),
-		((("NS",).into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS",).into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Owner), ("NS", "DB"), true),
+		((level_ns(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Editor), ("NS", "DB"), true),
+		((level_ns(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("NS", "DB"), false),
+		((level_ns(), Role::Viewer), ("OTHER_NS", "DB"), false),
 		// Database level
-		((("NS", "DB").into(), Role::Owner), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Owner), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Owner), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("NS", "DB"), true),
-		((("NS", "DB").into(), Role::Editor), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Editor), ("OTHER_NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("NS", "OTHER_DB"), false),
-		((("NS", "DB").into(), Role::Viewer), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Owner), ("NS", "DB"), true),
+		((level_db(), Role::Owner), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Owner), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Editor), ("NS", "DB"), true),
+		((level_db(), Role::Editor), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Editor), ("OTHER_NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "DB"), false),
+		((level_db(), Role::Viewer), ("NS", "OTHER_DB"), false),
+		((level_db(), Role::Viewer), ("OTHER_NS", "DB"), false),
 	];
 
 	let res = iam_check_cases(test_cases.iter(), &scenario, check_results).await;
@@ -1253,7 +1326,7 @@ async fn permissions_checks_define_index() {
 }
 
 #[tokio::test]
-async fn cross_transaction_caching_uuids_updated() -> Result<(), Error> {
+async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	let ds = new_ds().await?;
 	let cache = ds.get_cache();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);

@@ -1,12 +1,14 @@
+use crate::net::error::Error as NetError;
+use anyhow::{Result, bail};
 use axum::RequestPartsExt;
-use axum::{body::Body, Extension};
-use axum_extra::headers::{
-	authorization::{Basic, Bearer},
-	Authorization, Origin,
-};
+use axum::{Extension, body::Body};
 use axum_extra::TypedHeader;
+use axum_extra::headers::{
+	Authorization, Origin,
+	authorization::{Basic, Bearer},
+};
 use futures_util::future::BoxFuture;
-use http::{request::Parts, StatusCode};
+use http::{StatusCode, request::Parts};
 use hyper::{Request, Response};
 use surrealdb::{
 	dbs::Session,
@@ -15,15 +17,13 @@ use surrealdb::{
 use tower_http::auth::AsyncAuthorizeRequest;
 use uuid::Uuid;
 
-use crate::err::Error;
-
 use super::{
+	AppState,
 	client_ip::ExtractClientIP,
 	headers::{
-		parse_typed_header, SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId,
-		SurrealNamespace,
+		SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
+		parse_typed_header,
 	},
-	AppState,
 };
 
 ///
@@ -71,15 +71,16 @@ impl AsyncAuthorizeRequest<Body> for SurrealAuth {
 	}
 }
 
-async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
-	let or = if let Ok(or) = parts.extract::<TypedHeader<Origin>>().await {
-		if !or.is_null() {
-			Some(or.to_string())
-		} else {
-			None
+async fn check_auth(parts: &mut Parts) -> Result<Session> {
+	let or = match parts.extract::<TypedHeader<Origin>>().await {
+		Ok(or) => {
+			if !or.is_null() {
+				Some(or.to_string())
+			} else {
+				None
+			}
 		}
-	} else {
-		None
+		_ => None,
 	};
 
 	// Extract the session id from the headers or generate a new one.
@@ -91,7 +92,7 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 				// The specified request id was a valid UUID.
 				Ok(id) => Some(id.to_string()),
 				// The specified request id was not a valid UUID.
-				Err(_) => return Err(Error::Request),
+				Err(_) => bail!(NetError::Request),
 			}
 		}
 		// No request id was specified, create a new id.
@@ -118,7 +119,7 @@ async fn check_auth(parts: &mut Parts) -> Result<Session, Error> {
 
 	let Extension(state) = parts.extract::<Extension<AppState>>().await.map_err(|err| {
 		tracing::error!("Error extracting the app state: {:?}", err);
-		Error::InvalidAuth
+		NetError::InvalidAuth
 	})?;
 
 	let kvs = &state.datastore;

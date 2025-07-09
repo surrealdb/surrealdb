@@ -1,10 +1,9 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
-use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::ops::Deref;
-use std::{cmp, fmt};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -20,6 +19,24 @@ impl fmt::Display for Ordering {
 		match self {
 			Ordering::Random => write!(f, "ORDER BY RAND()"),
 			Ordering::Order(list) => writeln!(f, "ORDER BY {list}"),
+		}
+	}
+}
+
+impl From<Ordering> for crate::expr::order::Ordering {
+	fn from(v: Ordering) -> Self {
+		match v {
+			Ordering::Random => Self::Random,
+			Ordering::Order(list) => Self::Order(list.into()),
+		}
+	}
+}
+
+impl From<crate::expr::order::Ordering> for Ordering {
+	fn from(v: crate::expr::order::Ordering) -> Self {
+		match v {
+			crate::expr::order::Ordering::Random => Self::Random,
+			crate::expr::order::Ordering::Order(list) => Self::Order(list.into()),
 		}
 	}
 }
@@ -43,23 +60,15 @@ impl fmt::Display for OrderList {
 	}
 }
 
-impl OrderList {
-	pub(crate) fn compare(&self, a: &Value, b: &Value) -> cmp::Ordering {
-		for order in &self.0 {
-			// Reverse the ordering if DESC
-			let o = match order.direction {
-				true => a.compare(b, &order.value.0, order.collate, order.numeric),
-				false => b.compare(a, &order.value.0, order.collate, order.numeric),
-			};
-			//
-			match o {
-				Some(cmp::Ordering::Greater) => return cmp::Ordering::Greater,
-				Some(cmp::Ordering::Equal) => continue,
-				Some(cmp::Ordering::Less) => return cmp::Ordering::Less,
-				None => continue,
-			}
-		}
-		cmp::Ordering::Equal
+impl From<OrderList> for crate::expr::order::OrderList {
+	fn from(v: OrderList) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
+	}
+}
+
+impl From<crate::expr::order::OrderList> for OrderList {
+	fn from(v: crate::expr::order::OrderList) -> Self {
+		Self(v.0.into_iter().map(Into::into).collect())
 	}
 }
 
@@ -89,6 +98,27 @@ impl fmt::Display for Order {
 			write!(f, " DESC")?;
 		}
 		Ok(())
+	}
+}
+
+impl From<Order> for crate::expr::order::Order {
+	fn from(v: Order) -> Self {
+		Self {
+			value: v.value.into(),
+			collate: v.collate,
+			numeric: v.numeric,
+			direction: v.direction,
+		}
+	}
+}
+impl From<crate::expr::order::Order> for Order {
+	fn from(v: crate::expr::order::Order) -> Self {
+		Self {
+			value: v.value.into(),
+			collate: v.collate,
+			numeric: v.numeric,
+			direction: v.direction,
+		}
 	}
 }
 

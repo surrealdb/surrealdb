@@ -1,11 +1,9 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use http::HeaderMap;
-use reblessive::{tree::Stk, TreeStack};
-
 use super::{
 	body::ApiBody,
 	context::InvocationContext,
+	convert,
 	method::Method,
 	middleware::CollectMiddleware,
 	response::{ApiResponse, ResponseInstruction},
@@ -14,13 +12,15 @@ use crate::{
 	api::middleware::RequestMiddleware,
 	ctx::{Context, MutableContext},
 	dbs::{Options, Session},
-	err::Error,
-	kvs::{Datastore, Transaction},
-	sql::{
-		statements::define::{config::api::ApiConfig, ApiDefinition},
+	expr::{
 		FlowResultExt as _, Object, Value,
+		statements::define::{ApiDefinition, config::api::ApiConfig},
 	},
+	kvs::{Datastore, Transaction},
 };
+use anyhow::Result;
+use http::HeaderMap;
+use reblessive::{TreeStack, tree::Stk};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -33,13 +33,13 @@ pub struct ApiInvocation {
 }
 
 impl ApiInvocation {
-	pub fn vars(self, body: Value) -> Result<Value, Error> {
+	pub fn vars(self, body: Value) -> Result<Value> {
 		let obj = map! {
 			"params" => Value::from(self.params),
 			"body" => body,
 			"method" => self.method.to_string().into(),
 			"query" => Value::Object(self.query.into()),
-			"headers" => Value::Object(self.headers.try_into()?),
+			"headers" => Value::Object(convert::headermap_to_object(self.headers)?),
 		};
 
 		Ok(obj.into())
@@ -52,11 +52,12 @@ impl ApiInvocation {
 		sess: &Session,
 		api: &ApiDefinition,
 		body: ApiBody,
-	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
+	) -> Result<Option<(ApiResponse, ResponseInstruction)>> {
 		let opt = ds.setup_options(sess);
 
 		let mut ctx = ds.setup_ctx()?;
 		ctx.set_transaction(tx);
+		sess.context(&mut ctx);
 		let ctx = &ctx.freeze();
 
 		let mut stack = TreeStack::new();
@@ -72,7 +73,7 @@ impl ApiInvocation {
 		opt: &Options,
 		api: &ApiDefinition,
 		body: ApiBody,
-	) -> Result<Option<(ApiResponse, ResponseInstruction)>, Error> {
+	) -> Result<Option<(ApiResponse, ResponseInstruction)>> {
 		let (action, action_config) =
 			match api.actions.iter().find(|x| x.methods.contains(&self.method)) {
 				Some(v) => (&v.action, &v.config),

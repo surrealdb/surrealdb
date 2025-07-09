@@ -3,8 +3,8 @@ use std::mem;
 use unicase::UniCase;
 
 use crate::syn::{
-	error::{syntax_error, SyntaxError},
-	lexer::{keywords::KEYWORDS, Lexer},
+	error::{SyntaxError, syntax_error},
+	lexer::{Lexer, keywords::KEYWORDS},
 	token::{Token, TokenKind},
 };
 

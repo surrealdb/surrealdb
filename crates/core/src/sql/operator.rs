@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 
-use super::Value;
+use super::SqlValue;
 
 /// Binary operators.
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -37,10 +37,14 @@ pub enum Operator {
 	AllEqual, // *=
 	AnyEqual, // ?=
 	//
-	Like,                      // ~
-	NotLike,                   // !~
-	AllLike,                   // *~
-	AnyLike,                   // ?~
+	#[revision(end = 3, convert_fn = "like_convert")]
+	Like, // ~
+	#[revision(end = 3, convert_fn = "like_convert")]
+	NotLike, // !~
+	#[revision(end = 3, convert_fn = "like_convert")]
+	AllLike, // *~
+	#[revision(end = 3, convert_fn = "like_convert")]
+	AnyLike, // ?~
 	Matches(Option<MatchRef>), // @{ref}@
 	//
 	LessThan,        // <
@@ -67,6 +71,12 @@ pub enum Operator {
 	Ann(u32, u32), // <|{k},{ef}|>
 	//
 	Rem, // %
+}
+
+impl Operator {
+	fn like_convert<T>(_: T, _revision: u16) -> Result<Self, revision::Error> {
+		Err(revision::Error::Conversion("Like operators are no longer supported".to_owned()))
+	}
 }
 
 impl Default for Operator {
@@ -98,10 +108,6 @@ impl fmt::Display for Operator {
 			Self::NotEqual => f.write_str("!="),
 			Self::AllEqual => f.write_str("*="),
 			Self::AnyEqual => f.write_str("?="),
-			Self::Like => f.write_char('~'),
-			Self::NotLike => f.write_str("!~"),
-			Self::AllLike => f.write_str("*~"),
-			Self::AnyLike => f.write_str("?~"),
 			Self::LessThan => f.write_char('<'),
 			Self::LessThanOrEqual => f.write_str("<="),
 			Self::MoreThan => f.write_char('>'),
@@ -135,6 +141,98 @@ impl fmt::Display for Operator {
 			Self::Ann(k, ef) => {
 				write!(f, "<|{k},{ef}|>")
 			}
+		}
+	}
+}
+
+impl From<Operator> for crate::expr::Operator {
+	fn from(v: Operator) -> Self {
+		match v {
+			Operator::Neg => crate::expr::Operator::Neg,
+			Operator::Not => crate::expr::Operator::Not,
+			Operator::Or => crate::expr::Operator::Or,
+			Operator::And => crate::expr::Operator::And,
+			Operator::Tco => crate::expr::Operator::Tco,
+			Operator::Nco => crate::expr::Operator::Nco,
+			Operator::Add => crate::expr::Operator::Add,
+			Operator::Sub => crate::expr::Operator::Sub,
+			Operator::Mul => crate::expr::Operator::Mul,
+			Operator::Div => crate::expr::Operator::Div,
+			Operator::Rem => crate::expr::Operator::Rem,
+			Operator::Pow => crate::expr::Operator::Pow,
+			Operator::Inc => crate::expr::Operator::Inc,
+			Operator::Dec => crate::expr::Operator::Dec,
+			Operator::Ext => crate::expr::Operator::Ext,
+			Operator::Equal => crate::expr::Operator::Equal,
+			Operator::Exact => crate::expr::Operator::Exact,
+			Operator::NotEqual => crate::expr::Operator::NotEqual,
+			Operator::AllEqual => crate::expr::Operator::AllEqual,
+			Operator::AnyEqual => crate::expr::Operator::AnyEqual,
+			Operator::Matches(r) => crate::expr::Operator::Matches(r),
+			Operator::LessThan => crate::expr::Operator::LessThan,
+			Operator::LessThanOrEqual => crate::expr::Operator::LessThanOrEqual,
+			Operator::MoreThan => crate::expr::Operator::MoreThan,
+			Operator::MoreThanOrEqual => crate::expr::Operator::MoreThanOrEqual,
+			Operator::Contain => crate::expr::Operator::Contain,
+			Operator::NotContain => crate::expr::Operator::NotContain,
+			Operator::ContainAll => crate::expr::Operator::ContainAll,
+			Operator::ContainAny => crate::expr::Operator::ContainAny,
+			Operator::ContainNone => crate::expr::Operator::ContainNone,
+			Operator::Inside => crate::expr::Operator::Inside,
+			Operator::NotInside => crate::expr::Operator::NotInside,
+			Operator::AllInside => crate::expr::Operator::AllInside,
+			Operator::AnyInside => crate::expr::Operator::AnyInside,
+			Operator::NoneInside => crate::expr::Operator::NoneInside,
+			Operator::Outside => crate::expr::Operator::Outside,
+			Operator::Intersects => crate::expr::Operator::Intersects,
+			Operator::Knn(k, d) => crate::expr::Operator::Knn(k, d.map(Into::into)),
+			Operator::Ann(k, ef) => crate::expr::Operator::Ann(k, ef),
+		}
+	}
+}
+
+impl From<crate::expr::Operator> for Operator {
+	fn from(v: crate::expr::Operator) -> Self {
+		match v {
+			crate::expr::Operator::Neg => Self::Neg,
+			crate::expr::Operator::Not => Self::Not,
+			crate::expr::Operator::Or => Self::Or,
+			crate::expr::Operator::And => Self::And,
+			crate::expr::Operator::Tco => Self::Tco,
+			crate::expr::Operator::Nco => Self::Nco,
+			crate::expr::Operator::Add => Self::Add,
+			crate::expr::Operator::Sub => Self::Sub,
+			crate::expr::Operator::Mul => Self::Mul,
+			crate::expr::Operator::Div => Self::Div,
+			crate::expr::Operator::Rem => Self::Rem,
+			crate::expr::Operator::Pow => Self::Pow,
+			crate::expr::Operator::Inc => Self::Inc,
+			crate::expr::Operator::Dec => Self::Dec,
+			crate::expr::Operator::Ext => Self::Ext,
+			crate::expr::Operator::Equal => Self::Equal,
+			crate::expr::Operator::Exact => Self::Exact,
+			crate::expr::Operator::NotEqual => Self::NotEqual,
+			crate::expr::Operator::AllEqual => Self::AllEqual,
+			crate::expr::Operator::AnyEqual => Self::AnyEqual,
+			crate::expr::Operator::Matches(r) => Self::Matches(r),
+			crate::expr::Operator::LessThan => Self::LessThan,
+			crate::expr::Operator::LessThanOrEqual => Self::LessThanOrEqual,
+			crate::expr::Operator::MoreThan => Self::MoreThan,
+			crate::expr::Operator::MoreThanOrEqual => Self::MoreThanOrEqual,
+			crate::expr::Operator::Contain => Self::Contain,
+			crate::expr::Operator::NotContain => Self::NotContain,
+			crate::expr::Operator::ContainAll => Self::ContainAll,
+			crate::expr::Operator::ContainAny => Self::ContainAny,
+			crate::expr::Operator::ContainNone => Self::ContainNone,
+			crate::expr::Operator::Inside => Self::Inside,
+			crate::expr::Operator::NotInside => Self::NotInside,
+			crate::expr::Operator::AllInside => Self::AllInside,
+			crate::expr::Operator::AnyInside => Self::AnyInside,
+			crate::expr::Operator::NoneInside => Self::NoneInside,
+			crate::expr::Operator::Outside => Self::Outside,
+			crate::expr::Operator::Intersects => Self::Intersects,
+			crate::expr::Operator::Knn(k, d) => Self::Knn(k, d.map(Into::into)),
+			crate::expr::Operator::Ann(k, ef) => Self::Ann(k, ef),
 		}
 	}
 }
@@ -179,11 +277,7 @@ impl BindingPower {
 			| Operator::Exact
 			| Operator::NotEqual
 			| Operator::AllEqual
-			| Operator::AnyEqual
-			| Operator::Like
-			| Operator::NotLike
-			| Operator::AllLike
-			| Operator::AnyLike => BindingPower::Equality,
+			| Operator::AnyEqual => BindingPower::Equality,
 
 			Operator::LessThan
 			| Operator::LessThanOrEqual
@@ -222,9 +316,9 @@ impl BindingPower {
 	/// Returns the binding power for this expression. This is generally `BindingPower::Prime` as
 	/// most value variants are prime expressions, however some like Value::Expression and
 	/// Value::Range have a different binding power.
-	pub fn for_value(value: &Value) -> BindingPower {
+	pub fn for_value(value: &SqlValue) -> BindingPower {
 		match value {
-			Value::Expression(expr) => match **expr {
+			SqlValue::Expression(expr) => match **expr {
 				// All prefix expressions have the same binding power, regardless of the actual
 				// operator.
 				super::Expression::Unary {
@@ -235,7 +329,7 @@ impl BindingPower {
 					..
 				} => BindingPower::for_operator(o),
 			},
-			Value::Range(..) => BindingPower::Range,
+			SqlValue::Range(..) => BindingPower::Range,
 			_ => BindingPower::Prime,
 		}
 	}

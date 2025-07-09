@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
 use crate::kvs::{Check, Key, Val};
+use anyhow::{Result, ensure};
 use std::ops::Range;
 
 pub struct Datastore {
@@ -43,16 +44,16 @@ impl Drop for Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub async fn new(path: &str) -> Result<Datastore, Error> {
+	pub async fn new(path: &str) -> Result<Datastore> {
 		match indxdb::db::new(path).await {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),
-			Err(e) => Err(Error::Ds(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
 		}
 	}
 	/// Shutdown the database
-	pub(crate) async fn shutdown(&self) -> Result<(), Error> {
+	pub(crate) async fn shutdown(&self) -> Result<()> {
 		// Nothing to do here
 		Ok(())
 	}
@@ -61,7 +62,7 @@ impl Datastore {
 		&self,
 		write: bool,
 		_: bool,
-	) -> Result<Box<dyn crate::kvs::api::Transaction>, Error> {
+	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
 		// Specify the check level
 		#[cfg(not(debug_assertions))]
 		let check = Check::Warn;
@@ -76,7 +77,7 @@ impl Datastore {
 				inner,
 				save_points: Default::default(),
 			})),
-			Err(e) => Err(Error::Tx(e.to_string())),
+			Err(e) => Err(anyhow::Error::new(Error::Tx(e.to_string()))),
 		}
 	}
 }
@@ -86,6 +87,10 @@ impl Datastore {
 impl super::api::Transaction for Transaction {
 	fn kind(&self) -> &'static str {
 		"indxdb"
+	}
+
+	fn supports_reverse_scan(&self) -> bool {
+		false
 	}
 
 	/// Behaviour if unclosed
@@ -105,11 +110,9 @@ impl super::api::Transaction for Transaction {
 
 	/// Cancel a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Mark this transaction as done
 		self.done = true;
 		// Cancel this transaction
@@ -120,15 +123,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Commit a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Mark this transaction as done
 		self.done = true;
 		// Cancel this transaction
@@ -139,15 +138,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool, Error> {
+	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
 		// IndxDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check the key
 		let res = self.inner.exi(key).await?;
 		// Return result
@@ -156,15 +151,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>, Error> {
+	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
 		// IndxDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Get the key
 		let res = self.inner.get(key).await?;
 		// Return result
@@ -173,19 +164,13 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<(), Error> {
+	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// IndxDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Set the key
 		self.inner.set(key, val).await?;
 		// Return result
@@ -194,19 +179,13 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<(), Error> {
+	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// IndxDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Set the key
 		self.inner.put(key, val).await?;
 		// Return result
@@ -215,15 +194,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<(), Error> {
+	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Set the key
 		self.inner.putc(key, val, chk.map(Into::into)).await?;
 		// Return result
@@ -232,15 +207,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn del(&mut self, key: Key) -> Result<(), Error> {
+	async fn del(&mut self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Remove the key
 		let res = self.inner.del(key).await?;
 		// Return result
@@ -249,15 +220,11 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<(), Error> {
+	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
+		ensure!(self.write, Error::TxReadonly);
 		// Remove the key
 		let res = self.inner.delc(key, chk.map(Into::into)).await?;
 		// Return result
@@ -271,15 +238,11 @@ impl super::api::Transaction for Transaction {
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<Key>, Error> {
+	) -> Result<Vec<Key>> {
 		// IndxDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Scan the keys
 		let res = self.inner.keys(rng, limit).await?;
 		// Return result
@@ -293,15 +256,11 @@ impl super::api::Transaction for Transaction {
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>, Error> {
+	) -> Result<Vec<(Key, Val)>> {
 		// IndxDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
+		ensure!(!self.done, Error::TxFinished);
 		// Scan the keys
 		let res = self.inner.scan(rng, limit).await?;
 		// Return result

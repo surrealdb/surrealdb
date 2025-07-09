@@ -7,9 +7,9 @@ pub mod auth;
 pub mod capabilities;
 
 mod config;
-mod endpoint;
+pub(crate) mod endpoint;
 mod export;
-mod query;
+pub(crate) mod query;
 mod resource;
 mod tls;
 

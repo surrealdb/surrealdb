@@ -20,10 +20,12 @@ defaults:
     shell: bash
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   release:
+    permissions:
+      contents: write
     name: Prepare nightly release
     uses: ./.github/workflows/publish-version.yml
     with:

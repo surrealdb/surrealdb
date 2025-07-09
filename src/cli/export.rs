@@ -1,12 +1,12 @@
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
-use crate::err::Error;
+use anyhow::Result;
 use clap::Args;
 use futures_util::StreamExt;
-use surrealdb::engine::any::{connect, IntoEndpoint};
+use surrealdb::Connection;
+use surrealdb::engine::any::{self, connect};
 use surrealdb::kvs::export::TableConfig;
 use surrealdb::method::{Export, ExportConfig};
-use surrealdb::Connection;
 use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Args, Debug)]
@@ -83,13 +83,11 @@ pub async fn init(
 		},
 		config,
 	}: ExportCommandArguments,
-) -> Result<(), Error> {
+) -> Result<()> {
+	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
-	let client = if username.is_some()
-		&& password.is_some()
-		&& !endpoint.clone().into_endpoint()?.parse_kind()?.is_local()
-	{
+	let client = if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
 			.with_username(username.as_deref())
@@ -107,7 +105,7 @@ pub async fn init(
 		};
 
 		client
-	} else if token.is_some() && !endpoint.clone().into_endpoint()?.parse_kind()?.is_local() {
+	} else if token.is_some() && !is_local {
 		let client = connect(endpoint).await?;
 		client.authenticate(token.unwrap()).await?;
 

@@ -1,12 +1,13 @@
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::expr::statements::LiveStatement;
 use crate::kvs::Datastore;
 use crate::kvs::KeyDecode as _;
 use crate::kvs::Live;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::sql::statements::LiveStatement;
+use anyhow::Result;
 use std::time::Duration;
 
 const TARGET: &str = "surrealdb::core::kvs::node";
@@ -20,7 +21,7 @@ impl Datastore {
 	/// membership entries. This function must be run at server or database
 	/// startup, in order to write the initial entry and timestamp to storage.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
-	pub async fn insert_node(&self, id: uuid::Uuid) -> Result<(), Error> {
+	pub async fn insert_node(&self, id: uuid::Uuid) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Inserting node in the cluster");
 		// Refresh system usage metrics
@@ -30,11 +31,18 @@ impl Datastore {
 		let key = crate::key::root::nd::Nd::new(id);
 		let now = self.clock_now().await;
 		let val = revision::to_vec(&Node::new(id, now, false))?;
-		match run!(txn, txn.put(key, val, None).await) {
-			Err(Error::TxKeyAlreadyExists) => Err(Error::ClAlreadyExists {
-				id: id.to_string(),
-			}),
-			other => other,
+		let res = run!(txn, txn.put(key, val, None).await);
+		match res {
+			Err(e) => {
+				if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+					Err(anyhow::Error::new(Error::ClAlreadyExists {
+						id: id.to_string(),
+					}))
+				} else {
+					Err(e)
+				}
+			}
+			x => x,
 		}
 	}
 
@@ -46,7 +54,7 @@ impl Datastore {
 	/// timestamp. This ensures that the node is not marked as expired by any
 	/// garbage collection tasks, preventing any data cleanup for this node.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
-	pub async fn update_node(&self, id: uuid::Uuid) -> Result<(), Error> {
+	pub async fn update_node(&self, id: uuid::Uuid) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Updating node in the cluster");
 		// Refresh system usage metrics
@@ -67,7 +75,7 @@ impl Datastore {
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
-	pub async fn delete_node(&self, id: uuid::Uuid) -> Result<(), Error> {
+	pub async fn delete_node(&self, id: uuid::Uuid) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Archiving node in the cluster");
 		// Open transaction and set node data
@@ -86,7 +94,7 @@ impl Datastore {
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
-	pub async fn expire_nodes(&self) -> Result<(), Error> {
+	pub async fn expire_nodes(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Archiving expired nodes in the cluster");
 		// Fetch all of the inactive nodes
@@ -136,7 +144,7 @@ impl Datastore {
 	/// When a matching node is found, all node queries, and table queries are
 	/// garbage collected, before the node itself is completely deleted.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
-	pub async fn remove_nodes(&self) -> Result<(), Error> {
+	pub async fn remove_nodes(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
 		// Fetch all of the archived nodes
@@ -208,7 +216,7 @@ impl Datastore {
 	/// a number of transactions in order to prevent failure of large or
 	/// long-running transactions on distributed storage engines.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
-	pub async fn garbage_collect(&self) -> Result<(), Error> {
+	pub async fn garbage_collect(&self) -> Result<()> {
 		// Log the node deletion
 		trace!(target: TARGET, "Garbage collecting all miscellaneous data");
 		// Fetch archived nodes
@@ -293,7 +301,7 @@ impl Datastore {
 	/// WebSocket disconnects, and any associated live queries need to be
 	/// cleaned up and removed.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
-	pub async fn delete_queries(&self, ids: Vec<uuid::Uuid>) -> Result<(), Error> {
+	pub async fn delete_queries(&self, ids: Vec<uuid::Uuid>) -> Result<()> {
 		// Log the node deletion
 		trace!(target: TARGET, "Deleting live queries for a connection");
 		// Fetch expired nodes
