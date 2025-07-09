@@ -29,8 +29,11 @@ struct TermDocument {
 }
 
 pub(in crate::idx) struct QueryTerms {
+	#[allow(dead_code)]
 	tokens: Tokens,
+	#[allow(dead_code)]
 	docs: Vec<Option<RoaringTreemap>>,
+	#[allow(dead_code)]
 	has_unknown_terms: bool,
 }
 
@@ -228,14 +231,6 @@ impl FullTextIndex {
 			}
 		}
 		// If `docs` is empty, we return `None`
-		Ok(if let Some(docs) = docs {
-			if docs.is_empty() {
-				None
-			} else {
-				Some(docs)
-			}
-		} else {
-			None
-		})
+		Ok(docs.filter(|docs| !docs.is_empty()))
 	}
 }

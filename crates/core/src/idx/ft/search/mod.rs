@@ -701,7 +701,7 @@ mod tests {
 		si: &SearchIndex,
 		qs: &str,
 	) -> (Option<SearchHitsIterator>, BM25Scorer) {
-		let (term_list, _, terms_docs) =
+		let (_, _, terms_docs) =
 			si.extract_querying_terms(stk, ctx, opt, qs.to_string()).await.unwrap();
 		let terms_docs = Arc::new(terms_docs);
 		let scr = si.new_scorer(terms_docs.clone()).unwrap().unwrap();
