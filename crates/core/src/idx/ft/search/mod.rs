@@ -124,7 +124,7 @@ impl SearchIndex {
 		ctx: &Context,
 		opt: &Options,
 		az: &str,
-		index_key_base: IndexKeyBase,
+		ikb: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
 	) -> anyhow::Result<Self> {
@@ -133,7 +133,7 @@ impl SearchIndex {
 		let (ns, db) = opt.ns_db()?;
 		let az = tx.get_db_analyzer(ns, db, az).await?;
 		ixs.mappers().check(&az).await?;
-		Self::with_analyzer(ixs, &tx, az, index_key_base, p, tt).await
+		Self::with_analyzer(ixs, &tx, az, ikb, p, tt).await
 	}
 	async fn with_analyzer(
 		ixs: &IndexStores,
@@ -403,7 +403,7 @@ impl SearchIndex {
 		opt: &Options,
 		field_content: Vec<Value>,
 	) -> anyhow::Result<(DocLength, Vec<(TermId, TermFrequency)>)> {
-		// Let's first collect all the inputs, and collect the tokens.
+		// Let's first collect all the inputs and collect the tokens.
 		// We need to store them because everything after is zero-copy
 		let inputs = self
 			.analyzer
@@ -427,7 +427,7 @@ impl SearchIndex {
 		ctx: &Context,
 		opt: &Options,
 		query_string: String,
-	) -> anyhow::Result<(TermIdList, TermIdSet)> {
+	) -> anyhow::Result<(TermIdList, TermIdSet, SearchTermsDocs)> {
 		let tokens = self
 			.analyzer
 			.generate_tokens(stk, ctx, opt, FilteringStage::Querying, query_string)
@@ -452,12 +452,27 @@ impl SearchIndex {
 				}
 			}
 		}
+		// We collect the term docs
+		let mut terms_docs = Vec::with_capacity(list.len());
+		for opt_term in &list {
+			if let Some((term_id, _)) = opt_term {
+				let docs = self.term_docs.get_docs(&tx, *term_id).await?;
+				if let Some(docs) = docs {
+					terms_docs.push(Some((*term_id, docs)));
+				} else {
+					terms_docs.push(Some((*term_id, RoaringTreemap::new())));
+				}
+			} else {
+				terms_docs.push(None);
+			}
+		}
 		Ok((
 			list,
 			TermIdSet {
 				set,
 				has_unknown_terms,
 			},
+			terms_docs,
 		))
 	}
 
@@ -489,30 +504,9 @@ impl SearchIndex {
 		Ok((dl, tfid, osid))
 	}
 
-	pub(in crate::idx) async fn get_terms_docs(
-		&self,
-		tx: &Transaction,
-		terms: &TermIdList,
-	) -> anyhow::Result<Vec<Option<(TermId, RoaringTreemap)>>> {
-		let mut terms_docs = Vec::with_capacity(terms.len());
-		for opt_term in terms {
-			if let Some((term_id, _)) = opt_term {
-				let docs = self.term_docs.get_docs(tx, *term_id).await?;
-				if let Some(docs) = docs {
-					terms_docs.push(Some((*term_id, docs)));
-				} else {
-					terms_docs.push(Some((*term_id, RoaringTreemap::new())));
-				}
-			} else {
-				terms_docs.push(None);
-			}
-		}
-		Ok(terms_docs)
-	}
-
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
-		terms_docs: SearchTermsDocs,
+		terms_docs: Arc<SearchTermsDocs>,
 	) -> anyhow::Result<Option<SearchHitsIterator>> {
 		let mut hits: Option<RoaringTreemap> = None;
 		for opt_term_docs in terms_docs.iter() {
@@ -536,7 +530,7 @@ impl SearchIndex {
 
 	pub(in crate::idx) fn new_scorer(
 		&self,
-		terms_docs: SearchTermsDocs,
+		terms_docs: Arc<SearchTermsDocs>,
 	) -> anyhow::Result<Option<BM25Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			return Ok(Some(BM25Scorer::new(
@@ -650,7 +644,7 @@ impl SearchHitsIterator {
 		tx: &Transaction,
 	) -> anyhow::Result<Option<(Thing, DocId)>> {
 		for doc_id in self.iter.by_ref() {
-			let doc_id_key = self.ikb.new_bi_key(doc_id)?;
+			let doc_id_key = self.ikb.new_bi_key(doc_id);
 			if let Some(v) = tx.get(doc_id_key, None).await? {
 				return Ok(Some((revision::from_slice(&v)?, doc_id)));
 			}
@@ -707,12 +701,11 @@ mod tests {
 		si: &SearchIndex,
 		qs: &str,
 	) -> (Option<SearchHitsIterator>, BM25Scorer) {
-		let (term_list, _) =
+		let (term_list, _, terms_docs) =
 			si.extract_querying_terms(stk, ctx, opt, qs.to_string()).await.unwrap();
-		let tx = ctx.tx();
-		let td = Arc::new(si.get_terms_docs(&tx, &term_list).await.unwrap());
-		let scr = si.new_scorer(td.clone()).unwrap().unwrap();
-		let hits = si.new_hits_iterator(td).unwrap();
+		let terms_docs = Arc::new(terms_docs);
+		let scr = si.new_scorer(terms_docs.clone()).unwrap().unwrap();
+		let hits = si.new_hits_iterator(terms_docs).unwrap();
 		(hits, scr)
 	}
 

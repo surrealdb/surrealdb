@@ -1,18 +1,13 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::Id;
-use crate::idx::docids::DocId;
-use crate::key::index::bi::Bi;
-use crate::key::index::ib::Ib;
-use crate::key::index::id::Id as IdKey;
-use crate::key::index::is::Is;
+use crate::idx::IndexKeyBase;
 use crate::key::sequence::Prefix;
 use crate::key::sequence::ba::Ba;
 use crate::key::sequence::st::St;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
-use anyhow::{Result, bail};
+use anyhow::Result;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 use rand::{Rng, thread_rng};
@@ -26,100 +21,44 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub(crate) struct Sequences {
 	tf: TransactionFactory,
-	sequences: Arc<DashMap<Arc<SequenceKey>, Sequence>>,
+	sequences: Arc<DashMap<Arc<SequenceDomain>, Sequence>>,
 }
 
 #[derive(Hash, PartialEq, Eq)]
-enum SequenceDomain {
+pub(crate) enum SequenceDomain {
 	/// A user sequence in a namespace
-	UserName(String),
+	UserName(String, String, String),
 	/// A sequence generating DocIds for a FullText search index
-	FullTextDocIds {
-		tb: String,
-		ix: String,
-	},
+	FullTextDocIds(IndexKeyBase),
 }
 
-#[derive(Hash, PartialEq, Eq)]
-pub(crate) struct SequenceKey {
-	ns: String,
-	db: String,
-	domain: SequenceDomain,
-}
-
-impl SequenceKey {
+impl SequenceDomain {
 	fn new_user(ns: &str, db: &str, sq: &str) -> Self {
-		Self {
-			ns: ns.to_string(),
-			db: db.to_string(),
-			domain: SequenceDomain::UserName(sq.to_string()),
-		}
+		Self::UserName(ns.to_string(), db.to_string(), sq.to_string())
 	}
 
-	pub(crate) fn new_ft_doc_ids(ns: &str, db: &str, tb: &str, ix: &str) -> Self {
-		Self {
-			ns: ns.to_string(),
-			db: db.to_string(),
-			domain: SequenceDomain::FullTextDocIds {
-				tb: tb.to_string(),
-				ix: ix.to_string(),
-			},
-		}
-	}
-
-	pub(crate) fn new_bi_key(&self, doc_id: DocId) -> Result<Bi> {
-		match &self.domain {
-			SequenceDomain::UserName(sq) => bail!(Error::Unreachable(format!(
-				"SequenceKey::new_bi_key: user sequence {} not supported",
-				sq
-			))),
-			SequenceDomain::FullTextDocIds {
-				tb,
-				ix,
-			} => Ok(Bi::new(&self.ns, &self.db, tb, ix, doc_id)),
-		}
-	}
-
-	pub(crate) fn new_id_key(&self, id: Id) -> Result<IdKey> {
-		match &self.domain {
-			SequenceDomain::UserName(sq) => bail!(Error::Unreachable(format!(
-				"SequenceKey::new_ib_key: user sequence {} not supported",
-				sq
-			))),
-			SequenceDomain::FullTextDocIds {
-				tb,
-				ix,
-			} => Ok(IdKey::new(&self.ns, &self.db, tb, ix, id)),
-		}
+	pub(crate) fn new_ft_doc_ids(ikb: IndexKeyBase) -> Self {
+		Self::FullTextDocIds(ikb)
 	}
 
 	fn new_batch_range_keys(&self) -> Result<(Vec<u8>, Vec<u8>)> {
-		match &self.domain {
-			SequenceDomain::UserName(sq) => Prefix::new_ba_range(&self.ns, &self.db, sq),
-			SequenceDomain::FullTextDocIds {
-				tb,
-				ix,
-			} => Ib::new_range(&self.ns, &self.db, tb, ix),
+		match self {
+			Self::UserName(ns, db, sq) => Prefix::new_ba_range(ns, db, sq),
+			Self::FullTextDocIds(ibk) => ibk.new_ib_range(),
 		}
 	}
 
 	fn new_batch_key(&self, start: i64) -> Result<Vec<u8>> {
-		match &self.domain {
-			SequenceDomain::UserName(sq) => Ba::new(&self.ns, &self.db, sq, start).encode(),
-			SequenceDomain::FullTextDocIds {
-				tb,
-				ix,
-			} => Ib::new(&self.ns, &self.db, tb, ix, start).encode(),
+		match &self {
+			Self::UserName(ns, db, sq) => Ba::new(ns, db, sq, start).encode(),
+			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start),
 		}
 	}
 
 	fn new_state_key(&self, nid: Uuid) -> Result<Vec<u8>> {
-		match &self.domain {
-			SequenceDomain::UserName(sq) => St::new(&self.ns, &self.db, sq, nid).encode(),
-			SequenceDomain::FullTextDocIds {
-				tb,
-				ix,
-			} => Is::new(&self.ns, &self.db, tb, ix, nid).encode(),
+		match &self {
+			Self::UserName(ns, db, sq) => St::new(ns, db, sq, nid).encode(),
+			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid),
 		}
 	}
 }
@@ -165,7 +104,7 @@ impl Sequences {
 	}
 
 	pub(crate) fn sequence_removed(&self, ns: &str, db: &str, sq: &str) {
-		let key = SequenceKey::new_user(ns, db, sq);
+		let key = SequenceDomain::new_user(ns, db, sq);
 		self.sequences.remove(&key);
 	}
 
@@ -173,7 +112,7 @@ impl Sequences {
 		&self,
 		ctx: &Context,
 		nid: Uuid,
-		seq: Arc<SequenceKey>,
+		seq: Arc<SequenceDomain>,
 		batch: u32,
 		init_params: F,
 	) -> Result<i64>
@@ -200,7 +139,7 @@ impl Sequences {
 	) -> Result<i64> {
 		let (ns, db) = opt.ns_db()?;
 		let seq = ctx.tx().get_db_sequence(ns, db, sq).await?;
-		let key = Arc::new(SequenceKey::new_user(ns, db, sq));
+		let key = Arc::new(SequenceDomain::new_user(ns, db, sq));
 		self.next_val(ctx, opt.id()?, key, seq.batch, move || {
 			(seq.start, seq.timeout.clone().map(|d| d.0.0))
 		})
@@ -211,7 +150,7 @@ impl Sequences {
 		&self,
 		ctx: &Context,
 		nid: Uuid,
-		seq: Arc<SequenceKey>,
+		seq: Arc<SequenceDomain>,
 		batch: u32,
 	) -> Result<i64> {
 		self.next_val(ctx, nid, seq, batch, move || (0, None)).await
@@ -231,7 +170,7 @@ impl Sequence {
 		tf: TransactionFactory,
 		tx: &Transaction,
 		nid: Uuid,
-		seq: &SequenceKey,
+		seq: &SequenceDomain,
 		start: i64,
 		batch: u32,
 		timeout: Option<Duration>,
@@ -259,7 +198,7 @@ impl Sequence {
 		&mut self,
 		ctx: &Context,
 		nid: Uuid,
-		seq: &SequenceKey,
+		seq: &SequenceDomain,
 		batch: u32,
 	) -> Result<i64> {
 		if self.st.next >= self.to {
@@ -287,7 +226,7 @@ impl Sequence {
 		tf: &TransactionFactory,
 		ctx: &Context,
 		nid: Uuid,
-		seq: &SequenceKey,
+		seq: &SequenceDomain,
 		next: i64,
 		batch: u32,
 		to: Option<Duration>,
@@ -325,7 +264,7 @@ impl Sequence {
 
 	async fn check_batch_allocation(
 		tf: &TransactionFactory,
-		seq: &SequenceKey,
+		seq: &SequenceDomain,
 		nid: Uuid,
 		next: i64,
 		batch: u32,

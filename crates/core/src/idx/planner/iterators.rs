@@ -1356,7 +1356,7 @@ impl SearchMatchesThingIterator {
 	pub(super) async fn new(
 		irf: IteratorRef,
 		si: &SearchIndex,
-		terms_docs: SearchTermsDocs,
+		terms_docs: Arc<SearchTermsDocs>,
 	) -> Result<Self> {
 		let hits = si.new_hits_iterator(terms_docs)?;
 		let hits_left = if let Some(h) = &hits {

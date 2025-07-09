@@ -1,8 +1,9 @@
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::Id;
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, Resolved};
-use crate::kvs::sequences::SequenceKey;
+use crate::kvs::sequences::SequenceDomain;
 use crate::kvs::{Key, KeyEncode, Transaction, Val};
 use anyhow::Result;
 use std::sync::Arc;
@@ -10,17 +11,19 @@ use uuid::Uuid;
 
 /// Sequence-based DocIds store
 pub(crate) struct SeqDocIds {
+	ikb: IndexKeyBase,
 	nid: Uuid,
-	seq_key: Arc<SequenceKey>,
+	domain: Arc<SequenceDomain>,
 	batch: u32,
 }
 
 impl SeqDocIds {
-	pub(in crate::idx) fn new(nid: Uuid, ns: &str, db: &str, tb: &str, ix: &str) -> Self {
+	pub(in crate::idx) fn new(nid: Uuid, ikb: IndexKeyBase) -> Self {
 		Self {
 			nid,
-			seq_key: Arc::new(SequenceKey::new_ft_doc_ids(ns, db, tb, ix)),
+			domain: Arc::new(SequenceDomain::new_ft_doc_ids(ikb.clone())),
 			batch: 1000, // TODO ekeller: Make that configurable?
+			ikb,
 		}
 	}
 
@@ -29,7 +32,7 @@ impl SeqDocIds {
 		tx: &Transaction,
 		id: Id,
 	) -> Result<Option<DocId>> {
-		let id_key = self.seq_key.new_id_key(id.clone())?;
+		let id_key = self.ikb.new_id_key(id.clone());
 		if let Some(v) = tx.get(id_key, None).await? {
 			return Ok(Some(Self::val_to_doc_id(v)?));
 		}
@@ -48,7 +51,7 @@ impl SeqDocIds {
 	}
 
 	pub(in crate::idx) async fn resolve_doc_id(&self, ctx: &Context, id: Id) -> Result<Resolved> {
-		let id_key = self.seq_key.new_id_key(id.clone())?;
+		let id_key = self.ikb.new_id_key(id.clone());
 		let tx = ctx.tx();
 		// Do we already have an ID?
 		if let Some(val) = tx.get(id_key.clone(), None).await? {
@@ -58,14 +61,14 @@ impl SeqDocIds {
 		// If not, let's get one from the sequence
 		let new_doc_id = ctx
 			.try_get_sequences()?
-			.next_val_fts_idx(ctx, self.nid, self.seq_key.clone(), self.batch)
+			.next_val_fts_idx(ctx, self.nid, self.domain.clone(), self.batch)
 			.await? as DocId;
 		{
 			let val = new_doc_id.to_be_bytes();
 			tx.set(id_key, &val, None).await?;
 		}
 		{
-			let k = self.seq_key.new_bi_key(new_doc_id)?;
+			let k = self.ikb.new_bi_key(new_doc_id);
 			let v = revision::to_vec(&id)?;
 			tx.set(k, v, None).await?;
 		}
@@ -77,7 +80,7 @@ impl SeqDocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<Key>> {
-		tx.get(self.seq_key.new_bi_key(doc_id)?, None).await
+		tx.get(self.ikb.new_bi_key(doc_id), None).await
 	}
 
 	pub(in crate::idx) async fn _remove_doc_id(
@@ -85,10 +88,10 @@ impl SeqDocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<()> {
-		let k: Key = self.seq_key.new_bi_key(doc_id)?.encode()?;
+		let k: Key = self.ikb.new_bi_key(doc_id).encode()?;
 		if let Some(v) = tx.get(k.clone(), None).await? {
 			let id: Id = revision::from_slice(&v)?;
-			tx.del(self.seq_key.new_id_key(id)?).await?;
+			tx.del(self.ikb.new_id_key(id)).await?;
 			tx.del(k).await?;
 		}
 		Ok(())
@@ -99,6 +102,7 @@ impl SeqDocIds {
 mod tests {
 	use crate::ctx::Context;
 	use crate::expr::Id;
+	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::seqdocids::SeqDocIds;
 	use crate::idx::docids::{DocId, Resolved};
 	use crate::key::index::bi::Bi;
@@ -115,8 +119,9 @@ mod tests {
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Context, SeqDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let ikb = IndexKeyBase::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX).unwrap();
 		ctx.set_transaction(tx.into());
-		let d = SeqDocIds::new(Uuid::nil(), TEST_NS, TEST_DB, TEST_TB, TEST_IX);
+		let d = SeqDocIds::new(Uuid::nil(), ikb);
 		(ctx.freeze(), d)
 	}
 

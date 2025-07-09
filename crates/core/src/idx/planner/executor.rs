@@ -158,7 +158,8 @@ impl InnerQueryExecutor {
 						}
 						Entry::Vacant(e) => {
 							let (ns, db) = opt.ns_db()?;
-							let ikb = IndexKeyBase::new(ns, db, e.key())?;
+							let ix: &DefineIndexStatement = e.key();
+							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name)?;
 							let si = SearchIndex::new(
 								ctx,
 								opt,
@@ -196,7 +197,10 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let ft = FullTextIndex::new(ctx, opt, e.key(), p).await?;
+							let (ns, db) = opt.ns_db()?;
+							let ix: &DefineIndexStatement = e.key();
+							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name)?;
+							let ft = FullTextIndex::new(ctx, opt, ikb, p).await?;
 							let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
 							e.insert(PerIndexReferenceIndex::FullText(ft));
 							fte
@@ -238,7 +242,8 @@ impl InnerQueryExecutor {
 							}
 							Entry::Vacant(e) => {
 								let (ns, db) = opt.ns_db()?;
-								let ikb = IndexKeyBase::new(ns, db, e.key())?;
+								let ix: &DefineIndexStatement = e.key();
+								let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name)?;
 								let tx = ctx.tx();
 								let mti =
 									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
@@ -1270,10 +1275,10 @@ struct SearchEntry(Arc<InnerSearchEntry>);
 struct InnerSearchEntry {
 	index_option: IndexOption,
 	doc_ids: Arc<RwLock<BTreeDocIds>>,
+	terms: Arc<RwLock<SearchTerms>>,
 	query_terms_set: TermIdSet,
 	query_terms_list: TermIdList,
-	terms: Arc<RwLock<SearchTerms>>,
-	terms_docs: SearchTermsDocs,
+	terms_docs: Arc<SearchTermsDocs>,
 	scorer: Option<BM25Scorer>,
 }
 
@@ -1286,10 +1291,9 @@ impl SearchEntry {
 		io: IndexOption,
 	) -> Result<Option<Self>> {
 		if let Matches(qs, _) = io.op() {
-			let (terms_list, terms_set) =
+			let (terms_list, terms_set, terms_docs) =
 				si.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
-			let tx = ctx.tx();
-			let terms_docs = Arc::new(si.get_terms_docs(&tx, &terms_list).await?);
+			let terms_docs = Arc::new(terms_docs);
 			Ok(Some(Self(Arc::new(InnerSearchEntry {
 				index_option: io,
 				doc_ids: si.doc_ids(),
@@ -1314,17 +1318,14 @@ struct InnerFullTextEntry {
 
 impl FullTextEntry {
 	async fn new(
-		_stk: &mut Stk,
-		_ctx: &Context,
-		_opt: &Options,
-		_fti: &FullTextIndex,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		fti: &FullTextIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(_qs, _) = io.op() {
-			// let (terms_list, terms_set) =
-			// 	fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
-			// let tx = ctx.tx();
-			// let terms_docs = Arc::new(fti.get_terms_docs(&tx, &terms_list).await?);
+		if let Matches(qs, _) = io.op() {
+			let _qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
 				io,
 			}))))

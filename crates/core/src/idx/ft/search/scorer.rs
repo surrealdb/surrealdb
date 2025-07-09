@@ -13,7 +13,7 @@ pub(super) type Score = f32;
 
 pub(crate) struct BM25Scorer {
 	postings: Arc<RwLock<Postings>>,
-	terms_docs: SearchTermsDocs,
+	terms_docs: Arc<SearchTermsDocs>,
 	doc_lengths: Arc<RwLock<DocLengths>>,
 	average_doc_length: f32,
 	doc_count: f32,
@@ -23,7 +23,7 @@ pub(crate) struct BM25Scorer {
 impl BM25Scorer {
 	pub(super) fn new(
 		postings: Arc<RwLock<Postings>>,
-		terms_docs: SearchTermsDocs,
+		terms_docs: Arc<SearchTermsDocs>,
 		doc_lengths: Arc<RwLock<DocLengths>>,
 		total_docs_length: u128,
 		doc_count: u64,

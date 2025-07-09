@@ -4,7 +4,6 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
-use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Id, Thing};
 use crate::idx::docids::DocId;
 use crate::idx::ft::search::terms::TermId;
@@ -28,21 +27,27 @@ use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
+use crate::key::index::id::Id as IdKey;
 use crate::key::index::vm::Vm;
+
+use crate::key::index::ib::Ib;
+use crate::key::index::is::Is;
+use crate::key::index::td::Td;
 use crate::kvs::{Key, KeyEncode as _, Val};
 use anyhow::Result;
 use revision::Revisioned;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::sync::Arc;
+use uuid::Uuid;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct IndexKeyBase {
 	inner: Arc<Inner>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Hash, PartialEq, Eq)]
 struct Inner {
 	ns: String,
 	db: String,
@@ -51,13 +56,13 @@ struct Inner {
 }
 
 impl IndexKeyBase {
-	pub(crate) fn new(ns: &str, db: &str, ix: &DefineIndexStatement) -> Result<Self> {
+	pub(crate) fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Self> {
 		Ok(Self {
 			inner: Arc::new(Inner {
 				ns: ns.to_string(),
 				db: db.to_string(),
-				tb: ix.what.to_raw(),
-				ix: ix.name.to_raw(),
+				tb: tb.to_string(),
+				ix: ix.to_string(),
 			}),
 		})
 	}
@@ -80,17 +85,6 @@ impl IndexKeyBase {
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			node_id,
-		)
-		.encode()
-	}
-
-	fn new_bi_key(&self, doc_id: DocId) -> Result<Key> {
-		Bi::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			doc_id,
 		)
 		.encode()
 	}
@@ -259,6 +253,34 @@ impl IndexKeyBase {
 			node_id,
 		)
 		.encode()
+	}
+
+	fn new_bi_key(&self, doc_id: DocId) -> Bi {
+		Bi::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, doc_id)
+	}
+
+	fn new_id_key(&self, id: Id) -> IdKey {
+		IdKey::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, id)
+	}
+
+	pub(crate) fn new_ib_key(&self, start: i64) -> Result<Key> {
+		Ib::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, start).encode()
+	}
+
+	pub(crate) fn new_ib_range(&self) -> Result<(Key, Key)> {
+		Ib::new_range(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix)
+	}
+
+	pub(crate) fn new_is_key(&self, nid: Uuid) -> Result<Key> {
+		Is::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, nid).encode()
+	}
+
+	fn new_td_key<'a>(&'a self, term: &'a str, doc_id: Option<DocId>) -> Td<'a> {
+		Td::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, term, doc_id)
+	}
+
+	fn new_td_range_with_id(&self, term: &str) -> Result<(Key, Key)> {
+		Td::range_with_id(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, term)
 	}
 }
 

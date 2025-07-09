@@ -5,9 +5,8 @@ use crate::idx::ft::search::terms::TermId;
 use crate::kvs::Transaction;
 use anyhow::Result;
 use roaring::RoaringTreemap;
-use std::sync::Arc;
 
-pub(in crate::idx) type SearchTermsDocs = Arc<Vec<Option<(TermId, RoaringTreemap)>>>;
+pub(in crate::idx) type SearchTermsDocs = Vec<Option<(TermId, RoaringTreemap)>>;
 
 pub(in crate::idx) struct SearchTermDocs {
 	index_key_base: IndexKeyBase,

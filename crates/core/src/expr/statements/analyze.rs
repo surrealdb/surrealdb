@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::ident::Ident;
@@ -28,12 +27,7 @@ pub enum AnalyzeStatement {
 
 impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		match self {
 			AnalyzeStatement::Idx(tb, idx) => {
 				// Allowed to run?
@@ -41,7 +35,7 @@ impl AnalyzeStatement {
 				// Read the index
 				let (ns, db) = opt.ns_db()?;
 				let ix = ctx.tx().get_tb_index(ns, db, tb, idx).await?;
-				let ikb = IndexKeyBase::new(ns, db, &ix)?;
+				let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name)?;
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {

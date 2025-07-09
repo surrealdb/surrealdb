@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Thing, Value};
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
 use crate::idx::ft::analyzer::Analyzer;
@@ -19,7 +20,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use std::collections::HashSet;
-use std::ops::BitAndAssign;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Default)]
@@ -28,7 +28,14 @@ struct TermDocument {
 	o: Vec<Offset>,
 }
 
+pub(in crate::idx) struct QueryTerms {
+	tokens: Tokens,
+	docs: Vec<Option<RoaringTreemap>>,
+	has_unknown_terms: bool,
+}
+
 pub(crate) struct FullTextIndex {
+	ikb: IndexKeyBase,
 	analyzer: Analyzer,
 	highlighting: bool,
 	doc_ids: SeqDocIds,
@@ -38,7 +45,7 @@ impl FullTextIndex {
 	pub(crate) async fn new(
 		ctx: &Context,
 		opt: &Options,
-		ix: &DefineIndexStatement,
+		ikb: IndexKeyBase,
 		p: &FullTextParams,
 	) -> Result<Self> {
 		let tx = ctx.tx();
@@ -51,7 +58,8 @@ impl FullTextIndex {
 		Ok(Self {
 			analyzer,
 			highlighting: p.hl,
-			doc_ids: SeqDocIds::new(nid, ns, db, &ix.what, &ix.name),
+			doc_ids: SeqDocIds::new(nid, ikb.clone()),
+			ikb,
 		})
 	}
 
@@ -164,29 +172,70 @@ impl FullTextIndex {
 		Ok(dl)
 	}
 
-	pub(super) async fn get_docs(
+	pub(in crate::idx) async fn extract_querying_terms(
 		&self,
-		ns: &str,
-		db: &str,
-		ix: &DefineIndexStatement,
-		tx: &Transaction,
-		term: &str,
-		docs: &mut RoaringTreemap,
-	) -> Result<()> {
-		// First we read the compacted documents
-		let td = Td::new(ns, db, &ix.what, &ix.name, term, None);
-		if let Some(v) = tx.get(td, None).await? {
-			let d = RoaringTreemap::deserialize_from(&mut v.as_slice())?;
-			docs.bitand_assign(d);
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		query_string: String,
+	) -> Result<QueryTerms> {
+		// We extract the tokens
+		let tokens = self
+			.analyzer
+			.generate_tokens(stk, ctx, opt, FilteringStage::Querying, query_string)
+			.await?;
+		// We collect the term docs
+		let mut docs = Vec::with_capacity(tokens.list().len());
+		let mut unique_tokens = HashSet::new();
+		let tx = ctx.tx();
+		let mut has_unknown_terms = false;
+		for token in tokens.list() {
+			// Tokens can contain duplicates, not need to evaluate them again
+			if unique_tokens.insert(token) {
+				// Is the term known in the index?
+				let term = tokens.get_token_string(token)?;
+				let d = self.get_docs(&tx, term).await?;
+				if !has_unknown_terms && d.is_none() {
+					has_unknown_terms = true;
+				}
+				docs.push(d);
+			}
 		}
-		// then we read the not yet compacted term/documents if any
-		let (beg, end) = Td::range_with_id(ns, db, &ix.what, &ix.name, term)?;
+		Ok(QueryTerms {
+			tokens,
+			docs,
+			has_unknown_terms,
+		})
+	}
+
+	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {
+		// First we read the compacted documents
+		let mut docs = None;
+		let td = self.ikb.new_td_key(term, None);
+		if let Some(v) = tx.get(td, None).await? {
+			docs = Some(RoaringTreemap::deserialize_from(&mut v.as_slice())?);
+		}
+		// Then we read the not yet compacted term/documents if any
+		let (beg, end) = self.ikb.new_td_range_with_id(term)?;
 		for k in tx.keysr(beg..end, u32::MAX, None).await? {
 			let td = Td::decode(&k)?;
 			if let Some(doc_id) = td.id {
-				docs.insert(doc_id);
+				if let Some(docs) = &mut docs {
+					docs.insert(doc_id);
+				} else {
+					docs = Some(RoaringTreemap::from_iter(vec![doc_id]));
+				}
 			}
 		}
-		Ok(())
+		// If `docs` is empty, we return `None`
+		Ok(if let Some(docs) = docs {
+			if docs.is_empty() {
+				None
+			} else {
+				Some(docs)
+			}
+		} else {
+			None
+		})
 	}
 }
