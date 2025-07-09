@@ -8,7 +8,11 @@ impl Value {
 		// Create a new object for testing and patching
 		let mut new = self.clone();
 		// Loop over the patch operations and apply them
-		for operation in ops.to_operations()?.into_iter() {
+		for operation in Operation::value_to_operations(ops)
+			.map_err(Error::InvalidPatch)
+			.map_err(anyhow::Error::new)?
+			.into_iter()
+		{
 			match operation {
 				// Add a value
 				Operation::Add {

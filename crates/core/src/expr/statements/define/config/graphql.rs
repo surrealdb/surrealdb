@@ -8,7 +8,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GraphQLConfig {
@@ -17,7 +17,7 @@ pub struct GraphQLConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum TablesConfig {
@@ -29,7 +29,7 @@ pub enum TablesConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct TableConfig {
@@ -37,7 +37,7 @@ pub struct TableConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum FunctionsConfig {
@@ -87,6 +87,7 @@ impl From<String> for TableConfig {
 	}
 }
 
+/*
 pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
 	match val {
 		Value::Strand(s) => Ok(Ident::from_strand(s)),
@@ -99,7 +100,6 @@ pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
 	}
 }
 
-/*
 impl TryFrom<Value> for TableConfig {
 	type Error = Value;
 

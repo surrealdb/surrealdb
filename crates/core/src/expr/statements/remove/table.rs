@@ -11,15 +11,13 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use uuid::Uuid;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveTableStatement {
 	pub name: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
-	#[revision(start = 3)]
 	pub expunge: bool,
 }
 
@@ -56,15 +54,17 @@ impl RemoveTableStatement {
 		let lvs = txn.all_tb_lives(ns, db, &self.name).await?;
 		// Delete the definition
 		let key = crate::key::database::tb::new(ns, db, &self.name);
-		match self.expunge {
-			true => txn.clr(key).await?,
-			false => txn.del(key).await?,
+		if self.expunge {
+			txn.clr(key).await?
+		} else {
+			txn.del(key).await?
 		};
 		// Remove the resource data
 		let key = crate::key::table::all::new(ns, db, &self.name);
-		match self.expunge {
-			true => txn.clrp(key).await?,
-			false => txn.delp(key).await?,
+		if self.expunge {
+			txn.clrp(key).await?
+		} else {
+			txn.delp(key).await?
 		};
 		// Process each attached foreign table
 		for ft in fts.iter() {

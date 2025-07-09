@@ -1,4 +1,4 @@
-use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
+use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With, fmt::Fmt};
 use std::fmt;
 
 #[derive(Clone, Debug, Default)]

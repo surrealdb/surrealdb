@@ -34,7 +34,7 @@ mod idg;
 mod key;
 mod sys;
 
-pub mod api;
+//pub mod api;
 pub mod cnf;
 pub mod ctx;
 pub mod dbs;

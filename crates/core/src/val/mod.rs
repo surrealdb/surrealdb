@@ -2,9 +2,7 @@
 
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
-use crate::expr::id::range::RecordIdKeyRangeLit;
 use crate::expr::id::{Gen, RecordIdKeyLit};
-use crate::expr::model::Model;
 use crate::expr::reference::Refs;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, FlowResult, Ident, Kind};
@@ -42,7 +40,7 @@ pub use self::datetime::Datetime;
 pub use self::duration::Duration;
 pub use self::file::File;
 pub use self::geometry::Geometry;
-pub use self::number::Number;
+pub use self::number::{DecimalExt, Number};
 pub use self::object::Object;
 pub use self::range::Range;
 pub use self::regex::Regex;
@@ -153,7 +151,7 @@ impl Value {
 	/// Check if this Value is a single Thing
 	pub fn is_thing_single(&self) -> bool {
 		match self {
-			Value::Thing(t) => !matches!(t.key, RecordIdKeyLit::Range(_)),
+			Value::Thing(t) => !matches!(t.key, RecordIdKey::Range(_)),
 			_ => false,
 		}
 	}
@@ -333,6 +331,7 @@ impl Value {
 			Value::Object(_) => Some(Kind::Object),
 			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.as_type().to_string()])),
 			Value::Bytes(_) => Some(Kind::Bytes),
+			Value::Regex(_) => Some(Kind::Regex),
 			Value::Thing(thing) => {
 				// TODO: Null byte validity
 				let str = unsafe { Ident::new_unchecked(thing.table.clone()) };
@@ -351,6 +350,7 @@ impl Value {
 				let str = unsafe { Ident::new_unchecked(file.bucket.clone()) };
 				Some(Kind::File(vec![str]))
 			}
+			_ => None,
 		}
 	}
 
@@ -390,7 +390,7 @@ impl Value {
 			Self::Thing(_) => "thing",
 			// TODO: Dubious types
 			Self::Table(_) => "table",
-			Self::Closure(_) => "closure",
+			//Self::Closure(_) => "closure",
 			Self::Range(_) => "range",
 		}
 	}
@@ -438,7 +438,8 @@ impl Value {
 			},
 			Value::Thing(v) => match other {
 				Value::Thing(w) => v == w,
-				Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
+				// TODO(3.0.0): Decide if we want to keep this behavior.
+				//Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
 				_ => false,
 			},
 			Value::Strand(v) => match other {
@@ -448,7 +449,8 @@ impl Value {
 			},
 			Value::Regex(v) => match other {
 				Value::Regex(w) => v == w,
-				Value::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
+				// TODO(3.0.0): Decide if we want to keep this behavior.
+				//Value::Thing(w) => v.regex().is_match(w.to_raw().as_str()),
 				Value::Strand(w) => v.regex().is_match(w.as_str()),
 				_ => false,
 			},
@@ -513,7 +515,7 @@ impl Value {
 				_ => false,
 			},
 			Value::Object(v) => match other {
-				Value::Strand(w) => v.0.contains_key(&w),
+				Value::Strand(w) => v.0.contains_key(&**w),
 				_ => false,
 			},
 			Value::Range(r) => {
@@ -545,7 +547,7 @@ impl Value {
 					let Value::Strand(other_string) = s else {
 						return false;
 					};
-					this.contains(&other_string)
+					this.contains(&**other_string)
 				})
 			}
 			Value::Array(v) => v.iter().all(|v| match self {
@@ -554,7 +556,7 @@ impl Value {
 				_ => false,
 			}),
 			Value::Strand(other_strand) => match self {
-				Value::Strand(s) => s.contains(&other_strand),
+				Value::Strand(s) => s.contains(&**other_strand),
 				_ => false,
 			},
 			_ => false,
@@ -573,7 +575,7 @@ impl Value {
 					let Value::Strand(other_string) = s else {
 						return false;
 					};
-					this.contains(&other_string)
+					this.contains(&**other_string)
 				})
 			}
 			Value::Array(v) => v.iter().any(|v| match self {
@@ -582,7 +584,7 @@ impl Value {
 				_ => false,
 			}),
 			Value::Strand(other_strand) => match self {
-				Value::Strand(s) => s.contains(&other_strand),
+				Value::Strand(s) => s.contains(&**other_strand),
 				_ => false,
 			},
 			_ => false,
@@ -942,6 +944,7 @@ subtypes! {
 	Bool(bool) => (is_bool,as_bool,into_bool),
 	Number(Number) => (is_number,as_number,into_number),
 	Strand(Strand) => (is_strand,as_strand,into_strand),
+	Tabler(Strand) => (is_table,as_table,into_table),
 	Duration(Duration) => (is_duration,as_duration,into_duration),
 	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
 	Uuid(Uuid) => (is_uuid,as_uuid,into_uuid),
@@ -952,9 +955,8 @@ subtypes! {
 	Thing(RecordId) => (is_thing,as_thing,into_thing),
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
-	Model(Box<Model>) => (is_model,as_model,into_model),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
-	Refs(Refs) => (is_refs,as_refs,into_refs),
+	//Refs(Refs) => (is_refs,as_refs,into_refs),
 	File(File) => (is_file,as_file,into_file),
 }
 

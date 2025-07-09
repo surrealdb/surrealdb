@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
 use crate::expr::operator::BindingPower;
-use crate::expr::{Expr, Idiom, Model, Permission, Script, Value};
+use crate::expr::{Expr, Ident, Idiom, Model, Permission, Script, Value};
 use crate::fnc;
 use crate::iam::Action;
 use futures::future::try_join_all;
@@ -313,12 +313,14 @@ impl FunctionCall {
 impl fmt::Display for FunctionCall {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.receiver {
-			Function::Normal(s) => write!(f, "{s}({})", Fmt::comma_separated(&self.arguments)),
-			Function::Custom(s) => write!(f, "fn::{s}({})", Fmt::comma_separated(&self.arguments)),
-			Function::Script(s) => {
+			Function::Normal(ref s) => write!(f, "{s}({})", Fmt::comma_separated(&self.arguments)),
+			Function::Custom(ref s) => {
+				write!(f, "fn::{s}({})", Fmt::comma_separated(&self.arguments))
+			}
+			Function::Script(ref s) => {
 				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(&self.arguments))
 			}
-			Function::Model(m) => {
+			Function::Model(ref m) => {
 				write!(f, "{}({})", m, Fmt::comma_separated(&self.arguments))
 			}
 		}

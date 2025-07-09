@@ -38,7 +38,7 @@ impl Value {
 		&self,
 		steps: bool,
 		behavior: ArrayBehaviour,
-		mut accum: &mut Vec<Part>,
+		accum: &mut Vec<Part>,
 		build: &mut Vec<Idiom>,
 	) {
 		match self {
@@ -49,7 +49,8 @@ impl Value {
 				}
 
 				for (k, v) in v.0.iter() {
-					accum.push(Part::field(k.clone()));
+					// TODO: null byte validity.
+					accum.push(Part::field(k.clone()).unwrap());
 					v._every(steps, behavior, accum, build);
 					accum.pop();
 				}

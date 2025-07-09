@@ -1,8 +1,7 @@
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
-use crate::expr::Regex;
 use crate::fnc::util::string;
-use crate::val::Value;
+use crate::val::{Regex, Value};
 use anyhow::{Result, ensure};
 
 use super::args::{Any, Cast, Optional};

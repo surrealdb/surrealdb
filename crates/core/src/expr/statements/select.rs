@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::fmt::Fmt;
 use crate::expr::order::Ordering;
 use crate::expr::{
 	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Idioms, Limit, Splits, Start,
@@ -62,7 +63,7 @@ impl Default for SelectStatement {
 			timeout: None,
 			parallel: false,
 			explain: None,
-			tempfiles: None,
+			tempfiles: false,
 		}
 	}
 }
@@ -139,7 +140,7 @@ impl fmt::Display for SelectStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}

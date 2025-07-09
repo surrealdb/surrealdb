@@ -3,9 +3,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Expr, FlowResultExt, Ident, Permission};
+use crate::expr::{Base, Expr, FlowResultExt, Ident, Literal, Permission};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::{Object, Strand, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -15,7 +15,7 @@ use std::fmt::{self, Display};
 use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineBucketStatement {
@@ -127,20 +127,20 @@ impl Display for DefineBucketStatement {
 
 impl InfoStructure for DefineBucketStatement {
 	fn structure(self) -> Value {
-		Value::from(map! {
+		Value::from(Object(map! {
 			"name".to_string() => self.name.structure(),
 			"permissions".to_string() => self.permissions.structure(),
 			"backend".to_string(), if let Some(backend) = self.backend => backend,
 			"readonly".to_string() => self.readonly.into(),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
-		})
+		}))
 	}
 }
 
 // Computed bucket definition struct
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct BucketDefinition {
 	pub id: Option<u32>,
@@ -156,7 +156,8 @@ impl From<BucketDefinition> for DefineBucketStatement {
 		DefineBucketStatement {
 			kind: DefineKind::Default,
 			name: value.name,
-			backend: value.backend.map(|v| v.into()),
+			// TODO: Null byte validity.
+			backend: value.backend.map(|v| Expr::Literal(Literal::Strand(Strand::new(v).unwrap()))),
 			permissions: value.permissions,
 			readonly: value.readonly,
 			comment: value.comment,

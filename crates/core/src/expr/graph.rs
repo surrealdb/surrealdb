@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::try_join_all_buffered;
+use crate::expr::fmt::Fmt;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Ident, Idiom, Limit, RecordIdKeyRangeLit, Splits};
@@ -13,8 +14,6 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Bound, Deref};
-
-use super::fmt::Fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -48,9 +47,10 @@ impl Display for Graph {
 			&& self.expr.is_none()
 		{
 			Display::fmt(&self.dir, f)?;
-			match self.what.len() {
-				0 => f.write_char('?'),
-				_ => Display::fmt(&self.what, f),
+			if self.what.is_empty() {
+				f.write_char('?')
+			} else {
+				Fmt::comma_separated(self.what.iter()).fmt(f)
 			}
 		} else {
 			write!(f, "{}(", self.dir)?;
@@ -123,6 +123,49 @@ pub enum GraphSubject {
 }
 
 impl GraphSubject {
+	pub(crate) async fn compute(
+		self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<ComputedGraphSubject> {
+		match self {
+			GraphSubject::Table(ident) => Ok(ComputedGraphSubject::Table(ident)),
+			GraphSubject::Range {
+				table,
+				range,
+			} => Ok(ComputedGraphSubject::Range {
+				table,
+				range: range.compute(stk, ctx, opt, doc).await?,
+			}),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum ComputedGraphSubject {
+	Table(Ident),
+	Range {
+		table: Ident,
+		range: RecordIdKeyRange,
+	},
+}
+
+impl ComputedGraphSubject {
+	pub fn into_literal(self) -> GraphSubject {
+		match self {
+			ComputedGraphSubject::Table(ident) => GraphSubject::Table(ident),
+			ComputedGraphSubject::Range {
+				table,
+				range,
+			} => GraphSubject::Range {
+				table,
+				range: range.into_literal(),
+			},
+		}
+	}
+
 	pub(crate) fn presuf(
 		&self,
 		ns: &str,

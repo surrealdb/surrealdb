@@ -69,6 +69,15 @@ impl fmt::Display for RecordIdKeyRange {
 }
 
 impl RecordIdKeyRange {
+	pub fn into_literal(self) -> expr::RecordIdKeyRangeLit {
+		let start = self.start.map(|x| x.into_literal());
+		let end = self.end.map(|x| x.into_literal());
+		expr::RecordIdKeyRangeLit {
+			start,
+			end,
+		}
+	}
+
 	/// Convertes a record id key range into the range from a normal value.
 	pub fn into_value_range(self) -> Range {
 		Range {
@@ -177,12 +186,7 @@ impl RecordIdKey {
 			RecordIdKey::Object(object) => expr::RecordIdKeyLit::Object(object.into_literal()),
 			RecordIdKey::Array(array) => expr::RecordIdKeyLit::Array(array.into_literal()),
 			RecordIdKey::Range(range) => {
-				let start = range.start.map(|x| x.into_literal());
-				let end = range.end.map(|x| x.into_literal());
-				expr::RecordIdKeyLit::Range(Box::new(expr::RecordIdKeyRangeLit {
-					start,
-					end,
-				}))
+				expr::RecordIdKeyLit::Range(Box::new(range.into_literal()))
 			}
 		}
 	}

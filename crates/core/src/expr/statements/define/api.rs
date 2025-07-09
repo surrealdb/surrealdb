@@ -18,7 +18,7 @@ use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineApiStatement {
 	pub kind: DefineKind,
@@ -124,18 +124,18 @@ impl Display for DefineApiStatement {
 
 impl InfoStructure for DefineApiStatement {
 	fn structure(self) -> Value {
-		Value::from(map! {
+		Value::from(Object(map! {
 			"path".to_string() => self.path,
 			"config".to_string(), if let Some(config) = self.config => config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
 			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
-		})
+		}))
 	}
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct ApiDefinition {
 	pub id: Option<u32>,
@@ -174,7 +174,7 @@ impl Display for ApiDefinition {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct ApiAction {

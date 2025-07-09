@@ -1,16 +1,16 @@
+use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Span, Token, TokenKind, t};
+use crate::val::DecimalExt;
+use crate::val::duration::{
+	SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
+};
+use num_traits::Num;
+use rust_decimal::Decimal;
 use std::borrow::Cow;
 use std::num::{ParseFloatError, ParseIntError};
 use std::str::FromStr;
 use std::time::Duration;
-
-use rust_decimal::Decimal;
-
-use crate::syn::error::{SyntaxError, bail, syntax_error};
-use crate::syn::lexer::Lexer;
-use crate::syn::token::{Span, Token, TokenKind, t};
-use crate::val::duration::{
-	SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
-};
 
 pub enum Numeric {
 	Float(f64),
@@ -59,19 +59,27 @@ fn prepare_number_str(str: &str) -> Cow<str> {
 /// Like numeric but holds of parsing the a number into a specific value.
 pub fn numeric_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, SyntaxError> {
 	match start.kind {
-		t!("-") | t!("+") => number_kind(lexer, start),
+		t!("-") | t!("+") => match number_kind(lexer, start)? {
+			NumberKind::Integer => Ok(NumericKind::Int),
+			NumberKind::Float => Ok(NumericKind::Float),
+			NumberKind::Decimal => Ok(NumericKind::Decimal),
+		},
 		TokenKind::Digits => match lexer.reader.peek() {
 			Some(b'n' | b's' | b'm' | b'h' | b'y' | b'w' | b'u') => {
-				duration(lexer, start).map(|_| NumericKind::Duration)
+				duration(lexer, start).map(NumericKind::Duration)
 			}
 			Some(b'd') => {
 				if let Some(b'e') = lexer.reader.peek1() {
-					number_kind(lexer, start)
+					match number_kind(lexer, start)? {
+						NumberKind::Integer => Ok(NumericKind::Int),
+						NumberKind::Float => Ok(NumericKind::Float),
+						NumberKind::Decimal => Ok(NumericKind::Decimal),
+					}
 				} else {
-					duration(lexer, start).map(|_| NumericKind::Duration)
+					duration(lexer, start).map(NumericKind::Duration)
 				}
 			}
-			Some(x) if !x.is_ascii() => duration(lexer, start).map(|_| NumericKind::Duration),
+			Some(x) if !x.is_ascii() => duration(lexer, start).map(NumericKind::Duration),
 			_ => number_kind(lexer, start),
 		},
 		x => {
@@ -104,7 +112,7 @@ pub fn numeric(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> 
 	}
 }
 
-pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, SyntaxError> {
+pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumberKind, SyntaxError> {
 	let offset = start.span.offset as usize;
 	match start.kind {
 		t!("-") | t!("+") => {
@@ -114,7 +122,7 @@ pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, Synta
 		x => bail!("Unexpected start token for integer: {x}",@start.span),
 	}
 
-	let mut kind = NumericKind::Int;
+	let mut kind = NumberKind::Integer;
 
 	let before_mantissa = lexer.reader.offset();
 	// need to test for digit.. or digit.foo

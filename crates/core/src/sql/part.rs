@@ -151,7 +151,7 @@ impl<'a> Next<'a> for &'a [Part] {
 
 // ------------------------------
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DestructurePart {
 	All(Ident),

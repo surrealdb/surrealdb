@@ -230,11 +230,11 @@ impl Fields {
 								// the document, so `type::field("foo")` results in `{ foo: "value"
 								// }` instead of `{ ["type::field('foo')"]: "value" }`
 								match f.receiver {
-									Function::Normal(x) if x == "type::fields" => {
+									Function::Normal(ref x) if x == "type::fields" => {
 										// Some manual reimplemenation of type::fields to make it
 										// more efficient.
 										let mut arguments = Vec::new();
-										for arg in f.arguments {
+										for arg in f.arguments.iter() {
 											arguments.push(
 												arg.compute(stk, ctx, opt, Some(doc))
 													.await
@@ -248,13 +248,13 @@ impl Fields {
 											<(Vec<String>,)>::from_args("type::fields", arguments)?;
 
 										// manually do the implementation of type::fields
-										let idioms = Vec::<Idiom>::new();
+										let mut idioms = Vec::<Idiom>::new();
 										for arg in args {
 											idioms.push(syn::idiom(&arg)?.into())
 										}
 
-										let idiom_results = Vec::new();
-										for idiom in idioms {
+										let mut idiom_results = Vec::new();
+										for idiom in idioms.iter() {
 											let res = idiom
 												.compute(stk, ctx, opt, Some(doc))
 												.await
@@ -276,11 +276,11 @@ impl Fields {
 											}
 										}
 									}
-									Function::Normal(x) if x == "type::field" => {
+									Function::Normal(ref x) if x == "type::field" => {
 										// Some manual reimplemenation of type::field to make it
 										// more efficient.
 										let mut arguments = Vec::new();
-										for arg in f.arguments {
+										for arg in f.arguments.iter() {
 											arguments.push(
 												arg.compute(stk, ctx, opt, Some(doc))
 													.await

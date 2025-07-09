@@ -48,7 +48,11 @@ impl DefineConfigStatement {}
 
 impl ConfigInner {
 	pub fn name(&self) -> String {
-		ConfigKind::from(self).to_string()
+		match self {
+			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
+			ConfigInner::Api(_) => ConfigKind::Api,
+		}
+		.to_string()
 	}
 
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {

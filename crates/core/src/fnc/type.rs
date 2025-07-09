@@ -159,7 +159,10 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 				Value::Object(v) => v.into(),
 				Value::Number(v) => match v {
 					Number::Int(x) => x.into(),
-					Number::Float(x) => x.to_string().into(),
+					// Safety: float -> string conversion cannot contain a null byte.
+					Number::Float(x) => unsafe { Strand::new_unchecked(x.to_string()) }.into(),
+					// Safety: decimal -> string conversion cannot contain a null byte.
+					Number::Decimal(x) => unsafe { Strand::new_unchecked(x.to_string()) }.into(),
 					Number::Decimal(x) => x.to_string().into(),
 				},
 				Value::Range(v) => v.deref().to_owned().try_into()?,

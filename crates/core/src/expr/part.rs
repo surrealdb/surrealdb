@@ -60,13 +60,16 @@ impl Part {
 	///
 	/// TODO: Remove this method once we work out the kinks with removing `Part::Index(x)` and only
 	/// having `Part::Value(x)`
+	///
+	/// Already marked as deprecated for the full release to remind that this behavior should be
+	/// fixed.
 	#[deprecated(since = "3.0.0")]
 	pub(crate) fn as_old_index(&self) -> Option<usize> {
 		match self {
 			Part::Value(Expr::Literal(l)) => match l {
 				crate::expr::Literal::Integer(i) => Some(*i as usize),
 				crate::expr::Literal::Float(f) => Some(*f as usize),
-				crate::expr::Literal::Decimal(d) => Some(d.try_into().unwrap_or_default()),
+				crate::expr::Literal::Decimal(d) => Some(usize::try_from(*d).unwrap_or_default()),
 				_ => None,
 			},
 			_ => None,

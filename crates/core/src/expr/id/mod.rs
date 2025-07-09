@@ -3,9 +3,9 @@ use super::fmt::Fmt;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::Expr;
 use crate::expr::escape::EscapeRid;
 use crate::expr::literal::ObjectEntry;
+use crate::expr::{Expr, FlowResult};
 use crate::val::{Array, Object, RecordIdKey, Uuid};
 
 use anyhow::Result;
@@ -20,7 +20,6 @@ pub use range::RecordIdKeyRangeLit;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Gen {
 	Rand,
 	Ulid,
@@ -40,7 +39,6 @@ impl Gen {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum RecordIdKeyLit {
 	Number(i64),
 	String(String),
@@ -99,7 +97,7 @@ impl Display for RecordIdKeyLit {
 			Self::Array(v) => {
 				write!(f, "[{}]", Fmt::comma_separated(v.iter()))
 			}
-			Self::Object(v) => Display::fmt(v, f),
+			Self::Object(v) => write!(f, "{{{}}}", Fmt::comma_separated(v.iter())),
 			Self::Generate(v) => match v {
 				Gen::Rand => Display::fmt("rand()", f),
 				Gen::Ulid => Display::fmt("ulid()", f),

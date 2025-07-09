@@ -21,7 +21,7 @@ struct Aggregator {
 	array: Option<Array>,
 	first_val: Option<Value>,
 	count: Option<usize>,
-	count_function: Option<(Box<Expr>, usize)>,
+	count_function: Option<usize>,
 	math_max: Option<Value>,
 	math_min: Option<Value>,
 	math_sum: Option<Value>,
@@ -154,7 +154,7 @@ impl GroupsCollector {
 									let a = OptimisedAggregate::from_function_call(f);
 									let x = if matches!(a, OptimisedAggregate::None) {
 										// The aggregation is not optimised, let's compute it with the values
-										let args = vec![agr.take()];
+										let mut args = vec![agr.take()];
 										for e in f.arguments.iter().skip(1) {
 											args.push(
 												e.compute(stk, ctx, opt, None)
@@ -262,7 +262,7 @@ impl Aggregator {
 			}
 			OptimisedAggregate::CountFunction => {
 				if self.count_function.is_none() {
-					self.count_function = Some((f.clone().unwrap(), 0));
+					self.count_function = Some(0);
 				}
 			}
 			OptimisedAggregate::MathMax => {
@@ -303,7 +303,7 @@ impl Aggregator {
 			array: self.array.as_ref().map(|_| Array::new()),
 			first_val: self.first_val.as_ref().map(|_| Value::None),
 			count: self.count.as_ref().map(|_| 0),
-			count_function: self.count_function.as_ref().map(|(f, _)| (f.clone(), 0)),
+			count_function: self.count_function.as_ref().map(|_| 0),
 			math_max: self.math_max.as_ref().map(|_| Value::None),
 			math_min: self.math_min.as_ref().map(|_| Value::None),
 			math_sum: self.math_sum.as_ref().map(|_| 0.into()),
@@ -323,7 +323,7 @@ impl Aggregator {
 			}
 			*c += count;
 		}
-		if let Some((_, ref mut c)) = self.count_function {
+		if let Some(c) = self.count_function.as_mut() {
 			// NOTE: There was some rather complicated juggling of a function here where the argument
 			// was replaced but as far as I can tell the whole thing was just equivalent to the
 			// one liner below.
@@ -383,7 +383,7 @@ impl Aggregator {
 			OptimisedAggregate::None => Value::None,
 			OptimisedAggregate::Count => self.count.take().map(|v| v.into()).unwrap_or(Value::None),
 			OptimisedAggregate::CountFunction => {
-				self.count_function.take().map(|(_, v)| v.into()).unwrap_or(Value::None)
+				self.count_function.take().map(|v| v.into()).unwrap_or(Value::None)
 			}
 			OptimisedAggregate::MathMax => self.math_max.take().unwrap_or(Value::None),
 			OptimisedAggregate::MathMin => self.math_min.take().unwrap_or(Value::None),

@@ -12,9 +12,9 @@ use std::fmt::{self, Display};
 
 #[derive(Clone, Debug)]
 pub enum AlterKind<T> {
+	None,
 	Set(T),
 	Drop,
-	None,
 }
 
 impl<T> Default for AlterKind<T> {

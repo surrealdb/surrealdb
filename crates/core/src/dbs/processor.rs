@@ -5,6 +5,7 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::expr::Ident;
 use crate::expr::dir::Dir;
+use crate::expr::graph::{ComputedGraphSubject, GraphSubject};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
@@ -487,7 +488,11 @@ pub(super) trait Collector {
 				Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
 				Iterable::Thing(v) => self.collect(Collected::RecordId(v)).await?,
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
-				Iterable::Edges(e) => self.collect_edges(ctx, opt, e).await?,
+				Iterable::Edges {
+					from,
+					dir,
+					what,
+				} => self.collect_edges(ctx, opt, from, dir, what).await?,
 				Iterable::Range(tb, v, rs, sc) => match rs {
 					RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
 					RecordStrategy::KeysOnly => {
@@ -808,47 +813,50 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_edges(&mut self, ctx: &Context, opt: &Options, e: Edges) -> Result<()> {
+	async fn collect_edges(
+		&mut self,
+		ctx: &Context,
+		opt: &Options,
+		from: RecordId,
+		dir: Dir,
+		what: Vec<ComputedGraphSubject>,
+	) -> Result<()> {
 		// Pull out options
 		let (ns, db) = opt.ns_db()?;
-		let tb = &e.from.tb;
-		let id = &e.from.id;
+		let tb = &from.table;
+		let id = &from.key;
 		// Fetch start and end key pairs
-		let keys = match e.what.len() {
-			0 => match e.dir {
+		let keys = if what.is_empty() {
+			match dir {
 				// /ns/db/tb/id
 				Dir::Both => {
 					vec![(graph::prefix(ns, db, tb, id), graph::suffix(ns, db, tb, id))]
 				}
 				// /ns/db/tb/id/IN
 				Dir::In => vec![(
-					graph::egprefix(ns, db, tb, id, &e.dir),
-					graph::egsuffix(ns, db, tb, id, &e.dir),
+					graph::egprefix(ns, db, tb, id, &dir),
+					graph::egsuffix(ns, db, tb, id, &dir),
 				)],
 				// /ns/db/tb/id/OUT
 				Dir::Out => vec![(
-					graph::egprefix(ns, db, tb, id, &e.dir),
-					graph::egsuffix(ns, db, tb, id, &e.dir),
+					graph::egprefix(ns, db, tb, id, &dir),
+					graph::egsuffix(ns, db, tb, id, &dir),
 				)],
-			},
-			_ => match e.dir {
+			}
+		} else {
+			match dir {
 				// /ns/db/tb/id/IN/TB
-				Dir::In => {
-					e.what.iter().map(|v| v.presuf(ns, db, tb, id, &e.dir)).collect::<Vec<_>>()
-				}
+				Dir::In => what.iter().map(|v| v.presuf(ns, db, tb, id, &dir)).collect::<Vec<_>>(),
 				// /ns/db/tb/id/OUT/TB
-				Dir::Out => {
-					e.what.iter().map(|v| v.presuf(ns, db, tb, id, &e.dir)).collect::<Vec<_>>()
-				}
+				Dir::Out => what.iter().map(|v| v.presuf(ns, db, tb, id, &dir)).collect::<Vec<_>>(),
 				// /ns/db/tb/id/IN/TB, /ns/db/tb/id/OUT/TB
-				Dir::Both => e
-					.what
+				Dir::Both => what
 					.iter()
 					.flat_map(|v| {
 						[v.presuf(ns, db, tb, id, &Dir::In), v.presuf(ns, db, tb, id, &Dir::Out)]
 					})
 					.collect::<Vec<_>>(),
-			},
+			}
 		};
 		// Get the transaction
 		let txn = ctx.tx();

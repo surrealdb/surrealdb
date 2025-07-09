@@ -2,7 +2,7 @@ use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use std::fmt::{self, Display, Write};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of else if's
@@ -22,7 +22,7 @@ impl IfelseStatement {
 impl From<IfelseStatement> for crate::expr::statements::IfelseStatement {
 	fn from(v: IfelseStatement) -> Self {
 		crate::expr::statements::IfelseStatement {
-			exprs: v.exprs.into_iter().map(Into::into).collect(),
+			exprs: v.exprs.into_iter().map(|(a, b)| (From::from(a), From::from(b))).collect(),
 			close: v.close.map(Into::into),
 		}
 	}
@@ -31,7 +31,7 @@ impl From<IfelseStatement> for crate::expr::statements::IfelseStatement {
 impl From<crate::expr::statements::IfelseStatement> for IfelseStatement {
 	fn from(v: crate::expr::statements::IfelseStatement) -> Self {
 		IfelseStatement {
-			exprs: v.exprs.into_iter().map(Into::into).collect(),
+			exprs: v.exprs.into_iter().map(|(a, b)| (From::from(a), From::from(b))).collect(),
 			close: v.close.map(Into::into),
 		}
 	}

@@ -362,7 +362,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the starting `|` already be eaten and its span passed as an argument.
 	pub(super) fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
-		let name = self.next_token_value::<Ident>()?.0;
+		let name = self.next_token_value::<Ident>()?.into_string();
 		expected!(self, t!(":"));
 		let from = self.next_token_value()?;
 		let to = self.eat(t!("..")).then(|| self.next_token_value()).transpose()?;

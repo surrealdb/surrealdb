@@ -62,8 +62,8 @@ impl<'a> PrefixEg<'a> {
 			_c: b'*',
 			tb,
 			_d: b'~',
-			id: id.to_owned(),
-			eg: eg.to_owned(),
+			id: id.clone(),
+			eg: eg.clone(),
 		}
 	}
 }

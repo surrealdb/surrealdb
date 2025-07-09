@@ -21,7 +21,8 @@ impl Value {
 						.flat_map(|(field, v)| {
 							v._walk(
 								path.next(),
-								prev.clone().push(Part::Field(field.to_owned().into())),
+								// TODO: null byte validity.
+								prev.clone().push(Part::field(field.clone()).unwrap()),
 							)
 						})
 						.collect::<Vec<_>>(),
@@ -56,7 +57,10 @@ impl Value {
 							v.iter()
 								.enumerate()
 								.flat_map(|(i, v)| {
-									v._walk(path.next(), prev.clone().push(Part::index_int(i)))
+									v._walk(
+										path.next(),
+										prev.clone().push(Part::index_int(i as i64)),
+									)
 								})
 								.collect::<Vec<_>>()
 						}

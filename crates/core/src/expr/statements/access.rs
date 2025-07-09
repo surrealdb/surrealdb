@@ -261,7 +261,7 @@ impl GrantBearer {
 		let id = unsafe { Ident::new_unchecked(id) };
 		let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
 		// Safety: id cannot contain a null byte guarenteed above.
-		let key = unsafe { Ident::new_unchecked(format!("{prefix}-{id}-{secret}")) };
+		let key = unsafe { Strand::new_unchecked(format!("{prefix}-{id}-{secret}")) };
 		Self {
 			id,
 			key,

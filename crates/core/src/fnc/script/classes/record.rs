@@ -1,4 +1,4 @@
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, Strand, Value};
 use js::JsLifetime;
 use js::class::Trace;
 
@@ -22,7 +22,8 @@ impl Record {
 					Value::Object(v) => v.into(),
 					Value::Number(v) => v.to_int().into(),
 					Value::Uuid(v) => v.into(),
-					v => v.as_string().into(),
+					// TODO: Null byte validity
+					v => Strand::new(v.as_string()).unwrap().into(),
 				},
 			},
 		}

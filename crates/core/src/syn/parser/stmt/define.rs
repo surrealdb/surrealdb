@@ -1,6 +1,7 @@
 use reblessive::Stk;
 
 use crate::api::method::Method;
+use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
@@ -168,7 +169,7 @@ impl Parser<'_> {
 			block,
 			kind,
 			returns,
-			..Default::default()
+			comment: None,
 		};
 
 		loop {
@@ -223,14 +224,15 @@ impl Parser<'_> {
 						bail!("Unexpected token `PASSWORD`", @token.span => "Can't set both a passhash and a password");
 					}
 					res.pass_type =
-						PassType::Password(self.next_token_value::<Strand>()?.into_inner());
+						PassType::Password(self.next_token_value::<Strand>()?.into_string());
 				}
 				t!("PASSHASH") => {
 					let token = self.pop_peek();
 					if let PassType::Password(_) = res.pass_type {
 						bail!("Unexpected token `PASSHASH`", @token.span => "Can't set both a passhash and a password");
 					}
-					res.pass_type = PassType::Hash(self.next_token_value::<Strand>()?.into_inner());
+					res.pass_type =
+						PassType::Hash(self.next_token_value::<Strand>()?.into_string());
 				}
 				t!("ROLES") => {
 					self.pop_peek();
@@ -318,7 +320,10 @@ impl Parser<'_> {
 			name,
 			base,
 			kind,
-			..Default::default()
+			authenticate: None,
+			access_type: AccessType::default(),
+			duration: AccessDuration::default(),
+			comment: None,
 		};
 
 		loop {
@@ -342,7 +347,6 @@ impl Parser<'_> {
 								unexpected!(self, token, "a valid access type at this level");
 							}
 							let mut ac = access_type::RecordAccess::default();
-
 							loop {
 								match self.peek_kind() {
 									t!("SIGNUP") => {

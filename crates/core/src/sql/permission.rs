@@ -33,17 +33,17 @@ impl Permissions {
 	}
 
 	pub fn is_none(&self) -> bool {
-		self.select == Permission::None
-			&& self.create == Permission::None
-			&& self.update == Permission::None
-			&& self.delete == Permission::None
+		matches!(self.select, Permission::None)
+			&& matches!(self.create, Permission::None)
+			&& matches!(self.update, Permission::None)
+			&& matches!(self.delete, Permission::None)
 	}
 
 	pub fn is_full(&self) -> bool {
-		self.select == Permission::Full
-			&& self.create == Permission::Full
-			&& self.update == Permission::Full
-			&& self.delete == Permission::Full
+		matches!(self.select, Permission::Full)
+			&& matches!(self.create, Permission::Full)
+			&& matches!(self.update, Permission::Full)
+			&& matches!(self.delete, Permission::Full)
 	}
 }
 
@@ -74,7 +74,7 @@ impl Display for Permissions {
 				continue;
 			}
 
-			if let Some((existing, _)) = lines.iter_mut().find(|(_, p)| *p == permission) {
+			if let Some((existing, _)) = lines.iter_mut().find(|(_, p)| **p == *permission) {
 				existing.push(c);
 			} else {
 				lines.push((vec![c], permission));

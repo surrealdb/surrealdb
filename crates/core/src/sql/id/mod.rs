@@ -35,7 +35,7 @@ impl From<crate::expr::id::Gen> for Gen {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecordIdKeyLit {
 	Number(i64),

@@ -25,6 +25,25 @@ pub struct Assignment {
 	pub value: Expr,
 }
 
+impl From<Assignment> for crate::expr::data::Assignment {
+	fn from(value: Assignment) -> Self {
+		crate::expr::data::Assignment {
+			place: value.place.into(),
+			operator: value.operator.into(),
+			value: value.value.into(),
+		}
+	}
+}
+impl From<crate::expr::data::Assignment> for Assignment {
+	fn from(value: crate::expr::data::Assignment) -> Self {
+		Assignment {
+			place: value.place.into(),
+			operator: value.operator.into(),
+			value: value.value.into(),
+		}
+	}
+}
+
 impl Default for Data {
 	fn default() -> Self {
 		Self::EmptyExpression
@@ -38,9 +57,11 @@ impl Display for Data {
 			Self::SetExpression(v) => write!(
 				f,
 				"SET {}",
-				Fmt::comma_separated(
-					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
-				)
+				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |arg, f| write!(
+					f,
+					"{} {} {}",
+					arg.place, arg.operator, arg.value
+				))))
 			),
 			Self::UnsetExpression(v) => write!(
 				f,
@@ -65,9 +86,11 @@ impl Display for Data {
 			Self::UpdateExpression(v) => write!(
 				f,
 				"ON DUPLICATE KEY UPDATE {}",
-				Fmt::comma_separated(
-					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
-				)
+				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |arg, f| write!(
+					f,
+					"{} {} {}",
+					arg.place, arg.operator, arg.value
+				))))
 			),
 		}
 	}
@@ -87,7 +110,9 @@ impl From<Data> for crate::expr::Data {
 			Data::ContentExpression(v) => Self::ContentExpression(v.into()),
 			Data::SingleExpression(v) => Self::SingleExpression(v.into()),
 			Data::ValuesExpression(v) => Self::ValuesExpression(
-				v.into_iter().map(|v| v.into_iter().map(Into::into).collect()).collect(),
+				v.into_iter()
+					.map(|v| v.into_iter().map(|(a, b)| (a.into(), b.into())).collect())
+					.collect(),
 			),
 			Data::UpdateExpression(v) => {
 				Self::UpdateExpression(v.into_iter().map(Into::into).collect())
@@ -111,7 +136,9 @@ impl From<crate::expr::Data> for Data {
 			crate::expr::Data::ContentExpression(v) => Self::ContentExpression(v.into()),
 			crate::expr::Data::SingleExpression(v) => Self::SingleExpression(v.into()),
 			crate::expr::Data::ValuesExpression(v) => Self::ValuesExpression(
-				v.into_iter().map(|v| v.into_iter().map(Into::into).collect()).collect(),
+				v.into_iter()
+					.map(|v| v.into_iter().map(|(a, b)| (a.into(), b.into())).collect())
+					.collect(),
 			),
 			crate::expr::Data::UpdateExpression(v) => {
 				Self::UpdateExpression(v.into_iter().map(Into::into).collect())

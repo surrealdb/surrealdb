@@ -170,7 +170,7 @@ impl Parser<'_> {
 	}
 
 	pub(crate) async fn parse_record_id(&mut self, ctx: &mut Stk) -> ParseResult<RecordIdLit> {
-		let ident = self.next_token_value::<Ident>()?;
+		let ident = self.next_token_value::<Ident>()?.into_string();
 		self.parse_record_id_from_ident(ctx, ident).await
 	}
 

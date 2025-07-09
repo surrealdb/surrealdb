@@ -19,7 +19,7 @@ impl Fields {
 
 	pub fn contains_all(&self) -> bool {
 		match self {
-			Fields::Value(field) => matches!(field, Field::All),
+			Fields::Value(field) => matches!(**field, Field::All),
 			Fields::Select(fields) => fields.iter().all(|x| matches!(x, Field::All)),
 		}
 	}
@@ -28,8 +28,10 @@ impl Fields {
 impl From<Fields> for crate::expr::field::Fields {
 	fn from(v: Fields) -> Self {
 		match v {
-			Fields::Value(x) => crate::expr::field::Fields::Value(x.into()),
-			Fields::Select(x) => crate::expr::field::Fields::Select(x.into()),
+			Fields::Value(x) => crate::expr::field::Fields::Value(Box::new((*x).into())),
+			Fields::Select(x) => {
+				crate::expr::field::Fields::Select(x.into_iter().map(From::from).collect())
+			}
 		}
 	}
 }
@@ -37,8 +39,10 @@ impl From<Fields> for crate::expr::field::Fields {
 impl From<crate::expr::field::Fields> for Fields {
 	fn from(v: crate::expr::field::Fields) -> Self {
 		match v {
-			crate::expr::field::Fields::Value(x) => Fields::Value(x.into()),
-			crate::expr::field::Fields::Select(x) => Fields::Select(x.into()),
+			crate::expr::field::Fields::Value(x) => Fields::Value(Box::new((*x).into())),
+			crate::expr::field::Fields::Select(x) => {
+				Fields::Select(x.into_iter().map(From::from).collect())
+			}
 		}
 	}
 }

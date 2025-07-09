@@ -63,13 +63,6 @@ impl Fetch {
 		opt: &Options,
 		idioms: &mut Vec<Idiom>,
 	) -> Result<()> {
-		let strand_or_idiom = |v: Expr| match v {
-			Expr::Literal(Literal::Strand(s)) => Ok(Idiom::field(Ident::from_strand(s))),
-			Expr::Idiom(i) => Ok(i.clone()),
-			v => Err(Error::InvalidFetch {
-				value: v,
-			}),
-		};
 		match &self.0 {
 			Expr::Idiom(idiom) => {
 				idioms.push(idiom.to_owned());
@@ -85,11 +78,11 @@ impl Fetch {
 				// Previously `type::field(a.b)` would produce a fetch `a.b`.
 				// This is somewhat weird because elsewhere this wouldn't work.
 				match f.receiver {
-					Function::Normal(x) if x == "type::field" => {
+					Function::Normal(ref x) if x == "type::field" => {
 						// Some manual reimplemenation of type::field to make it
 						// more efficient.
 						let mut arguments = Vec::new();
-						for arg in f.arguments {
+						for arg in f.arguments.iter() {
 							arguments.push(arg.compute(stk, ctx, opt, None).await.catch_return()?);
 						}
 
@@ -102,9 +95,9 @@ impl Fetch {
 						idioms.push(idiom);
 						Ok(())
 					}
-					Function::Normal(x) if x == "type::fields" => {
+					Function::Normal(ref x) if x == "type::fields" => {
 						let mut arguments = Vec::new();
-						for arg in f.arguments {
+						for arg in f.arguments.iter() {
 							arguments.push(arg.compute(stk, ctx, opt, None).await.catch_return()?);
 						}
 

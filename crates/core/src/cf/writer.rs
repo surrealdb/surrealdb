@@ -435,11 +435,11 @@ mod tests {
 
 	async fn init(store_diff: bool) -> Datastore {
 		let dns = DefineNamespaceStatement {
-			name: crate::expr::Ident(NS.to_string()),
+			name: crate::expr::Ident::new(NS.to_string()).unwrap(),
 			..Default::default()
 		};
 		let ddb = DefineDatabaseStatement {
-			name: crate::expr::Ident(DB.to_string()),
+			name: crate::expr::Ident::new(DB.to_string()).unwrap(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_diff,
@@ -447,7 +447,7 @@ mod tests {
 			..Default::default()
 		};
 		let dtb = DefineTableStatement {
-			name: TB.into(),
+			name: crate::expr::Ident::new(TB.to_owned()).unwrap(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10 * 60),
 				store_diff,

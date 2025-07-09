@@ -9,8 +9,8 @@ use crate::expr::kind::{HasKind, KindLiteral};
 use crate::expr::{Ident, Kind};
 use crate::val::array::Uniq;
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Regex, Strand, Uuid, Value,
+	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
+	Range, RecordId, Regex, Strand, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -316,7 +316,7 @@ impl Cast for Strand {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::None | Value::Null => false,
-			Value::Bytes(b) => std::str::from_utf8(b).is_ok(),
+			Value::Bytes(b) => !b.contains(&0) && std::str::from_utf8(b).is_ok(),
 			_ => true,
 		}
 	}
@@ -325,13 +325,14 @@ impl Cast for Strand {
 		match v {
 			Value::Bytes(b) => match String::from_utf8(b.0) {
 				Ok(x) => {
-					if let Some(x) = Strand::new(x) {
-						Ok(x)
-					} else {
+					if x.contains('\0') {
 						Err(CastError::InvalidKind {
 							from: Value::Bytes(Bytes(x.into_bytes())),
 							into: "string".to_owned(),
 						})
+					} else {
+						// Safety: Condition checked above.
+						Ok(unsafe { Strand::new_unchecked(x) })
 					}
 				}
 				Err(e) => Err(CastError::InvalidKind {
@@ -454,7 +455,7 @@ impl Cast for Bytes {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => Ok(b),
-			Value::Strand(s) => Ok(Bytes(s.0.into_bytes())),
+			Value::Strand(s) => Ok(Bytes(s.into_string().into_bytes())),
 			Value::Array(x) => {
 				// Optimization to check first if the conversion can succeed to avoid possibly
 				// cloning large values.

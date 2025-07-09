@@ -77,13 +77,13 @@ impl Display for AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(comment) => write!(f, " COMMENT {}", comment)?,
+			AlterKind::Set(ref comment) => write!(f, " COMMENT {}", comment)?,
 			AlterKind::Drop => write!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}
 
 		match self.changefeed {
-			AlterKind::Set(changefeed) => write!(f, " CHANGEFEED {}", changefeed)?,
+			AlterKind::Set(ref changefeed) => write!(f, " CHANGEFEED {}", changefeed)?,
 			AlterKind::Drop => write!(f, " DROP CHANGEFEED")?,
 			AlterKind::None => {}
 		}

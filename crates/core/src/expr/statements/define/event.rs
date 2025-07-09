@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::fmt::Fmt;
 use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident};
@@ -17,7 +18,7 @@ use uuid::Uuid;
 use super::DefineKind;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineEventStatement {
@@ -102,7 +103,14 @@ impl Display for DefineEventStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {} WHEN {} THEN {}", self.name, self.what, self.when, self.then)?;
+		write!(
+			f,
+			" {} ON {} WHEN {} THEN {}",
+			self.name,
+			self.what,
+			self.when,
+			Fmt::comma_separated(self.then.iter())
+		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}

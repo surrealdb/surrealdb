@@ -239,7 +239,7 @@ impl Coerce for String {
 	}
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		Strand::coerce(v).map(|x| x.0)
+		Strand::coerce(v).map(|x| x.into_string())
 	}
 }
 

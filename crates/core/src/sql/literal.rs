@@ -1,7 +1,7 @@
 use std::fmt;
 
-use crate::sql::{Closure, Expr, RecordIdLit, Regex};
-use crate::val::{Bytes, Datetime, Duration, File, Geometry, Strand, Uuid};
+use crate::sql::{Closure, Expr, RecordIdLit};
+use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Strand, Uuid};
 use rust_decimal::Decimal;
 
 #[derive(Clone, Debug)]

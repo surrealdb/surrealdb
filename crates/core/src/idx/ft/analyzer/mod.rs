@@ -279,7 +279,7 @@ impl Analyzer {
 					ctx,
 					opt,
 					None,
-					Value::Strand(unsafe { Strand::new_unchecked(input) }),
+					vec![Value::Strand(unsafe { Strand::new_unchecked(input) })],
 				)
 				.await
 				.catch_return()?;

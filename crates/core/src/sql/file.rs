@@ -11,10 +11,10 @@ pub struct File {
 impl File {
 	/// Check if this File belongs to a certain bucket type
 	pub fn is_bucket_type(&self, types: &[Ident]) -> bool {
-		types.is_empty() || types.iter().any(|buc| buc.0 == self.bucket)
+		types.is_empty() || types.iter().any(|buc| **buc == self.bucket)
 	}
 
-	pub fn display_inner(&self) -> String {}
+	//pub fn display_inner(&self) -> String {}
 }
 
 impl fmt::Display for File {

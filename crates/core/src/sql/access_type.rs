@@ -4,11 +4,17 @@ use crate::sql::statements::DefineAccessStatement;
 use crate::sql::Algorithm;
 use crate::sql::escape::QuoteStr;
 use anyhow::Result;
+use rand::Rng;
+use rand::distributions::Alphanumeric;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 
 use super::Expr;
+
+pub(crate) fn random_key() -> String {
+	rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
+}
 
 /// The type of access methods available
 #[derive(Debug, Clone)]
@@ -117,6 +123,26 @@ pub struct JwtAccess {
 	// Issue is optional
 	// It is possible to only verify externally issued tokens
 	pub issue: Option<JwtAccessIssue>,
+}
+
+//TODO: Move this logic out of the parser
+impl Default for JwtAccess {
+	fn default() -> Self {
+		// Defaults to HS512 with a randomly generated key
+		let alg = Algorithm::Hs512;
+		let key = random_key();
+		// By default the access method can verify and issue tokens
+		Self {
+			verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+				alg,
+				key: key.clone(),
+			}),
+			issue: Some(JwtAccessIssue {
+				alg,
+				key,
+			}),
+		}
+	}
 }
 
 impl Jwt for JwtAccess {
@@ -257,7 +283,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks
 	}
 }
 
-#[derive(Debug, Hash, Clone)]
+#[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
 	pub signup: Option<Expr>,

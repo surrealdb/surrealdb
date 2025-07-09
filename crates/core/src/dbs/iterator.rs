@@ -5,10 +5,10 @@ use crate::dbs::result::Results;
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
-use crate::expr::graph::GraphSubject;
+use crate::expr::graph::{ComputedGraphSubject, GraphSubject};
 use crate::expr::{
-	self, Dir, Expr, Fields, FlowResultExt, Graph, Ident, Literal, Mock, RecordIdKeyLit,
-	RecordIdKeyRangeLit,
+	self, ControlFlow, Dir, Expr, Fields, FlowResultExt, Graph, Ident, Literal, Mock, Part,
+	RecordIdKeyLit, RecordIdKeyRangeLit, record_id,
 };
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
@@ -48,7 +48,7 @@ pub(crate) enum Iterable {
 	Edges {
 		dir: Dir,
 		from: RecordId,
-		what: Vec<GraphSubject>,
+		what: Vec<ComputedGraphSubject>,
 	},
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document.
@@ -168,8 +168,42 @@ impl Iterator {
 			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
 			Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
 			Expr::Idiom(x) => {
-				// Edges
-				todo!()
+				// match against what previously would be an edge.
+				if x.len() != 2 {
+					return Ok(());
+				}
+
+				let Part::Start(Expr::Literal(Literal::RecordId(from))) = x[0] else {
+					return Ok(());
+				};
+				let Part::Graph(graph) = x[0] else {
+					return Ok(());
+				};
+
+				if graph.alias.is_none()
+					&& graph.cond.is_none()
+					&& graph.group.is_none()
+					&& graph.limit.is_none()
+					&& graph.order.is_none()
+					&& graph.split.is_none()
+					&& graph.start.is_none()
+					&& graph.expr.is_none()
+				{
+					// TODO: Do we suport `RETURN a:b` here? What do we do when it is not of the
+					// right type?
+					let from = match from.compute(stk, ctx, opt, doc).await {
+						Ok(x) => x,
+						Err(ControlFlow::Err(e)) => return Err(e),
+						Err(_) => bail!(Error::InvalidControlFlow),
+						//
+					};
+					let mut what = Vec::new();
+					for s in graph.what.iter() {
+						what.push(s.compute(stk, ctx, opt, doc).await?);
+					}
+					// idiom matches the Edges pattern.
+					self.prepare_edges(stm_ctx.stm, from, graph.dir, what)?;
+				}
 			}
 			Expr::Literal(Literal::Array(array)) => {
 				self.prepare_array(stk, ctx, opt, doc, planner, stm_ctx, array).await?
@@ -274,16 +308,17 @@ impl Iterator {
 		stm: &Statement<'_>,
 		from: RecordId,
 		dir: Dir,
-		what: Vec<GraphSubject>,
+		what: Vec<ComputedGraphSubject>,
 	) -> Result<()> {
 		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Check if this is a create statement
 		if stm.is_create() {
+			// recreate the expression for the error.
 			let value = expr::Idiom(vec![
 				expr::Part::Start(Expr::Literal(Literal::RecordId(from.into_literal()))),
 				expr::Part::Graph(Graph {
 					dir,
-					what,
+					what: what.into_iter().map(|x| x.into_literal()).collect(),
 					..Default::default()
 				}),
 			])

@@ -5,7 +5,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -40,7 +40,7 @@ impl From<crate::expr::Idioms> for Idioms {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 pub struct Idiom(pub Vec<Part>);
 
 impl From<Idiom> for crate::expr::Idiom {

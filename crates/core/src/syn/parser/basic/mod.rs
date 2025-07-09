@@ -3,14 +3,13 @@ use std::mem;
 use rust_decimal::Decimal;
 
 use crate::sql::language::Language;
-use crate::sql::{Ident, Param, Regex};
+use crate::sql::{Ident, Param};
 use crate::syn::error::syntax_error;
 use crate::syn::lexer::compound::{self, NumberKind};
 use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, TokenKind, t};
-use crate::val::{Bytes, Datetime, Duration, File};
-use crate::val::{Strand, Uuid};
+use crate::val::{Bytes, Datetime, Duration, File, Regex, Strand, Uuid};
 
 use super::GluedValue;
 use super::mac::pop_glued;
@@ -304,7 +303,7 @@ mod test {
 			assert_eq!(
 				r.statements,
 				vec![sql::TopLevelExpr::Expr(sql::Expr::Idiom(sql::Idiom(vec![Part::Field(
-					Ident(ident.to_string())
+					Ident::new(ident.to_owned()).unwrap()
 				)])))]
 			)
 		}

@@ -4,7 +4,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Expr;
-use crate::val::Datetime;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -20,15 +19,6 @@ use super::Value;
 pub struct Version(pub Expr);
 
 impl Version {
-	fn convert_version_datetime(
-		&mut self,
-		_revision: u16,
-		old: Datetime,
-	) -> Result<(), revision::Error> {
-		self.0 = Value::Datetime(old);
-		Ok(())
-	}
-
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

@@ -23,7 +23,7 @@ use uuid::Uuid;
 use super::DefineKind;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DefineDefault {
 	#[default]
@@ -33,7 +33,7 @@ pub enum DefineDefault {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
@@ -305,7 +305,7 @@ impl DefineFieldStatement {
 				);
 
 				ensure!(
-					self.default.is_none(),
+					matches!(self.default, DefineDefault::None),
 					Error::RefsTypeConflict("DEFAULT".into(), typename)
 				);
 
@@ -320,23 +320,24 @@ impl DefineFieldStatement {
 
 			// If a reference is defined, the field must be a record
 			if self.reference.is_some() {
-				let kinds = match kind.get_optional_inner_kind() {
-					Kind::Either(kinds) => kinds,
+				let is_record_id = match kind.get_optional_inner_kind() {
+					Kind::Either(kinds) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
 					Kind::Array(kind, _) | Kind::Set(kind, _) => match kind.as_ref() {
-						Kind::Either(kinds) => kinds,
-						kind => &vec![kind.to_owned()],
+						Kind::Either(kinds) => kinds.iter().all(|k| matches!(k, Kind::Record(_))),
+						Kind::Record(_) => true,
+						_ => false,
 					},
 					Kind::Literal(lit) => match lit {
-						KindLiteral::Array(kinds) => kinds,
-						lit => &vec![Kind::Literal(lit.to_owned())],
+						KindLiteral::Array(kinds) => {
+							kinds.iter().all(|k| matches!(k, Kind::Record(_)))
+						}
+						_ => false,
 					},
-					kind => &vec![kind.to_owned()],
+					Kind::Record(_) => true,
+					_ => false,
 				};
 
-				ensure!(
-					kinds.iter().all(|k| matches!(k, Kind::Record(_))),
-					Error::ReferenceTypeConflict(kind.to_string())
-				);
+				ensure!(is_record_id, Error::ReferenceTypeConflict(kind.to_string()));
 			}
 		}
 
@@ -430,13 +431,10 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.field_kind {
 			write!(f, " TYPE {v}")?
 		}
-		if let Some(ref v) = self.default {
-			write!(f, " DEFAULT")?;
-			if self.default_always {
-				write!(f, " ALWAYS")?
-			}
-
-			write!(f, " {v}")?
+		match self.default {
+			DefineDefault::None => {}
+			DefineDefault::Always(expr) => writeln!(f, " DEFAULT ALWAYS {expr}"),
+			DefineDefault::Set(expr) => writeln!(f, " DEFAULT {expr}"),
 		}
 		if self.readonly {
 			write!(f, " READONLY")?

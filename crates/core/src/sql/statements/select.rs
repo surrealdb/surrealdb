@@ -1,3 +1,4 @@
+use crate::sql::fmt::Fmt;
 use crate::sql::order::Ordering;
 use crate::sql::{
 	Cond, Explain, Expr, Fetchs, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, With,

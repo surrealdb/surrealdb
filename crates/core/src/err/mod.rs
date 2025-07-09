@@ -1,6 +1,7 @@
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
 use crate::expr::index::Distance;
+use crate::expr::operation::PatchError;
 use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
@@ -121,10 +122,8 @@ pub enum Error {
 	},
 
 	/// There was an error with the provided JSON Patch
-	#[error("The JSON Patch contains invalid operations. {message}")]
-	InvalidPatch {
-		message: String,
-	},
+	#[error("The JSON Patch contains invalid operations. {0}")]
+	InvalidPatch(PatchError),
 
 	/// Given test operation failed for JSON Patch
 	#[error(

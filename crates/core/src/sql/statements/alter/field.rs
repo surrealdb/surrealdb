@@ -44,7 +44,7 @@ impl From<AlterDefault> for crate::expr::statements::alter::AlterDefault {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
@@ -96,9 +96,9 @@ impl Display for AlterFieldStatement {
 
 		match self.default {
 			AlterDefault::None => {}
-			AlterDefault::Drop => write!(f, "DROP DEFAULT"),
-			AlterDefault::Always(ref d) => write!(f, "DEFAULT ALWAYS {d}"),
-			AlterDefault::Set(ref d) => write!(f, "DEFAULT {d}"),
+			AlterDefault::Drop => write!(f, "DROP DEFAULT")?,
+			AlterDefault::Always(ref d) => write!(f, "DEFAULT ALWAYS {d}")?,
+			AlterDefault::Set(ref d) => write!(f, "DEFAULT {d}")?,
 		}
 
 		if let Some(permissions) = &self.permissions {
@@ -125,9 +125,9 @@ impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldSta
 			name: v.name.into(),
 			what: v.what.into(),
 			if_exists: v.if_exists,
-			flex: v.flex,
+			flex: v.flex.into(),
 			kind: v.kind.into(),
-			readonly: v.readonly,
+			readonly: v.readonly.into(),
 			value: v.value.into(),
 			assert: v.assert.into(),
 			default: v.default.into(),

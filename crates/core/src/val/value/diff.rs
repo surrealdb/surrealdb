@@ -13,7 +13,8 @@ impl Value {
 				for (key, _) in a.iter() {
 					if !b.contains_key(key) {
 						ops.push(Operation::Remove {
-							path: path.clone().push(Part::field(key.clone())),
+							// TODO: null byte validity.
+							path: path.clone().push(Part::field(key.clone()).unwrap()),
 						})
 					}
 				}
@@ -21,10 +22,12 @@ impl Value {
 				for (key, val) in b.iter() {
 					match a.get(key) {
 						None => ops.push(Operation::Add {
+							// TODO: null byte validity.
 							path: path.clone().push(Part::field(key.clone())),
 							value: val.clone(),
 						}),
 						Some(old) => {
+							// TODO: null byte validity.
 							let path = path.clone().push(Part::field(key.clone()));
 							ops.append(&mut old.diff(val, path))
 						}
@@ -34,6 +37,7 @@ impl Value {
 			(Value::Array(a), Value::Array(b)) if a != b => {
 				let mut n = 0;
 				while n < min(a.len(), b.len()) {
+					// TODO: null byte validity.
 					let path = path.clone().push(Part::index_int(n));
 					ops.append(&mut a[n].diff(&b[n], path));
 					n += 1;
@@ -41,6 +45,7 @@ impl Value {
 				while n < b.len() {
 					if n >= a.len() {
 						ops.push(Operation::Add {
+							// TODO: null byte validity.
 							path: path.clone().push(Part::index_int(n)),
 							value: b[n].clone(),
 						})
@@ -50,6 +55,7 @@ impl Value {
 				while n < a.len() {
 					if n >= b.len() {
 						ops.push(Operation::Remove {
+							// TODO: null byte validity.
 							path: path.clone().push(Part::index_int(n)),
 						})
 					}

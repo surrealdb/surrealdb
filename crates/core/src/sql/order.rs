@@ -66,7 +66,7 @@ impl From<crate::expr::order::OrderList> for OrderList {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Order {
 	/// The value to order by

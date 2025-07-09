@@ -29,9 +29,9 @@ pub enum AlterDefault {
 	Set(Expr),
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,

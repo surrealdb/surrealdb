@@ -183,7 +183,7 @@ impl Object {
 			.into_iter()
 			.map(|(k, v)| ObjectEntry {
 				key: k,
-				value: Expr::Literal(v.into_literal()),
+				value: v.into_literal(),
 			})
 			.collect()
 	}

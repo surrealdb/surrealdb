@@ -539,7 +539,7 @@ impl KindLiteral {
 	pub fn to_kind(&self) -> Kind {
 		match self {
 			Self::String(_) => Kind::String,
-			Self::Number(_) => Kind::Number,
+			Self::Integer(_) | Self::Float(_) | Self::Decimal(_) => Kind::Number,
 			Self::Duration(_) => Kind::Duration,
 			Self::Array(a) => {
 				if let Some(inner) = a.first() {
@@ -562,8 +562,16 @@ impl KindLiteral {
 				Value::Strand(s) => s == v,
 				_ => false,
 			},
-			Self::Number(v) => match value {
-				Value::Number(n) => n == v,
+			Self::Integer(v) => match value {
+				Value::Number(n) => *n == Number::Int(*v),
+				_ => false,
+			},
+			Self::Float(v) => match value {
+				Value::Number(n) => *n == Number::Float(*v),
+				_ => false,
+			},
+			Self::Decimal(v) => match value {
+				Value::Number(n) => *n == Number::Decimal(*v),
 				_ => false,
 			},
 			Self::Duration(v) => match value {
@@ -663,19 +671,17 @@ impl KindLiteral {
 		match self {
 			KindLiteral::Array(x) => match path.first() {
 				Some(Part::All) => x.iter().all(|y| y.allows_nested_kind(&path[1..], kind)),
-				Some(Part::Index(i)) => {
-					if let Some(y) = x.get(i.as_usize()) {
-						y.allows_nested_kind(&path[1..], kind)
-					} else {
-						false
-					}
-				}
-				_ => false,
+				Some(part) => part
+					.as_old_index()
+					.and_then(|idx| x.get(idx))
+					.map(|x| x.allows_nested_kind(&path[1..], kind))
+					.unwrap_or(false),
+				None => false,
 			},
 			KindLiteral::Object(x) => match path.first() {
 				Some(Part::All) => x.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind)),
 				Some(Part::Field(k)) => {
-					if let Some(y) = x.get(&k) {
+					if let Some(y) = x.get(&**k) {
 						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false
@@ -688,7 +694,7 @@ impl KindLiteral {
 					.iter()
 					.all(|o| o.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind))),
 				Some(Part::Field(k)) => discriminants.iter().all(|o| {
-					if let Some(y) = o.get(&k) {
+					if let Some(y) = o.get(&**k) {
 						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false
@@ -705,7 +711,9 @@ impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			KindLiteral::String(s) => write!(f, "{}", s),
-			KindLiteral::Number(n) => write!(f, "{}", n),
+			KindLiteral::Integer(n) => write!(f, "{}", n),
+			KindLiteral::Float(n) => write!(f, "{}f", n),
+			KindLiteral::Decimal(n) => write!(f, "{}dec", n),
 			KindLiteral::Duration(d) => write!(f, "{}", d),
 			KindLiteral::Bool(b) => write!(f, "{}", b),
 			KindLiteral::Array(a) => {
@@ -820,7 +828,9 @@ mod tests {
 	#[case::option(Kind::Option(Box::new(Kind::Point)), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Literal(KindLiteral::Bool(true)))), false)]
 	#[case::literal(Kind::Literal(KindLiteral::String("a".into())), false)]
-	#[case::literal(Kind::Literal(KindLiteral::Number(1.into())), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Integer(1)), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Float(1.0)), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Decimal(Decimal::from(1usize))), false)]
 	#[case::literal(Kind::Literal(KindLiteral::Duration(Duration::new(1, 0))), false)]
 	#[case::literal(Kind::Literal(KindLiteral::Bool(true)), false)]
 	#[case::literal(Kind::Literal(KindLiteral::Array(vec![])), true)]
@@ -840,10 +850,10 @@ mod tests {
 	#[case::range(Kind::Range, false)]
 	#[case::references(Kind::References(None, None), false)]
 	#[case::references(Kind::References(Some(Ident::new("table".to_string()).unwrap()), None), false)]
-	#[case::references(Kind::References(Some(Ident::new("table".to_string()).unwrap()), Some(Idiom::field("idiom".to_owned()))), false)]
+	#[case::references(Kind::References(Some(Ident::new("table".to_string()).unwrap()), Some(Idiom::field(Ident::new("idiom".to_owned()).unwrap()))), false)]
 	#[case::file(Kind::File(vec![]), false)]
-	#[case::file(Kind::File(vec![Ident("bucket".to_string())]), false)]
-	#[case::file(Kind::File(vec![Ident("bucket".to_string()), Ident("key".to_string())]), false)]
+	#[case::file(Kind::File(vec![Ident::new("bucket".to_string()).unwrap()]), false)]
+	#[case::file(Kind::File(vec![Ident::new("bucket".to_string()).unwrap(), Ident::new("key".to_string()).unwrap()]), false)]
 
 	fn is_array_like(#[case] kind: Kind, #[case] expected: bool) {
 		assert_eq!(kind.is_array_like(), expected);

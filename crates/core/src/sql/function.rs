@@ -64,13 +64,17 @@ impl From<crate::expr::FunctionCall> for FunctionCall {
 impl fmt::Display for FunctionCall {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.receiver {
-			Function::Normal(s) => write!(f, "{s}({})", Fmt::comma_separated(self.arguments)),
-			Function::Custom(s) => write!(f, "fn::{s}({})", Fmt::comma_separated(self.arguments)),
-			Function::Script(s) => {
-				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments))
+			Function::Normal(ref s) => {
+				write!(f, "{s}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
-			Function::Model(m) => {
-				write!(f, "{m}({})", Fmt::comma_separated(self.arguments))
+			Function::Custom(ref s) => {
+				write!(f, "fn::{s}({})", Fmt::comma_separated(self.arguments.iter()))
+			}
+			Function::Script(ref s) => {
+				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments.iter()))
+			}
+			Function::Model(ref m) => {
+				write!(f, "{m}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 		}
 	}

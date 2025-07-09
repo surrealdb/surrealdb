@@ -62,7 +62,7 @@ impl From<crate::expr::statements::access::AccessStatementGrant> for AccessState
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementShow {
 	pub ac: Ident,
@@ -93,7 +93,7 @@ impl From<crate::expr::statements::access::AccessStatementShow> for AccessStatem
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,

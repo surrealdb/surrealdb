@@ -123,7 +123,7 @@ impl Parser<'_> {
 				Ok(str)
 			}
 			t!("\"") | t!("'") | TokenKind::Glued(Glued::Strand) => {
-				let str = self.next_token_value::<Strand>()?.into_inner();
+				let str = self.next_token_value::<Strand>()?.into_string();
 				Ok(str)
 			}
 			TokenKind::Digits => {

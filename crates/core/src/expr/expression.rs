@@ -119,6 +119,21 @@ impl Expr {
 		}
 	}
 
+	pub(crate) fn to_idiom(&self) -> Idiom {
+		match self {
+			Expr::Idiom(v) => v.simplify(),
+			Expr::Param(v) => Idiom::field(v.clone().ident()),
+			Expr::Literal(Literal::Strand(v)) => Idiom::field(Ident::from_strand(v.clone())),
+			// TODO: Null byte validity: This is probably already correct.
+			Expr::Literal(Literal::Datetime(d)) => {
+				Idiom::field(Ident::new(d.0.to_string()).unwrap())
+			}
+			Expr::FunctionCall(v) => v.receiver.to_idiom(),
+			// TODO: Null byte validity.
+			_ => Idiom::field(Ident::new(self.to_string()).unwrap()),
+		}
+	}
+
 	/// Checks whether all expression parts are static values
 	pub(crate) fn is_static(&self) -> bool {
 		todo!()

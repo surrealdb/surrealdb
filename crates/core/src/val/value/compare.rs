@@ -53,48 +53,23 @@ impl Value {
 						(_, _) => Some(Ordering::Equal),
 					},
 					//TODO: It is kind of weird that a[1] works but `a[+(1)]` or `let $b = 1; a[$b]` for example doesn't as
-					Part::Value(Expr::Literal(l)) => {
-						let idx = match l {
-							//TODO: Improve this, this is just replicating previous behavior but
-							//decimal > usize::MAX resulting in a comparision between index 0 is
-							//strange behaviour.
-							Literal::Float(x) => *x as usize,
-							Literal::Integer(x) => *x as usize,
-							Literal::Decimal(x) => x.try_into().unwrap_or_default(),
-							_ => {
-								for (a, b) in a.iter().zip(b.iter()) {
-									match a.compare(b, path, collate, numeric) {
-										Some(Ordering::Equal) => continue,
-										None => continue,
-										o => return o,
-									}
-								}
-								match (a.len(), b.len()) {
-									(a, b) if a > b => Some(Ordering::Greater),
-									(a, b) if a < b => Some(Ordering::Less),
-									_ => Some(Ordering::Equal),
+					x => {
+						if let Some(idx) = x.as_old_index() {
+							match (a.get(idx), b.get(idx)) {
+								(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
+								(Some(_), None) => Some(Ordering::Greater),
+								(None, Some(_)) => Some(Ordering::Less),
+								(_, _) => Some(Ordering::Equal),
+							}
+						} else {
+							for (a, b) in a.iter().zip(b.iter()) {
+								match a.compare(b, path, collate, numeric) {
+									Some(Ordering::Equal) => continue,
+									None => continue,
+									o => return o,
 								}
 							}
-						};
-						match (a.get(idx), b.get(idx)) {
-							(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
-							(Some(_), None) => Some(Ordering::Greater),
-							(None, Some(_)) => Some(Ordering::Less),
-							(_, _) => Some(Ordering::Equal),
-						}
-					}
-					_ => {
-						for (a, b) in a.iter().zip(b.iter()) {
-							match a.compare(b, path, collate, numeric) {
-								Some(Ordering::Equal) => continue,
-								None => continue,
-								o => return o,
-							}
-						}
-						match (a.len(), b.len()) {
-							(a, b) if a > b => Some(Ordering::Greater),
-							(a, b) if a < b => Some(Ordering::Less),
-							_ => Some(Ordering::Equal),
+							Some(a.len().cmp(&b.len()))
 						}
 					}
 				},

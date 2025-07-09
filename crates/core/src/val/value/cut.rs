@@ -19,16 +19,6 @@ impl Value {
 							}
 						}
 					},
-					Part::Index(i) => match path.len() {
-						1 => {
-							v.remove(&i.to_string());
-						}
-						_ => {
-							if let Some(v) = v.get_mut(&i.to_string()) {
-								v.cut(path.next())
-							}
-						}
-					},
 					Part::All => match path.len() {
 						1 => {
 							v.clear();
@@ -38,6 +28,20 @@ impl Value {
 							v.iter_mut().for_each(|(_, v)| v.cut(path));
 						}
 					},
+					x => {
+						if let Some(i) = x.as_old_index() {
+							match path.len() {
+								1 => {
+									v.remove(&i.to_string());
+								}
+								_ => {
+									if let Some(v) = v.get_mut(&i.to_string()) {
+										v.cut(path.next())
+									}
+								}
+							}
+						}
+					}
 					_ => {}
 				},
 				// Current value at path is an array
@@ -77,20 +81,23 @@ impl Value {
 							}
 						}
 					},
-					Part::Index(i) => match path.len() {
-						1 => {
-							if v.len() > i.to_usize() {
-								v.remove(i.to_usize());
+					x => {
+						if let Some(i) = x.as_old_index() {
+							match path.len() {
+								1 => {
+									if v.len() > i {
+										v.remove(i);
+									}
+								}
+								_ => {
+									if let Some(v) = v.get_mut(i) {
+										v.cut(path.next())
+									}
+								}
 							}
+						} else {
+							v.iter_mut().for_each(|v| v.cut(path));
 						}
-						_ => {
-							if let Some(v) = v.get_mut(i.to_usize()) {
-								v.cut(path.next())
-							}
-						}
-					},
-					_ => {
-						v.iter_mut().for_each(|v| v.cut(path));
 					}
 				},
 				// Ignore everything else

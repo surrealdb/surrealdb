@@ -67,7 +67,7 @@ impl From<crate::expr::Ident> for Ident {
 
 impl From<Ident> for crate::expr::Ident {
 	fn from(v: Ident) -> Self {
-		Self(v.into_string())
+		unsafe { Self::new_unchecked(v.into_string()) }
 	}
 }
 

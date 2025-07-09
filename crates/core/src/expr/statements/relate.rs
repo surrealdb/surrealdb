@@ -184,7 +184,7 @@ impl RelateStatement {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
-				1 => Ok(a.pop()),
+				1 => Ok(a.0.pop().unwrap()),
 				// There were no results
 				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
 			},

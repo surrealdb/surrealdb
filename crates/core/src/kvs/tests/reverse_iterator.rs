@@ -2,7 +2,6 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::{Response, Session};
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
-use crate::sql::SqlValue;
 use crate::syn;
 use crate::val::Value;
 use std::sync::Arc;

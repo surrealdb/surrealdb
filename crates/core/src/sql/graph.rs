@@ -21,7 +21,7 @@ pub struct Graph {
 
 impl Display for Graph {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		if self.what.0.len() <= 1
+		if self.what.len() <= 1
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
@@ -72,7 +72,7 @@ impl From<Graph> for crate::expr::Graph {
 	fn from(v: Graph) -> Self {
 		Self {
 			dir: v.dir.into(),
-			expr: v.expr.into_iter().map(From::from).collect(),
+			expr: v.expr.map(From::from),
 			what: v.what.into_iter().map(From::from).collect(),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),

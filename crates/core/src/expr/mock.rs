@@ -35,7 +35,7 @@ impl Iterator for IntoIter {
 					self.index += 1;
 					Some(RecordId {
 						table: tb.to_string(),
-						key: RecordIdKey::from(self.index),
+						key: RecordIdKey::from(self.index as i64),
 					})
 				} else {
 					None

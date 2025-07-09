@@ -1,8 +1,17 @@
-use crate::expr::{Expr, RecordIdLit};
-use crate::val::{Bytes, Closure, Datetime, Duration, File, Geometry, Regex, Strand, Uuid};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::{Expr, FlowResult, RecordIdLit};
+use crate::val::{
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
+	Strand, Uuid, Value,
+};
+use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fmt;
 use std::hash::{Hash, Hasher};
 
 /// A literal value, should be computed to get an actual value.
@@ -19,6 +28,7 @@ use std::hash::{Hash, Hasher};
 pub enum Literal {
 	None,
 	Null,
+	// An unbounded range, i.e. `..` without any start or end bound.
 	UnboundedRange,
 	Bool(bool),
 	Float(f64),
@@ -38,6 +48,56 @@ pub enum Literal {
 	Geometry(Geometry),
 	File(File),
 	Closure(Box<Closure>),
+}
+
+impl Literal {
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> FlowResult<Value> {
+		let res = match self {
+			Literal::None => Value::None,
+			Literal::Null => Value::Null,
+			Literal::UnboundedRange => Value::Range(Box::new(Range::unbounded())),
+			Literal::Bool(x) => Value::Bool(*x),
+			Literal::Float(x) => Value::Number(Number::Float(*x)),
+			Literal::Integer(i) => Value::Number(Number::Int(*i)),
+			Literal::Decimal(d) => Value::Number(Number::Decimal(*d)),
+			Literal::Strand(strand) => Value::Strand(strand.clone()),
+			Literal::Bytes(bytes) => Value::Bytes(bytes.clone()),
+			Literal::Regex(regex) => Value::Regex(regex.clone()),
+			Literal::RecordId(record_id_lit) => {
+				Value::Thing(record_id_lit.compute(stk, ctx, opt, doc).await?)
+			}
+			Literal::Array(exprs) => {
+				let mut array = Vec::with_capacity(exprs.len());
+				for e in exprs.iter() {
+					array.push(e.compute(stk, ctx, opt, doc).await?);
+				}
+				Value::Array(Array(array))
+			}
+			// TODO: Geometry matching.
+			Literal::Object(items) => {
+				let mut map = BTreeMap::new();
+				for i in items.iter() {
+					let v = i.value.compute(stk, ctx, opt, doc).await?;
+					map.insert(i.key.clone(), v);
+				}
+				Value::Object(Object(map))
+			}
+			Literal::Duration(duration) => Value::Duration(*duration),
+			Literal::Datetime(datetime) => Value::Datetime(datetime.clone()),
+			Literal::Uuid(uuid) => Value::Uuid(*uuid),
+			Literal::Geometry(geometry) => Value::Geometry(geometry.clone()),
+			Literal::File(file) => Value::File(file.clone()),
+			Literal::Closure(closure) => Value::Closure(closure.clone()),
+		};
+		Ok(res)
+	}
 }
 
 impl PartialEq for Literal {
@@ -73,6 +133,7 @@ impl Hash for Literal {
 		match self {
 			Literal::None => {}
 			Literal::Null => {}
+			Literal::UnboundedRange => {}
 			Literal::Bool(x) => x.hash(state),
 			Literal::Float(x) => x.to_bits().hash(state),
 			Literal::Integer(x) => x.hash(state),
@@ -96,8 +157,13 @@ impl Hash for Literal {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,
+}
+
+impl fmt::Display for ObjectEntry {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}: {}", self.key, self.value)
+	}
 }

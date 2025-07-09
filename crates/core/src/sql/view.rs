@@ -13,7 +13,7 @@ pub struct View {
 
 impl fmt::Display for View {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "AS SELECT {} FROM {}", self.expr, Fmt::comma_seperated(self.what.iter()))?;
+		write!(f, "AS SELECT {} FROM {}", self.expr, Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}

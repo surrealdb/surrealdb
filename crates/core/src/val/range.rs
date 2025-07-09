@@ -21,6 +21,16 @@ pub struct Range {
 	pub end: Bound<Value>,
 }
 
+impl Range {
+	/// returns a range with no bounds.
+	pub const fn unbounded() -> Self {
+		Range {
+			start: Bound::Unbounded,
+			end: Bound::Unbounded,
+		}
+	}
+}
+
 impl PartialOrd for Range {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))

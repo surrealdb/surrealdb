@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdKeyRangeLit {
 	pub start: Bound<RecordIdKeyLit>,

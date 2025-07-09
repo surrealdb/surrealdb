@@ -29,15 +29,17 @@ impl Value {
 			// Current path part is an object
 			Value::Object(v) => match first {
 				Part::Field(f) => {
-					if let Some(v) = v.get(f as &str) {
-						accum.push(Part::field(f.0.clone()));
+					if let Some(v) = v.get(&**f) {
+						// TODO: Null byte validity
+						accum.push(Part::Field(f.clone()));
 						v._each(path.next(), accum, build);
 						accum.pop();
 					}
 				}
 				Part::All => {
 					for (k, v) in v.iter() {
-						accum.push(Part::field(k.clone()));
+						// TODO: Null byte validity
+						accum.push(Part::field(k.clone()).unwrap());
 						v._each(path.next(), accum, build);
 						accum.pop();
 					}

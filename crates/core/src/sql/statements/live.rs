@@ -27,8 +27,8 @@ impl fmt::Display for LiveStatement {
 impl From<LiveStatement> for crate::expr::statements::LiveStatement {
 	fn from(v: LiveStatement) -> Self {
 		crate::expr::statements::LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
+			id: crate::val::Uuid(Uuid::new_v4()),
+			node: crate::val::Uuid(Uuid::new_v4()),
 			expr: v.expr.into(),
 			what: v.what.into(),
 			cond: v.cond.map(Into::into),

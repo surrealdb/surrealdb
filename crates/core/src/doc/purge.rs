@@ -77,7 +77,7 @@ impl Document {
 
 					// Setup the delete statement
 					let stm = DeleteStatement {
-						what,
+						what: vec![Expr::Idiom(Idiom(what))],
 						..DeleteStatement::default()
 					};
 					// Execute the delete statement
