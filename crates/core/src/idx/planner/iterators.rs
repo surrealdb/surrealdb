@@ -4,7 +4,7 @@ use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Array, Ident, Number, Thing, Value};
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::ft::search::termdocs::TermsDocs;
+use crate::idx::ft::search::termdocs::SearchTermsDocs;
 use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
@@ -1356,7 +1356,7 @@ impl SearchMatchesThingIterator {
 	pub(super) async fn new(
 		irf: IteratorRef,
 		si: &SearchIndex,
-		terms_docs: TermsDocs,
+		terms_docs: SearchTermsDocs,
 	) -> Result<Self> {
 		let hits = si.new_hits_iterator(terms_docs)?;
 		let hits_left = if let Some(h) = &hits {

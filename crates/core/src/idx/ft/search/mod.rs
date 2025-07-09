@@ -1,4 +1,9 @@
+mod doclength;
+mod offsets;
+mod postings;
+pub(crate) mod scorer;
 pub(in crate::idx) mod termdocs;
+pub(crate) mod terms;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -7,14 +12,17 @@ use crate::expr::statements::DefineAnalyzerStatement;
 use crate::expr::{Idiom, Object, Scoring, Thing, Value};
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
-use crate::idx::ft::analyzer::{Analyzer, TermIdSet, TermsList};
-use crate::idx::ft::doclength::DocLengths;
+use crate::idx::ft::analyzer::Analyzer;
+use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
-use crate::idx::ft::offsets::Offsets;
-use crate::idx::ft::postings::Postings;
-use crate::idx::ft::scorer::BM25Scorer;
-use crate::idx::ft::search::termdocs::{TermDocs, TermsDocs};
-use crate::idx::ft::terms::{TermId, TermLen, Terms};
+use crate::idx::ft::offset::OffsetRecords;
+use crate::idx::ft::search::doclength::DocLengths;
+use crate::idx::ft::search::offsets::Offsets;
+use crate::idx::ft::search::postings::Postings;
+use crate::idx::ft::search::scorer::BM25Scorer;
+use crate::idx::ft::search::termdocs::{SearchTermDocs, SearchTermsDocs};
+use crate::idx::ft::search::terms::{SearchTerms, TermId, TermLen};
+use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedStore};
@@ -24,11 +32,35 @@ use revision::revisioned;
 use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::ops::BitAnd;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub(crate) type MatchRef = u8;
+
+pub(in crate::idx) type TermIdList = Vec<Option<(TermId, TermLen)>>;
+
+pub(in crate::idx) struct TermIdSet {
+	set: HashSet<TermId>,
+	has_unknown_terms: bool,
+}
+
+impl TermIdSet {
+	/// If the query TermsSet contains terms that are unknown in the index
+	/// of if there is no terms in the set then
+	/// we are sure that it does not match any document
+	pub(in crate::idx) fn is_matchable(&self) -> bool {
+		!(self.has_unknown_terms || self.set.is_empty())
+	}
+
+	pub(in crate::idx) fn is_subset(&self, other: &TermIdSet) -> bool {
+		if self.has_unknown_terms {
+			return false;
+		}
+		self.set.is_subset(&other.set)
+	}
+}
 
 pub(crate) struct SearchIndex {
 	analyzer: Analyzer,
@@ -40,9 +72,9 @@ pub(crate) struct SearchIndex {
 	doc_ids: Arc<RwLock<BTreeDocIds>>,
 	doc_lengths: Arc<RwLock<DocLengths>>,
 	postings: Arc<RwLock<Postings>>,
-	terms: Arc<RwLock<Terms>>,
+	terms: Arc<RwLock<SearchTerms>>,
 	offsets: Offsets,
-	term_docs: TermDocs,
+	term_docs: SearchTermDocs,
 }
 
 #[derive(Clone)]
@@ -136,9 +168,9 @@ impl SearchIndex {
 				.await?,
 		));
 		let terms = Arc::new(RwLock::new(
-			Terms::new(txn, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
+			SearchTerms::new(txn, index_key_base.clone(), p.terms_order, tt, p.terms_cache).await?,
 		));
-		let term_docs = TermDocs::new(index_key_base.clone());
+		let term_docs = SearchTermDocs::new(index_key_base.clone());
 		let offsets = Offsets::new(index_key_base.clone());
 		let mut bm25 = None;
 		if let Scoring::Bm {
@@ -172,12 +204,8 @@ impl SearchIndex {
 		self.doc_ids.clone()
 	}
 
-	pub(in crate::idx) fn terms(&self) -> Arc<RwLock<Terms>> {
+	pub(in crate::idx) fn terms(&self) -> Arc<RwLock<SearchTerms>> {
 		self.terms.clone()
-	}
-
-	pub(in crate::idx) fn analyzer(&self) -> Analyzer {
-		self.analyzer.clone()
 	}
 
 	pub(crate) async fn remove_document(
@@ -249,18 +277,12 @@ impl SearchIndex {
 		let doc_id = resolved.doc_id();
 
 		// Extract the doc_lengths, terms en frequencies (and offset)
-		let mut t = self.terms.write().await;
 		let (doc_length, terms_and_frequencies, offsets) = if self.highlighting {
-			let (dl, tf, ofs) = self
-				.analyzer
-				.extract_terms_with_frequencies_with_offsets(stk, ctx, opt, &mut t, content)
-				.await?;
+			let (dl, tf, ofs) =
+				self.extract_terms_with_frequencies_with_offsets(stk, ctx, opt, content).await?;
 			(dl, tf, Some(ofs))
 		} else {
-			let (dl, tf) = self
-				.analyzer
-				.extract_terms_with_frequencies(stk, ctx, opt, &mut t, content)
-				.await?;
+			let (dl, tf) = self.extract_terms_with_frequencies(stk, ctx, opt, content).await?;
 			(dl, tf, None)
 		};
 
@@ -297,6 +319,7 @@ impl SearchIndex {
 
 		// Remove any remaining postings
 		if let Some(old_term_ids) = &old_term_ids {
+			let mut t = self.terms.write().await;
 			for old_term_id in old_term_ids {
 				p.remove_posting(&tx, old_term_id, doc_id).await?;
 				let doc_count = self.term_docs.remove_doc(&tx, old_term_id, doc_id).await?;
@@ -307,7 +330,6 @@ impl SearchIndex {
 			}
 		}
 		drop(p);
-		drop(t);
 
 		if self.highlighting {
 			// Set the offset if any
@@ -342,22 +364,135 @@ impl SearchIndex {
 		Ok(())
 	}
 
+	pub(in crate::idx) async fn extract_indexing_terms(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		content: Value,
+	) -> anyhow::Result<TermIdSet> {
+		let mut tv = Vec::new();
+		self.analyzer
+			.analyze_value(stk, ctx, opt, content, FilteringStage::Indexing, &mut tv)
+			.await?;
+		let mut set = HashSet::new();
+		let mut has_unknown_terms = false;
+		let tx = ctx.tx();
+		let t = self.terms.read().await;
+		for tokens in tv {
+			for token in tokens.list() {
+				if let Some(term_id) = t.get_term_id(&tx, tokens.get_token_string(token)?).await? {
+					set.insert(term_id);
+				} else {
+					has_unknown_terms = true;
+				}
+			}
+		}
+		Ok(TermIdSet {
+			set,
+			has_unknown_terms,
+		})
+	}
+
+	/// This method is used for indexing.
+	/// It will create new term ids for non-already existing terms.
+	async fn extract_terms_with_frequencies(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		field_content: Vec<Value>,
+	) -> anyhow::Result<(DocLength, Vec<(TermId, TermFrequency)>)> {
+		// Let's first collect all the inputs, and collect the tokens.
+		// We need to store them because everything after is zero-copy
+		let inputs = self
+			.analyzer
+			.analyze_content(stk, ctx, opt, field_content, FilteringStage::Indexing)
+			.await?;
+		// We then collect every unique term and count the frequency
+		let (dl, tf) = Analyzer::extract_frequencies(&inputs)?;
+		// Now we can resolve the term ids
+		let mut tfid = Vec::with_capacity(tf.len());
+		let tx = ctx.tx();
+		let mut terms = self.terms.write().await;
+		for (t, f) in tf {
+			tfid.push((terms.resolve_term_id(&tx, t).await?, f));
+		}
+		Ok((dl, tfid))
+	}
+
 	pub(in crate::idx) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		query_string: String,
-	) -> anyhow::Result<(TermsList, TermIdSet)> {
+	) -> anyhow::Result<(TermIdList, TermIdSet)> {
+		let tokens = self
+			.analyzer
+			.generate_tokens(stk, ctx, opt, FilteringStage::Querying, query_string)
+			.await?;
+		// We extract the term ids
+		let mut list = Vec::with_capacity(tokens.list().len());
+		let mut unique_tokens = HashSet::new();
+		let mut set = HashSet::new();
+		let tx = ctx.tx();
+		let mut has_unknown_terms = false;
 		let t = self.terms.read().await;
-		let res = self.analyzer.extract_querying_terms(stk, ctx, opt, &t, query_string).await?;
-		Ok(res)
+		for token in tokens.list() {
+			// Tokens can contain duplicates, not need to evaluate them again
+			if unique_tokens.insert(token) {
+				// Is the term known in the index?
+				let opt_term_id = t.get_term_id(&tx, tokens.get_token_string(token)?).await?;
+				list.push(opt_term_id.map(|tid| (tid, token.get_char_len())));
+				if let Some(term_id) = opt_term_id {
+					set.insert(term_id);
+				} else {
+					has_unknown_terms = true;
+				}
+			}
+		}
+		Ok((
+			list,
+			TermIdSet {
+				set,
+				has_unknown_terms,
+			},
+		))
+	}
+
+	/// This method is used for indexing.
+	/// It will create new term ids for non-already existing terms.
+	async fn extract_terms_with_frequencies_with_offsets(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		content: Vec<Value>,
+	) -> anyhow::Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>)> {
+		// Let's first collect all the inputs, and collect the tokens.
+		// We need to store them because everything after is zero-copy
+		let inputs =
+			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
+		// We then collect every unique term and count the frequency and extract the offsets
+		let (dl, tfos) = Analyzer::extract_offsets(&inputs)?;
+		// Now we can resolve the term ids
+		let mut tfid = Vec::with_capacity(tfos.len());
+		let mut osid = Vec::with_capacity(tfos.len());
+		let tx = ctx.tx();
+		let mut terms = self.terms.write().await;
+		for (t, o) in tfos {
+			let id = terms.resolve_term_id(&tx, t).await?;
+			tfid.push((id, o.len() as TermFrequency));
+			osid.push((id, OffsetRecords(o)));
+		}
+		Ok((dl, tfid, osid))
 	}
 
 	pub(in crate::idx) async fn get_terms_docs(
 		&self,
 		tx: &Transaction,
-		terms: &TermsList,
+		terms: &TermIdList,
 	) -> anyhow::Result<Vec<Option<(TermId, RoaringTreemap)>>> {
 		let mut terms_docs = Vec::with_capacity(terms.len());
 		for opt_term in terms {
@@ -377,7 +512,7 @@ impl SearchIndex {
 
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
-		terms_docs: TermsDocs,
+		terms_docs: SearchTermsDocs,
 	) -> anyhow::Result<Option<SearchHitsIterator>> {
 		let mut hits: Option<RoaringTreemap> = None;
 		for opt_term_docs in terms_docs.iter() {
@@ -401,7 +536,7 @@ impl SearchIndex {
 
 	pub(in crate::idx) fn new_scorer(
 		&self,
-		terms_docs: TermsDocs,
+		terms_docs: SearchTermsDocs,
 	) -> anyhow::Result<Option<BM25Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			return Ok(Some(BM25Scorer::new(
@@ -442,7 +577,7 @@ impl SearchIndex {
 		Ok(Value::None)
 	}
 
-	pub(in crate::idx) async fn extract_offsets(
+	pub(in crate::idx) async fn read_offsets(
 		&self,
 		tx: &Transaction,
 		thg: &Thing,
@@ -532,7 +667,7 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
-	use crate::idx::ft::scorer::{BM25Scorer, Score};
+	use crate::idx::ft::search::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::{Statement, statements::DefineStatement};
@@ -569,15 +704,15 @@ mod tests {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		fti: &SearchIndex,
+		si: &SearchIndex,
 		qs: &str,
 	) -> (Option<SearchHitsIterator>, BM25Scorer) {
 		let (term_list, _) =
-			fti.extract_querying_terms(stk, ctx, opt, qs.to_string()).await.unwrap();
+			si.extract_querying_terms(stk, ctx, opt, qs.to_string()).await.unwrap();
 		let tx = ctx.tx();
-		let td = Arc::new(fti.get_terms_docs(&tx, &term_list).await.unwrap());
-		let scr = fti.new_scorer(td.clone()).unwrap().unwrap();
-		let hits = fti.new_hits_iterator(td).unwrap();
+		let td = Arc::new(si.get_terms_docs(&tx, &term_list).await.unwrap());
+		let scr = si.new_scorer(td.clone()).unwrap().unwrap();
+		let hits = si.new_hits_iterator(td).unwrap();
 		(hits, scr)
 	}
 

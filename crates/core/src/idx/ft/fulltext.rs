@@ -8,9 +8,8 @@ use crate::idx::docids::seqdocids::SeqDocIds;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
-use crate::idx::ft::doclength::DocLength;
-use crate::idx::ft::offsets::Offset;
-use crate::idx::ft::postings::TermFrequency;
+use crate::idx::ft::offset::Offset;
+use crate::idx::ft::{DocLength, TermFrequency};
 use crate::key::index::dl::Dl;
 use crate::key::index::td::Td;
 use crate::kvs::KeyDecode;
@@ -182,7 +181,7 @@ impl FullTextIndex {
 		}
 		// then we read the not yet compacted term/documents if any
 		let (beg, end) = Td::range_with_id(ns, db, &ix.what, &ix.name, term)?;
-		for (k, v) in tx.getr(beg..end, None).await? {
+		for k in tx.keysr(beg..end, u32::MAX, None).await? {
 			let td = Td::decode(&k)?;
 			if let Some(doc_id) = td.id {
 				docs.insert(doc_id);

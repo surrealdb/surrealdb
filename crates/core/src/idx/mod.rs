@@ -7,7 +7,7 @@ pub mod trees;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Id, Thing};
 use crate::idx::docids::DocId;
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
 use crate::idx::trees::vector::SerializedVector;

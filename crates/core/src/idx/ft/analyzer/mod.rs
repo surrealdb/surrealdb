@@ -6,16 +6,14 @@ use crate::expr::{FlowResultExt as _, Value};
 use crate::expr::{Function, Strand};
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
-use crate::idx::ft::doclength::DocLength;
-use crate::idx::ft::offsets::{Offset, OffsetRecords};
-use crate::idx::ft::postings::TermFrequency;
-use crate::idx::ft::terms::{TermId, TermLen, Terms};
+use crate::idx::ft::offset::Offset;
+use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::trees::store::IndexStores;
 use anyhow::{Result, bail};
 use filter::Filter;
 use reblessive::tree::Stk;
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub(in crate::idx::ft) mod filter;
@@ -28,29 +26,6 @@ pub(crate) struct Analyzer {
 	filters: Arc<Option<Vec<Filter>>>,
 }
 
-pub(in crate::idx) type TermsList = Vec<Option<(TermId, TermLen)>>;
-
-pub(in crate::idx) struct TermIdSet {
-	set: HashSet<TermId>,
-	has_unknown_terms: bool,
-}
-
-impl TermIdSet {
-	/// If the query TermsSet contains terms that are unknown in the index
-	/// of if there is no terms in the set then
-	/// we are sure that it does not match any document
-	pub(in crate::idx) fn is_matchable(&self) -> bool {
-		!(self.has_unknown_terms || self.set.is_empty())
-	}
-
-	pub(in crate::idx) fn is_subset(&self, other: &TermIdSet) -> bool {
-		if self.has_unknown_terms {
-			return false;
-		}
-		self.set.is_subset(&other.set)
-	}
-}
-
 impl Analyzer {
 	pub(crate) fn new(ixs: &IndexStores, az: Arc<DefineAnalyzerStatement>) -> Result<Self> {
 		Ok(Self {
@@ -59,178 +34,6 @@ impl Analyzer {
 		})
 	}
 
-	pub(super) async fn extract_querying_terms(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		t: &Terms,
-		content: String,
-	) -> Result<(TermsList, TermIdSet)> {
-		let tokens = self.generate_tokens(stk, ctx, opt, FilteringStage::Querying, content).await?;
-		// We extract the term ids
-		let mut list = Vec::with_capacity(tokens.list().len());
-		let mut unique_tokens = HashSet::new();
-		let mut set = HashSet::new();
-		let tx = ctx.tx();
-		let mut has_unknown_terms = false;
-		for token in tokens.list() {
-			// Tokens can contain duplicates, not need to evaluate them again
-			if unique_tokens.insert(token) {
-				// Is the term known in the index?
-				let opt_term_id = t.get_term_id(&tx, tokens.get_token_string(token)?).await?;
-				list.push(opt_term_id.map(|tid| (tid, token.get_char_len())));
-				if let Some(term_id) = opt_term_id {
-					set.insert(term_id);
-				} else {
-					has_unknown_terms = true;
-				}
-			}
-		}
-		drop(tx);
-		Ok((
-			list,
-			TermIdSet {
-				set,
-				has_unknown_terms,
-			},
-		))
-	}
-
-	pub(super) async fn extract_query_terms(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		content: String,
-	) -> Result<Tokens> {
-		self.generate_tokens(stk, ctx, opt, FilteringStage::Querying, content).await
-	}
-
-	pub(in crate::idx) async fn extract_indexing_terms(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		t: &Terms,
-		content: Value,
-	) -> Result<TermIdSet> {
-		let mut tv = Vec::new();
-		self.analyze_value(stk, ctx, opt, content, FilteringStage::Indexing, &mut tv).await?;
-		let mut set = HashSet::new();
-		let mut has_unknown_terms = false;
-		let tx = ctx.tx();
-		for tokens in tv {
-			for token in tokens.list() {
-				if let Some(term_id) = t.get_term_id(&tx, tokens.get_token_string(token)?).await? {
-					set.insert(term_id);
-				} else {
-					has_unknown_terms = true;
-				}
-			}
-		}
-		Ok(TermIdSet {
-			set,
-			has_unknown_terms,
-		})
-	}
-
-	pub(in crate::idx::ft) fn extract_frequencies(
-		inputs: &[Tokens],
-	) -> Result<(DocLength, HashMap<&str, TermFrequency>)> {
-		let mut dl = 0;
-		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
-		for tks in inputs {
-			for tk in tks.list() {
-				dl += 1;
-				let s = tks.get_token_string(tk)?;
-				match tf.entry(s) {
-					Entry::Vacant(e) => {
-						e.insert(1);
-					}
-					Entry::Occupied(mut e) => {
-						e.insert(*e.get() + 1);
-					}
-				}
-			}
-		}
-		Ok((dl, tf))
-	}
-
-	/// This method is used for indexing.
-	/// It will create new term ids for non already existing terms.
-	pub(super) async fn extract_terms_with_frequencies(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		terms: &mut Terms,
-		field_content: Vec<Value>,
-	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>)> {
-		// Let's first collect all the inputs, and collect the tokens.
-		// We need to store them because everything after is zero-copy
-		let inputs =
-			self.analyze_content(stk, ctx, opt, field_content, FilteringStage::Indexing).await?;
-		// We then collect every unique term and count the frequency
-		let (dl, tf) = Self::extract_frequencies(&inputs)?;
-		// Now we can resolve the term ids
-		let mut tfid = Vec::with_capacity(tf.len());
-		let tx = ctx.tx();
-		for (t, f) in tf {
-			tfid.push((terms.resolve_term_id(&tx, t).await?, f));
-		}
-		Ok((dl, tfid))
-	}
-
-	pub(in crate::idx::ft) fn extract_offsets(
-		inputs: &[Tokens],
-	) -> Result<(DocLength, HashMap<&str, Vec<Offset>>)> {
-		let mut dl = 0;
-		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
-		for (i, tks) in inputs.iter().enumerate() {
-			for tk in tks.list() {
-				dl += 1;
-				let s = tks.get_token_string(tk)?;
-				let o = tk.new_offset(i as u32);
-				match tfos.entry(s) {
-					Entry::Vacant(e) => {
-						e.insert(vec![o]);
-					}
-					Entry::Occupied(mut e) => e.get_mut().push(o),
-				}
-			}
-		}
-		Ok((dl, tfos))
-	}
-
-	/// This method is used for indexing.
-	/// It will create new term ids for non already existing terms.
-	pub(super) async fn extract_terms_with_frequencies_with_offsets(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		terms: &mut Terms,
-		content: Vec<Value>,
-	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>, Vec<(TermId, OffsetRecords)>)> {
-		// Let's first collect all the inputs, and collect the tokens.
-		// We need to store them because everything after is zero-copy
-		let inputs = self.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
-		// We then collect every unique term and count the frequency and extract the offsets
-		let (dl, tfos) = Self::extract_offsets(&inputs)?;
-		// Now we can resolve the term ids
-		let mut tfid = Vec::with_capacity(tfos.len());
-		let mut osid = Vec::with_capacity(tfos.len());
-		let tx = ctx.tx();
-		for (t, o) in tfos {
-			let id = terms.resolve_term_id(&tx, t).await?;
-			tfid.push((id, o.len() as TermFrequency));
-			osid.push((id, OffsetRecords(o)));
-		}
-		Ok((dl, tfid, osid))
-	}
-
-	/// Was marked recursive
 	pub(in crate::idx::ft) async fn analyze_content(
 		&self,
 		stk: &mut Stk,
@@ -247,7 +50,7 @@ impl Analyzer {
 	}
 
 	/// Was marked recursive
-	async fn analyze_value(
+	pub(super) async fn analyze_value(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -279,7 +82,7 @@ impl Analyzer {
 		Ok(())
 	}
 
-	async fn generate_tokens(
+	pub(super) async fn generate_tokens(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -320,6 +123,49 @@ impl Analyzer {
 		input: String,
 	) -> Result<Value> {
 		self.generate_tokens(stk, ctx, opt, FilteringStage::Indexing, input).await?.try_into()
+	}
+
+	pub(in crate::idx::ft) fn extract_frequencies(
+		inputs: &[Tokens],
+	) -> Result<(DocLength, HashMap<&str, TermFrequency>)> {
+		let mut dl = 0;
+		let mut tf: HashMap<&str, TermFrequency> = HashMap::new();
+		for tks in inputs {
+			for tk in tks.list() {
+				dl += 1;
+				let s = tks.get_token_string(tk)?;
+				match tf.entry(s) {
+					Entry::Vacant(e) => {
+						e.insert(1);
+					}
+					Entry::Occupied(mut e) => {
+						e.insert(*e.get() + 1);
+					}
+				}
+			}
+		}
+		Ok((dl, tf))
+	}
+
+	pub(in crate::idx::ft) fn extract_offsets(
+		inputs: &[Tokens],
+	) -> anyhow::Result<(DocLength, HashMap<&str, Vec<Offset>>)> {
+		let mut dl = 0;
+		let mut tfos: HashMap<&str, Vec<Offset>> = HashMap::new();
+		for (i, tks) in inputs.iter().enumerate() {
+			for tk in tks.list() {
+				dl += 1;
+				let s = tks.get_token_string(tk)?;
+				let o = tk.new_offset(i as u32);
+				match tfos.entry(s) {
+					Entry::Vacant(e) => {
+						e.insert(vec![o]);
+					}
+					Entry::Occupied(mut e) => e.get_mut().push(o),
+				}
+			}
+		}
+		Ok((dl, tfos))
 	}
 }
 

@@ -1,9 +1,9 @@
 pub(crate) mod analyzer;
-mod doclength;
 pub(crate) mod fulltext;
 pub(crate) mod highlighter;
-mod offsets;
-mod postings;
-pub(super) mod scorer;
+mod offset;
 pub(crate) mod search;
-pub(crate) mod terms;
+
+pub(super) type Position = u32;
+pub(super) type DocLength = u64;
+pub(super) type TermFrequency = u64;

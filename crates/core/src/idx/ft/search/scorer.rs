@@ -1,8 +1,9 @@
 use crate::idx::docids::DocId;
-use crate::idx::ft::doclength::{DocLength, DocLengths};
-use crate::idx::ft::postings::{Postings, TermFrequency};
 use crate::idx::ft::search::Bm25Params;
-use crate::idx::ft::search::termdocs::TermsDocs;
+use crate::idx::ft::search::doclength::DocLengths;
+use crate::idx::ft::search::postings::Postings;
+use crate::idx::ft::search::termdocs::SearchTermsDocs;
+use crate::idx::ft::{DocLength, TermFrequency};
 use crate::kvs::Transaction;
 use anyhow::Result;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ pub(super) type Score = f32;
 
 pub(crate) struct BM25Scorer {
 	postings: Arc<RwLock<Postings>>,
-	terms_docs: TermsDocs,
+	terms_docs: SearchTermsDocs,
 	doc_lengths: Arc<RwLock<DocLengths>>,
 	average_doc_length: f32,
 	doc_count: f32,
@@ -22,7 +23,7 @@ pub(crate) struct BM25Scorer {
 impl BM25Scorer {
 	pub(super) fn new(
 		postings: Arc<RwLock<Postings>>,
-		terms_docs: TermsDocs,
+		terms_docs: SearchTermsDocs,
 		doc_lengths: Arc<RwLock<DocLengths>>,
 		total_docs_length: u128,
 		doc_count: u64,

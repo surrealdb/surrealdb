@@ -9,13 +9,12 @@ use crate::expr::{
 };
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
-use crate::idx::ft::analyzer::{Analyzer, TermIdSet, TermsList};
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::ft::highlighter::HighlightParams;
-use crate::idx::ft::scorer::BM25Scorer;
-use crate::idx::ft::search::termdocs::TermsDocs;
-use crate::idx::ft::search::{MatchRef, SearchIndex};
-use crate::idx::ft::terms::Terms;
+use crate::idx::ft::search::scorer::BM25Scorer;
+use crate::idx::ft::search::termdocs::SearchTermsDocs;
+use crate::idx::ft::search::terms::SearchTerms;
+use crate::idx::ft::search::{MatchRef, SearchIndex, TermIdList, TermIdSet};
 use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
@@ -1069,18 +1068,19 @@ impl QueryExecutor {
 				if self.0.table.eq(&ix.what.0) {
 					return self.search_matches_with_doc_id(ctx, thg, se).await;
 				}
-				self.search_matches_with_value(stk, ctx, opt, se, l, r).await
+				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(ix) {
+					return self.search_matches_with_value(stk, ctx, opt, si, se, l, r).await;
+				}
 			}
 			Some(PerExpressionEntry::FullText(_fte)) => {
 				todo!()
 			}
-			_ => {
-				// If no previous case were successful, we end up with a user error
-				Err(anyhow::Error::new(Error::NoIndexFoundForMatch {
-					exp: exp.to_string(),
-				}))
-			}
+			_ => {}
 		}
+		// If no previous case were successful, we end up with a user error
+		Err(anyhow::Error::new(Error::NoIndexFoundForMatch {
+			exp: exp.to_string(),
+		}))
 	}
 
 	async fn search_matches_with_doc_id(
@@ -1116,11 +1116,13 @@ impl QueryExecutor {
 		Ok(false)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn search_matches_with_value(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
+		si: &SearchIndex,
 		se: &SearchEntry,
 		l: Value,
 		r: Value,
@@ -1138,7 +1140,7 @@ impl QueryExecutor {
 		};
 		let terms = se.0.terms.read().await;
 		// Extract the terms set from the record
-		let t = se.0.analyzer.extract_indexing_terms(stk, ctx, opt, &terms, v).await?;
+		let t = si.extract_indexing_terms(stk, ctx, opt, v).await?;
 		drop(terms);
 		Ok(se.0.query_terms_set.is_subset(&t))
 	}
@@ -1208,8 +1210,7 @@ impl QueryExecutor {
 				PerMatchRefEntry::Search(se) => {
 					if let Some(si) = self.get_search_index(se) {
 						let tx = ctx.tx();
-						let res =
-							si.extract_offsets(&tx, thg, &se.0.query_terms_list, partial).await;
+						let res = si.read_offsets(&tx, thg, &se.0.query_terms_list, partial).await;
 						return res;
 					}
 				}
@@ -1269,11 +1270,10 @@ struct SearchEntry(Arc<InnerSearchEntry>);
 struct InnerSearchEntry {
 	index_option: IndexOption,
 	doc_ids: Arc<RwLock<BTreeDocIds>>,
-	analyzer: Analyzer,
 	query_terms_set: TermIdSet,
-	query_terms_list: TermsList,
-	terms: Arc<RwLock<Terms>>,
-	terms_docs: TermsDocs,
+	query_terms_list: TermIdList,
+	terms: Arc<RwLock<SearchTerms>>,
+	terms_docs: SearchTermsDocs,
 	scorer: Option<BM25Scorer>,
 }
 
@@ -1293,7 +1293,6 @@ impl SearchEntry {
 			Ok(Some(Self(Arc::new(InnerSearchEntry {
 				index_option: io,
 				doc_ids: si.doc_ids(),
-				analyzer: si.analyzer(),
 				query_terms_set: terms_set,
 				query_terms_list: terms_list,
 				scorer: si.new_scorer(terms_docs.clone())?,
@@ -1322,6 +1321,10 @@ impl FullTextEntry {
 		io: IndexOption,
 	) -> Result<Option<Self>> {
 		if let Matches(_qs, _) = io.op() {
+			// let (terms_list, terms_set) =
+			// 	fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
+			// let tx = ctx.tx();
+			// let terms_docs = Arc::new(fti.get_terms_docs(&tx, &terms_list).await?);
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
 				io,
 			}))))

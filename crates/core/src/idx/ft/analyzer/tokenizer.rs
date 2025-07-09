@@ -1,8 +1,9 @@
 use crate::err::Error;
 use crate::expr::Value;
 use crate::expr::tokenizer::Tokenizer as SqlTokenizer;
+use crate::idx::ft::Position;
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
-use crate::idx::ft::offsets::{Offset, Position};
+use crate::idx::ft::offset::Offset;
 use anyhow::{Result, bail};
 
 pub(in crate::idx::ft) struct Tokens {
@@ -13,7 +14,7 @@ pub(in crate::idx::ft) struct Tokens {
 }
 
 impl Tokens {
-	pub(super) fn new(i: String) -> Self {
+	pub(in crate::idx::ft) fn new(i: String) -> Self {
 		Self {
 			i,
 			t: Vec::new(),
@@ -118,7 +119,7 @@ impl Token {
 		}
 	}
 
-	pub(super) fn new_offset(&self, i: u32) -> Offset {
+	pub(in crate::idx::ft) fn new_offset(&self, i: u32) -> Offset {
 		match self {
 			Token::Ref {
 				chars,
@@ -144,7 +145,7 @@ impl Token {
 		}
 	}
 
-	pub(super) fn get_char_len(&self) -> u32 {
+	pub(in crate::idx::ft) fn get_char_len(&self) -> u32 {
 		match self {
 			Token::Ref {
 				len,
