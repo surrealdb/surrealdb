@@ -425,7 +425,7 @@ impl Display for Index {
 				Ok(())
 			}
 			Self::FullText(p) => {
-				write!(f, "SEARCH ANALYZER {} {}", p.az, p.sc,)?;
+				write!(f, "FULLTEXT ANALYZER {} {}", p.az, p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
 				}

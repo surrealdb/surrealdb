@@ -3,9 +3,8 @@ use crate::dbs::Options;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Array, Ident, Number, Thing, Value};
 use crate::idx::docids::DocId;
-use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::ft::search::termdocs::SearchTermsDocs;
-use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
+use crate::idx::ft::fulltext::FullTextHitsIterator;
+use crate::idx::ft::search::SearchHitsIterator;
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
@@ -120,8 +119,8 @@ pub(crate) enum ThingIterator {
 	UniqueRangeReverse(UniqueRangeReverseThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
-	SearchMatches(SearchMatchesThingIterator),
-	FullTextMatches(FullTextMatchesThingIterator),
+	SearchMatches(MatchesThingIterator<SearchHitsIterator>),
+	FullTextMatches(MatchesThingIterator<FullTextHitsIterator>),
 	Knn(KnnIterator),
 	Multiples(Box<MultipleIterators>),
 }
@@ -1346,29 +1345,31 @@ impl UniqueJoinThingIterator {
 	}
 }
 
-pub(crate) struct SearchMatchesThingIterator {
-	irf: IteratorRef,
-	hits_left: usize,
-	hits: Option<SearchHitsIterator>,
+pub(crate) trait MatchesHitsIterator {
+	fn len(&self) -> usize;
+	async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>>;
 }
 
-impl SearchMatchesThingIterator {
-	pub(super) async fn new(
-		irf: IteratorRef,
-		si: &SearchIndex,
-		terms_docs: Arc<SearchTermsDocs>,
-	) -> Result<Self> {
-		let hits = si.new_hits_iterator(terms_docs)?;
-		let hits_left = if let Some(h) = &hits {
-			h.len()
-		} else {
-			0
-		};
-		Ok(Self {
+pub(crate) struct MatchesThingIterator<T>
+where
+	T: MatchesHitsIterator,
+{
+	irf: IteratorRef,
+	hits_left: usize,
+	hits: Option<T>,
+}
+
+impl<T> MatchesThingIterator<T>
+where
+	T: MatchesHitsIterator,
+{
+	pub(super) fn new(irf: IteratorRef, hits: Option<T>) -> Self {
+		let hits_left = hits.as_ref().map(|h| h.len()).unwrap_or(0);
+		Self {
 			irf,
 			hits,
 			hits_left,
-		})
+		}
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1421,31 +1422,6 @@ impl SearchMatchesThingIterator {
 		} else {
 			Ok(0)
 		}
-	}
-}
-
-pub(crate) struct FullTextMatchesThingIterator {}
-
-impl FullTextMatchesThingIterator {
-	pub(super) async fn new(_irf: IteratorRef, _fti: &FullTextIndex) -> Result<Self> {
-		todo!()
-	}
-	async fn next_batch<B: IteratorBatch>(
-		&mut self,
-		_ctx: &Context,
-		_tx: &Transaction,
-		_limit: u32,
-	) -> Result<B> {
-		todo!()
-	}
-
-	async fn next_count(
-		&mut self,
-		_ctx: &Context,
-		_tx: &Transaction,
-		_limit: u32,
-	) -> Result<usize> {
-		todo!()
 	}
 }
 

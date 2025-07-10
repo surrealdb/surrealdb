@@ -2,15 +2,17 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Thing, Value};
+use crate::expr::{Idiom, Thing, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
+use crate::idx::ft::highlighter::{HighlightParams, Highlighter};
 use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, TermFrequency};
+use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::key::index::dl::Dl;
 use crate::key::index::td::Td;
 use crate::kvs::KeyDecode;
@@ -19,7 +21,9 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
+use roaring::treemap::IntoIter;
 use std::collections::HashSet;
+use std::ops::BitAnd;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Default)]
@@ -82,8 +86,8 @@ impl FullTextIndex {
 		let mut set = HashSet::new();
 		let tx = ctx.tx();
 		// Get the doc id (if it exists)
-		let id = self.doc_ids.get_doc_id(&tx, rid.id.clone()).await?;
-		if let Some(id) = id {
+		let doc_id = self.doc_ids.get_doc_id(&tx, &rid.id).await?;
+		if let Some(doc_id) = doc_id {
 			// Delete the terms
 			for tks in &tokens {
 				for t in tks.list() {
@@ -92,22 +96,24 @@ impl FullTextIndex {
 					// Check if the term has already been deleted
 					if set.insert(s) {
 						// Delete the term
-						let key = Td::new(ns, db, &rid.tb, &ix.name, s, Some(id));
+						let key = Td::new(ns, db, &rid.tb, &ix.name, s, Some(doc_id));
 						tx.del(key).await?;
 					}
 				}
 			}
 			// Delete the doc length
-			let key = Dl::new(ns, db, &rid.tb, &ix.name, id);
+			let key = Dl::new(ns, db, &rid.tb, &ix.name, doc_id);
 			tx.del(key).await?;
-			Ok(Some(id))
+			Ok(Some(doc_id))
 		} else {
 			Ok(None)
 		}
 	}
 
-	pub(crate) async fn remove_doc(&self, _ctx: &Context, _doc_id: DocId) -> Result<()> {
-		todo!()
+	/// This method assumes that remove_content has been called previously,
+	/// as it does not remove the content (terms) but only removes the doc_id reference.
+	pub(crate) async fn remove_doc(&self, ctx: &Context, doc_id: DocId) -> Result<()> {
+		self.doc_ids.remove_doc_id(&ctx.tx(), doc_id).await
 	}
 
 	pub(crate) async fn index_content(
@@ -220,7 +226,7 @@ impl FullTextIndex {
 		}
 		// Then we read the not yet compacted term/documents if any
 		let (beg, end) = self.ikb.new_td_range_with_id(term)?;
-		for k in tx.keysr(beg..end, u32::MAX, None).await? {
+		for k in tx.keys(beg..end, u32::MAX, None).await? {
 			let td = Td::decode(&k)?;
 			if let Some(doc_id) = td.id {
 				if let Some(docs) = &mut docs {
@@ -232,5 +238,102 @@ impl FullTextIndex {
 		}
 		// If `docs` is empty, we return `None`
 		Ok(docs.filter(|docs| !docs.is_empty()))
+	}
+
+	pub(in crate::idx) fn new_hits_iterator(
+		&self,
+		qt: &QueryTerms,
+	) -> Result<Option<FullTextHitsIterator>> {
+		let mut hits: Option<RoaringTreemap> = None;
+		for opt_docs in qt.docs.iter() {
+			if let Some(docs) = opt_docs {
+				if let Some(h) = hits {
+					hits = Some(h.bitand(docs));
+				} else {
+					hits = Some(docs.clone());
+				}
+			} else {
+				return Ok(None);
+			}
+		}
+		if let Some(hits) = hits {
+			if !hits.is_empty() {
+				return Ok(Some(FullTextHitsIterator::new(self.ikb.clone(), hits)));
+			}
+		}
+		Ok(None)
+	}
+
+	pub(in crate::idx) async fn highlight(
+		&self,
+		tx: &Transaction,
+		thg: &Thing,
+		qt: &QueryTerms,
+		hlp: HighlightParams,
+		idiom: &Idiom,
+		doc: &Value,
+	) -> Result<Value> {
+		if !thg.tb.eq(self.ikb.table()) {
+			return Ok(Value::None);
+		}
+		let doc_id = self.doc_ids.get_doc_id(tx, &thg.id).await?;
+		if let Some(doc_id) = doc_id {
+			let mut hl = Highlighter::new(hlp, idiom, doc);
+			for tk in qt.tokens.list() {
+				let o = self.get_offsets(tx, doc_id, qt.tokens.get_token_string(tk)?).await?;
+				if let Some(o) = o {
+					hl.highlight(tk.get_char_len(), o);
+				}
+			}
+			return hl.try_into();
+		}
+		Ok(Value::None)
+	}
+
+	async fn get_offsets(
+		&self,
+		_tx: &Transaction,
+		_doc_id: DocId,
+		_term: &str,
+	) -> Result<Option<Vec<Offset>>> {
+		todo!()
+	}
+}
+
+pub(crate) struct FullTextHitsIterator {
+	ikb: IndexKeyBase,
+	iter: IntoIter,
+}
+
+impl FullTextHitsIterator {
+	fn new(ikb: IndexKeyBase, hits: RoaringTreemap) -> Self {
+		Self {
+			ikb,
+			iter: hits.into_iter(),
+		}
+	}
+}
+
+impl MatchesHitsIterator for FullTextHitsIterator {
+	#[cfg(target_pointer_width = "64")]
+	fn len(&self) -> usize {
+		self.iter.len()
+	}
+	#[cfg(not(target_pointer_width = "64"))]
+	fn len(&self) -> usize {
+		self.iter.size_hint().0
+	}
+
+	async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>> {
+		for doc_id in self.iter.by_ref() {
+			if let Some(id) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
+				let rid = Thing {
+					tb: self.ikb.table().to_string(),
+					id,
+				};
+				return Ok(Some((rid, doc_id)));
+			}
+		}
+		Ok(None)
 	}
 }

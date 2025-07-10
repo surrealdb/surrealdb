@@ -9,7 +9,7 @@ use crate::expr::{
 };
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
-use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms};
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::ft::search::scorer::BM25Scorer;
 use crate::idx::ft::search::termdocs::SearchTermsDocs;
@@ -18,9 +18,9 @@ use crate::idx::ft::search::{MatchRef, SearchIndex, TermIdList, TermIdSet};
 use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
-	FullTextMatchesThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
-	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef,
-	KnnIterator, KnnIteratorResult, MultipleIterators, SearchMatchesThingIterator, ThingIterator,
+	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
+	IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef, KnnIterator,
+	KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
 	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
 	UniqueUnionThingIterator, ValueType,
 };
@@ -992,8 +992,8 @@ impl QueryExecutor {
 			if let Matches(_, _) = io.op() {
 				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(io.ix_ref()) {
 					if let Some(PerExpressionEntry::Search(se)) = self.0.exp_entries.get(exp) {
-						let it = SearchMatchesThingIterator::new(ir, si, se.0.terms_docs.clone())
-							.await?;
+						let hits = si.new_hits_iterator(&se.0.terms_docs)?;
+						let it = MatchesThingIterator::new(ir, hits);
 						return Ok(Some(ThingIterator::SearchMatches(it)));
 					}
 				}
@@ -1011,8 +1011,9 @@ impl QueryExecutor {
 			if let Matches(_, _) = io.op() {
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
 				{
-					if let Some(PerExpressionEntry::FullText(_fte)) = self.0.exp_entries.get(exp) {
-						let it = FullTextMatchesThingIterator::new(ir, fti).await?;
+					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
+						let hits = fti.new_hits_iterator(&fte.0.qt)?;
+						let it = MatchesThingIterator::new(ir, hits);
 						return Ok(Some(ThingIterator::FullTextMatches(it)));
 					}
 				}
@@ -1194,8 +1195,12 @@ impl QueryExecutor {
 				}
 			}
 			Some(PerMatchRefEntry::FullText(fte)) => {
-				if let Some(_fti) = self.get_fulltext_index(fte) {
-					todo!()
+				if let Some(fti) = self.get_fulltext_index(fte) {
+					if let Some(id) = fte.0.io.id_ref() {
+						let tx = ctx.tx();
+						let res = fti.highlight(&tx, thg, &fte.0.qt, hlp, id, doc).await;
+						return res;
+					}
 				}
 			}
 			_ => {}
@@ -1314,6 +1319,7 @@ struct FullTextEntry(Arc<InnerFullTextEntry>);
 
 struct InnerFullTextEntry {
 	io: IndexOption,
+	qt: QueryTerms,
 }
 
 impl FullTextEntry {
@@ -1325,9 +1331,10 @@ impl FullTextEntry {
 		io: IndexOption,
 	) -> Result<Option<Self>> {
 		if let Matches(qs, _) = io.op() {
-			let _qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
+			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
 				io,
+				qt,
 			}))))
 		} else {
 			Ok(None)

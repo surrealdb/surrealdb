@@ -23,6 +23,7 @@ use crate::idx::ft::search::scorer::BM25Scorer;
 use crate::idx::ft::search::termdocs::{SearchTermDocs, SearchTermsDocs};
 use crate::idx::ft::search::terms::{SearchTerms, TermId, TermLen};
 use crate::idx::ft::{DocLength, TermFrequency};
+use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedStore};
@@ -506,10 +507,10 @@ impl SearchIndex {
 
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
-		terms_docs: Arc<SearchTermsDocs>,
+		terms_docs: &SearchTermsDocs,
 	) -> anyhow::Result<Option<SearchHitsIterator>> {
 		let mut hits: Option<RoaringTreemap> = None;
-		for opt_term_docs in terms_docs.iter() {
+		for opt_term_docs in terms_docs {
 			if let Some((_, term_docs)) = opt_term_docs {
 				if let Some(h) = hits {
 					hits = Some(h.bitand(term_docs));
@@ -629,20 +630,19 @@ impl SearchHitsIterator {
 			iter: hits.into_iter(),
 		}
 	}
+}
 
+impl MatchesHitsIterator for SearchHitsIterator {
 	#[cfg(target_pointer_width = "64")]
-	pub(crate) fn len(&self) -> usize {
+	fn len(&self) -> usize {
 		self.iter.len()
 	}
 	#[cfg(not(target_pointer_width = "64"))]
-	pub(crate) fn len(&self) -> usize {
+	fn len(&self) -> usize {
 		self.iter.size_hint().0
 	}
 
-	pub(crate) async fn next(
-		&mut self,
-		tx: &Transaction,
-	) -> anyhow::Result<Option<(Thing, DocId)>> {
+	async fn next(&mut self, tx: &Transaction) -> anyhow::Result<Option<(Thing, DocId)>> {
 		for doc_id in self.iter.by_ref() {
 			let doc_id_key = self.ikb.new_bi_key(doc_id);
 			if let Some(v) = tx.get(doc_id_key, None).await? {
@@ -663,6 +663,7 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::search::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
+	use crate::idx::planner::iterators::MatchesHitsIterator;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
 	use crate::sql::{Statement, statements::DefineStatement};
 	use crate::syn;
@@ -705,7 +706,7 @@ mod tests {
 			si.extract_querying_terms(stk, ctx, opt, qs.to_string()).await.unwrap();
 		let terms_docs = Arc::new(terms_docs);
 		let scr = si.new_scorer(terms_docs.clone()).unwrap().unwrap();
-		let hits = si.new_hits_iterator(terms_docs).unwrap();
+		let hits = si.new_hits_iterator(&terms_docs).unwrap();
 		(hits, scr)
 	}
 

@@ -30,7 +30,7 @@ impl SeqDocIds {
 	pub(in crate::idx) async fn get_doc_id(
 		&self,
 		tx: &Transaction,
-		id: Id,
+		id: &Id,
 	) -> Result<Option<DocId>> {
 		let id_key = self.ikb.new_id_key(id.clone());
 		if let Some(v) = tx.get(id_key, None).await? {
@@ -75,15 +75,19 @@ impl SeqDocIds {
 		Ok(Resolved::New(new_doc_id))
 	}
 
-	pub(in crate::idx) async fn _get_id_key(
-		&self,
+	pub(in crate::idx) async fn get_id(
+		ikb: &IndexKeyBase,
 		tx: &Transaction,
 		doc_id: DocId,
-	) -> Result<Option<Key>> {
-		tx.get(self.ikb.new_bi_key(doc_id), None).await
+	) -> Result<Option<Id>> {
+		if let Some(v) = tx.get(ikb.new_bi_key(doc_id), None).await? {
+			Ok(Some(revision::from_slice(&v)?))
+		} else {
+			Ok(None)
+		}
 	}
 
-	pub(in crate::idx) async fn _remove_doc_id(
+	pub(in crate::idx) async fn remove_doc_id(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
@@ -132,9 +136,8 @@ mod tests {
 	async fn check_get_doc_key_id(ctx: &Context, d: &SeqDocIds, doc_id: DocId, key: &str) {
 		let tx = ctx.tx();
 		let id: Id = key.into();
-		let k = revision::to_vec(&id).unwrap();
-		assert_eq!(d._get_id_key(&tx, doc_id).await.unwrap(), Some(k));
-		assert_eq!(d.get_doc_id(&tx, key.into()).await.unwrap(), Some(doc_id));
+		assert_eq!(SeqDocIds::get_id(&d.ikb, &tx, doc_id).await.unwrap(), Some(id));
+		assert_eq!(d.get_doc_id(&tx, &key.into()).await.unwrap(), Some(doc_id));
 	}
 	#[tokio::test]
 	async fn test_resolve_doc_id() {
@@ -218,16 +221,16 @@ mod tests {
 		// Remove non-existing doc 2 and doc 0 "Foo"
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			d._remove_doc_id(&ctx.tx(), 2).await.unwrap();
-			d._remove_doc_id(&ctx.tx(), 0).await.unwrap();
+			d.remove_doc_id(&ctx.tx(), 2).await.unwrap();
+			d.remove_doc_id(&ctx.tx(), 0).await.unwrap();
 			finish(ctx).await;
 		}
 
 		// Check 'Foo' has been removed
 		{
 			let (ctx, d) = new_operation(&ds, Read).await;
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Foo".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Bar".into()).await.unwrap(), Some(1));
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Foo".into()).await.unwrap(), None);
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Bar".into()).await.unwrap(), Some(1));
 		}
 
 		// Insert a new doc - should take the next available id 2
@@ -240,24 +243,24 @@ mod tests {
 		// Check we have "Hello" and "Bar"
 		{
 			let (ctx, d) = new_operation(&ds, Read).await;
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Foo".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Bar".into()).await.unwrap(), Some(1));
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Hello".into()).await.unwrap(), Some(2));
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Foo".into()).await.unwrap(), None);
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Bar".into()).await.unwrap(), Some(1));
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Hello".into()).await.unwrap(), Some(2));
 		}
 
 		// Remove doc 1 "Bar"
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			d._remove_doc_id(&ctx.tx(), 1).await.unwrap();
+			d.remove_doc_id(&ctx.tx(), 1).await.unwrap();
 			finish(ctx).await;
 		}
 
 		// Check "Bar" has been removed
 		{
 			let (ctx, d) = new_operation(&ds, Read).await;
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Foo".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Bar".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Hello".into()).await.unwrap(), Some(2));
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Foo".into()).await.unwrap(), None);
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Bar".into()).await.unwrap(), None);
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Hello".into()).await.unwrap(), Some(2));
 		}
 
 		// Insert a new doc - should take the available id 3
@@ -270,18 +273,18 @@ mod tests {
 		// Check "World" has been added
 		{
 			let (ctx, d) = new_operation(&ds, Read).await;
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Foo".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Bar".into()).await.unwrap(), None);
-			assert_eq!(d.get_doc_id(&ctx.tx(), "Hello".into()).await.unwrap(), Some(2));
-			assert_eq!(d.get_doc_id(&ctx.tx(), "World".into()).await.unwrap(), Some(3));
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Foo".into()).await.unwrap(), None);
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Bar".into()).await.unwrap(), None);
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"Hello".into()).await.unwrap(), Some(2));
+			assert_eq!(d.get_doc_id(&ctx.tx(), &"World".into()).await.unwrap(), Some(3));
 		}
 
 		// Remove remaining docs
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			d._remove_doc_id(&ctx.tx(), 1).await.unwrap();
-			d._remove_doc_id(&ctx.tx(), 2).await.unwrap();
-			d._remove_doc_id(&ctx.tx(), 3).await.unwrap();
+			d.remove_doc_id(&ctx.tx(), 1).await.unwrap();
+			d.remove_doc_id(&ctx.tx(), 2).await.unwrap();
+			d.remove_doc_id(&ctx.tx(), 3).await.unwrap();
 			finish(ctx).await;
 		}
 

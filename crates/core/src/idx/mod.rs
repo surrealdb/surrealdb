@@ -43,9 +43,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct IndexKeyBase {
-	inner: Arc<Inner>,
-}
+pub struct IndexKeyBase(Arc<Inner>);
 
 #[derive(Debug, Default, Hash, PartialEq, Eq)]
 struct Inner {
@@ -57,230 +55,112 @@ struct Inner {
 
 impl IndexKeyBase {
 	pub(crate) fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Self> {
-		Ok(Self {
-			inner: Arc::new(Inner {
-				ns: ns.to_string(),
-				db: db.to_string(),
-				tb: tb.to_string(),
-				ix: ix.to_string(),
-			}),
-		})
+		Ok(Self(Arc::new(Inner {
+			ns: ns.to_string(),
+			db: db.to_string(),
+			tb: tb.to_string(),
+			ix: ix.to_string(),
+		})))
 	}
 
 	fn new_bc_key(&self, term_id: TermId) -> Result<Key> {
-		Bc::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			term_id,
-		)
-		.encode()
+		Bc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id).encode()
 	}
 
 	fn new_bd_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Bd::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			node_id,
-		)
-		.encode()
+		Bd::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
 	}
 
 	fn new_bk_key(&self, doc_id: DocId) -> Result<Key> {
-		Bk::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			doc_id,
-		)
-		.encode()
+		Bk::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id).encode()
 	}
 
 	fn new_bl_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Bl::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			node_id,
-		)
-		.encode()
+		Bl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
 	}
 
 	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Result<Key> {
-		Bo::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			doc_id,
-			term_id,
-		)
-		.encode()
+		Bo::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id, term_id).encode()
 	}
 
 	fn new_bp_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Bp::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			node_id,
-		)
-		.encode()
+		Bp::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
 	}
 
 	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Result<Key> {
-		Bf::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			term_id,
-			doc_id,
-		)
-		.encode()
+		Bf::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id, doc_id).encode()
 	}
 
 	fn new_bt_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Bt::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			node_id,
-		)
-		.encode()
+		Bt::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
 	}
 
 	fn new_bs_key(&self) -> Result<Key> {
-		Bs::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-		)
-		.encode()
+		Bs::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix).encode()
 	}
 
 	fn new_bu_key(&self, term_id: TermId) -> Result<Key> {
-		Bu::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			term_id,
-		)
-		.encode()
+		Bu::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id).encode()
 	}
 
 	fn new_hd_key(&self, doc_id: Option<DocId>) -> Result<Key> {
-		Hd::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			doc_id,
-		)
-		.encode()
+		Hd::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id).encode()
 	}
 
 	fn new_he_key(&self, element_id: ElementId) -> Result<Key> {
-		He::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			element_id,
-		)
-		.encode()
+		He::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, element_id).encode()
 	}
 
 	fn new_hi_key(&self, id: Id) -> Result<Key> {
-		Hi::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			id,
-		)
-		.encode()
+		Hi::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id).encode()
 	}
 
 	fn new_hl_key(&self, layer: u16, chunk: u32) -> Result<Key> {
-		Hl::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			layer,
-			chunk,
-		)
-		.encode()
+		Hl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, layer, chunk).encode()
 	}
 
 	fn new_hv_key(&self, vec: Arc<SerializedVector>) -> Result<Key> {
-		Hv::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			vec,
-		)
-		.encode()
+		Hv::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, vec).encode()
 	}
 
 	fn new_hs_key(&self) -> Result<Key> {
-		Hs::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-		)
-		.encode()
+		Hs::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix).encode()
 	}
 
 	fn new_vm_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Vm::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
-			node_id,
-		)
-		.encode()
+		Vm::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
 	}
 
 	fn new_bi_key(&self, doc_id: DocId) -> Bi {
-		Bi::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, doc_id)
+		Bi::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
 
 	fn new_id_key(&self, id: Id) -> IdKey {
-		IdKey::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, id)
+		IdKey::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 
 	pub(crate) fn new_ib_key(&self, start: i64) -> Result<Key> {
-		Ib::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, start).encode()
+		Ib::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, start).encode()
 	}
 
 	pub(crate) fn new_ib_range(&self) -> Result<(Key, Key)> {
-		Ib::new_range(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix)
+		Ib::new_range(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
 	pub(crate) fn new_is_key(&self, nid: Uuid) -> Result<Key> {
-		Is::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, nid).encode()
+		Is::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, nid).encode()
 	}
 
 	fn new_td_key<'a>(&'a self, term: &'a str, doc_id: Option<DocId>) -> Td<'a> {
-		Td::new(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, term, doc_id)
+		Td::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, doc_id)
 	}
 
 	fn new_td_range_with_id(&self, term: &str) -> Result<(Key, Key)> {
-		Td::range_with_id(&self.inner.ns, &self.inner.db, &self.inner.tb, &self.inner.ix, term)
+		Td::range_with_id(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term)
+	}
+
+	fn table(&self) -> &str {
+		&self.0.tb
 	}
 }
 

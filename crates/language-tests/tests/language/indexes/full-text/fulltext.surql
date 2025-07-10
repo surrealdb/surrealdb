@@ -11,6 +11,9 @@ value = "None"
 value = "None"
 
 [[test.results]]
+value = "{ events: {  }, fields: {  }, indexes: { i: 'DEFINE INDEX i ON b FIELDS t FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS' }, lives: {  }, tables: {  } }"
+
+[[test.results]]
 value = "None"
 
 [[test.results]]
