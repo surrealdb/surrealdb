@@ -5852,7 +5852,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-macros"
-version = "0.13.0"
+version = "0.1.0"
 dependencies = [
  "quote",
  "revision 0.11.0",
