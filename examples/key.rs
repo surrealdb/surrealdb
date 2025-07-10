@@ -38,5 +38,4 @@ pub struct NsBorrowed<'a> {
 	_c: u8,
 	pub ns: &'a str,
 }
-
 fn main() {}

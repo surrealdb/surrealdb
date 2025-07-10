@@ -11,49 +11,35 @@ pub fn store(input: TokenStream) -> TokenStream {
 	// Add derived implementations
 	let output = quote! {
 
-		impl From<Vec<u8>> for #name {
-			fn from(v: Vec<u8>) -> Self {
-				Self::from(&v)
+		impl TryFrom<#name> for Vec<u8> {
+			type Error = crate::err::Error;
+			fn try_from(v: #name) -> Result<Self, Self::Error> {
+				Self::try_from(&v)
 			}
 		}
 
-		impl From<#name> for Vec<u8> {
-			fn from(v: #name) -> Vec<u8> {
-				Self::from(&v)
+		impl TryFrom<Vec<u8>> for #name {
+			type Error = crate::err::Error;
+			fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
+				Self::try_from(&v)
 			}
 		}
 
-		impl From<&#name> for Vec<u8> {
-			fn from(v: &#name) -> Vec<u8> {
+		impl TryFrom<&#name> for Vec<u8> {
+			type Error = crate::err::Error;
+			fn try_from(v: &#name) -> Result<Self, Self::Error> {
 				let mut out:Vec<u8> = vec![];
-				revision::Revisioned::serialize_revisioned(v, &mut out).unwrap();
-				out
+				revision::Revisioned::serialize_revisioned(v, &mut out)?;
+				Ok(out)
 			}
 		}
 
-		impl From<&Vec<u8>> for #name {
-			fn from(v: &Vec<u8>) -> Self {
-				revision::Revisioned::deserialize_revisioned(&mut v.as_slice()).unwrap()
+		impl TryFrom<&Vec<u8>> for #name {
+			type Error = crate::err::Error;
+			fn try_from(v: &Vec<u8>) -> Result<Self, Self::Error> {
+				Ok(revision::Revisioned::deserialize_revisioned(&mut v.as_slice())?)
 			}
 		}
-
-		// TODO: for a future pull request
-
-		// impl TryFrom<&#name> for Vec<u8> {
-		// 	type Error = crate::err::Error;
-		// 	fn try_from(v: &#name) -> Result<Self, Self::Error> {
-		// 		let mut out:Vec<u8> = vec![];
-		// 		revision::Revisioned::serialize_revisioned(v, &mut out)?;
-		// 		Ok(out)
-		// 	}
-		// }
-
-		// impl TryFrom<&Vec<u8>> for #name {
-		// 	type Error = crate::err::Error;
-		// 	fn try_from(v: &Vec<u8>) -> Result<Self, Self::Error> {
-		// 		revision::Revisioned::deserialize_revisioned(&mut v.as_slice())
-		// 	}
-		// }
 
 	};
 	//

@@ -63,3 +63,19 @@ jobs:
 
       - name: Run cargo clippy
         run: cargo clippy --no-deps -- -W warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Run cargo test
+        run: cargo test --locked
