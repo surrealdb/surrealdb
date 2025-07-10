@@ -1,7 +1,7 @@
 // cargo expand --example key
 
 use serde::{Deserialize, Serialize};
-use surrealdb_derive::Key;
+use surrealdb_macros::Key;
 
 mod err {
 	#[derive(Debug)]

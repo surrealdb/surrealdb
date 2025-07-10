@@ -2,7 +2,7 @@
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_derive::Store;
+use surrealdb_macros::Store;
 
 mod err {
 	#[derive(Debug)]

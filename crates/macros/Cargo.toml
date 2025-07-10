@@ -1,5 +1,5 @@
 [package]
-name = "surrealdb-derive"
+name = "surrealdb-macros"
 publish = true
 edition = "2021"
 version = "0.13.0"

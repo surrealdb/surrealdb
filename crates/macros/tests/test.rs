@@ -11,7 +11,7 @@ mod err {
 mod test {
 	use revision::revisioned;
 	use serde::{Deserialize, Serialize};
-	use surrealdb_derive::Store;
+	use surrealdb_macros::Store;
 
 	#[revisioned(revision = 1)]
 	#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Store)]

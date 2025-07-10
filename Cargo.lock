@@ -5851,7 +5851,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "surrealdb-derive"
+name = "surrealdb-macros"
 version = "0.13.0"
 dependencies = [
  "quote",
