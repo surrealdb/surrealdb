@@ -5,8 +5,8 @@ edition = "2024"
 version = "0.1.0"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "Private implementation of procedural macros for surrealdb"
-homepage = "https://github.com/surrealdb/surrealdb-derive"
-repository = "https://github.com/surrealdb/surrealdb-derive"
+homepage = "https://github.com/surrealdb/surrealdb/tree/main/crates/macros"
+repository = "https://github.com/surrealdb/surrealdb/tree/main/crates/macros"
 keywords = ["surrealdb", "surreal", "database", "derive"]
 license = "MIT"
 
