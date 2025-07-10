@@ -88,22 +88,6 @@ pub fn any_equal(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.any_equal(b).into())
 }
 
-pub fn like(a: &Value, b: &Value) -> Result<Value> {
-	Ok(a.fuzzy(b).into())
-}
-
-pub fn not_like(a: &Value, b: &Value) -> Result<Value> {
-	Ok((!a.fuzzy(b)).into())
-}
-
-pub fn all_like(a: &Value, b: &Value) -> Result<Value> {
-	Ok(a.all_fuzzy(b).into())
-}
-
-pub fn any_like(a: &Value, b: &Value) -> Result<Value> {
-	Ok(a.any_fuzzy(b).into())
-}
-
 pub fn less_than(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.lt(b).into())
 }

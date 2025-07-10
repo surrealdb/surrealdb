@@ -200,6 +200,7 @@ pub fn synchronous(
 		"count" => count::count,
 		//
 		"crypto::blake3" => crypto::blake3,
+		"crypto::joaat" => crypto::joaat,
 		"crypto::md5" => crypto::md5,
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
