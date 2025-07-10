@@ -11,6 +11,7 @@ use crate::idg::u32::U32;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 
+use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::expr;
 use crate::expr::thing::Thing;
 use crate::kvs::KeyDecode as _;
@@ -745,10 +746,12 @@ impl Transactor {
 		} else {
 			// Batch keys to avoid large memory usage when the amount of stored
 			// version stamps get's too big.
-			let mut batch = self.batch_keys(start..end, 1024, None).await?;
+			let mut batch = self.batch_keys(start..end, *NORMAL_FETCH_SIZE, None).await?;
 			let mut last = batch.result.pop();
 			while let Some(next) = batch.next {
-				batch = self.batch_keys(next, 1024, None).await?;
+				// Pause and yield execution
+				yield_now!();
+				batch = self.batch_keys(next, *NORMAL_FETCH_SIZE, None).await?;
 				last = batch.result.pop();
 			}
 			if let Some(last) = last {
