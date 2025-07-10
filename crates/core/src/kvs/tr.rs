@@ -749,10 +749,10 @@ impl Transactor {
 			let mut batch = self.batch_keys(start..end, *NORMAL_FETCH_SIZE, None).await?;
 			let mut last = batch.result.pop();
 			while let Some(next) = batch.next {
-				batch = self.batch_keys(next, *NORMAL_FETCH_SIZE, None).await?;
-				last = batch.result.pop();
 				// Pause and yield execution
 				yield_now!();
+				batch = self.batch_keys(next, *NORMAL_FETCH_SIZE, None).await?;
+				last = batch.result.pop();
 			}
 			if let Some(last) = last {
 				self.get(last, None).await?
