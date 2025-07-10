@@ -1,0 +1,23 @@
+[package]
+name = "surrealdb-derive"
+publish = true
+edition = "2021"
+version = "0.13.0"
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+description = "Private implementation of procedural macros for surrealdb"
+homepage = "https://github.com/surrealdb/surrealdb-derive"
+repository = "https://github.com/surrealdb/surrealdb-derive"
+keywords = ["surrealdb", "surreal", "database", "derive"]
+license = "MIT"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0.66"
+quote = "1.0.36"
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+revision = "0.7.0"
+storekey = "0.5.0"
