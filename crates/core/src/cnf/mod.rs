@@ -134,3 +134,7 @@ pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
 /// For example, by showing ⟨ and ⟩ as `
 pub static ACCESSIBLE_OUTPUT: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ACCESSIBLE_OUTPUT", bool, false);
+
+/// Specify the USER-AGENT string used by HTTP requests
+pub static SURREALDB_USER_AGENT: LazyLock<String> =
+	LazyLock::new(|| std::env::var("SURREAL_USER_AGENT").unwrap_or("SurrealDB".to_string()));
