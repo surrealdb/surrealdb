@@ -148,9 +148,7 @@ impl conn::Sealed for Any {
 						}
 						let client = builder.build()?;
 						let base_url = address.url;
-						let req = client.get(base_url.join("health")?);
-						#[cfg(not(target_family = "wasm"))]
-						let req = req.header(
+						let req = client.get(base_url.join("health")?).header(
 							reqwest::header::USER_AGENT,
 							&*crate::cnf::SURREALDB_USER_AGENT,
 						);
