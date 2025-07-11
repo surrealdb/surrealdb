@@ -209,7 +209,7 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let fd = vec!["testfd1", "testfd2"].into();
-		let id = "testid".into();
+		let id = RecordIdKey::String("testid".to_owned());
 		let val = Index::new("testns", "testdb", "testtb", "testix", &fd, Some(&id));
 		let enc = Index::encode(&val).unwrap();
 		assert_eq!(

@@ -39,7 +39,7 @@ impl Limit {
 			}
 			// An invalid value was specified
 			Ok(v) => Err(anyhow::Error::new(Error::InvalidLimit {
-				value: v.as_string(),
+				value: v.as_raw_string(),
 			})),
 			// A different error occurred
 			Err(e) => Err(e),

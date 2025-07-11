@@ -301,7 +301,7 @@ mod test {
 				.unwrap_or_else(|_| panic!("failed on {}", ident));
 
 			assert_eq!(
-				r.statements,
+				r.expressions,
 				vec![sql::TopLevelExpr::Expr(sql::Expr::Idiom(sql::Idiom(vec![Part::Field(
 					Ident::new(ident.to_owned()).unwrap()
 				)])))]

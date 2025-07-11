@@ -6,8 +6,9 @@ use std::fmt::{self, Display};
 
 use super::AlterKind;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum AlterDefault {
+	#[default]
 	None,
 	Drop,
 	Always(Expr),

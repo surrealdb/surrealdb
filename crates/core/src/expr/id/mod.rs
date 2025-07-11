@@ -6,7 +6,7 @@ use crate::doc::CursorDoc;
 use crate::expr::escape::EscapeRid;
 use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResult};
-use crate::val::{Array, Object, RecordIdKey, Uuid};
+use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -41,7 +41,7 @@ impl Gen {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecordIdKeyLit {
 	Number(i64),
-	String(String),
+	String(Strand),
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
@@ -119,7 +119,7 @@ impl RecordIdKeyLit {
 	) -> Result<RecordIdKey> {
 		match self {
 			RecordIdKeyLit::Number(v) => Ok(RecordIdKey::Number(*v)),
-			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone())),
+			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone().into_string())),
 			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKey::Uuid(*v)),
 			RecordIdKeyLit::Array(v) => {
 				let mut res = Vec::new();

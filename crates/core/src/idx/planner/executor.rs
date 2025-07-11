@@ -99,7 +99,7 @@ impl IteratorEntry {
 			Self::Single(_, io) => io.explain(),
 			Self::Range(_, ir, from, to) => {
 				let mut e = HashMap::default();
-				e.insert("index", Value::from(ir.name.0.clone()));
+				e.insert("index", Value::from(ir.name.clone().into_strand()));
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
 				Value::from(Object::from(e))

@@ -565,13 +565,14 @@ impl Parser<'_> {
 	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
 		expected!(self, t!("fn"));
 		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?;
+		let mut name = self.next_token_value::<Ident>()?.into_string();
 		while self.eat(t!("::")) {
-			let part = self.next_token_value::<Ident>()?;
-			name.0.push_str("::");
-			name.0.push_str(part.0.as_str());
+			let part = self.next_token_value::<Ident>()?.into_string();
+			name.push_str("::");
+			name.push_str(part.as_str());
 		}
-		Ok(name)
+		// Safety: Parser guarentees no null bytes.
+		Ok(unsafe { Ident::new_unchecked(name) })
 	}
 	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
 		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))

@@ -1,7 +1,6 @@
-use crate::expr;
-use crate::expr::kind::HasKind;
-use crate::val::Value;
+use crate::expr::{self, kind::HasKind};
 use crate::val::value::{Coerce, CoerceError};
+use crate::val::{Array, Number, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -240,6 +239,37 @@ impl TypedRange<i64> {
 			}
 			Bound::Unbounded => Some(r),
 		}
+	}
+
+	pub fn len(&self) -> usize {
+		let end = match self.end {
+			Bound::Unbounded => i64::MAX,
+			Bound::Included(x) => x,
+			Bound::Excluded(x) => match x.checked_sub(1) {
+				Some(x) => x,
+				None => return 0,
+			},
+		};
+
+		let start = match self.start {
+			Bound::Unbounded => todo!(),
+			Bound::Included(x) => x,
+			Bound::Excluded(x) => match x.checked_add(1) {
+				Some(x) => x,
+				None => return 0,
+			},
+		};
+
+		if start > end {
+			return 0;
+		}
+
+		usize::try_from(start.abs_diff(end)).unwrap_or(usize::MAX)
+	}
+
+	pub fn cast_to_array(self) -> Array {
+		let iter = self.iter();
+		Array(iter.map(|i| Value::Number(Number::Int(i))).collect())
 	}
 }
 

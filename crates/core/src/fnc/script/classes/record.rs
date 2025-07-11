@@ -45,7 +45,7 @@ impl Record {
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
-		self.value.into_raw_string()()
+		self.value.into_raw_string()
 	}
 	/// Convert the object to JSON
 	#[qjs(rename = "toJSON")]

@@ -1,6 +1,6 @@
 use crate::cnf::ID_CHARS;
-use crate::expr;
 use crate::expr::escape::EscapeRid;
+use crate::expr::{self, Ident};
 use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
 use futures::StreamExt;
 use nanoid::nanoid;
@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
+use surrealkv::Record;
 use ulid::Ulid;
 
 #[revisioned(revision = 1)]
@@ -84,6 +85,25 @@ impl RecordIdKeyRange {
 			start: self.start.map(|x| x.into_value()),
 			end: self.end.map(|x| x.into_value()),
 		}
+	}
+
+	/// Convertes a record id key range into the range from a normal value.
+	pub fn from_value_range(range: Range) -> Option<Self> {
+		let start = match range.start {
+			Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
+			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+		let end = match range.end {
+			Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
+			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+
+		Some(RecordIdKeyRange {
+			start,
+			end,
+		})
 	}
 }
 
@@ -177,11 +197,34 @@ impl RecordIdKey {
 		}
 	}
 
+	/// Tries to convert a value into a record id key,
+	///
+	/// Returns None if the value cannot be converted.
+	pub fn from_value(value: Value) -> Option<Self> {
+		// NOTE: This method dictates how coversion between values and record id keys behave. This
+		// method is reimplementing previous (before expr inversion pr) behavior but I am not sure
+		// if it is the right one, float and decimal generaly implicitly convert to other number
+		// types but here they are rejected.
+		match value {
+			Value::Number(Number::Int(i)) => Some(RecordIdKey::Number(i)),
+			Value::Strand(strand) => Some(RecordIdKey::String(strand.into_string())),
+			// NOTE: This was previously (before expr inversion pr) also rejected in this conversion, a bug I assume.
+			Value::Uuid(uuid) => Some(RecordIdKey::Uuid(uuid)),
+			Value::Array(array) => Some(RecordIdKey::Array(array)),
+			Value::Object(object) => Some(RecordIdKey::Object(object)),
+			Value::Range(range) => {
+				RecordIdKeyRange::from_value_range(*range).map(|x| RecordIdKey::Range(Box::new(x)))
+			}
+			_ => None,
+		}
+	}
+
 	/// Returns the expression which evaluates to the same value
 	pub fn into_literal(self) -> expr::RecordIdKeyLit {
 		match self {
 			RecordIdKey::Number(n) => expr::RecordIdKeyLit::Number(n),
-			RecordIdKey::String(s) => expr::RecordIdKeyLit::String(s),
+			// TODO: Null byte validity
+			RecordIdKey::String(s) => expr::RecordIdKeyLit::String(Strand::new(s).unwrap()),
 			RecordIdKey::Uuid(uuid) => expr::RecordIdKeyLit::Uuid(uuid),
 			RecordIdKey::Object(object) => expr::RecordIdKeyLit::Object(object.into_literal()),
 			RecordIdKey::Array(array) => expr::RecordIdKeyLit::Array(array.into_literal()),
@@ -200,7 +243,7 @@ impl From<i64> for RecordIdKey {
 
 impl From<Strand> for RecordIdKey {
 	fn from(value: Strand) -> Self {
-		RecordIdKey::String(value)
+		RecordIdKey::String(value.into_string())
 	}
 }
 
@@ -315,6 +358,10 @@ impl RecordId {
 			tb: self.table,
 			id: self.key.into_literal(),
 		}
+	}
+
+	pub fn is_record_type(&self, val: &[Ident]) -> bool {
+		val.is_empty() || val.iter().any(|x| self.table == **x)
 	}
 
 	/// Returns the string representation of this record id without

@@ -26,6 +26,15 @@ pub enum AccessType {
 	Bearer(BearerAccess),
 }
 
+impl Default for AccessType {
+	fn default() -> Self {
+		// Access type defaults to the most specific
+		Self::Record(RecordAccess {
+			..Default::default()
+		})
+	}
+}
+
 impl From<AccessType> for crate::expr::AccessType {
 	fn from(v: AccessType) -> Self {
 		match v {

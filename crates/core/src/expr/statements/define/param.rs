@@ -17,7 +17,7 @@ use std::fmt::{self, Display, Write};
 use super::DefineKind;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineParamStore {
 	pub name: Ident,
 	pub value: Value,
@@ -25,7 +25,9 @@ pub struct DefineParamStore {
 	pub permissions: Permission,
 }
 
+#[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: Ident,

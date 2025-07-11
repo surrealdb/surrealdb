@@ -1,14 +1,9 @@
 use crate::expr::id::range::RecordIdKeyRangeLit;
 use crate::expr::literal::ObjectEntry;
 use crate::expr::part::DestructurePart;
-use crate::expr::{
-	Cond, Expr, Function, FunctionCall, Idiom, Literal, Model, Part, PrefixOperator,
-	RecordIdKeyLit, RecordIdLit,
-};
+use crate::expr::{Cond, Expr, FunctionCall, Idiom, Literal, Part, RecordIdKeyLit, RecordIdLit};
 use crate::idx::planner::executor::KnnExpressions;
-use crate::val::{Array, Number, Object, Range, RecordId, Value};
 
-use std::collections::BTreeMap;
 use std::ops::Bound;
 
 pub(super) struct KnnConditionRewriter<'a>(&'a KnnExpressions);
@@ -31,7 +26,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			Expr::Literal(Literal::Object(o)) => self.eval_value_object(o),
 			Expr::Literal(Literal::RecordId(r)) => self.eval_value_thing(r),
 			Expr::Literal(l) => Some(Expr::Literal(l.clone())),
-			Expr::Idiom(i) => self.eval_value_idiom(i),
+			Expr::Idiom(i) => self.eval_expr_idiom(i),
 			Expr::Binary {
 				left,
 				op,
@@ -40,9 +35,9 @@ impl<'a> KnnConditionRewriter<'a> {
 				let left = self.rewrite_expr(left)?;
 				let right = self.rewrite_expr(right)?;
 				Some(Expr::Binary {
-					left,
+					left: Box::new(left),
 					op: op.clone(),
-					right,
+					right: Box::new(right),
 				})
 			}
 			Expr::Prefix {
@@ -50,14 +45,14 @@ impl<'a> KnnConditionRewriter<'a> {
 				expr,
 			} => Some(Expr::Prefix {
 				op: op.clone(),
-				expr: self.rewrite_expr(expr)?,
+				expr: Box::new(self.rewrite_expr(expr)?),
 			}),
 			Expr::Postfix {
 				op,
 				expr,
-			} => Some(Expr::Prefix {
+			} => Some(Expr::Postfix {
 				op: op.clone(),
-				expr: self.rewrite_expr(expr)?,
+				expr: Box::new(self.rewrite_expr(expr)?),
 			}),
 			Expr::Param(_)
 			| Expr::Table(_)
@@ -84,9 +79,9 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Expr::Forach(_)
 			| Expr::Let(_) => Some(v.clone()),
 
-			Expr::Block(_) | Expr::Future(_) => None,
+			Expr::Block(_) => None,
 			Expr::FunctionCall(function_call) => {
-				let arguments = Vec::new();
+				let mut arguments = Vec::new();
 				for arg in function_call.arguments.iter() {
 					arguments.push(self.rewrite_expr(arg)?);
 				}
@@ -99,22 +94,14 @@ impl<'a> KnnConditionRewriter<'a> {
 		}
 	}
 
-	fn eval_value_array(&self, a: &Vec<Expr>) -> Option<Value> {
-		self.eval_array(a).map(|a| a.into())
+	fn eval_value_array(&self, a: &[Expr]) -> Option<Expr> {
+		self.eval_exprs(a).map(|x| Expr::Literal(Literal::Array(x)))
 	}
 
-	fn eval_array(&self, a: &Array) -> Option<Array> {
-		self.eval_values(&a.0).map(|v| v.into())
-	}
-
-	fn eval_values(&self, values: &[Value]) -> Option<Vec<Value>> {
+	fn eval_exprs(&self, values: &[Expr]) -> Option<Vec<Expr>> {
 		let mut new_vec = Vec::with_capacity(values.len());
 		for v in values {
-			if let Some(v) = self.rewrite_expr(v) {
-				new_vec.push(v);
-			} else {
-				return None;
-			}
+			new_vec.push(self.rewrite_expr(v)?);
 		}
 		Some(new_vec)
 	}
@@ -143,30 +130,29 @@ impl<'a> KnnConditionRewriter<'a> {
 		Some(new_vec)
 	}
 
-	fn eval_value_object(&self, o: &[ObjectEntry]) -> Option<Value> {
-		self.eval_object(o).map(|o| o.into())
+	fn eval_value_object(&self, o: &[ObjectEntry]) -> Option<Expr> {
+		self.eval_object(o).map(|o| Expr::Literal(Literal::Object(o)))
 	}
 
-	fn eval_object(&self, o: &[ObjectEntry]) -> Option<Object> {
-		let mut new_o = BTreeMap::new();
+	fn eval_object(&self, o: &[ObjectEntry]) -> Option<Vec<ObjectEntry>> {
+		let mut new_o = Vec::with_capacity(o.len());
 		for entry in o {
-			if let Some(v) = self.rewrite_expr(&entry.value) {
-				new_o.insert(entry.key.clone(), v);
-			} else {
-				return None;
-			}
+			new_o.push(ObjectEntry {
+				key: entry.key.clone(),
+				value: self.rewrite_expr(&entry.value)?,
+			});
 		}
-		Some(new_o.into())
+		Some(new_o)
 	}
 
-	fn eval_value_thing(&self, t: &RecordIdLit) -> Option<Value> {
-		self.eval_thing(t).map(|t| t.into())
+	fn eval_value_thing(&self, t: &RecordIdLit) -> Option<Expr> {
+		self.eval_thing(t).map(|t| Expr::Literal(Literal::RecordId(t)))
 	}
 
-	fn eval_thing(&self, t: &RecordIdLit) -> Option<RecordId> {
-		self.eval_id(&t.id).map(|key| RecordId {
-			table: t.tb.clone(),
-			key,
+	fn eval_thing(&self, t: &RecordIdLit) -> Option<RecordIdLit> {
+		self.eval_id(&t.id).map(|id| RecordIdLit {
+			tb: t.tb.clone(),
+			id,
 		})
 	}
 
@@ -176,7 +162,7 @@ impl<'a> KnnConditionRewriter<'a> {
 			| RecordIdKeyLit::String(_)
 			| RecordIdKeyLit::Generate(_)
 			| RecordIdKeyLit::Uuid(_) => Some(id.clone()),
-			RecordIdKeyLit::Array(a) => self.eval_array(a).map(RecordIdKeyLit::Array),
+			RecordIdKeyLit::Array(a) => self.eval_exprs(a).map(RecordIdKeyLit::Array),
 			RecordIdKeyLit::Object(o) => self.eval_object(o).map(RecordIdKeyLit::Object),
 			RecordIdKeyLit::Range(r) => {
 				self.eval_id_range(r).map(|v| RecordIdKeyLit::Range(Box::new(v)))
@@ -184,18 +170,15 @@ impl<'a> KnnConditionRewriter<'a> {
 		}
 	}
 
-	fn eval_value_idiom(&self, i: &Idiom) -> Option<Value> {
-		self.eval_idiom(i).map(|i| i.into())
+	fn eval_expr_idiom(&self, i: &Idiom) -> Option<Expr> {
+		self.eval_idiom(i).map(Expr::Idiom)
 	}
 
 	fn eval_idiom(&self, i: &Idiom) -> Option<Idiom> {
 		let mut new_i = Vec::with_capacity(i.0.len());
 		for p in &i.0 {
-			if let Some(p) = self.eval_part(p) {
-				new_i.push(p);
-			} else {
-				return None;
-			}
+			let p = self.eval_part(p)?;
+			new_i.push(p);
 		}
 		Some(new_i.into())
 	}
@@ -214,34 +197,11 @@ impl<'a> KnnConditionRewriter<'a> {
 			Part::Graph(_) => None,
 			Part::Value(v) => self.rewrite_expr(v).map(Part::Value),
 			Part::Start(v) => self.rewrite_expr(v).map(Part::Start),
-			Part::Method(n, p) => self.eval_values(p).map(|v| Part::Method(n.clone(), v)),
+			Part::Method(n, p) => self.eval_exprs(p).map(|v| Part::Method(n.clone(), v)),
 			Part::Destructure(p) => self.eval_destructure_parts(p).map(Part::Destructure),
 			Part::Recurse(r, Some(v), instruction) => self
 				.eval_idiom(v)
 				.map(|v| Part::Recurse(r.to_owned(), Some(v), instruction.to_owned())),
-		}
-	}
-
-	fn eval_value_range(&self, r: &Range) -> Option<Value> {
-		self.eval_range(r).map(|r| r.into())
-	}
-
-	fn eval_range(&self, r: &Range) -> Option<Range> {
-		if let Some(beg) = self.eval_bound(&r.beg) {
-			self.eval_bound(&r.end).map(|end| Range {
-				beg,
-				end,
-			})
-		} else {
-			None
-		}
-	}
-
-	fn eval_bound(&self, b: &Bound<Value>) -> Option<Bound<Value>> {
-		match b {
-			Bound::Included(v) => self.rewrite_expr(v).map(Bound::Included),
-			Bound::Excluded(v) => self.rewrite_expr(v).map(Bound::Excluded),
-			Bound::Unbounded => Some(Bound::Unbounded),
 		}
 	}
 
@@ -262,38 +222,5 @@ impl<'a> KnnConditionRewriter<'a> {
 			Bound::Excluded(v) => self.eval_id(v).map(Bound::Excluded),
 			Bound::Unbounded => Some(Bound::Unbounded),
 		}
-	}
-
-	fn eval_value_function(&self, f: &Function) -> Option<Value> {
-		self.eval_function(f).map(|f| f.into())
-	}
-
-	fn eval_function(&self, f: &Function) -> Option<Function> {
-		match f {
-			Function::Normal(s, args) => {
-				self.eval_values(args).map(|args| Function::Normal(s.clone(), args))
-			}
-			Function::Custom(s, args) => {
-				self.eval_values(args).map(|args| Function::Custom(s.clone(), args))
-			}
-			Function::Script(s, args) => {
-				self.eval_values(args).map(|args| Function::Script(s.clone(), args))
-			}
-			Function::Anonymous(p, args, args_computed) => self
-				.eval_values(args)
-				.map(|args| Function::Anonymous(p.clone(), args, args_computed.to_owned())),
-		}
-	}
-
-	fn eval_value_model(&self, m: &Model) -> Option<Value> {
-		self.eval_model(m).map(|m| m.into())
-	}
-
-	fn eval_model(&self, m: &Model) -> Option<Model> {
-		self.eval_values(&m.args).map(|args| Model {
-			name: m.name.clone(),
-			version: m.version.clone(),
-			args,
-		})
 	}
 }

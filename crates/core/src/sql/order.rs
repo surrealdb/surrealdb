@@ -3,7 +3,7 @@ use crate::sql::{Expr, Idiom};
 use std::fmt;
 use std::ops::Deref;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Ordering {
 	Random,
@@ -37,7 +37,7 @@ impl From<crate::expr::order::Ordering> for Ordering {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OrderList(pub Vec<Order>);
 

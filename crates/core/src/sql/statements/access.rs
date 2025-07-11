@@ -124,7 +124,7 @@ impl From<crate::expr::statements::access::AccessStatementRevoke> for AccessStat
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementPurge {
 	pub ac: Ident,
@@ -158,7 +158,7 @@ impl From<crate::expr::statements::access::AccessStatementPurge> for AccessState
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessGrant {
 	pub id: Ident,                    // Unique grant identifier.
@@ -170,7 +170,7 @@ pub struct AccessGrant {
 	pub grant: Grant,                 // Grant data.
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Subject {
 	Record(RecordIdLit),
@@ -179,12 +179,13 @@ pub enum Subject {
 
 impl Subject {
 	// Returns the main identifier of a subject as a string.
+	/*
 	pub fn id(&self) -> String {
 		match self {
-			Subject::Record(id) => id.to_raw(),
-			Subject::User(name) => name.to_raw(),
+			Subject::Record(id) => id.into_raw_string()(),
+			Subject::User(name) => name.into_string(),
 		}
-	}
+	}*/
 }
 
 impl From<Subject> for crate::expr::statements::access::Subject {
@@ -205,7 +206,7 @@ impl From<crate::expr::statements::access::Subject> for Subject {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Grant {
 	Jwt(GrantJwt),
@@ -224,14 +225,14 @@ impl Grant {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantRecord {
 	pub rid: Uuid,             // Record ID
@@ -239,7 +240,7 @@ pub struct GrantRecord {
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantBearer {
 	pub id: Ident, // Key ID

@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::Response;
 use crate::dbs::{Force, Options, QueryType};
-use crate::err;
 use crate::err::Error;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
@@ -10,10 +9,11 @@ use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
-use crate::sql::planner::SqlToLogical;
+use crate::sql::{self, Ast};
 use crate::val::Value;
+use crate::{err, expr};
 use anyhow::{Result, anyhow, bail};
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, stream};
 use reblessive::TreeStack;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
@@ -543,38 +543,55 @@ impl Executor {
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
-		qry: LogicalPlan,
+		qry: Ast,
 	) -> Result<Vec<Response>> {
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_stream(kvs, ctx, opt, false, stream).await
 	}
 
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute_plan(
+		kvs: &Datastore,
+		ctx: Context,
+		opt: Options,
+		qry: LogicalPlan,
+	) -> Result<Vec<Response>> {
+		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
+		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
+	}
+
+	pub async fn execute_expr(
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
 		plan: TopLevelExpr,
 	) -> Result<Vec<Response>> {
-		let mut this = Executor::new(ctx, opt);
-
-		let query_type = match &plan {
-			TopLevelExpr::Live(_) => QueryType::Live,
-			TopLevelExpr::Kill(_) => QueryType::Kill,
-			_ => QueryType::Other,
-		};
-
-		let now = Instant::now();
-		let result = this.execute_plan_impl(kvs, plan).await;
-
-		Ok(vec![Response {
-			time: now.elapsed(),
-			result,
-			query_type,
-		}])
+		Self::execute_expr_stream(kvs, ctx, opt, false, stream::once(async { Ok(plan) })).await
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute_stream<S>(
+		kvs: &Datastore,
+		ctx: Context,
+		opt: Options,
+		skip_success_results: bool,
+		stream: S,
+	) -> Result<Vec<Response>>
+	where
+		S: Stream<Item = Result<sql::TopLevelExpr>>,
+	{
+		Self::execute_expr_stream(
+			kvs,
+			ctx,
+			opt,
+			skip_success_results,
+			stream.map(|x| x.map(expr::TopLevelExpr::from)),
+		)
+		.await
+	}
+
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub async fn execute_expr_stream<S>(
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,

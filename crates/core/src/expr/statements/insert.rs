@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct InsertStatement {
 	pub into: Option<Expr>,
@@ -190,7 +190,7 @@ fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 
 fn gen_id(v: &Value, into: &Option<Strand>) -> Result<RecordId> {
 	match into {
-		Some(into) => v.rid().generate(into, true),
+		Some(into) => v.rid().generate(into.clone(), true),
 		None => match v.rid() {
 			Value::Thing(v) => Ok(v),
 			v => Err(anyhow::Error::new(Error::InsertStatementId {

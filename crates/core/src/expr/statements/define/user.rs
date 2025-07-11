@@ -11,7 +11,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 use argon2::Argon2;
-use argon2::password_hash::SaltString;
+use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
@@ -22,7 +22,7 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineUserStatement {
 	pub kind: DefineKind,
@@ -44,11 +44,11 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 */
 
 impl DefineUserStatement {
-	pub fn new_with_password(base: Base, user: String, pass: &str, role: String) -> Self {
+	pub fn new_with_password(base: Base, user: Strand, pass: &str, role: Ident) -> Self {
 		DefineUserStatement {
 			kind: DefineKind::Default,
 			base,
-			name: user.into(),
+			name: Ident::from_strand(user),
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
 				.unwrap()
@@ -58,7 +58,7 @@ impl DefineUserStatement {
 				.take(128)
 				.map(char::from)
 				.collect::<String>(),
-			roles: vec![role.into()],
+			roles: vec![role],
 			duration: UserDuration::default(),
 			comment: None,
 		}

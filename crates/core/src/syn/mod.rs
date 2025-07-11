@@ -5,8 +5,8 @@ use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit};
-use crate::val::Value;
 use crate::val::{Datetime, Duration};
+use crate::val::{RecordId, Value};
 
 pub mod error;
 pub mod lexer;
@@ -174,10 +174,10 @@ pub fn duration(input: &str) -> Result<Duration> {
 
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn thing(input: &str) -> Result<RecordIdLit> {
+pub fn thing(input: &str) -> Result<RecordId> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 
-	parse_with(input, async |parser, stk| parser.parse_record_id(stk).await)
+	parse_with(input, async |parser, stk| parser.parse_value_record_id(stk).await)
 }
 
 /// Parse a record id including ranges.
@@ -257,7 +257,21 @@ pub fn expr_legacy_strand(input: &str) -> Result<Expr> {
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str) -> Result<Expr> {
+pub fn value(input: &str) -> Result<Value> {
+	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
+
+	let settings = ParserSettings {
+		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		..Default::default()
+	};
+
+	parse_with_settings(input, settings, async |parser, stk| parser.parse_value(stk).await)
+}
+
+/// Parses a SurrealQL [`Value`] and parses values within strings.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn value_legacy_strand(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {

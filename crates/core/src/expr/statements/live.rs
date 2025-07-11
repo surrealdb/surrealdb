@@ -59,7 +59,10 @@ impl LiveStatement {
 			node: Uuid::new_v4(),
 			what,
 			expr,
-			..Default::default()
+			cond: None,
+			auth: None,
+			session: None,
+			fetch: None,
 		}
 	}
 

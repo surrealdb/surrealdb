@@ -152,7 +152,7 @@ impl TryFrom<&Value> for TableConfig {
 				.iter()
 				.cloned()
 				.map(|v| match v {
-					Value::Strand(str) => Ok(str.0),
+					Value::Strand(str) => Ok(str.into_string()),
 					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
 						v.clone(),
 						"a string".into(),

@@ -91,7 +91,7 @@ impl Parser<'_> {
 					Numeric::Decimal(x) => Ok(Value::Number(Number::Decimal(x))),
 				}
 			}
-			_ => self.parse_value_record_id::<SurrealQL>(stk).await.map(Value::Thing),
+			_ => self.parse_value_record_id_inner::<SurrealQL>(stk).await.map(Value::Thing),
 		}
 	}
 
@@ -144,7 +144,7 @@ impl Parser<'_> {
 				let glued = pop_glued!(self, Duration);
 				Ok(Value::Duration(glued.into()))
 			}
-			_ => self.parse_value_record_id::<JSON>(ctx).await.map(Value::Thing),
+			_ => self.parse_value_record_id_inner::<JSON>(ctx).await.map(Value::Thing),
 		}
 	}
 
@@ -197,7 +197,11 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_value_record_id<VP>(&mut self, ctx: &mut Stk) -> ParseResult<RecordId>
+	pub async fn parse_value_record_id(&mut self, ctx: &mut Stk) -> ParseResult<RecordId> {
+		self.parse_value_record_id_inner::<SurrealQL>(ctx).await
+	}
+
+	async fn parse_value_record_id_inner<VP>(&mut self, ctx: &mut Stk) -> ParseResult<RecordId>
 	where
 		VP: ValueParseFunc,
 	{

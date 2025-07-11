@@ -56,59 +56,49 @@ impl Display for Permissions {
 		if self.is_full() {
 			return write!(f, " FULL");
 		}
-		let mut lines = Vec::<(Vec<PermissionKind>, &Permission)>::new();
-		for (c, permission) in [
-			PermissionKind::Select,
-			PermissionKind::Create,
-			PermissionKind::Update,
-			PermissionKind::Delete,
-		]
-		.into_iter()
-		.zip([&self.select, &self.create, &self.update, &self.delete])
-		{
-			// Alternate permissions display implementation ignores delete permission
-			// This display is used to show field permissions, where delete has no effect
-			// Displaying the permission could mislead users into thinking it has an effect
-			// Additionally, including the permission will cause a parsing error in 3.0.0
-			if f.alternate() && matches!(c, PermissionKind::Delete) {
-				continue;
-			}
-
-			if let Some((existing, _)) = lines.iter_mut().find(|(_, p)| **p == *permission) {
-				existing.push(c);
-			} else {
-				lines.push((vec![c], permission));
-			}
-		}
 		let indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {
 			f.write_char(' ')?;
 			None
 		};
-		for (i, (kinds, permission)) in lines.into_iter().enumerate() {
-			if i > 0 {
-				if is_pretty() {
-					pretty_sequence_item();
-				} else {
-					f.write_str(", ")?;
-				}
+
+		write!(f, "FOR SELECT ")?;
+		match self.select {
+			Permission::Specific(_) if is_pretty() => {
+				let _indent = pretty_indent();
+				self.select.fmt(f)?;
 			}
-			write!(f, "FOR ")?;
-			for (i, kind) in kinds.into_iter().enumerate() {
-				if i > 0 {
-					f.write_str(", ")?;
-				}
-				f.write_str(kind.as_str())?;
-			}
-			match permission {
-				Permission::Specific(_) if is_pretty() => {
-					let _indent = pretty_indent();
-					Display::fmt(permission, f)?;
-				}
-				_ => write!(f, " {permission}")?,
-			}
+			_ => write!(f, " {}", self.select)?,
 		}
+
+		write!(f, "FOR CREATE ")?;
+		match self.create {
+			Permission::Specific(_) if is_pretty() => {
+				let _indent = pretty_indent();
+				self.create.fmt(f)?;
+			}
+			_ => write!(f, " {}", self.create)?,
+		}
+
+		write!(f, "FOR UPDATE ")?;
+		match self.update {
+			Permission::Specific(_) if is_pretty() => {
+				let _indent = pretty_indent();
+				self.update.fmt(f)?;
+			}
+			_ => write!(f, " {}", self.update)?,
+		}
+
+		write!(f, "FOR DELETE ")?;
+		match self.delete {
+			Permission::Specific(_) if is_pretty() => {
+				let _indent = pretty_indent();
+				self.delete.fmt(f)?;
+			}
+			_ => write!(f, " {}", self.delete)?,
+		}
+
 		drop(indent);
 		Ok(())
 	}

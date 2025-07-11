@@ -281,7 +281,7 @@ impl DefineFieldStatement {
 			return Ok(());
 		}
 
-		if let Some(kind) = &self.kind {
+		if let Some(kind) = &self.field_kind {
 			let kinds = match kind {
 				Kind::Either(kinds) => kinds,
 				kind => &vec![kind.to_owned()],
@@ -433,8 +433,8 @@ impl Display for DefineFieldStatement {
 		}
 		match self.default {
 			DefineDefault::None => {}
-			DefineDefault::Always(expr) => writeln!(f, " DEFAULT ALWAYS {expr}"),
-			DefineDefault::Set(expr) => writeln!(f, " DEFAULT {expr}"),
+			DefineDefault::Always(ref expr) => writeln!(f, " DEFAULT ALWAYS {expr}")?,
+			DefineDefault::Set(ref expr) => writeln!(f, " DEFAULT {expr}")?,
 		}
 		if self.readonly {
 			write!(f, " READONLY")?
@@ -472,7 +472,7 @@ impl InfoStructure for DefineFieldStatement {
 			"name".to_string() => self.name.structure(),
 			"what".to_string() => self.what.structure(),
 			"flex".to_string() => self.flex.into(),
-			"kind".to_string(), if let Some(v) = self.kind => v.structure(),
+			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),
 			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
 			"default".to_string(), if let Some(v) = self.default => v.structure(),

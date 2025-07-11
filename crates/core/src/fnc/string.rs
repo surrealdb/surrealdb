@@ -19,7 +19,7 @@ fn limit(name: &str, n: usize) -> Result<()> {
 }
 
 pub fn concat(Any(args): Any) -> Result<Value> {
-	let strings = args.into_iter().map(Value::as_string).collect::<Vec<_>>();
+	let strings = args.into_iter().map(Value::as_raw_string).collect::<Vec<_>>();
 	limit("string::concat", strings.iter().map(String::len).sum::<usize>())?;
 	Ok(strings.concat().into())
 }
@@ -33,7 +33,7 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value> {
 }
 
 pub fn join(Any(args): Any) -> Result<Value> {
-	let mut args = args.into_iter().map(Value::as_string);
+	let mut args = args.into_iter().map(Value::as_raw_string);
 	let chr = args.next().ok_or_else(|| Error::InvalidArguments {
 		name: String::from("string::join"),
 		message: String::from("Expected at least one argument"),
@@ -340,8 +340,7 @@ pub mod is {
 	}
 
 	pub fn record((arg, Optional(tb)): (String, Optional<Value>)) -> Result<Value> {
-		// TODO: Fix once implemeted in parser.
-		let res = match RecordId::try_from(arg) {
+		let res = match syn::thing(&arg) {
 			Ok(t) => match tb {
 				Some(Value::Strand(tb) | Value::Table(tb)) => t.table.as_str() == tb.as_str(),
 				Some(_) => {

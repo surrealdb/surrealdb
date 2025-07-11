@@ -193,7 +193,7 @@ impl PlanBuilder {
 			if vals.is_empty() {
 				break;
 			}
-			if vals.iter().all(|v| v.is_none_or_null()) {
+			if vals.iter().all(|v| v.is_nullish()) {
 				break;
 			}
 			cont += 1;
@@ -386,7 +386,7 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		e.insert("index", Value::from(self.ix_ref().name.0.clone()));
+		e.insert("index", Value::from(self.ix_ref().name.clone().into_strand()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(BinaryOperator::Equal.to_string()));

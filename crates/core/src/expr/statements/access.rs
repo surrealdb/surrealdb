@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::access_type::BearerAccessSubject;
-use crate::expr::{AccessType, Base, Cond, FlowResultExt as _, Ident};
+use crate::expr::{AccessType, Base, Cond, FlowResultExt as _, Ident, RecordIdLit};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, RecordId, Strand, Uuid, Value};
 use anyhow::{Result, bail, ensure};
@@ -145,7 +145,7 @@ impl AccessGrant {
 		res.insert("revocation".to_owned(), Value::from(self.revocation));
 		let mut sub = Object::default();
 		match self.subject {
-			Subject::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
+			Subject::Record(id) => sub.insert("record".to_owned(), id),
 			Subject::User(name) => {
 				sub.insert("user".to_owned(), Value::from(name.into_raw_string()))
 			}
@@ -181,9 +181,8 @@ impl AccessGrant {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Subject {
-	Record(RecordId),
+	Record(RecordIdLit),
 	User(Ident),
 }
 
@@ -191,7 +190,7 @@ impl Subject {
 	// Returns the main identifier of a subject as a string.
 	pub fn id(&self) -> String {
 		match self {
-			Subject::Record(id) => id.into_raw_string(),
+			Subject::Record(id) => id.to_string(),
 			Subject::User(name) => name.into_raw_string(),
 		}
 	}
@@ -200,7 +199,6 @@ impl Subject {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Grant {
 	Jwt(GrantJwt),
 	Record(GrantRecord),

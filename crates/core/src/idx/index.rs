@@ -210,7 +210,7 @@ struct Indexable(Vec<(Value, bool)>);
 impl Indexable {
 	fn new(vals: Vec<Value>, ix: &DefineIndexStatement) -> Self {
 		let mut source = Vec::with_capacity(vals.len());
-		for (v, i) in vals.into_iter().zip(ix.cols.0.iter()) {
+		for (v, i) in vals.into_iter().zip(ix.cols.iter()) {
 			let f = matches!(i.0.last(), Some(&Part::Flatten));
 			source.push((v, f));
 		}

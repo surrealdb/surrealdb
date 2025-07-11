@@ -177,7 +177,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let mut rid = syn::thing(id)?.into();
+			let mut rid = syn::thing(id)?;
 			// Get the database access method
 			let de = tx.get_db_access(ns, db, ac).await?;
 			// Ensure that the transaction is cancelled

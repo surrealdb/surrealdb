@@ -21,10 +21,9 @@ use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[revisioned(revision = 6)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
@@ -166,15 +165,15 @@ impl DefineTableStatement {
 impl DefineTableStatement {
 	/// Checks if this is a TYPE RELATION table
 	pub fn is_relation(&self) -> bool {
-		matches!(self.kind, TableType::Relation(_))
+		matches!(self.table_type, TableType::Relation(_))
 	}
 	/// Checks if this table allows graph edges / relations
 	pub fn allows_relation(&self) -> bool {
-		matches!(self.kind, TableType::Relation(_) | TableType::Any)
+		matches!(self.table_type, TableType::Relation(_) | TableType::Any)
 	}
 	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
-		matches!(self.kind, TableType::Normal | TableType::Any)
+		matches!(self.table_type, TableType::Normal | TableType::Any)
 	}
 	/// Used to add relational fields to existing table records
 	pub async fn add_in_out_fields(
@@ -234,25 +233,29 @@ impl Display for DefineTableStatement {
 		}
 		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;
-		match &self.kind {
+		match &self.table_type {
 			TableType::Normal => {
 				f.write_str(" NORMAL")?;
 			}
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
 				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(
-						f,
-						" IN {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
+					write!(f, " IN ",)?;
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							write!(f, " | ")?;
+						}
+						k.fmt(f)?;
+					}
 				}
 				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(
-						f,
-						" OUT {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
+					write!(f, " OUT ",)?;
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							write!(f, " | ")?;
+						}
+						k.fmt(f)?;
+					}
 				}
 				if rel.enforced {
 					write!(f, " ENFORCED")?;

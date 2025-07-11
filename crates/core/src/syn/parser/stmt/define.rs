@@ -22,8 +22,8 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Ident, Idioms, Index, JwtAccess, Kind, Literal, Param, Permissions, Scoring,
-	TableType, access_type, table_type,
+	AccessType, Expr, Ident, Idioms, Index, JwtAccess, Kind, Literal, Param, Permission,
+	Permissions, Scoring, TableType, access_type, table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
@@ -170,6 +170,7 @@ impl Parser<'_> {
 			kind,
 			returns,
 			comment: None,
+			permissions: Permission::default(),
 		};
 
 		loop {
@@ -513,12 +514,14 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value::<Param>()?.0;
+		let name = self.next_token_value::<Param>()?.ident();
 
 		let mut res = DefineParamStatement {
 			name,
 			kind,
-			..Default::default()
+			value: Expr::Literal(Literal::None),
+			comment: None,
+			permissions: Permission::default(),
 		};
 
 		loop {
@@ -652,7 +655,10 @@ impl Parser<'_> {
 		let mut res = DefineApiStatement {
 			path,
 			kind,
-			..Default::default()
+			actions: Vec::new(),
+			fallback: None,
+			config: None,
+			comment: None,
 		};
 
 		loop {
@@ -745,7 +751,9 @@ impl Parser<'_> {
 			name,
 			what,
 			when: Expr::Literal(Literal::Bool(true)),
-			..Default::default()
+			then: Vec::new(),
+			kind: DefineKind::Default,
+			comment: None,
 		};
 
 		loop {
@@ -871,7 +879,10 @@ impl Parser<'_> {
 			name,
 			what,
 			kind,
-			..Default::default()
+			cols: Vec::new(),
+			index: Index::Idx,
+			comment: None,
+			concurrently: false,
 		};
 
 		loop {
@@ -879,9 +890,9 @@ impl Parser<'_> {
 				// COLUMNS and FIELDS are the same tokenkind
 				t!("FIELDS") => {
 					self.pop_peek();
-					res.cols = Idioms(vec![self.parse_local_idiom(ctx).await?]);
+					res.cols = vec![self.parse_local_idiom(ctx).await?];
 					while self.eat(t!(",")) {
-						res.cols.0.push(self.parse_local_idiom(ctx).await?);
+						res.cols.push(self.parse_local_idiom(ctx).await?);
 					}
 				}
 				t!("UNIQUE") => {
@@ -1179,7 +1190,7 @@ impl Parser<'_> {
 								let open_span = expected!(self, t!("(")).span;
 								let path: Strand = self.next_token_value()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
-								filters.push(Filter::Mapper(path.into_inner()))
+								filters.push(Filter::Mapper(path.into_string()))
 							}
 							_ => unexpected!(self, next, "a filter"),
 						}

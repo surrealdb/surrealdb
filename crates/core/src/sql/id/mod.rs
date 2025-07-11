@@ -1,7 +1,7 @@
 use crate::sql::escape::EscapeRid;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, fmt::Fmt};
-use crate::val::Uuid;
+use crate::val::{Strand, Uuid};
 use std::fmt::{self, Display, Formatter};
 
 pub mod range;
@@ -39,7 +39,7 @@ impl From<crate::expr::id::Gen> for Gen {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecordIdKeyLit {
 	Number(i64),
-	String(String),
+	String(Strand),
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),

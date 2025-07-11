@@ -1,4 +1,5 @@
-use crate::sql::{Ident, Idioms, Index};
+use crate::sql::fmt::Fmt;
+use crate::sql::{Ident, Idiom, Index};
 use crate::val::Strand;
 use std::fmt::{self, Display};
 
@@ -10,7 +11,7 @@ pub struct DefineIndexStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
 	pub what: Ident,
-	pub cols: Idioms,
+	pub cols: Vec<Idiom>,
 	pub index: Index,
 	pub comment: Option<Strand>,
 	pub concurrently: bool,
@@ -24,7 +25,13 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
+		write!(
+			f,
+			" {} ON {} FIELDS {}",
+			self.name,
+			self.what,
+			Fmt::comma_separated(self.cols.iter())
+		)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
@@ -44,7 +51,7 @@ impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			what: v.what.into(),
-			cols: v.cols.into(),
+			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
 			comment: v.comment.map(Into::into),
 			concurrently: v.concurrently,
@@ -58,7 +65,7 @@ impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			what: v.what.into(),
-			cols: v.cols.into(),
+			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
 			comment: v.comment.map(Into::into),
 			concurrently: v.concurrently,

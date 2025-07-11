@@ -385,7 +385,7 @@ impl<'a> Parser<'a> {
 	pub async fn parse_query(&mut self, ctx: &mut Stk) -> ParseResult<sql::Ast> {
 		let statements = self.parse_stmt_list(ctx).await?;
 		Ok(sql::Ast {
-			statements,
+			expressions: statements,
 		})
 	}
 

@@ -239,10 +239,10 @@ mod tests {
 			"testns",
 			"testdb",
 			"testtb",
-			"testid".into(),
+			RecordIdKey::String("testid".to_owned()),
 			"othertb",
 			"test.*",
-			"otherid".into(),
+			RecordIdKey::String("otherid".to_owned()),
 		);
 		let enc = Ref::encode(&val).unwrap();
 		assert_eq!(

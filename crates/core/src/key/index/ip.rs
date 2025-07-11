@@ -1,6 +1,6 @@
 //! Stores the previous value of record for concurrent index building
-use crate::expr::RecordIdKeyLit;
 use crate::kvs::impl_key;
+use crate::val::RecordIdKey;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
@@ -19,13 +19,13 @@ pub struct Ip<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: RecordIdKeyLit,
+	pub id: RecordIdKey,
 }
 impl_key!(Ip<'a>);
 
 impl<'a> Ip<'a> {
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: RecordIdKeyLit) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -52,7 +52,7 @@ mod tests {
 	fn key() {
 		use super::*;
 		let val =
-			Ip::new("testns", "testdb", "testtb", "testix", RecordIdKeyLit::from("id".to_string()));
+			Ip::new("testns", "testdb", "testtb", "testix", RecordIdKey::String("id".to_string()));
 		let enc = Ip::encode(&val).unwrap();
 		assert_eq!(
 			enc,

@@ -144,7 +144,7 @@ mod tests {
 	#[test]
 	fn check_define_serialize() {
 		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
-			name: Ident::from("test"),
+			name: Ident::new("test".to_owned()).unwrap(),
 			..Default::default()
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();

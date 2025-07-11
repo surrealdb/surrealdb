@@ -4,9 +4,10 @@ use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::fmt::Fmt;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Idioms, Index, Part};
+use crate::expr::{Base, Ident, Idiom, Idioms, Index, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
@@ -26,13 +27,13 @@ use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use super::DefineKind;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
 	pub what: Ident,
-	pub cols: Idioms,
+	pub cols: Vec<Idiom>,
 	pub index: Index,
 	pub comment: Option<Strand>,
 	pub concurrently: bool,
@@ -198,7 +199,13 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
+		write!(
+			f,
+			" {} ON {} FIELDS {}",
+			self.name,
+			self.what,
+			Fmt::comma_separated(self.cols.iter())
+		)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}

@@ -1,10 +1,26 @@
+use crate::expr;
 use crate::sql::Expr;
 use crate::sql::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, RebuildStatement, UseStatement,
 };
 
 pub struct Ast {
-	pub statements: Vec<TopLevelExpr>,
+	pub expressions: Vec<TopLevelExpr>,
+}
+
+impl From<expr::LogicalPlan> for Ast {
+	fn from(value: expr::LogicalPlan) -> Self {
+		Ast {
+			expressions: value.expressions.into_iter().map(From::from).collect(),
+		}
+	}
+}
+impl From<Ast> for expr::LogicalPlan {
+	fn from(value: Ast) -> Self {
+		expr::LogicalPlan {
+			expressions: value.expressions.into_iter().map(From::from).collect(),
+		}
+	}
 }
 
 pub enum TopLevelExpr {

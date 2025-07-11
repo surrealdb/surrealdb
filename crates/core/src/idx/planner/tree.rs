@@ -336,7 +336,7 @@ impl<'a> TreeBuilder<'a> {
 				let ixr = schema.new_reference(idx);
 				// Check if the WITH clause allow the index to be used
 				if let Some(With::Index(ixs)) = &self.ctx.with {
-					if ixs.contains(&ix.name.0) {
+					if ixs.contains(&*ix.name) {
 						if let Some(wi) = &mut self.with_indexes {
 							wi.push(ixr.clone());
 						} else {
@@ -523,7 +523,7 @@ impl<'a> TreeBuilder<'a> {
 		let BinaryOperator::NearestNeighbor(nn) = op else {
 			return Ok(None);
 		};
-		let NearestNeighbor::KTree(k) = nn else {
+		let NearestNeighbor::KTree(k) = &**nn else {
 			return Ok(None);
 		};
 
@@ -544,7 +544,7 @@ impl<'a> TreeBuilder<'a> {
 		let BinaryOperator::NearestNeighbor(nn) = op else {
 			return Ok(None);
 		};
-		let NearestNeighbor::Approximate(k, ef) = nn else {
+		let NearestNeighbor::Approximate(k, ef) = &**nn else {
 			return Ok(None);
 		};
 
@@ -553,22 +553,24 @@ impl<'a> TreeBuilder<'a> {
 			self.knn_expressions.insert(exp.clone());
 			return Ok(Some(IndexOperator::Ann(vec, *k, *ef)));
 		}
+
+		Ok(None)
 	}
 
 	fn eval_bruteforce_knn(&mut self, id: &Idiom, val: &Node, exp: &Arc<Expr>) -> Result<()> {
 		let Expr::Binary {
 			op,
 			..
-		} = exp
+		} = &**exp
 		else {
-			return Ok(None);
+			return Ok(());
 		};
 
 		let BinaryOperator::NearestNeighbor(nn) = op else {
-			return Ok(None);
+			return Ok(());
 		};
-		let NearestNeighbor::K(k, d) = nn else {
-			return Ok(None);
+		let NearestNeighbor::K(k, d) = &**nn else {
+			return Ok(());
 		};
 
 		if let Node::Computed(v) = val {
@@ -625,9 +627,9 @@ impl<'a> TreeBuilder<'a> {
 				}
 				(
 					BinaryOperator::LessThan
-					| BinaryOperator::LessThanOrEqual
+					| BinaryOperator::LessThanEqual
 					| BinaryOperator::MoreThan
-					| BinaryOperator::MoreThanOrEqual,
+					| BinaryOperator::MoreThanEqual,
 					v,
 					p,
 				) => {

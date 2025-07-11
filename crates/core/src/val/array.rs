@@ -90,7 +90,7 @@ impl Array {
 	}
 
 	pub fn into_literal(self) -> Vec<Expr> {
-		self.into_iter().map(|x| Expr::Literal(x.into_literal())).collect()
+		self.into_iter().map(|x| x.into_literal()).collect()
 	}
 }
 

@@ -9,6 +9,7 @@ use crate::syn::error::bail;
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{Glued, TokenKind, t};
+use crate::val::Strand;
 use std::cmp::Ordering;
 use std::ops::Bound;
 
@@ -236,7 +237,10 @@ impl Parser<'_> {
 				if let Ok(number) = digits_str.parse() {
 					Ok(RecordIdKeyLit::Number(number))
 				} else {
-					Ok(RecordIdKeyLit::String(digits_str.to_owned()))
+					// Safety: Parser guarentees no null bytes present in string.
+					Ok(RecordIdKeyLit::String(unsafe {
+						Strand::new_unchecked(digits_str.to_owned())
+					}))
 				}
 			}
 			t!("-") => {
@@ -248,13 +252,17 @@ impl Parser<'_> {
 					match number.value.cmp(&((i64::MAX as u64) + 1)) {
 						Ordering::Less => Ok(RecordIdKeyLit::Number(-(number.value as i64))),
 						Ordering::Equal => Ok(RecordIdKeyLit::Number(i64::MIN)),
-						Ordering::Greater => Ok(RecordIdKeyLit::String(format!(
-							"-{}",
-							self.lexer.span_str(number.span)
-						))),
+						// Safety: Parser guarentees no null bytes present in string.
+						Ordering::Greater => Ok(RecordIdKeyLit::String(unsafe {
+							Strand::new_unchecked(format!("-{}", self.lexer.span_str(number.span)))
+						})),
 					}
 				} else {
-					Ok(RecordIdKeyLit::String(format!("-{}", self.lexer.span_str(token.span))))
+					// Safety: Parser guarentees no null bytes present in string.
+					let strand = unsafe {
+						Strand::new_unchecked(format!("-{}", self.lexer.span_str(token.span)))
+					};
+					Ok(RecordIdKeyLit::String(strand))
 				}
 			}
 			TokenKind::Digits => {
@@ -262,7 +270,7 @@ impl Parser<'_> {
 					let next = self.peek_whitespace1();
 					if Self::kind_is_identifier(next.kind) {
 						let ident = self.parse_flexible_ident()?;
-						return Ok(RecordIdKeyLit::String(ident));
+						return Ok(RecordIdKeyLit::String(ident.into_strand()));
 					}
 				}
 
@@ -272,7 +280,10 @@ impl Parser<'_> {
 				if let Ok(number) = digits_str.parse::<i64>() {
 					Ok(RecordIdKeyLit::Number(number))
 				} else {
-					Ok(RecordIdKeyLit::String(digits_str.to_owned()))
+					// Safety: Parser guarentees no null bytes present in string.
+					Ok(RecordIdKeyLit::String(unsafe {
+						Strand::new_unchecked(digits_str.to_owned())
+					}))
 				}
 			}
 			TokenKind::Glued(Glued::Duration) if self.settings.flexible_record_id => {
@@ -282,6 +293,8 @@ impl Parser<'_> {
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();
+				// Safety: Parser guarentees no null bytes present in string.
+				let text = unsafe { Strand::new_unchecked(text) };
 				Ok(RecordIdKeyLit::String(text))
 			}
 			TokenKind::Glued(_) => {
@@ -299,7 +312,9 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(Gen::Ulid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					Ok(RecordIdKeyLit::String(slice.to_string()))
+					// Safety: Parser guarentees no null bytes present in string.
+					let text = unsafe { Strand::new_unchecked(slice.to_owned()) };
+					Ok(RecordIdKeyLit::String(text))
 				}
 			}
 			t!("UUID") => {
@@ -309,7 +324,9 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(Gen::Uuid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					Ok(RecordIdKeyLit::String(slice.to_string()))
+					// Safety: Parser guarentees no null bytes present in string.
+					let text = unsafe { Strand::new_unchecked(slice.to_owned()) };
+					Ok(RecordIdKeyLit::String(text))
 				}
 			}
 			t!("RAND") => {
@@ -319,7 +336,9 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(Gen::Rand))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					Ok(RecordIdKeyLit::String(slice.to_string()))
+					// Safety: Parser guarentees no null bytes present in string.
+					let text = unsafe { Strand::new_unchecked(slice.to_owned()) };
+					Ok(RecordIdKeyLit::String(text))
 				}
 			}
 			_ => {
@@ -328,7 +347,7 @@ impl Parser<'_> {
 				} else {
 					self.next_token_value::<Ident>()?
 				};
-				Ok(RecordIdKeyLit::String(ident.into_string()))
+				Ok(RecordIdKeyLit::String(ident.into_strand()))
 			}
 		}
 	}

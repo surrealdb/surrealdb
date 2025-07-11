@@ -59,6 +59,6 @@ impl From<Param> for crate::expr::Param {
 impl From<crate::expr::Param> for Param {
 	fn from(v: crate::expr::Param) -> Self {
 		// Safety: Null byte guarenteed is upheld by param.
-		unsafe { Self::new_unchecked(v.into_string()) }
+		unsafe { Self::new_unchecked(v.ident().into_string()) }
 	}
 }

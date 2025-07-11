@@ -13,7 +13,7 @@ use crate::dbs::node::Timestamp;
 use crate::dbs::{Attach, Capabilities, Executor, Notification, Options, Response, Session};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
-use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan, TopLevelExpr};
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
@@ -31,7 +31,7 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, TransactionType};
 use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
-use crate::val::Value;
+use crate::val::{Strand, Value};
 use crate::{cf, syn};
 #[allow(unused_imports)]
 use anyhow::bail;
@@ -620,9 +620,11 @@ impl Datastore {
 			// Create and new root user definition
 			let stm = DefineUserStatement::new_with_password(
 				Base::Root,
-				user.to_owned(),
+				// TODO: Null byte validity.
+				Strand::new(user.to_owned()).unwrap(),
 				pass,
-				INITIAL_USER_ROLE.to_owned(),
+				// TODO: Null byte validity, always correct here probably.
+				Ident::new(INITIAL_USER_ROLE.to_owned()).unwrap(),
 			);
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = MutableContext::default();
@@ -896,8 +898,7 @@ impl Datastore {
 					}
 				}
 			}
-		})
-		.map(|x| x.into());
+		});
 
 		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
 	}

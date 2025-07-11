@@ -354,7 +354,7 @@ impl QueryPlanner {
 		it: &mut Iterator,
 		rs: RecordStrategy,
 	) {
-		self.executors.insert(tb.0.clone(), exe.into());
+		self.executors.insert(tb.clone().into_string(), exe.into());
 		if let Some(irf) = irf {
 			it.ingest(Iterable::Index(tb, irf, rs));
 		}

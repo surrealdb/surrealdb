@@ -16,8 +16,8 @@ pub(crate) fn uri_is_valid(uri: &str) -> bool {
 
 fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
 	match body {
-		Value::Bytes(v) => req.body(v.0),
-		Value::Strand(v) => req.body(v.0),
+		Value::Bytes(v) => req.body(v.into_inner()),
+		Value::Strand(v) => req.body(v.into_string()),
 		_ if body.is_some() => req.json(&body.into_json()),
 		_ => req,
 	}

@@ -3,20 +3,19 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
-	IfelseStatement, InfoStatement, InsertStatement, RebuildStatement, RelateStatement,
-	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
+	IfelseStatement, InfoStatement, InsertStatement, OutputStatement, RebuildStatement,
+	RelateStatement, RemoveStatement, SelectStatement, SetStatement, UpdateStatement,
+	UpsertStatement,
 };
 use crate::expr::{
 	BinaryOperator, Block, Constant, FlowResult, FunctionCall, Ident, Idiom, Literal, Mock, Param,
-	PrefixOperator,
+	PostfixOperator, PrefixOperator,
 };
 use crate::val::{Closure, Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use super::PostfixOperator;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -50,7 +49,7 @@ pub enum Expr {
 
 	Break,
 	Continue,
-	Return(Box<Expr>),
+	Return(Box<OutputStatement>),
 	Throw(Box<Expr>),
 
 	IfElse(Box<IfelseStatement>),

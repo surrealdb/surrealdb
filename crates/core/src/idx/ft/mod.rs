@@ -534,7 +534,7 @@ mod tests {
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::statements::DefineStatement;
-	use crate::val::{Array, RecordId, Value};
+	use crate::val::{Array, RecordId, Strand, Value};
 	use crate::{sql, syn};
 	use reblessive::tree::Stk;
 	use std::collections::HashMap;
@@ -627,7 +627,7 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut ast = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Expr::Define(DefineStatement::Analyzer(az)) = ast.statements.pop().unwrap().into()
+		let Expr::Define(DefineStatement::Analyzer(az)) = ast.expressions.pop().unwrap().into()
 		else {
 			panic!()
 		};
@@ -636,9 +636,12 @@ mod tests {
 
 		let btree_order = 5;
 
-		let doc1: RecordId = RecordId::new("t".to_string(), "doc1".to_owned());
-		let doc2: RecordId = RecordId::new("t".to_string(), "doc2".to_owned());
-		let doc3: RecordId = RecordId::new("t".to_string(), "doc3".to_owned());
+		let doc1: RecordId =
+			RecordId::new("t".to_string(), Strand::new("doc1".to_owned()).unwrap());
+		let doc2: RecordId =
+			RecordId::new("t".to_string(), Strand::new("doc2".to_owned()).unwrap());
+		let doc3: RecordId =
+			RecordId::new("t".to_string(), Strand::new("doc3".to_owned()).unwrap());
 
 		stack
 			.enter(|stk| async {
@@ -767,7 +770,7 @@ mod tests {
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let mut ast = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-			let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = ast.statements.pop().unwrap()
+			let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = ast.expressions.pop().unwrap()
 			else {
 				panic!()
 			};
@@ -777,10 +780,14 @@ mod tests {
 			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 			let mut stack = reblessive::TreeStack::new();
 
-			let doc1: RecordId = RecordId::new("t".to_owned(), "doc1".to_owned());
-			let doc2: RecordId = RecordId::new("t".to_owned(), "doc2".to_owned());
-			let doc3: RecordId = RecordId::new("t".to_owned(), "doc3".to_owned());
-			let doc4: RecordId = RecordId::new("t".to_owned(), "doc4".to_owned());
+			let doc1: RecordId =
+				RecordId::new("t".to_owned(), Strand::new("doc1".to_owned()).unwrap());
+			let doc2: RecordId =
+				RecordId::new("t".to_owned(), Strand::new("doc2".to_owned()).unwrap());
+			let doc3: RecordId =
+				RecordId::new("t".to_owned(), Strand::new("doc3".to_owned()).unwrap());
+			let doc4: RecordId =
+				RecordId::new("t".to_owned(), Strand::new("doc4".to_owned()).unwrap());
 
 			let btree_order = 5;
 			stack
@@ -904,7 +911,7 @@ mod tests {
 
 	async fn concurrent_task(ds: Arc<Datastore>, az: Arc<DefineAnalyzerStatement>) {
 		let btree_order = 5;
-		let doc1: RecordId = RecordId::new("t".to_owned(), "doc1".to_owned());
+		let doc1: RecordId = RecordId::new("t".to_owned(), Strand::new("doc1".to_owned()).unwrap());
 		let content1 = Value::from(Array::from(vec![
 			"Enter a search term",
 			"Welcome",
@@ -951,7 +958,7 @@ mod tests {
 	async fn concurrent_test() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = q.statements.pop().unwrap() else {
+		let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = q.expressions.pop().unwrap() else {
 			panic!()
 		};
 		let sql::statements::DefineStatement::Analyzer(az) = *def else {
@@ -990,7 +997,7 @@ mod tests {
 			panic!()
 		};
 		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
-		let doc: RecordId = RecordId::new("t".to_owned(), "doc1".to_owned());
+		let doc: RecordId = RecordId::new("t".to_owned(), Strand::new("doc1".to_owned()).unwrap());
 		let content = Value::from(Array::from(vec![
 			"Enter a search term",
 			"Welcome",

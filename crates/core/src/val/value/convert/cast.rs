@@ -5,8 +5,10 @@ use std::str::FromStr as _;
 use geo::Point;
 use rust_decimal::Decimal;
 
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::expr::kind::{HasKind, KindLiteral};
 use crate::expr::{Ident, Kind};
+use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
@@ -506,10 +508,15 @@ impl Cast for Array {
 				}
 				// unwrap checked above
 				let range = range.coerce_to_typed::<i64>().unwrap();
-				range.clone().cast_to_array().ok_or_else(|| CastError::RangeSizeLimit {
-					value: Box::new(Range::from(range)),
-				})
+				if range.len() > *GENERATION_ALLOCATION_LIMIT {
+					return Err(CastError::RangeSizeLimit {
+						value: Box::new(Range::from(range)),
+					});
+				}
+
+				Ok(range.cast_to_array())
 			}
+
 			Value::Bytes(x) => Ok(Array(x.0.into_iter().map(|x| Value::from(x as i64)).collect())),
 			_ => Err(CastError::InvalidKind {
 				from: v,
@@ -640,7 +647,7 @@ impl Cast for RecordId {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Thing(x) => Ok(x),
-			Value::Strand(x) => match todo!() {
+			Value::Strand(x) => match syn::thing(&*x) {
 				Ok(x) => Ok(x),
 				Err(_) => Err(CastError::InvalidKind {
 					from: Value::Strand(x),

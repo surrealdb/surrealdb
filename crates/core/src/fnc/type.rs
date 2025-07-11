@@ -7,7 +7,8 @@ use crate::err::Error;
 use crate::expr::{FlowResultExt as _, Ident, Idiom, Kind};
 use crate::syn;
 use crate::val::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, Strand, Uuid, Value,
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
+	RecordIdKeyRange, Strand, Uuid, Value,
 };
 use anyhow::{Result, bail, ensure};
 use geo::Point;
@@ -139,7 +140,7 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 		// TODO: null byte check.
 		Value::Thing(t) => unsafe { Strand::new_unchecked(t.table) },
 		// TODO: Handle null byte
-		v => unsafe { Strand::new_unchecked(v.as_string()) },
+		v => unsafe { Strand::new_unchecked(v.as_raw_string()) },
 	};
 	Ok(Value::Table(strand))
 }
@@ -163,22 +164,29 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 					Number::Float(x) => unsafe { Strand::new_unchecked(x.to_string()) }.into(),
 					// Safety: decimal -> string conversion cannot contain a null byte.
 					Number::Decimal(x) => unsafe { Strand::new_unchecked(x.to_string()) }.into(),
-					Number::Decimal(x) => x.to_string().into(),
 				},
-				Value::Range(v) => v.deref().to_owned().try_into()?,
+				Value::Range(v) => {
+					let res =
+						RecordIdKeyRange::from_value_range((*v).clone()).ok_or_else(|| {
+							Error::IdInvalid {
+								value: arg2.as_raw_string(),
+							}
+						})?;
+					RecordIdKey::Range(Box::new(res))
+				}
 				Value::Uuid(u) => u.into(),
 				ref v => {
-					let s = v.clone().as_string();
+					let s = v.to_raw_string();
 					ensure!(
 						!s.is_empty(),
 						Error::IdInvalid {
-							value: arg2.as_string(),
+							value: arg2.as_raw_string(),
 						}
 					);
-					s.into()
+					RecordIdKey::String(s)
 				}
 			},
-			table: arg1.as_string(),
+			table: arg1.as_raw_string(),
 		})),
 
 		(arg1, None) => arg1
@@ -194,6 +202,7 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 }
 
 pub mod is {
+	use crate::expr::Ident;
 	use crate::fnc::args::Optional;
 	use crate::val::{Geometry, Strand, Value};
 	use anyhow::Result;
@@ -284,7 +293,7 @@ pub mod is {
 
 	pub fn record((arg, Optional(table)): (Value, Optional<Strand>)) -> Result<Value> {
 		let res = match table {
-			Some(tb) => arg.is_record_type(&[tb.into()]).into(),
+			Some(tb) => arg.is_record_type(&[Ident::from_strand(tb)]).into(),
 			None => arg.is_thing().into(),
 		};
 		Ok(res)

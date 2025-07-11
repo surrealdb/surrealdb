@@ -266,16 +266,6 @@ impl Value {
 	// Simple conversion of value
 	// -----------------------------------
 
-	/// Convert this Value into a String
-	pub fn as_string(self) -> String {
-		match self {
-			Value::Strand(v) => v.into_string(),
-			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw(),
-			_ => self.to_string(),
-		}
-	}
-
 	/// Converts this Value into an unquoted String
 	pub fn as_raw_string(self) -> String {
 		match self {
@@ -286,10 +276,6 @@ impl Value {
 		}
 	}
 
-	// -----------------------------------
-	// Expensive conversion of value
-	// -----------------------------------
-
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
@@ -299,6 +285,10 @@ impl Value {
 			_ => self.to_string(),
 		}
 	}
+
+	// -----------------------------------
+	// Expensive conversion of value
+	// -----------------------------------
 
 	/*
 	/// Converts a `surrealdb::sq::Value` into a `serde_json::Value`
@@ -944,7 +934,7 @@ subtypes! {
 	Bool(bool) => (is_bool,as_bool,into_bool),
 	Number(Number) => (is_number,as_number,into_number),
 	Strand(Strand) => (is_strand,as_strand,into_strand),
-	Tabler(Strand) => (is_table,as_table,into_table),
+	//Table(Strand) => (is_table,as_table,into_table),
 	Duration(Duration) => (is_duration,as_duration,into_duration),
 	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
 	Uuid(Uuid) => (is_uuid,as_uuid,into_uuid),
