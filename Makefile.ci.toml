@@ -1,3 +1,5 @@
+extend = "Makefile.common.toml"
+
 [env]
 RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
@@ -118,7 +120,8 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration=debug", condit
     "RUST_LOG",
 ] } } }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
@@ -137,7 +140,8 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "http_integration=debug", condi
     "RUST_LOG",
 ] } } }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
@@ -156,7 +160,8 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "ws_integration=debug", conditi
     "RUST_LOG",
 ] } } }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
@@ -175,16 +180,15 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug"
     "RUST_LOG",
 ] } } }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--features",
     "storage-mem,ml",
     "--workspace",
     "--test",
     "ml_integration",
-    "--",
-    "ml_integration",
-    "--nocapture",
+    "--no-capture",
 ]
 
 [tasks.ci-graphql-integration]
@@ -194,23 +198,23 @@ env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug"
     "RUST_LOG",
 ] } }, SURREAL_CAPS_ALLOW_EXPERIMENTAL = "graphql" }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--features",
     "storage-mem",
     "--workspace",
     "--test",
     "graphql_integration",
-    "--",
-    "graphql_integration",
-    "--nocapture",
+    "--no-capture",
 ]
 
 [tasks.ci-test-workspace]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
@@ -238,6 +242,7 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
     "llvm-cov",
+    "nextest",
     "--html",
     "--locked",
     "--no-default-features",
@@ -297,7 +302,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb-core",
@@ -306,6 +312,8 @@ args = [
     "${_TEST_FEATURES}",
     "--lib",
     "kvs::tests",
+    # Run the tests one at a time in order to ensure isolation.
+    "--test-threads", "1",
 ]
 
 [tasks.test-api-integration]
@@ -313,7 +321,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb",
@@ -323,6 +332,8 @@ args = [
     "--test",
     "api",
     "api_integration::${_TEST_API_ENGINE}",
+    # Run the tests one at a time in order to ensure isolation.
+    "--test-threads", "1",
 ]
 
 [tasks.ci-api-integration]
@@ -339,7 +350,8 @@ private = true
 command = "cargo"
 env = { RUST_LOG = "info" }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
@@ -347,9 +359,7 @@ args = [
     "--workspace",
     "--test",
     "database_upgrade",
-    "--",
-    "database_upgrade",
-    "--show-output",
+    "--success-output", "final",
 ]
 
 #
