@@ -2,6 +2,8 @@ mod expr;
 mod rpc;
 mod value;
 
+pub use surrealdb_protocol::{TryFromValue, TryIntoValue};
+
 /// Trait for converting a type to a flatbuffers builder type.
 pub trait ToFlatbuffers {
 	type Output<'bldr>;

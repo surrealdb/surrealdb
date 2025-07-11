@@ -17,6 +17,10 @@ pub struct Signin {
 	pub(super) access_method: AccessMethod,
 }
 
+trait MyTrait: Send + Sync {}
+
+impl MyTrait for Signin {}
+
 impl IntoFuture for Signin {
 	type Output = Result<Jwt>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -28,7 +32,6 @@ impl IntoFuture for Signin {
 		} = self;
 		Box::pin(async move {
 			let mut client = client.client.clone();
-			let client = &mut client;
 
 			let response = client
 				.signin(SigninRequest {

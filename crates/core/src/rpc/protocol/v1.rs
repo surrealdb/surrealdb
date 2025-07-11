@@ -105,7 +105,7 @@ pub trait RpcProtocolV1: RpcContext {
 		match ns {
 			V1Value::None => (),
 			V1Value::Null => session.ns = None,
-			V1Value::Strand(ns) => session.ns = Some(ns.0),
+			V1Value::String(ns) => session.ns = Some(ns.0),
 			_ => {
 				return Err(RpcError::InvalidParams);
 			}
@@ -114,7 +114,7 @@ pub trait RpcProtocolV1: RpcContext {
 		match db {
 			V1Value::None => (),
 			V1Value::Null => session.db = None,
-			V1Value::Strand(db) => session.db = Some(db.0),
+			V1Value::String(db) => session.db = Some(db.0),
 			_ => {
 				return Err(RpcError::InvalidParams);
 			}
@@ -192,7 +192,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 	async fn authenticate(&self, params: types::V1Array) -> Result<V1Data, RpcError> {
 		// Process the method arguments
-		let Ok(V1Value::Strand(token)) = params.needs_one() else {
+		let Ok(V1Value::String(token)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
@@ -277,7 +277,7 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok((V1Value::Strand(key), val)) = params.needs_one_or_two() else {
+		let Ok((V1Value::String(key), val)) = params.needs_one_or_two() else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the query parameters
@@ -327,7 +327,7 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let Ok(V1Value::Strand(key)) = params.needs_one() else {
+		let Ok(V1Value::String(key)) = params.needs_one() else {
 			return Err(RpcError::InvalidParams);
 		};
 		// Get the context lock
@@ -995,7 +995,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
 		// Output the graphql response
-		Ok(V1Value::Strand(out.into()).into())
+		Ok(V1Value::String(out.into()).into())
 	}
 
 	// ------------------------------

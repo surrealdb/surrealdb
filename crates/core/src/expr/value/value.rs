@@ -35,165 +35,6 @@ use std::ops::{Bound, Deref};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
-pub trait TryFromValue: Sized {
-	/// Try to convert a Value into this type
-	fn try_from_value(value: Value) -> Result<Self>;
-}
-
-impl<T> TryFromValue for Option<T>
-where
-	T: TryFromValue,
-{
-	#[inline]
-	fn try_from_value(value: Value) -> Result<Self> {
-		match value {
-			Value::None | Value::Null => Ok(None),
-			v => T::try_from_value(v).map(Some),
-		}
-	}
-}
-
-impl TryFromValue for Value {
-	#[inline]
-	fn try_from_value(value: Value) -> Result<Self> {
-		Ok(value)
-	}
-}
-
-impl TryFromValue for semver::Version {
-	#[inline]
-	fn try_from_value(value: Value) -> Result<Self> {
-		match value {
-			Value::Strand(s) => Ok(semver::Version::parse(&s.0)?),
-			_ => Err(Error::UnexpectedType {
-				expected: "version",
-				actual: value.kindof(),
-			}
-			.into()),
-		}
-	}
-}
-
-impl TryFromValue for String {
-	#[inline]
-	fn try_from_value(value: Value) -> Result<Self> {
-		match value {
-			Value::Strand(s) => Ok(s.0),
-			Value::Uuid(u) => Ok(u.to_raw()),
-			Value::Datetime(d) => Ok(d.to_raw()),
-			v => Err(Error::UnexpectedType {
-				expected: "string",
-				actual: v.kindof(),
-			}
-			.into()),
-		}
-	}
-}
-
-impl TryFromValue for uuid::Uuid {
-	#[inline]
-	fn try_from_value(value: Value) -> Result<Self> {
-		match value {
-			Value::Uuid(u) => Ok(u.0),
-			unexpected => Err(Error::UnexpectedType {
-				expected: "uuid",
-				actual: unexpected.kindof(),
-			}
-			.into()),
-		}
-	}
-}
-
-macro_rules! impl_try_from_value_for_int {
-	($t:ty) => {
-		impl TryFromValue for $t {
-			#[inline]
-			fn try_from_value(value: Value) -> Result<Self> {
-				match value {
-					Value::Number(Number::Int(v)) => Ok(v as Self),
-					Value::Number(Number::Float(v)) => Ok(v as Self),
-					Value::Number(Number::Decimal(v)) => Ok(v.to_i64().unwrap() as Self),
-					v => Err(Error::UnexpectedType {
-						expected: stringify!($t),
-						actual: v.kindof(),
-					}.into()),
-				}
-			}
-		}
-	};
-	($($t:ty),+ $(,)?) => {
-		$(impl_try_from_value_for_int!($t);)+
-	};
-}
-
-macro_rules! impl_try_from_value_for_float {
-	($t:ty) => {
-		impl TryFromValue for $t {
-			#[inline]
-			fn try_from_value(value: Value) -> Result<Self> {
-				match value {
-					Value::Number(Number::Float(v)) => Ok(v as Self),
-					Value::Number(Number::Int(v)) => Ok(v as Self),
-					Value::Number(Number::Decimal(v)) => Ok(v.to_f64().unwrap() as Self),
-					v => Err(Error::UnexpectedType {
-						expected: stringify!($t),
-						actual: v.kindof(),
-					}.into()),
-				}
-			}
-		}
-	};
-	($($t:ty),+ $(,)?) => {
-		$(impl_try_from_value_for_float!($t);)+
-	};
-}
-
-impl TryFromValue for bool {
-	#[inline]
-	fn try_from_value(value: Value) -> Result<Self> {
-		match value {
-			Value::Bool(b) => Ok(b),
-			v => Err(Error::UnexpectedType {
-				expected: "bool",
-				actual: v.kindof(),
-			}
-			.into()),
-		}
-	}
-}
-
-impl_try_from_value_for_int!(i8, i16, i32, i64, isize);
-impl_try_from_value_for_int!(u8, u16, u32, u64, usize);
-impl_try_from_value_for_float!(f32, f64);
-
-impl TryFromValue for () {
-	#[inline]
-	fn try_from_value(value: Value) -> Result<Self> {
-		match value {
-			Value::None | Value::Null => Ok(()),
-			v => Err(Error::UnexpectedType {
-				expected: "unit",
-				actual: v.kindof(),
-			}
-			.into()),
-		}
-	}
-}
-
-impl<T> TryFromValue for Vec<T>
-where
-	T: TryFromValue,
-{
-	#[inline]
-	fn try_from_value(value: Value) -> Result<Self> {
-		match value {
-			Value::Array(arr) => arr.into_iter().map(T::try_from_value).collect::<Result<Vec<_>>>(),
-			Value::None | Value::Null => Ok(Vec::new()),
-			v => Ok(vec![T::try_from_value(v)?]),
-		}
-	}
-}
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -1429,7 +1270,7 @@ subtypes! {
 macro_rules! impl_from_number {
 	($($n:ident),*$(,)?) => {
 		$(
-			impl From<$n> for Value{
+			impl From<$n> for Value {
 				fn from(v: $n) -> Self{
 					Value::Number(Number::from(v))
 				}
@@ -1602,6 +1443,20 @@ impl FromIterator<Value> for Value {
 impl FromIterator<(String, Value)> for Value {
 	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
 		Value::Object(Object(iter.into_iter().collect()))
+	}
+}
+
+// TODO: Remove these implementations. This is useful for testing.
+impl PartialEq<crate::sql::SqlValue> for Value {
+	fn eq(&self, other: &crate::sql::SqlValue) -> bool {
+		self == &Value::from(other.clone())
+	}
+}
+
+// TODO: Remove these implementations. This is useful for testing.
+impl PartialEq<Value> for crate::sql::SqlValue {
+	fn eq(&self, other: &Value) -> bool {
+		Value::from(self.clone()) == *other
 	}
 }
 

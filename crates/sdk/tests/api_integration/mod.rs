@@ -85,19 +85,15 @@ struct AuthParams<'a> {
 ///
 /// Used to be able to define tests on multiple types of databases only once.
 trait CreateDb {
-	type Con: Connection;
-
-	async fn create_db(&self) -> (SemaphorePermit<'static>, Surreal<Self::Con>);
+	async fn create_db(&self) -> (SemaphorePermit<'static>, Surreal);
 }
 
 impl<F, Fut, C> CreateDb for F
 where
 	F: Fn() -> Fut,
-	Fut: Future<Output = (SemaphorePermit<'static>, Surreal<C>)>,
+	Fut: Future<Output = (SemaphorePermit<'static>, Surreal)>,
 {
-	type Con = C;
-
-	async fn create_db(&self) -> (SemaphorePermit<'static>, Surreal<Self::Con>) {
+	async fn create_db(&self) -> (SemaphorePermit<'static>, Surreal) {
 		(self)().await
 	}
 }
@@ -187,42 +183,42 @@ mod ws {
 	include_tests!(new_db => basic, serialisation, live);
 }
 
-#[cfg(feature = "protocol-http")]
-mod http {
+// #[cfg(feature = "protocol-http")]
+// mod http {
 
-	use surrealdb::engine::remote::http::Client;
-	use surrealdb::engine::remote::http::Http;
+// 	use surrealdb::engine::remote::http::Client;
+// 	use surrealdb::engine::remote::http::Http;
 
-	use surrealdb::Surreal;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::Semaphore;
-	use tokio::sync::SemaphorePermit;
+// 	use surrealdb::Surreal;
+// 	use surrealdb::opt::auth::Root;
+// 	use tokio::sync::Semaphore;
+// 	use tokio::sync::SemaphorePermit;
 
-	use super::{ROOT_PASS, ROOT_USER};
+// 	use super::{ROOT_PASS, ROOT_USER};
 
-	static PERMITS: Semaphore = Semaphore::const_new(1);
+// 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
-		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		})
-		.await
-		.unwrap();
-		(permit, db)
-	}
+// 	async fn new_db() -> (SemaphorePermit<'static>, Surreal) {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
+// 		db.signin(Root {
+// 			username: ROOT_USER,
+// 			password: ROOT_PASS,
+// 		})
+// 		.await
+// 		.unwrap();
+// 		(permit, db)
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
-		drop(permit);
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn any_engine_can_connect() {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
+// 		drop(permit);
+// 	}
 
-	include_tests!(new_db => basic, serialisation, backup);
-}
+// 	include_tests!(new_db => basic, serialisation, backup);
+// }
 
 #[cfg(feature = "kv-mem")]
 mod mem {

@@ -19,14 +19,14 @@ async fn use_statement_set_ns() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into();
+	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['my_ns', 'my_ns', 'test', 'test']").into();
+	let val = SqlValue::parse("['my_ns', 'my_ns', 'test', 'test']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -45,14 +45,14 @@ async fn use_statement_set_db() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into();
+	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['test', 'test', 'my_db', 'my_db']").into();
+	let val = SqlValue::parse("['test', 'test', 'my_db', 'my_db']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -71,14 +71,14 @@ async fn use_statement_set_both() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into();
+	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['my_ns', 'my_ns', 'my_db', 'my_db']").into();
+	let val = SqlValue::parse("['my_ns', 'my_ns', 'my_db', 'my_db']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

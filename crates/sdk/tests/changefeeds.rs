@@ -100,29 +100,20 @@ async fn database_change_feeds() -> Result<()> {
 		let res = &mut dbs.execute(sql2, ses, None).await?;
 		assert_eq!(res.len(), 3);
 		// UPDATE CONTENT
-		let tmp = res.remove(0).values?[0];
+		let tmp = res.remove(0).take_first()?;
 		let val = SqlValue::parse(
-			"[
-			{
+			"{
 				id: person:test,
 				name: 'Name: Tobie',
-			}
-		]",
-		)
-		.into();
-		Some(&tmp)
-			.filter(|x| *x == &val)
-			.map(|_v| ())
-			.ok_or_else(|| anyhow!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
+			}",
+		);
+		assert_eq!(tmp, val);
 		// DELETE
 		let tmp = res.remove(0).values?;
-		let val = SqlValue::parse("[]").into();
-		Some(&tmp)
-			.filter(|x| *x == &val)
-			.map(|_v| ())
-			.ok_or_else(|| anyhow!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
+		assert!(tmp.is_empty());
+
 		// SHOW CHANGES
-		let tmp = res.remove(0).values?;
+		let tmp = res.remove(0).take_first()?;
 		cf_val_arr
 			.iter()
 			.find(|x| *x == &tmp)
@@ -168,7 +159,7 @@ async fn database_change_feeds() -> Result<()> {
 	tx.cancel().await?;
 
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	assert!(potential_show_changes_values.contains(&tmp));
 	// GC after 1hs
 	let one_hour_in_secs = 3600;
@@ -177,8 +168,7 @@ async fn database_change_feeds() -> Result<()> {
 	dbs.changefeed_process_at(current_time).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).values?;
-	let val: Value = SqlValue::parse("[]").into();
-	assert_eq!(val, tmp);
+	assert!(tmp.is_empty());
 	//
 	Ok(())
 }
@@ -234,7 +224,7 @@ async fn table_change_feeds() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	// UPDATE REPLACE
 	let tmp = res.remove(0).values;
@@ -252,7 +242,7 @@ async fn table_change_feeds() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	// UPDATE SET
 	let tmp = res.remove(0).values;
@@ -270,16 +260,16 @@ async fn table_change_feeds() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	// DELETE
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[]").into();
-	assert_eq!(tmp, val);
+	assert!(tmp.is_empty());
 	// CREATE
-	let _tmp = res.remove(0).values?;
-	// SHOW CHANGES
 	let tmp = res.remove(0).values?;
+	assert!(tmp.is_empty());
+	// SHOW CHANGES
+	let tmp = res.remove(0).take_first()?;
 	// If you want to write a macro, you are welcome to
 	let limit_variance = 3;
 	let first = VersionStamp::ZERO.iter().take(limit_variance);
@@ -353,7 +343,7 @@ async fn table_change_feeds() -> Result<()> {
 	dbs.changefeed_process_at(end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[]").into();
+	let val = Vec::new();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -397,7 +387,7 @@ async fn changefeed_with_ts() -> Result<()> {
 		},
 	]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(users, expected);
 	let sql = format!("SELECT * FROM {table}");
 	let users = db.execute(&sql, &ses, None).await?.remove(0).values?;

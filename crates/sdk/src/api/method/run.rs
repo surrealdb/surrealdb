@@ -8,8 +8,8 @@ use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Array;
-use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
+use surrealdb_core::protocol::TryFromValue;
 use surrealdb_core::sql::Function;
 use surrealdb_core::sql::Model;
 use surrealdb_core::sql::SqlValue;
@@ -76,8 +76,6 @@ where
 			let mut stream = QueryResponseValueStream::new(response.into_inner());
 
 			let value = stream.next().await.context("Failed to get value from stream")??;
-
-			let value: Value = value.try_into()?;
 
 			Ok(R::try_from_value(value)?)
 		})

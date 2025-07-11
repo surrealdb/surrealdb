@@ -9,11 +9,13 @@ use anyhow::Context;
 use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::expr::Data;
 use surrealdb_core::expr::Value;
-use surrealdb_core::expr::{Data, TryFromValue};
+use surrealdb_core::protocol::TryFromValue;
 use surrealdb_core::sql::Output;
 use surrealdb_core::sql::statements::InsertStatement;
 use surrealdb_protocol::QueryResponseValueStream;
+use surrealdb_protocol::TryIntoValue;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;
 
@@ -79,9 +81,7 @@ where
 
 			let first = stream.next().await.context("Failed to get first response")??;
 
-			let value: Value = first.try_into()?;
-
-			let value = RT::try_from_value(value)?;
+			let value = RT::try_from_value(first)?;
 
 			Ok(value)
 		})
@@ -94,12 +94,17 @@ where
 	RT: TryFromValue,
 {
 	/// Specifies the data to insert into the table
-	pub fn content(self, value: Value) -> Insert<R, RT> {
+	pub fn content<V>(self, value: V) -> Insert<R, RT>
+	where
+		V: TryIntoValue,
+	{
+		let value = value.try_into_value().unwrap();
+
 		Self {
 			txn: self.txn,
 			client: self.client,
 			what: self.what,
-			data: Data::ContentExpression(value.into()),
+			data: Data::ContentExpression(value.try_into().unwrap()),
 			response_type: PhantomData,
 		}
 	}

@@ -29,6 +29,8 @@ pub use surrealdb_core::expr::Value;
 #[expect(hidden_glob_reexports)]
 mod api;
 
+pub use surrealdb_core::expr::Thing as RecordId;
+
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {

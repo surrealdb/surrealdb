@@ -24,7 +24,7 @@ use types::User;
 
 #[tokio::test]
 async fn api() {
-	let DB = Surreal::connect("memory", 512).await.unwrap();
+	let DB = Surreal::connect("memory").await.unwrap();
 
 	// // connect to the mock server
 	// DB.connect::<Test>(()).with_capacity(512).await.unwrap();
@@ -171,14 +171,14 @@ async fn api() {
 	let _: Option<User> = DB.run("foo").await.unwrap();
 }
 
-fn assert_send_sync(_: impl Send + Sync) {}
+fn assert_send(_: impl Send) {}
 
 #[test]
 fn futures_are_send_sync() {
-	assert_send_sync(async {
+	assert_send(async {
 		let (channel, server_handle) = protocol::TestServer::serve().await;
 
-		let db = Surreal::new(channel, "test").await.unwrap();
+		let db = Surreal::new(channel, "test".try_into().unwrap());
 
 		db.signin(Root {
 			username: "root",

@@ -8,8 +8,10 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::expr::Data;
 use surrealdb_core::expr::Value;
-use surrealdb_core::expr::{Data, TryFromValue};
+use surrealdb_core::protocol::TryFromValue;
+use surrealdb_core::protocol::TryIntoValue;
 use surrealdb_core::sql::statements::CreateStatement;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;
@@ -88,8 +90,6 @@ where
 
 				let value = query_response.values.remove(0);
 
-				let value = Value::try_from(value)?;
-
 				return RT::try_from_value(value);
 			}
 
@@ -104,12 +104,13 @@ where
 	RT: TryFromValue,
 {
 	/// Sets content of a record
-	pub fn content(self, data: impl Into<Value>) -> Create<R, RT> {
-		let content = data.into();
+	pub fn content(self, data: impl TryInto<Value, Error = anyhow::Error>) -> Create<R, RT> {
+		let content: Value = data.try_into().unwrap();
 
-		let data = match content {
-			Value::None | Value::Null => Data::EmptyExpression,
-			content => Data::ContentExpression(content),
+		let data = if content.is_none() || content.is_null() {
+			Data::EmptyExpression
+		} else {
+			Data::ContentExpression(content)
 		};
 
 		Self {

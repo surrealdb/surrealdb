@@ -219,7 +219,7 @@ async fn define_statement_index_concurrently_building_status(
 		}
 		// We monitor the status
 		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
-		let tmp = r.remove(0).values?;
+		let tmp = r.remove(0).take_first()?;
 		if let Value::Object(o) = &tmp {
 			if let Some(Value::Object(o)) = o.get("building") {
 				if let Some(Value::Strand(s)) = o.get("status") {

@@ -395,7 +395,7 @@ impl Surreal {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(&self, request: impl Into<SignupRequest>) -> Signup {
+	pub fn signup(&self, request: impl Into<SignupRequest>) -> Signup {
 		Signup {
 			client: self.clone(),
 			request: request.into(),
@@ -653,18 +653,16 @@ impl Surreal {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<R, RT, RTItem>(&self, resource: R) -> Select<R, RT, RTItem>
+	pub fn select<R, RT>(&self, resource: R) -> Select<R, RT>
 	where
 		R: Resource,
-		RT: TryFromQueryStream<RTItem>,
-		RTItem: TryFrom<ValueProto>,
+		RT: TryFromQueryStream + Send,
 	{
 		Select {
 			txn: None,
 			client: self.clone(),
 			resource,
 			response_type: PhantomData,
-			response_item_type: PhantomData,
 		}
 	}
 

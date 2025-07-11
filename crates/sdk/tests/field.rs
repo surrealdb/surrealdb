@@ -304,7 +304,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[]").into();
+	let val = Vec::new();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -158,17 +158,14 @@ impl Surreal {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn new(dst: Channel, endpoint: impl Into<Endpoint>) -> Self {
+	pub fn new(dst: Channel, endpoint: Endpoint) -> Self {
 		Self {
 			client: SurrealDbServiceClient::new(dst),
-			endpoint: endpoint.into(),
+			endpoint,
 		}
 	}
 
-	pub async fn connect(
-		endpoint: impl TryInto<Endpoint, Error = anyhow::Error>,
-		capacity: usize,
-	) -> Result<Self> {
+	pub async fn connect(endpoint: impl TryInto<Endpoint, Error = anyhow::Error>) -> Result<Self> {
 		let endpoint = endpoint.try_into().context("Failed to parse endpoint")?;
 
 		let endpoint_kind = endpoint.url.scheme().parse::<EndpointKind>()?;
@@ -197,7 +194,7 @@ impl Surreal {
 				feature = "kv-surrealkv",
 			))]
 			{
-				let (client, server) = tokio::io::duplex(capacity);
+				let (client, server) = tokio::io::duplex(64 * 1024);
 				let mut client = Some(client);
 				let channel = tonic::transport::Endpoint::try_from(endpoint.url.to_string())?
 					.connect_with_connector(tower::service_fn(move |_: http::Uri| {

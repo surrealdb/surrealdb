@@ -473,9 +473,9 @@ pub async fn send(
 	let (len, msg) = match fmt.res_ws(response) {
 		Ok((l, m)) => (l, m),
 		Err(err) => {
-			// TODO: STU: Handle this error better.
-			fmt.res_ws(V1Response::failure(id, err))
-				.expect("Serialising internal error should always succeed")
+			if let Err(err) = fmt.res_ws(V1Response::failure(id, err)) {
+				warn!("Error serialising internal error: {err}");
+			}
 		}
 	};
 	// Send the message to the write channel
@@ -505,7 +505,7 @@ impl RpcContext for Websocket {
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> V1Data {
-		V1Data::Other(V1Value::Strand(format!("{PKG_NAME}-{}", *PKG_VERSION).into()))
+		V1Data::Other(V1Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION).into()))
 	}
 
 	// ------------------------------

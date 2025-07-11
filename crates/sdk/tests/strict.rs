@@ -196,11 +196,11 @@ async fn strict_mode_all_ok() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -7,8 +7,8 @@ use anyhow::Context;
 use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
+use surrealdb_core::protocol::TryFromValue;
 use surrealdb_core::sql::Data;
 use surrealdb_core::sql::Output;
 use surrealdb_core::sql::statements::InsertStatement;
@@ -71,9 +71,7 @@ where
 
 			let first = stream.next().await.context("Failed to get first response")??;
 
-			let value: Value = first.try_into()?;
-
-			let value = RT::try_from_value(value)?;
+			let value = RT::try_from_value(first)?;
 
 			Ok(value)
 		})

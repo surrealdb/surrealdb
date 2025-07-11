@@ -183,7 +183,7 @@ pub enum V1Value {
 	Null,
 	Bool(bool),
 	Number(V1Number),
-	Strand(V1Strand),
+	String(V1String),
 	Duration(V1Duration),
 	Datetime(V1Datetime),
 	Uuid(V1Uuid),
@@ -202,7 +202,7 @@ impl V1Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			V1Value::Strand(v) => v.0.clone(),
+			V1Value::String(v) => v.0.clone(),
 			V1Value::Uuid(v) => v.to_raw(),
 			V1Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
@@ -212,7 +212,7 @@ impl V1Value {
 	/// Converts this Value into an unquoted String
 	pub fn as_string(self) -> String {
 		match self {
-			V1Value::Strand(v) => v.0,
+			V1Value::String(v) => v.0,
 			V1Value::Uuid(v) => v.to_raw(),
 			V1Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
@@ -238,19 +238,19 @@ impl V1Value {
 
 impl From<String> for V1Value {
 	fn from(v: String) -> Self {
-		Self::Strand(V1Strand::from(v))
+		Self::String(V1String::from(v))
 	}
 }
 
 impl From<&str> for V1Value {
 	fn from(v: &str) -> Self {
-		Self::Strand(V1Strand::from(v.to_string()))
+		Self::String(V1String::from(v.to_string()))
 	}
 }
 
-impl From<V1Strand> for V1Value {
-	fn from(v: V1Strand) -> Self {
-		Self::Strand(v)
+impl From<V1String> for V1Value {
+	fn from(v: V1String) -> Self {
+		Self::String(v)
 	}
 }
 
@@ -464,15 +464,15 @@ impl V1Number {
 #[serde(rename = "$surrealdb::private::sql::Strand")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct V1Strand(#[serde(with = "no_nul_bytes")] pub String);
+pub struct V1String(#[serde(with = "no_nul_bytes")] pub String);
 
-impl From<String> for V1Strand {
+impl From<String> for V1String {
 	fn from(v: String) -> Self {
 		Self(v)
 	}
 }
 
-impl From<&str> for V1Strand {
+impl From<&str> for V1String {
 	fn from(v: &str) -> Self {
 		Self(v.to_string())
 	}
@@ -508,9 +508,9 @@ impl TryFrom<String> for V1Duration {
 	}
 }
 
-impl TryFrom<V1Strand> for V1Duration {
+impl TryFrom<V1String> for V1Duration {
 	type Error = anyhow::Error;
-	fn try_from(v: V1Strand) -> Result<Self, Self::Error> {
+	fn try_from(v: V1String) -> Result<Self, Self::Error> {
 		Self::try_from(v.0.as_str())
 	}
 }
@@ -865,9 +865,9 @@ impl TryFrom<String> for V1RecordId {
 	}
 }
 
-impl TryFrom<V1Strand> for V1RecordId {
+impl TryFrom<V1String> for V1RecordId {
 	type Error = anyhow::Error;
-	fn try_from(v: V1Strand) -> Result<Self, Self::Error> {
+	fn try_from(v: V1String) -> Result<Self, Self::Error> {
 		Self::try_from(v.0.as_str())
 	}
 }
@@ -1096,7 +1096,7 @@ impl Display for V1Value {
 			V1Value::Geometry(v) => write!(f, "{v}"),
 			V1Value::Number(v) => write!(f, "{v}"),
 			V1Value::Object(v) => write!(f, "{v}"),
-			V1Value::Strand(v) => write!(f, "{v}"),
+			V1Value::String(v) => write!(f, "{v}"),
 			V1Value::RecordId(v) => write!(f, "{v}"),
 			V1Value::Table(v) => write!(f, "{v}"),
 			V1Value::Uuid(v) => write!(f, "{v}"),
@@ -1277,7 +1277,7 @@ impl Display for V1Number {
 	}
 }
 
-impl Display for V1Strand {
+impl Display for V1String {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		crate::sql::escape::QuoteStr(&self.0).fmt(f)
 	}
@@ -1482,5 +1482,299 @@ impl Display for V1Geometry {
 				)
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	use crate::expr;
+	use crate::expr::Thing;
+	use crate::expr::Value;
+	use chrono::DateTime;
+	use chrono::Utc;
+	use geo::MultiLineString;
+	use geo::MultiPoint;
+	use geo::MultiPolygon;
+	use geo::line_string;
+	use geo::point;
+	use geo::polygon;
+	use rust_decimal::Decimal;
+	use serde_json::Value as Json;
+	use serde_json::json;
+	use std::collections::BTreeMap;
+	use std::time::Duration;
+	use uuid::Uuid;
+
+	use rstest::rstest;
+
+	#[rstest]
+	#[case::none(V1Value::None, json!(null), V1Value::Null)]
+	#[case::null(V1Value::Null, json!(null), V1Value::Null)]
+	#[case::bool(V1Value::Bool(true), json!(true), V1Value::Bool(true))]
+	#[case::bool(V1Value::Bool(false), json!(false), V1Value::Bool(false))]
+	#[case::number(
+		V1Value::Number(V1Number::Int(i64::MIN)),
+		json!(i64::MIN),
+		V1Value::Number(V1Number::Int(i64::MIN)),
+	)]
+	#[case::number(
+		V1Value::Number(V1Number::Int(i64::MAX)),
+		json!(i64::MAX),
+		V1Value::Number(V1Number::Int(i64::MAX)),
+	)]
+	#[case::number(
+		V1Value::Number(V1Number::Float(1.23)),
+		json!(1.23),
+		V1Value::Number(V1Number::Float(1.23)),
+	)]
+	#[case::number(
+		V1Value::Number(V1Number::Float(f64::NEG_INFINITY)),
+		json!(null),
+		V1Value::Null,
+	)]
+	#[case::number(
+		V1Value::Number(V1Number::Float(f64::MIN)),
+		json!(-1.7976931348623157e308),
+		V1Value::Number(V1Number::Float(f64::MIN)),
+	)]
+	#[case::number(
+		V1Value::Number(V1Number::Float(0.0)),
+		json!(0.0),
+		V1Value::Number(V1Number::Float(0.0)),
+	)]
+	#[case::number(
+		V1Value::Number(V1Number::Float(f64::MAX)),
+		json!(1.7976931348623157e308),
+		V1Value::Number(V1Number::Float(f64::MAX)),
+	)]
+	#[case::number(
+		V1Value::Number(V1Number::Float(f64::INFINITY)),
+		json!(null),
+		V1Value::Null,
+	)]
+	#[case::number(
+		V1Value::Number(V1Number::Float(f64::NAN)),
+		json!(null),
+		V1Value::Null,
+	)]
+	#[case::number(
+		V1Value::Number(V1Number::Decimal(Decimal::new(123, 2))),
+		json!("1.23"),
+		V1Value::String("1.23".into()),
+	)]
+	#[case::strand(
+		V1Value::String("".into()),
+		json!(""),
+		V1Value::String("".into()),
+	)]
+	#[case::strand(
+		V1Value::String("foo".into()),
+		json!("foo"),
+		V1Value::String("foo".into()),
+	)]
+	#[case::duration(
+		V1Value::Duration(V1Duration(Duration::ZERO)),
+		json!("0ns"),
+		V1Value::String("0ns".into()),
+	)]
+	#[case::duration(
+		V1Value::Duration(V1Duration(Duration::MAX)),
+		json!("584942417355y3w5d7h15s999ms999µs999ns"),
+		Value::String("584942417355y3w5d7h15s999ms999µs999ns".into()),
+	)]
+	#[case::datetime(
+		V1Value::Datetime(V1Datetime(DateTime::<Utc>::MIN_UTC)),
+		json!("-262143-01-01T00:00:00Z"),
+		V1Value::String("-262143-01-01T00:00:00Z".into()),
+	)]
+	#[case::datetime(
+		V1Value::Datetime(V1Datetime(DateTime::<Utc>::MAX_UTC)),
+		json!("+262142-12-31T23:59:59.999999999Z"),
+		V1Value::String("+262142-12-31T23:59:59.999999999Z".into()),
+	)]
+	#[case::uuid(
+		V1Value::Uuid(V1Uuid(Uuid::nil())),
+		json!("00000000-0000-0000-0000-000000000000"),
+		V1Value::String("00000000-0000-0000-0000-000000000000".into()),
+	)]
+	#[case::uuid(
+		V1Value::Uuid(V1Uuid(Uuid::max())),
+		json!("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+		V1Value::String("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
+	)]
+	#[case::bytes(
+		V1Value::Bytes(V1Bytes(vec![])),
+		json!([]),
+		V1Value::Array(V1Array(vec![])),
+	)]
+	#[case::bytes(
+		V1Value::Bytes(V1Bytes(b"foo".to_vec())),
+		json!([102, 111, 111]),
+		V1Value::Array(V1Array(vec![
+			V1Value::Number(V1Number::Int(102)),
+			V1Value::Number(V1Number::Int(111)),
+			V1Value::Number(V1Number::Int(111)),
+		])),
+	)]
+	#[case::thing(
+		V1Value::RecordId(V1RecordId { tb: "foo".to_string(), id: "bar".into()}) ,
+		json!("foo:bar"),
+		V1Value::RecordId(V1RecordId { tb: "foo".to_string(), id: "bar".into()}) ,
+	)]
+	#[case::array(
+		V1Value::Array(V1Array(vec![])),
+		json!([]),
+		V1Value::Array(V1Array(vec![])),
+	)]
+	#[case::array(
+		V1Value::Array(V1Array(vec![V1Value::Bool(true), V1Value::Bool(false)])),
+		json!([true, false]),
+		V1Value::Array(V1Array(vec![V1Value::Bool(true), V1Value::Bool(false)])),
+	)]
+	#[case::object(
+		V1Value::Object(V1Object(BTreeMap::new())),
+		json!({}),
+		V1Value::Object(V1Object(BTreeMap::new())),
+	)]
+	#[case::object(
+		V1Value::Object(V1Object(BTreeMap::from([("done".to_owned(), V1Value::Bool(true))]))),
+		json!({"done": true}),
+		V1Value::Object(V1Object(BTreeMap::from([("done".to_owned(), V1Value::Bool(true))]))),
+	)]
+	#[case::geometry_point(
+		V1Value::Geometry(V1Geometry::Point(point! { x: 10., y: 20. })),
+		json!({ "type": "Point", "coordinates": [10., 20.]}),
+		V1Value::Geometry(V1Geometry::Point(point! { x: 10., y: 20. })),
+	)]
+	#[case::geometry_line(
+		V1Value::Geometry(V1Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])),
+		json!({ "type": "LineString", "coordinates": [[0., 0.], [10., 0.]]}),
+		V1Value::Geometry(V1Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])),
+	)]
+	#[case::geometry_polygon(
+		V1Value::Geometry(V1Geometry::Polygon(polygon![
+			(x: -111., y: 45.),
+			(x: -111., y: 41.),
+			(x: -104., y: 41.),
+			(x: -104., y: 45.),
+		])),
+		json!({ "type": "Polygon", "coordinates": [[
+			[-111., 45.],
+			[-111., 41.],
+			[-104., 41.],
+			[-104., 45.],
+			[-111., 45.],
+		]]}),
+		V1Value::Geometry(V1Geometry::Polygon(polygon![
+			(x: -111., y: 45.),
+			(x: -111., y: 41.),
+			(x: -104., y: 41.),
+			(x: -104., y: 45.),
+		])),
+	)]
+	#[case::geometry_multi_point(
+		V1Value::Geometry(V1Geometry::MultiPoint(MultiPoint::new(vec![
+			point! { x: 0., y: 0. },
+			point! { x: 1., y: 2. },
+		]))),
+		json!({ "type": "MultiPoint", "coordinates": [[0., 0.], [1., 2.]]}),
+		V1Value::Geometry(V1Geometry::MultiPoint(MultiPoint::new(vec![
+			point! { x: 0., y: 0. },
+			point! { x: 1., y: 2. },
+		]))),
+	)]
+	#[case::geometry_multi_line(
+		V1Value::Geometry(
+			V1Geometry::MultiLine(
+				MultiLineString::new(vec![
+					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
+				])
+			)
+		),
+		json!({ "type": "MultiLineString", "coordinates": [[[0., 0.], [1., 2.]]]}),
+		V1Value::Geometry(
+			V1Geometry::MultiLine(
+				MultiLineString::new(vec![
+					line_string![( x: 0., y: 0. ), ( x: 1., y: 2. )],
+				])
+			)
+		),
+	)]
+	#[case::geometry_multi_polygon(
+		V1Value::Geometry(V1Geometry::MultiPolygon(MultiPolygon::new(vec![
+			polygon![
+				(x: -111., y: 45.),
+				(x: -111., y: 41.),
+				(x: -104., y: 41.),
+				(x: -104., y: 45.),
+			],
+		]))),
+		json!({ "type": "MultiPolygon", "coordinates": [[[
+			[-111., 45.],
+			[-111., 41.],
+			[-104., 41.],
+			[-104., 45.],
+			[-111., 45.],
+		]]]})
+	,	V1Value::Geometry(V1Geometry::MultiPolygon(MultiPolygon::new(vec![
+			polygon![
+				(x: -111., y: 45.),
+				(x: -111., y: 41.),
+				(x: -104., y: 41.),
+				(x: -104., y: 45.),
+			],
+		]))),
+	)]
+	#[case::geometry_collection(
+		V1Value::Geometry(V1Geometry::Collection(vec![])),
+		json!({
+			"type": "GeometryCollection",
+			"geometries": [],
+		}),
+		V1Value::Geometry(V1Geometry::Collection(vec![])),
+	)]
+	#[case::geometry_collection_with_point(
+		V1Value::Geometry(V1Geometry::Collection(vec![V1Geometry::Point(point! { x: 10., y: 20. })])),
+		json!({
+		"type": "GeometryCollection",
+		"geometries": [ { "type": "Point", "coordinates": [10., 20.] } ],
+	}),
+		V1Value::Geometry(V1Geometry::Collection(vec![V1Geometry::Point(point! { x: 10., y: 20. })])),
+	)]
+	#[case::geometry_collection_with_line(
+		V1Value::Geometry(V1Geometry::Collection(vec![V1Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])])),
+		json!({
+			"type": "GeometryCollection",
+			"geometries": [ { "type": "LineString", "coordinates": [[0., 0.], [10., 0.]] } ],
+		}),
+		V1Value::Geometry(V1Geometry::Collection(vec![V1Geometry::Line(line_string![
+			( x: 0., y: 0. ),
+			( x: 10., y: 0. ),
+		])])),
+	)]
+
+	fn test_json(
+		#[case] value: V1Value,
+		#[case] expected: Json,
+		#[case] expected_deserialized: V1Value,
+	) {
+		let json_value = Json::from(value.clone());
+		assert_eq!(json_value, expected);
+
+		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");
+		let deserialized_sql_value = crate::syn::value_legacy_strand(&json_str).unwrap();
+		let deserialized: V1Value = deserialized_sql_value.into();
+		assert_eq!(deserialized, expected_deserialized);
 	}
 }

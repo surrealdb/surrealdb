@@ -29,7 +29,7 @@ async fn geometry_point() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -44,7 +44,7 @@ async fn geometry_point() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -96,7 +96,7 @@ async fn geometry_polygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -119,7 +119,7 @@ async fn geometry_polygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -142,7 +142,7 @@ async fn geometry_polygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -187,7 +187,7 @@ async fn geometry_multipoint() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -205,7 +205,7 @@ async fn geometry_multipoint() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -223,7 +223,7 @@ async fn geometry_multipoint() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -272,7 +272,7 @@ async fn geometry_multipolygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -294,7 +294,7 @@ async fn geometry_multipolygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -316,7 +316,7 @@ async fn geometry_multipolygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -371,7 +371,7 @@ async fn geometry_inner_access() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -384,7 +384,7 @@ async fn geometry_inner_access() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -480,7 +480,7 @@ async fn geometry_inner_access() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

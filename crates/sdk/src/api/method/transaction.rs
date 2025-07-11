@@ -45,11 +45,10 @@ impl Transaction {
 	}
 
 	/// See [Surreal::select]
-	pub fn select<R, RT, RTItem>(&self, resource: R) -> Select<R, RT, RTItem>
+	pub fn select<R, RT>(&self, resource: R) -> Select<R, RT>
 	where
 		R: Resource,
-		RT: TryFromQueryStream<RTItem>,
-		RTItem: TryFrom<ValueProto>,
+		RT: TryFromQueryStream + Send,
 	{
 		self.client.select(resource).with_transaction(self.id)
 	}

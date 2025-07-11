@@ -9,8 +9,11 @@ use std::{
 };
 use surrealdb_core::{
 	dbs::Action,
-	expr::{Array, Id, Number, Object, TryFromValue, Value},
+	expr::{Array, Id, Number, Object, Value},
+	protocol::TryFromValue,
 };
+use surrealdb_protocol::proto::v1::Value as ValueProto;
+use surrealdb_protocol::proto::v1::value::Value as ValueInner;
 use uuid::Uuid;
 
 // Keeping bytes implementation minimal since it might be a good idea to use bytes crate here
@@ -196,13 +199,19 @@ impl fmt::Display for RecordIdKeyFromValueError {
 }
 
 impl TryFromValue for RecordIdKey {
-	fn try_from_value(key: Value) -> std::result::Result<Self, anyhow::Error> {
-		match key {
-			Value::Strand(x) => Ok(RecordIdKey::from_inner(Id::String(x.0))),
-			Value::Number(Number::Int(x)) => Ok(RecordIdKey::from_inner(Id::Number(x))),
-			Value::Object(x) => Ok(RecordIdKey::from_inner(Id::Object(x))),
-			Value::Array(x) => Ok(RecordIdKey::from_inner(Id::Array(x))),
-			_ => Err(anyhow!("failed to convert value into a record id key: {key}")),
+	fn try_from_value(value: ValueProto) -> std::result::Result<Self, anyhow::Error> {
+		let Some(inner) = value.value else {
+			return Err(anyhow!("failed to convert value into a record id key: {value:?}"));
+		};
+		match inner {
+			ValueInner::String(x) => Ok(RecordIdKey::from_inner(Id::String(x))),
+			ValueInner::Uint64(x) => Ok(RecordIdKey::from_inner(Id::Number(x as i64))),
+			ValueInner::Int64(x) => Ok(RecordIdKey::from_inner(Id::Number(x))),
+			ValueInner::Array(x) => Ok(RecordIdKey::from_inner(Id::Array(x.try_into()?))),
+			ValueInner::Uuid(x) => Ok(RecordIdKey::from_inner(Id::Uuid(x.try_into()?))),
+			unexpected => {
+				Err(anyhow!("failed to convert value into a record id key: {unexpected:?}"))
+			}
 		}
 	}
 }

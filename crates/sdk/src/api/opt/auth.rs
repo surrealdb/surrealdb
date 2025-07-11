@@ -4,10 +4,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt;
-use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
 use surrealdb_core::iam::AccessMethod;
 use surrealdb_core::iam::SignupParams;
+use surrealdb_core::protocol::TryFromValue;
+use surrealdb_protocol::proto::rpc::v1::SignupRequest;
 use surrealdb_protocol::proto::v1::Value as ValueProto;
 
 /// Credentials for authenticating with the server
@@ -134,6 +135,19 @@ impl<'a> From<RecordCredentials<'a>> for SignupParams {
 	}
 }
 
+impl<'a> From<RecordCredentials<'a>> for SignupRequest {
+	fn from(credentials: RecordCredentials<'a>) -> Self {
+		SignupRequest {
+			namespace: credentials.namespace.to_string(),
+			database: credentials.database.to_string(),
+			access_name: credentials.access.to_string(),
+			variables: Some(
+				credentials.params.into_iter().map(|(k, v)| (k, ValueProto::string(v))).collect(),
+			),
+		}
+	}
+}
+
 /// A JSON Web Token for authenticating with the server.
 ///
 /// This struct represents a JSON Web Token (JWT) that can be used for authentication purposes.
@@ -187,11 +201,9 @@ impl<'a> From<&'a str> for Jwt {
 }
 
 impl TryFromValue for Jwt {
-	fn try_from_value(value: Value) -> anyhow::Result<Self> {
-		match value {
-			Value::Strand(s) => Ok(Jwt(s.0)),
-			_ => Err(anyhow::anyhow!("Expected a string value, got {}", value.kindof())),
-		}
+	fn try_from_value(value: ValueProto) -> anyhow::Result<Self> {
+		let jwt = String::try_from_value(value)?;
+		Ok(Jwt(jwt))
 	}
 }
 

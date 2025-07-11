@@ -21,26 +21,22 @@ async fn clear_transaction_cache_table() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
-		"[
-			{
-				id: person:one,
-				x: 0
-			}
-		]",
+		"{
+			id: person:one,
+			x: 0
+		}",
 	)
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
-		"[
-			{
-				id: person:one,
-				x: 0
-			}
-		]",
+		"{
+			id: person:one,
+			x: 0
+		}",
 	)
 	.into();
 	assert_eq!(tmp, val);
@@ -48,14 +44,12 @@ async fn clear_transaction_cache_table() -> Result<()> {
 	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
-		"[
-			{
-				id: other:one,
-				x: 0
-			}
-		]",
+		"{
+			id: other:one,
+			x: 0
+		}",
 	)
 	.into();
 	assert_eq!(tmp, val);
@@ -83,28 +77,24 @@ async fn clear_transaction_cache_field() -> Result<()> {
 	let tmp = res.remove(0).values;
 	assert!(tmp.is_ok(), "{:?}", tmp.err());
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
-		"[
-			{
-				id: person:one,
-				test: 'test',
-				x: 0
-			}
-		]",
+		"{
+			id: person:one,
+			test: 'test',
+			x: 0
+		}",
 	)
 	.into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
-		"[
-			{
-				id: person:one,
-				test: 'test',
-				x: 0
-			}
-		]",
+		"{
+			id: person:one,
+			test: 'test',
+			x: 0
+		}",
 	)
 	.into();
 	assert_eq!(tmp, val);
@@ -112,14 +102,12 @@ async fn clear_transaction_cache_field() -> Result<()> {
 	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
-		"[
-			{
-				id: person:two,
-				x: 0
-			}
-		]",
+		"{
+			id: person:two,
+			x: 0
+		}",
 	)
 	.into();
 	assert_eq!(tmp, val);
@@ -138,7 +126,9 @@ async fn clear_transaction_cache_field() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.as_array()
+	.unwrap()
+	.0;
 	assert_eq!(tmp, val);
 	//
 	Ok(())

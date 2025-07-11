@@ -42,6 +42,12 @@ impl From<String> for Table {
 	}
 }
 
+impl From<&String> for Table {
+	fn from(v: &String) -> Self {
+		Self(v.clone())
+	}
+}
+
 impl From<&str> for Table {
 	fn from(v: &str) -> Self {
 		Self::from(String::from(v))

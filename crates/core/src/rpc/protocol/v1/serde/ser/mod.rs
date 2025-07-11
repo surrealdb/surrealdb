@@ -4,7 +4,7 @@ mod r#struct;
 use crate::err::Error;
 use crate::rpc::protocol::v1::types::{
 	V1Array, V1Bytes, V1Datetime, V1Duration, V1File, V1Geometry, V1Number, V1Object, V1RecordId,
-	V1Regex, V1Strand, V1Table, V1Uuid, V1Value,
+	V1Regex, V1String, V1Table, V1Uuid, V1Value,
 };
 use anyhow::Result;
 use castaway::match_type;
@@ -26,7 +26,7 @@ where
 		V1Value as v => Ok(v),
 		V1Number as v => Ok(v.into()),
 		rust_decimal::Decimal as v => Ok(v.into()),
-		V1Strand as v => Ok(v.into()),
+		V1String as v => Ok(v.into()),
 		V1Duration as v => Ok(v.into()),
 		core::time::Duration as v => Ok(v.into()),
 		V1Datetime as v => Ok(v.into()),
@@ -209,21 +209,21 @@ mod tests {
 
 	#[test]
 	fn strand() {
-		let strand = V1Strand("foobar".to_owned());
+		let strand = V1String("foobar".to_owned());
 		let value = to_value(strand.clone()).unwrap();
-		let expected = V1Value::Strand(strand);
+		let expected = V1Value::String(strand);
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 
 		let strand = "foobar".to_owned();
 		let value = to_value(strand.clone()).unwrap();
-		let expected = V1Value::Strand(strand.into());
+		let expected = V1Value::String(strand.into());
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 
 		let strand = "foobar";
 		let value = to_value(strand).unwrap();
-		let expected = V1Value::Strand(strand.into());
+		let expected = V1Value::String(strand.into());
 		assert_eq!(value, expected);
 		assert_eq!(expected.clone(), to_value(expected).unwrap());
 	}

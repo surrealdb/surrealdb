@@ -40,7 +40,51 @@ async fn subquery_select() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse(
+		"[
+			{
+				adult: true
+			}
+		]",
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse(
+		"[
+			{
+				adult: true
+			}
+		]",
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse(
+		"[
+			{
+				adult: true
+			}
+		]",
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse(
+		"[
+			{
+				adult: true
+			}
+		]",
+	)
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -62,51 +106,7 @@ async fn subquery_select() -> Result<()> {
 			}
 		]",
 	)
-	.into();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse(
-		"[
-			{
-				adult: true
-			}
-		]",
-	)
-	.into();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse(
-		"[
-			{
-				adult: true
-			}
-		]",
-	)
-	.into();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse(
-		"[
-			{
-				adult: true
-			}
-		]",
-	)
-	.into();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse(
-		"[
-			{
-				adult: true
-			}
-		]",
-	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -156,7 +156,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[]").into();
+	let val = Vec::new();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -188,7 +188,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -202,7 +202,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -222,7 +222,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -286,7 +286,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[]").into();
+	let val = Vec::new();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -299,7 +299,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -318,7 +318,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -332,7 +332,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -352,7 +352,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -367,7 +367,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

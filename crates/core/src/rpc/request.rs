@@ -39,7 +39,7 @@ impl TryFrom<V1Value> for V1Request {
 			V1Value::Null => Some(V1Value::Null),
 			V1Value::Uuid(v) => Some(V1Value::Uuid(v)),
 			V1Value::Number(v) => Some(V1Value::Number(v)),
-			V1Value::Strand(v) => Some(V1Value::Strand(v)),
+			V1Value::String(v) => Some(V1Value::String(v)),
 			V1Value::Datetime(v) => Some(V1Value::Datetime(v)),
 			unexpected => {
 				return Err(RpcError::InvalidRequest(format!("Unexpected id: {:?}", unexpected)));
@@ -72,7 +72,7 @@ impl TryFrom<V1Value> for V1Request {
 			V1Value::None => None,
 			V1Value::Null => None,
 			V1Value::Uuid(x) => Some(x.0),
-			V1Value::Strand(x) => Some(
+			V1Value::String(x) => Some(
 				Uuid::try_parse(&x.0).map_err(|err| RpcError::InvalidRequest(err.to_string()))?,
 			),
 			unexpected => {
@@ -81,7 +81,7 @@ impl TryFrom<V1Value> for V1Request {
 		};
 		// Fetch the 'method' argument
 		let method = match val.get_field_value(METHOD) {
-			V1Value::Strand(v) => v.0,
+			V1Value::String(v) => v.0,
 			unexpected => {
 				return Err(RpcError::InvalidRequest(format!(
 					"Unexpected method: {:?}",

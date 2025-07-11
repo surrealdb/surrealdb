@@ -100,7 +100,10 @@ async fn delete_update_mtree_index() -> Result<()> {
 				id: pts:3
 			}
 		]",
-	);
+	)
+	.as_array()
+	.unwrap()
+	.0;
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }

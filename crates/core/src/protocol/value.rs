@@ -8,6 +8,11 @@ use surrealdb_protocol::proto::prost_types::{
 	Duration as DurationProto, Timestamp as TimestampProto,
 };
 
+use crate::expr::{Number, Value};
+use anyhow::Context;
+use anyhow::Result;
+use surrealdb_protocol::TryFromValue;
+use surrealdb_protocol::proto::v1::value::Value as ValueInner;
 use surrealdb_protocol::proto::v1::{
 	Array as ArrayProto, File as FileProto, Geometry as GeometryProto, Id as IdProto,
 	NullValue as NullValueProto, Object as ObjectProto, RecordId as RecordIdProto,
@@ -15,34 +20,10 @@ use surrealdb_protocol::proto::v1::{
 	value as value_proto,
 };
 
-use crate::expr::{Number, Value};
-use anyhow::Context;
-
-// impl ValueProto {
-//     pub fn downcast_str(&self) -> Option<&str> {
-//         let Some(inner) = &self.inner else {
-//             return None;
-//         };
-//         if let crate::protocol::surrealdb::value::value::Inner::Strand(s) = inner {
-//             Some(s.as_str())
-//         } else {
-//             None
-//         }
-//     }
-// }
-
-// impl ObjectProto {
-//     pub fn get(&self, key: &str) -> Option<&ValueProto> {
-//         self.values.get(key)
-//     }
-// }
-
 impl TryFrom<ValueProto> for crate::expr::Value {
 	type Error = anyhow::Error;
 
 	fn try_from(proto: ValueProto) -> Result<Self, Self::Error> {
-		use value_proto::Value as ValueInner;
-
 		let Some(inner) = proto.value else {
 			return Ok(crate::expr::Value::None);
 		};
@@ -435,5 +416,50 @@ impl TryFrom<crate::expr::Version> for ValueProto {
 	fn try_from(version: crate::expr::Version) -> Result<Self, Self::Error> {
 		let value = ValueProto::try_from(version.0)?;
 		Ok(value)
+	}
+}
+
+impl TryFromValue for crate::expr::Value {
+	#[inline]
+	fn try_from_value(value: ValueProto) -> Result<Self> {
+		Ok(crate::expr::Value::try_from(value)?)
+	}
+}
+
+impl PartialEq<crate::expr::Value> for ValueProto {
+	fn eq(&self, other: &crate::expr::Value) -> bool {
+		match crate::expr::Value::try_from(self.clone()) {
+			Ok(value) => &value == other,
+			Err(_) => false,
+		}
+	}
+}
+
+impl PartialEq<ValueProto> for crate::expr::Value {
+	fn eq(&self, other: &ValueProto) -> bool {
+		match ValueProto::try_from(self.clone()) {
+			Ok(value) => &value == other,
+			Err(_) => false,
+		}
+	}
+}
+
+impl PartialEq<crate::sql::SqlValue> for ValueProto {
+	fn eq(&self, other: &crate::sql::SqlValue) -> bool {
+		let expr_value = crate::expr::Value::try_from(self.clone()).unwrap();
+		match crate::sql::SqlValue::try_from(expr_value) {
+			Ok(value) => &value == other,
+			Err(_) => false,
+		}
+	}
+}
+
+impl PartialEq<ValueProto> for crate::sql::SqlValue {
+	fn eq(&self, other: &ValueProto) -> bool {
+		let expr_value = crate::expr::Value::try_from(other.clone()).unwrap();
+		match crate::sql::SqlValue::try_from(expr_value) {
+			Ok(value) => &value == self,
+			Err(_) => false,
+		}
 	}
 }

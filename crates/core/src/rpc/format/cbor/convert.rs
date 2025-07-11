@@ -161,7 +161,7 @@ impl TryFrom<Cbor> for V1Value {
 						},
 						CborData::Array(mut v) if v.len() == 2 => {
 							let tb = match V1Value::try_from(Cbor(v.remove(0))) {
-								Ok(V1Value::Strand(tb)) => tb.0,
+								Ok(V1Value::String(tb)) => tb.0,
 								Ok(V1Value::Table(tb)) => tb.0,
 								_ => {
 									return Err(
@@ -340,7 +340,7 @@ impl TryFrom<V1Value> for Cbor {
 					Box::new(CborData::Text(v.to_string())),
 				))),
 			},
-			V1Value::Strand(v) => Ok(Cbor(CborData::Text(v.0))),
+			V1Value::String(v) => Ok(Cbor(CborData::Text(v.0))),
 			V1Value::Duration(v) => {
 				let seconds = v.0.as_secs();
 				let nanos = v.0.subsec_nanos();

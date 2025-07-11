@@ -27,7 +27,7 @@ async fn transaction_basic() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -38,7 +38,7 @@ async fn transaction_basic() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -65,7 +65,7 @@ async fn transaction_with_return() -> Result<()> {
 			jaime: person:jaime,
 		}",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -11,8 +11,8 @@ use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
-use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
+use surrealdb_core::protocol::TryFromValue;
 use surrealdb_core::sql::statements::UpsertStatement;
 use surrealdb_protocol::QueryResponseValueStream;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
@@ -78,8 +78,6 @@ where
 			let mut stream = QueryResponseValueStream::new(response.into_inner());
 
 			let value = stream.next().await.context("No response from server")??;
-
-			let value: Value = Value::try_from(value)?;
 
 			Ok(RT::try_from_value(value)?)
 		})

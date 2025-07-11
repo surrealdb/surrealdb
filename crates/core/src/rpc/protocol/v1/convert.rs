@@ -7,9 +7,11 @@ use crate::iam::AccessMethod;
 use crate::iam::SigninParams;
 use crate::iam::SignupParams;
 
+use surrealdb_protocol::proto::v1::Value as ValueProto;
+
 use super::types::{
 	V1Array, V1Bytes, V1Datetime, V1Duration, V1File, V1Gen, V1Geometry, V1Id, V1IdRange, V1Number,
-	V1Object, V1RecordId, V1Strand, V1Uuid, V1Value,
+	V1Object, V1RecordId, V1String, V1Uuid, V1Value,
 };
 use crate::expr::id::Gen as ExprGen;
 use crate::expr::{
@@ -241,7 +243,7 @@ macro_rules! impl_from_value {
 					$value::Null => Ok(V1Value::Null),
 					$value::Bool(bool) => Ok(V1Value::Bool(bool)),
 					$value::Number(number) => Ok(V1Value::Number(number.into())),
-					$value::Strand(strand) => Ok(V1Value::Strand(strand.into())),
+					$value::Strand(strand) => Ok(V1Value::String(strand.into())),
 					$value::Duration(duration) => Ok(V1Value::Duration(duration.into())),
 					$value::Datetime(datetime) => Ok(V1Value::Datetime(datetime.into())),
 					$value::Uuid(uuid) => Ok(V1Value::Uuid(uuid.into())),
@@ -268,7 +270,7 @@ macro_rules! impl_from_value {
 					V1Value::Null => Ok($value::Null),
 					V1Value::Bool(bool) => Ok($value::Bool(bool)),
 					V1Value::Number(number) => Ok($value::Number(number.into())),
-					V1Value::Strand(strand) => Ok($value::Strand(strand.into())),
+					V1Value::String(strand) => Ok($value::Strand(strand.into())),
 					V1Value::Duration(duration) => Ok($value::Duration(duration.into())),
 					V1Value::Datetime(datetime) => Ok($value::Datetime(datetime.into())),
 					V1Value::Uuid(uuid) => Ok($value::Uuid(uuid.into())),
@@ -404,14 +406,14 @@ macro_rules! impl_from_datetime {
 
 macro_rules! impl_from_strand {
 	($value:ident) => {
-		impl From<$value> for V1Strand {
+		impl From<$value> for V1String {
 			fn from(strand: $value) -> Self {
-				V1Strand(strand.0)
+				V1String(strand.0)
 			}
 		}
 
-		impl From<V1Strand> for $value {
-			fn from(strand: V1Strand) -> Self {
+		impl From<V1String> for $value {
+			fn from(strand: V1String) -> Self {
 				Self(strand.0)
 			}
 		}
@@ -686,5 +688,15 @@ impl TryFrom<BTreeMap<String, V1Value>> for crate::dbs::Variables {
 			vars.insert(key, value.try_into()?);
 		}
 		Ok(vars)
+	}
+}
+
+impl TryFrom<V1Value> for ValueProto {
+	type Error = anyhow::Error;
+
+	fn try_from(value: V1Value) -> Result<Self, Self::Error> {
+		// TODO: Do not convert to an intermediate value, convert directly to the proto value.
+		let value: crate::expr::Value = value.try_into()?;
+		value.try_into()
 	}
 }

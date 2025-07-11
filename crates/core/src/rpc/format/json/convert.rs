@@ -17,7 +17,7 @@ impl From<V1Value> for serde_json::Value {
 				V1Number::Float(float) => float.into(),
 				V1Number::Decimal(decimal) => json!(decimal),
 			},
-			V1Value::Strand(strand) => strand.0.into(),
+			V1Value::String(strand) => strand.0.into(),
 			V1Value::Duration(duration) => duration.to_raw().into(),
 			V1Value::Datetime(datetime) => json!(datetime.0),
 			V1Value::Uuid(uuid) => json!(uuid.0),
@@ -293,7 +293,7 @@ mod tests {
 		#[test]
 		fn strand() {
 			for str in ["", "foo"] {
-				let value = V1Value::Strand(str.to_string().into());
+				let value = V1Value::String(str.to_string().into());
 
 				let simple_json = Json::from(value.clone());
 				assert_eq!(simple_json, json!(str));

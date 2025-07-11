@@ -1,5 +1,6 @@
 use super::transaction::WithTransaction;
 use crate::Surreal;
+use crate::opt::{KeyRange, RangeableResource};
 
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
@@ -8,8 +9,8 @@ use anyhow::Context;
 use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::TryFromValue;
-use surrealdb_core::expr::Value;
+use surrealdb_core::expr::Thing as RecordId;
+use surrealdb_core::protocol::TryFromValue;
 use surrealdb_core::sql::statements::DeleteStatement;
 use surrealdb_protocol::QueryResponseValueStream;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
@@ -84,7 +85,6 @@ where
 			let mut response = QueryResponseValueStream::new(response.into_inner());
 
 			let first = response.next().await.context("Failed to get response")??;
-			let first: Value = first.try_into()?;
 			let first = RT::try_from_value(first)?;
 			return Ok(first);
 		})
@@ -105,18 +105,18 @@ where
 // 	}
 // }
 
-// impl<C, R, RT, NewResource> Delete<'_, C, R, Vec<RT>>
-// where
-// 	C
-// 	R: RangeableResource,
-// 	NewResource: RangeableResource,
-// {
-// 	/// Restricts a range of records to delete
-// 	pub fn range<'a>(self, range: impl Into<KeyRange>) -> Delete<'a, C, NewResource, Vec<RT>> {
-// 		Delete {
-// 			resource: self.resource.with_range(range.into()),
-// 			client: Cow::Borrowed(self.client.as_ref()),
-// 			response_type: PhantomData,
-// 		}
-// 	}
-// }
+impl<R, RT> Delete<R, RT>
+where
+	R: RangeableResource,
+	RT: TryFromValue,
+{
+	/// Restricts a range of records to delete
+	pub fn range<'a>(self, range: impl Into<KeyRange>) -> Delete<RecordId, RT> {
+		Delete {
+			resource: self.resource.with_range(range.into()),
+			client: self.client,
+			txn: self.txn,
+			response_type: PhantomData,
+		}
+	}
+}

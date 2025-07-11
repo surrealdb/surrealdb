@@ -98,11 +98,11 @@ async fn return_subquery_only() -> Result<()> {
 	let val = SqlValue::parse("['Tobie']").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse("{ name: 'Tobie' }").into();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = Value::from("Tobie");
 	assert_eq!(tmp, val);
 	//

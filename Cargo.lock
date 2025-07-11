@@ -5917,6 +5917,7 @@ dependencies = [
  "prost 0.13.5",
  "prost-types 0.13.5",
  "rust_decimal",
+ "semver",
  "serde",
  "tonic 0.12.3",
  "uuid",

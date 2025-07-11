@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use futures::stream::BoxStream;
 use surrealdb_protocol::proto::rpc::v1 as rpc_proto;
 use surrealdb_protocol::proto::v1::Value;
@@ -52,7 +53,7 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for TestServer {
 
 	async fn authenticate(
 		&self,
-		request: tonic::Request<rpc_proto::AuthenticateRequest>,
+		_request: tonic::Request<rpc_proto::AuthenticateRequest>,
 	) -> Result<tonic::Response<rpc_proto::AuthenticateResponse>, tonic::Status> {
 		Ok(tonic::Response::new(rpc_proto::AuthenticateResponse {
 			value: Some(Value::none()),
@@ -63,7 +64,6 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for TestServer {
 		&self,
 		request: tonic::Request<rpc_proto::UseRequest>,
 	) -> Result<tonic::Response<rpc_proto::UseResponse>, tonic::Status> {
-		let (session_id, session) = self.load_session(&request)?;
 		let rpc_proto::UseRequest {
 			namespace,
 			database,
@@ -78,7 +78,7 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for TestServer {
 
 	async fn set(
 		&self,
-		request: tonic::Request<rpc_proto::SetRequest>,
+		_request: tonic::Request<rpc_proto::SetRequest>,
 	) -> Result<tonic::Response<rpc_proto::SetResponse>, tonic::Status> {
 		// Return nothing
 		Ok(tonic::Response::new(rpc_proto::SetResponse {}))
@@ -86,7 +86,7 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for TestServer {
 
 	async fn unset(
 		&self,
-		request: tonic::Request<rpc_proto::UnsetRequest>,
+		_request: tonic::Request<rpc_proto::UnsetRequest>,
 	) -> Result<tonic::Response<rpc_proto::UnsetResponse>, tonic::Status> {
 		// Return nothing
 		Ok(tonic::Response::new(rpc_proto::UnsetResponse {}))
@@ -94,14 +94,14 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for TestServer {
 
 	async fn invalidate(
 		&self,
-		request: tonic::Request<rpc_proto::InvalidateRequest>,
+		_request: tonic::Request<rpc_proto::InvalidateRequest>,
 	) -> Result<tonic::Response<rpc_proto::InvalidateResponse>, tonic::Status> {
 		Ok(tonic::Response::new(rpc_proto::InvalidateResponse {}))
 	}
 
 	async fn reset(
 		&self,
-		request: tonic::Request<rpc_proto::ResetRequest>,
+		_request: tonic::Request<rpc_proto::ResetRequest>,
 	) -> Result<tonic::Response<rpc_proto::ResetResponse>, tonic::Status> {
 		// Return nothing on success
 		Ok(tonic::Response::new(rpc_proto::ResetResponse {}))
@@ -230,7 +230,7 @@ impl rpc_proto::surreal_db_service_server::SurrealDbService for TestServer {
 }
 
 impl TestServer {
-	async fn serve()
+	pub async fn serve()
 	-> (tonic::transport::Channel, tokio::task::JoinHandle<Result<(), tonic::transport::Error>>) {
 		let (client, server) = tokio::io::duplex(10);
 

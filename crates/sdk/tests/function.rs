@@ -1767,7 +1767,7 @@ async fn function_string_words() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = SqlValue::parse("[]").into();
+	let val = Vec::new();
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;

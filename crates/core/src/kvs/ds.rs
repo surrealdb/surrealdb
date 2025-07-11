@@ -469,16 +469,15 @@ impl Datastore {
 	}
 
 	/// Set a temporary directory for ordering of large result sets
+	#[cfg(storage)]
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
-		#[cfg(storage)]
-		{
-			self.temporary_directory = path.map(Arc::new);
-		}
-		#[cfg(not(storage))]
-		if path.is_some() {
-			warn!("Temporary directory is not supported in this build");
-		}
+		self.temporary_directory = path.map(Arc::new);
+		self
+	}
 
+	#[cfg(not(storage))]
+	pub fn with_temporary_directory(self, _path: Option<PathBuf>) -> Self {
+		warn!("Temporary directory is not supported in this build");
 		self
 	}
 

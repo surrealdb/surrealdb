@@ -1,5 +1,5 @@
 use crate::rpc::protocol::v1::types::{
-	V1Array, V1Bytes, V1Datetime, V1Duration, V1Object, V1Strand, V1Uuid, V1Value,
+	V1Array, V1Bytes, V1Datetime, V1Duration, V1Object, V1String, V1Uuid, V1Value,
 };
 use crate::rpc::protocol::v1::types::{V1Geometry, V1Number};
 use anyhow::Result;
@@ -24,7 +24,7 @@ impl V1Value {
 				V1Number::Float(v) => Ok(Content::Number(Number::F64(v))),
 				V1Number::Decimal(v) => serializer.serialize(v).map_err(Into::into),
 			},
-			V1Value::Strand(V1Strand(v)) => Ok(Content::String(Cow::Owned(v))),
+			V1Value::String(V1String(v)) => Ok(Content::String(Cow::Owned(v))),
 			V1Value::Duration(V1Duration(v)) => serializer.serialize(v).map_err(Into::into),
 			V1Value::Datetime(V1Datetime(v)) => serializer.serialize(v).map_err(Into::into),
 			V1Value::Uuid(V1Uuid(v)) => serializer.serialize(v).map_err(Into::into),

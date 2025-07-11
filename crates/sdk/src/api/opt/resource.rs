@@ -121,10 +121,12 @@ macro_rules! impl_resource_for_table_type {
 }
 
 impl_resource_for_table_type!(String);
+impl_resource_for_table_type!(&String);
 impl_resource_for_table_type!(&str);
 impl_resource_for_table_type!(CoreTable);
 
 impl CreatableResource for String {}
+impl CreatableResource for &String {}
 impl CreatableResource for &str {}
 impl CreatableResource for CoreTable {}
 impl CreatableResource for (&str, &str) {}
@@ -245,6 +247,12 @@ impl Resource for (&str, &str) {
 	fn into_values(self) -> Values {
 		let table = RecordId::from(self);
 		Values(vec![Value::from(table)])
+	}
+}
+
+impl InsertableResource for (&str, &str) {
+	fn table_name(&self) -> &str {
+		self.0
 	}
 }
 

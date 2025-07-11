@@ -293,8 +293,9 @@ async fn select_aggregate() -> Result<()> {
 					operation: 'Collector'
 				}
 			]",
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -326,7 +327,7 @@ async fn select_multi_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -340,7 +341,7 @@ async fn select_multi_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -388,7 +389,7 @@ async fn select_multi_aggregate() -> Result<()> {
 				}
 			]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -410,45 +411,46 @@ async fn select_multi_aggregate() -> Result<()> {
 				}
 			]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
-				{
-					detail: {
-						direction: 'forward',
-						table: 'test'
-					},
-					operation: 'Iterate Table'
+			{
+				detail: {
+					direction: 'forward',
+					table: 'test'
 				},
-				{
-					detail: {
-						idioms: {
-							group: [
-								'first'
-							],
-							max: [
-								'math::max'
-							],
-							mean: [
-								'math::mean'
-							],
-							one: [
-								'math::sum'
-							],
-							two: [
-								'math::sum'
-							]
-						},
-						type: 'Group'
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					idioms: {
+						group: [
+							'first'
+						],
+						max: [
+							'math::max'
+						],
+						mean: [
+							'math::mean'
+						],
+						one: [
+							'math::sum'
+						],
+						two: [
+							'math::sum'
+						]
 					},
-					operation: 'Collector'
-				}
-			]",
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+					type: 'Group'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -480,7 +482,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -494,7 +496,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -508,7 +510,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -522,7 +524,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -540,7 +542,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -558,7 +560,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -576,7 +578,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -607,8 +609,9 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 					operation: 'Collector'
 				}
 			]",
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -646,7 +649,7 @@ async fn select_array_group_group_by() -> Result<()> {
                 }
         ]"#,
 	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -689,8 +692,9 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 					operation: 'Collector'
 				}
 			]"#,
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
@@ -699,8 +703,9 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 						count: 2
 					}
 				]"#,
-	);
-	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -727,11 +732,11 @@ async fn select_aggregate_mean_update() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("None").into();
+	let val = SqlValue::parse("None").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -743,7 +748,7 @@ async fn select_aggregate_mean_update() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -754,7 +759,7 @@ async fn select_aggregate_mean_update() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

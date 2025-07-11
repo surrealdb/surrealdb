@@ -1,11 +1,10 @@
 use crate::api::{QueryResults, Result};
 use anyhow::bail;
 use surrealdb_core::expr::statements::*;
-use surrealdb_core::{
-	dbs::Variables,
-	expr::{TryFromValue, Value},
-};
+use surrealdb_core::{dbs::Variables, expr::Value, protocol::TryFromValue};
 use surrealdb_protocol::proto::rpc::v1::QueryStats as QueryStatsProto;
+use surrealdb_protocol::proto::v1::Value as ValueProto;
+use surrealdb_protocol::proto::v1::value::Value as ValueProtoEnum;
 
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery {
@@ -126,158 +125,171 @@ where
 	}
 }
 
-// impl QueryAccessor<Value> for (usize, &str) {}
-// impl query_accessor::Sealed<Value> for (usize, &str) {
-// 	fn query_result(self, response: &mut QueryResults<Value>) -> Result<Value> {
-// 		let (index, key) = self;
-// 		let mut values = match response.results.swap_remove(&index) {
-// 			Some(query_result) => query_result.values,
-// 			None => {
-// 				return Ok(Value::None);
-// 			}
-// 		};
+impl QueryAccessor<Value> for (usize, &str) {}
+impl query_accessor::Sealed<Value> for (usize, &str) {
+	fn take(self, response: &mut QueryResults) -> Result<Value> {
+		let (index, key) = self;
+		let mut values = match response.results.swap_remove(&index) {
+			Some(query_result) => query_result.values,
+			None => {
+				return Ok(Value::None);
+			}
+		};
 
-// 		if values.is_empty() {
-// 			return Ok(Value::None);
-// 		}
+		if values.is_empty() {
+			return Ok(Value::None);
+		}
 
-// 		if values.len() > 1 {
-// 			bail!("{} values found for index {}, but expected 1", values.len(), index);
-// 		}
+		if values.len() > 1 {
+			bail!("{} values found for index {}, but expected 1", values.len(), index);
+		}
 
-// 		let mut value = values.pop().unwrap().try_into()?;
+		let mut value = values.pop().unwrap();
 
-// 		let value = match &mut value {
-// 			Value::Object(object) => object.remove(key).unwrap_or_default(),
-// 			_ => Value::None,
-// 		};
+		let value = match &mut value.value {
+			Some(ValueProtoEnum::Object(object)) => object.items.remove(key).unwrap_or_default(),
+			_ => ValueProto::none(),
+		};
 
-// 		Ok(value)
-// 	}
+		Ok(value.try_into()?)
+	}
 
-// 	fn stats(&self, response: &QueryResults<Value>) -> Option<QueryStats> {
-// 		response.results.get(&self.0).map(|x| x.stats.clone())
-// 	}
-// }
+	fn stats(&self, response: &QueryResults) -> Option<QueryStatsProto> {
+		response.results.get(&self.0).map(|x| x.stats.clone())
+	}
+}
 
-// impl<T> QueryAccessor<Option<T>> for (usize, &str) where T: TryFromValue {}
-// impl<T> query_accessor::Sealed<Option<T>> for (usize, &str)
-// where
-// 	T: TryFromValue,
-// {
-// 	fn query_result(self, results: &mut QueryResults<Option<T>>) -> Result<Option<T>> {
-// 		let (index, key) = self;
-// 		let mut values = match results.results.swap_remove(&index) {
-// 			Some(query_result) => query_result.values,
-// 			None => {
-// 				return Ok(None);
-// 			}
-// 		};
+impl<T> QueryAccessor<Option<T>> for (usize, &str) where T: TryFromValue {}
+impl<T> query_accessor::Sealed<Option<T>> for (usize, &str)
+where
+	T: TryFromValue,
+{
+	fn take(self, results: &mut QueryResults) -> Result<Option<T>> {
+		let (index, key) = self;
+		let mut values = match results.results.swap_remove(&index) {
+			Some(query_result) => query_result.values,
+			None => {
+				return Ok(None);
+			}
+		};
 
-// 		if values.is_empty() {
-// 			return Ok(None);
-// 		}
+		if values.is_empty() {
+			return Ok(None);
+		}
 
-// 		if values.len() > 1 {
-// 			bail!("{} values found for index {}, but expected 1", values.len(), index);
-// 		}
+		if values.len() > 1 {
+			bail!("{} values found for index {}, but expected 1", values.len(), index);
+		}
 
-// 		let mut value = values.pop().unwrap().try_into()?;
+		let mut value = values.pop().unwrap();
 
-// 		match &mut value {
-// 			Value::None => Ok(None),
-// 			Value::Object(object) => {
-// 				if object.is_empty() {
-// 					return Ok(None);
-// 				}
-// 				let Some(value) = object.remove(key) else {
-// 					return Ok(None);
-// 				};
-// 				Option::<T>::try_from_value(value)
-// 			}
-// 			_ => Ok(None),
-// 		}
-// 	}
+		match &mut value.value {
+			Some(ValueProtoEnum::Object(object)) => {
+				if object.items.is_empty() {
+					return Ok(None);
+				}
+				let Some(value) = object.items.remove(key) else {
+					return Ok(None);
+				};
+				Option::<T>::try_from_value(value)
+			}
+			_ => Ok(None),
+		}
+	}
 
-// 	fn stats(&self, response: &QueryResults<Option<T>>) -> Option<QueryStats> {
-// 		response.results.get(&self.0).map(|x| x.stats.clone())
-// 	}
-// }
+	fn stats(&self, response: &QueryResults) -> Option<QueryStatsProto> {
+		response.results.get(&self.0).map(|x| x.stats.clone())
+	}
+}
 
-// impl<T> QueryAccessor<Vec<T>> for usize where T: TryFromValue {}
-// impl<T> query_accessor::Sealed<Vec<T>> for usize
-// where
-// 	T: TryFromValue,
-// {
-// 	fn query_result(self, results: &mut QueryResults<Vec<T>>) -> Result<Vec<T>> {
-// 		let vec = match results.results.swap_remove(&self) {
-// 			Some(query_result) => query_result.values,
-// 			None => {
-// 				return Ok(vec![]);
-// 			}
-// 		};
-// 		vec.into_iter().map(T::try_from_value).collect::<Result<Vec<T>>>()
-// 	}
+impl<T> QueryAccessor<Vec<T>> for usize where T: TryFromValue {}
+impl<T> query_accessor::Sealed<Vec<T>> for usize
+where
+	T: TryFromValue,
+{
+	fn take(self, results: &mut QueryResults) -> Result<Vec<T>> {
+		let vec = match results.results.swap_remove(&self) {
+			Some(query_result) => query_result.values,
+			None => {
+				return Ok(vec![]);
+			}
+		};
+		vec.into_iter().map(|v| T::try_from_value(v)).collect::<Result<Vec<T>>>()
+	}
 
-// 	fn stats(&self, results: &QueryResults<Vec<T>>) -> Option<QueryStats> {
-// 		results.results.get(self).map(|x| x.stats.clone())
-// 	}
-// }
+	fn stats(&self, results: &QueryResults) -> Option<QueryStatsProto> {
+		results.results.get(self).map(|x| x.stats.clone())
+	}
+}
 
-// impl<T> QueryAccessor<Vec<T>> for (usize, &str) where T: TryFromValue {}
-// impl<T> query_accessor::Sealed<Vec<T>> for (usize, &str)
-// where
-// 	T: TryFromValue,
-// {
-// 	fn query_result(self, results: &mut QueryResults<Vec<T>>) -> Result<Vec<T>> {
-// 		let (index, key) = self;
-// 		let values = match results.results.get_mut(&index) {
-// 			Some(query_result) => &mut query_result.values,
-// 			None => return Ok(vec![]),
-// 		};
+impl<T> QueryAccessor<Vec<T>> for (usize, &str) where T: TryFromValue {}
+impl<T> query_accessor::Sealed<Vec<T>> for (usize, &str)
+where
+	T: TryFromValue,
+{
+	fn take(self, results: &mut QueryResults) -> Result<Vec<T>> {
+		use surrealdb_protocol::proto::v1::value::Value as ValueProtoEnum;
 
-// 		let mut responses = Vec::with_capacity(values.len());
-// 		for value in values.iter_mut() {
-// 			if let Value::Object(object) = value {
-// 				if let Some(value) = object.remove(key) {
-// 					responses.push(T::try_from_value(value)?);
-// 				}
-// 			}
-// 		}
-// 		Ok(responses)
-// 	}
+		let (index, key) = self;
+		let values = match results.results.get_mut(&index) {
+			Some(query_result) => &mut query_result.values,
+			None => return Err(anyhow::anyhow!("Index out of bounds: {index}")),
+		};
 
-// 	fn stats(&self, response: &QueryResults<Vec<T>>) -> Option<QueryStats> {
-// 		response.results.get(&self.0).map(|x| x.stats.clone())
-// 	}
-// }
+		let mut responses = Vec::with_capacity(values.len());
+		for value in values.iter_mut() {
+			if let Some(ValueProtoEnum::Object(object)) = &mut value.value {
+				if let Some(value) = object.items.remove(key) {
+					responses.push(T::try_from_value(value)?);
+				}
+			}
+		}
+		Ok(responses)
+	}
 
-// impl QueryAccessor<Value> for &str {}
-// impl query_accessor::Sealed<Value> for &str {
-// 	fn query_result(self, results: &mut QueryResults<Value>) -> Result<Value> {
-// 		(0, self).query_result(results)
-// 	}
-// }
+	fn stats(&self, response: &QueryResults) -> Option<QueryStatsProto> {
+		response.results.get(&self.0).map(|x| x.stats.clone())
+	}
+}
 
-// impl<T> QueryAccessor<Option<T>> for &str where T: TryFromValue {}
-// impl<T> query_accessor::Sealed<Option<T>> for &str
-// where
-// 	T: TryFromValue,
-// {
-// 	fn query_result(self, response: &mut QueryResults<Option<T>>) -> Result<Option<T>> {
-// 		(0, self).query_result(response)
-// 	}
-// }
+impl QueryAccessor<Value> for &str {}
+impl query_accessor::Sealed<Value> for &str {
+	fn take(self, results: &mut QueryResults) -> Result<Value> {
+		(0, self).take(results)
+	}
 
-// impl<T> QueryAccessor<Vec<T>> for &str where T: TryFromValue {}
-// impl<T> query_accessor::Sealed<Vec<T>> for &str
-// where
-// 	T: TryFromValue,
-// {
-// 	fn query_result(self, response: &mut QueryResults<Vec<T>>) -> Result<Vec<T>> {
-// 		(0, self).query_result(response)
-// 	}
-// }
+	fn stats(&self, results: &QueryResults) -> Option<QueryStatsProto> {
+		<(usize, &str) as query_accessor::Sealed<Value>>::stats(&(0_usize, *self), results)
+	}
+}
+
+impl<T> QueryAccessor<Option<T>> for &str where T: TryFromValue {}
+impl<T> query_accessor::Sealed<Option<T>> for &str
+where
+	T: TryFromValue,
+{
+	fn take(self, results: &mut QueryResults) -> Result<Option<T>> {
+		(0, self).take(results)
+	}
+
+	fn stats(&self, results: &QueryResults) -> Option<QueryStatsProto> {
+		<(usize, &str) as query_accessor::Sealed<Option<T>>>::stats(&(0_usize, *self), results)
+	}
+}
+
+impl<T> QueryAccessor<Vec<T>> for &str where T: TryFromValue {}
+impl<T> query_accessor::Sealed<Vec<T>> for &str
+where
+	T: TryFromValue,
+{
+	fn take(self, results: &mut QueryResults) -> Result<Vec<T>> {
+		(0, self).take(results)
+	}
+
+	fn stats(&self, results: &QueryResults) -> Option<QueryStatsProto> {
+		<(usize, &str) as query_accessor::Sealed<Vec<T>>>::stats(&(0_usize, *self), results)
+	}
+}
 
 // impl QueryStream<Value> for usize {}
 // impl query_stream::Sealed<Value> for usize {

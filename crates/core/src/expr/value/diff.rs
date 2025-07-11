@@ -87,7 +87,7 @@ mod tests {
 			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
 		let now: Value =
 			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
-		let res: Value = SqlValue::parse("[]").into();
+		let res: Value = Vec::new();
 		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
 	}
 

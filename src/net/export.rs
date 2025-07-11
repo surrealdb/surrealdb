@@ -39,12 +39,11 @@ async fn post_handler(
 	content_type: TypedHeader<ContentType>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, ResponseError> {
-	Ok("TODO: STU")
-	// let fmt = content_type.deref();
-	// let fmt: Format = fmt.into();
-	// let val = fmt.parse_value(body)?;
-	// let cfg = export::Config::from_value(&val.into()).map_err(ResponseError)?;
-	// handle_inner(state, session, cfg).await
+	let fmt = content_type.deref();
+	let fmt: Format = fmt.into();
+	let val = fmt.parse_value(body)?;
+	let cfg = export::Config::from_value(&val.into()).map_err(ResponseError)?;
+	handle_inner(state, session, cfg).await
 }
 
 async fn handle_inner(

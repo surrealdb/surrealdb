@@ -1,6 +1,7 @@
 use super::transaction::WithTransaction;
 use crate::Surreal;
 use crate::api::method::live::Subscribe;
+use crate::opt::{KeyRange, RangeableResource};
 
 use crate::api::Result;
 use crate::api::method::BoxFuture;
@@ -8,6 +9,8 @@ use crate::api::opt::Resource;
 use std::error::Error as StdError;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::expr::Thing as RecordId;
+use surrealdb_core::expr::Value;
 use surrealdb_core::sql::statements::SelectStatement;
 use surrealdb_protocol::TryFromQueryStream;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
@@ -16,15 +19,15 @@ use uuid::Uuid;
 /// A select future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Select<R: Resource, RT, RTItem> {
+pub struct Select<R: Resource, RT> {
 	pub(super) client: Surreal,
 	pub(super) txn: Option<Uuid>,
 	pub(super) resource: R,
 	pub(super) response_type: PhantomData<RT>,
-	pub(super) response_item_type: PhantomData<RTItem>,
+	// pub(super) response_item_type: PhantomData<RTItem>,
 }
 
-impl<R, RT, RTItem> WithTransaction for Select<R, RT, RTItem>
+impl<R, RT> WithTransaction for Select<R, RT>
 where
 	R: Resource,
 {
@@ -34,13 +37,12 @@ where
 	}
 }
 
-impl<R, RT, T> Select<R, RT, T> where R: Resource {}
+impl<R, RT> Select<R, RT> where R: Resource {}
 
-impl<R, RT, RTItem> IntoFuture for Select<R, RT, RTItem>
+impl<R, RT> IntoFuture for Select<R, RT>
 where
 	R: Resource,
-	RT: TryFromQueryStream<RTItem>,
-	<RT as TryFromQueryStream<RTItem>>::Error: StdError + Send + Sync + 'static,
+	RT: TryFromQueryStream,
 {
 	type Output = Result<RT>;
 	type IntoFuture = BoxFuture<'static, Self::Output>;
@@ -75,34 +77,41 @@ where
 	}
 }
 
-// impl<C, R> Select<'_, C, R, Value>
+// impl<R> Select<R, Value>
 // where
-// 	C
 // 	R: RangeableResource,
 // {
 // 	/// Restricts the records selected to those in the specified range
-// 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-// 		self.resource = self.resource.with_range(range.into());
-// 		self
+// 	pub fn range(self, range: impl Into<KeyRange>) -> Select<RecordId, Value> {
+
+// 		Select {
+// 			resource: self.resource.with_range(range.into()),
+// 			client: self.client,
+// 			txn: self.txn,
+// 			response_type: PhantomData,
+// 		}
 // 	}
 // }
 
-// impl<C, R, RT> Select<'_, C, R, Vec<RT>>
-// where
-// 	C
-// 	R: RangeableResource,
-// {
-// 	/// Restricts the records selected to those in the specified range
-// 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-// 		self.resource = self.resource.with_range(range.into());
-// 		self
-// 	}
-// }
+impl<R, RT> Select<R, RT>
+where
+	R: RangeableResource,
+{
+	/// Restricts the records selected to those in the specified range
+	pub fn range(self, range: impl Into<KeyRange>) -> Select<RecordId, RT> {
+		Select {
+			resource: self.resource.with_range(range.into()),
+			client: self.client,
+			txn: self.txn,
+			response_type: PhantomData,
+		}
+	}
+}
 
-impl<R, RT, RTItem> Select<R, RT, RTItem>
+impl<R, RT> Select<R, RT>
 where
 	R: Resource,
-	RT: TryFromQueryStream<RTItem>,
+	RT: TryFromQueryStream,
 {
 	/// Turns a normal select query into a live query
 	///

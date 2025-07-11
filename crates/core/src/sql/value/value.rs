@@ -880,6 +880,16 @@ impl SqlValue {
 			_ => Err(anyhow::Error::new(Error::NonComputed)),
 		}
 	}
+
+	/// Convert this Value into a Vec of SqlValues.
+	/// If this Value is an Array, return the contents of the Array.
+	/// Otherwise, return a Vec containing this Value.
+	pub fn into_vec(self) -> Vec<SqlValue> {
+		match self {
+			SqlValue::Array(v) => v.0,
+			_ => vec![self],
+		}
+	}
 }
 
 impl fmt::Display for SqlValue {

@@ -1,6 +1,7 @@
 #![cfg(not(target_family = "wasm"))]
 
 mod parse;
+use anyhow::Context;
 use parse::Parse;
 mod helpers;
 use helpers::new_ds;
@@ -119,7 +120,7 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
 		}
 		//
 		let tmp = res.next().unwrap()?;
-		let val = SqlValue::parse("[ { fut: [42] } ]").into();
+		let val = SqlValue::parse("[ { fut: [42] } ]").into_vec();
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -236,10 +237,12 @@ fn excessive_cast_chain_depth() -> Result<()> {
 
 async fn run_queries(
 	sql: &str,
-) -> Result<impl ExactSizeIterator<Item = Result<Value>> + DoubleEndedIterator + 'static> {
+) -> Result<impl ExactSizeIterator<Item = Result<Vec<Value>>> + DoubleEndedIterator + 'static> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.values))
+	dbs.execute(sql, &ses, None)
+		.await
+		.map(|v| v.into_iter().map(|res| res.values.context("query errored")))
 }
 
 fn cast_chain(n: usize) -> String {

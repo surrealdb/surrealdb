@@ -58,10 +58,7 @@ pub async fn iam_run_case(
 		);
 
 		for (i, r) in resp.into_iter().enumerate() {
-			let tmp = r.output();
-			ensure!(tmp.is_ok(), "Check statement errored for test: {}", tmp.unwrap_err());
-
-			let tmp = tmp.unwrap();
+			let tmp = r.take_first().unwrap();
 			let expected = value(check_expected_result[i])?;
 			ensure!(
 				tmp == expected,
@@ -189,7 +186,7 @@ pub fn with_enough_stack(fut: impl Future<Output = Result<()>> + Send + 'static)
 #[allow(dead_code)]
 fn skip_ok_pos(res: &mut Vec<QueryResult>, pos: usize) -> Result<()> {
 	assert!(!res.is_empty(), "At position {pos} - No more result!");
-	let r = res.remove(0).result;
+	let r = res.remove(0).values;
 	let _ = r.is_err_and(|e| {
 		panic!("At position {pos} - Statement fails with: {e}");
 	});
@@ -394,7 +391,7 @@ impl Test {
 		&mut self,
 		check: F,
 	) -> Result<&mut Self> {
-		let tmp = self.next()?.values;
+		let tmp = self.next()?.take_first();
 		match &tmp {
 			Ok(val) => {
 				panic!("At position {} - Expect error, but got OK: {val}", self.pos);

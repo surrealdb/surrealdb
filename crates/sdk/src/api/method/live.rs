@@ -11,8 +11,10 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use surrealdb_core::dbs::{Action, Notification as CoreNotification};
-use surrealdb_core::expr::TryFromValue;
+use surrealdb_core::protocol::TryFromValue;
 use surrealdb_core::sql::statements::LiveStatement;
+use surrealdb_protocol::proto::rpc::v1::Action as ActionProto;
+use surrealdb_protocol::proto::rpc::v1::Notification as NotificationProto;
 use surrealdb_protocol::proto::rpc::v1::SubscribeRequest;
 use surrealdb_protocol::proto::v1::Value as ValueProto;
 use uuid::Uuid;
@@ -22,22 +24,33 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 const ID: &str = "id";
 
-fn deserialize<R>(notification: CoreNotification) -> Option<Result<crate::Notification<R>>>
+fn deserialize<R>(notification: NotificationProto) -> Option<Result<crate::Notification<R>>>
 where
 	R: TryFromValue,
 {
-	let query_id = *notification.id;
-	let action = notification.action;
-	match action {
-		Action::Killed => None,
-		action => match R::try_from_value(notification.result) {
-			Ok(data) => Some(Ok(Notification {
-				query_id,
-				data,
-				action,
-			})),
-			Err(error) => Some(Err(error)),
-		},
+	match notification.action() {
+		ActionProto::Killed => None,
+		action => {
+			let NotificationProto {
+				live_query_id,
+				action: _,
+				record_id,
+				value,
+			} = notification;
+			let query_id = live_query_id.map(TryInto::try_into)?.ok()?;
+			let Some(value) = value else {
+				return None;
+			};
+			let action = action.try_into().ok()?;
+			match R::try_from_value(value) {
+				Ok(data) => Some(Ok(Notification {
+					query_id,
+					data,
+					action,
+				})),
+				Err(error) => Some(Err(error)),
+			}
+		}
 	}
 }
 

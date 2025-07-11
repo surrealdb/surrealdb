@@ -34,7 +34,7 @@ async fn future_function_arguments() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -52,7 +52,7 @@ async fn future_disabled() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("<future> { 123 }").into();
+	let val = SqlValue::parse("<future> { 123 }").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -11,12 +11,15 @@ use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
-use surrealdb_core::expr::TryFromValue;
 use surrealdb_core::expr::Value;
+use surrealdb_core::protocol::TryFromValue;
 use surrealdb_core::sql::statements::UpdateStatement;
-use surrealdb_protocol::QueryResponseValueStream;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
+use surrealdb_protocol::{QueryResponseValueStream, TryIntoValue};
 use uuid::Uuid;
+
+use crate::opt::{KeyRange, RangeableResource};
+use surrealdb_core::expr::Thing as RecordId;
 
 /// An update future
 #[derive(Debug)]
@@ -77,8 +80,6 @@ where
 
 			let value = stream.next().await.context("No response from server")??;
 
-			let value: Value = Value::try_from(value)?;
-
 			Ok(RT::try_from_value(value)?)
 		})
 	}
@@ -96,17 +97,21 @@ where
 // 	}
 // }
 
-// impl<C, R, RT> Update<'_, C, R, Vec<RT>>
-// where
-// 	C
-// 	R: RangeableResource,
-// {
-// 	/// Restricts the records to update to those in the specified range
-// 	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
-// 		self.resource = self.resource.with_range(range.into());
-// 		self
-// 	}
-// }
+impl<R, RT> Update<R, RT>
+where
+	R: RangeableResource,
+{
+	/// Restricts the records to update to those in the specified range
+	pub fn range(self, range: impl Into<KeyRange>) -> Update<RecordId, RT> {
+		Update {
+			what: self.what.with_range(range.into()),
+			client: self.client,
+			txn: self.txn,
+			data: self.data,
+			response_type: PhantomData,
+		}
+	}
+}
 
 impl<R, RT> Update<R, RT>
 where
@@ -114,10 +119,16 @@ where
 	RT: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content(self, data: Value) -> Update<R, RT> {
-		let data = match data {
-			Value::None => Data::EmptyExpression,
-			content => Data::ContentExpression(content),
+	pub fn content<V>(self, value: V) -> Update<R, RT>
+	where
+		V: TryIntoValue,
+	{
+		let value = value.try_into_value().unwrap();
+
+		let data = if value.is_none() {
+			Data::EmptyExpression
+		} else {
+			Data::ContentExpression(value.try_into().unwrap())
 		};
 
 		Self {
@@ -130,12 +141,17 @@ where
 	}
 
 	/// Merges the current document / record data with the specified data
-	pub fn merge(self, data: Value) -> Update<R, RT> {
+	pub fn merge<V>(self, value: V) -> Update<R, RT>
+	where
+		V: TryIntoValue,
+	{
+		let value = value.try_into_value().unwrap();
+
 		Self {
 			txn: self.txn,
 			client: self.client,
 			what: self.what,
-			data: Data::MergeExpression(data),
+			data: Data::MergeExpression(value.try_into().unwrap()),
 			response_type: PhantomData,
 		}
 	}

@@ -49,7 +49,7 @@ impl RpcContext for Http {
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> V1Data {
-		V1Data::Other(V1Value::Strand(format!("{PKG_NAME}-{}", *PKG_VERSION).into()))
+		V1Data::Other(V1Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION).into()))
 	}
 
 	// ------------------------------

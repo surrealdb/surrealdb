@@ -205,10 +205,9 @@ pub async fn init(
 					}
 				}
 
-				// TODO: STU: WTF is this?
-				// for var in &vars {
-				// 	query.push(Statement::Value(Value::Param(Param::from(var.as_str()))))
-				// }
+				for var in &vars {
+					query.push(Statement::Value(Value::Param(Param::from(var.as_str()))))
+				}
 
 				// Extract the namespace and database from the current prompt
 				let (prompt_ns, prompt_db) = split_prompt(&prompt);
