@@ -17,7 +17,7 @@ error = "Invalid control flow statement, break or continue statement found outsi
 error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
-error = "An error occurred: ERROR"
+error = "Execution halted with output: `ERROR`"
 
 [[test.results]]
 value = "[1, 2, 3, 4, 5, 6]"
