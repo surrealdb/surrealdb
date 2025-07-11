@@ -201,7 +201,7 @@ impl InfoStatement {
 						"functions".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.full_name().to_raw(), v.to_string().into());
 							}
 							out.into()
 						},
