@@ -16,6 +16,7 @@ use reqwest::ClientBuilder;
 use reqwest::header::HeaderMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
+use surrealdb_core::cnf::SURREALDB_USER_AGENT;
 use tokio::sync::watch;
 use url::Url;
 
@@ -43,7 +44,10 @@ impl conn::Sealed for Client {
 
 			let base_url = address.url;
 
-			super::health(client.get(base_url.join("health")?)).await?;
+			let req = client
+				.get(base_url.join("health")?)
+				.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
+			super::health(req).await?;
 
 			let (route_tx, route_rx) = match capacity {
 				0 => async_channel::unbounded(),

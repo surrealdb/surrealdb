@@ -1,8 +1,8 @@
+use crate::cnf::SURREALDB_USER_AGENT;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::{Bytes, Object, Strand, Value};
 use crate::syn;
-
 use anyhow::{Context as _, Result, bail};
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
@@ -108,7 +108,7 @@ async fn request(
 	let mut req = cli.request(method.clone(), url);
 	// Add the User-Agent header
 	if cfg!(not(target_family = "wasm")) {
-		req = req.header("User-Agent", "SurrealDB");
+		req = req.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
