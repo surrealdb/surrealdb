@@ -4,11 +4,12 @@ use crate::dbs::{Force, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::array::Array;
-use crate::expr::index::{HnswParams, Index, MTreeParams, SearchParams};
+use crate::expr::index::{FullTextParams, HnswParams, Index, MTreeParams, SearchParams};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{FlowResultExt as _, Part, Thing, Value};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::FtIndex;
+use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 #[cfg(not(target_family = "wasm"))]
@@ -92,7 +93,8 @@ impl Document {
 		match &ix.index {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
-			Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
+			Index::Search(p) => ic.index_search(stk, ctx, p).await?,
+			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 		}
@@ -382,16 +384,11 @@ impl<'a> IndexOperation<'a> {
 		})
 	}
 
-	async fn index_full_text(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		p: &SearchParams,
-	) -> Result<()> {
+	async fn index_search(&mut self, stk: &mut Stk, ctx: &Context, p: &SearchParams) -> Result<()> {
 		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
+		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name)?;
 
-		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
+		let mut ft = SearchIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(stk, ctx, self.opt, self.rid, n).await?;
@@ -401,10 +398,35 @@ impl<'a> IndexOperation<'a> {
 		ft.finish(ctx).await
 	}
 
+	async fn index_fulltext(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		p: &FullTextParams,
+	) -> Result<()> {
+		let (ns, db) = self.opt.ns_db()?;
+		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name)?;
+		// Build a FullText instance
+		let s = FullTextIndex::new(ctx, self.opt, ikb, p).await?;
+		// Delete the old index data
+		let doc_id = if let Some(o) = self.o.take() {
+			s.remove_content(stk, ctx, self.opt, self.ix, self.rid, o).await?
+		} else {
+			None
+		};
+		// Create the new index data
+		if let Some(n) = self.n.take() {
+			s.index_content(stk, ctx, self.opt, self.ix, self.rid, n).await?;
+		} else if let Some(doc_id) = doc_id {
+			s.remove_doc(ctx, doc_id).await?;
+		}
+		Ok(())
+	}
+
 	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
 		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
+		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name)?;
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

@@ -1,0 +1,339 @@
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::expr::index::FullTextParams;
+use crate::expr::statements::DefineIndexStatement;
+use crate::expr::{Idiom, Thing, Value};
+use crate::idx::IndexKeyBase;
+use crate::idx::docids::DocId;
+use crate::idx::docids::seqdocids::SeqDocIds;
+use crate::idx::ft::analyzer::Analyzer;
+use crate::idx::ft::analyzer::filter::FilteringStage;
+use crate::idx::ft::analyzer::tokenizer::Tokens;
+use crate::idx::ft::highlighter::{HighlightParams, Highlighter};
+use crate::idx::ft::offset::Offset;
+use crate::idx::ft::{DocLength, TermFrequency};
+use crate::idx::planner::iterators::MatchesHitsIterator;
+use crate::key::index::dl::Dl;
+use crate::key::index::td::Td;
+use crate::kvs::KeyDecode;
+use crate::kvs::Transaction;
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use roaring::RoaringTreemap;
+use roaring::treemap::IntoIter;
+use std::collections::HashSet;
+use std::ops::BitAnd;
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Default)]
+struct TermDocument {
+	f: TermFrequency,
+	o: Vec<Offset>,
+}
+
+pub(in crate::idx) struct QueryTerms {
+	#[allow(dead_code)]
+	tokens: Tokens,
+	#[allow(dead_code)]
+	docs: Vec<Option<RoaringTreemap>>,
+	#[allow(dead_code)]
+	has_unknown_terms: bool,
+}
+
+pub(crate) struct FullTextIndex {
+	ikb: IndexKeyBase,
+	analyzer: Analyzer,
+	highlighting: bool,
+	doc_ids: SeqDocIds,
+}
+
+impl FullTextIndex {
+	pub(crate) async fn new(
+		ctx: &Context,
+		opt: &Options,
+		ikb: IndexKeyBase,
+		p: &FullTextParams,
+	) -> Result<Self> {
+		let tx = ctx.tx();
+		let (ns, db) = opt.ns_db()?;
+		let nid = opt.id()?;
+		let az = tx.get_db_analyzer(ns, db, &p.az).await?;
+		let ixs = ctx.get_index_stores();
+		ixs.mappers().check(&az).await?;
+		let analyzer = Analyzer::new(ixs, az)?;
+		Ok(Self {
+			analyzer,
+			highlighting: p.hl,
+			doc_ids: SeqDocIds::new(nid, ikb.clone()),
+			ikb,
+		})
+	}
+
+	pub(crate) async fn remove_content(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		rid: &Thing,
+		content: Vec<Value>,
+	) -> Result<Option<DocId>> {
+		let (ns, db) = opt.ns_db()?;
+		// Collect the tokens.
+		let tokens =
+			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
+		let mut set = HashSet::new();
+		let tx = ctx.tx();
+		// Get the doc id (if it exists)
+		let doc_id = self.doc_ids.get_doc_id(&tx, &rid.id).await?;
+		if let Some(doc_id) = doc_id {
+			// Delete the terms
+			for tks in &tokens {
+				for t in tks.list() {
+					// Extract the term
+					let s = tks.get_token_string(t)?;
+					// Check if the term has already been deleted
+					if set.insert(s) {
+						// Delete the term
+						let key = Td::new(ns, db, &rid.tb, &ix.name, s, Some(doc_id));
+						tx.del(key).await?;
+					}
+				}
+			}
+			// Delete the doc length
+			let key = Dl::new(ns, db, &rid.tb, &ix.name, doc_id);
+			tx.del(key).await?;
+			Ok(Some(doc_id))
+		} else {
+			Ok(None)
+		}
+	}
+
+	/// This method assumes that remove_content has been called previously,
+	/// as it does not remove the content (terms) but only removes the doc_id reference.
+	pub(crate) async fn remove_doc(&self, ctx: &Context, doc_id: DocId) -> Result<()> {
+		self.doc_ids.remove_doc_id(&ctx.tx(), doc_id).await
+	}
+
+	pub(crate) async fn index_content(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+		rid: &Thing,
+		content: Vec<Value>,
+	) -> Result<()> {
+		let (ns, db) = opt.ns_db()?;
+		let tx = ctx.tx();
+		// Get the doc id (if it exists)
+		let id = self.doc_ids.resolve_doc_id(ctx, rid.id.clone()).await?;
+		// Collect the tokens.
+		let tokens =
+			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
+		let dl = if self.highlighting {
+			Self::index_with_offsets(&tx, ns, db, ix, id.doc_id(), tokens).await?
+		} else {
+			Self::index_without_offsets(&tx, ns, db, ix, id.doc_id(), tokens).await?
+		};
+		// Set the doc length
+		let key = Dl::new(ns, db, &rid.tb, &ix.name, id.doc_id());
+		tx.set(key, revision::to_vec(&dl)?, None).await?;
+		// We're done
+		Ok(())
+	}
+
+	async fn index_with_offsets(
+		tx: &Transaction,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		id: DocId,
+		tokens: Vec<Tokens>,
+	) -> Result<DocLength> {
+		let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;
+		let mut td = TermDocument::default();
+		for (t, o) in offsets {
+			let key = Td::new(ns, db, &ix.what, &ix.name, t, Some(id));
+			td.f = o.len() as TermFrequency;
+			td.o = o;
+			tx.set(key, revision::to_vec(&td)?, None).await?;
+		}
+		Ok(dl)
+	}
+
+	async fn index_without_offsets(
+		tx: &Transaction,
+		ns: &str,
+		db: &str,
+		ix: &DefineIndexStatement,
+		id: DocId,
+		tokens: Vec<Tokens>,
+	) -> Result<DocLength> {
+		let (dl, tf) = Analyzer::extract_frequencies(&tokens)?;
+		let mut td = TermDocument::default();
+		for (t, f) in tf {
+			let key = Td::new(ns, db, &ix.what, &ix.name, t, Some(id));
+			td.f = f;
+			tx.set(key, revision::to_vec(&td)?, None).await?;
+		}
+		Ok(dl)
+	}
+
+	pub(in crate::idx) async fn extract_querying_terms(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		query_string: String,
+	) -> Result<QueryTerms> {
+		// We extract the tokens
+		let tokens = self
+			.analyzer
+			.generate_tokens(stk, ctx, opt, FilteringStage::Querying, query_string)
+			.await?;
+		// We collect the term docs
+		let mut docs = Vec::with_capacity(tokens.list().len());
+		let mut unique_tokens = HashSet::new();
+		let tx = ctx.tx();
+		let mut has_unknown_terms = false;
+		for token in tokens.list() {
+			// Tokens can contain duplicates, not need to evaluate them again
+			if unique_tokens.insert(token) {
+				// Is the term known in the index?
+				let term = tokens.get_token_string(token)?;
+				let d = self.get_docs(&tx, term).await?;
+				if !has_unknown_terms && d.is_none() {
+					has_unknown_terms = true;
+				}
+				docs.push(d);
+			}
+		}
+		Ok(QueryTerms {
+			tokens,
+			docs,
+			has_unknown_terms,
+		})
+	}
+
+	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {
+		// First we read the compacted documents
+		let mut docs = None;
+		let td = self.ikb.new_td_key(term, None);
+		if let Some(v) = tx.get(td, None).await? {
+			docs = Some(RoaringTreemap::deserialize_from(&mut v.as_slice())?);
+		}
+		// Then we read the not yet compacted term/documents if any
+		let (beg, end) = self.ikb.new_td_range_with_id(term)?;
+		for k in tx.keys(beg..end, u32::MAX, None).await? {
+			let td = Td::decode(&k)?;
+			if let Some(doc_id) = td.id {
+				if let Some(docs) = &mut docs {
+					docs.insert(doc_id);
+				} else {
+					docs = Some(RoaringTreemap::from_iter(vec![doc_id]));
+				}
+			}
+		}
+		// If `docs` is empty, we return `None`
+		Ok(docs.filter(|docs| !docs.is_empty()))
+	}
+
+	pub(in crate::idx) fn new_hits_iterator(
+		&self,
+		qt: &QueryTerms,
+	) -> Result<Option<FullTextHitsIterator>> {
+		let mut hits: Option<RoaringTreemap> = None;
+		for opt_docs in qt.docs.iter() {
+			if let Some(docs) = opt_docs {
+				if let Some(h) = hits {
+					hits = Some(h.bitand(docs));
+				} else {
+					hits = Some(docs.clone());
+				}
+			} else {
+				return Ok(None);
+			}
+		}
+		if let Some(hits) = hits {
+			if !hits.is_empty() {
+				return Ok(Some(FullTextHitsIterator::new(self.ikb.clone(), hits)));
+			}
+		}
+		Ok(None)
+	}
+
+	pub(in crate::idx) async fn highlight(
+		&self,
+		tx: &Transaction,
+		thg: &Thing,
+		qt: &QueryTerms,
+		hlp: HighlightParams,
+		idiom: &Idiom,
+		doc: &Value,
+	) -> Result<Value> {
+		if !thg.tb.eq(self.ikb.table()) {
+			return Ok(Value::None);
+		}
+		let doc_id = self.doc_ids.get_doc_id(tx, &thg.id).await?;
+		if let Some(doc_id) = doc_id {
+			let mut hl = Highlighter::new(hlp, idiom, doc);
+			for tk in qt.tokens.list() {
+				let o = self.get_offsets(tx, doc_id, qt.tokens.get_token_string(tk)?).await?;
+				if let Some(o) = o {
+					hl.highlight(tk.get_char_len(), o);
+				}
+			}
+			return hl.try_into();
+		}
+		Ok(Value::None)
+	}
+
+	async fn get_offsets(
+		&self,
+		_tx: &Transaction,
+		_doc_id: DocId,
+		_term: &str,
+	) -> Result<Option<Vec<Offset>>> {
+		todo!()
+	}
+}
+
+pub(crate) struct FullTextHitsIterator {
+	ikb: IndexKeyBase,
+	iter: IntoIter,
+}
+
+impl FullTextHitsIterator {
+	fn new(ikb: IndexKeyBase, hits: RoaringTreemap) -> Self {
+		Self {
+			ikb,
+			iter: hits.into_iter(),
+		}
+	}
+}
+
+impl MatchesHitsIterator for FullTextHitsIterator {
+	#[cfg(target_pointer_width = "64")]
+	fn len(&self) -> usize {
+		self.iter.len()
+	}
+	#[cfg(not(target_pointer_width = "64"))]
+	fn len(&self) -> usize {
+		self.iter.size_hint().0
+	}
+
+	async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>> {
+		for doc_id in self.iter.by_ref() {
+			if let Some(id) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
+				let rid = Thing {
+					tb: self.ikb.table().to_string(),
+					id,
+				};
+				return Ok(Some((rid, doc_id)));
+			}
+		}
+		Ok(None)
+	}
+}

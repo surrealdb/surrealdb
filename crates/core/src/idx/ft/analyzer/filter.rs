@@ -1,15 +1,15 @@
 use crate::expr::filter::Filter as SqlFilter;
 use crate::expr::language::Language;
+use crate::idx::ft::Position;
 use crate::idx::ft::analyzer::mapper::Mapper;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
-use crate::idx::ft::offsets::Position;
 use crate::idx::trees::store::IndexStores;
 use anyhow::Result;
 use deunicode::deunicode;
 use rust_stemmers::{Algorithm, Stemmer};
 
 #[derive(Clone, Copy)]
-pub(super) enum FilteringStage {
+pub(in crate::idx::ft) enum FilteringStage {
 	Indexing,
 	Querying,
 }
