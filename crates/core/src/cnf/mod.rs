@@ -130,7 +130,7 @@ pub static GLOBAL_BUCKET: LazyLock<Option<String>> =
 pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_GLOBAL_BUCKET_ENFORCED", bool, false);
 
-/// Whether to output in a form readable for devices like screen and braile readers
+/// Whether to output in a form readable for devices like screen and braille readers
 /// For example, by showing ⟨ and ⟩ as `
 pub static ACCESSIBLE_OUTPUT: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ACCESSIBLE_OUTPUT", bool, false);
