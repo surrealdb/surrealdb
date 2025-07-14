@@ -14,13 +14,28 @@ value = "None"
 value = "{ events: {  }, fields: {  }, indexes: { i: 'DEFINE INDEX i ON b FIELDS t FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "None"
+value = "[{ detail: { plan: { index: 'i', operator: '@1@', value: 'Hello' }, table: 'b' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
-value = "{}"
+value = "[{ score: NaN, title: '{Hello} World!' }]"
 
 [[test.results]]
-value = "{}"
+value = "[{ id: b:2, t: 'Foo Bar' }]"
+
+[[test.results]]
+value = "[{ score: NaN, title: 'Foo {Bar}' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ score: NaN, title: 'Foo Bar' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
 
 */
 

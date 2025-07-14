@@ -9,7 +9,7 @@ use crate::expr::{
 };
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
-use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms};
+use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::ft::search::scorer::BM25Scorer;
 use crate::idx::ft::search::termdocs::SearchTermsDocs;
@@ -1078,8 +1078,14 @@ impl QueryExecutor {
 					return self.search_matches_with_value(stk, ctx, opt, si, se, l, r).await;
 				}
 			}
-			Some(PerExpressionEntry::FullText(_fte)) => {
-				todo!()
+			Some(PerExpressionEntry::FullText(fte)) => {
+				let ix = fte.0.io.ix_ref();
+				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(ix) {
+					if self.0.table.eq(&ix.what.0) {
+						return self.fulltext_matches_with_doc_id(ctx, thg, fti, fte).await;
+					}
+					return self.fulltext_matches_with_value(stk, ctx, opt, fti, fte, l, r).await;
+				}
 			}
 			_ => {}
 		}
@@ -1096,17 +1102,16 @@ impl QueryExecutor {
 		se: &SearchEntry,
 	) -> Result<bool> {
 		// TODO ask Emmanuel
+		// If there is no terms, it can't be a match
+		if se.0.terms_docs.is_empty() {
+			return Ok(false);
+		}
 		let doc_key = revision::to_vec(thg)?;
 		let tx = ctx.tx();
 		let di = se.0.doc_ids.read().await;
 		let doc_id = di.get_doc_id(&tx, doc_key).await?;
 		drop(di);
 		if let Some(doc_id) = doc_id {
-			let term_goals = se.0.terms_docs.len();
-			// If there is no terms, it can't be a match
-			if term_goals == 0 {
-				return Ok(false);
-			}
 			for opt_td in se.0.terms_docs.iter() {
 				if let Some((_, docs)) = opt_td {
 					if !docs.contains(doc_id) {
@@ -1118,6 +1123,25 @@ impl QueryExecutor {
 				}
 			}
 			return Ok(true);
+		}
+		Ok(false)
+	}
+
+	async fn fulltext_matches_with_doc_id(
+		&self,
+		ctx: &Context,
+		thg: &Thing,
+		fti: &FullTextIndex,
+		fte: &FullTextEntry,
+	) -> Result<bool> {
+		if fte.0.qt.is_empty() {
+			return Ok(false);
+		}
+		let tx = ctx.tx();
+		if let Some(doc_id) = fti.get_doc_id(&tx, thg).await? {
+			if fte.0.qt.contains_doc(doc_id) {
+				return Ok(true);
+			}
 		}
 		Ok(false)
 	}
@@ -1149,6 +1173,20 @@ impl QueryExecutor {
 		let t = si.extract_indexing_terms(stk, ctx, opt, v).await?;
 		drop(terms);
 		Ok(se.0.query_terms_set.is_subset(&t))
+	}
+
+	#[allow(clippy::too_many_arguments)]
+	async fn fulltext_matches_with_value(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		fti: &FullTextIndex,
+		fte: &FullTextEntry,
+		l: Value,
+		r: Value,
+	) -> Result<bool> {
+		todo!()
 	}
 
 	fn get_match_ref_entry(&self, match_ref: &Value) -> Option<&PerMatchRefEntry> {
@@ -1242,15 +1280,15 @@ impl QueryExecutor {
 		ir: Option<&Arc<IteratorRecord>>,
 	) -> Result<Value> {
 		if let Some(mre) = self.get_match_ref_entry(match_ref) {
+			let mut doc_id = if let Some(ir) = ir {
+				ir.doc_id()
+			} else {
+				None
+			};
 			match mre {
 				PerMatchRefEntry::Search(se) => {
 					if let Some(scorer) = &se.0.scorer {
 						let tx = ctx.tx();
-						let mut doc_id = if let Some(ir) = ir {
-							ir.doc_id()
-						} else {
-							None
-						};
 						if doc_id.is_none() {
 							let key = revision::to_vec(rid)?;
 							let di = se.0.doc_ids.read().await;
@@ -1259,14 +1297,23 @@ impl QueryExecutor {
 						}
 						if let Some(doc_id) = doc_id {
 							let score = scorer.score(&tx, doc_id).await?;
-							if let Some(score) = score {
+							return Ok(Value::from(score));
+						}
+					}
+				}
+				PerMatchRefEntry::FullText(fte) => {
+					if let Some(scorer) = &fte.0.scorer {
+						if let Some(fti) = self.get_fulltext_index(fte) {
+							let tx = ctx.tx();
+							if doc_id.is_none() {
+								doc_id = fti.get_doc_id(&tx, rid).await?;
+							}
+							if let Some(doc_id) = doc_id {
+								let score = scorer.score(fti, &tx, &fte.0.qt, doc_id).await?;
 								return Ok(Value::from(score));
 							}
 						}
 					}
-				}
-				PerMatchRefEntry::FullText(_fte) => {
-					todo!()
 				}
 			}
 		}
@@ -1320,6 +1367,7 @@ struct FullTextEntry(Arc<InnerFullTextEntry>);
 struct InnerFullTextEntry {
 	io: IndexOption,
 	qt: QueryTerms,
+	scorer: Option<Scorer>,
 }
 
 impl FullTextEntry {
@@ -1332,9 +1380,11 @@ impl FullTextEntry {
 	) -> Result<Option<Self>> {
 		if let Matches(qs, _) = io.op() {
 			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
+			let scorer = fti.new_scorer(ctx).await?;
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
 				io,
 				qt,
+				scorer,
 			}))))
 		} else {
 			Ok(None)

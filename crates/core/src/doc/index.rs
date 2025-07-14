@@ -410,13 +410,13 @@ impl<'a> IndexOperation<'a> {
 		let s = FullTextIndex::new(ctx, self.opt, ikb, p).await?;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
-			s.remove_content(stk, ctx, self.opt, self.ix, self.rid, o).await?
+			s.remove_content(stk, ctx, self.opt, self.rid, o).await?
 		} else {
 			None
 		};
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			s.index_content(stk, ctx, self.opt, self.ix, self.rid, n).await?;
+			s.index_content(stk, ctx, self.opt, self.rid, n).await?;
 		} else if let Some(doc_id) = doc_id {
 			s.remove_doc(ctx, doc_id).await?;
 		}

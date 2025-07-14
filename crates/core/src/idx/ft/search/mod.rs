@@ -661,7 +661,7 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
-	use crate::idx::ft::search::scorer::{BM25Scorer, Score};
+	use crate::idx::ft::search::scorer::BM25Scorer;
 	use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
 	use crate::idx::planner::iterators::MatchesHitsIterator;
 	use crate::kvs::{Datastore, LockType::*, TransactionType};
@@ -688,7 +688,7 @@ mod tests {
 			}
 			assert_eq!(map.len(), e.len());
 			for (k, p) in e {
-				assert_eq!(map.get(k), Some(&p), "{}", k);
+				assert_eq!(map.get(k), p.as_ref(), "{}", k);
 			}
 		} else {
 			panic!("hits is none");

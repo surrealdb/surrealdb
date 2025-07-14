@@ -1,8 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Idiom, Thing, Value};
+use crate::expr::{Idiom, Scoring, Thing, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
@@ -11,9 +10,9 @@ use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::highlighter::{HighlightParams, Highlighter};
 use crate::idx::ft::offset::Offset;
-use crate::idx::ft::{DocLength, TermFrequency};
+use crate::idx::ft::search::Bm25Params;
+use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
-use crate::key::index::dl::Dl;
 use crate::key::index::td::Td;
 use crate::kvs::KeyDecode;
 use crate::kvs::Transaction;
@@ -32,6 +31,13 @@ struct TermDocument {
 	o: Vec<Offset>,
 }
 
+#[revisioned(revision = 1)]
+#[derive(Debug, Default)]
+struct DocLengthAndCount {
+	total_docs_length: i128,
+	doc_count: i64,
+}
+
 pub(in crate::idx) struct QueryTerms {
 	#[allow(dead_code)]
 	tokens: Tokens,
@@ -41,11 +47,27 @@ pub(in crate::idx) struct QueryTerms {
 	has_unknown_terms: bool,
 }
 
+impl QueryTerms {
+	pub(in crate::idx) fn is_empty(&self) -> bool {
+		self.tokens.list().is_empty()
+	}
+
+	pub(in crate::idx) fn contains_doc(&self, doc_id: DocId) -> bool {
+		for d in self.docs.iter().flatten() {
+			if d.contains(doc_id) {
+				return true;
+			}
+		}
+		false
+	}
+}
+
 pub(crate) struct FullTextIndex {
 	ikb: IndexKeyBase,
 	analyzer: Analyzer,
 	highlighting: bool,
 	doc_ids: SeqDocIds,
+	bm25: Option<Bm25Params>,
 }
 
 impl FullTextIndex {
@@ -62,11 +84,23 @@ impl FullTextIndex {
 		let ixs = ctx.get_index_stores();
 		ixs.mappers().check(&az).await?;
 		let analyzer = Analyzer::new(ixs, az)?;
+		let mut bm25 = None;
+		if let Scoring::Bm {
+			k1,
+			b,
+		} = p.sc
+		{
+			bm25 = Some(Bm25Params {
+				k1,
+				b,
+			});
+		}
 		Ok(Self {
 			analyzer,
 			highlighting: p.hl,
 			doc_ids: SeqDocIds::new(nid, ikb.clone()),
 			ikb,
+			bm25,
 		})
 	}
 
@@ -75,18 +109,16 @@ impl FullTextIndex {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ix: &DefineIndexStatement,
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<Option<DocId>> {
-		let (ns, db) = opt.ns_db()?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
 		let mut set = HashSet::new();
 		let tx = ctx.tx();
 		// Get the doc id (if it exists)
-		let doc_id = self.doc_ids.get_doc_id(&tx, &rid.id).await?;
+		let doc_id = self.get_doc_id(&tx, &rid).await?;
 		if let Some(doc_id) = doc_id {
 			// Delete the terms
 			for tks in &tokens {
@@ -96,13 +128,13 @@ impl FullTextIndex {
 					// Check if the term has already been deleted
 					if set.insert(s) {
 						// Delete the term
-						let key = Td::new(ns, db, &rid.tb, &ix.name, s, Some(doc_id));
+						let key = self.ikb.new_td_with_id(s, doc_id);
 						tx.del(key).await?;
 					}
 				}
 			}
 			// Delete the doc length
-			let key = Dl::new(ns, db, &rid.tb, &ix.name, doc_id);
+			let key = self.ikb.new_dl(doc_id);
 			tx.del(key).await?;
 			Ok(Some(doc_id))
 		} else {
@@ -121,11 +153,9 @@ impl FullTextIndex {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ix: &DefineIndexStatement,
 		rid: &Thing,
 		content: Vec<Value>,
 	) -> Result<()> {
-		let (ns, db) = opt.ns_db()?;
 		let tx = ctx.tx();
 		// Get the doc id (if it exists)
 		let id = self.doc_ids.resolve_doc_id(ctx, rid.id.clone()).await?;
@@ -133,29 +163,37 @@ impl FullTextIndex {
 		let tokens =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
 		let dl = if self.highlighting {
-			Self::index_with_offsets(&tx, ns, db, ix, id.doc_id(), tokens).await?
+			self.index_with_offsets(&tx, id.doc_id(), tokens).await?
 		} else {
-			Self::index_without_offsets(&tx, ns, db, ix, id.doc_id(), tokens).await?
+			self.index_without_offsets(&tx, id.doc_id(), tokens).await?
 		};
 		// Set the doc length
-		let key = Dl::new(ns, db, &rid.tb, &ix.name, id.doc_id());
+		let key = self.ikb.new_dl(id.doc_id());
 		tx.set(key, revision::to_vec(&dl)?, None).await?;
 		// We're done
 		Ok(())
 	}
 
+	async fn get_doc_length(&self, tx: &Transaction, doc_id: DocId) -> Result<Option<DocLength>> {
+		let key = self.ikb.new_dl(doc_id);
+		if let Some(v) = tx.get(key, None).await? {
+			let dl: DocLength = revision::from_slice(&v)?;
+			Ok(Some(dl))
+		} else {
+			Ok(None)
+		}
+	}
+
 	async fn index_with_offsets(
+		&self,
 		tx: &Transaction,
-		ns: &str,
-		db: &str,
-		ix: &DefineIndexStatement,
 		id: DocId,
 		tokens: Vec<Tokens>,
 	) -> Result<DocLength> {
 		let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, o) in offsets {
-			let key = Td::new(ns, db, &ix.what, &ix.name, t, Some(id));
+			let key = self.ikb.new_td_with_id(t, id);
 			td.f = o.len() as TermFrequency;
 			td.o = o;
 			tx.set(key, revision::to_vec(&td)?, None).await?;
@@ -164,17 +202,15 @@ impl FullTextIndex {
 	}
 
 	async fn index_without_offsets(
+		&self,
 		tx: &Transaction,
-		ns: &str,
-		db: &str,
-		ix: &DefineIndexStatement,
 		id: DocId,
 		tokens: Vec<Tokens>,
 	) -> Result<DocLength> {
 		let (dl, tf) = Analyzer::extract_frequencies(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, f) in tf {
-			let key = Td::new(ns, db, &ix.what, &ix.name, t, Some(id));
+			let key = self.ikb.new_td_with_id(t, id);
 			td.f = f;
 			tx.set(key, revision::to_vec(&td)?, None).await?;
 		}
@@ -220,7 +256,7 @@ impl FullTextIndex {
 	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {
 		// First we read the compacted documents
 		let mut docs = None;
-		let td = self.ikb.new_td_key(term, None);
+		let td = self.ikb.new_td_compacted(term);
 		if let Some(v) = tx.get(td, None).await? {
 			docs = Some(RoaringTreemap::deserialize_from(&mut v.as_slice())?);
 		}
@@ -264,6 +300,24 @@ impl FullTextIndex {
 		Ok(None)
 	}
 
+	pub(in crate::idx) async fn get_doc_id(
+		&self,
+		tx: &Transaction,
+		rid: &Thing,
+	) -> Result<Option<DocId>> {
+		if !rid.tb.eq(self.ikb.table()) {
+			return Ok(None);
+		}
+		self.doc_ids.get_doc_id(tx, &rid.id).await
+	}
+	pub(in crate::idx) async fn new_scorer(&self, ctx: &Context) -> Result<Option<Scorer>> {
+		if let Some(bm25) = &self.bm25 {
+			let sc = Scorer::new(&self.ikb, &ctx.tx(), bm25.clone()).await?;
+			return Ok(Some(sc));
+		}
+		Ok(None)
+	}
+
 	pub(in crate::idx) async fn highlight(
 		&self,
 		tx: &Transaction,
@@ -273,16 +327,14 @@ impl FullTextIndex {
 		idiom: &Idiom,
 		doc: &Value,
 	) -> Result<Value> {
-		if !thg.tb.eq(self.ikb.table()) {
-			return Ok(Value::None);
-		}
-		let doc_id = self.doc_ids.get_doc_id(tx, &thg.id).await?;
+		let doc_id = self.get_doc_id(tx, &thg).await?;
 		if let Some(doc_id) = doc_id {
 			let mut hl = Highlighter::new(hlp, idiom, doc);
 			for tk in qt.tokens.list() {
-				let o = self.get_offsets(tx, doc_id, qt.tokens.get_token_string(tk)?).await?;
-				if let Some(o) = o {
-					hl.highlight(tk.get_char_len(), o);
+				if let Some(td) =
+					self.get_term_document(tx, doc_id, qt.tokens.get_token_string(tk)?).await?
+				{
+					hl.highlight(tk.get_char_len(), td.o);
 				}
 			}
 			return hl.try_into();
@@ -290,13 +342,19 @@ impl FullTextIndex {
 		Ok(Value::None)
 	}
 
-	async fn get_offsets(
+	async fn get_term_document(
 		&self,
-		_tx: &Transaction,
-		_doc_id: DocId,
-		_term: &str,
-	) -> Result<Option<Vec<Offset>>> {
-		todo!()
+		tx: &Transaction,
+		id: DocId,
+		term: &str,
+	) -> Result<Option<TermDocument>> {
+		let key = self.ikb.new_td_with_id(term, id);
+		if let Some(v) = tx.get(key, None).await? {
+			let td: TermDocument = revision::from_slice(&v)?;
+			Ok(Some(td))
+		} else {
+			Ok(None)
+		}
 	}
 }
 
@@ -335,5 +393,90 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 			}
 		}
 		Ok(None)
+	}
+}
+
+pub(in crate::idx) struct Scorer {
+	bm25: Bm25Params,
+	average_doc_length: f32,
+	doc_count: f32,
+}
+
+impl Scorer {
+	async fn new(ikb: &IndexKeyBase, tx: &Transaction, bm25: Bm25Params) -> Result<Self> {
+		let mut dlc = DocLengthAndCount::default();
+		let (beg, end) = ikb.new_dc_range()?;
+		// Compute the total number of documents (DocCount) and the total number of terms (DocLength)
+		// This key list is supposed to be small.
+		// One is compacted, and few others are transaction not yet compacted.
+		for (_, v) in tx.getr(beg..end, None).await? {
+			let st: DocLengthAndCount = revision::from_slice(&v)?;
+			dlc.doc_count += st.doc_count;
+			dlc.total_docs_length += st.total_docs_length;
+		}
+		let doc_count = dlc.doc_count as f32;
+		let average_doc_length = (dlc.total_docs_length as f32) / doc_count;
+		Ok(Self {
+			bm25,
+			doc_count,
+			average_doc_length,
+		})
+	}
+
+	async fn term_score(
+		&self,
+		fti: &FullTextIndex,
+		tx: &Transaction,
+		doc_id: DocId,
+		term_doc_count: DocLength,
+		term_frequency: TermFrequency,
+	) -> Result<Score> {
+		let doc_length = fti.get_doc_length(tx, doc_id).await?.unwrap_or(0);
+		Ok(self.compute_bm25_score(term_frequency as f32, term_doc_count as f32, doc_length as f32))
+	}
+
+	pub(crate) async fn score(
+		&self,
+		fti: &FullTextIndex,
+		tx: &Transaction,
+		qt: &QueryTerms,
+		doc_id: DocId,
+	) -> Result<Score> {
+		let mut sc = 0.0;
+		let tl = qt.tokens.list();
+		for (i, d) in qt.docs.iter().enumerate() {
+			if let Some(docs) = d {
+				if docs.contains(doc_id) {
+					if let Some(token) = tl.get(i) {
+						let term = qt.tokens.get_token_string(token)?;
+						let td = fti.get_term_document(tx, doc_id, term).await?;
+						if let Some(td) = td {
+							sc += self.term_score(fti, tx, doc_id, docs.len(), td.f).await?;
+						}
+					}
+				}
+			}
+		}
+		Ok(sc)
+	}
+
+	// https://en.wikipedia.org/wiki/Okapi_BM25
+	// Including the lower-bounding term frequency normalization (2011 CIKM)
+	fn compute_bm25_score(&self, term_freq: f32, term_doc_count: f32, doc_length: f32) -> f32 {
+		// (n(qi) + 0.5)
+		let denominator = term_doc_count + 0.5;
+		// (N - n(qi) + 0.5)
+		let numerator = self.doc_count - term_doc_count + 0.5;
+		let idf = (numerator / denominator).ln();
+		if idf.is_nan() {
+			return f32::NAN;
+		}
+		let tf_prim = 1.0 + term_freq.ln();
+		// idf * (k1 + 1)
+		let numerator = idf * (self.bm25.k1 + 1.0) * tf_prim;
+		// 1 - b + b * (|D| / avgDL)
+		let denominator = 1.0 - self.bm25.b + self.bm25.b * (doc_length / self.average_doc_length);
+		// numerator / (k1 * denominator + 1)
+		numerator / (self.bm25.k1 * denominator + 1.0)
 	}
 }

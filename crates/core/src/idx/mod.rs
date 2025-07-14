@@ -30,6 +30,8 @@ use crate::key::index::hv::Hv;
 use crate::key::index::id::Id as IdKey;
 use crate::key::index::vm::Vm;
 
+use crate::key::index::dc::Dc;
+use crate::key::index::dl::Dl;
 use crate::key::index::ib::Ib;
 use crate::key::index::is::Is;
 use crate::key::index::td::Td;
@@ -151,14 +153,33 @@ impl IndexKeyBase {
 		Is::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, nid).encode()
 	}
 
-	fn new_td_key<'a>(&'a self, term: &'a str, doc_id: Option<DocId>) -> Td<'a> {
-		Td::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, doc_id)
+	fn new_td_with_id<'a>(&'a self, term: &'a str, doc_id: DocId) -> Td<'a> {
+		Td::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, Some(doc_id))
+	}
+
+	fn new_td_compacted<'a>(&'a self, term: &'a str) -> Td<'a> {
+		Td::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, None)
 	}
 
 	fn new_td_range_with_id(&self, term: &str) -> Result<(Key, Key)> {
 		Td::range_with_id(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term)
 	}
 
+	fn new_dc_with_id<'a>(&'a self, doc_id: DocId) -> Dc<'a> {
+		Dc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, Some(doc_id))
+	}
+
+	fn new_dc_compacted<'a>(&'a self) -> Dc<'a> {
+		Dc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, None)
+	}
+
+	fn new_dc_range(&self) -> Result<(Key, Key)> {
+		Dc::range(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
+	}
+
+	fn new_dl<'a>(&'a self, doc_id: DocId) -> Dl<'a> {
+		Dl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
+	}
 	fn table(&self) -> &str {
 		&self.0.tb
 	}

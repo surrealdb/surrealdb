@@ -136,6 +136,8 @@ pub enum Category {
 	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
 	IndexTerms,
+	/// crate::key::index::dc                /*{ns}*{db}*{tb}+{ix}!dc{id}
+	IndexFullTextDocCountAndLength,
 	/// crate::key::index::dl                /*{ns}*{db}*{tb}+{ix}!dl{id}
 	IndexDocLength,
 	/// crate::key::index::td                /*{ns}*{db}*{tb}+{ix}!td{term}{id}
@@ -261,6 +263,7 @@ impl Display for Category {
 			Self::TaskLease => "TaskLease",
 			Self::IndexInvertedDocIds => "IndexInvertedDocIds",
 			Self::IndexFullTextDocIdsSequenceState => "IndexFullTextDocIdsSequenceState",
+			Self::IndexFullTextDocCountAndLength => "IndexFullTextDocCountAndLength",
 		};
 		write!(f, "{}", name)
 	}
