@@ -48,7 +48,7 @@ impl From<Notification> for ResponseData {
 	}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Failure {
 	pub code: i64,
 	pub message: Cow<'static, str>,

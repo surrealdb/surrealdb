@@ -44,7 +44,7 @@ async fn field_definition_value_reference() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -57,7 +57,7 @@ async fn field_definition_value_reference() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -73,25 +73,7 @@ async fn field_definition_value_reference() -> Result<()> {
 			},
 		]",
 	)
-	.into();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse(
-		"[
-			{
-				id: product:one,
-				subproducts: [
-					product:two,
-				],
-			},
-			{
-				id: product:two,
-				subproducts: [],
-			},
-		]",
-	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -109,7 +91,25 @@ async fn field_definition_value_reference() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse(
+		"[
+			{
+				id: product:one,
+				subproducts: [
+					product:two,
+				],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	)
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -151,7 +151,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 			},
 		]",
 		)
-		.into();
+		.into_vec();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).values?;
@@ -164,7 +164,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 			},
 		]",
 		)
-		.into();
+		.into_vec();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).values?;
@@ -182,7 +182,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 			},
 		]",
 		)
-		.into();
+		.into_vec();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).values?;
@@ -200,7 +200,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 			},
 		]",
 		)
-		.into();
+		.into_vec();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).values?;
@@ -218,7 +218,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 			},
 		]",
 		)
-		.into();
+		.into_vec();
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -263,7 +263,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -279,7 +279,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let sql = "
@@ -300,12 +300,11 @@ async fn field_definition_edge_permissions() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = Vec::new();
-	assert_eq!(tmp, val);
+	assert!(tmp.is_empty());
 	//
 	Ok(())
 }
@@ -339,7 +338,7 @@ async fn field_definition_readonly() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -351,7 +350,7 @@ async fn field_definition_readonly() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;

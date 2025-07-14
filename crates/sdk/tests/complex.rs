@@ -167,7 +167,7 @@ fn ok_graph_traversal_depth() -> Result<()> {
 							}}
 						]"
 					))
-					.into();
+					.into_vec();
 					assert_eq!(res, val);
 				}
 				Err(res) => {
@@ -198,7 +198,7 @@ fn ok_cast_chain_depth() -> Result<()> {
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap()?;
-		let val = Value::from(vec![SqlValue::from(5)]);
+		let val = vec![SqlValue::from(5)];
 		assert_eq!(tmp, val);
 		//
 		Ok(())

@@ -101,10 +101,8 @@ async fn delete_update_mtree_index() -> Result<()> {
 			}
 		]",
 	)
-	.as_array()
-	.unwrap()
-	.0;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	.into_vec();
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -150,8 +148,9 @@ async fn index_embedding() -> Result<()> {
 				}
 			]
 		}",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -346,8 +345,9 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 						operation: 'Collector'
 					}
 			]",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
@@ -363,8 +363,9 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 					distance: 14f
 				}
 			]",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -418,8 +419,9 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 						operation: 'Collector'
 					}
 			]",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
@@ -435,8 +437,9 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 					id: pts:3
 				}
 			]",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -485,25 +488,27 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 					operation: 'Collector'
 				}
 			]",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
-				{
-					distance: 6f,
-					flag: true,
-					id: pts:5
-				},
-				{
-					distance: 14f,
-					flag: true,
-					id: pts:3
-				}
-			]",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+			{
+				distance: 6f,
+				flag: true,
+				id: pts:5
+			},
+			{
+				distance: 14f,
+				flag: true,
+				id: pts:3
+			}
+		]",
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }

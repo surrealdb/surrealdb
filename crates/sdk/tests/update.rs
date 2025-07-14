@@ -33,7 +33,7 @@ async fn update_merge_and_content() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -45,7 +45,7 @@ async fn update_merge_and_content() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
@@ -70,7 +70,7 @@ async fn update_merge_and_content() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
@@ -123,7 +123,7 @@ async fn update_simple_with_input() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -135,7 +135,7 @@ async fn update_simple_with_input() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
@@ -153,7 +153,7 @@ async fn update_simple_with_input() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
@@ -171,7 +171,7 @@ async fn update_simple_with_input() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -183,7 +183,7 @@ async fn update_simple_with_input() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -239,7 +239,7 @@ async fn update_with_return_clause() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -252,7 +252,7 @@ async fn update_with_return_clause() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -264,7 +264,7 @@ async fn update_with_return_clause() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -276,7 +276,7 @@ async fn update_with_return_clause() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -289,7 +289,7 @@ async fn update_with_return_clause() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -317,7 +317,7 @@ async fn update_with_object_array_string_field_names() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -331,7 +331,7 @@ async fn update_with_object_array_string_field_names() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -396,7 +396,7 @@ async fn update_records_and_arrays_with_json_patch() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -423,7 +423,7 @@ async fn update_records_and_arrays_with_json_patch() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -451,7 +451,7 @@ async fn update_records_and_arrays_with_json_patch() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -703,7 +703,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == Vec::new(),
+			res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should not be able to select if the table has no permissions"
 		);
@@ -829,7 +829,7 @@ async fn check_permissions_auth_disabled() {
 			)
 			.await
 			.unwrap();
-		let res = resp.remove(0).output();
+		let res = resp.remove(0).take_first();
 		let res = res.unwrap().to_string();
 		assert!(
 			res.contains("Name"),
@@ -877,7 +877,7 @@ async fn check_permissions_auth_disabled() {
 			)
 			.await
 			.unwrap();
-		let res = resp.remove(0).output();
+		let res = resp.remove(0).take_first();
 		let res = res.unwrap().to_string();
 		assert!(
 			res.contains("Name"),
@@ -918,7 +918,7 @@ async fn update_field_permissions() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let _ = res.remove(0).values?;
@@ -932,7 +932,7 @@ async fn update_field_permissions() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 
 	let sql = r#"
@@ -950,7 +950,7 @@ async fn update_field_permissions() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 
 	Ok(())

@@ -917,7 +917,7 @@ async fn check_permissions_auth_disabled() {
 			)
 			.await
 			.unwrap();
-		let res = resp.remove(0).output();
+		let res = resp.remove(0).take_first();
 		let res = res.unwrap().to_string();
 		assert!(
 			res.contains("Name"),

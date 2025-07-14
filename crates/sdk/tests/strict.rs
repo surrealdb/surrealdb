@@ -226,39 +226,39 @@ async fn loose_mode_all_ok() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into();
+	let val = SqlValue::parse("[{ id: test:tester, extra: true }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			accesses: { },
 			namespaces: { test: 'DEFINE NAMESPACE test' },
 			nodes: { },
 			system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 },
 			users: { },
-		}"
-	).into();
+		}]"
+	).into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
-		}",
+		}]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			accesses: {},
 			analyzers: {},
 			apis: {},
@@ -270,22 +270,22 @@ async fn loose_mode_all_ok() -> Result<()> {
 			sequences: {},
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },
 			users: {},
-		}",
+		}]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			events: {},
 			fields: { extra: 'DEFINE FIELD extra ON test VALUE true PERMISSIONS FULL' },
 			tables: {},
 			indexes: {},
 			lives: {},
-		}",
+		}]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

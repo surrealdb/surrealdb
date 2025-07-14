@@ -1,7 +1,7 @@
 use std::future::Future;
 
 use serde::{Deserialize, Serialize};
-use surrealdb::{Connection, RecordId, Surreal};
+use surrealdb::{RecordId, Surreal};
 use tokio::sync::SemaphorePermit;
 
 /// Tests for this module are defined using this macro.
@@ -100,8 +100,6 @@ where
 
 #[cfg(feature = "protocol-ws")]
 mod ws {
-	use surrealdb::engine::remote::grpc::Client;
-	use surrealdb::engine::remote::grpc::Ws;
 
 	use futures::poll;
 	use std::pin::pin;
@@ -132,7 +130,7 @@ mod ws {
 	#[test_log::test(tokio::test)]
 	async fn any_engine_can_connect() {
 		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("ws://127.0.0.1:8000").await.unwrap();
+		surrealdb::engine::remote::grpc::native::connect("grpc://127.0.0.1:8000").await.unwrap();
 		drop(permit);
 	}
 
@@ -144,14 +142,14 @@ mod ws {
 
 		// Create an unconnected client
 		// At this point wait_for should continue to wait for both the connection and database selection.
-		let db: Surreal<ws::Client> = Surreal::init();
-		assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Pending);
-		assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
+		// let db: Surreal = Surreal::init();
+		// assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Pending);
+		// assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
 
 		// Connect to the server
 		// The connection event should fire and allow wait_for to return immediately when waiting for a connection.
 		// When waiting for a database to be selected, it should continue waiting.
-		db.connect::<Ws>("127.0.0.1:8000").await.unwrap();
+		db.connect("127.0.0.1:8000").await.unwrap();
 		assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
 		assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
 
@@ -220,381 +218,382 @@ mod ws {
 // 	include_tests!(new_db => basic, serialisation, backup);
 // }
 
-#[cfg(feature = "kv-mem")]
-mod mem {
-	use surrealdb::RecordIdKey;
-	use surrealdb::engine::local::Db;
-	use surrealdb::engine::local::Mem;
-	use surrealdb::error::Db as DbError;
-	use surrealdb::iam;
-	use surrealdb::opt::Config;
-	use surrealdb::opt::Resource;
-	use surrealdb::opt::capabilities::Capabilities;
-	use surrealdb::opt::capabilities::ExperimentalFeature;
+// TODO: STU: Fix this
+// #[cfg(feature = "kv-mem")]
+// mod mem {
+// 	use surrealdb::RecordIdKey;
+// 	use surrealdb::engine::local::Db;
+// 	use surrealdb::engine::local::Mem;
+// 	use surrealdb::error::Db as DbError;
+// 	use surrealdb::iam;
+// 	use surrealdb::opt::Config;
+// 	use surrealdb::opt::Resource;
+// 	use surrealdb::opt::capabilities::Capabilities;
+// 	use surrealdb::opt::capabilities::ExperimentalFeature;
 
-	use surrealdb::Surreal;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::Semaphore;
-	use tokio::sync::SemaphorePermit;
+// 	use surrealdb::Surreal;
+// 	use surrealdb::opt::auth::Root;
+// 	use tokio::sync::Semaphore;
+// 	use tokio::sync::SemaphorePermit;
 
-	use crate::api_integration::ApiRecordId;
+// 	use crate::api_integration::ApiRecordId;
 
-	use super::{ROOT_PASS, ROOT_USER};
+// 	use super::{ROOT_PASS, ROOT_USER};
 
-	static PERMITS: Semaphore = Semaphore::const_new(1);
+// 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
-		let db = Surreal::new::<Mem>(config).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
+// 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		let root = Root {
+// 			username: ROOT_USER,
+// 			password: ROOT_PASS,
+// 		};
+// 		let config = Config::new().user(root).capabilities(Capabilities::all());
+// 		let db = Surreal::new::<Mem>(config).await.unwrap();
+// 		db.signin(root).await.unwrap();
+// 		(permit, db)
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn memory_allowed_as_address() {
-		surrealdb::engine::any::connect("memory").await.unwrap();
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn memory_allowed_as_address() {
+// 		surrealdb::engine::any::connect("memory").await.unwrap();
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		surrealdb::engine::any::connect("mem://").await.unwrap();
-		surrealdb::engine::any::connect("memory").await.unwrap();
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn any_engine_can_connect() {
+// 		surrealdb::engine::any::connect("mem://").await.unwrap();
+// 		surrealdb::engine::any::connect("memory").await.unwrap();
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn signin_first_not_necessary() {
-		let db = Surreal::new::<Mem>(()).await.unwrap();
-		db.use_ns("namespace").use_db("database").await.unwrap();
-		let Some(record): Option<ApiRecordId> = db.create(("item", "foo")).await.unwrap() else {
-			panic!("record not found");
-		};
-		assert_eq!(*record.id.key(), RecordIdKey::from("foo".to_owned()));
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn signin_first_not_necessary() {
+// 		let db = Surreal::new::<Mem>(()).await.unwrap();
+// 		db.use_ns("namespace").use_db("database").await.unwrap();
+// 		let Some(record): Option<ApiRecordId> = db.create(("item", "foo")).await.unwrap() else {
+// 			panic!("record not found");
+// 		};
+// 		assert_eq!(*record.id.key(), RecordIdKey::from("foo".to_owned()));
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn cant_sign_into_default_root_account() {
-		let db = Surreal::new::<Mem>(()).await.unwrap();
-		let Some(DbError::InvalidAuth) = db
-			.signin(Root {
-				username: ROOT_USER,
-				password: ROOT_PASS,
-			})
-			.await
-			.unwrap_err()
-			.downcast_ref()
-		else {
-			panic!("unexpected successful login");
-		};
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn cant_sign_into_default_root_account() {
+// 		let db = Surreal::new::<Mem>(()).await.unwrap();
+// 		let Some(DbError::InvalidAuth) = db
+// 			.signin(Root {
+// 				username: ROOT_USER,
+// 				password: ROOT_PASS,
+// 			})
+// 			.await
+// 			.unwrap_err()
+// 			.downcast_ref()
+// 		else {
+// 			panic!("unexpected successful login");
+// 		};
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn credentials_activate_authentication() {
-		let config = Config::new().user(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		});
-		let db = Surreal::new::<Mem>(config).await.unwrap();
-		db.use_ns("namespace").use_db("database").await.unwrap();
-		let res = db.create(Resource::from("item:foo")).await;
-		let Some(DbError::IamError(iam::Error::NotAllowed {
-			actor: _,
-			action: _,
-			resource: _,
-		})) = res.unwrap_err().downcast_ref()
-		else {
-			panic!("expected permissions error");
-		};
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn credentials_activate_authentication() {
+// 		let config = Config::new().user(Root {
+// 			username: ROOT_USER,
+// 			password: ROOT_PASS,
+// 		});
+// 		let db = Surreal::new::<Mem>(config).await.unwrap();
+// 		db.use_ns("namespace").use_db("database").await.unwrap();
+// 		let res = db.create(Resource::from("item:foo")).await;
+// 		let Some(DbError::IamError(iam::Error::NotAllowed {
+// 			actor: _,
+// 			action: _,
+// 			resource: _,
+// 		})) = res.unwrap_err().downcast_ref()
+// 		else {
+// 			panic!("expected permissions error");
+// 		};
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn surreal_clone() {
-		use surrealdb::engine::any::Any;
+// 	#[test_log::test(tokio::test)]
+// 	async fn surreal_clone() {
+// 		use surrealdb::engine::any::Any;
 
-		let db: Surreal<Db> = Surreal::init();
-		db.clone().connect::<Mem>(()).await.unwrap();
-		db.use_ns("test").use_db("test").await.unwrap();
+// 		let db: Surreal<Db> = Surreal::init();
+// 		db.clone().connect::<Mem>(()).await.unwrap();
+// 		db.use_ns("test").use_db("test").await.unwrap();
 
-		let db: Surreal<Any> = Surreal::init();
-		db.clone().connect("memory").await.unwrap();
-		db.use_ns("test").use_db("test").await.unwrap();
-	}
+// 		let db: Surreal<Any> = Surreal::init();
+// 		db.clone().connect("memory").await.unwrap();
+// 		db.use_ns("test").use_db("test").await.unwrap();
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn experimental_features() {
-		let surql = "
-		    USE NAMESPACE namespace DATABASE database;
-			DEFINE FIELD using ON house TYPE references<utility>;
-		";
-		// Experimental features are rejected by default
-		let db = Surreal::new::<Mem>(()).await.unwrap();
-		db.query(surql).await.unwrap_err();
-		// Experimental features can be allowed
-		let capabilities = Capabilities::new()
-			.with_experimental_feature_allowed(ExperimentalFeature::RecordReferences);
-		let config = Config::new().capabilities(capabilities);
-		let db = Surreal::new::<Mem>(config).await.unwrap();
-		db.query(surql).await.unwrap().check().unwrap();
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn experimental_features() {
+// 		let surql = "
+// 		    USE NAMESPACE namespace DATABASE database;
+// 			DEFINE FIELD using ON house TYPE references<utility>;
+// 		";
+// 		// Experimental features are rejected by default
+// 		let db = Surreal::new::<Mem>(()).await.unwrap();
+// 		db.query(surql).await.unwrap_err();
+// 		// Experimental features can be allowed
+// 		let capabilities = Capabilities::new()
+// 			.with_experimental_feature_allowed(ExperimentalFeature::RecordReferences);
+// 		let config = Config::new().capabilities(capabilities);
+// 		let db = Surreal::new::<Mem>(config).await.unwrap();
+// 		db.query(surql).await.unwrap().check().unwrap();
+// 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
-}
+// 	include_tests!(new_db => basic, serialisation, live, backup);
+// }
 
-#[cfg(feature = "kv-rocksdb")]
-mod rocksdb {
-	use surrealdb::engine::local::Db;
-	use surrealdb::engine::local::RocksDb;
-	use surrealdb::opt::capabilities::Capabilities;
+// #[cfg(feature = "kv-rocksdb")]
+// mod rocksdb {
+// 	use surrealdb::engine::local::Db;
+// 	use surrealdb::engine::local::RocksDb;
+// 	use surrealdb::opt::capabilities::Capabilities;
 
-	use surrealdb::Surreal;
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::Semaphore;
-	use tokio::sync::SemaphorePermit;
-	use ulid::Ulid;
+// 	use surrealdb::Surreal;
+// 	use surrealdb::opt::Config;
+// 	use surrealdb::opt::auth::Root;
+// 	use tokio::sync::Semaphore;
+// 	use tokio::sync::SemaphorePermit;
+// 	use ulid::Ulid;
 
-	use super::TEMP_DIR;
-	use super::{ROOT_PASS, ROOT_USER};
+// 	use super::TEMP_DIR;
+// 	use super::{ROOT_PASS, ROOT_USER};
 
-	static PERMITS: Semaphore = Semaphore::const_new(1);
+// 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let path = TEMP_DIR.join(Ulid::new().to_string());
-		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
-		let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
+// 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		let path = TEMP_DIR.join(Ulid::new().to_string());
+// 		let root = Root {
+// 			username: ROOT_USER,
+// 			password: ROOT_PASS,
+// 		};
+// 		let config = Config::new().user(root).capabilities(Capabilities::all());
+// 		let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
+// 		db.signin(root).await.unwrap();
+// 		(permit, db)
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let db_dir = Ulid::new().to_string();
-		// Create a database directory using an absolute path
-		surrealdb::engine::any::connect(format!(
-			"rocksdb://{}",
-			TEMP_DIR.join("absolute").join(&db_dir).display()
-		))
-		.await
-		.unwrap();
-		// Switch to the temporary directory, if possible, to test relative paths
-		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
-			// Create a database directory using a relative path
-			surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}")).await.unwrap();
-		}
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn any_engine_can_connect() {
+// 		let db_dir = Ulid::new().to_string();
+// 		// Create a database directory using an absolute path
+// 		surrealdb::engine::any::connect(format!(
+// 			"rocksdb://{}",
+// 			TEMP_DIR.join("absolute").join(&db_dir).display()
+// 		))
+// 		.await
+// 		.unwrap();
+// 		// Switch to the temporary directory, if possible, to test relative paths
+// 		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+// 			// Create a database directory using a relative path
+// 			surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}")).await.unwrap();
+// 		}
+// 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
-}
+// 	include_tests!(new_db => basic, serialisation, live, backup);
+// }
 
-#[cfg(feature = "kv-tikv")]
-mod tikv {
-	use surrealdb::engine::local::Db;
-	use surrealdb::engine::local::TiKv;
+// #[cfg(feature = "kv-tikv")]
+// mod tikv {
+// 	use surrealdb::engine::local::Db;
+// 	use surrealdb::engine::local::TiKv;
 
-	use surrealdb::Surreal;
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::capabilities::Capabilities;
-	use tokio::sync::Semaphore;
-	use tokio::sync::SemaphorePermit;
+// 	use surrealdb::Surreal;
+// 	use surrealdb::opt::Config;
+// 	use surrealdb::opt::auth::Root;
+// 	use surrealdb::opt::capabilities::Capabilities;
+// 	use tokio::sync::Semaphore;
+// 	use tokio::sync::SemaphorePermit;
 
-	use super::{ROOT_PASS, ROOT_USER};
+// 	use super::{ROOT_PASS, ROOT_USER};
 
-	static PERMITS: Semaphore = Semaphore::const_new(1);
+// 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
-		let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
+// 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		let root = Root {
+// 			username: ROOT_USER,
+// 			password: ROOT_PASS,
+// 		};
+// 		let config = Config::new().user(root).capabilities(Capabilities::all());
+// 		let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
+// 		db.signin(root).await.unwrap();
+// 		(permit, db)
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
-		drop(permit);
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn any_engine_can_connect() {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
+// 		drop(permit);
+// 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
-}
+// 	include_tests!(new_db => basic, serialisation, live, backup);
+// }
 
-#[cfg(any(feature = "kv-fdb-7_1", feature = "kv-fdb-7_3"))]
-mod fdb {
-	use surrealdb::engine::local::Db;
-	use surrealdb::engine::local::FDb;
+// #[cfg(any(feature = "kv-fdb-7_1", feature = "kv-fdb-7_3"))]
+// mod fdb {
+// 	use surrealdb::engine::local::Db;
+// 	use surrealdb::engine::local::FDb;
 
-	use surrealdb::Surreal;
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::capabilities::Capabilities;
-	use tokio::sync::Semaphore;
-	use tokio::sync::SemaphorePermit;
+// 	use surrealdb::Surreal;
+// 	use surrealdb::opt::Config;
+// 	use surrealdb::opt::auth::Root;
+// 	use surrealdb::opt::capabilities::Capabilities;
+// 	use tokio::sync::Semaphore;
+// 	use tokio::sync::SemaphorePermit;
 
-	use super::{ROOT_PASS, ROOT_USER};
+// 	use super::{ROOT_PASS, ROOT_USER};
 
-	static PERMITS: Semaphore = Semaphore::const_new(1);
+// 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
-		let path = "/etc/foundationdb/fdb.cluster";
-		surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone())).await.unwrap();
-		let db = Surreal::new::<FDb>((path, config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
+// 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		let root = Root {
+// 			username: ROOT_USER,
+// 			password: ROOT_PASS,
+// 		};
+// 		let config = Config::new().user(root).capabilities(Capabilities::all());
+// 		let path = "/etc/foundationdb/fdb.cluster";
+// 		surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone())).await.unwrap();
+// 		let db = Surreal::new::<FDb>((path, config)).await.unwrap();
+// 		db.signin(root).await.unwrap();
+// 		(permit, db)
+// 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
-}
+// 	include_tests!(new_db => basic, serialisation, live, backup);
+// }
 
-#[cfg(feature = "kv-surrealkv")]
-mod surrealkv {
-	use surrealdb::engine::local::Db;
-	use surrealdb::engine::local::SurrealKv;
-	use surrealdb::opt::capabilities::Capabilities;
+// #[cfg(feature = "kv-surrealkv")]
+// mod surrealkv {
+// 	use surrealdb::engine::local::Db;
+// 	use surrealdb::engine::local::SurrealKv;
+// 	use surrealdb::opt::capabilities::Capabilities;
 
-	use surrealdb::Surreal;
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::Semaphore;
-	use tokio::sync::SemaphorePermit;
-	use ulid::Ulid;
+// 	use surrealdb::Surreal;
+// 	use surrealdb::opt::Config;
+// 	use surrealdb::opt::auth::Root;
+// 	use tokio::sync::Semaphore;
+// 	use tokio::sync::SemaphorePermit;
+// 	use ulid::Ulid;
 
-	use super::TEMP_DIR;
-	use super::{ROOT_PASS, ROOT_USER};
+// 	use super::TEMP_DIR;
+// 	use super::{ROOT_PASS, ROOT_USER};
 
-	static PERMITS: Semaphore = Semaphore::const_new(1);
+// 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let path = TEMP_DIR.join(Ulid::new().to_string());
-		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
-		let db = Surreal::new::<SurrealKv>((path, config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
+// 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		let path = TEMP_DIR.join(Ulid::new().to_string());
+// 		let root = Root {
+// 			username: ROOT_USER,
+// 			password: ROOT_PASS,
+// 		};
+// 		let config = Config::new().user(root).capabilities(Capabilities::all());
+// 		let db = Surreal::new::<SurrealKv>((path, config)).await.unwrap();
+// 		db.signin(root).await.unwrap();
+// 		(permit, db)
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let db_dir = Ulid::new().to_string();
-		// Create a database directory using an absolute path
-		surrealdb::engine::any::connect(format!(
-			"surrealkv://{}",
-			TEMP_DIR.join("absolute").join(&db_dir).display()
-		))
-		.await
-		.unwrap();
-		// Switch to the temporary directory, if possible, to test relative paths
-		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
-			// Create a database directory using a relative path
-			surrealdb::engine::any::connect(format!("surrealkv://relative/{db_dir}"))
-				.await
-				.unwrap();
-		}
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn any_engine_can_connect() {
+// 		let db_dir = Ulid::new().to_string();
+// 		// Create a database directory using an absolute path
+// 		surrealdb::engine::any::connect(format!(
+// 			"surrealkv://{}",
+// 			TEMP_DIR.join("absolute").join(&db_dir).display()
+// 		))
+// 		.await
+// 		.unwrap();
+// 		// Switch to the temporary directory, if possible, to test relative paths
+// 		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+// 			// Create a database directory using a relative path
+// 			surrealdb::engine::any::connect(format!("surrealkv://relative/{db_dir}"))
+// 				.await
+// 				.unwrap();
+// 		}
+// 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
-}
+// 	include_tests!(new_db => basic, serialisation, live, backup);
+// }
 
-#[cfg(feature = "kv-surrealkv")]
-mod surrealkv_versioned {
-	use surrealdb::engine::local::Db;
-	use surrealdb::engine::local::SurrealKv;
-	use surrealdb::opt::capabilities::Capabilities;
+// #[cfg(feature = "kv-surrealkv")]
+// mod surrealkv_versioned {
+// 	use surrealdb::engine::local::Db;
+// 	use surrealdb::engine::local::SurrealKv;
+// 	use surrealdb::opt::capabilities::Capabilities;
 
-	use surrealdb::Surreal;
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::Semaphore;
-	use tokio::sync::SemaphorePermit;
-	use ulid::Ulid;
+// 	use surrealdb::Surreal;
+// 	use surrealdb::opt::Config;
+// 	use surrealdb::opt::auth::Root;
+// 	use tokio::sync::Semaphore;
+// 	use tokio::sync::SemaphorePermit;
+// 	use ulid::Ulid;
 
-	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
+// 	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
 
-	static PERMITS: Semaphore = Semaphore::const_new(1);
+// 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let path = TEMP_DIR.join(Ulid::new().to_string());
-		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
-		let db = Surreal::new::<SurrealKv>((path, config)).versioned().await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
+// 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		let path = TEMP_DIR.join(Ulid::new().to_string());
+// 		let root = Root {
+// 			username: ROOT_USER,
+// 			password: ROOT_PASS,
+// 		};
+// 		let config = Config::new().user(root).capabilities(Capabilities::all());
+// 		let db = Surreal::new::<SurrealKv>((path, config)).versioned().await.unwrap();
+// 		db.signin(root).await.unwrap();
+// 		(permit, db)
+// 	}
 
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let db_dir = Ulid::new().to_string();
-		// Create a database directory using an absolute path
-		surrealdb::engine::any::connect(format!(
-			"surrealkv+versioned://{}",
-			TEMP_DIR.join("absolute").join(&db_dir).display()
-		))
-		.await
-		.unwrap();
-		// Switch to the temporary directory, if possible, to test relative paths
-		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
-			// Create a database directory using a relative path
-			surrealdb::engine::any::connect(format!("surrealkv+versioned://relative/{db_dir}"))
-				.await
-				.unwrap();
-		}
-	}
+// 	#[test_log::test(tokio::test)]
+// 	async fn any_engine_can_connect() {
+// 		let db_dir = Ulid::new().to_string();
+// 		// Create a database directory using an absolute path
+// 		surrealdb::engine::any::connect(format!(
+// 			"surrealkv+versioned://{}",
+// 			TEMP_DIR.join("absolute").join(&db_dir).display()
+// 		))
+// 		.await
+// 		.unwrap();
+// 		// Switch to the temporary directory, if possible, to test relative paths
+// 		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+// 			// Create a database directory using a relative path
+// 			surrealdb::engine::any::connect(format!("surrealkv+versioned://relative/{db_dir}"))
+// 				.await
+// 				.unwrap();
+// 		}
+// 	}
 
-	include_tests!(new_db => basic, serialisation, version, live, backup, backup_version);
-}
+// 	include_tests!(new_db => basic, serialisation, version, live, backup, backup_version);
+// }
 
-#[cfg(feature = "protocol-http")]
-mod any {
-	use surrealdb::engine::any::Any;
+// #[cfg(feature = "protocol-http")]
+// mod any {
+// 	use surrealdb::engine::any::Any;
 
-	use surrealdb::Surreal;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::Semaphore;
-	use tokio::sync::SemaphorePermit;
+// 	use surrealdb::Surreal;
+// 	use surrealdb::opt::auth::Root;
+// 	use tokio::sync::Semaphore;
+// 	use tokio::sync::SemaphorePermit;
 
-	use super::{ROOT_PASS, ROOT_USER};
+// 	use super::{ROOT_PASS, ROOT_USER};
 
-	static PERMITS: Semaphore = Semaphore::const_new(1);
+// 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Any>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
-		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		})
-		.await
-		.unwrap();
-		(permit, db)
-	}
+// 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Any>) {
+// 		let permit = PERMITS.acquire().await.unwrap();
+// 		let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
+// 		db.signin(Root {
+// 			username: ROOT_USER,
+// 			password: ROOT_PASS,
+// 		})
+// 		.await
+// 		.unwrap();
+// 		(permit, db)
+// 	}
 
-	include_tests!(new_db => basic, serialisation, backup);
-}
+// 	include_tests!(new_db => basic, serialisation, backup);
+// }

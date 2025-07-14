@@ -193,6 +193,17 @@ impl Resource for RecordId {
 	}
 }
 
+impl resource::Sealed for &RecordId {}
+impl Resource for &RecordId {
+	fn kind(&self) -> &'static str {
+		"record_id"
+	}
+
+	fn into_values(self) -> Values {
+		Values(vec![Value::from(self.clone())])
+	}
+}
+
 impl InsertableResource for RecordId {
 	fn table_name(&self) -> &str {
 		self.tb.as_str()

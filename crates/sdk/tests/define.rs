@@ -4,6 +4,7 @@ use parse::Parse;
 
 mod helpers;
 use helpers::*;
+use surrealdb_core::dbs::Variables;
 use surrealdb_core::expr::Value;
 use surrealdb_core::iam::Level;
 
@@ -33,7 +34,7 @@ async fn define_statement_namespace() -> Result<()> {
 	let tmp = res.remove(0).values;
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"{
 			accesses: {},
@@ -54,8 +55,7 @@ async fn define_statement_namespace() -> Result<()> {
 			},
 			users: {},
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -77,13 +77,13 @@ async fn define_statement_database() -> Result<()> {
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
-		}",
+		}]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -390,7 +390,7 @@ async fn define_statement_search_index() -> Result<()> {
 
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			events: {},
 			fields: {},
 			tables: {},
@@ -399,11 +399,12 @@ async fn define_statement_search_index() -> Result<()> {
 			DOC_IDS_ORDER 100 DOC_LENGTHS_ORDER 100 POSTINGS_ORDER 100 TERMS_ORDER 100 \
 			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
 			lives: {},
-		}",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		}]",
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 
 	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
@@ -445,7 +446,7 @@ async fn define_statement_user_root() -> Result<()> {
 
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
 
 	assert!(
@@ -481,7 +482,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	assert!(
 		res.next()
 			.unwrap()
-			.values
+			.take_first()
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -490,7 +491,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	assert!(
 		res.next()
 			.unwrap()
-			.values
+			.take_first()
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -499,7 +500,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	assert!(
 		res.next()
 			.unwrap()
-			.values
+			.take_first()
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -507,7 +508,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	);
 
 	assert_eq!(
-		res.next().unwrap().values.as_ref().unwrap_err().to_string(),
+		res.next().unwrap().take_first().unwrap_err().to_string(),
 		"The root user 'test' does not exist"
 	); // User doesn't exist at the NS level
 
@@ -517,7 +518,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	assert!(res.remove(0).values.is_err());
+	assert!(res.remove(0).take_first().is_err());
 
 	Ok(())
 }
@@ -551,7 +552,7 @@ async fn define_statement_user_db() -> Result<()> {
 
 	assert!(
 		res[3]
-			.values
+			.take_first()
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -559,7 +560,7 @@ async fn define_statement_user_db() -> Result<()> {
 	);
 	assert!(
 		res[4]
-			.values
+			.take_first()
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -567,7 +568,7 @@ async fn define_statement_user_db() -> Result<()> {
 	);
 	assert!(
 		res[5]
-			.values
+			.take_first()
 			.as_ref()
 			.unwrap()
 			.to_string()
@@ -580,7 +581,7 @@ async fn define_statement_user_db() -> Result<()> {
 	";
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	assert!(res.remove(0).values.is_err());
+	assert!(res.remove(0).take_first().is_err());
 
 	Ok(())
 }
@@ -1357,7 +1358,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 	res.remove(0).take_first().unwrap();
 	res.remove(0).take_first().unwrap();
 	res.remove(0).take_first().unwrap();
-	let lqid = res.remove(0).values?;
+	let lqid = res.remove(0).take_first()?;
 	assert!(matches!(lqid, Value::Uuid(_)));
 	// Obtain the uuids after definitions
 	let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
@@ -1380,7 +1381,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 		KILL $lqid;
 	"
 	.to_owned();
-	let vars = map! { "lqid".to_string() => lqid };
+	let vars = Variables(map! { "lqid".to_string() => lqid });
 	let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 	assert_eq!(res.len(), 5);
 	res.remove(0).take_first().unwrap();

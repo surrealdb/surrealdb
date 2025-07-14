@@ -979,7 +979,7 @@ async fn permissions_access_grant() {
 
 				if should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
-					assert_ne!(res.unwrap(), Vec::new(), "{}", msg);
+					assert!(!res.unwrap().is_empty(), "{}", msg);
 				} else {
 					let err = res.unwrap_err().to_string();
 					assert!(

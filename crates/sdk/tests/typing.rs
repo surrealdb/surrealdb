@@ -37,7 +37,7 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
@@ -53,7 +53,7 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -67,7 +67,7 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -82,7 +82,7 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -97,7 +97,7 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -112,7 +112,7 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
@@ -184,7 +184,7 @@ async fn strict_typing_defined() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

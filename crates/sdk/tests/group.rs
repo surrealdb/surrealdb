@@ -40,7 +40,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -53,7 +53,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -66,7 +66,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -79,7 +79,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -92,7 +92,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -105,7 +105,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -118,7 +118,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -131,7 +131,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -144,7 +144,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -206,7 +206,7 @@ async fn select_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -256,7 +256,7 @@ async fn select_aggregate() -> Result<()> {
 				}
 			]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -355,7 +355,7 @@ async fn select_multi_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -369,7 +369,7 @@ async fn select_multi_aggregate() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -648,7 +648,8 @@ async fn select_array_group_group_by() -> Result<()> {
                         user: 2
                 }
         ]"#,
-	);
+	)
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

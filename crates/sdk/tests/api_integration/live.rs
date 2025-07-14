@@ -20,8 +20,10 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use surrealdb::Notification;
+use surrealdb::RecordId;
 use surrealdb::Value;
 use surrealdb::opt::Resource;
+use surrealdb_core::dbs::Action;
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
@@ -256,13 +258,8 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 
 		// Start listening
 		info!("Starting live query");
-		let users: QueryStream<Notification<ApiRecordId>> = db
-			.query(format!("LIVE SELECT * FROM {table}"))
-			.await
-			.unwrap()
-			.stream::<Notification<_>>(0)
-			.unwrap();
-		let users = Arc::new(RwLock::new(users));
+		let users = db.subscribe(table).await.unwrap();
+		// let users = Arc::new(RwLock::new(users));
 
 		// Create a record
 		info!("Creating record");
@@ -496,12 +493,12 @@ pub async fn live_select_with_fetch(new_db: impl CreateDb) {
 }
 
 async fn receive_all_pending_notifications<S: Stream<Item = Result<Notification<I>>> + Unpin, I>(
-	stream: Arc<RwLock<S>>,
+	stream: S,
 	timeout: Duration,
 ) -> Vec<Notification<I>> {
 	let mut results = Vec::new();
 	let we_expect_timeout = tokio::time::timeout(timeout, async {
-		while let Some(notification) = stream.write().await.next().await {
+		while let Some(notification) = stream.next().await {
 			if results.len() >= MAX_NOTIFICATIONS {
 				panic!("too many notification!")
 			}

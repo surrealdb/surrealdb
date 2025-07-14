@@ -328,7 +328,7 @@ async fn table_change_feeds() -> Result<()> {
 	";
 	dbs.changefeed_process_at(end_ts + 3599).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	assert!(
 		allowed_values.contains(&tmp),
 		"tmp:\n{}\nchecked:\n{}",
@@ -343,8 +343,7 @@ async fn table_change_feeds() -> Result<()> {
 	dbs.changefeed_process_at(end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).values?;
-	let val = Vec::new();
-	assert_eq!(tmp, val);
+	assert!(tmp.is_empty());
 	//
 	Ok(())
 }
@@ -395,13 +394,10 @@ async fn changefeed_with_ts() -> Result<()> {
 	let sql = "
         SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
-	let value: Value = db.execute(sql, &ses, None).await?.remove(0).values?;
-	let Value::Array(array) = value.clone() else {
-		unreachable!()
-	};
-	assert_eq!(array.len(), 5);
+	let values = db.execute(sql, &ses, None).await?.remove(0).values?;
+	assert_eq!(values.len(), 5);
 	// DEFINE TABLE
-	let a = array.first().unwrap();
+	let a = values.first().unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -423,7 +419,7 @@ async fn changefeed_with_ts() -> Result<()> {
 		.unwrap()
 	);
 	// UPDATE user:amos
-	let a = &array[1];
+	let a = &values[1];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -446,7 +442,7 @@ async fn changefeed_with_ts() -> Result<()> {
 		.unwrap()
 	);
 	// UPDATE user:jane
-	let a = &array[2];
+	let a = &values[2];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -470,7 +466,7 @@ async fn changefeed_with_ts() -> Result<()> {
 		.unwrap()
 	);
 	// UPDATE user:amos
-	let a = &array[3];
+	let a = &values[3];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -494,7 +490,7 @@ async fn changefeed_with_ts() -> Result<()> {
 		.unwrap()
 	);
 	// UPDATE table
-	let a = &array[4];
+	let a = &values[4];
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -531,13 +527,10 @@ async fn changefeed_with_ts() -> Result<()> {
 	// Show changes using timestamp 1
 	//
 	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts1_dt}' LIMIT 10; ");
-	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).values?;
-	let Value::Array(array) = value.clone() else {
-		unreachable!()
-	};
-	assert_eq!(array.len(), 4);
+	let values = db.execute(&sql, &ses, None).await?.remove(0).values?;
+	assert_eq!(values.len(), 4);
 	// UPDATE user:amos
-	let a = array.first().unwrap();
+	let a = values.first().unwrap();
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
@@ -568,10 +561,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	// Show changes using timestamp 3
 	//
 	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts3_dt}' LIMIT 10; ");
-	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).values?;
-	let Value::Array(array) = value.clone() else {
-		unreachable!()
-	};
-	assert_eq!(array.len(), 0);
+	let values = db.execute(&sql, &ses, None).await?.remove(0).values?;
+	assert_eq!(values.len(), 0);
 	Ok(())
 }

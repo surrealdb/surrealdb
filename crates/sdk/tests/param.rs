@@ -25,7 +25,7 @@ async fn define_global_param() -> Result<()> {
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			accesses: {},
 			analyzers: {},
 			apis: {},
@@ -37,20 +37,20 @@ async fn define_global_param() -> Result<()> {
 			sequences: {},
 			tables: {},
 			users: {},
-		}",
+		}]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[12345]").into();
+	let val = SqlValue::parse("[12345]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[56789]").into();
+	let val = SqlValue::parse("[56789]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -80,7 +80,7 @@ async fn define_protected_param() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;

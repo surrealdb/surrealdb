@@ -1,5 +1,6 @@
 mod parse;
 use parse::Parse;
+use surrealdb_core::dbs::Failure;
 mod helpers;
 use crate::helpers::skip_ok;
 use helpers::new_ds;
@@ -46,14 +47,14 @@ async fn define_foreign_table() -> Result<()> {
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			events: {},
 			fields: {},
 			tables: { person_by_age: 'DEFINE TABLE person_by_age TYPE ANY SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average, math::max(score) AS max, math::min(score) AS min FROM person GROUP BY age PERMISSIONS NONE' },
 			indexes: {},
 			lives: {},
-		}",
-	).into();
+		}]",
+	).into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -66,7 +67,7 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -83,7 +84,7 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -96,7 +97,7 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -113,7 +114,7 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -126,7 +127,7 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -143,11 +144,11 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values.unwrap_err();
-	assert!(matches!(tmp.downcast_ref(), Some(Error::InvalidAggregation { .. })));
+	assert_eq!(tmp, Failure::custom("Invalid aggregation"));
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
@@ -163,7 +164,7 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -199,7 +200,7 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -214,7 +215,7 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

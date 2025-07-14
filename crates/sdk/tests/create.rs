@@ -45,7 +45,7 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -57,11 +57,11 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("{ id: foo:bar}").into();
+	let val = SqlValue::parse("[{ id: foo:bar}]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

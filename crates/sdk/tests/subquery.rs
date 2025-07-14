@@ -95,7 +95,7 @@ async fn subquery_select() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
@@ -151,37 +151,17 @@ async fn subquery_ifelse_set() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = Vec::new();
-	assert_eq!(tmp, val);
+	assert!(tmp.is_empty());
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
-				sport: [
-					'basketball',
-				]
-			}
-		]",
-	)
-	.into();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).values?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse(
-		"[
-			{
-				count: 1,
-				id: person:test,
 				sport: [
 					'basketball',
 				]
@@ -191,21 +171,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse(
-		"[
-			{
-				sport: [
-					'basketball',
-					'football',
-				]
-			}
-		]",
-	)
-	.into_vec();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
@@ -217,6 +183,39 @@ async fn subquery_ifelse_set() -> Result<()> {
 				id: person:test,
 				sport: [
 					'basketball',
+				]
+			}
+		]",
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse(
+		"[
+			{
+				sport: [
+					'basketball',
+					'football',
+				]
+			}
+		]",
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).take_first()?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse(
+		"[
+			{
+				count: 1,
+				id: person:test,
+				sport: [
+					'basketball',
 					'football',
 				]
 			}
@@ -236,7 +235,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -281,13 +280,12 @@ async fn subquery_ifelse_array() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = Vec::new();
-	assert_eq!(tmp, val);
+	assert!(tmp.is_empty());
 	//
 	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
@@ -302,7 +300,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
@@ -335,7 +333,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).values?;
+	let tmp = res.remove(0).take_first()?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//

@@ -1,16 +1,20 @@
 //! Methods to use when interacting with a SurrealDB instance
 
+use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::path::Path;
+use std::time::Duration;
+
 use crate::api::Surreal;
 use crate::api::opt;
 use crate::api::opt::auth::IntoAccessCredentials;
 use crate::api::opt::auth::Jwt;
+use crate::method::live::Subscribe;
 use crate::opt::CreatableResource;
 use crate::opt::InsertableResource;
 use crate::opt::IntoExportDestination;
 use crate::opt::Resource;
-use std::marker::PhantomData;
-use std::path::Path;
-use std::time::Duration;
+use std::error::Error as StdError;
 use surrealdb_core::dbs::Variables;
 use surrealdb_core::expr::Array;
 use surrealdb_core::expr::Data;
@@ -611,6 +615,20 @@ impl Surreal {
 			queries: vec![query.into_query()],
 			variables: Variables::default(),
 			client: self.clone(),
+		}
+	}
+
+	pub fn subscribe<R, RT>(&self, resource: R) -> Subscribe<R, RT>
+	where
+		R: Resource,
+		RT: TryFrom<ValueProto> + Debug,
+		<RT as TryFrom<ValueProto>>::Error: StdError + Send + Sync + 'static,
+	{
+		Subscribe {
+			txn: None,
+			resource,
+			client: self.clone(),
+			response_type: PhantomData,
 		}
 	}
 

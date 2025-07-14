@@ -55,11 +55,11 @@ async fn return_subquery_only() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ name: 'Jaime' }, { name: 'Tobie' }]").into();
+	let val = SqlValue::parse("[{ name: 'Jaime' }, { name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['Jaime', 'Tobie']").into();
+	let val = SqlValue::parse("['Jaime', 'Tobie']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
@@ -75,31 +75,31 @@ async fn return_subquery_only() -> Result<()> {
 	));
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ name: 'Tobie' }]").into();
+	let val = SqlValue::parse("[{ name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['Tobie']").into();
+	let val = SqlValue::parse("['Tobie']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("{ name: 'Tobie' }").into();
+	let val = SqlValue::parse("[{ name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::from("Tobie").into();
+	let val = SqlValue::from("['Tobie']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ name: 'Tobie' }]").into();
+	let val = SqlValue::parse("[{ name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['Tobie']").into();
+	let val = SqlValue::parse("['Tobie']").into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).take_first()?;
-	let val = SqlValue::parse("{ name: 'Tobie' }").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[{ name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).take_first()?;
@@ -107,11 +107,11 @@ async fn return_subquery_only() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ name: 'Jaime' }, { name: 'Tobie' }]").into();
+	let val = SqlValue::parse("[{ name: 'Jaime' }, { name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['Jaime', 'Tobie']").into();
+	let val = SqlValue::parse("['Jaime', 'Tobie']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values;
@@ -127,35 +127,35 @@ async fn return_subquery_only() -> Result<()> {
 	));
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ name: 'Tobie' }]").into();
+	let val = SqlValue::parse("[{ name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['Tobie']").into();
+	let val = SqlValue::parse("['Tobie']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("{ name: 'Tobie' }").into();
+	let val = SqlValue::parse("[{ name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::from("Tobie").into();
+	let val = SqlValue::from("['Tobie']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[{ name: 'Tobie' }]").into();
+	let val = SqlValue::parse("[{ name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("['Tobie']").into();
+	let val = SqlValue::parse("['Tobie']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("{ name: 'Tobie' }").into();
+	let val = SqlValue::parse("[{ name: 'Tobie' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::from("Tobie").into();
+	let val = SqlValue::from("['Tobie']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -200,19 +200,19 @@ async fn return_breaks_nested_execution() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("1").into();
+	let val = SqlValue::parse("[1]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("1").into();
+	let val = SqlValue::parse("[1]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("1").into();
+	let val = SqlValue::parse("[1]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).values?;
-	let val = SqlValue::parse("[2, 2, 4, 4]").into();
+	let val = SqlValue::parse("[2, 2, 4, 4]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -52,7 +52,7 @@ async fn model_range() -> Result<()> {
 			count: 1000
 		}]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
