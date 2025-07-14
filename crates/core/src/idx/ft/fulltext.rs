@@ -118,7 +118,7 @@ impl FullTextIndex {
 		let mut set = HashSet::new();
 		let tx = ctx.tx();
 		// Get the doc id (if it exists)
-		let doc_id = self.get_doc_id(&tx, &rid).await?;
+		let doc_id = self.get_doc_id(&tx, rid).await?;
 		if let Some(doc_id) = doc_id {
 			// Delete the terms
 			for tks in &tokens {
@@ -327,7 +327,7 @@ impl FullTextIndex {
 		idiom: &Idiom,
 		doc: &Value,
 	) -> Result<Value> {
-		let doc_id = self.get_doc_id(tx, &thg).await?;
+		let doc_id = self.get_doc_id(tx, thg).await?;
 		if let Some(doc_id) = doc_id {
 			let mut hl = Highlighter::new(hlp, idiom, doc);
 			for tk in qt.tokens.list() {

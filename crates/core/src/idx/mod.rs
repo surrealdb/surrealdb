@@ -165,19 +165,19 @@ impl IndexKeyBase {
 		Td::range_with_id(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term)
 	}
 
-	fn new_dc_with_id<'a>(&'a self, doc_id: DocId) -> Dc<'a> {
-		Dc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, Some(doc_id))
+	fn _new_dc_with_id(&self, doc_id: DocId) -> Dc {
+		Dc::_new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, Some(doc_id))
 	}
 
-	fn new_dc_compacted<'a>(&'a self) -> Dc<'a> {
-		Dc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, None)
+	fn _new_dc_compacted(&self) -> Dc {
+		Dc::_new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, None)
 	}
 
 	fn new_dc_range(&self) -> Result<(Key, Key)> {
 		Dc::range(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
-	fn new_dl<'a>(&'a self, doc_id: DocId) -> Dl<'a> {
+	fn new_dl(&self, doc_id: DocId) -> Dl {
 		Dl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
 	fn table(&self) -> &str {

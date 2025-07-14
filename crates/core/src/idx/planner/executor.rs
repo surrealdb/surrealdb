@@ -1178,13 +1178,13 @@ impl QueryExecutor {
 	#[allow(clippy::too_many_arguments)]
 	async fn fulltext_matches_with_value(
 		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		fti: &FullTextIndex,
-		fte: &FullTextEntry,
-		l: Value,
-		r: Value,
+		_stk: &mut Stk,
+		_ctx: &Context,
+		_opt: &Options,
+		_fti: &FullTextIndex,
+		_fte: &FullTextEntry,
+		_l: Value,
+		_r: Value,
 	) -> Result<bool> {
 		todo!()
 	}

@@ -33,7 +33,7 @@ impl Categorise for Dc<'_> {
 }
 
 impl<'a> Dc<'a> {
-	pub(crate) fn new(
+	pub(crate) fn _new(
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
@@ -116,7 +116,7 @@ mod tests {
 	#[test]
 	fn key_with_id() {
 		let id = Some(129);
-		let val = Dc::new("testns", "testdb", "testtb", "testix", id);
+		let val = Dc::_new("testns", "testdb", "testtb", "testix", id);
 		let enc = Dc::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\x01\0\0\0\0\0\0\0\x81");
 		let dec = Dc::decode(&enc).unwrap();
@@ -125,7 +125,7 @@ mod tests {
 
 	#[test]
 	fn key_no_id() {
-		let val = Dc::new("testns", "testdb", "testtb", "testix", None);
+		let val = Dc::_new("testns", "testdb", "testtb", "testix", None);
 		let enc = Dc::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0");
 		let dec = Dc::decode(&enc).unwrap();

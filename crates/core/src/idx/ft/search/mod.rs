@@ -661,6 +661,7 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
+	use crate::idx::ft::Score;
 	use crate::idx::ft::search::scorer::BM25Scorer;
 	use crate::idx::ft::search::{SearchHitsIterator, SearchIndex};
 	use crate::idx::planner::iterators::MatchesHitsIterator;
