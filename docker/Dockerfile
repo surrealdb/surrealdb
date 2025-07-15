@@ -5,7 +5,16 @@
 
 FROM docker.io/rockylinux/rockylinux:10 AS builder
 
-RUN yum install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
+RUN dnf install -y \
+    gcc \
+    gcc-c++ \
+    git \
+    cmake \
+    make \
+    patch \
+    zlib-devel \
+    python3 \
+ && dnf clean all
 
 # Install rust
 ARG RUST_VERSION=1.84.0
