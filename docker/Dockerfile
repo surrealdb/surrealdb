@@ -14,6 +14,7 @@ RUN dnf install -y \
 	llvm \
 	llvm-libs \
     make \
+	gcc-aarch64-linux-gnu \
     patch \
     zlib-devel \
     python3 \
