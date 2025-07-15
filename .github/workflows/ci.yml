@@ -43,10 +43,10 @@ jobs:
       matrix:
         include:
           - name: amd64
-            runner: ubuntu-latest
+            runner: runner-amd64-large
             target: x86_64-unknown-linux-gnu
           - name: arm64
-            runner: ubuntu-24.04-arm
+            runner: runner-arm64-large
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     steps:
@@ -390,7 +390,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ ubuntu-24.04-arm ]
+    runs-on: [ runner-arm64-2xlarge ]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable

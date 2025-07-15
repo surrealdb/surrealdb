@@ -191,7 +191,7 @@ jobs:
   test:
     name: Test
     needs: [prepare-vars]
-    runs-on: [ubuntu-latest]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
@@ -236,7 +236,7 @@ jobs:
   lint:
     name: Lint
     needs: [prepare-vars]
-    runs-on: [ubuntu-latest]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -284,7 +284,7 @@ jobs:
     permissions: 
       contents: write
     needs: [prepare-vars, test, lint, build]
-    runs-on: [ubuntu-latest]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
