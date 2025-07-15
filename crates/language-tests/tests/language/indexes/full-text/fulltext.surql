@@ -29,7 +29,7 @@ value = "[{ score: 0.5108255743980408f, title: '{Hello} World!' }]"
 value = "[{ id: b:4, t: 'Foo Bar' }]"
 
 [[test.results]]
-value = "[{ score: 0.9537026882171631f, title: 'Foo {Bar}' }]"
+value = "[{ score: 0.9537026882171631f, title: { '0': [{ e: 7, s: 4 }] } }]"
 
 [[test.results]]
 value = "[]"
@@ -54,7 +54,7 @@ INFO FOR TB b;
 SELECT id FROM b WHERE t @1@ 'Hello' EXPLAIN;
 SELECT search::highlight('{', '}', 1) AS title, search::score(1) AS score FROM b WHERE t @1@ 'Hello';
 CREATE b:4 SET t = 'Foo Bar';
-SELECT search::highlight('{', '}', 1) AS title, search::score(1) AS score FROM b WHERE t @1@ 'Bar';
+SELECT search::offsets(1) AS title, search::score(1) AS score FROM b WHERE t @1@ 'Bar';
 DELETE b:1;
 SELECT search::highlight('{', '}', 1) AS title, search::score(1) * search::score(2) AS score FROM b WHERE t @1@ 'Hello' OR t @2@ 'Bar';
 DELETE b:4;

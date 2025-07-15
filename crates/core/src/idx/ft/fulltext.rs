@@ -8,7 +8,7 @@ use crate::idx::docids::seqdocids::SeqDocIds;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
-use crate::idx::ft::highlighter::{HighlightParams, Highlighter};
+use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::idx::ft::offset::Offset;
 use crate::idx::ft::search::Bm25Params;
 use crate::idx::ft::{DocLength, Score, TermFrequency};
@@ -380,6 +380,28 @@ impl FullTextIndex {
 		} else {
 			Ok(None)
 		}
+	}
+
+	pub(in crate::idx) async fn read_offsets(
+		&self,
+		tx: &Transaction,
+		thg: &Thing,
+		qt: &QueryTerms,
+		partial: bool,
+	) -> Result<Value> {
+		let doc_id = self.get_doc_id(tx, thg).await?;
+		if let Some(doc_id) = doc_id {
+			let mut or = Offseter::new(partial);
+			for tk in qt.tokens.list() {
+				let term = qt.tokens.get_token_string(tk)?;
+				let o = self.get_term_document(tx, doc_id, term).await?;
+				if let Some(o) = o {
+					or.highlight(tk.get_char_len(), o.o);
+				}
+			}
+			return or.try_into().map_err(anyhow::Error::new);
+		}
+		Ok(Value::None)
 	}
 }
 

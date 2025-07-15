@@ -1263,8 +1263,10 @@ impl QueryExecutor {
 					}
 				}
 				PerMatchRefEntry::FullText(fte) => {
-					if let Some(_fti) = self.get_fulltext_index(fte) {
-						todo!()
+					if let Some(fti) = self.get_fulltext_index(fte) {
+						let tx = ctx.tx();
+						let res = fti.read_offsets(&tx, thg, &fte.0.qt, partial).await;
+						return res;
 					}
 				}
 			}
