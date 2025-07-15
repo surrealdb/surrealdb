@@ -10,6 +10,9 @@ RUN dnf install -y \
     gcc-c++ \
     git \
     cmake \
+	clang \
+	llvm \
+	llvm-libs \
     make \
     patch \
     zlib-devel \
