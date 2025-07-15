@@ -20,7 +20,7 @@ RUN dnf install -y \
  && dnf clean all
 
 # Install rust
-ARG RUST_VERSION=1.84.0
+ARG RUST_VERSION=1.88.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup.sh
 RUN bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"
