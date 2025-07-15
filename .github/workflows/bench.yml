@@ -39,7 +39,7 @@ jobs:
   # Disable Bench common until we can get it to run under 1h.
   # common:
   #   name: Bench common
-  #   runs-on: [runner-arm64-2xlarge]
+  #   runs-on: [ubuntu-24.04-arm]
   #   timeout-minutes: 60
   #   steps:
   #     - name: Install stable toolchain
@@ -98,7 +98,7 @@ jobs:
 
   engines:
     name: Benchmark engines
-    runs-on: [runner-arm64-2xlarge]
+    runs-on: [ubuntu-24.04-arm]
     timeout-minutes: 60
     permissions:
       id-token: write
