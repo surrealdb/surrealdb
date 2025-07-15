@@ -17,6 +17,8 @@ use crate::expr::{
 	model::Model,
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::rpc::V1Value;
+use crate::sql::SqlValue;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -25,7 +27,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as Json;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -37,7 +38,6 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Values(pub Vec<Value>);
 
 impl<V> From<V> for Values
@@ -117,6 +117,8 @@ pub enum Value {
 	Geometry(Geometry),
 	Bytes(Bytes),
 	Thing(Thing),
+	File(File),
+
 	// These Value types are un-computed values
 	// and are not used in query responses sent
 	// to the client. These types need to be
@@ -145,7 +147,6 @@ pub enum Value {
 	Model(Box<Model>),
 	Closure(Box<Closure>),
 	Refs(Refs),
-	File(File),
 	// Add new variants here
 }
 
@@ -180,6 +181,10 @@ impl Value {
 	/// Create an empty Object Value
 	pub fn base() -> Self {
 		Value::Object(Object::default())
+	}
+
+	pub fn uuid(uuid: uuid::Uuid) -> Self {
+		Value::Uuid(Uuid(uuid))
 	}
 
 	// -----------------------------------
@@ -435,6 +440,13 @@ impl Value {
 		}
 	}
 
+	pub fn into_vec(self) -> Vec<Value> {
+		match self {
+			Value::Array(v) => v.0,
+			_ => vec![self],
+		}
+	}
+
 	/// Try to convert this Value into a set of JSONPatch operations
 	pub fn to_operations(&self) -> Result<Vec<Operation>> {
 		match self {
@@ -457,8 +469,9 @@ impl Value {
 	///
 	/// This converts certain types like `Thing` into their simpler formats
 	/// instead of the format used internally by SurrealDB.
-	pub fn into_json(self) -> Json {
-		self.into()
+	pub fn into_json(self) -> serde_json::Value {
+		let v1_value: V1Value = self.try_into().unwrap();
+		v1_value.into_json()
 	}
 
 	// -----------------------------------
@@ -897,6 +910,17 @@ impl Value {
 	}
 }
 
+/// Parse a string surql statement into a Value.
+///
+/// This is a convenience method for tests.
+#[cfg(test)]
+impl crate::syn::Parse<Self> for Value {
+	fn parse(val: &str) -> Self {
+		let sql_value = crate::sql::SqlValue::parse(val);
+		sql_value.into()
+	}
+}
+
 impl fmt::Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
@@ -1226,7 +1250,7 @@ subtypes! {
 macro_rules! impl_from_number {
 	($($n:ident),*$(,)?) => {
 		$(
-			impl From<$n> for Value{
+			impl From<$n> for Value {
 				fn from(v: $n) -> Self{
 					Value::Number(Number::from(v))
 				}
@@ -1390,6 +1414,25 @@ impl From<Id> for Value {
 	}
 }
 
+impl TryFrom<Value> for serde_json::Value {
+	type Error = anyhow::Error;
+
+	#[inline]
+	fn try_from(value: Value) -> Result<serde_json::Value> {
+		Ok(value.into_json())
+	}
+}
+
+impl TryFrom<serde_json::Value> for Value {
+	type Error = anyhow::Error;
+
+	#[inline]
+	fn try_from(value: serde_json::Value) -> Result<Value> {
+		let v1_value = V1Value::try_from(value)?;
+		Ok(Value::try_from(v1_value)?)
+	}
+}
+
 impl FromIterator<Value> for Value {
 	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
 		Value::Array(Array(iter.into_iter().collect()))
@@ -1399,6 +1442,20 @@ impl FromIterator<Value> for Value {
 impl FromIterator<(String, Value)> for Value {
 	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
 		Value::Object(Object(iter.into_iter().collect()))
+	}
+}
+
+// TODO: Remove these implementations. This is useful for testing.
+impl PartialEq<crate::sql::SqlValue> for Value {
+	fn eq(&self, other: &crate::sql::SqlValue) -> bool {
+		self == &Value::from(other.clone())
+	}
+}
+
+// TODO: Remove these implementations. This is useful for testing.
+impl PartialEq<Value> for crate::sql::SqlValue {
+	fn eq(&self, other: &Value) -> bool {
+		Value::from(self.clone()) == *other
 	}
 }
 

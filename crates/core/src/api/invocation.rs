@@ -6,7 +6,7 @@ use super::{
 	convert,
 	method::Method,
 	middleware::CollectMiddleware,
-	response::{ApiResponse, ResponseInstruction},
+	response::{ApiResponse, ResponseFormat},
 };
 use crate::{
 	api::middleware::RequestMiddleware,
@@ -52,12 +52,12 @@ impl ApiInvocation {
 		sess: &Session,
 		api: &ApiDefinition,
 		body: ApiBody,
-	) -> Result<Option<(ApiResponse, ResponseInstruction)>> {
+	) -> Result<Option<(ApiResponse, ResponseFormat)>> {
 		let opt = ds.setup_options(sess);
 
 		let mut ctx = ds.setup_ctx()?;
 		ctx.set_transaction(tx);
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		let ctx = &ctx.freeze();
 
 		let mut stack = TreeStack::new();
@@ -73,7 +73,7 @@ impl ApiInvocation {
 		opt: &Options,
 		api: &ApiDefinition,
 		body: ApiBody,
-	) -> Result<Option<(ApiResponse, ResponseInstruction)>> {
+	) -> Result<Option<(ApiResponse, ResponseFormat)>> {
 		let (action, action_config) =
 			match api.actions.iter().find(|x| x.methods.contains(&self.method)) {
 				Some(v) => (&v.action, &v.config),
@@ -97,12 +97,10 @@ impl ApiInvocation {
 		inv_ctx.apply_middleware(builtin)?;
 
 		// Prepare the response headers and conversion
-		let res_instruction = if body.is_native() {
-			ResponseInstruction::Native
-		} else if inv_ctx.response_body_raw {
-			ResponseInstruction::Raw
+		let res_instruction = if inv_ctx.response_body_raw {
+			ResponseFormat::Raw
 		} else {
-			ResponseInstruction::for_format(&self)?
+			ResponseFormat::Ipc
 		};
 
 		let body = body.process(&inv_ctx, &self).await?;

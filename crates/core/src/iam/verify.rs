@@ -1415,7 +1415,7 @@ mod tests {
 			)
 			.as_str(),
 			&sess,
-			None,
+			Variables::default(),
 		)
 		.await
 		.unwrap();

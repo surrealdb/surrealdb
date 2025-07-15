@@ -228,8 +228,6 @@ pub fn synchronous(
 		//
 		"encoding::base64::decode" => encoding::base64::decode,
 		"encoding::base64::encode" => encoding::base64::encode,
-		"encoding::cbor::decode" => encoding::cbor::decode,
-		"encoding::cbor::encode" => encoding::cbor::encode,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
@@ -1658,7 +1656,7 @@ mod tests {
 					.with_capabilities(Capabilities::all());
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
-				let tmp = res.remove(0).result.unwrap();
+				let tmp = res.remove(0).take_first().unwrap();
 				if tmp == Value::from("object") {
 					// Assume this function is superseded by a module of the same name.
 				} else if tmp != Value::from("function") {

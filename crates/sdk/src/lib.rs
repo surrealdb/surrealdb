@@ -24,8 +24,12 @@ extern crate tracing;
 #[doc(hidden)]
 pub use surrealdb_core::*;
 
+pub use surrealdb_core::expr::Value;
+
 #[expect(hidden_glob_reexports)]
 mod api;
+
+pub use surrealdb_core::expr::Thing as RecordId;
 
 #[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
@@ -48,10 +52,8 @@ pub use crate::api::headers;
 
 #[doc(inline)]
 pub use crate::api::{
-	Connect, Connection, Response, Surreal, engine, method, opt,
-	value::{
-		self, Action, Bytes, Datetime, Notification, Number, Object, RecordId, RecordIdKey, Value,
-	},
+	QueryResults, Surreal, engine, method, opt,
+	value::{self, Notification, RecordIdKey},
 };
 
 /// A specialized `Result` type

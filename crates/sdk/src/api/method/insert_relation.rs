@@ -1,13 +1,19 @@
 use crate::Surreal;
-use crate::Value;
-use crate::api::Connection;
+use crate::opt::InsertableResource;
+
 use crate::api::Result;
-use crate::api::conn::Command;
-use crate::method::OnceLockExt;
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
+
+use anyhow::Context;
+use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use surrealdb_core::expr::Value;
+use surrealdb_core::protocol::TryFromValue;
+use surrealdb_core::sql::Data;
+use surrealdb_core::sql::Output;
+use surrealdb_core::sql::statements::InsertStatement;
+use surrealdb_protocol::QueryResponseValueStream;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 
 use super::BoxFuture;
 
@@ -16,80 +22,58 @@ use super::BoxFuture;
 ///
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct InsertRelation<'r, C: Connection, R> {
-	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) command: Result<Command>,
-	pub(super) response_type: PhantomData<R>,
+pub struct InsertRelation<R, RT> {
+	pub(super) client: Surreal,
+	pub(super) txn_id: Option<uuid::Uuid>,
+	pub(super) what: R,
+	pub(super) data: Value,
+	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<'r, C, R> InsertRelation<'r, C, R>
+impl<R, RT> IntoFuture for InsertRelation<R, RT>
 where
-	C: Connection,
+	R: InsertableResource,
+	RT: TryFromValue,
 {
-	pub(crate) fn from_closure<F>(client: Cow<'r, Surreal<C>>, f: F) -> Self
-	where
-		F: FnOnce() -> Result<Command>,
-	{
-		InsertRelation {
+	type Output = Result<RT>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
+
+	fn into_future(self) -> Self::IntoFuture {
+		let InsertRelation {
 			client,
-			command: f(),
-			response_type: PhantomData,
-		}
+			what,
+			mut data,
+			txn_id,
+			..
+		} = self;
+
+		let table_name = what.table_name().to_string();
+		what.augment_data(&mut data);
+
+		Box::pin(async move {
+			let mut stmt = InsertStatement::default();
+			stmt.into = Some(surrealdb_core::sql::Table::from(table_name).into());
+			stmt.data = Data::SingleExpression(data.into());
+			stmt.output = Some(Output::After);
+			stmt.relation = true;
+
+			let mut client = client.client.clone();
+
+			let resp = client
+				.query(QueryRequest {
+					txn_id: txn_id.map(|id| id.into()),
+					query: stmt.to_string(),
+					variables: Default::default(),
+				})
+				.await?;
+
+			let mut stream = QueryResponseValueStream::new(resp.into_inner());
+
+			let first = stream.next().await.context("Failed to get first response")??;
+
+			let value = RT::try_from_value(first)?;
+
+			Ok(value)
+		})
 	}
-
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> InsertRelation<'static, C, R> {
-		InsertRelation {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
-}
-
-macro_rules! into_future {
-	($method:ident) => {
-		fn into_future(self) -> Self::IntoFuture {
-			let InsertRelation {
-				client,
-				command,
-				..
-			} = self;
-			Box::pin(async move {
-				let router = client.inner.router.extract()?;
-				router.$method(command?).await
-			})
-		}
-	};
-}
-
-impl<'r, Client> IntoFuture for InsertRelation<'r, Client, Value>
-where
-	Client: Connection,
-{
-	type Output = Result<Value>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_value}
-}
-
-impl<'r, Client, R> IntoFuture for InsertRelation<'r, Client, Option<R>>
-where
-	Client: Connection,
-	R: DeserializeOwned,
-{
-	type Output = Result<Option<R>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_opt}
-}
-
-impl<'r, Client, R> IntoFuture for InsertRelation<'r, Client, Vec<R>>
-where
-	Client: Connection,
-	R: DeserializeOwned,
-{
-	type Output = Result<Vec<R>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
-
-	into_future! {execute_vec}
 }

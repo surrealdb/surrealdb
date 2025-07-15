@@ -17,7 +17,7 @@ async fn geometry_point() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -29,10 +29,10 @@ async fn geometry_point() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -44,7 +44,7 @@ async fn geometry_point() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -76,7 +76,7 @@ async fn geometry_polygon() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -96,10 +96,10 @@ async fn geometry_polygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -119,10 +119,10 @@ async fn geometry_polygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -142,7 +142,7 @@ async fn geometry_polygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -172,7 +172,7 @@ async fn geometry_multipoint() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -187,10 +187,10 @@ async fn geometry_multipoint() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -205,10 +205,10 @@ async fn geometry_multipoint() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -223,7 +223,7 @@ async fn geometry_multipoint() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -253,7 +253,7 @@ async fn geometry_multipolygon() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -272,10 +272,10 @@ async fn geometry_multipolygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -294,10 +294,10 @@ async fn geometry_multipolygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -316,7 +316,7 @@ async fn geometry_multipolygon() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -361,7 +361,7 @@ async fn geometry_inner_access() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -371,10 +371,10 @@ async fn geometry_inner_access() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -384,10 +384,10 @@ async fn geometry_inner_access() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -418,10 +418,10 @@ async fn geometry_inner_access() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		r#"[
 			{
@@ -480,7 +480,7 @@ async fn geometry_inner_access() -> Result<()> {
 			}
 		]"#,
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -8,11 +8,13 @@ use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::statements::DefineTableStatement;
 use crate::key::thing;
+use anyhow::Context;
 use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
 use std::fmt;
+use surrealdb_protocol::proto::rpc::v1::{ExportSqlRequest, export_sql_request};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -110,6 +112,42 @@ impl From<Config> for Value {
 	}
 }
 
+impl TryFrom<ExportSqlRequest> for Config {
+	type Error = anyhow::Error;
+
+	fn try_from(value: ExportSqlRequest) -> Result<Self, Self::Error> {
+		Ok(Self {
+			users: value.users,
+			accesses: value.accesses,
+			params: value.params,
+			functions: value.functions,
+			analyzers: value.analyzers,
+			tables: value.tables.context("Expected tables config to be present")?.try_into()?,
+			versions: value.versions,
+			records: value.records,
+			sequences: value.sequences,
+		})
+	}
+}
+
+impl TryFrom<export_sql_request::Tables> for TableConfig {
+	type Error = anyhow::Error;
+
+	fn try_from(value: export_sql_request::Tables) -> Result<Self, Self::Error> {
+		let Some(selection) = value.selection else {
+			return Ok(TableConfig::None);
+		};
+
+		match selection {
+			export_sql_request::tables::Selection::All(_) => Ok(TableConfig::All),
+			export_sql_request::tables::Selection::None(_) => Ok(TableConfig::None),
+			export_sql_request::tables::Selection::Selected(selected) => {
+				Ok(TableConfig::Some(selected.tables))
+			}
+		}
+	}
+}
+
 #[derive(Clone, Debug, Default)]
 pub enum TableConfig {
 	#[default]
@@ -182,6 +220,25 @@ impl TableConfig {
 			Self::All => true,
 			Self::None => false,
 			Self::Some(v) => v.iter().any(|v| v.eq(table)),
+		}
+	}
+}
+
+impl From<TableConfig> for export_sql_request::Tables {
+	fn from(value: TableConfig) -> Self {
+		use surrealdb_protocol::proto::v1::NullValue;
+		let selection = match value {
+			TableConfig::All => export_sql_request::tables::Selection::All(NullValue {}),
+			TableConfig::None => export_sql_request::tables::Selection::None(NullValue {}),
+			TableConfig::Some(v) => export_sql_request::tables::Selection::Selected(
+				export_sql_request::SelectedTables {
+					tables: v,
+				},
+			),
+		};
+
+		export_sql_request::Tables {
+			selection: Some(selection),
 		}
 	}
 }

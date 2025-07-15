@@ -24,9 +24,9 @@ async fn insert_statement_object_single() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val =
-		SqlValue::parse("[{ id: `test-table`:tester, test: true, something: 'other' }]").into();
+		SqlValue::parse("[{ id: `test-table`:tester, test: true, something: 'other' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -53,14 +53,14 @@ async fn insert_statement_object_multiple() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{ id: test:1, test: true, something: 'other' },
 			{ id: test:2, test: false, something: 'else' }
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -76,8 +76,8 @@ async fn insert_statement_values_single() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ id: test:tester, test: true, something: 'other' }]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[{ id: test:tester, test: true, something: 'other' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -93,14 +93,14 @@ async fn insert_statement_values_multiple() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{ id: test:1, test: true, something: 'other' },
 			{ id: test:2, test: false, something: 'else' }
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -116,14 +116,14 @@ async fn insert_statement_values_retable_id() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{ id: test:1, test: true, something: 'other' },
 			{ id: test:2, test: false, something: 'else' }
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -140,12 +140,12 @@ async fn insert_statement_on_duplicate_key() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ id: test:tester, test: true, something: 'other' }]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[{ id: test:tester, test: true, something: 'other' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ id: test:tester, test: true, something: 'else' }]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[{ id: test:tester, test: true, something: 'else' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -227,8 +227,8 @@ async fn insert_statement_output() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ something: 'other' }]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[{ something: 'other' }]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -247,18 +247,18 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
 	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-10"));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
 	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-11"));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp.first().pick(&[Part::from("name")]), Value::from("SurrealDB"));
 	assert_eq!(tmp.first().pick(&[Part::from("founded")]), Value::from("2021-09-12"));
 	//
@@ -403,12 +403,12 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
-			let res = resp.remove(0).output();
+			let res = resp.remove(0).values;
 
 			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(), "{}", msg);
+				assert!(res.is_ok() && !res.unwrap().is_empty(), "{}", msg);
 			} else if res.is_ok() {
-				assert!(res.unwrap() == SqlValue::parse("[]").into(), "{}", msg);
+				assert!(res.unwrap().is_empty(), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -431,7 +431,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+				res.is_ok() && !res.unwrap().is_empty(),
 				"unexpected error creating person record"
 			);
 
@@ -441,7 +441,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+				res.is_ok() && !res.unwrap().is_empty(),
 				"unexpected error creating person record"
 			);
 
@@ -451,7 +451,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+				res.is_ok() && !res.unwrap().is_empty(),
 				"unexpected error creating person record"
 			);
 
@@ -460,9 +460,9 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(), "{}", msg);
+				assert!(res.is_ok() && !res.unwrap().is_empty(), "{}", msg);
 			} else if res.is_ok() {
-				assert!(res.unwrap() == SqlValue::parse("[]").into(), "{}", msg);
+				assert!(res.unwrap().is_empty(), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -538,7 +538,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == SqlValue::parse("[]").into(),
+			res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should not be able to insert a new record if the table exists but has no permissions"
 		);
@@ -570,7 +570,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			!res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should be able to insert a new record if the table exists and grants full permissions"
 		);
@@ -604,7 +604,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			!res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should be able to create the table"
 		);
@@ -636,7 +636,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			!res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should not be able to insert a new record if the table exists but has no permissions"
 		);
@@ -668,7 +668,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			!res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should be able to insert a new record if the table exists and grants full permissions"
 		);
@@ -709,11 +709,11 @@ async fn insert_relation() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ id: person:1 }, { id: person:2 }, { id: person:3 }]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[{ id: person:1 }, { id: person:2 }, { id: person:3 }]").into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"
 		[
@@ -725,10 +725,10 @@ async fn insert_relation() -> Result<()> {
 		]
 	",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"
 		[
@@ -745,10 +745,10 @@ async fn insert_relation() -> Result<()> {
 		]
 	",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"
 		[
@@ -760,10 +760,10 @@ async fn insert_relation() -> Result<()> {
 		]
 	",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"
 		[
@@ -779,7 +779,7 @@ async fn insert_relation() -> Result<()> {
 		]
 	",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

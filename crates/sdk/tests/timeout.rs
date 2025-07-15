@@ -52,7 +52,7 @@ async fn query_timeout() -> Result<()> {
 	if before.elapsed() > Duration::from_millis(7050) {
 		panic!("Query did not properly timeout");
 	}
-	res.pop().unwrap().result.unwrap_err();
+	res.pop().unwrap().values.unwrap_err();
 
 	Ok(())
 }

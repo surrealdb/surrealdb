@@ -92,7 +92,7 @@ async fn info_for_user() {
 	// Info for ROOT user
 	let sql = "INFO FOR USER user ON ROOT";
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
-	let out = res.pop().unwrap().output();
+	let out = res.pop().unwrap().take_first();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex = Regex::new(r"DEFINE USER user ON ROOT PASSHASH .* ROLES VIEWER").unwrap();
 	let out_str = out.unwrap().to_string();
@@ -106,7 +106,7 @@ async fn info_for_user() {
 	// Info for NS user
 	let sql = "INFO FOR USER user ON NS";
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
-	let out = res.pop().unwrap().output();
+	let out = res.pop().unwrap().take_first();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
 		Regex::new(r"DEFINE USER user ON NAMESPACE PASSHASH .* ROLES VIEWER").unwrap();
@@ -121,7 +121,7 @@ async fn info_for_user() {
 	// Info for DB user
 	let sql = "INFO FOR USER user ON DB";
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
-	let out = res.pop().unwrap().output();
+	let out = res.pop().unwrap().take_first();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
 		Regex::new(r"DEFINE USER user ON DATABASE PASSHASH .* ROLES VIEWER").unwrap();
@@ -136,7 +136,7 @@ async fn info_for_user() {
 	// Info for user on selected level
 	let sql = "INFO FOR USER user";
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
-	let out = res.pop().unwrap().output();
+	let out = res.pop().unwrap().take_first();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
 		Regex::new(r"DEFINE USER user ON DATABASE PASSHASH .* ROLES VIEWER").unwrap();
@@ -487,7 +487,7 @@ async fn access_info_redacted() {
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
-		let out = res.pop().unwrap().output();
+		let out = res.pop().unwrap().take_first();
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
@@ -512,7 +512,7 @@ async fn access_info_redacted() {
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
-		let out = res.pop().unwrap().output();
+		let out = res.pop().unwrap().take_first();
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
@@ -537,7 +537,7 @@ async fn access_info_redacted() {
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
-		let out = res.pop().unwrap().output();
+		let out = res.pop().unwrap().take_first();
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
@@ -562,7 +562,7 @@ async fn access_info_redacted() {
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
-		let out = res.pop().unwrap().output();
+		let out = res.pop().unwrap().take_first();
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
@@ -591,7 +591,7 @@ async fn access_info_redacted_structure() {
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
-		let out = res.pop().unwrap().output();
+		let out = res.pop().unwrap().take_first();
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
@@ -616,7 +616,7 @@ async fn access_info_redacted_structure() {
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
-		let out = res.pop().unwrap().output();
+		let out = res.pop().unwrap().take_first();
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
@@ -641,7 +641,7 @@ async fn access_info_redacted_structure() {
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
-		let out = res.pop().unwrap().output();
+		let out = res.pop().unwrap().take_first();
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
@@ -666,7 +666,7 @@ async fn access_info_redacted_structure() {
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
-		let out = res.pop().unwrap().output();
+		let out = res.pop().unwrap().take_first();
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
@@ -691,7 +691,7 @@ async fn function_info_structure() {
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 2);
 
-	let out = res.pop().unwrap().output();
+	let out = res.pop().unwrap().take_first();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let out_expected =

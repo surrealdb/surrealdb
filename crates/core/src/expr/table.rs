@@ -5,8 +5,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Table";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -36,12 +34,17 @@ impl Display for Tables {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord)]
 #[serde(rename = "$surrealdb::private::sql::Table")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Table(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Table {
 	fn from(v: String) -> Self {
 		Self(v)
+	}
+}
+
+impl From<&String> for Table {
+	fn from(v: &String) -> Self {
+		Self(v.clone())
 	}
 }
 

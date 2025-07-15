@@ -1,49 +1,38 @@
 use crate::Surreal;
-use crate::api::Connection;
+
 use crate::api::Result;
-use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::expr::Value;
-use crate::method::OnceLockExt;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use serde_content::Serializer;
-use serde_content::Value as Content;
-use std::borrow::Cow;
+
+use anyhow::Context;
+use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Array;
-use surrealdb_core::expr::to_value;
+use surrealdb_core::protocol::TryFromValue;
+use surrealdb_core::sql::Function;
+use surrealdb_core::sql::Model;
+use surrealdb_core::sql::SqlValue;
+use surrealdb_core::sql::Statement;
+use surrealdb_protocol::QueryResponseValueStream;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 
 /// A run future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Run<'r, C: Connection, R> {
-	pub(super) client: Cow<'r, Surreal<C>>,
+pub struct Run<R> {
+	pub(super) client: Surreal,
 	pub(super) function: Result<(String, Option<String>)>,
-	pub(super) args: serde_content::Result<serde_content::Value<'static>>,
+	pub(super) args: Array,
 	pub(super) response_type: PhantomData<R>,
 }
-impl<C, R> Run<'_, C, R>
-where
-	C: Connection,
-{
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Run<'static, C, R> {
-		Run {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
-}
+impl<R> Run<R> {}
 
-impl<'r, Client, R> IntoFuture for Run<'r, Client, R>
+impl<R> IntoFuture for Run<R>
 where
-	Client: Connection,
-	R: DeserializeOwned,
+	R: TryFromValue,
 {
 	type Output = Result<R>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		let Run {
@@ -52,37 +41,50 @@ where
 			args,
 			..
 		} = self;
+
 		Box::pin(async move {
-			let router = client.inner.router.extract()?;
+			let mut client = client.client.clone();
 			let (name, version) = function?;
-			let value = match args.map_err(crate::error::Db::from)? {
-				// Tuples are treated as multiple function arguments
-				Content::Tuple(tup) => tup,
-				// Everything else is treated as a single argument
-				content => vec![content],
+
+			let args = args.0.into_iter().map(|x| x.into()).collect::<Vec<_>>();
+
+			let func: SqlValue = match name.strip_prefix("fn::") {
+				Some(name) => Function::Custom(name.to_owned(), args).into(),
+				None => match name.strip_prefix("ml::") {
+					Some(name) => {
+						let mut tmp = Model::default();
+						name.clone_into(&mut tmp.name);
+						tmp.args = args;
+						tmp.version = version.context("ML functions must have a version")?;
+						tmp.into()
+					}
+					None => Function::Normal(name, args).into(),
+				},
 			};
-			let args = match to_value(value)? {
-				Value::Array(array) => array,
-				value => Array::from(vec![value]),
-			};
-			router
-				.execute(Command::Run {
-					name,
-					version,
-					args,
+
+			let stmt = Statement::Value(func).to_string();
+
+			let response = client
+				.query(QueryRequest {
+					query: stmt,
+					variables: None,
+					txn_id: None,
 				})
-				.await
+				.await?;
+
+			let mut stream = QueryResponseValueStream::new(response.into_inner());
+
+			let value = stream.next().await.context("Failed to get value from stream")??;
+
+			Ok(R::try_from_value(value)?)
 		})
 	}
 }
 
-impl<Client, R> Run<'_, Client, R>
-where
-	Client: Connection,
-{
+impl<R> Run<R> {
 	/// Supply arguments to the function being run.
-	pub fn args(mut self, args: impl Serialize) -> Self {
-		self.args = Serializer::new().serialize(args);
+	pub fn args(mut self, args: impl Into<Array>) -> Self {
+		self.args = args.into();
 		self
 	}
 }

@@ -18,15 +18,15 @@ async fn use_statement_set_ns() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("['my_ns', 'my_ns', 'test', 'test']").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("['my_ns', 'my_ns', 'test', 'test']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -44,15 +44,15 @@ async fn use_statement_set_db() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("['test', 'test', 'my_db', 'my_db']").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("['test', 'test', 'my_db', 'my_db']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -70,15 +70,15 @@ async fn use_statement_set_both() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("['test', 'test', 'test', 'test']").into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("['my_ns', 'my_ns', 'my_db', 'my_db']").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("['my_ns', 'my_ns', 'my_db', 'my_db']").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -51,7 +51,7 @@ async fn test_fetch_get() {
 	server.verify().await;
 
 	assert_eq!(
-		res.to_string(),
+		res[0].to_string(),
 		"{ body: 'some body once told me', status: 200f }",
 		"Unexpected result: {:?}",
 		res

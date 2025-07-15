@@ -12,8 +12,6 @@ use std::fmt;
 use super::Value;
 use super::graph::GraphSubjects;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Edges";
-
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Edges")]

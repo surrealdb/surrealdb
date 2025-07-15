@@ -75,10 +75,7 @@ mod tests {
 		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
 		let res: Vec<Idiom> = vec![Idiom::default()];
 		assert_eq!(res, val.each(&idi));
-		assert_eq!(
-			val.pick(&res[0]),
-			SqlValue::parse("{ test: { other: null, something: 123 } }").into()
-		);
+		assert_eq!(val.pick(&res[0]), Value::parse("{ test: { other: null, something: 123 } }"));
 	}
 
 	#[test]
@@ -97,7 +94,7 @@ mod tests {
 			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
 		let res: Vec<Idiom> = vec![SqlIdiom::parse("test.something").into()];
 		assert_eq!(res, val.each(&idi));
-		assert_eq!(val.pick(&res[0]), SqlValue::parse("[{ age: 34 }, { age: 36 }]").into());
+		assert_eq!(val.pick(&res[0]), Value::parse("[{ age: 34 }, { age: 36 }]"));
 	}
 
 	#[test]

@@ -1,4 +1,9 @@
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+
+#[revisioned(revision = 1)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Method {
 	Unknown,

@@ -1,5 +1,6 @@
 mod parse;
 use parse::Parse;
+use surrealdb_core::dbs::Failure;
 mod helpers;
 use crate::helpers::skip_ok;
 use helpers::new_ds;
@@ -38,25 +39,25 @@ async fn define_foreign_table() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 11);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			events: {},
 			fields: {},
 			tables: { person_by_age: 'DEFINE TABLE person_by_age TYPE ANY SCHEMALESS AS SELECT count(), age, math::sum(age) AS total, math::mean(score) AS average, math::max(score) AS max, math::min(score) AS min FROM person GROUP BY age PERMISSIONS NONE' },
 			indexes: {},
 			lives: {},
-		}",
-	).into();
+		}]",
+	).into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -66,10 +67,10 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -83,10 +84,10 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -96,10 +97,10 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -113,10 +114,10 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -126,10 +127,10 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -143,13 +144,13 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp.downcast_ref(), Some(Error::InvalidAggregation { .. })));
+	let tmp = res.remove(0).values.unwrap_err();
+	assert_eq!(tmp, Failure::custom("Invalid aggregation"));
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -163,7 +164,7 @@ async fn define_foreign_table() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -188,7 +189,7 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 	//
 	skip_ok(res, 5)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -199,10 +200,10 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -214,7 +215,7 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -279,9 +280,9 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<()> {
 		// Skip the UPDATE or DELETE statement
 		skip_ok(res, 1)?;
 		// Get the computed result
-		let comp = res.remove(0).result?;
+		let comp = res.remove(0).values?;
 		// Get the projected result
-		let proj = res.remove(0).result?;
+		let proj = res.remove(0).values?;
 		// Check they are similar
 		assert_eq!(proj, comp, "#{i}");
 	}

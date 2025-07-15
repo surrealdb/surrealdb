@@ -1,6 +1,4 @@
 use crate::opt::capabilities::Capabilities;
-#[cfg(storage)]
-use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb_core::{dbs::Capabilities as CoreCapabilities, iam::Level};
 
@@ -19,12 +17,6 @@ pub struct Config {
 	pub(crate) username: String,
 	pub(crate) password: String,
 	pub(crate) capabilities: CoreCapabilities,
-	#[cfg(storage)]
-	pub(crate) temporary_directory: Option<PathBuf>,
-	pub(crate) node_membership_refresh_interval: Option<Duration>,
-	pub(crate) node_membership_check_interval: Option<Duration>,
-	pub(crate) node_membership_cleanup_interval: Option<Duration>,
-	pub(crate) changefeed_gc_interval: Option<Duration>,
 }
 
 impl Config {
@@ -102,42 +94,6 @@ impl Config {
 	/// Set the capabilities for the database
 	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
 		self.capabilities = capabilities.into();
-		self
-	}
-
-	#[cfg(storage)]
-	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
-		self.temporary_directory = path;
-		self
-	}
-
-	/// Set the interval at which the database should run node maintenance tasks
-	pub fn node_membership_refresh_interval(
-		mut self,
-		interval: impl Into<Option<Duration>>,
-	) -> Self {
-		self.node_membership_refresh_interval = interval.into().filter(|x| !x.is_zero());
-		self
-	}
-
-	/// Set the interval at which the database should run node maintenance tasks
-	pub fn node_membership_check_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
-		self.node_membership_check_interval = interval.into().filter(|x| !x.is_zero());
-		self
-	}
-
-	/// Set the interval at which the database should run node maintenance tasks
-	pub fn node_membership_cleanup_interval(
-		mut self,
-		interval: impl Into<Option<Duration>>,
-	) -> Self {
-		self.node_membership_cleanup_interval = interval.into().filter(|x| !x.is_zero());
-		self
-	}
-
-	/// Set the interval at which the database should run node maintenance tasks
-	pub fn changefeed_gc_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
-		self.changefeed_gc_interval = interval.into().filter(|x| !x.is_zero());
 		self
 	}
 }

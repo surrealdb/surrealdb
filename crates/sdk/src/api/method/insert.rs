@@ -1,38 +1,40 @@
 use super::transaction::WithTransaction;
 use crate::Surreal;
-use crate::Value;
-use crate::api::Connection;
+use crate::opt::InsertableResource;
+
 use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::method::Content;
-use crate::api::opt::Resource;
-use crate::method::OnceLockExt;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use std::borrow::Cow;
+
+use anyhow::Context;
+use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::expr::Data;
+use surrealdb_core::expr::Value;
+use surrealdb_core::protocol::TryFromValue;
+use surrealdb_core::sql::Output;
+use surrealdb_core::sql::statements::InsertStatement;
+use surrealdb_protocol::QueryResponseValueStream;
+use surrealdb_protocol::TryIntoValue;
+use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
-use super::validate_data;
 
 /// An insert future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Insert<'r, C: Connection, R> {
+pub struct Insert<R: InsertableResource, RT> {
+	pub(super) client: Surreal,
 	pub(super) txn: Option<Uuid>,
-	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) resource: Result<Resource>,
-	pub(super) response_type: PhantomData<R>,
+	pub(super) what: R,
+	pub(super) data: Data,
+	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<C, R> WithTransaction for Insert<'_, C, R>
+impl<R, RT> WithTransaction for Insert<R, RT>
 where
-	C: Connection,
+	R: InsertableResource,
 {
 	fn with_transaction(mut self, id: Uuid) -> Self {
 		self.txn = Some(id);
@@ -40,198 +42,87 @@ where
 	}
 }
 
-impl<C, R> Insert<'_, C, R>
+impl<R, RT> IntoFuture for Insert<R, RT>
 where
-	C: Connection,
+	R: InsertableResource,
+	RT: TryFromValue,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Insert<'static, C, R> {
-		Insert {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
-}
+	type Output = Result<RT>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
-macro_rules! into_future {
-	($method:ident) => {
-		fn into_future(self) -> Self::IntoFuture {
-			let Insert {
-				txn,
-				client,
-				resource,
-				..
-			} = self;
-			Box::pin(async move {
-				let (table, data) = match resource? {
-					Resource::Table(table) => (table.into(), CoreObject::default()),
-					Resource::RecordId(record_id) => {
-						let record_id = record_id.into_inner();
-						let mut map = CoreObject::default();
-						map.insert("id".to_string(), record_id.id.into());
-						(record_id.tb, map)
-					}
-					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
-					Resource::Array(_) => return Err(Error::InsertOnArray.into()),
-					Resource::Edge {
-						..
-					} => return Err(Error::InsertOnEdges.into()),
-					Resource::Range {
-						..
-					} => return Err(Error::InsertOnRange.into()),
-					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
-				};
-				let cmd = Command::Insert {
-					txn,
-					what: Some(table.to_string()),
-					data: data.into(),
-				};
+	fn into_future(self) -> Self::IntoFuture {
+		let Insert {
+			txn,
+			client,
+			what,
+			data,
+			..
+		} = self;
 
-				let router = client.inner.router.extract()?;
-				router.$method(cmd).await
-			})
-		}
-	};
-}
+		let table_name = what.table_name().to_string();
 
-impl<'r, Client> IntoFuture for Insert<'r, Client, Value>
-where
-	Client: Connection,
-{
-	type Output = Result<Value>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+		Box::pin(async move {
+			let mut client = client.client.clone();
 
-	into_future! {execute_value}
-}
+			let mut stmt = InsertStatement::default();
+			stmt.into = Some(surrealdb_core::sql::Table::from(table_name).into());
+			stmt.data = data.into();
+			stmt.output = Some(Output::After);
 
-impl<'r, Client, R> IntoFuture for Insert<'r, Client, Option<R>>
-where
-	Client: Connection,
-	R: DeserializeOwned,
-{
-	type Output = Result<Option<R>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+			let resp = client
+				.query(QueryRequest {
+					txn_id: txn.map(|id| id.into()),
+					query: stmt.to_string(),
+					variables: Default::default(),
+				})
+				.await?;
 
-	into_future! {execute_opt}
-}
+			let mut stream = QueryResponseValueStream::new(resp.into_inner());
 
-impl<'r, Client, R> IntoFuture for Insert<'r, Client, Vec<R>>
-where
-	Client: Connection,
-	R: DeserializeOwned,
-{
-	type Output = Result<Vec<R>>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+			let first = stream.next().await.context("Failed to get first response")??;
 
-	into_future! {execute_vec}
-}
+			let value = RT::try_from_value(first)?;
 
-impl<'r, C, R> Insert<'r, C, R>
-where
-	C: Connection,
-	R: DeserializeOwned,
-{
-	/// Specifies the data to insert into the table
-	pub fn content<D>(self, data: D) -> Content<'r, C, R>
-	where
-		D: Serialize + 'static,
-	{
-		Content::from_closure(self.client, self.txn, || {
-			let mut data = to_core_value(data)?;
-			validate_data(
-				&data,
-				"Tried to insert non-object-like data as content, only structs and objects are supported",
-			)?;
-			match self.resource? {
-				Resource::Table(table) => Ok(Command::Insert {
-					txn: self.txn,
-					what: Some(table),
-					data,
-				}),
-				Resource::RecordId(thing) => {
-					if data.is_array() {
-						Err(Error::InvalidParams(
-							"Tried to insert multiple records on a record ID".to_owned(),
-						)
-						.into())
-					} else {
-						let thing = thing.into_inner();
-						if let CoreValue::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.id.into());
-						}
-
-						Ok(Command::Insert {
-							txn: self.txn,
-							what: Some(thing.tb),
-							data,
-						})
-					}
-				}
-				Resource::Object(_) => Err(Error::InsertOnObject.into()),
-				Resource::Array(_) => Err(Error::InsertOnArray.into()),
-				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
-				Resource::Range(_) => Err(Error::InsertOnRange.into()),
-				Resource::Unspecified => Ok(Command::Insert {
-					txn: self.txn,
-					what: None,
-					data,
-				}),
-			}
+			Ok(value)
 		})
 	}
 }
 
-impl<'r, C, R> Insert<'r, C, R>
+impl<R, RT> Insert<R, RT>
 where
-	C: Connection,
-	R: DeserializeOwned,
+	R: InsertableResource,
+	RT: TryFromValue,
 {
 	/// Specifies the data to insert into the table
-	pub fn relation<D>(self, data: D) -> InsertRelation<'r, C, R>
+	pub fn content<V>(self, value: V) -> Insert<R, RT>
 	where
-		D: Serialize + 'static,
+		V: TryIntoValue,
 	{
-		InsertRelation::from_closure(self.client, || {
-			let mut data = to_core_value(data)?;
-			validate_data(
-				&data,
-				"Tried to insert non-object-like data as relation data, only structs and objects are supported",
-			)?;
-			match self.resource? {
-				Resource::Table(table) => Ok(Command::InsertRelation {
-					txn: self.txn,
-					what: Some(table),
-					data,
-				}),
-				Resource::RecordId(thing) => {
-					if data.is_array() {
-						Err(Error::InvalidParams(
-							"Tried to insert multiple records on a record ID".to_owned(),
-						)
-						.into())
-					} else {
-						let thing = thing.into_inner();
-						if let CoreValue::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.id.into());
-						}
+		let value = value.try_into_value().unwrap();
 
-						Ok(Command::InsertRelation {
-							txn: self.txn,
-							what: Some(thing.tb),
-							data,
-						})
-					}
-				}
-				Resource::Unspecified => Ok(Command::InsertRelation {
-					txn: self.txn,
-					what: None,
-					data,
-				}),
-				Resource::Object(_) => Err(Error::InsertOnObject.into()),
-				Resource::Array(_) => Err(Error::InsertOnArray.into()),
-				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
-				Resource::Range(_) => Err(Error::InsertOnRange.into()),
-			}
-		})
+		Self {
+			txn: self.txn,
+			client: self.client,
+			what: self.what,
+			data: Data::ContentExpression(value.try_into().unwrap()),
+			response_type: PhantomData,
+		}
+	}
+}
+
+impl<R, RT> Insert<R, RT>
+where
+	R: InsertableResource,
+	RT: TryFromValue,
+{
+	/// Specifies the data to insert into the table
+	pub fn relation(self, data: Value) -> InsertRelation<R, RT> {
+		InsertRelation {
+			client: self.client,
+			txn_id: self.txn,
+			what: self.what,
+			data,
+			response_type: PhantomData,
+		}
 	}
 }

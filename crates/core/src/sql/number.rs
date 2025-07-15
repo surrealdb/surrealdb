@@ -19,8 +19,6 @@ pub mod decimal;
 
 pub use decimal::DecimalExt;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 #[serde(rename = "$surrealdb::private::sql::Number")]

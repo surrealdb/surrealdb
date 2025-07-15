@@ -20,12 +20,12 @@ async fn define_global_param() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
-		"{
+		"[{
 			accesses: {},
 			analyzers: {},
 			apis: {},
@@ -37,20 +37,20 @@ async fn define_global_param() -> Result<()> {
 			sequences: {},
 			tables: {},
 			users: {},
-		}",
+		}]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[12345]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[12345]").into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[56789]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[56789]").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -68,10 +68,10 @@ async fn define_protected_param() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -80,10 +80,10 @@ async fn define_protected_param() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert!(matches!(
 		tmp.err(),
 		Some(e) if e.to_string() == "'auth' is a protected variable and cannot be set"

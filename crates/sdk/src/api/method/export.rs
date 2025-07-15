@@ -1,121 +1,78 @@
 use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Error;
-use crate::api::ExtraFeatures;
 use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::conn::MlExportConfig;
 use crate::api::method::BoxFuture;
 use crate::method::ExportConfig as Config;
-use crate::method::Model;
-use crate::method::OnceLockExt;
+
 use async_channel::Receiver;
 use futures::Stream;
 use futures::StreamExt;
-use semver::Version;
-use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
+use surrealdb_protocol::proto::rpc::v1::{ExportSqlRequest, export_sql_request};
+use tokio::io::AsyncWriteExt;
 
 /// A database export future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Export<'r, C: Connection, R, T = ()> {
-	pub(super) client: Cow<'r, Surreal<C>>,
+pub struct Export<R, T = ()> {
+	pub(super) client: Surreal,
 	pub(super) target: R,
-	pub(super) ml_config: Option<MlExportConfig>,
-	pub(super) db_config: Option<DbExportConfig>,
+	pub(super) export_request: ExportSqlRequest,
 	pub(super) response: PhantomData<R>,
 	pub(super) export_type: PhantomData<T>,
 }
 
-impl<'r, C, R> Export<'r, C, R>
-where
-	C: Connection,
-{
-	/// Export machine learning model
-	pub fn ml(self, name: &str, version: Version) -> Export<'r, C, R, Model> {
-		Export {
-			client: self.client,
-			target: self.target,
-			ml_config: Some(MlExportConfig {
-				name: name.to_owned(),
-				version: version.to_string(),
-			}),
-			db_config: self.db_config,
-			response: self.response,
-			export_type: PhantomData,
-		}
-	}
-
+impl<R> Export<R> {
 	/// Configure the export options
-	pub fn with_config(self) -> Export<'r, C, R, Config> {
+	pub fn with_config(self) -> Export<R, Config> {
 		Export {
 			client: self.client,
 			target: self.target,
-			ml_config: self.ml_config,
-			// Use default configuration options
-			db_config: Some(Default::default()),
+			export_request: ExportSqlRequest::default(),
 			response: self.response,
 			export_type: PhantomData,
 		}
 	}
 }
 
-impl<C, R> Export<'_, C, R, Config>
-where
-	C: Connection,
-{
+impl<R> Export<R, Config> {
 	/// Whether to export users from the database
 	pub fn users(mut self, users: bool) -> Self {
-		if let Some(cfg) = self.db_config.as_mut() {
-			cfg.users = users;
-		}
+		self.export_request.users = users;
 		self
 	}
 
 	/// Whether to export accesses from the database
 	pub fn accesses(mut self, accesses: bool) -> Self {
-		if let Some(cfg) = self.db_config.as_mut() {
-			cfg.accesses = accesses;
-		}
+		self.export_request.accesses = accesses;
 		self
 	}
 
 	/// Whether to export params from the database
 	pub fn params(mut self, params: bool) -> Self {
-		if let Some(cfg) = self.db_config.as_mut() {
-			cfg.params = params;
-		}
+		self.export_request.params = params;
 		self
 	}
 
 	/// Whether to export functions from the database
 	pub fn functions(mut self, functions: bool) -> Self {
-		if let Some(cfg) = self.db_config.as_mut() {
-			cfg.functions = functions;
-		}
+		self.export_request.functions = functions;
 		self
 	}
 
 	/// Whether to export analyzers from the database
 	pub fn analyzers(mut self, analyzers: bool) -> Self {
-		if let Some(cfg) = self.db_config.as_mut() {
-			cfg.analyzers = analyzers;
-		}
+		self.export_request.analyzers = analyzers;
 		self
 	}
 
 	/// Whether to export all versions of data from the database
 	pub fn versions(mut self, versions: bool) -> Self {
-		if let Some(cfg) = self.db_config.as_mut() {
-			cfg.versions = versions;
-		}
+		self.export_request.versions = versions;
 		self
 	}
 
@@ -135,102 +92,76 @@ where
 	/// # let target = ();
 	/// db.export(target).with_config().tables(vec!["users"]);
 	/// ```
-	pub fn tables(mut self, tables: impl Into<TableConfig>) -> Self {
-		if let Some(cfg) = self.db_config.as_mut() {
-			cfg.tables = tables.into();
-		}
+	pub fn tables(mut self, tables: impl Into<export_sql_request::Tables>) -> Self {
+		self.export_request.tables = Some(tables.into());
 		self
 	}
 
 	/// Whether to export records from the database
 	pub fn records(mut self, records: bool) -> Self {
-		if let Some(cfg) = self.db_config.as_mut() {
-			cfg.records = records;
-		}
+		self.export_request.records = records;
 		self
 	}
 }
 
-impl<C, R, T> Export<'_, C, R, T>
-where
-	C: Connection,
-{
-	/// Converts to an owned type which can easily be moved to a different thread
-	pub fn into_owned(self) -> Export<'static, C, R, T> {
-		Export {
-			client: Cow::Owned(self.client.into_owned()),
-			..self
-		}
-	}
-}
+impl<R, T> Export<R, T> {}
 
-impl<'r, Client, T> IntoFuture for Export<'r, Client, PathBuf, T>
-where
-	Client: Connection,
-{
+impl<T> IntoFuture for Export<PathBuf, T> {
 	type Output = Result<()>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.inner.router.extract()?;
-			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::BackupsNotSupported.into());
+			let mut client = self.client.client.clone();
+
+			let resp = client.export_sql(self.export_request).await?;
+
+			let mut stream = resp.into_inner();
+
+			// Open the file
+			let mut file = tokio::fs::File::create(self.target).await?;
+
+			while let Some(resp) = stream.next().await {
+				let resp = resp?;
+
+				file.write_all(resp.statement.as_bytes()).await?;
 			}
 
-			if let Some(config) = self.ml_config {
-				return router
-					.execute_unit(Command::ExportMl {
-						path: self.target,
-						config,
-					})
-					.await;
-			}
-
-			router
-				.execute_unit(Command::ExportFile {
-					path: self.target,
-					config: self.db_config,
-				})
-				.await
+			Ok(())
 		})
 	}
 }
 
-impl<'r, Client, T> IntoFuture for Export<'r, Client, (), T>
-where
-	Client: Connection,
-{
+impl<T> IntoFuture for Export<(), T> {
 	type Output = Result<Backup>;
-	type IntoFuture = BoxFuture<'r, Self::Output>;
+	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let router = self.client.inner.router.extract()?;
-			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::BackupsNotSupported.into());
-			}
+			let mut client = self.client.client.clone();
+
+			let resp = client.export_sql(self.export_request).await?;
+
+			let mut stream = resp.into_inner();
+
 			let (tx, rx) = crate::channel::bounded(1);
 			let rx = Box::pin(rx);
 
-			if let Some(config) = self.ml_config {
-				router
-					.execute_unit(Command::ExportBytesMl {
-						bytes: tx,
-						config,
-					})
-					.await?;
-				return Ok(Backup {
-					rx,
-				});
-			}
+			tokio::spawn(async move {
+				while let Some(resp) = stream.next().await {
+					let resp = match resp {
+						Ok(resp) => resp,
+						Err(err) => {
+							tx.send(Err(anyhow::anyhow!("Error exporting data: {err:?}")))
+								.await
+								.unwrap();
+							return;
+						}
+					};
 
-			router
-				.execute_unit(Command::ExportBytes {
-					bytes: tx,
-					config: self.db_config,
-				})
-				.await?;
+					tx.send(Ok(resp.statement.as_bytes().to_vec())).await.unwrap();
+				}
+			});
 
 			Ok(Backup {
 				rx,
@@ -243,7 +174,7 @@ where
 #[derive(Debug, Clone)]
 #[must_use = "streams do nothing unless you poll them"]
 pub struct Backup {
-	rx: Pin<Box<Receiver<Result<Vec<u8>>>>>,
+	pub(super) rx: Pin<Box<Receiver<Result<Vec<u8>>>>>,
 }
 
 impl Stream for Backup {

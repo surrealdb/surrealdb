@@ -10,8 +10,6 @@ use std::fmt;
 
 use super::Duration;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Constant")]

@@ -22,7 +22,7 @@ async fn select_field_value() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -31,10 +31,10 @@ async fn select_field_value() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -43,20 +43,20 @@ async fn select_field_value() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			'Jaime',
 			'Tobie',
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -67,7 +67,7 @@ async fn select_field_value() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -86,7 +86,7 @@ async fn select_field_and_omit() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -99,10 +99,10 @@ async fn select_field_and_omit() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -115,10 +115,10 @@ async fn select_field_and_omit() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -133,10 +133,10 @@ async fn select_field_and_omit() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -157,7 +157,7 @@ async fn select_field_and_omit() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -177,7 +177,7 @@ async fn select_expression_value() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -187,10 +187,10 @@ async fn select_expression_value() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -200,30 +200,30 @@ async fn select_expression_value() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			-5,
 			5,
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			false,
 			true
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -253,7 +253,7 @@ async fn select_expression_value() -> Result<()> {
 				}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -294,10 +294,10 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -325,10 +325,10 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -338,10 +338,10 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -349,13 +349,13 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -363,13 +363,13 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -377,7 +377,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -398,10 +398,10 @@ async fn select_writeable_subqueries() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -409,21 +409,21 @@ async fn select_writeable_subqueries() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[tester:test]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[tester:test]").into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("tester:test").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("tester:test").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -445,7 +445,7 @@ async fn select_where_field_is_bool() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -454,10 +454,10 @@ async fn select_where_field_is_bool() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -466,10 +466,10 @@ async fn select_where_field_is_bool() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -478,10 +478,10 @@ async fn select_where_field_is_bool() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -494,10 +494,10 @@ async fn select_where_field_is_bool() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -510,10 +510,10 @@ async fn select_where_field_is_bool() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -522,7 +522,7 @@ async fn select_where_field_is_bool() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 
 	Ok(())
@@ -543,12 +543,12 @@ async fn select_where_field_is_thing_and_with_index() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -570,10 +570,10 @@ async fn select_where_field_is_thing_and_with_index() -> Result<()> {
 				}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -607,10 +607,10 @@ async fn select_where_field_is_thing_and_with_index() -> Result<()> {
 				}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -623,7 +623,7 @@ async fn select_where_field_is_thing_and_with_index() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -641,11 +641,11 @@ async fn select_where_and_with_index() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -667,10 +667,10 @@ async fn select_where_and_with_index() -> Result<()> {
 				}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -678,7 +678,7 @@ async fn select_where_and_with_index() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -696,11 +696,11 @@ async fn select_where_and_with_unique_index() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -722,10 +722,10 @@ async fn select_where_and_with_unique_index() -> Result<()> {
 				}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -733,7 +733,7 @@ async fn select_where_and_with_unique_index() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -752,12 +752,12 @@ async fn select_where_and_with_fulltext_index() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -779,10 +779,10 @@ async fn select_where_and_with_fulltext_index() -> Result<()> {
 				}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -790,7 +790,7 @@ async fn select_where_and_with_fulltext_index() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -808,11 +808,11 @@ async fn select_where_explain() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -837,10 +837,10 @@ async fn select_where_explain() -> Result<()> {
 				},
 			]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -877,7 +877,7 @@ async fn select_where_explain() -> Result<()> {
 				},
 			]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -889,8 +889,8 @@ async fn select_with_function_field() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[{ a: 1, b: 1 }]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[{ a: 1, b: 1 }]").into_vec();
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -1025,8 +1025,6 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	];
 	let statement = "SELECT * FROM person";
 
-	let empty_array = SqlValue::parse("[]").into();
-
 	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
@@ -1040,7 +1038,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != empty_array,
+				res.is_ok() && !res.unwrap().is_empty(),
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
@@ -1049,7 +1047,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != empty_array,
+				res.is_ok() && !res.unwrap().is_empty(),
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
@@ -1058,7 +1056,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != empty_array,
+				res.is_ok() && !res.unwrap().is_empty(),
 				"unexpected error creating person record"
 			);
 
@@ -1070,9 +1068,9 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = res.unwrap();
 
 			if should_succeed {
-				assert!(res != empty_array, "{}", msg);
+				assert!(!res.is_empty(), "{}", msg);
 			} else {
-				assert!(res == empty_array, "{}", msg);
+				assert!(res.is_empty(), "{}", msg);
 			}
 		}
 	}
@@ -1113,7 +1111,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == SqlValue::parse("[]").into(),
+			res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should not be able to select if the table has no permissions"
 		);
@@ -1141,7 +1139,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			!res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -1183,7 +1181,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			!res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should be able to select if the table has no permissions"
 		);
@@ -1211,7 +1209,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			!res.unwrap().is_empty(),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -1231,10 +1229,10 @@ async fn select_issue_3510() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 				{
@@ -1243,11 +1241,12 @@ async fn select_issue_3510() -> Result<()> {
 					}
 				}
 			]",
-	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	)
+	.into_vec();
+	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	let tmp = res.remove(0).values?;
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -1263,7 +1262,7 @@ async fn select_destructure() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -1282,10 +1281,10 @@ async fn select_destructure() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -1299,10 +1298,10 @@ async fn select_destructure() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -1317,7 +1316,7 @@ async fn select_destructure() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1338,17 +1337,17 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
     		{ id: a:1 },
     		{ id: a:2 }
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -1359,10 +1358,10 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -1373,10 +1372,10 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 		    [
@@ -1393,7 +1392,7 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 			]
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -1416,10 +1415,10 @@ async fn select_field_value_permissions() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -1429,13 +1428,13 @@ async fn select_field_value_permissions() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
+	let _ = res.remove(0).values?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -1443,7 +1442,7 @@ async fn select_field_value_permissions() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 
 	let sql = r#"
@@ -1456,7 +1455,7 @@ async fn select_field_value_permissions() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -1465,10 +1464,10 @@ async fn select_field_value_permissions() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -1476,15 +1475,14 @@ async fn select_field_value_permissions() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[]").into();
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).values?;
+	assert!(tmp.is_empty());
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[NONE]").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("[NONE]").into_vec();
 	assert_eq!(tmp, val);
 
 	Ok(())
@@ -1501,9 +1499,9 @@ async fn select_order_by_rand_large() -> Result<()> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
-	let _ = res.remove(0).result?;
+	let _ = res.remove(0).values?;
 
-	let v = res.remove(0).result.unwrap();
+	let v = res.remove(0).take_first().unwrap();
 	let Value::Array(x) = v else {
 		panic!("not the right type");
 	};

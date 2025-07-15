@@ -21,8 +21,6 @@ use std::ops::Deref;
 use super::FlowResult;
 use super::statements::InfoStatement;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Block")]

@@ -31,29 +31,29 @@ async fn rebuild_index_statement() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 14);
 	for i in 0..3 {
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap_or_else(|_| panic!("{i}"));
 	}
 	// Check infos output
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"{
-				events: {},
-				fields: {},
-				indexes: {
-					uniq_isbn: 'DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE'
-				},
-				lives: {},
-				tables: {}
-			}",
+			events: {},
+			fields: {},
+			indexes: {
+				uniq_isbn: 'DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE'
+			},
+			lives: {},
+			tables: {}
+		}",
 	);
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	for _ in 0..8 {
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 	}
 	// Check infos output
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"{
 				events: {},
@@ -69,16 +69,14 @@ async fn rebuild_index_statement() -> Result<()> {
 	);
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	// Check record is found
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
-		"[
-				{
-					author: 'Maxwell Flitton',
-					id: book:1,
-					isbn: '978-1803234694',
-					title: 'Rust Web Programming'
-				}
-			]",
+		"{
+			author: 'Maxwell Flitton',
+			id: book:1,
+			isbn: '978-1803234694',
+			title: 'Rust Web Programming'
+	}",
 	);
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	Ok(())

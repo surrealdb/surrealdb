@@ -1,7 +1,5 @@
 pub use self::value::*;
 
-pub(super) mod serde;
-
 #[expect(clippy::module_inception)]
 mod value;
 
@@ -25,7 +23,6 @@ mod get;
 pub(crate) mod idiom_recursion;
 mod inc;
 mod increment;
-mod into_json;
 mod last;
 mod merge;
 mod patch;

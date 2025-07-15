@@ -22,7 +22,7 @@ async fn future_function_arguments() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -34,7 +34,7 @@ async fn future_function_arguments() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -51,8 +51,8 @@ async fn future_disabled() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("<future> { 123 }").into();
+	let tmp = res.remove(0).values?;
+	let val = SqlValue::parse("<future> { 123 }").into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -101,7 +101,7 @@ async fn concurrency() -> Result<()> {
 
 				let res = res.into_iter().next().unwrap();
 
-				let elapsed = res.time.as_millis() as usize;
+				let elapsed = res.stats.execution_duration.as_millis() as usize;
 
 				Ok(elapsed < TIMEOUT)
 			}

@@ -5,7 +5,6 @@ use http::StatusCode;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
 use serde_json::Value as Json;
-use surrealdb::expr;
 
 pub enum Output {
 	None,
@@ -50,7 +49,7 @@ impl Output {
 
 /// Convert and simplify the value into JSON
 pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json> {
-	Ok(expr::to_value(v)?.into())
+	serde_json::to_value(v).map_err(anyhow::Error::msg)
 }
 
 impl IntoResponse for Output {

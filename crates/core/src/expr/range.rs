@@ -17,8 +17,6 @@ use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Range")]

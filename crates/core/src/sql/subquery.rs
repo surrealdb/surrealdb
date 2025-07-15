@@ -12,8 +12,6 @@ use std::fmt::{self, Display, Formatter};
 
 use super::statements::InfoStatement;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
-
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Subquery")]

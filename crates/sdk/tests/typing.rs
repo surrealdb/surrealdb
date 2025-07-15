@@ -25,10 +25,10 @@ async fn strict_typing_inline() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(tmp.unwrap_err().to_string(), "Expected `int` but found a `NONE`");
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -37,13 +37,13 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(tmp.unwrap_err().to_string(), "Expected `bool | int` but found a `NONE`");
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -53,10 +53,10 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -67,10 +67,10 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -82,10 +82,10 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -97,10 +97,10 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -112,10 +112,10 @@ async fn strict_typing_inline() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(
 		tmp.unwrap_err().to_string(),
 		"Expected `array<float,5>` buf found an collection of length `10`"
@@ -141,38 +141,38 @@ async fn strict_typing_defined() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(
 		tmp.unwrap_err().to_string(),
 		"Couldn't coerce value for field `age` of `person:test`: Expected `int` but found `NONE`"
 	);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	assert_eq!(
 		tmp.unwrap_err().to_string(),
 		"Couldn't coerce value for field `enabled` of `person:test`: Expected `bool | int` but found `NONE`"
 	);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 
 	assert_eq!(
 		tmp.unwrap_err().to_string(),
 		"Couldn't coerce value for field `name` of `person:test`: Expected `string` but found `NONE`"
 	);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -184,7 +184,7 @@ async fn strict_typing_defined() -> Result<()> {
 			}
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

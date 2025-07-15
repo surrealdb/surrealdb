@@ -11,9 +11,7 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::Timestamp;
-use crate::dbs::{
-	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
-};
+use crate::dbs::{Capabilities, Executor, Notification, Options, QueryResult, Session, Variables};
 use crate::err::Error;
 use crate::expr::LogicalPlan;
 use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
@@ -42,7 +40,6 @@ use dashmap::DashMap;
 use futures::{Future, Stream};
 use reblessive::TreeStack;
 use std::fmt;
-#[cfg(storage)]
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
@@ -83,7 +80,8 @@ pub struct Datastore {
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
 	// Whether this datastore enables live query notifications to subscribers.
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	notifications_sender: Sender<Notification>,
+	notifications_receiver: Receiver<Notification>,
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
@@ -94,8 +92,8 @@ pub struct Datastore {
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,
-	#[cfg(storage)]
 	// The temporary directory
+	#[allow(dead_code)]
 	temporary_directory: Option<Arc<PathBuf>>,
 	// Map of bucket connections
 	buckets: Arc<BucketConnections>,
@@ -256,23 +254,23 @@ impl Datastore {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_clock(path, None).await
+	pub async fn new(uri: &str) -> Result<Self> {
+		Self::new_with_clock(uri, None).await
 	}
 
 	#[allow(unused_variables)]
-	pub async fn new_with_clock(path: &str, clock: Option<Arc<SizedClock>>) -> Result<Datastore> {
+	pub async fn new_with_clock(uri: &str, clock: Option<Arc<SizedClock>>) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (flavor, clock): (Result<DatastoreFlavor>, Arc<SizedClock>) = match path {
+		let (flavor, clock): (Result<DatastoreFlavor>, Arc<SizedClock>) = match uri {
 			// Initiate an in-memory datastore
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store in {}", path);
+					info!(target: TARGET, "Starting kvs store in {}", uri);
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store in {}", path);
+					info!(target: TARGET, "Started kvs store in {}", uri);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
@@ -285,13 +283,13 @@ impl Datastore {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", uri);
 					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at {}", uri);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -304,12 +302,12 @@ impl Datastore {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-					info!(target: TARGET, "Starting kvs store at {}", path);
+					info!(target: TARGET, "Starting kvs store at {}", uri);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(DatastoreFlavor::RocksDB);
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store at {}", path);
+					info!(target: TARGET, "Started kvs store at {}", uri);
 					Ok((v, c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -382,13 +380,15 @@ impl Datastore {
 			}
 			// The datastore path is not valid
 			_ => {
-				info!(target: TARGET, "Unable to load the specified datastore {}", path);
+				info!(target: TARGET, "Unable to load the specified datastore {}", uri);
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}?;
 		// Set the properties on the datastore
 		flavor.map(|flavor| {
 			let tf = TransactionFactory::new(clock, flavor);
+			let (notifications_sender, notifications_receiver) =
+				async_channel::bounded(LQ_CHANNEL_SIZE);
 			Self {
 				id: Uuid::new_v4(),
 				transaction_factory: tf.clone(),
@@ -396,14 +396,14 @@ impl Datastore {
 				auth_enabled: false,
 				query_timeout: None,
 				transaction_timeout: None,
-				notification_channel: None,
+				notifications_sender,
+				notifications_receiver,
 				capabilities: Arc::new(Capabilities::default()),
 				index_stores: IndexStores::default(),
 				#[cfg(not(target_family = "wasm"))]
 				index_builder: IndexBuilder::new(tf.clone()),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-				#[cfg(storage)]
 				temporary_directory: None,
 				cache: Arc::new(DatastoreCache::new()),
 				buckets: Arc::new(DashMap::new()),
@@ -422,13 +422,13 @@ impl Datastore {
 			query_timeout: self.query_timeout,
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
-			notification_channel: self.notification_channel,
+			notifications_sender: self.notifications_sender,
+			notifications_receiver: self.notifications_receiver,
 			index_stores: Default::default(),
 			#[cfg(not(target_family = "wasm"))]
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
-			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
@@ -446,12 +446,6 @@ impl Datastore {
 	/// Specify whether this Datastore should run in strict mode
 	pub fn with_strict_mode(mut self, strict: bool) -> Self {
 		self.strict = strict;
-		self
-	}
-
-	/// Specify whether this datastore should enable live query notifications
-	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(async_channel::bounded(LQ_CHANNEL_SIZE));
 		self
 	}
 
@@ -479,10 +473,16 @@ impl Datastore {
 		self
 	}
 
-	#[cfg(storage)]
 	/// Set a temporary directory for ordering of large result sets
+	#[cfg(storage)]
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path.map(Arc::new);
+		self
+	}
+
+	#[cfg(not(storage))]
+	pub fn with_temporary_directory(self, _path: Option<PathBuf>) -> Self {
+		warn!("Temporary directory is not supported in this build");
 		self
 	}
 
@@ -778,7 +778,7 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
 		// Check if the session has expired
@@ -850,12 +850,12 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute(
 		&self,
-		txt: &str,
+		sql: &str,
 		sess: &Session,
-		vars: Variables,
-	) -> Result<Vec<Response>> {
+		vars: Option<Variables>,
+	) -> Result<Vec<QueryResult>> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
+		let ast = syn::parse_with_capabilities(sql, &self.capabilities)?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -864,9 +864,9 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 		query: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -889,11 +889,13 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
-		// Process all statements
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 
+		// Process all statements
 		let parser_settings = ParserSettings {
 			references_enabled: ctx
 				.get_capabilities()
@@ -991,8 +993,8 @@ impl Datastore {
 		&self,
 		ast: Query,
 		sess: &Session,
-		vars: Variables,
-	) -> Result<Vec<Response>> {
+		vars: Option<Variables>,
+	) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1011,9 +1013,11 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Process all statements
 		Executor::execute(self, ctx.freeze(), opt, ast).await
 	}
@@ -1022,8 +1026,8 @@ impl Datastore {
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Variables,
-	) -> Result<Vec<Response>> {
+		vars: Option<Variables>,
+	) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1042,9 +1046,11 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await
@@ -1069,7 +1075,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(&self, val: Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn compute(
+		&self,
+		val: Value,
+		sess: &Session,
+		vars: Option<Variables>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can compute values when auth is enabled
@@ -1095,13 +1106,13 @@ impl Datastore {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notifications_sender.clone());
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
@@ -1145,7 +1156,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(&self, val: &Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn evaluate(
+		&self,
+		val: &Value,
+		sess: &Session,
+		vars: Option<Variables>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
@@ -1161,13 +1177,13 @@ impl Datastore {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notifications_sender.clone());
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
@@ -1197,24 +1213,24 @@ impl Datastore {
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?.with_notifications();
+	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::owner();
-	/// 	if let Some(channel) = ds.notifications() {
-	///     	while let Ok(v) = channel.recv().await {
-	///     	    println!("Received notification: {v}");
-	///     	}
-	/// 	}
+	/// 	let channel = ds.notifications();
+	///
+	///     while let Ok(v) = channel.recv().await {
+	///         println!("Received notification: {v}");
+	///     }
 	///     Ok(())
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<Notification>> {
-		self.notification_channel.as_ref().map(|v| v.1.clone())
+	pub fn notifications(&self) -> Receiver<Notification> {
+		self.notifications_receiver.clone()
 	}
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
@@ -1223,7 +1239,7 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<Response>>
+	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -1306,9 +1322,7 @@ impl Datastore {
 			self.buckets.clone(),
 		)?;
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notifications_sender.clone());
 		Ok(ctx)
 	}
 

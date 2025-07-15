@@ -1,7 +1,6 @@
-use crate::dbs;
 use anyhow::Result;
 use clap::Args;
-use surrealdb::engine::any;
+use surrealdb::Surreal;
 
 #[derive(Args, Debug)]
 pub struct FixCommandArguments {
@@ -18,14 +17,8 @@ pub async fn init(
 	}: FixCommandArguments,
 ) -> Result<()> {
 	// Clean the path
-	let endpoint = any::__into_endpoint(path)?;
-	let path = if endpoint.path.is_empty() {
-		endpoint.url.to_string()
-	} else {
-		endpoint.path
-	};
+	let client = Surreal::connect(path).await?;
+
 	// Fix the datastore, if applicable
-	dbs::fix(path).await?;
-	// All ok
-	Ok(())
+	Err(anyhow::anyhow!("Not implemented"))
 }

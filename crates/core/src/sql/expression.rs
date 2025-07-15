@@ -7,8 +7,6 @@ use std::str;
 
 use super::operator::BindingPower;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
-
 /// Binary expressions.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

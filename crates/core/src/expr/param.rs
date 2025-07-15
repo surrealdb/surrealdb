@@ -14,8 +14,6 @@ use std::{fmt, ops::Deref, str};
 
 use super::FlowResultExt as _;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Param")]

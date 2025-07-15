@@ -13,6 +13,7 @@ use axum::{Extension, response::Response};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::StatusCode;
+use surrealdb::Value;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::iam::Action::View;
@@ -45,7 +46,8 @@ async fn post_handler(
 	let fmt = content_type.deref();
 	let fmt: Format = fmt.into();
 	let val = fmt.parse_value(body)?;
-	let cfg = export::Config::from_value(&val.into()).map_err(ResponseError)?;
+	let val = Value::try_from(val).map_err(ResponseError)?;
+	let cfg = export::Config::from_value(&val).map_err(ResponseError)?;
 	handle_inner(state, session, cfg).await
 }
 

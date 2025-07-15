@@ -27,13 +27,13 @@ async fn remove_statement_table() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"{
 			accesses: {},
@@ -48,8 +48,7 @@ async fn remove_statement_table() -> Result<()> {
 			tables: {},
 			users: {}
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -68,13 +67,13 @@ async fn remove_statement_namespace() -> Result<()> {
 		let res = &mut dbs.execute(sql, &ses, None).await?;
 		assert_eq!(res.len(), 3);
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		assert!(tmp.is_err());
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 	}
 	// Namespace selected
@@ -90,13 +89,13 @@ async fn remove_statement_namespace() -> Result<()> {
 		let res = &mut dbs.execute(sql, &ses, None).await?;
 		assert_eq!(res.len(), 3);
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		assert!(tmp.is_err());
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 	}
 	Ok(())
@@ -116,13 +115,13 @@ async fn remove_statement_database() -> Result<()> {
 		let res = &mut dbs.execute(sql, &ses, None).await?;
 		assert_eq!(res.len(), 3);
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		assert!(tmp.is_err());
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 	}
 	// Database selected
@@ -138,13 +137,13 @@ async fn remove_statement_database() -> Result<()> {
 		let res = &mut dbs.execute(sql, &ses, None).await?;
 		assert_eq!(res.len(), 3);
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		assert!(tmp.is_err());
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 		//
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 	}
 	Ok(())
@@ -162,13 +161,13 @@ async fn remove_statement_analyzer() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
 	// Analyzer is defined
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	// Analyzer is removed
-	let tmp = res.remove(0).result;
+	let tmp = res.remove(0).values;
 	tmp.unwrap();
 	// Check infos output
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"{
 			accesses: {},
@@ -183,8 +182,7 @@ async fn remove_statement_analyzer() -> Result<()> {
 			tables: {},
 			users: {}
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -207,11 +205,11 @@ async fn remove_statement_index() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
 	for _ in 0..8 {
-		let tmp = res.remove(0).result;
+		let tmp = res.remove(0).values;
 		tmp.unwrap();
 	}
 	// Check infos output
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	let val = SqlValue::parse(
 		"{
 			events: {},
@@ -220,8 +218,7 @@ async fn remove_statement_index() -> Result<()> {
 			tables: {},
 			lives: {},
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -236,7 +233,7 @@ async fn should_not_error_when_remove_table_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -252,7 +249,7 @@ async fn should_not_error_when_remove_analyzer_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -268,7 +265,7 @@ async fn should_not_error_when_remove_database_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -284,7 +281,7 @@ async fn should_not_error_when_remove_event_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -300,7 +297,7 @@ async fn should_not_error_when_remove_field_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -316,7 +313,7 @@ async fn should_not_error_when_remove_function_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -332,7 +329,7 @@ async fn should_not_error_when_remove_index_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -348,7 +345,7 @@ async fn should_not_error_when_remove_namespace_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -364,7 +361,7 @@ async fn should_not_error_when_remove_param_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -380,7 +377,7 @@ async fn should_not_error_when_remove_access_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())
@@ -396,7 +393,7 @@ async fn should_not_error_when_remove_user_if_exists() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).take_first()?;
 	assert_eq!(tmp, Value::None);
 
 	Ok(())

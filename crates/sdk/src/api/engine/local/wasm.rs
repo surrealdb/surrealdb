@@ -96,11 +96,6 @@ pub(crate) async fn run_router(
 		}
 	};
 
-	let kvs = match address.config.capabilities.allows_live_query_notifications() {
-		true => kvs.with_notifications(),
-		false => kvs,
-	};
-
 	let kvs = kvs
 		.with_strict_mode(address.config.strict)
 		.with_query_timeout(address.config.query_timeout)

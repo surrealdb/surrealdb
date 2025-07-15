@@ -1,6 +1,7 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::err::Error;
+use crate::rpc::V1Value;
 use crate::sql::id::range::IdRange;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
@@ -27,8 +28,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Bound, Deref};
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -163,13 +162,6 @@ impl SqlValue {
 				end: fields.0.end,
 			})),
 		}))
-	}
-
-	pub(crate) fn get_field_value(&self, name: &str) -> SqlValue {
-		match self {
-			SqlValue::Object(v) => v.get(name).cloned().unwrap_or(SqlValue::None),
-			_ => SqlValue::None,
-		}
 	}
 }
 
@@ -467,7 +459,8 @@ impl SqlValue {
 	/// This converts certain types like `Thing` into their simpler formats
 	/// instead of the format used internally by SurrealDB.
 	pub fn into_json(self) -> Json {
-		self.into()
+		let v1_value: V1Value = self.try_into().unwrap();
+		v1_value.into_json()
 	}
 
 	// -----------------------------------
@@ -853,6 +846,16 @@ impl SqlValue {
 			Object(o) => o.validate_computed(),
 			Range(r) => r.validate_computed(),
 			_ => Err(anyhow::Error::new(Error::NonComputed)),
+		}
+	}
+
+	/// Convert this Value into a Vec of SqlValues.
+	/// If this Value is an Array, return the contents of the Array.
+	/// Otherwise, return a Vec containing this Value.
+	pub fn into_vec(self) -> Vec<SqlValue> {
+		match self {
+			SqlValue::Array(v) => v.0,
+			_ => vec![self],
 		}
 	}
 }

@@ -107,7 +107,7 @@ impl RemoveTableStatement {
 				chn.send(Notification {
 					id: lv.id,
 					action: dbs::Action::Killed,
-					record: Value::None,
+					record: None,
 					result: Value::None,
 				})
 				.await?;

@@ -124,15 +124,12 @@ mod tests {
 	use anyhow::Result;
 
 	pub async fn new_ds() -> Result<Datastore> {
-		Ok(Datastore::new("memory")
-			.await?
-			.with_capabilities(Capabilities::all())
-			.with_notifications())
+		Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()))
 	}
 
 	#[tokio::test]
 	async fn test_table_definition_is_created_for_live_query() {
-		let dbs = new_ds().await.unwrap().with_notifications();
+		let dbs = new_ds().await.unwrap();
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
@@ -146,7 +143,7 @@ mod tests {
 		let lq_stmt = format!("LIVE SELECT * FROM {}", tb);
 		let live_query_response = &mut dbs.execute(&lq_stmt, &ses, None).await.unwrap();
 
-		let live_id = live_query_response.remove(0).result.unwrap();
+		let live_id = live_query_response.remove(0).take_first().unwrap();
 		let live_id = match live_id {
 			Value::Uuid(id) => id,
 			_ => panic!("expected uuid"),
@@ -171,8 +168,8 @@ mod tests {
 		))
 		.into();
 
-		let tmp = create_response.remove(0).result.unwrap();
-		assert_eq!(tmp, expected_record);
+		let tmp = create_response.remove(0).values.unwrap();
+		assert_eq!(Value::from(tmp), expected_record);
 
 		// Create a new transaction to verify that the same table was used.
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
@@ -182,14 +179,14 @@ mod tests {
 		tx.cancel().await.unwrap();
 
 		// Validate notification
-		let notifications = dbs.notifications().expect("expected notifications");
+		let notifications = dbs.notifications();
 		let notification = notifications.recv().await.unwrap();
 		assert_eq!(
 			notification,
 			Notification::new(
 				live_id,
 				Action::Create,
-				SqlValue::Thing(Thing::from((tb, "test_true"))).into(),
+				Some(Thing::from((tb, "test_true")).into()),
 				SqlValue::parse(&format!(
 					"{{
 						id: {tb}:test_true,
@@ -203,7 +200,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_table_exists_for_live_query() {
-		let dbs = new_ds().await.unwrap().with_notifications();
+		let dbs = new_ds().await.unwrap();
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 

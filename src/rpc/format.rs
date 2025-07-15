@@ -1,6 +1,4 @@
 use crate::net::headers::{Accept, ContentType};
-use crate::rpc::failure::Failure;
-use crate::rpc::response::Response;
 use axum::extract::ws::Message;
 use axum::response::IntoResponse;
 use axum::response::Response as AxumResponse;
@@ -8,7 +6,9 @@ use bytes::Bytes;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use surrealdb::rpc::RpcError;
 use surrealdb::rpc::format::Format;
-use surrealdb::rpc::request::Request;
+use surrealdb::rpc::request::V1Request;
+use surrealdb_core::dbs::Failure;
+use surrealdb_core::rpc::V1Response;
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {
@@ -48,19 +48,19 @@ impl From<&Format> for ContentType {
 
 pub trait WsFormat {
 	/// Process a WebSocket RPC request
-	fn req_ws(&self, msg: Message) -> Result<Request, Failure>;
+	fn req_ws(&self, msg: Message) -> Result<V1Request, Failure>;
 	/// Process a WebSocket RPC response
-	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure>;
+	fn res_ws(&self, res: V1Response) -> Result<(usize, Message), Failure>;
 }
 
 impl WsFormat for Format {
 	/// Process a WebSocket RPC request
-	fn req_ws(&self, msg: Message) -> Result<Request, Failure> {
+	fn req_ws(&self, msg: Message) -> Result<V1Request, Failure> {
 		let val = msg.into_data();
 		self.req(val).map_err(Into::into)
 	}
 	/// Process a WebSocket RPC response
-	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
+	fn res_ws(&self, res: V1Response) -> Result<(usize, Message), Failure> {
 		let res = self.res(res).map_err(Failure::from)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be
@@ -76,18 +76,18 @@ impl WsFormat for Format {
 
 pub trait HttpFormat {
 	/// Process a HTTP RPC request
-	fn req_http(&self, body: Bytes) -> Result<Request, RpcError>;
+	fn req_http(&self, body: Bytes) -> Result<V1Request, RpcError>;
 	/// Process a HTTP RPC response
-	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError>;
+	fn res_http(&self, res: V1Response) -> Result<AxumResponse, RpcError>;
 }
 
 impl HttpFormat for Format {
 	/// Process a HTTP RPC request
-	fn req_http(&self, body: Bytes) -> Result<Request, RpcError> {
-		self.req(body)
+	fn req_http(&self, body: Bytes) -> Result<V1Request, RpcError> {
+		self.req(body.to_vec())
 	}
 	/// Process a HTTP RPC response
-	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
+	fn res_http(&self, res: V1Response) -> Result<AxumResponse, RpcError> {
 		let res = self.res(res)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be

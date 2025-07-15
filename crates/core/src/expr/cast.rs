@@ -11,8 +11,6 @@ use std::fmt;
 
 use super::{ControlFlow, FlowResult};
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Cast";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Cast")]

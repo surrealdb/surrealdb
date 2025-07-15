@@ -90,7 +90,7 @@ impl CreateInfo {
 		};
 
 		let ds =
-			ds.with_capabilities(Capabilities::all()).with_notifications().with_auth_enabled(true);
+			ds.with_capabilities(Capabilities::all()).with_auth_enabled(true);
 
 		ds.bootstrap().await?;
 
@@ -133,7 +133,6 @@ async fn create_base_datastore() -> Result<Datastore> {
 	let db = Datastore::new("memory")
 		.await?
 		.with_capabilities(Capabilities::all())
-		.with_notifications()
 		.with_auth_enabled(true);
 
 	db.bootstrap().await?;

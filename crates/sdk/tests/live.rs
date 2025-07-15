@@ -10,7 +10,7 @@ use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {
-	let dbs = new_ds().await?.with_auth_enabled(true).with_notifications();
+	let dbs = new_ds().await?.with_auth_enabled(true);
 
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let sql = "
@@ -26,7 +26,7 @@ async fn live_permissions() -> Result<()> {
 	//
 	skip_ok(res, 1)?;
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -34,7 +34,7 @@ async fn live_permissions() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "test")).into())
@@ -48,7 +48,7 @@ async fn live_permissions() -> Result<()> {
 	//
 	skip_ok(res, 1)?;
 	//
-	let tmp = res.remove(0).result.unwrap_err().to_string();
+	let tmp = res.remove(0).values.unwrap_err().to_string();
 	let val = "An error occurred: create".to_string();
 	assert_eq!(tmp, val);
 	//
@@ -57,7 +57,7 @@ async fn live_permissions() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
-	let tmp = res.remove(0).result?;
+	let tmp = res.remove(0).values?;
 	let val = SqlValue::parse(
 		"[
 			{
@@ -65,7 +65,7 @@ async fn live_permissions() -> Result<()> {
 			},
 		]",
 	)
-	.into();
+	.into_vec();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

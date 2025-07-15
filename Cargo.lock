@@ -1027,6 +1027,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "capnp"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64b3560604b407fe0ab6f89b81ac11887b4ae07f8d31486581dee5b353e48f06"
+dependencies = [
+ "embedded-io",
+]
+
+[[package]]
+name = "capnpc"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5af589f7a7f3e6d920120b913345bd9a2fc65dfd76c5053a142852a5ea2e8609"
+dependencies = [
+ "capnp",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1188,6 +1206,15 @@ dependencies = [
  "error-code",
  "str-buf",
  "winapi",
+]
+
+[[package]]
+name = "cmake"
+version = "0.1.54"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7caa3f9de89ddbe2c607f4101924c5abec803763ae9534e4f4d7d8f84aa81f0"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -1636,6 +1663,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1810,6 +1843,34 @@ name = "fixedbitset"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
+
+[[package]]
+name = "flatbuffers"
+version = "25.2.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1045398c1bfd89168b5fd3f1fc11f6e70b34f6f66300c87d44d3de849463abf1"
+dependencies = [
+ "bitflags 2.9.0",
+ "rustc_version",
+ "serde",
+]
+
+[[package]]
+name = "flatbuffers-build"
+version = "0.2.2+flatc-25.2.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e076a12a84666f58d2818fe9ee9959e819cca8de93b53935094594f7b06d9881"
+dependencies = [
+ "anyhow",
+ "cmake",
+ "flate2",
+ "hex",
+ "reqwest",
+ "ring",
+ "tar",
+ "tempfile",
+ "thiserror 1.0.69",
+]
 
 [[package]]
 name = "flate2"
@@ -4038,7 +4099,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "prost 0.12.6",
- "prost-build",
+ "prost-build 0.12.6",
  "prost-derive 0.12.6",
  "sha2",
  "smallvec",
@@ -4167,6 +4228,26 @@ dependencies = [
  "prettyplease",
  "prost 0.12.6",
  "prost-types 0.12.6",
+ "regex",
+ "syn 2.0.100",
+ "tempfile",
+]
+
+[[package]]
+name = "prost-build"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
+dependencies = [
+ "heck",
+ "itertools 0.14.0",
+ "log",
+ "multimap",
+ "once_cell",
+ "petgraph",
+ "prettyplease",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
  "regex",
  "syn 2.0.100",
  "tempfile",
@@ -4585,6 +4666,7 @@ dependencies = [
  "async-compression",
  "base64 0.22.1",
  "bytes",
+ "encoding_rs",
  "futures-channel",
  "futures-core",
  "futures-util",
@@ -4613,6 +4695,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper 1.0.2",
+ "system-configuration",
  "tokio",
  "tokio-native-tls",
  "tokio-rustls 0.26.2",
@@ -5623,6 +5706,7 @@ dependencies = [
  "clap",
  "console-subscriber",
  "env_logger",
+ "flatbuffers",
  "futures",
  "futures-util",
  "geo",
@@ -5655,6 +5739,7 @@ dependencies = [
  "serial_test",
  "surrealdb",
  "surrealdb-core",
+ "surrealdb-protocol",
  "tempfile",
  "test-log",
  "thiserror 1.0.69",
@@ -5681,25 +5766,35 @@ name = "surrealdb"
 version = "3.0.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "arrayvec",
  "async-channel",
+ "async-stream",
  "bincode",
+ "bytes",
  "chrono",
  "ciborium",
  "criterion",
+ "dashmap",
  "dmp",
  "env_logger",
+ "flatbuffers",
  "flate2",
  "futures",
  "geo",
  "getrandom 0.3.2",
  "hashbrown 0.14.5",
+ "http 1.3.1",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper-util",
  "indexmap 2.8.0",
  "native-tls",
  "parking_lot",
  "path-clean",
  "pharos",
  "pprof",
+ "prost 0.13.5",
  "radix_trie",
  "rand 0.8.5",
  "rayon",
@@ -5713,17 +5808,20 @@ dependencies = [
  "rustls-pki-types",
  "semver",
  "serde",
- "serde-content",
  "serde_json",
  "serial_test",
  "surrealdb-core",
+ "surrealdb-protocol",
  "temp-dir",
  "test-log",
  "thiserror 1.0.69",
  "time",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "tokio-util",
+ "tonic 0.12.3",
+ "tower 0.4.13",
  "tracing",
  "tracing-subscriber",
  "trice",
@@ -5756,6 +5854,8 @@ dependencies = [
  "bincode",
  "blake3",
  "bytes",
+ "capnp",
+ "capnpc",
  "castaway",
  "chrono",
  "ciborium",
@@ -5765,6 +5865,8 @@ dependencies = [
  "dmp",
  "env_logger",
  "ext-sort",
+ "flatbuffers",
+ "flatbuffers-build",
  "flate2",
  "foundationdb",
  "fst",
@@ -5795,6 +5897,8 @@ dependencies = [
  "phf",
  "pin-project-lite",
  "pprof",
+ "prost 0.13.5",
+ "prost-build 0.13.5",
  "quick_cache",
  "radix_trie",
  "rand 0.8.5",
@@ -5824,6 +5928,7 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
+ "surrealdb-protocol",
  "surrealdb-tikv-client",
  "surrealkv",
  "surrealml-core",
@@ -5836,6 +5941,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-tungstenite 0.23.1",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "trice",
@@ -5859,6 +5965,27 @@ dependencies = [
  "serde",
  "storekey",
  "syn 2.0.100",
+]
+
+[[package]]
+name = "surrealdb-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "flatbuffers",
+ "futures",
+ "geo",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+ "rust_decimal",
+ "semver",
+ "serde",
+ "serde_json",
+ "tonic 0.12.3",
+ "uuid",
 ]
 
 [[package]]
@@ -6012,6 +6139,27 @@ dependencies = [
  "ntapi",
  "rayon",
  "windows",
+]
+
+[[package]]
+name = "system-configuration"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
+dependencies = [
+ "bitflags 2.9.0",
+ "core-foundation",
+ "system-configuration-sys",
+]
+
+[[package]]
+name = "system-configuration-sys"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
 ]
 
 [[package]]
@@ -6362,9 +6510,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.14"
+version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b9590b93e6fcc1739458317cccd391ad3955e2bde8913edf6f95f9e65a8f034"
+checksum = "66a539a9ad6d5d281510d5bd368c973d636c02dbf8a67300bfb6b950696ad7df"
 dependencies = [
  "bytes",
  "futures-core",
