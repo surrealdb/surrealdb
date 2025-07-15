@@ -35,6 +35,7 @@ use crate::key::index::dl::Dl;
 use crate::key::index::ib::Ib;
 use crate::key::index::is::Is;
 use crate::key::index::td::Td;
+use crate::key::index::tt::Tt;
 use crate::kvs::{Key, KeyEncode as _, Val};
 use anyhow::Result;
 use revision::Revisioned;
@@ -153,16 +154,27 @@ impl IndexKeyBase {
 		Is::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, nid).encode()
 	}
 
-	fn new_td_with_id<'a>(&'a self, term: &'a str, doc_id: DocId) -> Td<'a> {
-		Td::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, Some(doc_id))
+	fn new_td<'a>(&'a self, term: &'a str, doc_id: DocId) -> Td<'a> {
+		Td::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, doc_id)
 	}
 
-	fn new_td_compacted<'a>(&'a self, term: &'a str) -> Td<'a> {
-		Td::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, None)
+	fn new_tt<'a>(
+		&'a self,
+		term: &'a str,
+		doc_id: DocId,
+		nid: Uuid,
+		uid: Uuid,
+		add: bool,
+	) -> Tt<'a> {
+		Tt::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, Some((doc_id, nid, uid, add)))
 	}
 
-	fn new_td_range_with_id(&self, term: &str) -> Result<(Key, Key)> {
-		Td::range_with_id(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term)
+	fn new_tt_compacted<'a>(&'a self, term: &'a str) -> Tt<'a> {
+		Tt::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, None)
+	}
+
+	fn new_tt_range(&self, term: &str) -> Result<(Key, Key)> {
+		Tt::range(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term)
 	}
 
 	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> Dc {
@@ -180,6 +192,7 @@ impl IndexKeyBase {
 	fn new_dl(&self, doc_id: DocId) -> Dl {
 		Dl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
+
 	fn table(&self) -> &str {
 		&self.0.tb
 	}

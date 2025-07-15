@@ -142,6 +142,8 @@ pub enum Category {
 	IndexDocLength,
 	/// crate::key::index::td                /*{ns}*{db}*{tb}+{ix}!td{term}{id}
 	IndexTermDocument,
+	/// crate::key::index::tt                /*{ns}*{db}*{tb}+{ix}!td{term}{uuid}{uuid}
+	IndexTermDocuments,
 	/// crate::key::index::he                /*{ns}*{db}*{tb}+{ix}!he{id}
 	IndexHnswElements,
 	/// crate::key::index::hd                /*{ns}*{db}*{tb}+{ix}!hd{id}
@@ -264,6 +266,7 @@ impl Display for Category {
 			Self::IndexInvertedDocIds => "IndexInvertedDocIds",
 			Self::IndexFullTextDocIdsSequenceState => "IndexFullTextDocIdsSequenceState",
 			Self::IndexFullTextDocCountAndLength => "IndexFullTextDocCountAndLength",
+			Self::IndexTermDocuments => "IndexTermDocuments",
 		};
 		write!(f, "{}", name)
 	}
