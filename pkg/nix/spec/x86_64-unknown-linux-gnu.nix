@@ -4,9 +4,7 @@
   inherit target;
 
   features = with util.features;
-    [ default storage-tikv ]
-    ++ pkgs.lib.lists.optional (util.fdbSupported pkgs.fdbPackages)
-    [ storage-fdb-7_3 ];
+    [ default storage-tikv storage-fdb-7_3 ];
 
   buildSpec = with pkgs;
     let crossCompiling = !util.isNative target;
@@ -16,9 +14,7 @@
 
       nativeBuildInputs = [ pkg-config ];
 
-      buildInputs = [ openssl onnxruntime ]
-        ++ lib.lists.optional (util.fdbSupported fdbPackages)
-        (util.fdbPackage fdbPackages);
+      buildInputs = [ openssl onnxruntime ];
 
       LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
 
