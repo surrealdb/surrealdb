@@ -23,6 +23,7 @@ use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
 use std::collections::HashSet;
 use std::ops::BitAnd;
+use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Default)]
@@ -133,9 +134,22 @@ impl FullTextIndex {
 					}
 				}
 			}
-			// Delete the doc length
-			let key = self.ikb.new_dl(doc_id);
-			tx.del(key).await?;
+			{
+				let key = self.ikb.new_dl(doc_id);
+				// get the doc length
+				if let Some(v) = tx.get(key.clone(), None).await? {
+					// Delete the doc length
+					tx.del(key).await?;
+					// Decrease the doc count and total doc length
+					let dl: DocLength = revision::from_slice(&v)?;
+					let dcl = DocLengthAndCount {
+						total_docs_length: -(dl as i128),
+						doc_count: -1,
+					};
+					let key = self.ikb.new_dc_with_id(doc_id, opt.id()?, Uuid::now_v7());
+					tx.put(key, revision::to_vec(&dcl)?, None).await?;
+				}
+			}
 			Ok(Some(doc_id))
 		} else {
 			Ok(None)
@@ -167,9 +181,20 @@ impl FullTextIndex {
 		} else {
 			self.index_without_offsets(&tx, id.doc_id(), tokens).await?
 		};
-		// Set the doc length
-		let key = self.ikb.new_dl(id.doc_id());
-		tx.set(key, revision::to_vec(&dl)?, None).await?;
+		{
+			// Set the doc length
+			let key = self.ikb.new_dl(id.doc_id());
+			tx.set(key, revision::to_vec(&dl)?, None).await?;
+		}
+		{
+			// Increase the doc count and total doc length
+			let key = self.ikb.new_dc_with_id(id.doc_id(), opt.id()?, Uuid::now_v7());
+			let dcl = DocLengthAndCount {
+				total_docs_length: dl as i128,
+				doc_count: 1,
+			};
+			tx.put(key, revision::to_vec(&dcl)?, None).await?;
+		}
 		// We're done
 		Ok(())
 	}
@@ -462,12 +487,14 @@ impl Scorer {
 
 	// https://en.wikipedia.org/wiki/Okapi_BM25
 	// Including the lower-bounding term frequency normalization (2011 CIKM)
+	// Floor for Negative Scores
 	fn compute_bm25_score(&self, term_freq: f32, term_doc_count: f32, doc_length: f32) -> f32 {
 		// (n(qi) + 0.5)
 		let denominator = term_doc_count + 0.5;
 		// (N - n(qi) + 0.5)
 		let numerator = self.doc_count - term_doc_count + 0.5;
-		let idf = (numerator / denominator).ln();
+		// Calculate IDF with floor
+		let idf = (numerator / denominator).ln().max(0.0);
 		if idf.is_nan() {
 			return f32::NAN;
 		}

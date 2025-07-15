@@ -1,4 +1,4 @@
-//! Stores the term/document frequency and offsets
+//! Stores the term/document frequency and offsets for a document
 
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
@@ -6,6 +6,7 @@ use crate::key::category::Category;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -22,7 +23,7 @@ pub struct Dc<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: Option<DocId>,
+	pub ids: Option<(DocId, Uuid, Uuid)>,
 }
 impl_key!(Dc<'a>);
 
@@ -33,12 +34,12 @@ impl Categorise for Dc<'_> {
 }
 
 impl<'a> Dc<'a> {
-	pub(crate) fn _new(
+	pub(crate) fn new(
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
-		id: Option<DocId>,
+		ids: Option<(DocId, Uuid, Uuid)>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -53,7 +54,7 @@ impl<'a> Dc<'a> {
 			_e: b'!',
 			_f: b'd',
 			_g: b'c',
-			id,
+			ids,
 		}
 	}
 
@@ -114,18 +115,18 @@ mod tests {
 	use crate::kvs::KeyDecode;
 
 	#[test]
-	fn key_with_id() {
-		let id = Some(129);
-		let val = Dc::_new("testns", "testdb", "testtb", "testix", id);
+	fn key_with_ids() {
+		let ids = Some((129, Uuid::from_u128(1), Uuid::from_u128(2)));
+		let val = Dc::new("testns", "testdb", "testtb", "testix", ids);
 		let enc = Dc::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\x01\0\0\0\0\0\0\0\x81");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\x01\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\x10\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\x10\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 		let dec = Dc::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 
 	#[test]
 	fn key_no_id() {
-		let val = Dc::_new("testns", "testdb", "testtb", "testix", None);
+		let val = Dc::new("testns", "testdb", "testtb", "testix", None);
 		let enc = Dc::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0");
 		let dec = Dc::decode(&enc).unwrap();
