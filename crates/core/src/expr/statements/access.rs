@@ -3,7 +3,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::access_type::BearerAccessSubject;
-use crate::expr::{AccessType, Base, Cond, FlowResultExt as _, Ident, RecordIdLit};
+use crate::expr::{
+	AccessType, Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, Ident, RecordIdLit,
+};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, RecordId, Strand, Uuid, Value};
 use anyhow::{Result, bail, ensure};
@@ -80,60 +82,17 @@ pub struct AccessStatementPurge {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct AccessGrant {
+pub struct AccessGrantStore {
 	pub id: Ident,                    // Unique grant identifier.
 	pub ac: Ident,                    // Access method used to create the grant.
 	pub creation: Datetime,           // Grant creation time.
 	pub expiration: Option<Datetime>, // Grant expiration time, if any.
 	pub revocation: Option<Datetime>, // Grant revocation time, if any.
-	pub subject: Subject,             // Subject of the grant.
+	pub subject: SubjectStore,        // Subject of the grant.
 	pub grant: Grant,                 // Grant data.
 }
 
-impl AccessGrant {
-	/// Returns a version of the statement where potential secrets are redacted.
-	/// This function should be used when displaying the statement to datastore users.
-	/// This function should NOT be used when displaying the statement for export purposes.
-	pub fn redacted(&self) -> AccessGrant {
-		let mut ags = self.clone();
-		ags.grant = match ags.grant {
-			Grant::Jwt(mut gr) => {
-				// Token should not even be stored. We clear it just as a precaution.
-				gr.token = None;
-				Grant::Jwt(gr)
-			}
-			Grant::Record(mut gr) => {
-				// Token should not even be stored. We clear it just as a precaution.
-				gr.token = None;
-				Grant::Record(gr)
-			}
-			Grant::Bearer(mut gr) => {
-				// Key is stored, but should not usually be displayed.
-				gr.key = "[REDACTED]".into();
-				Grant::Bearer(gr)
-			}
-		};
-		ags
-	}
-
-	// Returns if the access grant is expired.
-	pub fn is_expired(&self) -> bool {
-		match &self.expiration {
-			Some(exp) => exp < &Datetime::default(),
-			None => false,
-		}
-	}
-
-	// Returns if the access grant is revoked.
-	pub fn is_revoked(&self) -> bool {
-		self.revocation.is_some()
-	}
-
-	// Returns if the access grant is active.
-	pub fn is_active(&self) -> bool {
-		!(self.is_expired() || self.is_revoked())
-	}
-
+impl AccessGrantStore {
 	/// Returns the surrealql object representation of the access grant
 	pub fn into_access_object(self) -> Object {
 		let mut res = Object::default();
@@ -145,8 +104,8 @@ impl AccessGrant {
 		res.insert("revocation".to_owned(), Value::from(self.revocation));
 		let mut sub = Object::default();
 		match self.subject {
-			Subject::Record(id) => sub.insert("record".to_owned(), id),
-			Subject::User(name) => {
+			SubjectStore::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
+			SubjectStore::User(name) => {
 				sub.insert("user".to_owned(), Value::from(name.into_raw_string()))
 			}
 		};
@@ -176,6 +135,80 @@ impl AccessGrant {
 
 		res
 	}
+
+	/// Returns a version of the statement where potential secrets are redacted.
+	/// This function should be used when displaying the statement to datastore users.
+	/// This function should NOT be used when displaying the statement for export purposes.
+	pub fn redacted(mut self) -> AccessGrantStore {
+		self.grant = match self.grant {
+			Grant::Jwt(mut gr) => {
+				// Token should not even be stored. We clear it just as a precaution.
+				gr.token = None;
+				Grant::Jwt(gr)
+			}
+			Grant::Record(mut gr) => {
+				// Token should not even be stored. We clear it just as a precaution.
+				gr.token = None;
+				Grant::Record(gr)
+			}
+			Grant::Bearer(mut gr) => {
+				// Key is stored, but should not usually be displayed.
+				gr.key = "[REDACTED]".into();
+				Grant::Bearer(gr)
+			}
+		};
+		self
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct AccessGrant {
+	pub id: Ident,                    // Unique grant identifier.
+	pub ac: Ident,                    // Access method used to create the grant.
+	pub creation: Datetime,           // Grant creation time.
+	pub expiration: Option<Datetime>, // Grant expiration time, if any.
+	pub revocation: Option<Datetime>, // Grant revocation time, if any.
+	pub subject: Subject,             // Subject of the grant.
+	pub grant: Grant,                 // Grant data.
+}
+
+impl AccessGrant {
+	// Returns if the access grant is expired.
+	pub fn is_expired(&self) -> bool {
+		match &self.expiration {
+			Some(exp) => exp < &Datetime::default(),
+			None => false,
+		}
+	}
+
+	// Returns if the access grant is revoked.
+	pub fn is_revoked(&self) -> bool {
+		self.revocation.is_some()
+	}
+
+	// Returns if the access grant is active.
+	pub fn is_active(&self) -> bool {
+		!(self.is_expired() || self.is_revoked())
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum SubjectStore {
+	Record(RecordId),
+	User(Ident),
+}
+
+impl SubjectStore {
+	// Returns the main identifier of a subject as a string.
+	pub fn id(&self) -> String {
+		match self {
+			SubjectStore::Record(id) => id.to_string(),
+			SubjectStore::User(name) => name.into_raw_string(),
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -187,11 +220,18 @@ pub enum Subject {
 }
 
 impl Subject {
-	// Returns the main identifier of a subject as a string.
-	pub fn id(&self) -> String {
+	async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> FlowResult<SubjectStore> {
 		match self {
-			Subject::Record(id) => id.to_string(),
-			Subject::User(name) => name.into_raw_string(),
+			Subject::Record(record_id_lit) => {
+				Ok(SubjectStore::Record(record_id_lit.compute(stk, ctx, opt, doc).await?))
+			}
+			Subject::User(ident) => Ok(SubjectStore::User(ident.clone())),
 		}
 	}
 }
@@ -272,7 +312,7 @@ impl GrantBearer {
 		// Unlike with passwords, brute force and rainbow tables are infeasable due to the key length.
 		// When hashing the bearer keys, the prefix and key identifier are kept as salt.
 		let mut hasher = Sha256::new();
-		hasher.update(self.key.as_string());
+		hasher.update(self.key.as_str());
 		let hash = hasher.finalize();
 		let hash_hex = format!("{hash:x}").into();
 
@@ -295,11 +335,13 @@ fn random_string(length: usize, pool: &[u8]) -> String {
 }
 
 pub async fn create_grant(
-	stmt: &AccessStatementGrant,
+	access: Ident,
+	base: Option<Base>,
+	subject: SubjectStore,
 	ctx: &Context,
 	opt: &Options,
-) -> Result<AccessGrant> {
-	let base = match &stmt.base {
+) -> Result<AccessGrantStore> {
+	let base = match &base {
 		Some(base) => base.clone(),
 		None => opt.selected_base()?,
 	};
@@ -311,11 +353,11 @@ pub async fn create_grant(
 	txn.clear();
 	// Read the access definition.
 	let ac = match base {
-		Base::Root => txn.get_root_access(&stmt.ac).await?,
-		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac).await?,
+		Base::Root => txn.get_root_access(&access).await?,
+		Base::Ns => txn.get_ns_access(opt.ns()?, &access).await?,
 		Base::Db => {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_db_access(ns, db, &stmt.ac).await?
+			txn.get_db_access(ns, db, &access).await?
 		}
 		_ => {
 			bail!(Error::Unimplemented(
@@ -330,11 +372,11 @@ pub async fn create_grant(
 			Err(anyhow::Error::new(Error::Unimplemented(format!("Grants for JWT on {base}"))))
 		}
 		AccessType::Record(at) => {
-			match &stmt.subject {
-				Subject::User(_) => {
+			match &subject {
+				SubjectStore::User(_) => {
 					bail!(Error::AccessGrantInvalidSubject);
 				}
-				Subject::Record(_) => {
+				SubjectStore::Record(_) => {
 					// If the grant is being created for a record, a database must be selected.
 					ensure!(matches!(base, Base::Db), Error::DbEmpty);
 				}
@@ -346,7 +388,7 @@ pub async fn create_grant(
 			};
 			// Create a new bearer key.
 			let grant = GrantBearer::new(atb.kind.prefix());
-			let gr = AccessGrant {
+			let gr = AccessGrantStore {
 				ac: ac.name.clone(),
 				// Unique grant identifier.
 				// In the case of bearer grants, the key identifier.
@@ -358,7 +400,7 @@ pub async fn create_grant(
 				// The grant is initially not revoked.
 				revocation: None,
 				// Subject associated with the grant.
-				subject: stmt.subject.clone(),
+				subject,
 				// The contents of the grant.
 				grant: Grant::Bearer(grant.clone()),
 			};
@@ -407,8 +449,8 @@ pub async fn create_grant(
 			Ok(gr)
 		}
 		AccessType::Bearer(at) => {
-			match &stmt.subject {
-				Subject::User(user) => {
+			match &subject {
+				SubjectStore::User(user) => {
 					// Grant subject must match access method subject.
 					ensure!(
 						matches!(&at.subject, BearerAccessSubject::User),
@@ -427,7 +469,7 @@ pub async fn create_grant(
 						)),
 					};
 				}
-				Subject::Record(_) => {
+				SubjectStore::Record(_) => {
 					// If the grant is being created for a record, a database must be selected.
 					ensure!(matches!(base, Base::Db), Error::DbEmpty);
 					// Grant subject must match access method subject.
@@ -440,7 +482,7 @@ pub async fn create_grant(
 			};
 			// Create a new bearer key.
 			let grant = GrantBearer::new(at.kind.prefix());
-			let gr = AccessGrant {
+			let gr = AccessGrantStore {
 				ac: ac.name.clone(),
 				// Unique grant identifier.
 				// In the case of bearer grants, the key identifier.
@@ -452,7 +494,7 @@ pub async fn create_grant(
 				// The grant is initially not revoked.
 				revocation: None,
 				// Subject associated with the grant.
-				subject: stmt.subject.clone(),
+				subject,
 				// The contents of the grant.
 				grant: Grant::Bearer(grant.clone()),
 			};
@@ -517,11 +559,14 @@ pub async fn create_grant(
 
 async fn compute_grant(
 	stmt: &AccessStatementGrant,
+	stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
-	_doc: Option<&CursorDoc>,
-) -> Result<Value> {
-	let grant = create_grant(stmt, ctx, opt).await?;
+	doc: Option<&CursorDoc>,
+) -> FlowResult<Value> {
+	let subject = stmt.subject.compute(stk, ctx, opt, doc).await?;
+
+	let grant = create_grant(stmt.ac.clone(), stmt.base.clone(), subject, ctx, opt).await?;
 	Ok(Value::Object(grant.into_access_object()))
 }
 
@@ -926,13 +971,19 @@ impl AccessStatement {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+		doc: Option<&CursorDoc>,
+	) -> FlowResult<Value> {
 		match self {
-			AccessStatement::Grant(stmt) => compute_grant(stmt, ctx, opt, _doc).await,
-			AccessStatement::Show(stmt) => compute_show(stmt, stk, ctx, opt, _doc).await,
-			AccessStatement::Revoke(stmt) => compute_revoke(stmt, stk, ctx, opt, _doc).await,
-			AccessStatement::Purge(stmt) => compute_purge(stmt, ctx, opt, _doc).await,
+			AccessStatement::Grant(stmt) => compute_grant(stmt, stk, ctx, opt, doc).await,
+			AccessStatement::Show(stmt) => {
+				compute_show(stmt, stk, ctx, opt, doc).await.map_err(ControlFlow::Err)
+			}
+			AccessStatement::Revoke(stmt) => {
+				compute_revoke(stmt, stk, ctx, opt, doc).await.map_err(ControlFlow::Err)
+			}
+			AccessStatement::Purge(stmt) => {
+				compute_purge(stmt, ctx, opt, doc).await.map_err(ControlFlow::Err)
+			}
 		}
 	}
 }
@@ -946,9 +997,9 @@ impl Display for AccessStatement {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
-				match stmt.subject {
-					Subject::User(_) => write!(f, " FOR USER {}", stmt.subject.id())?,
-					Subject::Record(_) => write!(f, " FOR RECORD {}", stmt.subject.id())?,
+				match &stmt.subject {
+					Subject::User(x) => write!(f, " FOR USER {}", x.into_raw_string())?,
+					Subject::Record(x) => write!(f, " FOR RECORD {}", x.to_string())?,
 				}
 				Ok(())
 			}

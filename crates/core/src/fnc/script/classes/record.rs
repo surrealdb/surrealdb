@@ -23,7 +23,7 @@ impl Record {
 					Value::Number(v) => v.to_int().into(),
 					Value::Uuid(v) => v.into(),
 					// TODO: Null byte validity
-					v => Strand::new(v.as_string()).unwrap().into(),
+					v => Strand::new(v.as_raw_string()).unwrap().into(),
 				},
 			},
 		}
@@ -45,11 +45,11 @@ impl Record {
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
-		self.value.into_raw_string()
+		self.value.to_string()
 	}
 	/// Convert the object to JSON
 	#[qjs(rename = "toJSON")]
 	pub fn to_json(&self) -> String {
-		self.value.into_raw_string()
+		self.value.to_string()
 	}
 }

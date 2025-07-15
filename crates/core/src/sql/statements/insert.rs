@@ -2,7 +2,7 @@ use crate::sql::{Data, Expr, Output, Timeout};
 use revision::revisioned;
 use std::fmt;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct InsertStatement {
 	pub into: Option<Expr>,

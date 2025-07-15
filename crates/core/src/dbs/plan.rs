@@ -173,7 +173,7 @@ impl ExplainItem {
 				],
 			},
 			Iterable::Index(t, ir, rs) => {
-				let mut details = vec![("table", Value::Table(t.clone().into_strand()))];
+				let mut details = vec![("table", Value::Table(t.clone().into()))];
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(t.as_str()) {
 						details.push(("plan", exe.explain(*ir)));

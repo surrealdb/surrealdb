@@ -1,11 +1,12 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::order::Ordering;
 use crate::sql::{
-	Cond, Explain, Expr, Fetchs, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, With,
+	Cond, Explain, Expr, Fetchs, Fields, Groups, Idioms, Limit, Splits, Start, Timeout, Version,
+	With,
 };
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
@@ -22,7 +23,7 @@ pub struct SelectStatement {
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
-	pub version: Option<Expr>,
+	pub version: Option<Version>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub explain: Option<Explain>,

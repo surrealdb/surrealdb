@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Model {
 	pub name: String,

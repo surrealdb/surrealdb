@@ -1,5 +1,3 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 

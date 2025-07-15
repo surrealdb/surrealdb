@@ -12,7 +12,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineConfigStatement {
 	pub kind: DefineKind,
@@ -37,7 +37,7 @@ impl From<crate::expr::statements::define::DefineConfigStatement> for DefineConf
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ConfigInner {
 	GraphQL(GraphQLConfig),

@@ -18,7 +18,7 @@ fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
 	match body {
 		Value::Bytes(v) => req.body(v.into_inner()),
 		Value::Strand(v) => req.body(v.into_string()),
-		_ if body.is_some() => req.json(&body.into_json()),
+		_ if !body.is_nullish() => req.json(&body.into_json()),
 		_ => req,
 	}
 }

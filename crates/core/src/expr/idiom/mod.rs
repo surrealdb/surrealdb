@@ -56,7 +56,6 @@ impl InfoStructure for Idioms {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Idiom")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {

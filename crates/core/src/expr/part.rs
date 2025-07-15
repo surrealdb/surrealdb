@@ -282,7 +282,7 @@ impl<'a> RecursionPlan {
 					Value::None => Ok(Value::None),
 					v => Err(anyhow::Error::new(Error::unreachable(format_args!(
 						"Expected an object or none, found {}.",
-						v.kindof()
+						v.kind_of()
 					)))),
 				}
 			}

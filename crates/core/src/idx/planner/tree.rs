@@ -336,7 +336,7 @@ impl<'a> TreeBuilder<'a> {
 				let ixr = schema.new_reference(idx);
 				// Check if the WITH clause allow the index to be used
 				if let Some(With::Index(ixs)) = &self.ctx.with {
-					if ixs.contains(&*ix.name) {
+					if ixs.iter().any(|x| x == ix.name.as_str()) {
 						if let Some(wi) = &mut self.with_indexes {
 							wi.push(ixr.clone());
 						} else {

@@ -42,7 +42,7 @@ impl Document {
 						(&self.initial, &self.current)
 					};
 					// Output a DIFF of any changes applied to the document
-					let ops = initial.doc.as_ref().diff(current.doc.as_ref(), Idiom::default());
+					let ops = initial.doc.as_ref().diff(current.doc.as_ref());
 					Ok(Operation::operations_to_value(ops))
 				}
 				Output::After => {

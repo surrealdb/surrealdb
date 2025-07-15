@@ -1,7 +1,7 @@
 use crate::sql::Ident;
 use std::fmt::{self, Display};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveFunctionStatement {
 	pub name: Ident,

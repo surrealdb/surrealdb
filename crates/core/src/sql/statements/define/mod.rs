@@ -36,7 +36,7 @@ pub use api::ApiAction;
 
 use std::fmt::{self, Display};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum DefineKind {
 	#[default]
 	Default,
@@ -64,7 +64,7 @@ impl From<DefineKind> for crate::expr::statements::define::DefineKind {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),

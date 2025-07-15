@@ -8,7 +8,6 @@ use super::Ident;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
 #[serde(rename = "$surrealdb::private::sql::File")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct File {
 	pub bucket: String,
 	pub key: String,
@@ -30,7 +29,7 @@ impl File {
 
 	/// Check if this File belongs to a certain bucket type
 	pub fn is_bucket_type(&self, types: &[Ident]) -> bool {
-		types.is_empty() || types.iter().any(|buc| *buc == self.bucket)
+		types.is_empty() || types.iter().any(|buc| &**buc == self.bucket)
 	}
 
 	pub fn display_inner(&self) -> String {

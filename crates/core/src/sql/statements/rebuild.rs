@@ -3,7 +3,7 @@ use crate::sql::ident::Ident;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RebuildStatement {
 	Index(RebuildIndexStatement),

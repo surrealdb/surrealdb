@@ -30,9 +30,9 @@ impl Document {
 		// Collect indexes or skip
 		let ixs = match &opt.force {
 			Force::Index(ix)
-				if ix
-					.first()
-					.is_some_and(|ix| self.id.as_ref().is_some_and(|id| **ix.what == id.table)) =>
+				if ix.first().is_some_and(|ix| {
+					self.id.as_ref().is_some_and(|id| ix.what.as_str() == id.table)
+				}) =>
 			{
 				ix.clone()
 			}

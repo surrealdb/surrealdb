@@ -299,7 +299,7 @@ impl InfoStructure for DefineTableStatement {
 			"name".to_string() => self.name.structure(),
 			"drop".to_string() => self.drop.into(),
 			"full".to_string() => self.full.into(),
-			"kind".to_string() => self.kind.structure(),
+			"kind".to_string() => self.table_type.structure(),
 			"view".to_string(), if let Some(v) = self.view => v.structure(),
 			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
 			"permissions".to_string() => self.permissions.structure(),

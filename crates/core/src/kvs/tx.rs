@@ -4,14 +4,15 @@ use super::{Key, KeyEncode, Val, Version, util};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::{
 	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
 };
 use crate::expr::statements::{
-	AccessGrant, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStore, DefineTableStatement,
-	DefineUserStatement, LiveStatement,
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
+	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineNamespaceStatement, DefineParamStore, DefineTableStatement, DefineUserStatement,
+	LiveStatement,
 };
 use crate::expr::{Ident, Permissions};
 use crate::idx::planner::ScanDirection;
@@ -497,7 +498,7 @@ impl Transaction {
 
 	/// Retrieve all root access grants in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrant]>> {
+	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Rgs(ra);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_rag(),
@@ -569,7 +570,11 @@ impl Transaction {
 
 	/// Retrieve all namespace access grants for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_ns_access_grants(&self, ns: &str, na: &str) -> Result<Arc<[AccessGrant]>> {
+	pub async fn all_ns_access_grants(
+		&self,
+		ns: &str,
+		na: &str,
+	) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Ngs(ns, na);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nag(),
@@ -650,7 +655,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		da: &str,
-	) -> Result<Arc<[AccessGrant]>> {
+	) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Dgs(ns, db, da);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dag(),
@@ -1019,7 +1024,7 @@ impl Transaction {
 
 	/// Retrieve a specific root access grant.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_root_access_grant(&self, ac: &str, gr: &str) -> Result<Arc<AccessGrant>> {
+	pub async fn get_root_access_grant(&self, ac: &str, gr: &str) -> Result<Arc<AccessGrantStore>> {
 		let qey = cache::tx::Lookup::Rg(ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1030,7 +1035,7 @@ impl Transaction {
 						ac: ac.to_owned(),
 						gr: gr.to_owned(),
 					})?;
-				let val: AccessGrant = revision::from_slice(&val)?;
+				let val: AccessGrantStore = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1108,7 +1113,7 @@ impl Transaction {
 		ns: &str,
 		ac: &str,
 		gr: &str,
-	) -> Result<Arc<AccessGrant>> {
+	) -> Result<Arc<AccessGrantStore>> {
 		let qey = cache::tx::Lookup::Ng(ns, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1120,7 +1125,7 @@ impl Transaction {
 						gr: gr.to_owned(),
 						ns: ns.to_owned(),
 					})?;
-				let val: AccessGrant = revision::from_slice(&val)?;
+				let val: AccessGrantStore = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1211,7 +1216,7 @@ impl Transaction {
 		db: &str,
 		ac: &str,
 		gr: &str,
-	) -> Result<Arc<AccessGrant>> {
+	) -> Result<Arc<AccessGrantStore>> {
 		let qey = cache::tx::Lookup::Dg(ns, db, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1224,7 +1229,7 @@ impl Transaction {
 						ns: ns.to_owned(),
 						db: db.to_owned(),
 					})?;
-				let val: AccessGrant = revision::from_slice(&val)?;
+				let val: AccessGrantStore = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);

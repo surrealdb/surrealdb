@@ -5,7 +5,7 @@ use reblessive::Stk;
 use super::mac::unexpected;
 use crate::sql::operator::{BindingPower, NearestNeighbor};
 use crate::sql::{
-	AssignOperator, BinaryOperator, Expr, Literal, Part, PostfixOperator, PrefixOperator,
+	AssignOperator, BinaryOperator, Expr, Ident, Literal, Part, PostfixOperator, PrefixOperator,
 };
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::Numeric;
@@ -162,6 +162,18 @@ impl Parser<'_> {
 			t!(">") if self.peek_whitespace1().kind == t!("..") => Some(BindingPower::Range),
 			t!("..") => Some(BindingPower::Range),
 			t!("(") => Some(BindingPower::Call),
+			t!(".") => {
+				// match method call.
+				if !Self::kind_is_keyword_like(self.peek1().kind) {
+					return None;
+				}
+
+				let t!("(") = self.peek2().kind else {
+					return None;
+				};
+
+				Some(BindingPower::Call)
+			}
 			_ => None,
 		}
 	}
@@ -394,7 +406,7 @@ impl Parser<'_> {
 			t!("-") => BinaryOperator::Subtract,
 			t!("*") | t!("×") => BinaryOperator::Multiply,
 			t!("/") | t!("÷") => BinaryOperator::Divide,
-			t!("%") => BinaryOperator::Modulo,
+			t!("%") => BinaryOperator::Remainder,
 			t!("∋") | t!("CONTAINS") => BinaryOperator::Contain,
 			t!("∌") | t!("CONTAINSNOT") => BinaryOperator::NotContain,
 			t!("∈") | t!("INSIDE") => BinaryOperator::Inside,
@@ -449,11 +461,14 @@ impl Parser<'_> {
 			x => unreachable!("found non-operator token {x:?}"),
 		};
 		let before = self.recent_span();
+		let rhs_covered = self.peek().kind == t!("(");
+		let rhs = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
 		let is_relation = Self::operator_is_relation(&operator);
 		if !lhs_prime && is_relation && Self::expr_is_relation(&lhs) {
+			let span = before.covers(self.recent_span());
 			bail!("Chained relational operators have no defined associativity.",
-				@token.span => "Use parens, '()', to specify which operator must be evaluated first")
+				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		let is_range = matches!(
@@ -464,97 +479,26 @@ impl Parser<'_> {
 				| BinaryOperator::RangeInclusive
 		);
 		if !lhs_prime && is_range && Self::expr_is_range(&lhs) {
+			let span = before.covers(self.recent_span());
 			bail!("Chained range operators has no specified associativity",
-				@token.span => "use parens, '()', to specify which operator must be evaluated first")
+				@span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
-		let rhs_covered = self.peek().kind == t!("(");
-		let rhs = ctx.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
-
 		if !rhs_covered && is_relation && Self::expr_is_relation(&rhs) {
+			let span = before.covers(self.recent_span());
 			bail!("Chained relational operators have no defined associativity.",
-				@token.span => "Use parens, '()', to specify which operator must be evaluated first")
+				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		if !rhs_covered && is_range && Self::expr_is_range(&rhs) {
+			let span = before.covers(self.recent_span());
 			bail!("Chained range operators have no defined associativity.",
-				@token.span => "Use parens, '()', to specify which operator must be evaluated first")
+				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		Ok(Expr::Binary {
 			left: Box::new(lhs),
 			op: operator,
-			right: Box::new(rhs),
-		})
-	}
-
-	async fn parse_infix_range(
-		&mut self,
-		ctx: &mut Stk,
-		exclusive: bool,
-		lhs: Expr,
-		lhs_prime: bool,
-	) -> ParseResult<Expr> {
-		let inclusive = self.eat_whitespace(t!("="));
-
-		let before = self.recent_span();
-		let peek = self.peek_whitespace();
-		let (rhs, rhs_covered) = if inclusive {
-			// ..= must be followed by an expression.
-			if peek.kind == TokenKind::WhiteSpace {
-				bail!("Unexpected whitespace, expected inclusive range to be immediately followed by a expression",
-					@peek.span => "Whitespace between a range and it's operands is dissallowed")
-			}
-			let rhs_covered = self.peek().kind == t!("(");
-			(ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?, rhs_covered)
-		} else if Self::kind_starts_expression(peek.kind) {
-			let rhs_covered = self.peek().kind == t!("(");
-			(ctx.run(|ctx| self.pratt_parse_expr(ctx, BindingPower::Range)).await?, rhs_covered)
-		} else {
-			todo!()
-			/*
-			return Ok(Box::new(Range {
-				beg: if exclusive {
-					Bound::Excluded(lhs)
-				} else {
-					Bound::Included(lhs)
-				},
-				end: Bound::Unbounded,
-			})));
-			*/
-		};
-
-		if Self::expr_is_range(&lhs) && !lhs_prime {
-			let span = before.covers(self.recent_span());
-			// a..b..c is ambiguous, so throw an error
-			bail!("Chaining range operators has no specified associativity",
-				@span => "use parens, '()', to specify which operator must be evaluated first")
-		}
-
-		if Self::expr_is_range(&rhs) && !rhs_covered {
-			let span = before.covers(self.recent_span());
-			// a..b..c is ambiguous, so throw an error
-			bail!("Chaining range operators has no specified associativity",
-				@span => "use parens, '()', to specify which operator must be evaluated first")
-		}
-
-		let op = if exclusive {
-			if inclusive {
-				BinaryOperator::RangeSkipInclusive
-			} else {
-				BinaryOperator::RangeSkip
-			}
-		} else {
-			if inclusive {
-				BinaryOperator::RangeInclusive
-			} else {
-				BinaryOperator::Range
-			}
-		};
-
-		Ok(Expr::Binary {
-			left: Box::new(lhs),
-			op,
 			right: Box::new(rhs),
 		})
 	}
@@ -599,6 +543,28 @@ impl Parser<'_> {
 					}
 				}
 				PostfixOperator::Call(args)
+			}
+			t!(".") => {
+				self.pop_peek();
+
+				let name = self.next_token_value::<Ident>()?;
+				expected!(self, t!("("));
+
+				let mut args = Vec::new();
+				loop {
+					if self.eat(t!(")")) {
+						break;
+					}
+
+					let arg = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+					args.push(arg);
+
+					if !self.eat(t!(",")) {
+						self.expect_closing_delimiter(t!(")"), token.span)?;
+						break;
+					}
+				}
+				PostfixOperator::MethodCall(name, args)
 			}
 			// should be unreachable as we previously check if the token was a postfix op.
 			x => unreachable!("found non-operator token {x:?}"),

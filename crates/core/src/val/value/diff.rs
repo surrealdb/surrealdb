@@ -1,69 +1,76 @@
-use crate::expr::Part;
-use crate::expr::idiom::Idiom;
 use crate::expr::operation::Operation;
 use crate::val::Value;
-use std::cmp::min;
 
 impl Value {
-	pub(crate) fn diff(&self, val: &Value, path: Idiom) -> Vec<Operation> {
-		let mut ops: Vec<Operation> = vec![];
+	pub(crate) fn diff(&self, val: &Value) -> Vec<Operation> {
+		let mut res = Vec::new();
+		let mut path = Vec::new();
+
+		self.diff_rec(val, &mut path, &mut res);
+
+		res
+	}
+
+	fn diff_rec(&self, val: &Value, path: &mut Vec<String>, ops: &mut Vec<Operation>) {
 		match (self, val) {
 			(Value::Object(a), Value::Object(b)) if a != b => {
 				// Loop over old keys
 				for (key, _) in a.iter() {
 					if !b.contains_key(key) {
+						let mut path = path.clone();
+						path.push(key.clone());
 						ops.push(Operation::Remove {
-							// TODO: null byte validity.
-							path: path.clone().push(Part::field(key.clone()).unwrap()),
-						})
+							path,
+						});
 					}
 				}
 				// Loop over new keys
 				for (key, val) in b.iter() {
 					match a.get(key) {
-						None => ops.push(Operation::Add {
-							// TODO: null byte validity.
-							path: path.clone().push(Part::field(key.clone())),
-							value: val.clone(),
-						}),
+						None => {
+							let mut path = path.clone();
+							path.push(key.clone());
+							ops.push(Operation::Add {
+								// TODO: null byte validity.
+								path,
+								value: val.clone(),
+							});
+						}
 						Some(old) => {
-							// TODO: null byte validity.
-							let path = path.clone().push(Part::field(key.clone()));
-							ops.append(&mut old.diff(val, path))
+							path.push(key.clone());
+							old.diff_rec(val, path, ops);
+							path.pop();
 						}
 					}
 				}
 			}
 			(Value::Array(a), Value::Array(b)) if a != b => {
-				let mut n = 0;
-				while n < min(a.len(), b.len()) {
+				let min_len = a.len().min(b.len());
+				for n in 0..min_len {
 					// TODO: null byte validity.
-					let path = path.clone().push(Part::index_int(n));
-					ops.append(&mut a[n].diff(&b[n], path));
-					n += 1;
+					path.push(n.to_string());
+					a[n].diff_rec(&b[n], path, ops);
+					path.pop();
 				}
-				while n < b.len() {
-					if n >= a.len() {
-						ops.push(Operation::Add {
-							// TODO: null byte validity.
-							path: path.clone().push(Part::index_int(n)),
-							value: b[n].clone(),
-						})
-					}
-					n += 1;
+				for n in min_len..b.len() {
+					let mut path = path.clone();
+					path.push(n.to_string());
+					ops.push(Operation::Add {
+						path,
+						value: b[n].clone(),
+					})
 				}
-				while n < a.len() {
-					if n >= b.len() {
-						ops.push(Operation::Remove {
-							// TODO: null byte validity.
-							path: path.clone().push(Part::index_int(n)),
-						})
-					}
-					n += 1;
+				for n in min_len..a.len() {
+					let mut path = path.clone();
+					path.push(n.to_string());
+					ops.push(Operation::Add {
+						path,
+						value: b[n].clone(),
+					})
 				}
 			}
 			(Value::Strand(a), Value::Strand(b)) if a != b => ops.push(Operation::Change {
-				path,
+				path: path.clone(),
 				value: {
 					let dmp = dmp::new();
 					let pch = dmp.patch_make1(a, b);
@@ -72,12 +79,11 @@ impl Value {
 				},
 			}),
 			(a, b) if a != b => ops.push(Operation::Replace {
-				path,
+				path: path.clone(),
 				value: val.clone(),
 			}),
 			(_, _) => (),
 		}
-		ops
 	}
 }
 

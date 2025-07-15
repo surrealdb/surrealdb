@@ -1,16 +1,28 @@
 use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Model, Script};
+use crate::sql::{Expr, Ident, Idiom, Model, Script};
 use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Function {
 	Normal(String),
 	Custom(String),
 	Script(Script),
 	Model(Model),
+}
+
+impl Function {
+	pub fn to_idiom(&self) -> Idiom {
+		match self {
+			// Safety: "function" does not contain null bytes"
+			Self::Script(_) => Idiom::field(unsafe { Ident::new_unchecked("function".to_owned()) }),
+			Self::Normal(f) => Idiom::field(unsafe { Ident::new_unchecked(f.to_owned()) }),
+			Self::Custom(f) => Idiom::field(unsafe { Ident::new_unchecked(format!("fn::{f}")) }),
+			Self::Model(m) => Idiom::field(unsafe { Ident::new_unchecked(m.to_string()) }),
+		}
+	}
 }
 
 impl From<Function> for crate::expr::Function {
@@ -36,7 +48,7 @@ impl From<crate::expr::Function> for Function {
 }
 
 ///TODO(3.0): Remove after proper first class function support?
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct FunctionCall {
 	pub receiver: Function,

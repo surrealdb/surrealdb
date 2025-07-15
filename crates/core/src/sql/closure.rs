@@ -5,7 +5,7 @@ use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Closure";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Closure {
 	pub args: Vec<(Ident, Kind)>,

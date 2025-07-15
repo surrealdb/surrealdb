@@ -109,6 +109,18 @@ impl Display for RecordIdKeyLit {
 }
 
 impl RecordIdKeyLit {
+	pub(crate) fn is_static(&self) -> bool {
+		match self {
+			RecordIdKeyLit::Number(_)
+			| RecordIdKeyLit::String(_)
+			| RecordIdKeyLit::Uuid(_)
+			| RecordIdKeyLit::Generate(_) => true,
+			RecordIdKeyLit::Range(record_id_key_range_lit) => record_id_key_range_lit.is_static(),
+			RecordIdKeyLit::Array(exprs) => exprs.iter().all(|x| x.is_static()),
+			RecordIdKeyLit::Object(items) => items.iter().all(|x| x.value.is_static()),
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

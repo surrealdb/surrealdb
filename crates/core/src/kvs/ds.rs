@@ -984,7 +984,7 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn compute(
 		&self,
-		val: TopLevelExpr,
+		val: Expr,
 		sess: &Session,
 		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Value> {
@@ -1036,11 +1036,12 @@ impl Datastore {
 		let res =
 			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
-		match (res.is_ok(), matches!(txn_type, TransactionType::Read)) {
+		if res.is_ok() && matches!(txn_type, TransactionType::Read) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.commit().await?,
+			txn.commit().await?
+		} else {
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.cancel().await?,
+			txn.cancel().await?
 		};
 		// Return result
 		res

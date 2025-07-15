@@ -130,7 +130,8 @@ impl InfoStructure for DefineBucketStatement {
 		Value::from(Object(map! {
 			"name".to_string() => self.name.structure(),
 			"permissions".to_string() => self.permissions.structure(),
-			"backend".to_string(), if let Some(backend) = self.backend => backend,
+			// TODO: Null byte validity
+			"backend".to_string(), if let Some(backend) = self.backend => Value::Strand(Strand::new(backend.to_string()).unwrap()),
 			"readonly".to_string() => self.readonly.into(),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
 		}))

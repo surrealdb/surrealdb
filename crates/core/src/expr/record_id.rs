@@ -19,6 +19,10 @@ pub struct RecordIdLit {
 }
 
 impl RecordIdLit {
+	pub(crate) fn is_static(&self) -> bool {
+		self.id.is_static()
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

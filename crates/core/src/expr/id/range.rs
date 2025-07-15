@@ -36,6 +36,24 @@ impl fmt::Display for RecordIdKeyRangeLit {
 }
 
 impl RecordIdKeyRangeLit {
+	pub(crate) fn is_static(&self) -> bool {
+		let res = match &self.start {
+			Bound::Included(x) => x.is_static(),
+			Bound::Excluded(x) => x.is_static(),
+			Bound::Unbounded => true,
+		};
+
+		if !res {
+			return false;
+		}
+
+		match &self.end {
+			Bound::Included(x) => x.is_static(),
+			Bound::Excluded(x) => x.is_static(),
+			Bound::Unbounded => true,
+		}
+	}
+
 	/// Process the values in the bounds for this IdRange
 	pub(crate) async fn compute(
 		&self,

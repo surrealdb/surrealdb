@@ -1,15 +1,16 @@
 use std::mem;
 
+use num_traits::Num;
 use rust_decimal::Decimal;
 
 use crate::sql::language::Language;
 use crate::sql::{Ident, Param};
-use crate::syn::error::syntax_error;
+use crate::syn::error::{bail, syntax_error};
 use crate::syn::lexer::compound::{self, NumberKind};
 use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, TokenKind, t};
-use crate::val::{Bytes, Datetime, Duration, File, Regex, Strand, Uuid};
+use crate::val::{Bytes, Datetime, DecimalExt as _, Duration, File, Number, Regex, Strand, Uuid};
 
 use super::GluedValue;
 use super::mac::pop_glued;
@@ -233,9 +234,29 @@ impl TokenValue for NumberToken {
 			}
 			t!("+") | t!("-") | TokenKind::Digits => {
 				parser.pop_peek();
-				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
+				let token = parser.lexer.lex_compound(token, compound::number)?;
+				match token.value {
+					compound::Numeric::Float(f) => Ok(NumberToken::Float(f)),
+					compound::Numeric::Integer(i) => Ok(NumberToken::Integer(i)),
+					compound::Numeric::Decimal(d) => Ok(NumberToken::Decimal(d)),
+					compound::Numeric::Duration(_) => {
+						bail!("Unexpected token `duration`, expected a number", @token.span)
+					}
+				}
 			}
 			_ => unexpected!(parser, token, "a number"),
+		}
+	}
+}
+
+// TODO: Remove once properly seperating AST from Expr.
+impl TokenValue for Number {
+	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
+		let token = parser.next_token_value::<NumberToken>()?;
+		match token {
+			NumberToken::Float(x) => Ok(Number::Float(x)),
+			NumberToken::Integer(x) => Ok(Number::Int(x)),
+			NumberToken::Decimal(x) => Ok(Number::Decimal(x)),
 		}
 	}
 }

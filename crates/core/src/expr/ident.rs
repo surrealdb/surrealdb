@@ -1,8 +1,8 @@
 use crate::expr::Value;
 use crate::expr::escape::EscapeIdent;
 use crate::expr::statements::info::InfoStructure;
-use crate::val::Strand;
 use crate::val::strand::no_nul_bytes;
+use crate::val::{Strand, Table};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -49,11 +49,16 @@ impl Ident {
 		self.0
 	}
 
+	/// Returns the slice of the underlying string.
+	pub fn as_str(&self) -> &str {
+		self.0.as_str()
+	}
+
 	/// Convert the Ident to a raw String
 	pub fn into_raw_string(&self) -> String {
 		self.0.to_string()
 	}
-	/// Checks if this field is the `id` field
+	/// Checks if this field is the `-` field
 	pub(crate) fn is_dash(&self) -> bool {
 		self.0.as_str() == "-"
 	}
@@ -76,7 +81,7 @@ impl Ident {
 }
 
 impl Deref for Ident {
-	type Target = String;
+	type Target = str;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -85,6 +90,12 @@ impl Deref for Ident {
 impl Display for Ident {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		EscapeIdent(&self.0).fmt(f)
+	}
+}
+
+impl From<Table> for Ident {
+	fn from(value: Table) -> Self {
+		Ident(value.into_string())
 	}
 }
 

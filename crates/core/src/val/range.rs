@@ -252,7 +252,7 @@ impl TypedRange<i64> {
 		};
 
 		let start = match self.start {
-			Bound::Unbounded => todo!(),
+			Bound::Unbounded => i64::MIN,
 			Bound::Included(x) => x,
 			Bound::Excluded(x) => match x.checked_add(1) {
 				Some(x) => x,

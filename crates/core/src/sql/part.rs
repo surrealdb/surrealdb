@@ -5,7 +5,7 @@ use std::fmt::Write;
 
 use super::fmt::{is_pretty, pretty_indent};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Part {
 	All,
@@ -151,7 +151,7 @@ impl<'a> Next<'a> for &'a [Part] {
 
 // ------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DestructurePart {
 	All(Ident),
@@ -270,7 +270,7 @@ impl From<crate::expr::part::Recurse> for Recurse {
 }
 // ------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecurseInstruction {
 	Path {

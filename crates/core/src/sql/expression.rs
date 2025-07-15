@@ -1,3 +1,5 @@
+use crate::sql::fmt::Pretty;
+use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
 	IfelseStatement, InfoStatement, InsertStatement, OutputStatement, RebuildStatement,
@@ -10,7 +12,7 @@ use crate::sql::{
 };
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Expr {
 	Literal(Literal),
 
@@ -61,9 +63,96 @@ pub enum Expr {
 	Let(Box<SetStatement>),
 }
 
+impl Expr {
+	pub(crate) fn to_idiom(&self) -> Idiom {
+		match self {
+			Expr::Idiom(i) => i.simplify(),
+			Expr::Param(i) => Idiom::field(i.clone().ident()),
+			Expr::FunctionCall(x) => x.receiver.to_idiom(),
+			Expr::Literal(l) => match l {
+				Literal::Strand(s) => Idiom::field(Ident::from_strand(s.clone())),
+				// TODO: Null byte validity
+				Literal::Datetime(d) => Idiom::field(Ident::new(d.into_raw_string()).unwrap()),
+				x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+			},
+			x => Idiom::field(Ident::new(x.to_string()).unwrap()),
+		}
+	}
+}
+
 impl fmt::Display for Expr {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		todo!()
+		use std::fmt::Write;
+		let mut f = Pretty::from(f);
+		match self {
+			Expr::Literal(literal) => write!(f, "{literal}"),
+			Expr::Param(param) => write!(f, "{param}"),
+			Expr::Idiom(idiom) => write!(f, "{idiom}"),
+			Expr::Table(ident) => write!(f, "{ident}"),
+			Expr::Mock(mock) => write!(f, "{mock}"),
+			Expr::Block(block) => write!(f, "{block}"),
+			Expr::Constant(constant) => write!(f, "{constant}"),
+			Expr::Prefix {
+				op,
+				expr,
+			} => {
+				if BindingPower::for_expr(expr) < BindingPower::Prefix {
+					write!(f, "{op}({expr})")
+				} else {
+					write!(f, "{op}{expr}")
+				}
+			}
+			Expr::Postfix {
+				expr,
+				op,
+			} => {
+				if BindingPower::for_expr(expr) < BindingPower::for_postfix_operator(op) {
+					write!(f, "({expr}){op}")
+				} else {
+					write!(f, "{expr}{op}")
+				}
+			}
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				let op_bp = BindingPower::for_binary_operator(op);
+				if BindingPower::for_expr(left) < op_bp {
+					write!(f, "({left})")?;
+				} else {
+					write!(f, "{left}")?;
+				}
+				write!(f, " {op} ")?;
+
+				if BindingPower::for_expr(right) < op_bp {
+					write!(f, "({right})")
+				} else {
+					write!(f, "{right}")
+				}
+			}
+			Expr::FunctionCall(function_call) => write!(f, "{function_call}"),
+			Expr::Closure(closure) => write!(f, "{closure}"),
+			Expr::Break => write!(f, "BREAK"),
+			Expr::Continue => write!(f, "CONTINUE"),
+			Expr::Return(x) => write!(f, "RETURN {x}"),
+			Expr::Throw(expr) => write!(f, "THROW {expr}"),
+			Expr::If(s) => write!(f, "{s}"),
+			Expr::Select(s) => write!(f, "{s}"),
+			Expr::Create(s) => write!(f, "{s}"),
+			Expr::Update(s) => write!(f, "{s}"),
+			Expr::Delete(s) => write!(f, "{s}"),
+			Expr::Relate(s) => write!(f, "{s}"),
+			Expr::Insert(s) => write!(f, "{s}"),
+			Expr::Define(s) => write!(f, "{s}"),
+			Expr::Remove(s) => write!(f, "{s}"),
+			Expr::Rebuild(s) => write!(f, "{s}"),
+			Expr::Upsert(s) => write!(f, "{s}"),
+			Expr::Alter(s) => write!(f, "{s}"),
+			Expr::Info(s) => write!(f, "{s}"),
+			Expr::Forach(s) => write!(f, "{s}"),
+			Expr::Let(s) => write!(f, "{s}"),
+		}
 	}
 }
 
@@ -76,7 +165,6 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Table(t) => crate::expr::Expr::Table(t.into()),
 			Expr::Mock(m) => crate::expr::Expr::Mock(m.into()),
 			Expr::Block(b) => crate::expr::Expr::Block(Box::new((*b).into())),
-			//Expr::Future(f) => crate::expr::Expr::Future(f.into()),
 			Expr::Constant(c) => crate::expr::Expr::Constant(c.into()),
 			Expr::Prefix {
 				op,

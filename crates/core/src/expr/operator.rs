@@ -1,6 +1,6 @@
 use crate::expr::fmt::Fmt;
 use crate::expr::index::Distance;
-use crate::expr::{Expr, Kind};
+use crate::expr::{Expr, Ident, Kind};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -42,6 +42,7 @@ impl fmt::Display for PrefixOperator {
 pub enum PostfixOperator {
 	Range,
 	RangeSkip,
+	MethodCall(Ident, Vec<Expr>),
 	Call(Vec<Expr>),
 }
 
@@ -50,7 +51,12 @@ impl fmt::Display for PostfixOperator {
 		match self {
 			Self::Range => write!(f, ".."),
 			Self::RangeSkip => write!(f, ">.."),
-			Self::Call(x) => write!(f, "({})", Fmt::comma_separated(x)),
+			Self::MethodCall(name, expr) => {
+				write!(f, ".{name}({})", Fmt::comma_separated(expr.iter()))
+			}
+			Self::Call(expr) => {
+				write!(f, "({})", Fmt::comma_separated(expr.iter()))
+			}
 		}
 	}
 }
@@ -317,7 +323,7 @@ impl BindingPower {
 	pub fn for_postfix_operator(op: &PostfixOperator) -> Self {
 		match op {
 			PostfixOperator::Range | PostfixOperator::RangeSkip => BindingPower::Range,
-			PostfixOperator::Call(_) => BindingPower::Postfix,
+			PostfixOperator::MethodCall(..) | PostfixOperator::Call(..) => BindingPower::Postfix,
 		}
 	}
 

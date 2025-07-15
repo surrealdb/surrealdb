@@ -155,6 +155,12 @@ impl Parser<'_> {
 					res.push(Part::Flatten);
 				}
 				t!(".") => {
+					// Filter out method calls
+					// TODO: Handle this better once the AST is restructured.
+					if Self::kind_is_identifier(self.peek1().kind) && self.peek2().kind == t!("(") {
+						break;
+					}
+
 					self.pop_peek();
 					res.push(self.parse_dot_part(ctx).await?)
 				}

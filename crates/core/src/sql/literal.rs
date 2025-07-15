@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::sql::fmt::Fmt;
 use crate::sql::{Closure, Expr, RecordIdLit};
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Strand, Uuid};
 use rust_decimal::Decimal;
@@ -31,6 +32,71 @@ pub enum Literal {
 	File(File),
 	Bytes(Bytes),
 	Closure(Box<Closure>),
+}
+
+impl PartialEq for Literal {
+	fn eq(&self, other: &Self) -> bool {
+		match (self, other) {
+			(Literal::None, Literal::None) => true,
+			(Literal::Null, Literal::Null) => true,
+			(Literal::Bool(a), Literal::Bool(b)) => a == b,
+			(Literal::Float(a), Literal::Float(b)) => a.to_bits() == b.to_bits(),
+			(Literal::Integer(a), Literal::Integer(b)) => a == b,
+			(Literal::Decimal(a), Literal::Decimal(b)) => a == b,
+			(Literal::Strand(a), Literal::Strand(b)) => a == b,
+			(Literal::Bytes(a), Literal::Bytes(b)) => a == b,
+			(Literal::Regex(a), Literal::Regex(b)) => a == b,
+			(Literal::RecordId(a), Literal::RecordId(b)) => a == b,
+			(Literal::Array(a), Literal::Array(b)) => a == b,
+			(Literal::Object(a), Literal::Object(b)) => a == b,
+			(Literal::Duration(a), Literal::Duration(b)) => a == b,
+			(Literal::Datetime(a), Literal::Datetime(b)) => a == b,
+			(Literal::Uuid(a), Literal::Uuid(b)) => a == b,
+			(Literal::Geometry(a), Literal::Geometry(b)) => a == b,
+			(Literal::File(a), Literal::File(b)) => a == b,
+			(Literal::Closure(a), Literal::Closure(b)) => a == b,
+			_ => false,
+		}
+	}
+}
+impl Eq for Literal {}
+
+impl fmt::Display for Literal {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Literal::None => "NONE".fmt(f),
+			Literal::Null => "NULL".fmt(f),
+			Literal::UnboundedRange => "..".fmt(f),
+			Literal::Bool(x) => {
+				if *x {
+					"true".fmt(f)
+				} else {
+					"false".fmt(f)
+				}
+			}
+			Literal::Float(float) => {
+				if float.is_finite() {
+					write!(f, "{float}f")
+				} else {
+					write!(f, "{float}")
+				}
+			}
+			Literal::Integer(x) => x.fmt(f),
+			Literal::Decimal(d) => write!(f, "{d}dec"),
+			Literal::Strand(strand) => strand.fmt(f),
+			Literal::Bytes(bytes) => bytes.fmt(f),
+			Literal::Regex(regex) => regex.fmt(f),
+			Literal::RecordId(record_id_lit) => record_id_lit.fmt(f),
+			Literal::Array(exprs) => write!(f, "[{}]", Fmt::comma_separated(exprs.iter())),
+			Literal::Object(items) => write!(f, "{{{}}}", Fmt::comma_separated(items.iter())),
+			Literal::Duration(duration) => duration.fmt(f),
+			Literal::Datetime(datetime) => datetime.fmt(f),
+			Literal::Uuid(uuid) => uuid.fmt(f),
+			Literal::Geometry(geometry) => geometry.fmt(f),
+			Literal::File(file) => file.fmt(f),
+			Literal::Closure(closure) => closure.fmt(f),
+		}
+	}
 }
 
 impl From<Literal> for crate::expr::Literal {
@@ -97,7 +163,7 @@ impl From<crate::expr::Literal> for Literal {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,

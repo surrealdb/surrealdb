@@ -1,7 +1,7 @@
 use crate::sql::{Data, Expr, Output, Timeout};
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RelateStatement {
 	pub only: bool,

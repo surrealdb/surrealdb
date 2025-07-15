@@ -250,30 +250,32 @@ impl Document {
 					old,
 					user_input: inp,
 				};
+				/*
 				// Process a potential `references` TYPE
 				if let Some(v) = field.process_refs_type().await? {
+					todo!()
 					// We found a `references` TYPE
 					// No other clauses will be present, so no need to process them
 					val = v;
 				} else {
-					// Skip this field?
-					if !skipped {
-						// Process any DEFAULT clause
-						val = field.process_default_clause(val).await?;
-						// Check for the existance of a VALUE clause
-						if field.def.value.is_some() {
-							// Process any TYPE clause
-							val = field.process_type_clause(val).await?;
-							// Process any VALUE clause
-							val = field.process_value_clause(val).await?;
-						}
+				*/
+				// Skip this field?
+				if !skipped {
+					// Process any DEFAULT clause
+					val = field.process_default_clause(val).await?;
+					// Check for the existance of a VALUE clause
+					if field.def.value.is_some() {
 						// Process any TYPE clause
 						val = field.process_type_clause(val).await?;
-						// Process any ASSERT clause
-						val = field.process_assert_clause(val).await?;
-						// Process any REFERENCE clause
-						field.process_reference_clause(&val).await?;
+						// Process any VALUE clause
+						val = field.process_value_clause(val).await?;
 					}
+					// Process any TYPE clause
+					val = field.process_type_clause(val).await?;
+					// Process any ASSERT clause
+					val = field.process_assert_clause(val).await?;
+					// Process any REFERENCE clause
+					field.process_reference_clause(&val).await?;
 				}
 				// Process any PERMISSIONS clause
 				val = field.process_permissions_clause(val).await?;

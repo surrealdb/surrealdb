@@ -5,7 +5,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,

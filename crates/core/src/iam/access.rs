@@ -106,11 +106,6 @@ pub async fn create_refresh_token_record(
 	db: &str,
 	rid: RecordId,
 ) -> Result<String> {
-	let stmt = access::AccessStatementGrant {
-		ac,
-		base: Some(Base::Db),
-		subject: access::Subject::Record(rid),
-	};
 	let sess = Session::owner().with_ns(ns).with_db(db);
 	let opt = kvs.setup_options(&sess);
 	// Create a new context with a writeable transaction
@@ -119,14 +114,17 @@ pub async fn create_refresh_token_record(
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
-	let grant = access::create_grant(&stmt, &ctx, &opt).await.map_err(|e| {
-		warn!("Unexpected error when attempting to create a refresh token: {e}");
-		Error::UnexpectedAuth
-	})?;
+	let grant =
+		access::create_grant(ac, Some(Base::Db), access::SubjectStore::Record(rid), &ctx, &opt)
+			.await
+			.map_err(|e| {
+				warn!("Unexpected error when attempting to create a refresh token: {e}");
+				Error::UnexpectedAuth
+			})?;
 	tx.commit().await?;
 	// Return the key string from the bearer grant
 	match grant.grant {
-		access::Grant::Bearer(bearer) => Ok(bearer.key.as_string()),
+		access::Grant::Bearer(bearer) => Ok(bearer.key.into_string()),
 		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 	}
 }

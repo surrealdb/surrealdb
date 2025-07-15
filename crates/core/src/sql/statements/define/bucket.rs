@@ -6,7 +6,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineBucketStatement {
 	pub kind: DefineKind,

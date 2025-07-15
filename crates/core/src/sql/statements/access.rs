@@ -3,7 +3,7 @@ use crate::val::{Datetime, Duration, Strand, Uuid};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
@@ -34,7 +34,7 @@ impl From<crate::expr::statements::access::AccessStatement> for AccessStatement 
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementGrant {
 	pub ac: Ident,
@@ -62,7 +62,7 @@ impl From<crate::expr::statements::access::AccessStatementGrant> for AccessState
 	}
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementShow {
 	pub ac: Ident,
@@ -93,7 +93,7 @@ impl From<crate::expr::statements::access::AccessStatementShow> for AccessStatem
 	}
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
@@ -124,11 +124,12 @@ impl From<crate::expr::statements::access::AccessStatementRevoke> for AccessStat
 	}
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementPurge {
 	pub ac: Ident,
 	pub base: Option<Base>,
+	// TODO: Merge these booleans into a enum as having them both be false is invalid state.
 	pub expired: bool,
 	pub revoked: bool,
 	pub grace: Duration,
@@ -158,7 +159,7 @@ impl From<crate::expr::statements::access::AccessStatementPurge> for AccessState
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessGrant {
 	pub id: Ident,                    // Unique grant identifier.
@@ -170,7 +171,7 @@ pub struct AccessGrant {
 	pub grant: Grant,                 // Grant data.
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Subject {
 	Record(RecordIdLit),
@@ -206,7 +207,7 @@ impl From<crate::expr::statements::access::Subject> for Subject {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Grant {
 	Jwt(GrantJwt),
@@ -225,14 +226,14 @@ impl Grant {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantRecord {
 	pub rid: Uuid,             // Record ID
@@ -240,7 +241,7 @@ pub struct GrantRecord {
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GrantBearer {
 	pub id: Ident, // Key ID
@@ -259,9 +260,9 @@ impl Display for AccessStatement {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
-				match stmt.subject {
-					Subject::User(_) => write!(f, " FOR USER {}", stmt.subject.id())?,
-					Subject::Record(_) => write!(f, " FOR RECORD {}", stmt.subject.id())?,
+				match &stmt.subject {
+					Subject::User(x) => write!(f, " FOR USER {}", x)?,
+					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
 				}
 				Ok(())
 			}

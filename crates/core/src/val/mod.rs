@@ -2,8 +2,6 @@
 
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
-use crate::expr::id::{Gen, RecordIdKeyLit};
-use crate::expr::reference::Refs;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, FlowResult, Ident, Kind};
 use anyhow::{Result, bail};
@@ -15,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Write};
-use std::ops::{Bound, Deref};
+use std::ops::Bound;
 
 pub mod array;
 pub mod bytes;
@@ -29,6 +27,7 @@ pub mod object;
 pub mod range;
 pub mod regex;
 pub mod strand;
+pub mod table;
 pub mod thing;
 pub mod uuid;
 pub mod value;
@@ -45,6 +44,7 @@ pub use self::object::Object;
 pub use self::range::Range;
 pub use self::regex::Regex;
 pub use self::strand::Strand;
+pub use self::table::Table;
 pub use self::thing::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
@@ -75,7 +75,7 @@ pub enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	Table(Strand),
+	Table(Table),
 	Thing(RecordId),
 	Regex(Regex),
 	File(File),
@@ -271,7 +271,7 @@ impl Value {
 		match self {
 			Value::Strand(v) => v.into_string(),
 			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw(),
+			Value::Datetime(v) => v.into_raw_string(),
 			_ => self.to_string(),
 		}
 	}
@@ -281,7 +281,7 @@ impl Value {
 		match self {
 			Value::Strand(v) => v.clone().into_string(),
 			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw(),
+			Value::Datetime(v) => v.into_raw_string(),
 			_ => self.to_string(),
 		}
 	}
@@ -349,7 +349,7 @@ impl Value {
 	/// # Warning
 	/// This function is not fully implement for all variants, make sure you don't accidentally use
 	/// it where it can return an invalid value.
-	pub fn kindof(&self) -> &'static str {
+	pub fn kind_of(&self) -> &'static str {
 		// TODO: Look at this function, there are a whole bunch of options for which this returns
 		// "incorrect type" which might sneak into the results where it shouldn.t
 		match self {
@@ -646,7 +646,7 @@ impl Value {
 			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
 			Value::Closure(closure) => expr::Expr::Literal(expr::Literal::Closure(closure)),
 			Value::Range(range) => range.into_literal(),
-			Value::Table(t) => expr::Expr::Table(Ident::from_strand(t)),
+			Value::Table(t) => expr::Expr::Table(t.into()),
 		}
 	}
 }
@@ -934,7 +934,7 @@ subtypes! {
 	Bool(bool) => (is_bool,as_bool,into_bool),
 	Number(Number) => (is_number,as_number,into_number),
 	Strand(Strand) => (is_strand,as_strand,into_strand),
-	//Table(Strand) => (is_table,as_table,into_table),
+	Table(Table) => (is_table,as_table,into_table),
 	Duration(Duration) => (is_duration,as_duration,into_duration),
 	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
 	Uuid(Uuid) => (is_uuid,as_uuid,into_uuid),

@@ -2,7 +2,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::{Cond, Fields, Groups, Ident};
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct View {
 	pub expr: Fields,

@@ -512,7 +512,6 @@ impl Number {
 		match (self, power) {
 			(Number::Int(v), Number::Int(p)) => Number::Int(v.pow(p as u32)),
 			(Number::Decimal(v), Number::Int(p)) => v.powi(p).into(),
-			// TODO: (Number::Decimal(v), Number::Float(p)) => todo!(),
 			// TODO: (Number::Decimal(v), Number::Decimal(p)) => todo!(),
 			(v, p) => v.as_float().powf(p.as_float()).into(),
 		}

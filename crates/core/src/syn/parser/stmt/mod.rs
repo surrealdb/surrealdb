@@ -107,10 +107,6 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_use_stmt().map(TopLevelExpr::Use)
 			}
-			t!("REBUILD") => {
-				self.pop_peek();
-				self.parse_rebuild_stmt().map(TopLevelExpr::Rebuild)
-			}
 			_ => self.parse_expr_table(stk).await.map(TopLevelExpr::Expr),
 		}
 	}

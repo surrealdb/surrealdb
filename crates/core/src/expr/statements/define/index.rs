@@ -9,7 +9,7 @@ use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Idiom, Idioms, Index, Part};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::{Array, Strand, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -224,7 +224,7 @@ impl InfoStructure for DefineIndexStatement {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
 			"what".to_string() => self.what.structure(),
-			"cols".to_string() => self.cols.structure(),
+			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})

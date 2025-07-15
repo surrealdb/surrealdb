@@ -151,7 +151,7 @@ impl RelateStatement {
 						// There is a data clause so check for a record id
 						Some(ref data) => {
 							let id = match data.rid(stk, &ctx, opt).await? {
-								Some(id) => id.generate(tb, false)?,
+								Some(id) => id.generate(tb.into_strand(), false)?,
 								None => RecordId::random_for_table(tb.into_string()),
 							};
 							i.ingest(Iterable::Relatable(f, id, w, None))

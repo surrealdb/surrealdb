@@ -6,7 +6,7 @@ use std::fmt::{self, Display};
 
 use super::AlterKind;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum AlterDefault {
 	#[default]
 	None,
@@ -45,7 +45,7 @@ impl From<AlterDefault> for crate::expr::statements::alter::AlterDefault {
 	}
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterFieldStatement {
 	pub name: Idiom,

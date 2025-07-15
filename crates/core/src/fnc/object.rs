@@ -24,7 +24,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 			Value::Array(Array(entry)) if entry.len() == 2 => {
 				let key = match entry.first() {
 					Some(v) => match v {
-						Value::Strand(v) => v.to_owned().to_raw(),
+						Value::Strand(v) => v.clone().into_string(),
 						v => v.to_string(),
 					},
 					_ => {
@@ -50,7 +50,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 			_ => {
 				bail!(Error::InvalidArguments {
 					name: "object::from_entries".to_string(),
-					message: format!("Expected entries, found {}", v.kindof()),
+					message: format!("Expected entries, found {}", v.kind_of()),
 				})
 			}
 		}

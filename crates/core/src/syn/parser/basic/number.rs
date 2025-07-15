@@ -9,6 +9,7 @@ use crate::syn::lexer::compound::{self, NumberKind, Numeric};
 use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{GluedValue, ParseResult, Parser};
 use crate::syn::token::{self, TokenKind, t};
+use crate::val::DecimalExt as _;
 
 use super::TokenValue;
 

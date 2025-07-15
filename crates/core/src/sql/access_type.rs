@@ -17,7 +17,7 @@ pub(crate) fn random_key() -> String {
 }
 
 /// The type of access methods available
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AccessType {
 	Record(RecordAccess),
@@ -202,6 +202,18 @@ pub struct JwtAccessIssue {
 	pub key: String,
 }
 
+impl Default for JwtAccessIssue {
+	fn default() -> Self {
+		// TODO: Move this computation out of the AST
+		Self {
+			// Defaults to HS512
+			alg: Algorithm::Hs512,
+			// Avoid defaulting to empty key
+			key: random_key(),
+		}
+	}
+}
+
 impl From<JwtAccessIssue> for crate::expr::access_type::JwtAccessIssue {
 	fn from(v: JwtAccessIssue) -> Self {
 		Self {
@@ -292,7 +304,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks
 	}
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
 	pub signup: Option<Expr>,

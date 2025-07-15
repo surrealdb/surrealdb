@@ -8,6 +8,7 @@ use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::{AccessGrant, DefineAccessStatement, access};
 use crate::expr::{AccessType, access_type};
 use crate::iam::Auth;
@@ -207,7 +208,7 @@ pub async fn db_access(
 												ns: Some(ns.clone()),
 												db: Some(db.clone()),
 												ac: Some(ac.clone()),
-												id: Some(rid.into_raw_string()),
+												id: Some(rid.to_string()),
 												..Claims::default()
 											};
 											// AUTHENTICATE clause
@@ -588,7 +589,7 @@ pub async fn signin_bearer(
 	// Authenticate bearer key against stored grant.
 	verify_grant_bearer(&gr, key)?;
 	// If the subject of the grant is a system user, get their roles.
-	let roles = if let access::Subject::User(user) = &gr.subject {
+	let roles = if let access::SubjectStore::User(user) = &gr.subject {
 		// Create a new readonly transaction.
 		let tx = kvs.transaction(Read, Optimistic).await?;
 		// Fetch the specified user from storage.
@@ -629,12 +630,12 @@ pub async fn signin_bearer(
 		db: db.clone(),
 		ac: Some(av.name.to_string()),
 		id: match &gr.subject {
-			access::Subject::User(user) => Some(user.into_raw_string()),
-			access::Subject::Record(rid) => Some(rid.into_raw_string()),
+			access::SubjectStore::User(user) => Some(user.into_raw_string()),
+			access::SubjectStore::Record(rid) => Some(rid.to_string()),
 		},
 		roles: match &gr.subject {
-			access::Subject::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
-			access::Subject::Record(_) => Default::default(),
+			access::SubjectStore::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
+			access::SubjectStore::Record(_) => Default::default(),
 		},
 		..Claims::default()
 	};
@@ -656,7 +657,7 @@ pub async fn signin_bearer(
 	let refresh = match at.kind {
 		access_type::BearerAccessType::Refresh => {
 			match &gr.subject {
-				access::Subject::Record(rid) => {
+				access::SubjectStore::Record(rid) => {
 					if let (Some(ns), Some(db)) = (&ns, &db) {
 						// Revoke the used refresh token.
 						revoke_refresh_token_record(kvs, gr.id.clone(), gr.ac.clone(), ns, db)
@@ -673,7 +674,7 @@ pub async fn signin_bearer(
 						bail!(Error::InvalidAuth);
 					}
 				}
-				access::Subject::User(_) => {
+				access::SubjectStore::User(_) => {
 					debug!(
 						"Invalid attempt to authenticatea as a system user with a refresh token"
 					);
@@ -694,7 +695,7 @@ pub async fn signin_bearer(
 	session.ac = Some(av.name.to_string());
 	session.exp = expiration(av.duration.session)?;
 	match &gr.subject {
-		access::Subject::User(user) => {
+		access::SubjectStore::User(user) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				user.to_string(),
 				roles
@@ -710,7 +711,7 @@ pub async fn signin_bearer(
 				},
 			)));
 		}
-		access::Subject::Record(rid) => {
+		access::SubjectStore::Record(rid) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),
@@ -723,7 +724,7 @@ pub async fn signin_bearer(
 					bail!(Error::InvalidAuth);
 				},
 			)));
-			session.rd = Some(Value::from(rid.to_owned()));
+			session.rd = Some(Value::from(rid.clone()));
 		}
 	};
 	// Return the authentication token.
@@ -753,7 +754,10 @@ pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	Ok(kid.to_string())
 }
 
-pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<&access::GrantBearer> {
+pub fn verify_grant_bearer(
+	gr: &Arc<AccessGrantStore>,
+	key: String,
+) -> Result<&access::GrantBearer> {
 	// Check if the grant is revoked or expired.
 	match (&gr.expiration, &gr.revocation) {
 		(None, None) => {}

@@ -93,7 +93,7 @@ impl Deref for Datetime {
 
 impl Datetime {
 	/// Convert the Datetime to a raw String
-	pub fn to_raw(&self) -> String {
+	pub fn into_raw_string(&self) -> String {
 		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 	}
 
@@ -115,7 +115,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "d{}", &QuoteStr(&self.to_raw()))
+		write!(f, "d{}", &QuoteStr(&self.into_raw_string()))
 	}
 }
 

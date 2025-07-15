@@ -125,7 +125,8 @@ impl Display for DefineApiStatement {
 impl InfoStructure for DefineApiStatement {
 	fn structure(self) -> Value {
 		Value::from(Object(map! {
-			"path".to_string() => self.path,
+			// TODO: Null byte validity
+			"path".to_string() => Strand::new(self.path.to_string()).unwrap().into(),
 			"config".to_string(), if let Some(config) = self.config => config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
 			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),

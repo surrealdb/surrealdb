@@ -23,7 +23,7 @@ pub async fn diff(
 	(val1, val2): (Value, Value),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
-		Ok(Operation::operations_to_value(val1.diff(&val2, Idiom::default())))
+		Ok(Operation::operations_to_value(val1.diff(&val2)))
 	} else {
 		Ok(Value::None)
 	}

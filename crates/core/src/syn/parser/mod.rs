@@ -291,6 +291,10 @@ impl<'a> Parser<'a> {
 		self.peek_token_at(1)
 	}
 
+	pub fn peek2(&mut self) -> Token {
+		self.peek_token_at(2)
+	}
+
 	/// Returns the next n'th token without consuming it.
 	/// `peek_token_at(0)` is equivalent to `peek`.
 	pub fn peek_whitespace_token_at(&mut self, at: u8) -> Token {

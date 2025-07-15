@@ -2,7 +2,7 @@ use crate::sql::{Expr, Ident, Kind};
 
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SetStatement {
 	pub name: Ident,

@@ -49,7 +49,7 @@ impl Parser<'_> {
 		};
 		let fetch = self.try_parse_fetch(stk).await?;
 		let version = if self.eat(t!("VERSION")) {
-			Some(self.parse_expr_field(stk).await?)
+			Some(Version(self.parse_expr_field(stk).await?))
 		} else {
 			None
 		};

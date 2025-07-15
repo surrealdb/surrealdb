@@ -4,7 +4,7 @@ use crate::sql::{Block, Ident, Kind, Permission};
 use crate::val::Strand;
 use std::fmt::{self, Display, Write};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFunctionStatement {
 	pub kind: DefineKind,

@@ -153,7 +153,7 @@ impl InfoStructure for LiveStatement {
 		Value::from(map! {
 			"expr".to_string() => self.expr.structure(),
 			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
+			"cond".to_string(), if let Some(v) = self.cond => v.0.structure(),
 			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
 		})
 	}

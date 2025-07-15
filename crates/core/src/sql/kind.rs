@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
@@ -247,6 +247,71 @@ pub enum KindLiteral {
 	Object(BTreeMap<String, Kind>),
 	Bool(bool),
 }
+
+impl PartialEq for KindLiteral {
+	fn eq(&self, other: &Self) -> bool {
+		match self {
+			KindLiteral::String(a) => {
+				if let KindLiteral::String(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			KindLiteral::Integer(a) => {
+				if let KindLiteral::Integer(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			KindLiteral::Float(a) => {
+				if let KindLiteral::Float(b) = other {
+					// Uses exact bit equility instead of normal floating point equilitiy
+					a.to_bits() == b.to_bits()
+				} else {
+					false
+				}
+			}
+			KindLiteral::Decimal(a) => {
+				if let KindLiteral::Decimal(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			KindLiteral::Duration(a) => {
+				if let KindLiteral::Duration(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			KindLiteral::Array(a) => {
+				if let KindLiteral::Array(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			KindLiteral::Object(a) => {
+				if let KindLiteral::Object(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+			KindLiteral::Bool(a) => {
+				if let KindLiteral::Bool(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+		}
+	}
+}
+impl Eq for KindLiteral {}
 
 impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {

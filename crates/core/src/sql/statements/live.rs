@@ -2,7 +2,7 @@ use crate::sql::{Cond, Expr, Fetchs, Fields};
 use std::fmt;
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct LiveStatement {
 	pub expr: Fields,

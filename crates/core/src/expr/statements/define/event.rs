@@ -124,7 +124,7 @@ impl InfoStructure for DefineEventStatement {
 			"name".to_string() => self.name.structure(),
 			"what".to_string() => self.what.structure(),
 			"when".to_string() => self.when.structure(),
-			"then".to_string() => self.then.structure(),
+			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

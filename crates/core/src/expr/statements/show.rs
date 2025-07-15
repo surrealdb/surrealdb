@@ -56,15 +56,9 @@ impl ShowStatement {
 		let txn = ctx.tx();
 		// Process the show query
 		let (ns, db) = opt.ns_db()?;
-		let r = crate::cf::read(
-			&txn,
-			ns,
-			db,
-			self.table.as_deref().map(String::as_str),
-			self.since.clone(),
-			self.limit,
-		)
-		.await?;
+		let r =
+			crate::cf::read(&txn, ns, db, self.table.as_deref(), self.since.clone(), self.limit)
+				.await?;
 		// Return the changes
 		let a: Vec<Value> = r.iter().cloned().map(|x| x.into_value()).collect();
 		Ok(a.into())

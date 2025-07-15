@@ -1,11 +1,12 @@
-use crate::sql::Part;
 use crate::sql::fmt::{Fmt, fmt_separated_by};
+use crate::sql::{Ident, Part};
 use revision::revisioned;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default)]
+// TODO: Remove unnessacry newtype.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -40,8 +41,25 @@ impl From<crate::expr::Idioms> for Idioms {
 	}
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Idiom(pub Vec<Part>);
+
+impl Idiom {
+	/// Simplifies this Idiom for use in object keys
+	pub(crate) fn simplify(&self) -> Idiom {
+		Idiom(
+			self.0
+				.iter()
+				.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Graph(_)))
+				.cloned()
+				.collect(),
+		)
+	}
+
+	pub fn field(name: Ident) -> Self {
+		Idiom(vec![Part::Field(name)])
+	}
+}
 
 impl From<Idiom> for crate::expr::Idiom {
 	fn from(v: Idiom) -> Self {

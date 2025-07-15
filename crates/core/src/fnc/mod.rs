@@ -599,7 +599,7 @@ pub async fn idiom(
 	name: &str,
 	mut args: Vec<Value>,
 ) -> Result<Value> {
-	ctx.check_allowed_function(&idiom_name_to_normal(value.kindof(), name))?;
+	ctx.check_allowed_function(&idiom_name_to_normal(value.kind_of(), name))?;
 	match value {
 		Value::Array(x) => {
 			args.insert(0, Value::Array(x));
@@ -1405,7 +1405,7 @@ pub async fn idiom(
 			)
 		}
 		x => {
-			let message = format!("no such method found for the {} type", x.kindof());
+			let message = format!("no such method found for the {} type", x.kind_of());
 			args.insert(0, x);
 			dispatch!(
 				ctx,

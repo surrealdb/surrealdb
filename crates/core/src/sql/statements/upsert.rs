@@ -1,7 +1,7 @@
 use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With, fmt::Fmt};
 use std::fmt;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct UpsertStatement {
 	pub only: bool,

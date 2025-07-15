@@ -25,6 +25,17 @@ pub struct DefineParamStore {
 	pub permissions: Permission,
 }
 
+impl InfoStructure for DefineParamStore {
+	fn structure(self) -> Value {
+		Value::from(map! {
+			"name".to_string() => self.name.structure(),
+			"value".to_string() => self.value.structure(),
+			"permissions".to_string() => self.permissions.structure(),
+			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+		})
+	}
+}
+
 #[revisioned(revision = 1)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -129,16 +140,5 @@ impl Display for DefineParamStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineParamStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"value".to_string() => self.value.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

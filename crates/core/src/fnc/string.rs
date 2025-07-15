@@ -342,7 +342,8 @@ pub mod is {
 	pub fn record((arg, Optional(tb)): (String, Optional<Value>)) -> Result<Value> {
 		let res = match syn::thing(&arg) {
 			Ok(t) => match tb {
-				Some(Value::Strand(tb) | Value::Table(tb)) => t.table.as_str() == tb.as_str(),
+				Some(Value::Strand(tb)) => t.table.as_str() == tb.as_str(),
+				Some(Value::Table(tb)) => t.table.as_str() == tb.as_str(),
 				Some(_) => {
 					bail!(Error::InvalidArguments {
 						name: "string::is::record()".into(),

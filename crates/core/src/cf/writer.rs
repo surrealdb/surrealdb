@@ -97,8 +97,7 @@ impl Writer {
 						} else {
 							// We intentionally record the patches in reverse (current -> previous)
 							// because we cannot otherwise resolve operations such as "replace" and "remove".
-							let patches_to_create_previous =
-								current.diff(&previous, Idiom::default());
+							let patches_to_create_previous = current.diff(&previous);
 							TableMutation::SetWithDiff(
 								id,
 								current.into_owned(),

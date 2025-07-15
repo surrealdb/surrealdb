@@ -5,22 +5,20 @@ use crate::dbs::result::Results;
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
-use crate::expr::graph::{ComputedGraphSubject, GraphSubject};
+use crate::expr::graph::ComputedGraphSubject;
 use crate::expr::{
 	self, ControlFlow, Dir, Expr, Fields, FlowResultExt, Graph, Ident, Literal, Mock, Part,
-	RecordIdKeyLit, RecordIdKeyRangeLit, record_id,
 };
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::val::{Array, Object, RecordId, RecordIdKey, RecordIdKeyRange, Strand, Value};
+use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::mem;
 use std::sync::Arc;
-use surrealkv::Record;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -390,6 +388,32 @@ impl Iterator {
 		Ok(())
 	}
 
+	async fn perpare_computed(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		planner: &mut QueryPlanner,
+		stm_ctx: &StatementContext<'_>,
+		expr: &Expr,
+	) -> Result<()> {
+		let v = expr.compute(stk, ctx, opt, doc).await.catch_return()?;
+		match v {
+			Value::Object(o) if !stm_ctx.stm.is_select() => {
+				self.prepare_object(stm_ctx.stm, o)?;
+			}
+			Value::Thing(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
+			v => {
+				bail!(Error::InvalidStatementTarget {
+					value: v.to_string(),
+				})
+			}
+		}
+		Ok(())
+	}
+
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_array(
 		&mut self,
@@ -408,24 +432,53 @@ impl Iterator {
 				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
 				Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
 				Expr::Idiom(x) => {
-					//edges
-					todo!()
-				}
-				v => {
-					let v = v.compute(stk, ctx, opt, doc).await.catch_return()?;
-					match v {
-						Value::Object(o) if !stm_ctx.stm.is_select() => {
-							self.prepare_object(stm_ctx.stm, o)?;
-						}
-						Value::Thing(v) => self.prepare_thing(planner, stm_ctx, v).await?,
-						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
-						v => {
-							bail!(Error::InvalidStatementTarget {
-								value: v.to_string(),
-							})
-						}
+					// match against what previously would be an edge.
+					if x.len() != 2 {
+						return self
+							.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.await;
 					}
+
+					let Part::Start(Expr::Literal(Literal::RecordId(from))) = x[0] else {
+						return self
+							.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.await;
+					};
+
+					let Part::Graph(graph) = x[0] else {
+						return self
+							.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.await;
+					};
+
+					if graph.alias.is_none()
+						&& graph.cond.is_none()
+						&& graph.group.is_none()
+						&& graph.limit.is_none()
+						&& graph.order.is_none()
+						&& graph.split.is_none()
+						&& graph.start.is_none()
+						&& graph.expr.is_none()
+					{
+						// TODO: Do we suport `RETURN a:b` here? What do we do when it is not of the
+						// right type?
+						let from = match from.compute(stk, ctx, opt, doc).await {
+							Ok(x) => x,
+							Err(ControlFlow::Err(e)) => return Err(e),
+							Err(_) => bail!(Error::InvalidControlFlow),
+							//
+						};
+						let mut what = Vec::new();
+						for s in graph.what.iter() {
+							what.push(s.compute(stk, ctx, opt, doc).await?);
+						}
+						// idiom matches the Edges pattern.
+						return self.prepare_edges(stm_ctx.stm, from, graph.dir, what);
+					}
+
+					self.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?
 				}
+				v => self.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?,
 			}
 		}
 		// All ingested ok

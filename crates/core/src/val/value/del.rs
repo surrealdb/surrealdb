@@ -41,10 +41,10 @@ impl Value {
 					},
 					Part::Field(f) => match path.len() {
 						1 => {
-							v.remove(f.as_str());
+							v.remove(&**f);
 							Ok(())
 						}
-						_ => match v.get_mut(f.as_str()) {
+						_ => match v.get_mut(&**f) {
 							Some(v) if !v.is_nullish() => {
 								stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 							}
@@ -78,10 +78,10 @@ impl Value {
 						},
 						Value::Thing(t) => match path.len() {
 							1 => {
-								v.remove(&t.into_raw_string());
+								v.remove(&t.to_string());
 								Ok(())
 							}
-							_ => match v.get_mut(&t.into_raw_string()) {
+							_ => match v.get_mut(&t.to_string()) {
 								Some(v) if !v.is_nullish() => {
 									stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 								}

@@ -363,11 +363,6 @@ impl RecordId {
 	pub fn is_record_type(&self, val: &[Ident]) -> bool {
 		val.is_empty() || val.iter().any(|x| self.table == **x)
 	}
-
-	/// Returns the string representation of this record id without
-	pub fn into_raw_string(&self) -> String {
-		todo!()
-	}
 }
 
 impl fmt::Display for RecordId {

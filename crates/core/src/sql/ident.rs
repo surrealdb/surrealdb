@@ -27,6 +27,10 @@ impl Ident {
 		Ident(str)
 	}
 
+	pub fn from_strand(strand: Strand) -> Self {
+		Ident(strand.into_string())
+	}
+
 	/// Convert ident into a strand.
 	pub fn into_strand(self) -> Strand {
 		// Safety: both ident and Strand uphold the no-null byte invariant.

@@ -74,7 +74,6 @@ impl InfoStructure for ReferenceDeleteStrategy {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Refs")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);
 
 impl Refs {
@@ -84,6 +83,8 @@ impl Refs {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
+		bail!(Error::Unimplemented("Refs::compute not yet implemented".to_owned()))
+		/*
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(Value::Array(Default::default()));
 		}
@@ -116,6 +117,7 @@ impl Refs {
 		};
 
 		Ok(Value::Array(arr.uniq()))
+		*/
 	}
 }
 

@@ -92,6 +92,17 @@ impl Executor {
 		plan: TopLevelExpr,
 	) -> FlowResult<Value> {
 		let res = match plan {
+			TopLevelExpr::Use(_) => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
+					"TopLevelExpr::Use should have been handled by a calling function",
+				))));
+			}
+			TopLevelExpr::Option(_) => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
+					"TopLevelExpr::Use should have been handled by a calling function",
+				))));
+			}
+
 			TopLevelExpr::Expr(Expr::Let(stm)) => {
 				// Avoid moving in and out of the context via Arc::get_mut
 				Arc::get_mut(&mut self.ctx)
@@ -125,8 +136,64 @@ impl Executor {
 					Err(err) => Err(err),
 				}
 			}
+			TopLevelExpr::Begin => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+					"Cannot begin a transaction within a transaction".to_string(),
+				))));
+			}
+			TopLevelExpr::Commit => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+					"Cannot COMMIT without starting a transaction".to_string(),
+				))));
+			}
+			TopLevelExpr::Cancel => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+					"Cannot CANCEL without starting a transaction".to_string(),
+				))));
+			}
+			TopLevelExpr::Kill(s) => {
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+				self.stack
+					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
+					.finish()
+					.await
+					.map_err(ControlFlow::Err)
+			}
+			TopLevelExpr::Live(s) => {
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+				self.stack
+					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
+					.finish()
+					.await
+					.map_err(ControlFlow::Err)
+			}
+			TopLevelExpr::Access(s) => {
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await
+			}
 			// Process all other normal statements
-			plan => {
+			TopLevelExpr::Expr(e) => {
 				// The transaction began successfully
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
@@ -137,7 +204,7 @@ impl Executor {
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Process the statement
-				self.stack.enter(|stk| plan.compute(stk, &self.ctx, &self.opt, None)).finish().await
+				self.stack.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None)).finish().await
 			}
 		};
 

@@ -620,7 +620,7 @@ pub(super) mod tests {
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::syn::Parse;
+	use crate::syn::{self, Parse};
 	use crate::val::Array as SqlArray;
 	use crate::val::{Number, Value};
 	#[cfg(debug_assertions)]
@@ -690,7 +690,9 @@ pub(super) mod tests {
 				}
 			}
 			let line = line_result?;
-			let array = SqlArray::parse(&line);
+			let Ok(Value::Array(array)) = syn::value(&line) else {
+				panic!()
+			};
 			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array.into()))?.into();
 			res.push((i as DocId, vec));
 		}

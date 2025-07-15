@@ -256,7 +256,7 @@ impl Value {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
 						Value::Strand(x) => x.into_string(),
-						Value::Thing(x) => x.into_raw_string(),
+						Value::Thing(x) => x.to_string(),
 						Value::Number(x) => x.to_string(),
 						Value::Range(x) => x.to_string(),
 						_ => return Ok(()),

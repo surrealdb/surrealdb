@@ -1,7 +1,7 @@
-use crate::sql::{Data, Expr, Output, Timeout, fmt::Fmt};
+use crate::sql::{Data, Expr, Output, Timeout, Version, fmt::Fmt};
 use std::fmt;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
@@ -17,7 +17,7 @@ pub struct CreateStatement {
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<Expr>,
+	pub version: Option<Version>,
 }
 
 impl fmt::Display for CreateStatement {

@@ -77,9 +77,9 @@ impl Document {
 			Force::Table(tb)
 				if tb.first().is_some_and(|tb| {
 					tb.view.as_ref().is_some_and(|v| {
-						self.id
-							.as_ref()
-							.is_some_and(|id| v.what.iter().any(|p| **p == id.table.as_str()))
+						self.id.as_ref().is_some_and(|id| {
+							v.what.iter().any(|p| p.as_str() == id.table.as_str())
+						})
 					})
 				}) =>
 			{

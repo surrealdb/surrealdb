@@ -109,8 +109,8 @@ pub use self::script::Script;
 pub use self::split::{Split, Splits};
 pub use self::start::Start;
 pub use self::statements::{
-	CreateStatement, DefineStatement, IfelseStatement, InsertStatement, KillStatement,
-	LiveStatement, RelateStatement, SelectStatement, SetStatement, UpdateStatement,
+	CreateStatement, DefineAnalyzerStatement, DefineStatement, IfelseStatement, InsertStatement,
+	KillStatement, LiveStatement, RelateStatement, SelectStatement, SetStatement, UpdateStatement,
 	UpsertStatement,
 };
 pub use self::table_type::{Relation, TableType};

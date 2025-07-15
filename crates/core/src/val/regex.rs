@@ -12,7 +12,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct Regex(pub regex::Regex);
 

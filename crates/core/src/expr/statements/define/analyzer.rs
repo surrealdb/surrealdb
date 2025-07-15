@@ -102,8 +102,9 @@ impl Display for DefineAnalyzerStatement {
 impl InfoStructure for DefineAnalyzerStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"function".to_string(), if let Some(v) = self.function => v.structure(),
+			"name".to_string() => Value::from(self.name.clone().into_strand()),
+			// TODO: Null byte validity
+			"function".to_string(), if let Some(v) = self.function => Value::from(Strand::new(v.clone()).unwrap()),
 			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
 				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
 			"filters".to_string(), if let Some(v) = self.filters =>

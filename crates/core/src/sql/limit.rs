@@ -1,7 +1,7 @@
 use crate::sql::Expr;
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limit(pub Expr);
 
 impl fmt::Display for Limit {

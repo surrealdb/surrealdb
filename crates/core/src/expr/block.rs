@@ -2,7 +2,9 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
+use crate::val::Strand;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -97,10 +99,9 @@ impl Display for Block {
 	}
 }
 
-/*
 impl InfoStructure for Block {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		// TODO: Null byte validity
+		Value::Strand(Strand::new(self.to_string()).unwrap())
 	}
 }
-*/

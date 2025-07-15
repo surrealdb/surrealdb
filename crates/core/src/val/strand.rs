@@ -15,7 +15,6 @@ use std::str;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Strand")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Strand(#[serde(with = "no_nul_bytes")] String);
 
 impl Strand {
@@ -41,6 +40,10 @@ impl Strand {
 	pub fn into_string(self) -> String {
 		self.0
 	}
+
+	pub fn as_str(&self) -> &str {
+		self.0.as_str()
+	}
 }
 
 impl From<String> for Strand {
@@ -58,7 +61,7 @@ impl From<&str> for Strand {
 }
 
 impl Deref for Strand {
-	type Target = String;
+	type Target = str;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -70,27 +73,13 @@ impl From<Strand> for String {
 	}
 }
 
-impl Strand {
-	/// Get the underlying String slice
-	pub fn as_str(&self) -> &str {
-		self.0.as_str()
-	}
-	/// Returns the underlying String
-	pub fn as_string(self) -> String {
-		self.0
-	}
-	/// Convert the Strand to a raw String
-	pub fn to_raw(self) -> String {
-		self.0
-	}
-}
-
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		QuoteStr(&self.0).fmt(f)
 	}
 }
 
+// TODO: Dubious add implementation, concatination is not really an addition in rust.
 impl ops::Add for Strand {
 	type Output = Self;
 	fn add(mut self, other: Self) -> Self {

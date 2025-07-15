@@ -139,7 +139,7 @@ impl Cast for bool {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Bool(_) => true,
-			Value::Strand(x) => **x == "true" || **x == "false",
+			Value::Strand(x) => matches!(x.as_str(), "true" | "false"),
 			_ => false,
 		}
 	}
@@ -350,7 +350,7 @@ impl Cast for Strand {
 
 			Value::Strand(x) => Ok(x),
 			Value::Uuid(x) => Ok(x.to_raw().into()),
-			Value::Datetime(x) => Ok(x.to_raw().into()),
+			Value::Datetime(x) => Ok(x.into_raw_string().into()),
 			// TODO: Handle null bytes
 			x => Ok(unsafe { Strand::new_unchecked(x.to_string()) }),
 		}
@@ -639,7 +639,7 @@ impl Cast for RecordId {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Thing(_) => true,
-			Value::Strand(x) => todo!(),
+			Value::Strand(x) => syn::thing(x).is_ok(),
 			_ => false,
 		}
 	}
@@ -885,7 +885,7 @@ impl Value {
 	fn cast_to_record(self, val: &[Ident]) -> Result<RecordId, CastError> {
 		match self {
 			Value::Thing(v) if v.is_record_type(val) => Ok(v),
-			Value::Strand(v) => match todo!() /*Thing::from_str(v.as_str())*/ {
+			Value::Strand(v) => match syn::thing(v.as_str()) {
 				Ok(x) if x.is_record_type(val) => Ok(x),
 				_ => {
 					let mut kind = "record<".to_string();

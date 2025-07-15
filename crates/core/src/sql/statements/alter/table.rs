@@ -8,7 +8,7 @@ use std::fmt::{self, Display, Write};
 
 use super::AlterKind;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterTableStatement {
 	pub name: Ident,

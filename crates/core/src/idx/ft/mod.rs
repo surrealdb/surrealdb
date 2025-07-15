@@ -525,9 +525,9 @@ impl HitsIterator {
 mod tests {
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
-	use crate::expr::Expr;
 	use crate::expr::index::SearchParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
+	use crate::expr::{self, Expr};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::scorer::{BM25Scorer, Score};
 	use crate::idx::ft::{FtIndex, HitsIterator};
@@ -627,11 +627,13 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut ast = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Expr::Define(DefineStatement::Analyzer(az)) = ast.expressions.pop().unwrap().into()
-		else {
+		let sql::TopLevelExpr::Expr(sql::Expr::Define(x)) = ast.expressions.pop().unwrap() else {
 			panic!()
 		};
-		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+		let sql::DefineStatement::Analyzer(az) = *x else {
+			panic!()
+		};
+		let az: Arc<expr::DefineAnalyzerStatement> = Arc::new(az.into());
 		let mut stack = reblessive::TreeStack::new();
 
 		let btree_order = 5;
@@ -990,7 +992,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = q.statements.pop().unwrap() else {
+		let sql::TopLevelExpr::Expr(sql::Expr::Define(def)) = q.expressions.pop().unwrap() else {
 			panic!()
 		};
 		let sql::statements::DefineStatement::Analyzer(az) = *def else {

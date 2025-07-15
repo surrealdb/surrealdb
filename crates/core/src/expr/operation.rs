@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct PatchError {
-	message: String,
+	pub message: String,
 }
 
 impl fmt::Display for PatchError {
@@ -23,7 +23,6 @@ impl fmt::Display for PatchError {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(tag = "op")]
 #[serde(rename_all = "lowercase")]
-#[non_exhaustive]
 pub enum Operation {
 	Add {
 		path: Vec<String>,

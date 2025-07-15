@@ -1,6 +1,8 @@
 use std::fmt;
 use std::str::Chars;
 
+// TODO: Remove duplicated code between sql and expr
+
 #[derive(Clone)]
 pub struct Escape<'a> {
 	chars: Chars<'a>,

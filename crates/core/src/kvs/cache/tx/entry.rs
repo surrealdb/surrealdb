@@ -1,4 +1,5 @@
 use crate::dbs::node::Node;
+use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::{
 	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
 };
@@ -27,7 +28,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineAccessStatement specified at the root.
 	Ras(Arc<[DefineAccessStatement]>),
 	/// A slice of AccessGrant specified at the root.
-	Rag(Arc<[AccessGrant]>),
+	Rag(Arc<[AccessGrantStore]>),
 	/// A slice of DefineNamespaceStatement specified on a namespace.
 	Nss(Arc<[DefineNamespaceStatement]>),
 	/// A slice of DefineUserStatement specified on a namespace.
@@ -35,7 +36,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineAccessStatement specified on a namespace.
 	Nas(Arc<[DefineAccessStatement]>),
 	/// A slice of AccessGrant specified at on a namespace.
-	Nag(Arc<[AccessGrant]>),
+	Nag(Arc<[AccessGrantStore]>),
 	/// A slice of DefineDatabaseStatement specified on a namespace.
 	Dbs(Arc<[DefineDatabaseStatement]>),
 	/// A slice of ApiDefinition specified on a namespace.
@@ -47,7 +48,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineAccessStatement specified on a database.
 	Das(Arc<[DefineAccessStatement]>),
 	/// A slice of AccessGrant specified at on a database.
-	Dag(Arc<[AccessGrant]>),
+	Dag(Arc<[AccessGrantStore]>),
 	/// A slice of DefineUserStatement specified on a database.
 	Dus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineFunctionStatement specified on a database.
@@ -112,9 +113,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Ras"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`AccessGrant`].
+	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// This panics if called on a cache entry that is not an [`Entry::Rag`].
-	pub(crate) fn try_into_rag(self) -> Result<Arc<[AccessGrant]>> {
+	pub(crate) fn try_into_rag(self) -> Result<Arc<[AccessGrantStore]>> {
 		match self {
 			Entry::Rag(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Rag"),
@@ -136,9 +137,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Nas"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`AccessGrant`].
+	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nag`].
-	pub(crate) fn try_into_nag(self) -> Result<Arc<[AccessGrant]>> {
+	pub(crate) fn try_into_nag(self) -> Result<Arc<[AccessGrantStore]>> {
 		match self {
 			Entry::Nag(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Nag"),
@@ -168,9 +169,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Das"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`AccessGrant`].
+	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// This panics if called on a cache entry that is not an [`Entry::Dag`].
-	pub(crate) fn try_into_dag(self) -> Result<Arc<[AccessGrant]>> {
+	pub(crate) fn try_into_dag(self) -> Result<Arc<[AccessGrantStore]>> {
 		match self {
 			Entry::Dag(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Dag"),

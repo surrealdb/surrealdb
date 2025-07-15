@@ -5,7 +5,7 @@ use std::fmt::{self, Display, Formatter, Write};
 
 use super::Ident;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Graph {
 	pub dir: Dir,
 	pub expr: Option<Fields>,
@@ -102,7 +102,7 @@ impl From<crate::expr::Graph> for Graph {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum GraphSubject {
 	Table(Ident),

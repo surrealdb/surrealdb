@@ -261,7 +261,7 @@ impl Parser<'_> {
 					expected!(self, t!("FOR"));
 					loop {
 						let token = self.peek();
-						match token {
+						match token.kind {
 							t!("TOKEN") => {
 								self.pop_peek();
 								let peek = self.peek();
@@ -1539,7 +1539,7 @@ impl Parser<'_> {
 		let mut res = access_type::JwtAccess {
 			// By default, a JWT access method is only used to verify.
 			issue: None,
-			verify: Default::default(),
+			..Default::default()
 		};
 
 		let mut iss = access_type::JwtAccessIssue::default();

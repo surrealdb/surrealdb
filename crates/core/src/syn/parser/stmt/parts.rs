@@ -3,12 +3,11 @@
 use reblessive::Stk;
 
 use crate::sql::changefeed::ChangeFeed;
-use crate::sql::data::Assignment;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
 use crate::sql::{
-	AssignOperator, Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups,
-	Ident, Idiom, Output, Permission, Permissions, Timeout, View, With,
+	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom,
+	Output, Permission, Permissions, Timeout, View, With,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
@@ -168,6 +167,7 @@ impl Parser<'_> {
 		Ok(Some(Cond(v)))
 	}
 
+	/// Move this out of the parser.
 	pub(crate) fn check_idiom<'a>(
 		kind: MissingKind,
 		fields: &'a Fields,
@@ -179,28 +179,28 @@ impl Parser<'_> {
 		match fields {
 			Fields::Value(field) => {
 				let Field::Single {
-					expr,
-					alias,
-				} = *field
+					ref expr,
+					ref alias,
+				} = **field
 				else {
 					unreachable!()
 				};
 
 				if let Some(alias) = alias {
 					if idiom == alias {
-						found = Some(field);
+						found = Some(&**field);
 					}
 				}
 
 				match expr {
 					Expr::Idiom(x) => {
 						if idiom == x {
-							found = Some(field);
+							found = Some(&**field);
 						}
 					}
 					v => {
 						if *idiom == v.to_idiom() {
-							found = Some(field);
+							found = Some(&**field);
 						}
 					}
 				}
@@ -590,9 +590,9 @@ impl Parser<'_> {
 				With::NoIndex
 			}
 			t!("INDEX") => {
-				let mut index = vec![self.next_token_value::<Ident>()?.0];
+				let mut index = vec![self.next_token_value::<Ident>()?.into_string()];
 				while self.eat(t!(",")) {
-					index.push(self.next_token_value::<Ident>()?.0);
+					index.push(self.next_token_value::<Ident>()?.into_string());
 				}
 				With::Index(index)
 			}

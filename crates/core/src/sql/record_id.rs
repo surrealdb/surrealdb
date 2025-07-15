@@ -3,7 +3,7 @@ use crate::sql::id::RecordIdKeyLit;
 use std::fmt;
 
 /// A record id literal, needs to be evaluated to get the actual record id.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdLit {
 	/// Table name

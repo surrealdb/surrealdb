@@ -1,9 +1,12 @@
+use std::fmt;
+
 use crate::expr;
 use crate::sql::Expr;
 use crate::sql::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, RebuildStatement, UseStatement,
 };
 
+#[derive(Debug)]
 pub struct Ast {
 	pub expressions: Vec<TopLevelExpr>,
 }
@@ -23,6 +26,7 @@ impl From<Ast> for expr::LogicalPlan {
 	}
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum TopLevelExpr {
 	Begin,
 	Cancel,
@@ -32,16 +36,12 @@ pub enum TopLevelExpr {
 	Live(Box<LiveStatement>),
 	Option(OptionStatement),
 	Use(UseStatement),
-	Rebuild(RebuildStatement),
 	Expr(Expr),
 }
 
 impl From<TopLevelExpr> for crate::expr::TopLevelExpr {
 	fn from(value: TopLevelExpr) -> Self {
 		match value {
-			TopLevelExpr::Rebuild(rebuild_statement) => {
-				crate::expr::TopLevelExpr::Rebuild(rebuild_statement.into())
-			}
 			TopLevelExpr::Begin => crate::expr::TopLevelExpr::Begin,
 			TopLevelExpr::Cancel => crate::expr::TopLevelExpr::Cancel,
 			TopLevelExpr::Commit => crate::expr::TopLevelExpr::Commit,
@@ -68,9 +68,6 @@ impl From<TopLevelExpr> for crate::expr::TopLevelExpr {
 impl From<crate::expr::TopLevelExpr> for TopLevelExpr {
 	fn from(value: crate::expr::TopLevelExpr) -> Self {
 		match value {
-			crate::expr::TopLevelExpr::Rebuild(rebuild_statement) => {
-				TopLevelExpr::Rebuild(rebuild_statement.into())
-			}
 			crate::expr::TopLevelExpr::Begin => TopLevelExpr::Begin,
 			crate::expr::TopLevelExpr::Cancel => TopLevelExpr::Cancel,
 			crate::expr::TopLevelExpr::Commit => TopLevelExpr::Commit,
@@ -90,6 +87,22 @@ impl From<crate::expr::TopLevelExpr> for TopLevelExpr {
 				TopLevelExpr::Use(use_statement.into())
 			}
 			crate::expr::TopLevelExpr::Expr(expr) => TopLevelExpr::Expr(expr.into()),
+		}
+	}
+}
+
+impl fmt::Display for TopLevelExpr {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			TopLevelExpr::Begin => write!(f, "BEGIN"),
+			TopLevelExpr::Cancel => write!(f, "CANCEL"),
+			TopLevelExpr::Commit => write!(f, "COMMIT"),
+			TopLevelExpr::Access(s) => s.fmt(f),
+			TopLevelExpr::Kill(s) => s.fmt(f),
+			TopLevelExpr::Live(s) => s.fmt(f),
+			TopLevelExpr::Option(s) => s.fmt(f),
+			TopLevelExpr::Use(s) => s.fmt(f),
+			TopLevelExpr::Expr(e) => e.fmt(f),
 		}
 	}
 }

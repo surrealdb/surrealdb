@@ -56,7 +56,7 @@ fn prepare_number_str(str: &str) -> Cow<str> {
 }
 
 /// Tokens which can start with digits: Number or Duration.
-/// Like numeric but holds of parsing the a number into a specific value.
+/// Like numeric but holds off on parsing the a number into a specific value.
 pub fn numeric_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, SyntaxError> {
 	match start.kind {
 		t!("-") | t!("+") => match number_kind(lexer, start)? {
@@ -80,7 +80,11 @@ pub fn numeric_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, Synt
 				}
 			}
 			Some(x) if !x.is_ascii() => duration(lexer, start).map(NumericKind::Duration),
-			_ => number_kind(lexer, start),
+			_ => match number_kind(lexer, start)? {
+				NumberKind::Integer => Ok(NumericKind::Int),
+				NumberKind::Float => Ok(NumericKind::Float),
+				NumberKind::Decimal => Ok(NumericKind::Decimal),
+			},
 		},
 		x => {
 			bail!("Unexpected token `{x}`, expected a numeric value, either a duration or number",@start.span)

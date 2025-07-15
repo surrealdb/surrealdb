@@ -6,7 +6,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineDatabaseStatement {
 	pub kind: DefineKind,

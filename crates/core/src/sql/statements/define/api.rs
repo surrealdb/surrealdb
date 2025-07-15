@@ -8,7 +8,7 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineApiStatement {
 	pub kind: DefineKind,
@@ -102,7 +102,7 @@ impl Display for ApiDefinition {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiAction {
 	pub methods: Vec<Method>,

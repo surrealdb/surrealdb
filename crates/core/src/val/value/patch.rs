@@ -1,3 +1,5 @@
+use crate::expr::Ident;
+use crate::expr::operation::PatchError;
 use crate::expr::part::Part;
 use crate::val::Value;
 use crate::{err::Error, expr::Operation};
@@ -6,7 +8,6 @@ use anyhow::{Result, ensure};
 impl Value {
 	pub(crate) fn patch(&mut self, ops: Value) -> Result<()> {
 		// Create a new object for testing and patching
-		let mut new = self.clone();
 		// Loop over the patch operations and apply them
 		for operation in Operation::value_to_operations(ops)
 			.map_err(Error::InvalidPatch)
@@ -16,72 +17,94 @@ impl Value {
 			match operation {
 				// Add a value
 				Operation::Add {
-					path,
+					mut path,
 					value,
 				} => {
 					// Split the last path part from the path
-					match path.split_last() {
-						// Check what the last path part is
-						Some((last, left)) => match last {
-							Part::Index(i) => match new.pick(left) {
+					if let Some(last) = path.pop() {
+						let path = path
+							.into_iter()
+							.map(|x| Part::Field(Ident::new(x).unwrap()))
+							.collect::<Vec<_>>();
+
+						if let Ok(x) = last.parse::<usize>() {
+							// TODO: Fix behavior on overload.
+							match self.pick(&path) {
 								Value::Array(mut v) => {
-									if v.len() > i.as_usize() {
-										v.insert((*i).as_usize(), value);
-										new.put(left, Value::Array(v));
+									if v.len() > x {
+										v.insert(x, value);
+										self.put(&path, Value::Array(v));
 									} else {
 										v.push(value);
-										new.put(left, Value::Array(v));
+										self.put(&path, Value::Array(v));
 									}
 								}
-								_ => new.put(left, value),
-							},
-							Part::Field(v) if v.is_dash() => match new.pick(left) {
+								_ => self.put(&path, value),
+							}
+						} else if last == "-" {
+							match self.pick(&path) {
 								Value::Array(mut v) => {
 									v.push(value);
-									new.put(left, Value::Array(v));
+									self.put(&path, Value::Array(v));
 								}
-								_ => new.put(left, value),
-							},
-							_ => match new.pick(&path) {
-								Value::Array(_) => new.inc(&path, value),
-								_ => new.put(&path, value),
-							},
-						},
-						None => match new.pick(&path) {
-							Value::Array(_) => new.inc(&path, value),
-							_ => new.put(&path, value),
-						},
+								_ => self.put(&path, value),
+							}
+						} else {
+							match self.pick(&path) {
+								Value::Array(_) => self.inc(&path, value),
+								_ => self.put(&path, value),
+							}
+						}
+					} else {
+						// no path
+						*self = value
 					}
 				}
 				// Remove a value at the specified path
 				Operation::Remove {
 					path,
-				} => new.cut(&path),
+				} => {
+					let path = path
+						.into_iter()
+						.map(|x| Part::Field(Ident::new(x).unwrap()))
+						.collect::<Vec<_>>();
+					self.cut(&path)
+				}
 				// Replace a value at the specified path
 				Operation::Replace {
 					path,
 					value,
-				} => new.put(&path, value),
+				} => {
+					let path = path
+						.into_iter()
+						.map(|x| Part::Field(Ident::new(x).unwrap()))
+						.collect::<Vec<_>>();
+					self.put(&path, value)
+				}
 				// Modify a string at the specified path
 				Operation::Change {
 					path,
 					value,
 				} => {
+					let path = path
+						.into_iter()
+						.map(|x| Part::Field(Ident::new(x).unwrap()))
+						.collect::<Vec<_>>();
 					if let Value::Strand(p) = value {
-						if let Value::Strand(v) = new.pick(&path) {
+						if let Value::Strand(v) = self.pick(&path) {
 							let dmp = dmp::new();
-							let pch = dmp.patch_from_text(p.as_string()).map_err(|e| {
-								Error::InvalidPatch {
+							let pch = dmp.patch_from_text(p.into_string()).map_err(|e| {
+								Error::InvalidPatch(PatchError {
 									message: format!("{e:?}"),
-								}
+								})
 							})?;
 							let (txt, _) = dmp.patch_apply(&pch, v.as_str()).map_err(|e| {
-								Error::InvalidPatch {
+								Error::InvalidPatch(PatchError {
 									message: format!("{e:?}"),
-								}
+								})
 							})?;
 							let txt = txt.into_iter().collect::<String>();
-							new.put(&path, Value::from(txt));
+							self.put(&path, Value::from(txt));
 						}
 					}
 				}
@@ -90,24 +113,47 @@ impl Value {
 					path,
 					from,
 				} => {
-					let val = new.pick(&from);
-					new.put(&path, val);
+					// TODO: NUll byte validity
+					let from = from
+						.into_iter()
+						.map(|x| Part::Field(Ident::new(x).unwrap()))
+						.collect::<Vec<_>>();
+					let path = path
+						.into_iter()
+						.map(|x| Part::Field(Ident::new(x).unwrap()))
+						.collect::<Vec<_>>();
+
+					let val = self.pick(&from);
+					self.put(&path, val);
 				}
 				// Move a value from one field to another
 				Operation::Move {
 					path,
 					from,
 				} => {
-					let val = new.pick(&from);
-					new.put(&path, val);
-					new.cut(&from);
+					let from = from
+						.into_iter()
+						.map(|x| Part::Field(Ident::new(x).unwrap()))
+						.collect::<Vec<_>>();
+					let path = path
+						.into_iter()
+						.map(|x| Part::Field(Ident::new(x).unwrap()))
+						.collect::<Vec<_>>();
+
+					let val = self.pick(&from);
+					self.put(&path, val);
+					self.cut(&from);
 				}
 				// Test whether a value matches another value
 				Operation::Test {
 					path,
 					value,
 				} => {
-					let val = new.pick(&path);
+					let path = path
+						.into_iter()
+						.map(|x| Part::Field(Ident::new(x).unwrap()))
+						.collect::<Vec<_>>();
+					let val = self.pick(&path);
 					ensure!(
 						value == val,
 						Error::PatchTest {
@@ -118,8 +164,6 @@ impl Value {
 				}
 			}
 		}
-		// Set the document to the updated document
-		*self = new;
 		// Everything ok
 		Ok(())
 	}

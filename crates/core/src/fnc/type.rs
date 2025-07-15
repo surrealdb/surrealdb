@@ -8,7 +8,7 @@ use crate::expr::{FlowResultExt as _, Ident, Idiom, Kind};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Strand, Uuid, Value,
+	RecordIdKeyRange, Strand, Table, Uuid, Value,
 };
 use anyhow::{Result, bail, ensure};
 use geo::Point;
@@ -105,13 +105,24 @@ pub fn range((val,): (Value,)) -> Result<Value> {
 
 pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 	match tb {
-		Some(Value::Strand(tb) | Value::Table(tb)) if tb.is_empty() => {
-			Err(anyhow::Error::new(Error::TbInvalid {
-				value: tb.into_string(),
-			}))
+		Some(Value::Strand(tb)) => {
+			if tb.is_empty() {
+				Err(anyhow::Error::new(Error::TbInvalid {
+					value: tb.into_string(),
+				}))
+			} else {
+				rid.cast_to_kind(&Kind::Record(vec![Ident::from_strand(tb)])).map_err(From::from)
+			}
 		}
-		Some(Value::Strand(tb) | Value::Table(tb)) => {
-			rid.cast_to_kind(&Kind::Record(vec![Ident::from_strand(tb)])).map_err(From::from)
+
+		Some(Value::Table(tb)) => {
+			if tb.is_empty() {
+				Err(anyhow::Error::new(Error::TbInvalid {
+					value: tb.into_string(),
+				}))
+			} else {
+				rid.cast_to_kind(&Kind::Record(vec![tb.into()])).map_err(From::from)
+			}
 		}
 		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: "type::record".into(),
@@ -142,14 +153,14 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 		// TODO: Handle null byte
 		v => unsafe { Strand::new_unchecked(v.as_raw_string()) },
 	};
-	Ok(Value::Table(strand))
+	Ok(Value::Table(Table::from_strand(strand)))
 }
 
 pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
 	match (arg1, arg2) {
 		// Empty table name
 		(Value::Strand(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
-			value: arg1.as_string(),
+			value: arg1.into_string(),
 		}),
 
 		// Handle second argument

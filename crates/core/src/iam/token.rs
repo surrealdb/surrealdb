@@ -1,3 +1,4 @@
+use crate::syn;
 use crate::val::{Object, Value};
 use jsonwebtoken::{Algorithm, Header};
 use serde::{Deserialize, Serialize};
@@ -138,7 +139,7 @@ impl From<Claims> for Value {
 					}
 				};
 				// Parse that JSON string into the corresponding SurrealQL value
-				let claim_value = match json(&claim_json) {
+				let claim_value = match syn::json(&claim_json) {
 					Ok(claim_value) => claim_value,
 					Err(err) => {
 						debug!("Failed to parse token claim '{}': {}", claim, err);
@@ -220,7 +221,7 @@ impl From<&Claims> for Value {
 					}
 				};
 				// Parse that JSON string into the corresponding SurrealQL value
-				let claim_value = match json(&claim_json) {
+				let claim_value = match syn::json(&claim_json) {
 					Ok(claim_value) => claim_value,
 					Err(err) => {
 						debug!("Failed to parse token claim '{}': {}", claim, err);

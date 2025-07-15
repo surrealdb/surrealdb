@@ -7,7 +7,6 @@ use std::{str, time};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
 	pub store_diff: bool,

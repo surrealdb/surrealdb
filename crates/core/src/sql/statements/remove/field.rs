@@ -2,7 +2,7 @@ use crate::sql::{Ident, Idiom};
 
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveFieldStatement {

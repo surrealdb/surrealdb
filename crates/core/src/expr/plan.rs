@@ -20,16 +20,6 @@ impl LogicalPlan {
 	pub(crate) fn read_only(&self) -> bool {
 		self.expressions.iter().all(|x| x.read_only())
 	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		todo!()
-	}
 }
 
 impl Display for LogicalPlan {
@@ -48,7 +38,6 @@ pub enum TopLevelExpr {
 	Live(Box<LiveStatement>),
 	Option(OptionStatement),
 	Use(UseStatement),
-	Rebuild(RebuildStatement),
 	Expr(Expr),
 }
 
@@ -63,25 +52,24 @@ impl TopLevelExpr {
 			TopLevelExpr::Kill(_)
 			| TopLevelExpr::Live(_)
 			| TopLevelExpr::Option(_)
-			| TopLevelExpr::Rebuild(_)
 			| TopLevelExpr::Access(_) => false,
 			TopLevelExpr::Expr(expr) => expr.read_only(),
 		}
-	}
-	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> FlowResult<Value> {
-		todo!()
 	}
 }
 
 impl Display for TopLevelExpr {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		todo!()
+		match self {
+			TopLevelExpr::Begin => write!(f, "BEGIN"),
+			TopLevelExpr::Cancel => write!(f, "CANCEL"),
+			TopLevelExpr::Commit => write!(f, "COMMIT"),
+			TopLevelExpr::Access(s) => s.fmt(f),
+			TopLevelExpr::Kill(s) => s.fmt(f),
+			TopLevelExpr::Live(s) => s.fmt(f),
+			TopLevelExpr::Option(s) => s.fmt(f),
+			TopLevelExpr::Use(s) => s.fmt(f),
+			TopLevelExpr::Expr(e) => e.fmt(f),
+		}
 	}
 }

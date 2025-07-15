@@ -3,8 +3,7 @@ use crate::val::Duration;
 use std::fmt::{self, Display, Formatter};
 use std::{str, time};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
-#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
 	pub store_diff: bool,

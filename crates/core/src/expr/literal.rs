@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, FlowResult, RecordIdLit};
+use crate::expr::{Expr, FlowResult, RecordIdLit, fmt::Fmt};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
 	Strand, Uuid, Value,
@@ -51,6 +51,30 @@ pub enum Literal {
 }
 
 impl Literal {
+	pub(crate) fn is_static(&self) -> bool {
+		match self {
+			Literal::None
+			| Literal::Null
+			| Literal::UnboundedRange
+			| Literal::Bool(_)
+			| Literal::Float(_)
+			| Literal::Integer(_)
+			| Literal::Decimal(_)
+			| Literal::Strand(_)
+			| Literal::Bytes(_)
+			| Literal::Regex(_)
+			| Literal::Duration(_)
+			| Literal::Datetime(_)
+			| Literal::Uuid(_)
+			| Literal::File(_)
+			| Literal::Geometry(_) => true,
+			Literal::RecordId(record_id_lit) => record_id_lit.is_static(),
+			Literal::Array(exprs) => exprs.iter().all(|x| x.is_static()),
+			Literal::Object(items) => items.iter().all(|x| x.value.is_static()),
+			Literal::Closure(_) => false,
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -150,6 +174,44 @@ impl Hash for Literal {
 			Literal::Geometry(x) => x.hash(state),
 			Literal::File(x) => x.hash(state),
 			Literal::Closure(x) => x.hash(state),
+		}
+	}
+}
+
+impl fmt::Display for Literal {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Literal::None => "NONE".fmt(f),
+			Literal::Null => "NULL".fmt(f),
+			Literal::UnboundedRange => "..".fmt(f),
+			Literal::Bool(x) => {
+				if *x {
+					"true".fmt(f)
+				} else {
+					"false".fmt(f)
+				}
+			}
+			Literal::Float(float) => {
+				if float.is_finite() {
+					write!(f, "{float}f")
+				} else {
+					write!(f, "{float}")
+				}
+			}
+			Literal::Integer(x) => x.fmt(f),
+			Literal::Decimal(d) => write!(f, "{d}dec"),
+			Literal::Strand(strand) => strand.fmt(f),
+			Literal::Bytes(bytes) => bytes.fmt(f),
+			Literal::Regex(regex) => regex.fmt(f),
+			Literal::RecordId(record_id_lit) => record_id_lit.fmt(f),
+			Literal::Array(exprs) => write!(f, "[{}]", Fmt::comma_separated(exprs.iter())),
+			Literal::Object(items) => write!(f, "{{{}}}", Fmt::comma_separated(items.iter())),
+			Literal::Duration(duration) => duration.fmt(f),
+			Literal::Datetime(datetime) => datetime.fmt(f),
+			Literal::Uuid(uuid) => uuid.fmt(f),
+			Literal::Geometry(geometry) => geometry.fmt(f),
+			Literal::File(file) => file.fmt(f),
+			Literal::Closure(closure) => closure.fmt(f),
 		}
 	}
 }

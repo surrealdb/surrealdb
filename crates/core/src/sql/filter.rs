@@ -2,7 +2,7 @@ use crate::sql::language::Language;
 use std::fmt;
 use std::fmt::Display;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Filter {
 	Ascii,

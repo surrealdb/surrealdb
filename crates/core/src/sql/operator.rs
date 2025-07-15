@@ -1,9 +1,9 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::index::Distance;
-use crate::sql::{Expr, Kind};
+use crate::sql::{Expr, Ident, Kind};
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum PrefixOperator {
 	/// `!`
@@ -58,11 +58,12 @@ impl fmt::Display for PrefixOperator {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum PostfixOperator {
 	Range,
 	RangeSkip,
+	MethodCall(Ident, Vec<Expr>),
 	Call(Vec<Expr>),
 }
 
@@ -71,8 +72,12 @@ impl From<PostfixOperator> for crate::expr::PostfixOperator {
 		match value {
 			PostfixOperator::Range => crate::expr::PostfixOperator::Range,
 			PostfixOperator::RangeSkip => crate::expr::PostfixOperator::RangeSkip,
+			PostfixOperator::MethodCall(name, x) => crate::expr::PostfixOperator::MethodCall(
+				name.into(),
+				x.into_iter().map(From::from).collect(),
+			),
 			PostfixOperator::Call(x) => {
-				crate::expr::PostfixOperator::Call(x.into_iter().map(|x| x.into()).collect())
+				crate::expr::PostfixOperator::Call(x.into_iter().map(From::from).collect())
 			}
 		}
 	}
@@ -83,8 +88,11 @@ impl From<crate::expr::PostfixOperator> for PostfixOperator {
 		match value {
 			crate::expr::PostfixOperator::Range => PostfixOperator::Range,
 			crate::expr::PostfixOperator::RangeSkip => PostfixOperator::RangeSkip,
-			crate::expr::PostfixOperator::Call(x) => {
-				PostfixOperator::Call(x.into_iter().map(|x| x.into()).collect())
+			crate::expr::PostfixOperator::MethodCall(name, args) => {
+				PostfixOperator::MethodCall(name.into(), args.into_iter().map(From::from).collect())
+			}
+			crate::expr::PostfixOperator::Call(args) => {
+				PostfixOperator::Call(args.into_iter().map(From::from).collect())
 			}
 		}
 	}
@@ -95,12 +103,13 @@ impl fmt::Display for PostfixOperator {
 		match self {
 			Self::Range => write!(f, ".."),
 			Self::RangeSkip => write!(f, ">.."),
-			Self::Call(x) => write!(f, "({})", Fmt::comma_separated(x)),
+			Self::MethodCall(name, x) => write!(f, "{name}({})", Fmt::comma_separated(x)),
+			Self::Call(args) => write!(f, "({})", Fmt::comma_separated(args.iter())),
 		}
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum BinaryOperator {
 	/// `-`
@@ -112,7 +121,7 @@ pub enum BinaryOperator {
 	/// `/`
 	Divide,
 	/// `%`
-	Modulo,
+	Remainder,
 	/// `**`
 	Power,
 	/// `=`
@@ -190,7 +199,7 @@ impl From<BinaryOperator> for crate::expr::BinaryOperator {
 			BinaryOperator::Add => crate::expr::BinaryOperator::Add,
 			BinaryOperator::Multiply => crate::expr::BinaryOperator::Multiply,
 			BinaryOperator::Divide => crate::expr::BinaryOperator::Divide,
-			BinaryOperator::Modulo => crate::expr::BinaryOperator::Remainder,
+			BinaryOperator::Remainder => crate::expr::BinaryOperator::Remainder,
 			BinaryOperator::Power => crate::expr::BinaryOperator::Power,
 			BinaryOperator::Equal => crate::expr::BinaryOperator::Equal,
 			BinaryOperator::ExactEqual => crate::expr::BinaryOperator::ExactEqual,
@@ -235,7 +244,7 @@ impl From<crate::expr::BinaryOperator> for BinaryOperator {
 			crate::expr::BinaryOperator::Add => BinaryOperator::Add,
 			crate::expr::BinaryOperator::Multiply => BinaryOperator::Multiply,
 			crate::expr::BinaryOperator::Divide => BinaryOperator::Divide,
-			crate::expr::BinaryOperator::Remainder => BinaryOperator::Modulo,
+			crate::expr::BinaryOperator::Remainder => BinaryOperator::Remainder,
 			crate::expr::BinaryOperator::Power => BinaryOperator::Power,
 			crate::expr::BinaryOperator::Equal => BinaryOperator::Equal,
 			crate::expr::BinaryOperator::ExactEqual => BinaryOperator::ExactEqual,
@@ -318,7 +327,7 @@ impl fmt::Display for BinaryOperator {
 			Self::Subtract => write!(f, "-"),
 			Self::Multiply => write!(f, "*"),
 			Self::Divide => write!(f, "/"),
-			Self::Modulo => write!(f, "%"),
+			Self::Remainder => write!(f, "%"),
 			Self::Power => write!(f, "**"),
 			Self::Equal => write!(f, "="),
 			Self::ExactEqual => write!(f, "=="),
@@ -438,7 +447,7 @@ impl BindingPower {
 	/// powers.
 	///
 	/// This function returns the binding power for if the operator is used in the infix position.
-	pub fn for_binary_opator(op: &BinaryOperator) -> Self {
+	pub fn for_binary_operator(op: &BinaryOperator) -> Self {
 		match op {
 			BinaryOperator::Or => BindingPower::Or,
 			BinaryOperator::And => BindingPower::And,
@@ -470,7 +479,7 @@ impl BindingPower {
 
 			BinaryOperator::Add | BinaryOperator::Subtract => BindingPower::AddSub,
 
-			BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Modulo => {
+			BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Remainder => {
 				BindingPower::MulDiv
 			}
 
@@ -485,6 +494,13 @@ impl BindingPower {
 		}
 	}
 
+	pub fn for_postfix_operator(op: &PostfixOperator) -> Self {
+		match op {
+			PostfixOperator::Range | PostfixOperator::RangeSkip => BindingPower::Range,
+			PostfixOperator::MethodCall(..) | PostfixOperator::Call(..) => BindingPower::Call,
+		}
+	}
+
 	/// Returns the binding power for this expression. This is generally `BindingPower::Prime` as
 	/// most value variants are prime expressions, however some like Value::Expression and
 	/// Value::Range have a different binding power.
@@ -496,7 +512,7 @@ impl BindingPower {
 			Expr::Binary {
 				op,
 				..
-			} => BindingPower::for_binary_opator(op),
+			} => BindingPower::for_binary_operator(op),
 			_ => BindingPower::Prime,
 		}
 	}

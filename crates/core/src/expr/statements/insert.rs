@@ -7,7 +7,7 @@ use crate::expr::{
 	Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Timeout, Value, Version,
 };
 use crate::idx::planner::RecordStrategy;
-use crate::val::{RecordId, Strand};
+use crate::val::{RecordId, Strand, Table};
 use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
@@ -188,9 +188,9 @@ fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 	}
 }
 
-fn gen_id(v: &Value, into: &Option<Strand>) -> Result<RecordId> {
+fn gen_id(v: &Value, into: &Option<Table>) -> Result<RecordId> {
 	match into {
-		Some(into) => v.rid().generate(into.clone(), true),
+		Some(into) => v.rid().generate(into.clone().into_strand(), true),
 		None => match v.rid() {
 			Value::Thing(v) => Ok(v),
 			v => Err(anyhow::Error::new(Error::InsertStatementId {
