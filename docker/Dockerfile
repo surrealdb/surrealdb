@@ -3,7 +3,7 @@
 # This stage is used to build the SurrealDB linux binary
 ###
 
-FROM docker.io/rockylinux/rockylinux:10-minimal AS builder
+FROM docker.io/rockylinux/rockylinux:10 AS builder
 
 RUN yum install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
 
