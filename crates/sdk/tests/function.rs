@@ -3145,8 +3145,7 @@ async fn function_type_thing() -> Result<()> {
 				id: person:john,
 			}
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.take_first()?;

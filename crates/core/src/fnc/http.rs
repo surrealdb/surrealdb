@@ -131,6 +131,7 @@ pub mod resolver {
 	use crate::dbs::{Capabilities, capabilities::NetTarget};
 	use ipnet::IpNet;
 	use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+	use std::str::FromStr;
 	use std::{error::Error, net::ToSocketAddrs, sync::Arc};
 
 	pub struct FilteringResolver {
@@ -147,15 +148,23 @@ pub mod resolver {
 
 	impl Resolve for FilteringResolver {
 		fn resolve(&self, name: Name) -> Resolving {
-			let ctx = self.cap.clone();
+			let cap = self.cap.clone();
+
 			let blocking = tokio::task::spawn_blocking(
 				move || -> Result<Addrs, Box<dyn Error + Send + Sync>> {
+					// Check the domain name (if any) matches the allowlist
+					let name_target = NetTarget::from_str(name.as_str())
+						.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
+					let name_is_allowed = cap.matches_any_allow_net(&name_target)
+						&& !cap.matches_any_deny_net(&name_target);
+					// Resolve the addresses
 					let addrs = (name.as_str(), 0)
 						.to_socket_addrs()
 						.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
+					// Build an iterator checking the addresses
 					let iterator = Box::new(addrs.filter(move |addr| {
 						let target = IpNet::new_assert(addr.ip(), 0);
-						ctx.allows_network_target(&NetTarget::IPNet(target))
+						name_is_allowed && !cap.matches_any_deny_net(&NetTarget::IPNet(target))
 					}));
 					Ok(iterator as Addrs)
 				},

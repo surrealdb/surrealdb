@@ -17,8 +17,8 @@ use crate::expr::{
 	model::Model,
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
-use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::rpc::V1Value;
+use crate::sql::SqlValue;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -715,37 +715,6 @@ impl Value {
 		}
 	}
 
-	/// Fuzzy check if this Value is equal to another Value
-	pub fn fuzzy(&self, other: &Value) -> bool {
-		match self {
-			Value::Uuid(v) => match other {
-				Value::Strand(w) => v.to_raw().as_str().fuzzy_match(w.as_str()),
-				_ => false,
-			},
-			Value::Strand(v) => match other {
-				Value::Strand(w) => v.as_str().fuzzy_match(w.as_str()),
-				_ => false,
-			},
-			_ => self.equal(other),
-		}
-	}
-
-	/// Fuzzy check if all Values in an Array are equal to another Value
-	pub fn all_fuzzy(&self, other: &Value) -> bool {
-		match self {
-			Value::Array(v) => v.iter().all(|v| v.fuzzy(other)),
-			_ => self.fuzzy(other),
-		}
-	}
-
-	/// Fuzzy check if any Values in an Array are equal to another Value
-	pub fn any_fuzzy(&self, other: &Value) -> bool {
-		match self {
-			Value::Array(v) => v.iter().any(|v| v.fuzzy(other)),
-			_ => self.fuzzy(other),
-		}
-	}
-
 	/// Check if this Value contains another Value
 	pub fn contains(&self, other: &Value) -> bool {
 		match self {
@@ -938,6 +907,17 @@ impl Value {
 		};
 
 		res.map_err(ControlFlow::from)
+	}
+}
+
+/// Parse a string surql statement into a Value.
+///
+/// This is a convenience method for tests.
+#[cfg(test)]
+impl crate::syn::Parse<Self> for Value {
+	fn parse(val: &str) -> Self {
+		let sql_value = crate::sql::SqlValue::parse(val);
+		sql_value.into()
 	}
 }
 
@@ -1431,6 +1411,25 @@ impl From<Id> for Value {
 			},
 			Id::Range(v) => v.deref().to_owned().into(),
 		}
+	}
+}
+
+impl TryFrom<Value> for serde_json::Value {
+	type Error = anyhow::Error;
+
+	#[inline]
+	fn try_from(value: Value) -> Result<serde_json::Value> {
+		Ok(value.into_json())
+	}
+}
+
+impl TryFrom<serde_json::Value> for Value {
+	type Error = anyhow::Error;
+
+	#[inline]
+	fn try_from(value: serde_json::Value) -> Result<Value> {
+		let v1_value = V1Value::try_from(value)?;
+		Ok(Value::try_from(v1_value)?)
 	}
 }
 

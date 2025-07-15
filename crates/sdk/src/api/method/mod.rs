@@ -14,14 +14,12 @@ use crate::opt::CreatableResource;
 use crate::opt::InsertableResource;
 use crate::opt::IntoExportDestination;
 use crate::opt::Resource;
-use std::error::Error as StdError;
 use surrealdb_core::dbs::Variables;
 use surrealdb_core::expr::Array;
 use surrealdb_core::expr::Data;
 use surrealdb_core::expr::Value;
-use surrealdb_protocol::TryFromQueryStream;
+use surrealdb_core::sql::statements::LiveStatement;
 use surrealdb_protocol::proto::rpc::v1::SignupRequest;
-use surrealdb_protocol::proto::v1::Value as ValueProto;
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -74,6 +72,7 @@ pub use select::Select;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
+use surrealdb_protocol::TryFromValue;
 pub use transaction::Transaction;
 pub use unset::Unset;
 pub use update::Update;
@@ -618,15 +617,32 @@ impl Surreal {
 		}
 	}
 
-	pub fn subscribe<R, RT>(&self, resource: R) -> Subscribe<R, RT>
+	pub fn subscribe_to<R, RT>(&self, resource: R) -> Subscribe<RT>
 	where
 		R: Resource,
-		RT: TryFrom<ValueProto> + Debug,
-		<RT as TryFrom<ValueProto>>::Error: StdError + Send + Sync + 'static,
+		RT: TryFromValue + Debug,
+	{
+		let what = resource.into_values();
+		let what = what.0[0].clone();
+
+		let mut live_stmt = LiveStatement::default();
+		live_stmt.what = what.into();
+
+		Subscribe {
+			txn: None,
+			live_query: live_stmt.to_string(),
+			client: self.clone(),
+			response_type: PhantomData,
+		}
+	}
+
+	pub fn subscribe<RT>(&self, query: impl opt::IntoQuery) -> Subscribe<RT>
+	where
+		RT: TryFromValue + Debug,
 	{
 		Subscribe {
 			txn: None,
-			resource,
+			live_query: query.into_query(),
 			client: self.clone(),
 			response_type: PhantomData,
 		}
@@ -674,7 +690,7 @@ impl Surreal {
 	pub fn select<R, RT>(&self, resource: R) -> Select<R, RT>
 	where
 		R: Resource,
-		RT: TryFromQueryStream + Send,
+		// RT: TryFromQueryStream + Send,
 	{
 		Select {
 			txn: None,

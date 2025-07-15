@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
+use surrealdb_protocol::TryFromValue;
+use surrealdb_protocol::proto::v1::Value as ValueProto;
 
 const ID: &str = "id";
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
@@ -297,6 +299,29 @@ impl Thing {
 			tb: self.tb.clone(),
 			id: self.id.compute(stk, ctx, opt, doc).await?,
 		}))
+	}
+}
+
+impl TryFrom<Value> for Thing {
+	type Error = anyhow::Error;
+
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Thing(thing) => Ok(thing),
+			unexpected => Err(anyhow::anyhow!("Unexpected value: {unexpected:?}")),
+		}
+	}
+}
+
+impl TryFromValue for Thing {
+	fn try_from_value(mut value: ValueProto) -> anyhow::Result<Self> {
+		let tb =
+			String::try_from_value(value.remove("id").ok_or(anyhow::anyhow!("id not found"))?)?;
+		let id = Id::try_from_value(value.remove("tb").ok_or(anyhow::anyhow!("tb not found"))?)?;
+		Ok(Thing {
+			tb,
+			id,
+		})
 	}
 }
 

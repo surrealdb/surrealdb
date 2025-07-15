@@ -230,3 +230,19 @@ harness = false
 [[bench]]
 name = "allocator"
 harness = false
+
+[[bench]]
+name = "array_uniq"
+harness = false
+
+[[bench]]
+name = "array_complement"
+harness = false
+
+[[bench]]
+name = "array_difference"
+harness = false
+
+[[bench]]
+name = "array_intersect"
+harness = false

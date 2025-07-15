@@ -120,8 +120,7 @@ mod tests {
 	fn serialize() {
 		let val = SqlValue::Bytes(Bytes(vec![1, 2, 3, 5]));
 		let serialized: Vec<u8> = revision::to_vec(&val).unwrap();
-		println!("{serialized:?}");
-		let deserialized = revision::from_slice(&serialized).unwrap();
+		let deserialized: SqlValue = revision::from_slice(&serialized).unwrap();
 		assert_eq!(val, deserialized);
 	}
 
@@ -129,7 +128,7 @@ mod tests {
 	fn json_roundtrip() {
 		let val = Bytes::from(vec![1, 2, 3, 5]);
 		let json = serde_json::to_string(&val).unwrap();
-		let deserialized = serde_json::from_str(&json).unwrap();
+		let deserialized: Bytes = serde_json::from_str(&json).unwrap();
 		assert_eq!(val, deserialized);
 	}
 }

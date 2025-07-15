@@ -91,20 +91,6 @@ where
 	}
 }
 
-// impl<C, R, NewResource> Delete<'_, C, R, Value>
-// where
-// 	C
-// 	R: RangeableResource,
-// {
-// 	/// Restricts a range of records to delete
-// 	pub fn range(self, range: impl Into<KeyRange>) -> Self {
-// 		Self {
-// 			resource: self.resource.with_range(range.into()),
-// 			..self
-// 		}
-// 	}
-// }
-
 impl<R, RT> Delete<R, RT>
 where
 	R: RangeableResource,

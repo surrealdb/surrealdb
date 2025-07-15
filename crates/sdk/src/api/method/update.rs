@@ -14,8 +14,8 @@ use surrealdb_core::expr::Data;
 use surrealdb_core::expr::Value;
 use surrealdb_core::protocol::TryFromValue;
 use surrealdb_core::sql::statements::UpdateStatement;
+use surrealdb_protocol::QueryResponseValueStream;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
-use surrealdb_protocol::{QueryResponseValueStream, TryIntoValue};
 use uuid::Uuid;
 
 use crate::opt::{KeyRange, RangeableResource};
@@ -119,11 +119,8 @@ where
 	RT: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content<V>(self, value: V) -> Update<R, RT>
-	where
-		V: TryIntoValue,
-	{
-		let value = value.try_into_value().unwrap();
+	pub fn content(self, value: impl TryInto<Value, Error = anyhow::Error>) -> Update<R, RT> {
+		let value = value.try_into().unwrap();
 
 		let data = if value.is_none() {
 			Data::EmptyExpression
@@ -141,11 +138,8 @@ where
 	}
 
 	/// Merges the current document / record data with the specified data
-	pub fn merge<V>(self, value: V) -> Update<R, RT>
-	where
-		V: TryIntoValue,
-	{
-		let value = value.try_into_value().unwrap();
+	pub fn merge(self, value: impl TryInto<Value, Error = anyhow::Error>) -> Update<R, RT> {
+		let value = value.try_into().unwrap();
 
 		Self {
 			txn: self.txn,

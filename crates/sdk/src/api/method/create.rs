@@ -11,7 +11,6 @@ use std::marker::PhantomData;
 use surrealdb_core::expr::Data;
 use surrealdb_core::expr::Value;
 use surrealdb_core::protocol::TryFromValue;
-use surrealdb_core::protocol::TryIntoValue;
 use surrealdb_core::sql::statements::CreateStatement;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use uuid::Uuid;

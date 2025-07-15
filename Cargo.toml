@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/core", "crates/sdk"]
+members = [".", "crates/core", "crates/macros", "crates/sdk"]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -253,6 +253,7 @@ axum-extra = { version = "0.9.3", features = [
     "typed-header",
 ] }
 axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
+console-subscriber = "0.4.1"
 clap = { version = "4.4.11", features = [
     "env",
     "derive",
@@ -316,7 +317,7 @@ serde_json.workspace = true
 surrealdb-protocol.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "signal"] }
+tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
 tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
 tokio-util = { workspace = true, features = ["io"] }

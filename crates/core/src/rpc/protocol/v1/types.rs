@@ -907,6 +907,18 @@ pub enum V1Id {
 	Range(Box<V1IdRange>),
 }
 
+impl From<&str> for V1Id {
+	fn from(v: &str) -> Self {
+		V1Id::String(v.to_string())
+	}
+}
+
+impl From<String> for V1Id {
+	fn from(v: String) -> Self {
+		V1Id::String(v)
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -1582,7 +1594,7 @@ mod tests {
 	#[case::duration(
 		V1Value::Duration(V1Duration(Duration::MAX)),
 		json!("584942417355y3w5d7h15s999ms999µs999ns"),
-		Value::String("584942417355y3w5d7h15s999ms999µs999ns".into()),
+		V1Value::String("584942417355y3w5d7h15s999ms999µs999ns".into()),
 	)]
 	#[case::datetime(
 		V1Value::Datetime(V1Datetime(DateTime::<Utc>::MIN_UTC)),
@@ -1774,7 +1786,7 @@ mod tests {
 
 		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");
 		let deserialized_sql_value = crate::syn::value_legacy_strand(&json_str).unwrap();
-		let deserialized: V1Value = deserialized_sql_value.into();
+		let deserialized: V1Value = deserialized_sql_value.try_into().unwrap();
 		assert_eq!(deserialized, expected_deserialized);
 	}
 }

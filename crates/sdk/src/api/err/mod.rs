@@ -212,7 +212,7 @@ pub enum Error {
 	#[error(
 		"tried to convert from a value which contained non-primitive values to a value which only allows primitive values."
 	)]
-	RecievedInvalidValue,
+	ReceivedInvalidValue,
 
 	/// The engine used does not support data versioning
 	#[error("The '{0}' engine does not support data versioning")]

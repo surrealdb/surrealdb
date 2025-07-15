@@ -45,11 +45,24 @@ impl IntoVariables for Variables {
 	}
 }
 
-impl IntoVariables for (&str, &str) {
+// impl IntoVariables for (&str, &str) {
+// 	fn into_variables(self) -> Variables {
+// 		let (key, value) = self;
+// 		let mut variables = Variables::new();
+// 		variables.insert(key.to_string(), Value::Strand(value.into()));
+// 		variables
+// 	}
+// }
+
+impl<K, V> IntoVariables for (K, V)
+where
+	K: Into<String>,
+	V: Into<Value>,
+{
 	fn into_variables(self) -> Variables {
 		let (key, value) = self;
 		let mut variables = Variables::new();
-		variables.insert(key.to_string(), Value::Strand(value.into()));
+		variables.insert(key.into(), value.into());
 		variables
 	}
 }
@@ -63,6 +76,28 @@ mod query_accessor {
 		fn take(self, results: &mut super::QueryResults) -> anyhow::Result<RT>;
 
 		fn stats(&self, results: &super::QueryResults) -> Option<super::QueryStatsProto>;
+	}
+}
+
+impl QueryAccessor<()> for usize {}
+impl query_accessor::Sealed<()> for usize {
+	fn take(self, results: &mut QueryResults) -> Result<()> {
+		match results.results.swap_remove(&self) {
+			Some(query_result) => {
+				if let Some(error) = query_result.error {
+					return Err(error.into());
+				}
+
+				Ok(())
+			}
+			None => {
+				return Err(anyhow::anyhow!("Index out of bounds: {self}"));
+			}
+		}
+	}
+
+	fn stats(&self, results: &QueryResults) -> Option<QueryStatsProto> {
+		results.results.get(self).map(|x| x.stats.clone())
 	}
 }
 

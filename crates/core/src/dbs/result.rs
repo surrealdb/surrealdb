@@ -230,6 +230,10 @@ impl QueryResult {
 		}
 	}
 
+	pub fn get_first(&self) -> Option<&Value> {
+		self.values.as_ref().ok().and_then(|v| v.first())
+	}
+
 	pub fn take_first(self) -> anyhow::Result<Value> {
 		self.values.map(|mut v| v.remove(0)).map_err(anyhow::Error::from)
 	}

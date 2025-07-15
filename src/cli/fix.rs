@@ -17,7 +17,7 @@ pub async fn init(
 	}: FixCommandArguments,
 ) -> Result<()> {
 	// Clean the path
-	let client = Surreal::connect(path, 1024).await?;
+	let client = Surreal::connect(path).await?;
 
 	// Fix the datastore, if applicable
 	Err(anyhow::anyhow!("Not implemented"))

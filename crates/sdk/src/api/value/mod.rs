@@ -9,7 +9,7 @@ use std::{
 };
 use surrealdb_core::{
 	dbs::Action,
-	expr::{Array, Id, Number, Object, Value},
+	expr::{Array, Id, Object, Value},
 	protocol::TryFromValue,
 };
 use surrealdb_protocol::proto::v1::Value as ValueProto;

@@ -1,6 +1,4 @@
 use crate::opt::capabilities::Capabilities;
-#[cfg(storage)]
-use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb_core::{dbs::Capabilities as CoreCapabilities, iam::Level};
 

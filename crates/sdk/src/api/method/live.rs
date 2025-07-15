@@ -1,22 +1,17 @@
 use crate::Surreal;
 use crate::api::Result;
 use crate::api::method::BoxFuture;
-use crate::opt::Resource;
 use crate::value::Notification;
 use futures::Stream;
 use futures::StreamExt;
-use std::error::Error as StdError;
 use std::fmt::Debug;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use surrealdb_core::dbs::{Action, Notification as CoreNotification};
 use surrealdb_core::protocol::TryFromValue;
-use surrealdb_core::sql::statements::LiveStatement;
 use surrealdb_protocol::proto::rpc::v1::Action as ActionProto;
 use surrealdb_protocol::proto::rpc::v1::Notification as NotificationProto;
 use surrealdb_protocol::proto::rpc::v1::SubscribeRequest;
-use surrealdb_protocol::proto::v1::Value as ValueProto;
 use uuid::Uuid;
 
 #[cfg(target_family = "wasm")]
@@ -57,19 +52,17 @@ where
 /// A select future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Subscribe<R, RT> {
+pub struct Subscribe<RT> {
 	pub(super) client: Surreal,
 	pub(super) txn: Option<Uuid>,
-	pub(super) resource: R,
+	pub(super) live_query: String,
 
 	pub(super) response_type: PhantomData<RT>,
 }
 
-impl<R, RT> IntoFuture for Subscribe<R, RT>
+impl<RT> IntoFuture for Subscribe<RT>
 where
-	R: Resource,
-	RT: TryFrom<ValueProto> + Debug,
-	<RT as TryFrom<ValueProto>>::Error: StdError + Send + Sync + 'static,
+	RT: TryFromValue + Debug,
 {
 	// type Output = Stream<Result<Notification<RT>>>;
 	type Output = Result<Pin<Box<dyn Stream<Item = Result<Notification<RT>>> + Send>>>;
@@ -78,23 +71,16 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		let Subscribe {
 			client,
-
-			resource,
+			live_query,
 			..
 		} = self;
-
-		let what = resource.into_values();
-		let what = what.0[0].clone();
 
 		Box::pin(async move {
 			let mut client = client.client.clone();
 
-			let mut stmt = LiveStatement::default();
-			stmt.what = what.into();
-
 			let response = client
 				.subscribe(SubscribeRequest {
-					query: stmt.to_string(),
+					query: live_query,
 					variables: None,
 				})
 				.await
@@ -120,7 +106,7 @@ where
 					return Err(anyhow::anyhow!("Value missing from response"));
 				};
 
-				let value = RT::try_from(value)?;
+				let value = RT::try_from_value(value)?;
 
 				let notification = Notification {
 					query_id: live_query_id,

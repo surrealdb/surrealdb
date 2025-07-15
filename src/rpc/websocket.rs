@@ -472,11 +472,13 @@ pub async fn send(
 	// Process the response for the format
 	let (len, msg) = match fmt.res_ws(response) {
 		Ok((l, m)) => (l, m),
-		Err(err) => {
-			if let Err(err) = fmt.res_ws(V1Response::failure(id, err)) {
+		Err(err) => match fmt.res_ws(V1Response::failure(id, err)) {
+			Ok((l, m)) => (l, m),
+			Err(err) => {
 				warn!("Error serialising internal error: {err}");
+				return;
 			}
-		}
+		},
 	};
 	// Send the message to the write channel
 	if chn.send(msg).await.is_ok() {

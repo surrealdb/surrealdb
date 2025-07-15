@@ -115,7 +115,7 @@ pub use self::filter::Filter;
 pub use self::function::Function;
 pub use self::future::Future;
 pub use self::geometry::Geometry;
-pub use self::graph::Graph;
+pub use self::graph::{Graph, GraphSubject, GraphSubjects};
 pub use self::group::Group;
 pub use self::group::Groups;
 pub use self::id::Id;

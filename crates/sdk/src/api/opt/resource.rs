@@ -129,7 +129,8 @@ impl CreatableResource for String {}
 impl CreatableResource for &String {}
 impl CreatableResource for &str {}
 impl CreatableResource for CoreTable {}
-impl CreatableResource for (&str, &str) {}
+impl CreatableResource for RecordId {}
+impl CreatableResource for &RecordId {}
 
 impl InsertableResource for String {
 	fn table_name(&self) -> &str {
@@ -249,23 +250,32 @@ impl Resource for Edge {
 	}
 }
 
-impl resource::Sealed for (&str, &str) {}
-impl Resource for (&str, &str) {
-	fn kind(&self) -> &'static str {
-		"table"
-	}
+macro_rules! impl_resource_for_tuple_type {
+	($type:ty) => {
+		impl resource::Sealed for $type {}
+		impl Resource for $type {
+			fn kind(&self) -> &'static str {
+				"table"
+			}
 
-	fn into_values(self) -> Values {
-		let table = RecordId::from(self);
-		Values(vec![Value::from(table)])
-	}
+			fn into_values(self) -> Values {
+				let table = RecordId::from(self);
+				Values(vec![Value::from(table)])
+			}
+		}
+
+		impl InsertableResource for $type {
+			fn table_name(&self) -> &str {
+				&self.0
+			}
+		}
+
+		impl CreatableResource for $type {}
+	};
 }
 
-impl InsertableResource for (&str, &str) {
-	fn table_name(&self) -> &str {
-		self.0
-	}
-}
+// impl_resource_for_tuple_type!((String, &str));
+impl_resource_for_tuple_type!((&str, &str));
 
 // impl resource::Sealed for QueryRange {}
 // impl Resource for QueryRange {

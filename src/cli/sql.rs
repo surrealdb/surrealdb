@@ -17,7 +17,7 @@ use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::{QueryResults, Value};
-use surrealdb_core::sql::Statement;
+use surrealdb_core::sql::{Param, SqlValue, Statement};
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -70,7 +70,7 @@ pub async fn init(
 	// Capabilities configuration for local engines
 	let capabilities = capabilities.into_cli_capabilities();
 	let config = Config::new().capabilities(capabilities.clone().into());
-	let client = Surreal::connect(endpoint, 1024).await?;
+	let client = Surreal::connect(endpoint).await?;
 	let is_local = client.is_local();
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
 	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
@@ -184,7 +184,7 @@ pub async fn init(
 		}
 		// Complete the request
 		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
-			Ok(query) => {
+			Ok(mut query) => {
 				let mut namespace = None;
 				let mut database = None;
 				let mut vars = Vec::new();
@@ -206,7 +206,7 @@ pub async fn init(
 				}
 
 				for var in &vars {
-					query.push(Statement::Value(Value::Param(Param::from(var.as_str()))))
+					query.push(Statement::Value(SqlValue::Param(Param::from(var.as_str()))));
 				}
 
 				// Extract the namespace and database from the current prompt

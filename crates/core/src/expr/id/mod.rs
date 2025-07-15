@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Bound, Deref};
+use surrealdb_protocol::TryFromValue;
+use surrealdb_protocol::proto::v1::Value as ValueProto;
 use ulid::Ulid;
 
 pub mod range;
@@ -169,6 +171,24 @@ impl TryFrom<Value> for Id {
 			v => Err(anyhow::Error::new(Error::IdInvalid {
 				value: v.kindof().to_string(),
 			})),
+		}
+	}
+}
+
+impl TryFromValue for Id {
+	fn try_from_value(value: ValueProto) -> anyhow::Result<Self> {
+		use surrealdb_protocol::proto::v1::value::Value as ValueEnum;
+		let Some(value) = value.value else {
+			return Err(anyhow::anyhow!("Expected value"));
+		};
+
+		match value {
+			ValueEnum::Int64(v) => Ok(Id::Number(v)),
+			ValueEnum::String(v) => Ok(Id::String(v)),
+			ValueEnum::Uuid(v) => Ok(Id::Uuid(v.try_into()?)),
+			ValueEnum::Array(v) => Ok(Id::Array(v.try_into()?)),
+			ValueEnum::Object(v) => Ok(Id::Object(v.try_into()?)),
+			unexpected => Err(anyhow::anyhow!("Unexpected value: {unexpected:?}")),
 		}
 	}
 }

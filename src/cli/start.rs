@@ -100,7 +100,7 @@ pub async fn init(
 	}
 	// use anyhow::Context;
 	// let client =
-	// 	Surreal::connect(path.as_str(), 1024).await.context("Failed to connect to database")?;
+	// 	Surreal::connect(path.as_str()).await.context("Failed to connect to database")?;
 	// Extract the certificate and key
 	let (crt, key) = if let Some(val) = web {
 		(val.web_crt, val.web_key)

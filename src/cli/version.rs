@@ -31,7 +31,7 @@ pub async fn init(
 
 async fn get_server_version_string(endpoint: String) -> Result<String> {
 	// Connect to the database engine
-	let client = Surreal::connect(endpoint, 1024).await?;
+	let client = Surreal::connect(endpoint).await?;
 	// Query database version info
 	let server_version = client.version().await?;
 	// Convert version info to formatted string

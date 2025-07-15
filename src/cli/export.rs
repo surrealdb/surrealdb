@@ -83,7 +83,7 @@ pub async fn init(
 		config,
 	}: ExportCommandArguments,
 ) -> Result<()> {
-	let client = Surreal::connect(endpoint, 1024).await?;
+	let client = Surreal::connect(endpoint).await?;
 	let is_local = client.is_local();
 
 	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.

@@ -4,12 +4,14 @@ use crate::api::Result;
 use crate::api::method::BoxFuture;
 use crate::api::opt;
 use crate::method::WithStats;
+use crate::method::live::Subscribe;
 use crate::opt::IntoVariables;
 use anyhow::Context as AnyhowContext;
 use futures::StreamExt;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::future::IntoFuture;
+use std::marker::PhantomData;
 use surrealdb_core::dbs::Variables;
 use surrealdb_core::protocol::TryFromValue;
 use surrealdb_protocol::proto::rpc::v1::QueryError as QueryErrorProto;
@@ -186,6 +188,18 @@ impl Query {
 		self.variables.extend(variables);
 
 		self
+	}
+
+	pub fn subscribe<RT>(self, query: impl opt::IntoQuery) -> Subscribe<RT>
+	where
+		RT: TryFromValue,
+	{
+		Subscribe {
+			txn: self.txn,
+			live_query: query.into_query(),
+			client: self.client,
+			response_type: PhantomData,
+		}
 	}
 }
 
@@ -657,7 +671,7 @@ mod tests {
 			}]),
 			..QueryResults::new()
 		};
-		response.take::<Option<()>>(0).unwrap_err();
+		response.take::<()>(0).unwrap_err();
 	}
 
 	#[test]
@@ -853,13 +867,13 @@ mod tests {
 			results: to_map(vec![QueryResult::ok(vec![true, false].into())]),
 		};
 		let value: Vec<Value> = response.take(0).unwrap();
-		assert_eq!(value, vec![Value::from(true), Value::from(false)]);
+		assert_eq!(value, vec![Value::Array(vec![Value::from(true), Value::from(false)].into())]);
 
 		let mut response = QueryResults {
 			results: to_map(vec![QueryResult::ok(vec![true, false].into())]),
 		};
-		let vec: Vec<bool> = response.take(0).unwrap();
-		assert_eq!(vec, vec![true, false]);
+		let vec: Vec<Vec<bool>> = response.take(0).unwrap();
+		assert_eq!(vec, vec![vec![true, false]]);
 
 		let mut response = QueryResults {
 			results: to_map(vec![QueryResult::ok(vec![true, false].into())]),
@@ -911,12 +925,12 @@ mod tests {
 			QueryResult::ok(1.into()),
 			QueryResult::ok(2.into()),
 			QueryResult::err(QueryErrorProto::new(-1, "test".to_string())),
-			QueryResult::ok(3.into()),
 			QueryResult::ok(4.into()),
 			QueryResult::ok(5.into()),
-			QueryResult::err(QueryErrorProto::new(-2, "test".to_string())),
 			QueryResult::ok(6.into()),
-			QueryResult::ok(7.into()),
+			QueryResult::err(QueryErrorProto::new(-2, "test".to_string())),
+			QueryResult::ok(8.into()),
+			QueryResult::ok(9.into()),
 			QueryResult::err(QueryErrorProto::new(-3, "test".to_string())),
 		];
 		let mut response = QueryResults {
@@ -926,24 +940,14 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		let Some(crate::api::err::Error::DuplicateRequestId(duplicate_id)) =
-			errors[&10].downcast_ref()
-		else {
-			panic!("index `10` is not `DuplicateRequestId`");
-		};
-		assert_eq!(duplicate_id, "0");
-		let Some(crate::api::err::Error::BackupsNotSupported) = errors[&7].downcast_ref() else {
-			panic!("index `7` is not `BackupsNotSupported`");
-		};
-		let Some(crate::api::err::Error::ConnectionUninitialised) = errors[&3].downcast_ref()
-		else {
-			panic!("index `3` is not `ConnectionUninitialised`");
-		};
+		assert_eq!(errors[&3].downcast_ref(), Some(&QueryErrorProto::new(-1, "test".to_string())));
+		assert_eq!(errors[&7].downcast_ref(), Some(&QueryErrorProto::new(-2, "test".to_string())));
+		assert_eq!(errors[&10].downcast_ref(), Some(&QueryErrorProto::new(-3, "test".to_string())));
 		let Some(value): Option<i32> = response.take(2).unwrap() else {
 			panic!("statement not found");
 		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
-		assert_eq!(value, Value::from(3));
+		assert_eq!(value, Value::from(4));
 	}
 }

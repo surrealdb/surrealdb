@@ -24,22 +24,25 @@ use types::User;
 
 #[tokio::test]
 async fn api() {
-	let DB = Surreal::connect("memory").await.unwrap();
+	let (channel, server_handle) = protocol::TestServer::serve().await;
+	let db = Surreal::new(channel, "test".try_into().unwrap());
+
+	// let DB = Surreal::connect("memory").await.unwrap();
 
 	// // connect to the mock server
 	// DB.connect::<Test>(()).with_capacity(512).await.unwrap();
 
 	// health
-	let _ = DB.health().await.unwrap();
+	let _ = db.health().await.unwrap();
 
 	// invalidate
-	let _: () = DB.invalidate().await.unwrap();
+	let _: () = db.invalidate().await.unwrap();
 
 	// use
-	let _ = DB.use_ns("test-ns").use_db("test-db").await.unwrap();
+	let _ = db.use_ns("test-ns").use_db("test-db").await.unwrap();
 
 	// signup
-	let _: Jwt = DB
+	let _: Jwt = db
 		.signup(RecordCredentials {
 			namespace: "test-ns",
 			database: "test-db",
@@ -50,14 +53,14 @@ async fn api() {
 		.unwrap();
 
 	// signin
-	let _: Jwt = DB
+	let _: Jwt = db
 		.signin(Root {
 			username: "root",
 			password: "root",
 		})
 		.await
 		.unwrap();
-	let _: Jwt = DB
+	let _: Jwt = db
 		.signin(Namespace {
 			namespace: "test-ns",
 			username: "user",
@@ -65,7 +68,7 @@ async fn api() {
 		})
 		.await
 		.unwrap();
-	let _: Jwt = DB
+	let _: Jwt = db
 		.signin(Database {
 			namespace: "test-ns",
 			database: "test-db",
@@ -74,7 +77,7 @@ async fn api() {
 		})
 		.await
 		.unwrap();
-	let _: Jwt = DB
+	let _: Jwt = db
 		.signin(RecordCredentials {
 			namespace: "test-ns",
 			database: "test-db",
@@ -85,13 +88,13 @@ async fn api() {
 		.unwrap();
 
 	// authenticate
-	let _: () = DB.authenticate(Jwt(String::new())).await.unwrap();
+	let _: () = db.authenticate(Jwt(String::new())).await.unwrap();
 
 	// query
-	let _: QueryResults = DB.query("SELECT * FROM user").await.unwrap();
+	let _: QueryResults = db.query("SELECT * FROM user").await.unwrap();
 	let _: QueryResults =
-		DB.query("CREATE user:john SET name = $name").bind(("name", "John Doe")).await.unwrap();
-	let _: QueryResults = DB
+		db.query("CREATE user:john SET name = $name").bind(("name", "John Doe")).await.unwrap();
+	let _: QueryResults = db
 		.query("CREATE user:john SET name = $name")
 		.bind(User {
 			id: "john".to_owned(),
@@ -99,7 +102,7 @@ async fn api() {
 		})
 		.await
 		.unwrap();
-	let _: QueryResults = DB
+	let _: QueryResults = db
 		.query(BeginStatement::default().to_string())
 		.query("CREATE account:one SET balance = 135605.16")
 		.query("CREATE account:two SET balance = 91031.31")
@@ -110,65 +113,65 @@ async fn api() {
 		.unwrap();
 
 	// create
-	let _: Option<User> = DB.create(USER).await.unwrap();
-	let _: Option<User> = DB.create((USER, "john")).await.unwrap();
-	let _: Option<User> = DB.create(USER).content(User::default()).await.unwrap();
-	let _: Option<User> = DB.create((USER, "john")).content(User::default()).await.unwrap();
+	let _: Option<User> = db.create(USER).await.unwrap();
+	let _: Option<User> = db.create((USER, "john")).await.unwrap();
+	let _: Option<User> = db.create(USER).content(User::default()).await.unwrap();
+	let _: Option<User> = db.create((USER, "john")).content(User::default()).await.unwrap();
 
 	// select
-	let _: Vec<User> = DB.select(USER).await.unwrap();
-	let _: Option<User> = DB.select((USER, "john")).await.unwrap();
-	let _: Vec<User> = DB.select(USER).range(..).await.unwrap();
-	let _: Vec<User> = DB.select(USER).range(.."john").await.unwrap();
-	let _: Vec<User> = DB.select(USER).range(..="john").await.unwrap();
-	let _: Vec<User> = DB.select(USER).range("jane"..).await.unwrap();
-	let _: Vec<User> = DB.select(USER).range("jane".."john").await.unwrap();
-	let _: Vec<User> = DB.select(USER).range("jane"..="john").await.unwrap();
-	let _: Vec<User> = DB.select(USER).range("jane"..="john").await.unwrap();
+	let _: Vec<User> = db.select(USER).await.unwrap();
+	let _: Option<User> = db.select((USER, "john")).await.unwrap();
+	let _: Vec<User> = db.select(USER).range(..).await.unwrap();
+	let _: Vec<User> = db.select(USER).range(.."john").await.unwrap();
+	let _: Vec<User> = db.select(USER).range(..="john").await.unwrap();
+	let _: Vec<User> = db.select(USER).range("jane"..).await.unwrap();
+	let _: Vec<User> = db.select(USER).range("jane".."john").await.unwrap();
+	let _: Vec<User> = db.select(USER).range("jane"..="john").await.unwrap();
+	let _: Vec<User> = db.select(USER).range("jane"..="john").await.unwrap();
 	let _: Vec<User> =
-		DB.select(USER).range((Bound::Excluded("jane"), Bound::Included("john"))).await.unwrap();
+		db.select(USER).range((Bound::Excluded("jane"), Bound::Included("john"))).await.unwrap();
 
 	// update
-	let _: Vec<User> = DB.update(USER).await.unwrap();
-	let _: Option<User> = DB.update((USER, "john")).await.unwrap();
-	let _: Vec<User> = DB.update(USER).content(User::default()).await.unwrap();
+	let _: Vec<User> = db.update(USER).await.unwrap();
+	let _: Option<User> = db.update((USER, "john")).await.unwrap();
+	let _: Vec<User> = db.update(USER).content(User::default()).await.unwrap();
 	let _: Vec<User> =
-		DB.update(USER).range("jane".."john").content(User::default()).await.unwrap();
-	let _: Option<User> = DB.update((USER, "john")).content(User::default()).await.unwrap();
+		db.update(USER).range("jane".."john").content(User::default()).await.unwrap();
+	let _: Option<User> = db.update((USER, "john")).content(User::default()).await.unwrap();
 
 	// insert
-	let _: Vec<User> = DB.insert(USER).await.unwrap();
-	let _: Option<User> = DB.insert((USER, "john")).await.unwrap();
-	let _: Vec<User> = DB.insert(USER).content(User::default()).await.unwrap();
-	let _: Option<User> = DB.insert((USER, "john")).content(User::default()).await.unwrap();
+	let _: Vec<User> = db.insert(USER).await.unwrap();
+	let _: Option<User> = db.insert((USER, "john")).await.unwrap();
+	let _: Vec<User> = db.insert(USER).content(User::default()).await.unwrap();
+	let _: Option<User> = db.insert((USER, "john")).content(User::default()).await.unwrap();
 
 	// merge
-	let _: Vec<User> = DB.update(USER).merge(User::default()).await.unwrap();
-	let _: Vec<User> = DB.update(USER).range("jane".."john").merge(User::default()).await.unwrap();
-	let _: Option<User> = DB.update((USER, "john")).merge(User::default()).await.unwrap();
+	let _: Vec<User> = db.update(USER).merge(User::default()).await.unwrap();
+	let _: Vec<User> = db.update(USER).range("jane".."john").merge(User::default()).await.unwrap();
+	let _: Option<User> = db.update((USER, "john")).merge(User::default()).await.unwrap();
 
 	// patch
-	let _: Vec<User> = DB.update(USER).patch(PatchOp::remove("/name")).await.unwrap();
+	let _: Vec<User> = db.update(USER).patch(PatchOp::remove("/name")).await.unwrap();
 	let _: Vec<User> =
-		DB.update(USER).range("jane".."john").patch(PatchOp::remove("/name")).await.unwrap();
-	let _: Option<User> = DB.update((USER, "john")).patch(PatchOp::remove("/name")).await.unwrap();
+		db.update(USER).range("jane".."john").patch(PatchOp::remove("/name")).await.unwrap();
+	let _: Option<User> = db.update((USER, "john")).patch(PatchOp::remove("/name")).await.unwrap();
 
 	// delete
-	let _: Vec<User> = DB.delete(USER).await.unwrap();
-	let _: Option<User> = DB.delete((USER, "john")).await.unwrap();
-	let _: Vec<User> = DB.delete(USER).range("jane".."john").await.unwrap();
+	let _: Vec<User> = db.delete(USER).await.unwrap();
+	let _: Option<User> = db.delete((USER, "john")).await.unwrap();
+	let _: Vec<User> = db.delete(USER).range("jane".."john").await.unwrap();
 
 	// export
-	let _: () = DB.export("backup.sql").await.unwrap();
+	let _: () = db.export("backup.sql").await.unwrap();
 
 	// import
-	let _: () = DB.import("backup.sql").await.unwrap();
+	let _: () = db.import("backup.sql").await.unwrap();
 
 	// version
-	let _: Version = DB.version().await.unwrap();
+	let _: Version = db.version().await.unwrap();
 
 	// run
-	let _: Option<User> = DB.run("foo").await.unwrap();
+	let _: Option<User> = db.run("foo").await.unwrap();
 }
 
 fn assert_send(_: impl Send) {}

@@ -27,18 +27,20 @@ pub mod email {
 
 	#[cfg(test)]
 	mod tests {
+		use crate::expr::Value;
+
 		#[test]
 		fn host() {
 			let input = (String::from("john.doe@example.com"),);
 			let value = super::host(input).unwrap();
-			assert_eq!(value, "example.com".into());
+			assert_eq!(value, Value::from("example.com"));
 		}
 
 		#[test]
 		fn user() {
 			let input = (String::from("john.doe@example.com"),);
 			let value = super::user(input).unwrap();
-			assert_eq!(value, "john.doe".into());
+			assert_eq!(value, Value::from("john.doe"));
 		}
 	}
 }
@@ -126,19 +128,19 @@ pub mod url {
 		#[test]
 		fn port_default_port_specified() {
 			let value = super::port(("http://www.google.com:80".to_string(),)).unwrap();
-			assert_eq!(value, 80.into());
+			assert_eq!(value, Value::from(80));
 		}
 
 		#[test]
 		fn port_nondefault_port_specified() {
 			let value = super::port(("http://www.google.com:8080".to_string(),)).unwrap();
-			assert_eq!(value, 8080.into());
+			assert_eq!(value, Value::from(8080));
 		}
 
 		#[test]
 		fn port_no_port_specified() {
 			let value = super::port(("http://www.google.com".to_string(),)).unwrap();
-			assert_eq!(value, 80.into());
+			assert_eq!(value, Value::from(80));
 		}
 
 		#[test]

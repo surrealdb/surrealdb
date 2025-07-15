@@ -17,7 +17,7 @@ pub async fn init(
 	}: IsReadyCommandArguments,
 ) -> Result<()> {
 	// Connect to the database engine
-	Surreal::connect(endpoint, 1024).await?;
+	Surreal::connect(endpoint).await?;
 	// Log output ok
 	println!("OK");
 	// All ok

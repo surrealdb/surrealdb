@@ -1233,6 +1233,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "console-api"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8030735ecb0d128428b64cd379809817e620a40e5001c54465b99ec5feec2857"
+dependencies = [
+ "futures-core",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+ "tonic 0.12.3",
+ "tracing-core",
+]
+
+[[package]]
+name = "console-subscriber"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6539aa9c6a4cd31f4b1c040f860a1eac9aa80e7df6b05d506a6e7179936d6a01"
+dependencies = [
+ "console-api",
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "futures-task",
+ "hdrhistogram",
+ "humantime",
+ "hyper-util",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+ "serde",
+ "serde_json",
+ "thread_local",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.12.3",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "console_error_panic_hook"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2316,6 +2355,19 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash",
+]
+
+[[package]]
+name = "hdrhistogram"
+version = "7.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "765c9198f173dd59ce26ff9f95ef0aafd0a0fe01fb9d72841bc5066a4c06511d"
+dependencies = [
+ "base64 0.21.7",
+ "byteorder",
+ "flate2",
+ "nom",
+ "num-traits",
 ]
 
 [[package]]
@@ -5652,6 +5704,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "clap",
+ "console-subscriber",
  "env_logger",
  "flatbuffers",
  "futures",
@@ -5904,6 +5957,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "revision 0.11.0",
+ "serde",
+ "storekey",
+ "syn 2.0.100",
+]
+
+[[package]]
 name = "surrealdb-protocol"
 version = "0.1.0"
 dependencies = [
@@ -5919,6 +5983,7 @@ dependencies = [
  "rust_decimal",
  "semver",
  "serde",
+ "serde_json",
  "tonic 0.12.3",
  "uuid",
 ]
@@ -6347,6 +6412,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.52.0",
 ]
 

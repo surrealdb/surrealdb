@@ -255,11 +255,10 @@ jobs:
 
   check-binaries:
     name: Cross-compile binaries
-    needs: [ format, check, check-wasm ]
+    needs: format
     uses: ./.github/workflows/build.yml
     with:
       name: ci
-      release-branch: ${{ github.head_ref || github.ref_name }}
       # Only upload if not a pull request.
       upload: ${{ github.event_name != 'pull_request' }}
       # Only compile with --release when not a pull request.
@@ -1009,7 +1008,7 @@ jobs:
         run: sleep 10
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install .
 
       - name: Run Python tests (HTTP)
         run: python -m unittest discover -s tests

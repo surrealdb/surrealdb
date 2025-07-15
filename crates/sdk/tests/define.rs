@@ -552,24 +552,30 @@ async fn define_statement_user_db() -> Result<()> {
 
 	assert!(
 		res[3]
-			.take_first()
+			.values
 			.as_ref()
+			.unwrap()
+			.first()
 			.unwrap()
 			.to_string()
 			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
 	);
 	assert!(
 		res[4]
-			.take_first()
+			.values
 			.as_ref()
+			.unwrap()
+			.first()
 			.unwrap()
 			.to_string()
 			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
 	);
 	assert!(
 		res[5]
-			.take_first()
+			.values
 			.as_ref()
+			.unwrap()
+			.first()
 			.unwrap()
 			.to_string()
 			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")

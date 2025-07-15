@@ -6,7 +6,6 @@ use crate::sql::id::range::IdRange;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 
-use crate::fnc::util::string::fuzzy::Fuzzy;
 use crate::sql::{
 	Array, Block, Bytes, Cast, Constant, Datetime, Duration, Edges, Expression, File, Function,
 	Future, Geometry, Idiom, Mock, Number, Object, Operation, Param, Part, Query, Range, Regex,
@@ -702,37 +701,6 @@ impl SqlValue {
 		match self {
 			SqlValue::Array(v) => v.iter().any(|v| v.equal(other)),
 			_ => self.equal(other),
-		}
-	}
-
-	/// Fuzzy check if this Value is equal to another Value
-	pub fn fuzzy(&self, other: &SqlValue) -> bool {
-		match self {
-			SqlValue::Uuid(v) => match other {
-				SqlValue::Strand(w) => v.to_raw().as_str().fuzzy_match(w.as_str()),
-				_ => false,
-			},
-			SqlValue::Strand(v) => match other {
-				SqlValue::Strand(w) => v.as_str().fuzzy_match(w.as_str()),
-				_ => false,
-			},
-			_ => self.equal(other),
-		}
-	}
-
-	/// Fuzzy check if all Values in an Array are equal to another Value
-	pub fn all_fuzzy(&self, other: &SqlValue) -> bool {
-		match self {
-			SqlValue::Array(v) => v.iter().all(|v| v.fuzzy(other)),
-			_ => self.fuzzy(other),
-		}
-	}
-
-	/// Fuzzy check if any Values in an Array are equal to another Value
-	pub fn any_fuzzy(&self, other: &SqlValue) -> bool {
-		match self {
-			SqlValue::Array(v) => v.iter().any(|v| v.fuzzy(other)),
-			_ => self.fuzzy(other),
 		}
 	}
 

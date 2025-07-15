@@ -6,14 +6,12 @@ use crate::opt::{KeyRange, RangeableResource};
 use crate::api::Result;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
-use std::error::Error as StdError;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Thing as RecordId;
-use surrealdb_core::expr::Value;
-use surrealdb_core::sql::statements::SelectStatement;
-use surrealdb_protocol::TryFromQueryStream;
+use surrealdb_core::sql::statements::{LiveStatement, SelectStatement};
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
+use surrealdb_protocol::{TryFromQueryStream, TryFromValue};
 use uuid::Uuid;
 
 /// A select future
@@ -111,7 +109,7 @@ where
 impl<R, RT> Select<R, RT>
 where
 	R: Resource,
-	RT: TryFromQueryStream,
+	RT: TryFromValue,
 {
 	/// Turns a normal select query into a live query
 	///
@@ -160,11 +158,16 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn live(self) -> Subscribe<R, RT> {
+	pub fn live(self) -> Subscribe<RT> {
+		let what = self.resource.into_values();
+		let what = what.0[0].clone();
+		let mut live_stmt = LiveStatement::default();
+		live_stmt.what = what.into();
+
 		Subscribe {
 			txn: self.txn,
 			client: self.client,
-			resource: self.resource,
+			live_query: live_stmt.to_string(),
 			response_type: self.response_type,
 		}
 	}

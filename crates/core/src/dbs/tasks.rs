@@ -103,7 +103,7 @@ pub(in crate::dbs) async fn changefeed_cleanup_task(
 			_ = canceller.cancelled() => break,
 			// Receive a notification on the channel
 			Some(_) = ticker.next() => {
-				if let Err(e) = dbs.changefeed_process().await {
+				if let Err(e) = dbs.changefeed_process(&interval).await {
 					error!("Error running changefeed garbage collection: {e}");
 				}
 			}

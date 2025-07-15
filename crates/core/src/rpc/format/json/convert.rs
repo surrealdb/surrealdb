@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+
+use crate::rpc::V1String;
 use crate::rpc::protocol::v1::types::{V1Array, V1Geometry, V1Number, V1Object, V1Value};
 use serde::Serialize;
 use serde_json::Map;
@@ -30,6 +33,35 @@ impl From<V1Value> for serde_json::Value {
 			V1Value::Model(model) => json!(model),
 			V1Value::File(file) => file.to_string().into(),
 			V1Value::Regex(regex) => json!(regex),
+		}
+	}
+}
+
+impl TryFrom<serde_json::Value> for V1Value {
+	type Error = anyhow::Error;
+
+	fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+		match value {
+			JsonValue::Null => Ok(V1Value::None),
+			JsonValue::Bool(boolean) => Ok(V1Value::Bool(boolean)),
+			JsonValue::Number(number) => {
+				Ok(V1Value::Number(V1Number::Float(number.as_f64().unwrap())))
+			}
+			JsonValue::String(string) => Ok(V1Value::String(V1String(string))),
+			JsonValue::Array(array) => {
+				let mut vec = Vec::with_capacity(array.len());
+				for value in array {
+					vec.push(V1Value::try_from(value)?);
+				}
+				Ok(V1Value::Array(V1Array(vec)))
+			}
+			JsonValue::Object(object) => {
+				let mut map = BTreeMap::new();
+				for (key, value) in object {
+					map.insert(key, V1Value::try_from(value)?);
+				}
+				Ok(V1Value::Object(V1Object(map)))
+			}
 		}
 	}
 }

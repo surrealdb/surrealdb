@@ -8,7 +8,6 @@ use futures::StreamExt;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Array;
-use surrealdb_core::expr::Value;
 use surrealdb_core::protocol::TryFromValue;
 use surrealdb_core::sql::Function;
 use surrealdb_core::sql::Model;

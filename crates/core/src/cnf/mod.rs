@@ -139,3 +139,8 @@ pub static PKG_VERSION: LazyLock<String> =
 		}
 		_ => env!("CARGO_PKG_VERSION").to_owned(),
 	});
+
+/// Whether to output in a form readable for devices like screen and braile readers
+/// For example, by showing ⟨ and ⟩ as `
+pub static ACCESSIBLE_OUTPUT: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_ACCESSIBLE_OUTPUT", bool, false);
