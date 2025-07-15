@@ -25,7 +25,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup target add x86_64-unknown-linux-gnu
 RUN rustup target add aarch64-unknown-linux-gnu
 
-ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=/opt/rh/gcc-toolset-13/root/usr/bin/aarch64-redhat-linux-gcc
+#ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=/opt/rh/gcc-toolset-13/root/usr/bin/aarch64-redhat-linux-gcc
 
 WORKDIR /surrealdb
 
