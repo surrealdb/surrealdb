@@ -240,9 +240,9 @@ jobs:
               echo $(shasum -a 256 surreal-${{ inputs.name }}.linux-amd64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.linux-amd64.txt
 
               # Verify the binary is compatible with various Linux distributions
-              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/${compile_profile}/surreal:/surreal ubuntu:20.04 /surreal version
-              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/${compile_profile}/surreal:/surreal rockylinux:8 /surreal version
-              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/${compile_profile}/surreal:/surreal debian:11 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/${compile_profile}/surreal:/surreal ubuntu:24.04 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/${compile_profile}/surreal:/surreal rockylinux/rockylinux:10 /surreal version
+              docker run --platform linux/amd64 --rm -t -v ./target/x86_64-unknown-linux-gnu/${compile_profile}/surreal:/surreal debian:12 /surreal version
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
@@ -287,9 +287,9 @@ jobs:
               echo $(shasum -a 256 surreal-${{ inputs.name }}.linux-arm64.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.linux-arm64.txt
 
               # Verify the binary is compatible with various Linux distributions
-              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/${compile_profile}/surreal:/surreal ubuntu:20.04 /surreal version
-              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/${compile_profile}/surreal:/surreal rockylinux:8 /surreal version
-              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/${compile_profile}/surreal:/surreal debian:11 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/${compile_profile}/surreal:/surreal ubuntu:24.04 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/${compile_profile}/surreal:/surreal rockylinux/rockylinux:10 /surreal version
+              docker run --platform linux/arm64 --rm -t -v ./target/aarch64-unknown-linux-gnu/${compile_profile}/surreal:/surreal debian:12 /surreal version
 
           # Windows amd64
           - arch: x86_64-pc-windows-msvc
