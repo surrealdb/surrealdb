@@ -130,7 +130,7 @@ impl FullTextIndex {
 					// Check if the term has already been deleted
 					if set.insert(s) {
 						// Delete the term
-						let key = self.ikb.new_td(s, doc_id);
+						let key = self.ikb.new_td(s, Some(doc_id));
 						tx.del(key).await?;
 						self.set_tt(&tx, s, doc_id, &nid, false).await?;
 					}
@@ -223,7 +223,7 @@ impl FullTextIndex {
 		let mut td = TermDocument::default();
 		for (t, o) in offsets {
 			{
-				let key = self.ikb.new_td(t, id);
+				let key = self.ikb.new_td(t, Some(id));
 				td.f = o.len() as TermFrequency;
 				td.o = o;
 				tx.set(key, revision::to_vec(&td)?, None).await?;
@@ -243,7 +243,7 @@ impl FullTextIndex {
 		let (dl, tf) = Analyzer::extract_frequencies(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, f) in tf {
-			let key = self.ikb.new_td(t, id);
+			let key = self.ikb.new_td(t, Some(id));
 			td.f = f;
 			tx.set(key, revision::to_vec(&td)?, None).await?;
 			self.set_tt(tx, t, id, nid, true).await?;
@@ -302,7 +302,7 @@ impl FullTextIndex {
 	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {
 		// First we read the compacted documents
 		let mut docs = None;
-		let td = self.ikb.new_tt_compacted(term);
+		let td = self.ikb.new_td(term, None);
 		if let Some(v) = tx.get(td, None).await? {
 			docs = Some(RoaringTreemap::deserialize_from(&mut v.as_slice())?);
 		}
@@ -310,16 +310,22 @@ impl FullTextIndex {
 		let (beg, end) = self.ikb.new_tt_range(term)?;
 		for k in tx.keys(beg..end, u32::MAX, None).await? {
 			let tt = Tt::decode(&k)?;
-			if let Some((doc_id, ..)) = tt.d {
-				if let Some(docs) = &mut docs {
-					docs.insert(doc_id);
+			if let Some(docs) = &mut docs {
+				if tt.add {
+					docs.insert(tt.doc_id);
 				} else {
-					docs = Some(RoaringTreemap::from_iter(vec![doc_id]));
+					docs.remove(tt.doc_id);
 				}
+			} else if tt.add {
+				docs = Some(RoaringTreemap::from_iter(vec![tt.doc_id]));
 			}
 		}
 		// If `docs` is empty, we return `None`
 		Ok(docs.filter(|docs| !docs.is_empty()))
+	}
+
+	async fn _compact_term_docs(&self, _tx: &Transaction) {
+		todo!()
 	}
 
 	pub(in crate::idx) fn new_hits_iterator(
@@ -394,7 +400,7 @@ impl FullTextIndex {
 		id: DocId,
 		term: &str,
 	) -> Result<Option<TermDocument>> {
-		let key = self.ikb.new_td(term, id);
+		let key = self.ikb.new_td(term, Some(id));
 		if let Some(v) = tx.get(key, None).await? {
 			let td: TermDocument = revision::from_slice(&v)?;
 			Ok(Some(td))

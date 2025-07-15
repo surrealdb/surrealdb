@@ -23,7 +23,11 @@ pub struct Dc<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub ids: Option<(DocId, Uuid, Uuid)>,
+	pub doc_id: DocId,
+	#[serde(with = "uuid::serde::compact")]
+	pub nid: Uuid,
+	#[serde(with = "uuid::serde::compact")]
+	pub uid: Uuid,
 }
 impl_key!(Dc<'a>);
 
@@ -34,12 +38,15 @@ impl Categorise for Dc<'_> {
 }
 
 impl<'a> Dc<'a> {
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
-		ids: Option<(DocId, Uuid, Uuid)>,
+		doc_id: DocId,
+		nid: Uuid,
+		uid: Uuid,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -54,8 +61,14 @@ impl<'a> Dc<'a> {
 			_e: b'!',
 			_f: b'd',
 			_g: b'c',
-			ids,
+			doc_id,
+			nid,
+			uid,
 		}
+	}
+
+	pub(crate) fn new_root(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Result<Vec<u8>> {
+		DcPrefix::new(ns, db, tb, ix).encode()
 	}
 
 	pub(crate) fn range(
@@ -68,7 +81,7 @@ impl<'a> Dc<'a> {
 		let mut beg = prefix.encode()?;
 		beg.extend_from_slice(b"\0");
 		let mut end = prefix.encode()?;
-		end.extend_from_slice(b"\x01\xff\xff\xff\xff\xff\xff\xff\xff");
+		end.extend_from_slice(b"\xff\xff\xff\xff\xff\xff\xff\xff");
 		Ok((beg, end))
 	}
 }
@@ -116,8 +129,15 @@ mod tests {
 
 	#[test]
 	fn key_with_ids() {
-		let ids = Some((129, Uuid::from_u128(1), Uuid::from_u128(2)));
-		let val = Dc::new("testns", "testdb", "testtb", "testix", ids);
+		let val = Dc::new(
+			"testns",
+			"testdb",
+			"testtb",
+			"testix",
+			129,
+			Uuid::from_u128(1),
+			Uuid::from_u128(2),
+		);
 		let enc = Dc::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\x01\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\x10\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\x10\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 		let dec = Dc::decode(&enc).unwrap();
@@ -125,12 +145,10 @@ mod tests {
 	}
 
 	#[test]
-	fn key_no_id() {
-		let val = Dc::new("testns", "testdb", "testtb", "testix", None);
-		let enc = Dc::encode(&val).unwrap();
+	fn key_root() {
+		let enc = Dc::new_root("testns", "testdb", "testtb", "testix").unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0");
-		let dec = Dc::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let _ = DcPrefix::decode(&enc).unwrap();
 	}
 
 	#[test]

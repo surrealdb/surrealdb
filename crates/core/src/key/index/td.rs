@@ -22,7 +22,7 @@ pub struct Td<'a> {
 	_f: u8,
 	_g: u8,
 	pub term: &'a str,
-	pub id: DocId,
+	pub id: Option<DocId>,
 }
 impl_key!(Td<'a>);
 
@@ -39,7 +39,7 @@ impl<'a> Td<'a> {
 		tb: &'a str,
 		ix: &'a str,
 		term: &'a str,
-		id: DocId,
+		id: Option<DocId>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -67,7 +67,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Td::new("testns", "testdb", "testtb", "testix", "term", 129);
+		let val = Td::new("testns", "testdb", "testtb", "testix", "term", Some(129));
 		let enc = Td::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0\x01\0\0\0\0\0\0\0\x81");
 		let dec = Td::decode(&enc).unwrap();

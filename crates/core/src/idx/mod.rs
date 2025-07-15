@@ -154,7 +154,7 @@ impl IndexKeyBase {
 		Is::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, nid).encode()
 	}
 
-	fn new_td<'a>(&'a self, term: &'a str, doc_id: DocId) -> Td<'a> {
+	fn new_td<'a>(&'a self, term: &'a str, doc_id: Option<DocId>) -> Td<'a> {
 		Td::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, doc_id)
 	}
 
@@ -166,11 +166,7 @@ impl IndexKeyBase {
 		uid: Uuid,
 		add: bool,
 	) -> Tt<'a> {
-		Tt::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, Some((doc_id, nid, uid, add)))
-	}
-
-	fn new_tt_compacted<'a>(&'a self, term: &'a str) -> Tt<'a> {
-		Tt::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, None)
+		Tt::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, doc_id, nid, uid, add)
 	}
 
 	fn new_tt_range(&self, term: &str) -> Result<(Key, Key)> {
@@ -178,11 +174,11 @@ impl IndexKeyBase {
 	}
 
 	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> Dc {
-		Dc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, Some((doc_id, nid, uid)))
+		Dc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id, nid, uid)
 	}
 
-	fn _new_dc_compacted(&self) -> Dc {
-		Dc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, None)
+	fn _new_dc_compacted(&self) -> Result<Key> {
+		Dc::new_root(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
 	fn new_dc_range(&self) -> Result<(Key, Key)> {

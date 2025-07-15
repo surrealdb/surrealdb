@@ -24,7 +24,12 @@ pub struct Tt<'a> {
 	_f: u8,
 	_g: u8,
 	pub term: &'a str,
-	pub d: Option<(DocId, Uuid, Uuid, bool)>,
+	pub doc_id: DocId,
+	#[serde(with = "uuid::serde::compact")]
+	pub nid: Uuid,
+	#[serde(with = "uuid::serde::compact")]
+	pub uid: Uuid,
+	pub add: bool,
 }
 
 impl_key!(Tt<'a>);
@@ -36,13 +41,17 @@ impl Categorise for Tt<'_> {
 }
 
 impl<'a> Tt<'a> {
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
 		term: &'a str,
-		d: Option<(DocId, Uuid, Uuid, bool)>,
+		doc_id: DocId,
+		nid: Uuid,
+		uid: Uuid,
+		add: bool,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -58,7 +67,10 @@ impl<'a> Tt<'a> {
 			_f: b't',
 			_g: b't',
 			term,
-			d,
+			doc_id,
+			nid,
+			uid,
+			add,
 		}
 	}
 
@@ -71,9 +83,9 @@ impl<'a> Tt<'a> {
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = TtPrefix::new(ns, db, tb, ix, term);
 		let mut beg = prefix.encode()?;
-		beg.extend_from_slice(b"\x01\0\0\0\0\0\0\0\0");
+		beg.extend([0; 41]);
 		let mut end = prefix.encode()?;
-		end.extend_from_slice(b"\x01\xff\xff\xff\xff\xff\xff\xff\xff");
+		end.extend([255; 41]);
 		Ok((beg, end))
 	}
 }
@@ -129,10 +141,13 @@ mod tests {
 			"testtb",
 			"testix",
 			"term",
-			Some((129, Uuid::from_u128(1), Uuid::from_u128(2), true)),
+			129,
+			Uuid::from_u128(1),
+			Uuid::from_u128(2),
+			true,
 		);
 		let enc = Tt::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\x01\0\0\0\0\0\0\0\x81");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x01");
 		let dec = Tt::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
@@ -140,10 +155,10 @@ mod tests {
 	#[test]
 	fn range() {
 		let (beg, end) = Tt::range("testns", "testdb", "testtb", "testix", "term").unwrap();
-		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0\x01\0\0\0\0\0\0\0\0");
+		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0\x01\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 }
