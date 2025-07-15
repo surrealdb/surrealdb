@@ -3,7 +3,7 @@
 # This stage is used to build the SurrealDB linux binary
 ###
 
-FROM docker.io/rockylinux/rockylinux:10 AS builder
+FROM docker.io/rockylinux/rockylinux:9 AS builder
 
 RUN dnf install -y \
     gcc \
