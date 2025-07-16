@@ -776,6 +776,23 @@ impl Datastore {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn index_compaction(&self, interval: &Duration) -> Result<()> {
+		let lh = LeaseHandler::new(
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			*interval * 2,
+		)?;
+		// Attempt to acquire a lease for the ChangeFeedCleanup task
+		// If we don't get the lease, another node is handling this task
+		if !lh.has_lease().await? {
+			return Ok(());
+		}
+		let _lh = Some(lh);
+		todo!()
+	}
+
 	/// Performs a database import from SQL
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {

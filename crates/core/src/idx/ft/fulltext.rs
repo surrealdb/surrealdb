@@ -324,7 +324,7 @@ impl FullTextIndex {
 		Ok(docs.filter(|docs| !docs.is_empty()))
 	}
 
-	async fn _compact_term_docs(&self, _tx: &Transaction) {
+	async fn compact_term_docs(&self, _tx: &Transaction) -> Result<()> {
 		todo!()
 	}
 
@@ -364,10 +364,38 @@ impl FullTextIndex {
 	}
 	pub(in crate::idx) async fn new_scorer(&self, ctx: &Context) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
-			let sc = Scorer::new(&self.ikb, &ctx.tx(), bm25.clone()).await?;
+			let dlc = self.compute_doc_length_and_count(&ctx.tx()).await?;
+			let sc = Scorer::new(dlc, bm25.clone());
 			return Ok(Some(sc));
 		}
 		Ok(None)
+	}
+
+	async fn compute_doc_length_and_count(&self, tx: &Transaction) -> Result<DocLengthAndCount> {
+		let mut dlc = DocLengthAndCount::default();
+		let (beg, end) = self.ikb.new_dc_range()?;
+		// Compute the total number of documents (DocCount) and the total number of terms (DocLength)
+		// This key list is supposed to be small, subject to compaction.
+		// The root key is the compacted values, and the others are deltas from transaction not yet compacted.
+		for (_, v) in tx.getr(beg..end, None).await? {
+			let st: DocLengthAndCount = revision::from_slice(&v)?;
+			dlc.doc_count += st.doc_count;
+			dlc.total_docs_length += st.total_docs_length;
+		}
+		Ok(dlc)
+	}
+
+	async fn compact_doc_length_and_count(&self, tx: &Transaction) -> Result<()> {
+		let dlc = self.compute_doc_length_and_count(tx).await?;
+		let key = self.ikb.new_dc_compacted()?;
+		tx.set(key, revision::to_vec(&dlc)?, None).await?;
+		Ok(())
+	}
+
+	pub(crate) async fn compaction(&self, tx: &Transaction) -> Result<()> {
+		self.compact_doc_length_and_count(tx).await?;
+		self.compact_term_docs(tx).await?;
+		Ok(())
 	}
 
 	pub(in crate::idx) async fn highlight(
@@ -477,24 +505,14 @@ pub(in crate::idx) struct Scorer {
 }
 
 impl Scorer {
-	async fn new(ikb: &IndexKeyBase, tx: &Transaction, bm25: Bm25Params) -> Result<Self> {
-		let mut dlc = DocLengthAndCount::default();
-		let (beg, end) = ikb.new_dc_range()?;
-		// Compute the total number of documents (DocCount) and the total number of terms (DocLength)
-		// This key list is supposed to be small.
-		// One is compacted, and few others are transaction not yet compacted.
-		for (_, v) in tx.getr(beg..end, None).await? {
-			let st: DocLengthAndCount = revision::from_slice(&v)?;
-			dlc.doc_count += st.doc_count;
-			dlc.total_docs_length += st.total_docs_length;
-		}
+	fn new(dlc: DocLengthAndCount, bm25: Bm25Params) -> Self {
 		let doc_count = dlc.doc_count as f32;
 		let average_doc_length = (dlc.total_docs_length as f32) / doc_count;
-		Ok(Self {
+		Self {
 			bm25,
 			doc_count,
 			average_doc_length,
-		})
+		}
 	}
 
 	async fn term_score(

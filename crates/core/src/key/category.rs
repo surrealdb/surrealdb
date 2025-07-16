@@ -30,6 +30,8 @@ pub enum Category {
 	User,
 	/// crate::key::root::tl                 /!tl{tl}
 	TaskLease,
+	/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uuid}
+	IndexCompaction,
 	///
 	/// ------------------------------
 	///
@@ -267,6 +269,7 @@ impl Display for Category {
 			Self::IndexFullTextDocIdsSequenceState => "IndexFullTextDocIdsSequenceState",
 			Self::IndexFullTextDocCountAndLength => "IndexFullTextDocCountAndLength",
 			Self::IndexTermDocuments => "IndexTermDocuments",
+			Self::IndexCompaction => "IndexCompaction",
 		};
 		write!(f, "{}", name)
 	}

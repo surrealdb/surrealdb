@@ -177,7 +177,7 @@ impl IndexKeyBase {
 		Dc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id, nid, uid)
 	}
 
-	fn _new_dc_compacted(&self) -> Result<Key> {
+	fn new_dc_compacted(&self) -> Result<Key> {
 		Dc::new_root(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
