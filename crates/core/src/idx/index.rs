@@ -151,7 +151,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_search(&mut self, stk: &mut Stk, p: &SearchParams) -> Result<()> {
 		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name)?;
+		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
 
 		let mut ft =
 			SearchIndex::new(self.ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
@@ -166,9 +166,11 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_fulltext(&mut self, stk: &mut Stk, p: &FullTextParams) -> Result<()> {
 		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name)?;
+		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
 		// Build a FullText instance
-		let s = FullTextIndex::new(self.ctx, self.opt, ikb, p).await?;
+		let s =
+			FullTextIndex::new(self.opt.id()?, self.ctx.get_index_stores(), &self.ctx.tx(), ikb, p)
+				.await?;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
 			s.remove_content(stk, self.ctx, self.opt, self.rid, o).await?
@@ -190,7 +192,7 @@ impl<'a> IndexOperation<'a> {
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {
 		let txn = self.ctx.tx();
 		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name)?;
+		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

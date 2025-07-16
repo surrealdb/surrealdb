@@ -13,6 +13,7 @@ use crate::idx::ft::offset::Offset;
 use crate::idx::ft::search::Bm25Params;
 use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
+use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
 use crate::kvs::KeyDecode;
 use crate::kvs::Transaction;
@@ -73,16 +74,13 @@ pub(crate) struct FullTextIndex {
 
 impl FullTextIndex {
 	pub(crate) async fn new(
-		ctx: &Context,
-		opt: &Options,
+		nid: Uuid,
+		ixs: &IndexStores,
+		tx: &Transaction,
 		ikb: IndexKeyBase,
 		p: &FullTextParams,
 	) -> Result<Self> {
-		let tx = ctx.tx();
-		let (ns, db) = opt.ns_db()?;
-		let nid = opt.id()?;
-		let az = tx.get_db_analyzer(ns, db, &p.az).await?;
-		let ixs = ctx.get_index_stores();
+		let az = tx.get_db_analyzer(&ikb.0.ns, &ikb.0.db, &p.az).await?;
 		ixs.mappers().check(&az).await?;
 		let analyzer = Analyzer::new(ixs, az)?;
 		let mut bm25 = None;

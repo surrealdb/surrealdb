@@ -35,7 +35,7 @@ impl AnalyzeStatement {
 				// Read the index
 				let (ns, db) = opt.ns_db()?;
 				let ix = ctx.tx().get_tb_index(ns, db, tb, idx).await?;
-				let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name)?;
+				let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {

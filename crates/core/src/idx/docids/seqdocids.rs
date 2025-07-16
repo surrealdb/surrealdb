@@ -123,7 +123,7 @@ mod tests {
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Context, SeqDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let ikb = IndexKeyBase::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX).unwrap();
+		let ikb = IndexKeyBase::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX);
 		ctx.set_transaction(tx.into());
 		let d = SeqDocIds::new(Uuid::nil(), ikb);
 		(ctx.freeze(), d)

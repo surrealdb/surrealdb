@@ -159,7 +159,7 @@ impl InnerQueryExecutor {
 						Entry::Vacant(e) => {
 							let (ns, db) = opt.ns_db()?;
 							let ix: &DefineIndexStatement = e.key();
-							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name)?;
+							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 							let si = SearchIndex::new(
 								ctx,
 								opt,
@@ -199,8 +199,15 @@ impl InnerQueryExecutor {
 						Entry::Vacant(e) => {
 							let (ns, db) = opt.ns_db()?;
 							let ix: &DefineIndexStatement = e.key();
-							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name)?;
-							let ft = FullTextIndex::new(ctx, opt, ikb, p).await?;
+							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+							let ft = FullTextIndex::new(
+								opt.id()?,
+								ctx.get_index_stores(),
+								&ctx.tx(),
+								ikb,
+								p,
+							)
+							.await?;
 							let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
 							e.insert(PerIndexReferenceIndex::FullText(ft));
 							fte
@@ -243,7 +250,7 @@ impl InnerQueryExecutor {
 							Entry::Vacant(e) => {
 								let (ns, db) = opt.ns_db()?;
 								let ix: &DefineIndexStatement = e.key();
-								let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name)?;
+								let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 								let tx = ctx.tx();
 								let mti =
 									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;

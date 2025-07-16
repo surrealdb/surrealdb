@@ -36,6 +36,7 @@ use crate::key::index::ib::Ib;
 use crate::key::index::is::Is;
 use crate::key::index::td::Td;
 use crate::key::index::tt::Tt;
+use crate::key::root::ic::Ic;
 use crate::kvs::{Key, KeyEncode as _, Val};
 use anyhow::Result;
 use revision::Revisioned;
@@ -57,13 +58,22 @@ struct Inner {
 }
 
 impl IndexKeyBase {
-	pub(crate) fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Self> {
-		Ok(Self(Arc::new(Inner {
+	pub(crate) fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Self {
+		Self(Arc::new(Inner {
 			ns: ns.to_string(),
 			db: db.to_string(),
 			tb: tb.to_string(),
 			ix: ix.to_string(),
-		})))
+		}))
+	}
+
+	pub(crate) fn from_ic(ic: &Ic) -> Self {
+		Self(Arc::new(Inner {
+			ns: ic.ns.to_string(),
+			db: ic.db.to_string(),
+			tb: ic.tb.to_string(),
+			ix: ic.ix.to_string(),
+		}))
 	}
 
 	fn new_bc_key(&self, term_id: TermId) -> Result<Key> {

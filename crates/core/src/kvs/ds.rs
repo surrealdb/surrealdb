@@ -1,7 +1,7 @@
-use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
+use super::{KeyDecode, export};
 use crate::buc::BucketConnections;
 use crate::cf;
 use crate::ctx::MutableContext;
@@ -15,12 +15,15 @@ use crate::dbs::{
 	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
 };
 use crate::err::Error;
-use crate::expr::LogicalPlan;
 use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
+use crate::expr::{Index, LogicalPlan};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::store::IndexStores;
+use crate::key::root::ic::Ic;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[expect(unused_imports)]
@@ -789,8 +792,48 @@ impl Datastore {
 		if !lh.has_lease().await? {
 			return Ok(());
 		}
-		let _lh = Some(lh);
-		todo!()
+		// Create a new transaction
+		let txn = self.transaction(Write, Optimistic).await?;
+		// Collect every item in the queue
+		let (beg, end) = Ic::range();
+		let previous = Ic::new("", "", "", "", Uuid::nil(), Uuid::nil());
+		// Returns an ordered list of indexes that require compaction
+		for (k, _) in txn.getr(beg..end, None).await? {
+			let ic = Ic::decode(&k)?;
+			// If the index has already been compacted, we can ignore the task
+			if previous.ix != ic.ix
+				|| previous.tb != ic.tb
+				|| previous.db != ic.db
+				|| previous.ns != ic.ns
+			{
+				match txn.get_tb_index(ic.ns, ic.db, ic.tb, ic.ix).await {
+					Ok(ix) => {
+						if let Index::FullText(p) = &ix.index {
+							let ft = FullTextIndex::new(
+								self.id(),
+								&self.index_stores,
+								&txn,
+								IndexKeyBase::from_ic(&ic),
+								p,
+							)
+							.await?;
+							ft.compaction(&txn).await?;
+						}
+					}
+					Err(e) => {
+						if matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+							trace!(target: TARGET, "Index compaction: Index {} not found, skipping", ic.ix);
+						} else {
+							bail!(e);
+						}
+					}
+				}
+			}
+			txn.del(k).await?;
+			lh.try_maintain_lease().await?;
+		}
+		txn.commit().await?;
+		Ok(())
 	}
 
 	/// Performs a database import from SQL
@@ -804,7 +847,7 @@ impl Datastore {
 		self.execute(sql, sess, None).await
 	}
 
-	/// Run the datastore shutdown tasks, perfoming any necessary cleanup
+	/// Run the datastore shutdown tasks, performing any necessary cleanup
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs
