@@ -79,9 +79,9 @@ impl<'a> Dc<'a> {
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = DcPrefix::new(ns, db, tb, ix);
 		let mut beg = prefix.encode()?;
-		beg.extend_from_slice(b"\0");
+		beg.extend([0; 40]);
 		let mut end = prefix.encode()?;
-		end.extend_from_slice(b"\xff\xff\xff\xff\xff\xff\xff\xff");
+		end.extend([255; 40]);
 		Ok((beg, end))
 	}
 }
@@ -139,7 +139,7 @@ mod tests {
 			Uuid::from_u128(2),
 		);
 		let enc = Dc::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\x01\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\x10\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\x10\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 		let dec = Dc::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
@@ -147,17 +147,18 @@ mod tests {
 	#[test]
 	fn key_root() {
 		let enc = Dc::new_root("testns", "testdb", "testtb", "testix").unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc");
 		let _ = DcPrefix::decode(&enc).unwrap();
 	}
 
 	#[test]
 	fn range() {
 		let (beg, end) = Dc::range("testns", "testdb", "testtb", "testix").unwrap();
-		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0");
+		println!("{} {}", beg.len(), end.len());
+		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!dc\x01\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*testns\0*testdb\0*testtb\0+testix\0!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 }

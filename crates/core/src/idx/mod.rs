@@ -32,7 +32,9 @@ use crate::key::index::vm::Vm;
 
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
+use crate::key::index::ia::Ia;
 use crate::key::index::ib::Ib;
+use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
 use crate::key::index::td::Td;
 use crate::key::index::tt::Tt;
@@ -152,8 +154,20 @@ impl IndexKeyBase {
 		IdKey::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 
+	pub(crate) fn new_ia_key(&self, i: u32) -> Ia {
+		Ia::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, i)
+	}
+
+	pub(crate) fn new_ip_key(&self, id: Id) -> Ip {
+		Ip::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
+	}
+
 	pub(crate) fn new_ib_key(&self, start: i64) -> Result<Key> {
 		Ib::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, start).encode()
+	}
+
+	pub(crate) fn new_ic_key(&self, nid: Uuid) -> Ic {
+		Ic::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, nid, Uuid::now_v7())
 	}
 
 	pub(crate) fn new_ib_range(&self) -> Result<(Key, Key)> {
@@ -199,8 +213,12 @@ impl IndexKeyBase {
 		Dl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
 
-	fn table(&self) -> &str {
+	pub(crate) fn table(&self) -> &str {
 		&self.0.tb
+	}
+
+	pub(crate) fn index(&self) -> &str {
+		&self.0.ix
 	}
 }
 

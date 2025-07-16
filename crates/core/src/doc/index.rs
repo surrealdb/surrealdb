@@ -1,6 +1,7 @@
 use crate::ctx::Context;
+use crate::dbs::Force;
 use crate::dbs::Options;
-use crate::dbs::{Force, Statement};
+use crate::dbs::Statement;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::array::Array;
@@ -79,7 +80,7 @@ impl Document {
 				// The index builder consumed the value, which means it is currently building the index asynchronously,
 				// we don't index the document and let the index builder do it later.
 				ConsumeResult::Enqueued => return Ok(()),
-				// The index builder is done, the index has been built, we can proceed normally
+				// The index builder is done, the index has been built; we can proceed normally
 				ConsumeResult::Ignored(o, n) => (o, n),
 			}
 		} else {
@@ -406,20 +407,26 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<()> {
 		let (ns, db) = self.opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
+		let tx = ctx.tx();
 		// Build a FullText instance
-		let s =
-			FullTextIndex::new(self.opt.id()?, ctx.get_index_stores(), &ctx.tx(), ikb, p).await?;
+		let fti =
+			FullTextIndex::new(self.opt.id()?, ctx.get_index_stores(), &tx, ikb.clone(), p).await?;
+		let mut rc = false;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
-			s.remove_content(stk, ctx, self.opt, self.rid, o).await?
+			fti.remove_content(stk, ctx, self.opt, self.rid, o, &mut rc).await?
 		} else {
 			None
 		};
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			s.index_content(stk, ctx, self.opt, self.rid, n).await?;
+			fti.index_content(stk, ctx, self.opt, self.rid, n, &mut rc).await?;
 		} else if let Some(doc_id) = doc_id {
-			s.remove_doc(ctx, doc_id).await?;
+			fti.remove_doc(ctx, doc_id).await?;
+		}
+		// Do we need to trigger the compaction?
+		if rc {
+			FullTextIndex::trigger_compaction(&ikb, &tx, self.opt.id()?).await?;
 		}
 		Ok(())
 	}

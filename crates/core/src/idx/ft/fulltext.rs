@@ -110,6 +110,7 @@ impl FullTextIndex {
 		opt: &Options,
 		rid: &Thing,
 		content: Vec<Value>,
+		require_compaction: &mut bool,
 	) -> Result<Option<DocId>> {
 		// Collect the tokens.
 		let tokens =
@@ -148,6 +149,7 @@ impl FullTextIndex {
 					};
 					let key = self.ikb.new_dc_with_id(doc_id, opt.id()?, Uuid::now_v7());
 					tx.put(key, revision::to_vec(&dcl)?, None).await?;
+					*require_compaction = true;
 				}
 			}
 			Ok(Some(doc_id))
@@ -169,6 +171,7 @@ impl FullTextIndex {
 		opt: &Options,
 		rid: &Thing,
 		content: Vec<Value>,
+		require_compaction: &mut bool,
 	) -> Result<()> {
 		let tx = ctx.tx();
 		let nid = opt.id()?;
@@ -195,6 +198,7 @@ impl FullTextIndex {
 				doc_count: 1,
 			};
 			tx.put(key, revision::to_vec(&dcl)?, None).await?;
+			*require_compaction = true;
 		}
 		// We're done
 		Ok(())
@@ -393,6 +397,16 @@ impl FullTextIndex {
 	pub(crate) async fn compaction(&self, tx: &Transaction) -> Result<()> {
 		self.compact_doc_length_and_count(tx).await?;
 		self.compact_term_docs(tx).await?;
+		Ok(())
+	}
+
+	pub(crate) async fn trigger_compaction(
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		nid: Uuid,
+	) -> Result<()> {
+		let ic = ikb.new_ic_key(nid);
+		tx.put(ic, b"0", None).await?;
 		Ok(())
 	}
 
