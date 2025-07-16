@@ -247,7 +247,11 @@ For just getting started with a development server running in memory, you can pa
 
 ```bash
 docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log info --user root --pass root memory
-``` 
+```
+
+Additional logging options include `--log-socket` to stream logs to a Unix socket
+(or `SURREAL_LOG_SOCKET`) and `--log-file-socket` to send log file output to a
+socket via `SURREAL_LOG_FILE_SOCKET`.
 
 <h2><img height="20" src="./img/features.svg">&nbsp;&nbsp;Quick look</h2>
 

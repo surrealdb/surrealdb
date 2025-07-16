@@ -19,3 +19,6 @@ To adjust the verbosity of OpenTelemetry traces separately from standard logs,
 use the `--log-otel-level` command-line option (or `SURREAL_LOG_OTEL_LEVEL`
 environment variable). File logging can likewise be tuned with
 `--log-file-level` / `SURREAL_LOG_FILE_LEVEL`.
+Logs can be streamed to a Unix socket using `--log-socket` (or
+`SURREAL_LOG_SOCKET`). If file logging is enabled, log files may also be written
+to a socket with `--log-file-socket` / `SURREAL_LOG_FILE_SOCKET`.

@@ -49,11 +49,13 @@ pub struct Builder {
 	filter: CustomFilter,
 	file_filter: Option<CustomFilter>,
 	otel_filter: Option<CustomFilter>,
-	log_file_enabled: bool,
-	log_file_format: LogFormat,
-	log_file_path: Option<String>,
-	log_file_name: Option<String>,
-	log_file_rotation: Option<String>,
+        log_file_enabled: bool,
+        log_file_format: LogFormat,
+        log_file_path: Option<String>,
+        log_file_name: Option<String>,
+       log_file_rotation: Option<String>,
+       log_socket: Option<String>,
+       log_file_socket: Option<String>,
 }
 
 pub fn builder() -> Builder {
@@ -71,12 +73,14 @@ impl Default for Builder {
 			file_filter: None,
 			otel_filter: None,
 			log_file_format: LogFormat::Text,
-			log_file_enabled: false,
-			log_file_path: Some("logs".to_string()),
-			log_file_name: Some("surrealdb.log".to_string()),
-			log_file_rotation: Some("daily".to_string()),
-		}
-	}
+                       log_file_enabled: false,
+                       log_file_path: Some("logs".to_string()),
+                       log_file_name: Some("surrealdb.log".to_string()),
+                       log_file_rotation: Some("daily".to_string()),
+                       log_socket: None,
+                       log_file_socket: None,
+               }
+       }
 }
 
 impl Builder {
@@ -150,10 +154,22 @@ impl Builder {
 	}
 
 	/// Set the log file rotation interval (daily, hourly, or never)
-	pub fn with_log_file_rotation(mut self, rotation: Option<String>) -> Self {
-		self.log_file_rotation = rotation;
-		self
-	}
+        pub fn with_log_file_rotation(mut self, rotation: Option<String>) -> Self {
+                self.log_file_rotation = rotation;
+                self
+        }
+
+       /// Set the socket path for streaming log output
+       pub fn with_log_socket(mut self, socket: Option<String>) -> Self {
+               self.log_socket = socket;
+               self
+       }
+
+       /// Set the socket path for streaming log file output
+       pub fn with_log_file_socket(mut self, socket: Option<String>) -> Self {
+               self.log_file_socket = socket;
+               self
+       }
 
 	/// Build a tracing dispatcher with the logs and tracer subscriber
 	pub fn build(&self) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, Vec<WorkerGuard>)> {
