@@ -55,6 +55,11 @@ impl RpcContext for Http {
 	/// Live queries are disabled on HTTP
 	const LQ_SUPPORT: bool = false;
 
+	/// Handles the cleanup of live queries
+	async fn cleanup_lqs(&self) {
+		// Do nothing as HTTP is stateless
+	}
+
 	// ------------------------------
 	// GraphQL
 	// ------------------------------

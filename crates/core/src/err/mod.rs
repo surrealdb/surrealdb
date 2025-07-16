@@ -468,7 +468,8 @@ pub enum Error {
 	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
 	ComputationDepthExceeded,
 
-	#[error("invalid statement: {0}")]
+	/// Tried to execute a statement that can't be used here
+	#[error("Invalid statement: {0}")]
 	InvalidStatement(String),
 
 	/// Can not execute statement using the specified value

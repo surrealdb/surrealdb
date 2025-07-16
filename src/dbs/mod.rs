@@ -13,6 +13,8 @@ use surrealdb::dbs::capabilities::{
 use surrealdb::kvs::Datastore;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 
+const TARGET: &str = "surreal::dbs";
+
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
 	#[arg(help = "Whether strict mode is enabled on this database instance")]
@@ -489,6 +491,8 @@ impl From<DbsCapabilities> for Capabilities {
 	}
 }
 
+/// Initialise the database server
+#[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 pub async fn init(
 	StartCommandDbsOptions {
 		strict_mode,
@@ -542,12 +546,18 @@ pub async fn init(
 	dbs.check_version().await?;
 	// Import file at start, if provided
 	if let Some(file) = import_file {
-		info!("Importing data from file: {:?}", file);
+		// Log the startup import path
+		info!(target: TARGET, file = ?file, "Importing data from file");
+		// Read the full file contents
 		let sql = fs::read_to_string(file)?;
-		dbs.import(&sql, &Session::owner()).await?;
+		// Execute the SurrealQL file
+		dbs.startup(&sql, &Session::owner()).await?;
 	}
 	// Setup initial server auth credentials
 	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
+		// Log the initialisation of credentials
+		info!(target: TARGET, user = %user, "Initialising credentials");
+		// Initialise the credentials
 		dbs.initialise_credentials(user, pass).await?;
 	}
 	// Bootstrap the datastore
@@ -556,6 +566,7 @@ pub async fn init(
 	Ok(dbs)
 }
 
+/// Performs a database fix
 pub async fn fix(path: String) -> Result<()> {
 	// Parse and setup the desired kv datastore
 	let dbs = Arc::new(Datastore::new(&path).await?);
@@ -574,7 +585,6 @@ pub async fn fix(path: String) -> Result<()> {
 #[cfg(test)]
 mod tests {
 	use std::str::FromStr;
-
 	use surrealdb::iam::verify::verify_root_creds;
 	use surrealdb::kvs::LockType::*;
 	use surrealdb::kvs::TransactionType::*;
@@ -634,15 +644,22 @@ mod tests {
 		)
 	}
 
-	#[test(tokio::test)]
+	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_capabilities() {
 		let server1 = {
 			let s = MockServer::start().await;
 			let get = Mock::given(method("GET"))
+				.and(path("/"))
+				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
+				.expect(1);
+
+			let get2 = Mock::given(method("GET"))
+				.and(path("/test"))
 				.respond_with(ResponseTemplate::new(200).set_body_string("SUCCESS"))
 				.expect(1);
 
 			s.register(get).await;
+			s.register(get2).await;
 			s
 		};
 
@@ -676,7 +693,7 @@ mod tests {
 		// (Datastore, Session, Query, Succeeds, Response Contains)
 		let cases = vec![
 			//
-			// Functions and Networking are allowed
+			// 0 - Functions and Networking are allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -690,7 +707,7 @@ mod tests {
 				"SUCCESS".to_string(),
 			),
 			//
-			// Scripting is allowed
+			// 1 - Scripting is allowed
 			//
 			(
 				Datastore::new("memory")
@@ -703,7 +720,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// Scripting is not allowed
+			// 2 - Scripting is not allowed
 			//
 			(
 				Datastore::new("memory")
@@ -716,7 +733,7 @@ mod tests {
 				"Scripting functions are not allowed".to_string(),
 			),
 			//
-			// Anonymous actor when guest access is allowed and auth is enabled, succeeds
+			// 3 - Anonymous actor when guest access is allowed and auth is enabled, succeeds
 			//
 			(
 				Datastore::new("memory")
@@ -730,7 +747,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// Anonymous actor when guest access is not allowed and auth is enabled, throws error
+			// 4 - Anonymous actor when guest access is not allowed and auth is enabled, throws error
 			//
 			(
 				Datastore::new("memory")
@@ -744,7 +761,7 @@ mod tests {
 				"Not enough permissions to perform this action".to_string(),
 			),
 			//
-			// Anonymous actor when guest access is not allowed and auth is disabled, succeeds
+			// 5 - Anonymous actor when guest access is not allowed and auth is disabled, succeeds
 			//
 			(
 				Datastore::new("memory")
@@ -758,7 +775,7 @@ mod tests {
 				"1".to_string(),
 			),
 			//
-			// Authenticated user when guest access is not allowed and auth is enabled, succeeds
+			// 6 - Authenticated user when guest access is not allowed and auth is enabled, succeeds
 			//
 			(
 				Datastore::new("memory")
@@ -771,7 +788,7 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
-			// Specific experimental feature enabled
+			// 7 - Specific experimental feature enabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -782,7 +799,7 @@ mod tests {
 				true,
 				"NONE".to_string(),
 			),
-			// Specific experimental feature disabled
+			// 8 - Specific experimental feature disabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -794,7 +811,7 @@ mod tests {
 				"Experimental capability `record_references` is not enabled".to_string(),
 			),
 			//
-			// Some functions are not allowed
+			// 9 - Some functions are not allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -811,6 +828,7 @@ mod tests {
 				false,
 				"Function 'string::len' is not allowed".to_string(),
 			),
+			// 10 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -826,6 +844,7 @@ mod tests {
 				true,
 				"a".to_string(),
 			),
+			// 11 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -842,7 +861,7 @@ mod tests {
 				"Function 'time::now' is not allowed".to_string(),
 			),
 			//
-			// Some net targets are not allowed
+			// 12 - Some net targets are not allowed
 			//
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -864,6 +883,7 @@ mod tests {
 				false,
 				format!("Access to network target '{}' is not allowed", server1.address()),
 			),
+			// 13 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -884,6 +904,7 @@ mod tests {
 				false,
 				"Access to network target '1.1.1.1:80' is not allowed".to_string(),
 			),
+			// 14 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -905,7 +926,7 @@ mod tests {
 				"SUCCESS".to_string(),
 			),
 			(
-				// Ensure redirect fails
+				// 15 - Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
@@ -920,12 +941,25 @@ mod tests {
 				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
 				format!(
-					"here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
+					"There was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
 					server3.uri()
 				),
 			),
 			(
-				// Ensure resolve to a forbidden ip address fails
+				// 16 - Ensure connecting via localhost succeed
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::All),
+				),
+				Session::owner(),
+				format!("RETURN http::get('http://localhost:{}/test')", server1.address().port()),
+				true,
+				"SUCCESS".to_string(),
+			),
+			// - 17
+			(
+				// Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
@@ -935,12 +969,44 @@ mod tests {
 						)),
 				),
 				Session::owner(),
-				"RETURN http::get('http://localhost')".to_string(),
+				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
 				false,
-				format!(
-					"here was an error processing a remote HTTP request: error following redirect for url ({}/redirect)",
-					server3.uri()
+				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
+			),
+			// 18 - Ensure redirect succeed
+			(
+				Datastore::new("memory").await.unwrap().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::All)
+						.with_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str("blog.manel.in").unwrap()].into(),
+						))
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[
+								NetTarget::from_str("0.0.0.0/8").unwrap(),
+								NetTarget::from_str("10.0.0.0/8").unwrap(),
+								NetTarget::from_str("10.18.0.0/16").unwrap(),
+								NetTarget::from_str("10.2.0.0/16").unwrap(),
+								NetTarget::from_str("100.64.0.0/10").unwrap(),
+								NetTarget::from_str("127.0.0.0/8").unwrap(),
+								NetTarget::from_str("169.254.0.0/16").unwrap(),
+								NetTarget::from_str("172.16.0.0/12").unwrap(),
+								NetTarget::from_str("172.20.0.0/16").unwrap(),
+								NetTarget::from_str("192.0.0.0/24").unwrap(),
+								NetTarget::from_str("192.168.0.0/16").unwrap(),
+								NetTarget::from_str("192.88.99.0/24").unwrap(),
+								NetTarget::from_str("198.18.0.0/15").unwrap(),
+								NetTarget::from_str("::1/128").unwrap(),
+								NetTarget::from_str("fc00::/7").unwrap(),
+								NetTarget::from_str("fc00::/8").unwrap(),
+							]
+							.into(),
+						)),
 				),
+				Session::owner(),
+				"RETURN http::get('https://blog.manel.in/')".to_string(),
+				true,
+				"<!DOCTYPE html>".to_string(),
 			),
 		];
 

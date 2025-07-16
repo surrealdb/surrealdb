@@ -95,7 +95,10 @@ impl fmt::Display for EscapeRid<'_> {
 		if s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
 		{
-			return f.write_fmt(format_args!("⟨{}⟩", Escape::escape_str(s, '⟩')));
+			return match *crate::cnf::ACCESSIBLE_OUTPUT {
+				true => f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`'))),
+				false => f.write_fmt(format_args!("⟨{}⟩", Escape::escape_str(s, '⟩'))),
+			};
 		}
 
 		f.write_str(s)

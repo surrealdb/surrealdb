@@ -95,7 +95,7 @@ impl LiveStatement {
 		// Get the id
 		let id = stm.id.0;
 		// Process the live query table
-		match skt.run(|stk| stm.what.compute(stk, ctx, opt, doc)).await.catch_return()? {
+		match stk.run(|stk| stm.what.compute(stk, ctx, opt, doc)).await.catch_return()? {
 			Value::Table(tb) => {
 				// Store the current Node ID
 				stm.node = nid.into();

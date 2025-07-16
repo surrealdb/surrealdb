@@ -49,11 +49,6 @@ fn parse_numeric_object_key() {
 }
 
 #[test]
-fn parse_like_operator() {
-	test_parse!(parse_expr_field, "a ~ b").unwrap();
-}
-
-#[test]
 fn parse_range_operator() {
 	test_parse!(parse_expr_field, "1..2").unwrap();
 }

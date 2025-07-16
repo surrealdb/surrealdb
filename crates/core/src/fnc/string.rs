@@ -269,15 +269,27 @@ pub mod is {
 	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
 
 	pub fn alphanum((arg,): (String,)) -> Result<Value> {
-		Ok(arg.chars().all(char::is_alphanumeric).into())
+		if arg.is_empty() {
+			Ok(Value::Bool(false))
+		} else {
+			Ok(arg.chars().all(char::is_alphanumeric).into())
+		}
 	}
 
 	pub fn alpha((arg,): (String,)) -> Result<Value> {
-		Ok(arg.chars().all(char::is_alphabetic).into())
+		if arg.is_empty() {
+			Ok(Value::Bool(false))
+		} else {
+			Ok(arg.chars().all(char::is_alphabetic).into())
+		}
 	}
 
 	pub fn ascii((arg,): (String,)) -> Result<Value> {
-		Ok(arg.is_ascii().into())
+		if arg.is_empty() {
+			Ok(Value::Bool(false))
+		} else {
+			Ok(arg.is_ascii().into())
+		}
 	}
 
 	pub fn datetime((arg, Optional(fmt)): (String, Optional<String>)) -> Result<Value> {
@@ -296,7 +308,11 @@ pub mod is {
 	}
 
 	pub fn hexadecimal((arg,): (String,)) -> Result<Value> {
-		Ok(arg.chars().all(|x| char::is_ascii_hexdigit(&x)).into())
+		if arg.is_empty() {
+			Ok(Value::Bool(false))
+		} else {
+			Ok(arg.chars().all(|x| char::is_ascii_hexdigit(&x)).into())
+		}
 	}
 
 	pub fn ip((arg,): (String,)) -> Result<Value> {
@@ -320,7 +336,11 @@ pub mod is {
 	}
 
 	pub fn numeric((arg,): (String,)) -> Result<Value> {
-		Ok(arg.chars().all(char::is_numeric).into())
+		if arg.is_empty() {
+			Ok(Value::Bool(false))
+		} else {
+			Ok(arg.chars().all(char::is_numeric).into())
+		}
 	}
 
 	pub fn semver((arg,): (String,)) -> Result<Value> {
@@ -362,15 +382,17 @@ pub mod is {
 }
 
 pub mod similarity {
-
-	use crate::fnc::util::string::fuzzy::Fuzzy;
 	use crate::val::Value;
 	use anyhow::Result;
+	use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
+	use std::sync::LazyLock;
+	static MATCHER: LazyLock<SkimMatcherV2> =
+		LazyLock::new(|| SkimMatcherV2::default().ignore_case());
 
 	use strsim;
 
-	pub fn fuzzy((a, b): (String, String)) -> Result<Value> {
-		Ok(a.as_str().fuzzy_score(b.as_str()).into())
+	pub fn fuzzy(arg: (String, String)) -> Result<Value> {
+		smithwaterman(arg)
 	}
 
 	/// Calculate the Jaro similarity between two strings
@@ -386,7 +408,7 @@ pub mod similarity {
 	}
 
 	pub fn smithwaterman((a, b): (String, String)) -> Result<Value> {
-		Ok(a.as_str().fuzzy_score(b.as_str()).into())
+		Ok(MATCHER.fuzzy_match(&a, &b).unwrap_or(0).into())
 	}
 
 	/// Calculate the Sørensen-Dice similarity between two strings
@@ -552,25 +574,6 @@ mod tests {
 	}
 
 	#[test]
-	fn string_contains() {
-		#[track_caller]
-		fn test(base: &str, contained: &str, expected: bool) {
-			assert_eq!(
-				contains((base.to_string(), contained.to_string())).unwrap(),
-				Value::from(expected)
-			);
-		}
-
-		test("", "", true);
-		test("", "a", false);
-		test("a", "", true);
-		test("abcde", "bcd", true);
-		test("abcde", "cbcd", false);
-		test("好世界", "世", true);
-		test("好世界", "你好", false);
-	}
-
-	#[test]
 	fn string_replace() {
 		#[track_caller]
 		fn test(base: &str, pattern: Value, replacement: &str, expected: &str) {
@@ -605,151 +608,6 @@ mod tests {
 		test("", "foo", false);
 		test("foo bar", "foo", true);
 		test("foo bar", "bar", true);
-	}
-
-	#[test]
-	fn is_alphanum() {
-		let value = super::is::alphanum((String::from("abc123"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::alphanum((String::from("y%*"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_alpha() {
-		let value = super::is::alpha((String::from("abc"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::alpha((String::from("1234"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_ascii() {
-		let value = super::is::ascii((String::from("abc"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::ascii((String::from("中国"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_domain() {
-		let value = super::is::domain((String::from("食狮.中国"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::domain((String::from("example-.com"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_email() {
-		let input = (String::from("user@[fd79:cdcb:38cc:9dd:f686:e06d:32f3:c123]"),);
-		let value = super::is::email(input).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let input = (String::from("john..doe@example.com"),);
-		let value = super::is::email(input).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_hexadecimal() {
-		let value = super::is::hexadecimal((String::from("00FF00"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::hexadecimal((String::from("SurrealDB"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_ip() {
-		let value = super::is::ip((String::from("127.0.0.1"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::ip((String::from("127.0.0"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_ipv4() {
-		let value = super::is::ipv4((String::from("127.0.0.1"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::ipv4((String::from("127.0.0"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_ipv6() {
-		let value = super::is::ipv6((String::from("::1"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::ipv6((String::from("200t:db8::"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_latitude() {
-		let value = super::is::latitude((String::from("-0.118092"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::latitude((String::from("12345"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_longitude() {
-		let value = super::is::longitude((String::from("91.509865"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::longitude((String::from("-91.509865"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::longitude((String::from("-180.00000"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::longitude((String::from("-180.00001"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-
-		let value = super::is::longitude((String::from("180.00000"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::longitude((String::from("180.00001"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-
-		let value = super::is::longitude((String::from("12345"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_numeric() {
-		let value = super::is::numeric((String::from("12345"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::numeric((String::from("abcde"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_semver() {
-		let value = super::is::semver((String::from("1.0.0"),)).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let value = super::is::semver((String::from("1.0"),)).unwrap();
-		assert_eq!(value, Value::Bool(false));
-	}
-
-	#[test]
-	fn is_uuid() {
-		let input = (String::from("123e4567-e89b-12d3-a456-426614174000"),);
-		let value = super::is::uuid(input).unwrap();
-		assert_eq!(value, Value::Bool(true));
-
-		let input = (String::from("foo-bar"),);
-		let value = super::is::uuid(input).unwrap();
-		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]

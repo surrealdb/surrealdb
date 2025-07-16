@@ -146,10 +146,12 @@ impl conn::Sealed for Any {
 						}
 						let client = builder.build()?;
 						let base_url = address.url;
-						engine::remote::http::health(client.get(base_url.join("health")?)).await?;
-						tokio::spawn(engine::remote::http::native::run_router(
-							base_url, client, route_rx,
-						));
+						let req = client.get(base_url.join("health")?).header(
+							reqwest::header::USER_AGENT,
+							&*crate::cnf::SURREALDB_USER_AGENT,
+						);
+						http::health(req).await?;
+						tokio::spawn(http::native::run_router(base_url, client, route_rx));
 					}
 
 					#[cfg(not(feature = "protocol-http"))]

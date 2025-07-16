@@ -3,7 +3,7 @@
     "A scalable, distributed, collaborative, document-graph database, for the realtime web";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11-small";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05-small";
     flake-utils.url = "github:numtide/flake-utils/v1.0.0";
     crane = {
       url = "github:ipetkov/crane/v0.20.3";
