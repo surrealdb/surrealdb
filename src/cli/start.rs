@@ -6,8 +6,12 @@ use crate::env;
 use crate::net::{self, client_ip::ClientIp};
 use anyhow::Result;
 use clap::Args;
+use surrealdb::opt::Endpoint;
+use tokio::net::TcpListener;
+use tokio_stream::wrappers::TcpListenerStream;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(feature = "ml")]
@@ -46,6 +50,10 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "127.0.0.1:8000")]
 	listen_addresses: Vec<SocketAddr>,
+	#[arg(help = "The hostname or IP address to listen for gRPC connections on")]
+	#[arg(env = "SURREAL_GRPC_ADDRESS", long = "grpc-address")]
+	#[arg(default_value = "127.0.0.1:8001")]
+	grpc_address: SocketAddr,
 	#[arg(help = "Whether to suppress the server name and version headers")]
 	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
 	#[arg(default_value_t = false)]
@@ -87,6 +95,7 @@ pub async fn init(
 	StartCommandArguments {
 		client_ip,
 		listen_addresses,
+		grpc_address,
 		dbs: dbs_opts,
 		web,
 		no_banner,
@@ -110,6 +119,7 @@ pub async fn init(
 	// Configure the config
 	let config = Config {
 		bind: listen_addresses.first().copied().unwrap(),
+		grpc_address,
 		client_ip,
 		no_identification_headers,
 		crt,
@@ -128,9 +138,18 @@ pub async fn init(
 	let cancellation_token = CancellationToken::new();
 	// Start the datastore
 	let surrealdb = dbs::init(dbs_opts, cancellation_token.clone()).await?;
+
+
+	// let grpc_address = grpc_address.parse()?;
+	let listener = TcpListener::bind(grpc_address).await?;
+	let incoming = TcpListenerStream::new(listener);
+
+	
 	// Start the web server
 	let api_datastore = surrealdb.kvs();
 	let api_canceller = cancellation_token.clone();
+	
+	tokio::spawn(surrealdb::engine::local::native::serve(incoming, surrealdb.kvs()));
 
 	tokio::select! {
 		result = tokio::spawn(async move { net::init(api_datastore, api_canceller).await }) => {

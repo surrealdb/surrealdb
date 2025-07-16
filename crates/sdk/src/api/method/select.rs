@@ -10,6 +10,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Thing as RecordId;
 use surrealdb_core::sql::statements::{LiveStatement, SelectStatement};
+use surrealdb_core::sql::Field;
 use surrealdb_protocol::proto::rpc::v1::QueryRequest;
 use surrealdb_protocol::{TryFromQueryStream, TryFromValue};
 use uuid::Uuid;
@@ -59,6 +60,7 @@ where
 			let mut client = client.client.clone();
 
 			let mut stmt = SelectStatement::default();
+			stmt.expr.0 = vec![Field::All];
 			stmt.what = what.into();
 
 			let response = client
@@ -74,22 +76,6 @@ where
 		})
 	}
 }
-
-// impl<R> Select<R, Value>
-// where
-// 	R: RangeableResource,
-// {
-// 	/// Restricts the records selected to those in the specified range
-// 	pub fn range(self, range: impl Into<KeyRange>) -> Select<RecordId, Value> {
-
-// 		Select {
-// 			resource: self.resource.with_range(range.into()),
-// 			client: self.client,
-// 			txn: self.txn,
-// 			response_type: PhantomData,
-// 		}
-// 	}
-// }
 
 impl<R, RT> Select<R, RT>
 where

@@ -1311,7 +1311,7 @@ impl Surreal {
 		Run {
 			client: self.clone(),
 			function: function.into_fn(),
-			args: Array::new(),
+			args: Array::default(),
 			response_type: PhantomData,
 		}
 	}

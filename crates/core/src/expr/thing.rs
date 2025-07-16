@@ -195,6 +195,15 @@ impl From<(&str, Id)> for Thing {
 	}
 }
 
+impl From<(&str, i64)> for Thing {
+	fn from((tb, id): (&str, i64)) -> Self {
+		Self {
+			tb: tb.to_owned(),
+			id: id.into(),
+		}
+	}
+}
+
 impl From<(String, Id)> for Thing {
 	fn from((tb, id): (String, Id)) -> Self {
 		Self {

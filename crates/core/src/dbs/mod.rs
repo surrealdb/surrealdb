@@ -83,6 +83,28 @@ pub struct SurrealDBArgs {
 	pub changefeed_gc_interval: Duration,
 }
 
+impl SurrealDBArgs {
+	pub fn memory_default() -> Self {
+		Self {
+			uri: "memory".to_string(),
+			strict_mode: false,
+			query_timeout: None,
+			transaction_timeout: None,
+			unauthenticated: false,
+			capabilities: Capabilities::default(),
+			temporary_directory: None,
+			import_file: None,
+			root_user: None,
+			root_pass: None,
+			node_membership_refresh_interval: Duration::from_secs(10),
+			node_membership_check_interval: Duration::from_secs(10),
+			node_membership_cleanup_interval: Duration::from_secs(10),
+			changefeed_gc_interval: Duration::from_secs(10),
+		}
+	}
+}
+
+
 /// This is a wrapper around the Datastore. It is in charge of spawning the datastore and managing
 /// the lifecycle of the database.
 pub struct SurrealDB {

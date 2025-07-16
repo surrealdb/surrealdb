@@ -1,7 +1,9 @@
 use std::future::Future;
 
 use serde::{Deserialize, Serialize};
-use surrealdb::{RecordId, Surreal};
+use surrealdb::{RecordId, Surreal, Value};
+use surrealdb_core::dbs::Variables;
+use surrealdb_core::expr::Object;
 use surrealdb_protocol::proto::v1::Value as ValueProto;
 use surrealdb_protocol::{TryFromValue, TryIntoValue};
 use tokio::sync::SemaphorePermit;
@@ -31,13 +33,13 @@ macro_rules! define_include_tests {
 	};
 }
 
-// macro_rules! include_tests {
-// 	($create_db:ident => $($name:ident),*) => {
-// 		$(
-// 			super::$name::include_tests!($create_db);
-// 		)*
-// 	};
-// }
+macro_rules! include_tests {
+	($create_db:ident => $($name:ident),*) => {
+		$(
+			super::$name::include_tests!($create_db);
+		)*
+	};
+}
 
 mod backup;
 mod backup_version;
@@ -57,6 +59,30 @@ static TEMP_DIR: std::sync::LazyLock<std::path::PathBuf> =
 #[derive(Debug, Serialize)]
 struct Record {
 	name: String,
+}
+
+impl TryFrom<Record> for Value {
+	type Error = anyhow::Error;
+
+	fn try_from(value: Record) -> Result<Self, Self::Error> {
+		Ok(Value::Object(BTreeMap::from([("name".to_string(), Value::from(value.name))]).into()))
+	}
+}
+
+impl TryIntoValue for Record {
+	fn try_into_value(self) -> Result<ValueProto, anyhow::Error> {
+		Ok(ValueProto::object(BTreeMap::from([("name".to_string(), ValueProto::string(self.name))]).into()))
+	}
+}
+
+impl TryFrom<Record> for Variables {
+	type Error = anyhow::Error;
+
+	fn try_from(value: Record) -> Result<Self, Self::Error> {
+		let mut vars = Variables::new();
+		vars.insert("name".to_string(), value.name.into());
+		Ok(vars)
+	}
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
@@ -93,6 +119,25 @@ impl TryFromValue for RecordName {
 struct RecordBuf {
 	id: RecordId,
 	name: String,
+}
+
+impl TryFromValue for RecordBuf {
+	fn try_from_value(mut value: ValueProto) -> Result<Self, anyhow::Error> {
+		let id = RecordId::try_from_value(value.remove("id").ok_or(anyhow::anyhow!("id not found"))?)?;
+		let name = String::try_from_value(value.remove("name").ok_or(anyhow::anyhow!("name not found"))?)?;
+		Ok(RecordBuf { id, name })
+	}
+}
+
+impl TryFrom<RecordBuf> for Value {
+	type Error = anyhow::Error;
+
+	fn try_from(value: RecordBuf) -> Result<Self, Self::Error> {
+		let mut obj = BTreeMap::new();
+		obj.insert("id".to_string(), value.id.into());
+		obj.insert("name".to_string(), value.name.into());
+		Ok(Value::Object(Object::new(obj)))
+	}
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -205,7 +250,7 @@ mod ws {
 		drop(permit);
 	}
 
-	// include_tests!(new_db => basic, serialisation, live);
+	include_tests!(new_db => basic, serialisation, live);
 }
 
 // #[cfg(feature = "protocol-http")]

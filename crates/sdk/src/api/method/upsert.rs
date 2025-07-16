@@ -114,8 +114,8 @@ where
 	RT: TryFromValue,
 {
 	/// Replaces the current document / record data with the specified data
-	pub fn content(self, data: impl Into<Value>) -> Upsert<R, RT> {
-		let data = data.into();
+	pub fn content(self, data: impl TryInto<Value, Error = anyhow::Error>) -> Upsert<R, RT> {
+		let data = data.try_into().unwrap();
 
 		Self {
 			txn: self.txn,
@@ -127,7 +127,9 @@ where
 	}
 
 	/// Merges the current document / record data with the specified data
-	pub fn merge(self, data: Value) -> Upsert<R, RT> {
+	pub fn merge(self, data: impl TryInto<Value, Error = anyhow::Error>) -> Upsert<R, RT> {
+		let data = data.try_into().unwrap();
+
 		Self {
 			txn: self.txn,
 			client: self.client,

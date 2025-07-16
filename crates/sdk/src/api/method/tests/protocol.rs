@@ -243,9 +243,10 @@ impl TestServer {
 		});
 
 		let mut client = Some(client);
-		let channel = tonic::transport::Endpoint::try_from("http://localhost:50052")
+		let channel = tonic::transport::Endpoint::try_from("grpc://localhost:50053")
 			.unwrap()
 			.connect_with_connector(tower::service_fn(move |_: http::Uri| {
+				eprintln!("Connecting to test server: INNER");
 				let client = client.take();
 				async move {
 					if let Some(client) = client {

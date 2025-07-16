@@ -128,7 +128,7 @@ impl Error for Failure {}
 
 impl fmt::Display for Failure {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "Failure ({}): {}", self.code, self.message)
+		write!(f, "{}", self.message)
 	}
 }
 

@@ -8,8 +8,6 @@ use surrealdb_protocol::TryIntoValue;
 use surrealdb_protocol::proto::v1::Object as ObjectProto;
 use surrealdb_protocol::proto::v1::Value as ValueProto;
 
-use crate::opt::IntoVariables;
-
 pub const USER: &str = "user";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -18,12 +16,15 @@ pub struct User {
 	pub name: String,
 }
 
-impl IntoVariables for User {
-	fn into_variables(self) -> Variables {
+impl TryInto<Variables> for User {
+	type Error = anyhow::Error;
+
+	#[inline]
+	fn try_into(self) -> Result<Variables> {
 		let mut vars = Variables::default();
 		vars.insert("id".to_string(), self.id.into());
 		vars.insert("name".to_string(), self.name.into());
-		vars
+		Ok(vars)
 	}
 }
 

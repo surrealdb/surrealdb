@@ -47,6 +47,12 @@ impl From<Array> for Vec<Value> {
 	}
 }
 
+impl From<i64> for Array {
+	fn from(v: i64) -> Self {
+		Array(vec![Value::Number(v.into())])
+	}
+}
+
 impl FromIterator<Value> for Array {
 	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
 		Array(iter.into_iter().collect())
@@ -76,8 +82,8 @@ impl IntoIterator for Array {
 
 impl Array {
 	// Create a new empty array
-	pub fn new() -> Self {
-		Self::default()
+	pub fn new(values: Vec<Value>) -> Self {
+		Self(values)
 	}
 	// Create a new array with capacity
 	pub fn with_capacity(len: usize) -> Self {
@@ -319,7 +325,7 @@ pub(crate) trait Intersect<T> {
 
 impl Intersect<Self> for Array {
 	fn intersect(self, mut other: Self) -> Self {
-		let mut out = Self::new();
+		let mut out = Self::default();
 		for v in self.0.into_iter() {
 			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);

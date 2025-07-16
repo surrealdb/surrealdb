@@ -7,6 +7,7 @@ use crate::api::opt::Resource;
 
 use anyhow::Context;
 use futures::StreamExt;
+use surrealdb_core::sql::Output;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use surrealdb_core::expr::Thing as RecordId;
@@ -70,6 +71,7 @@ where
 
 			let mut delete_statement = DeleteStatement::default();
 			delete_statement.what = what.into();
+			delete_statement.output = Some(Output::Before);
 
 			let txn_id = txn.map(|id| id.try_into()).transpose()?;
 			let query = delete_statement.to_string();

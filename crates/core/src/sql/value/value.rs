@@ -1319,6 +1319,15 @@ impl From<Id> for SqlValue {
 	}
 }
 
+impl FromStr for SqlValue {
+	type Err = anyhow::Error;
+
+	fn from_str(s: &str) -> Result<Self> {
+		Ok(crate::syn::value(s)?)
+	}
+}
+
+
 impl FromIterator<SqlValue> for SqlValue {
 	fn from_iter<I: IntoIterator<Item = SqlValue>>(iter: I) -> Self {
 		SqlValue::Array(Array(iter.into_iter().collect()))

@@ -1,6 +1,6 @@
 use crate::api::{QueryResults, Result};
 use anyhow::bail;
-use surrealdb_core::expr::statements::*;
+use surrealdb_core::sql::statements::*;
 use surrealdb_core::{dbs::Variables, expr::Value, protocol::TryFromValue};
 use surrealdb_protocol::proto::rpc::v1::QueryStats as QueryStatsProto;
 use surrealdb_protocol::proto::v1::Value as ValueProto;
@@ -35,15 +35,28 @@ macro_rules! impl_into_query_for_statement {
 }
 impl_into_query_for_statement!(BeginStatement, CommitStatement, SelectStatement);
 
-pub trait IntoVariables {
-	fn into_variables(self) -> Variables;
-}
+// pub trait IntoVariables {
+// 	fn into_variables(self) -> Variables;
+// }
 
-impl IntoVariables for Variables {
-	fn into_variables(self) -> Variables {
-		self
-	}
-}
+// impl IntoVariables for Variables {
+// 	fn into_variables(self) -> Variables {
+// 		self
+// 	}
+// }
+
+// impl<T> IntoVariables for T
+// where
+// 	T: TryInto<Value>,
+// {
+// 	fn into_variables(self) -> Variables {
+// 		let value = self.try_into().unwrap_or_default();
+// 		match value {
+// 			Value::Object(object) => Variables(object.0),
+// 			_ => Variables::default()
+// 		}
+// 	}
+// }
 
 // impl IntoVariables for (&str, &str) {
 // 	fn into_variables(self) -> Variables {
@@ -54,18 +67,18 @@ impl IntoVariables for Variables {
 // 	}
 // }
 
-impl<K, V> IntoVariables for (K, V)
-where
-	K: Into<String>,
-	V: Into<Value>,
-{
-	fn into_variables(self) -> Variables {
-		let (key, value) = self;
-		let mut variables = Variables::new();
-		variables.insert(key.into(), value.into());
-		variables
-	}
-}
+// impl<K, V> IntoVariables for (K, V)
+// where
+// 	K: Into<String>,
+// 	V: Into<Value>,
+// {
+// 	fn into_variables(self) -> Variables {
+// 		let (key, value) = self;
+// 		let mut variables = Variables::new();
+// 		variables.insert(key.into(), value.into());
+// 		variables
+// 	}
+// }
 
 /// Represents a way to take a single query result from a list of responses
 pub trait QueryAccessor<RT: TryFromValue>: query_accessor::Sealed<RT> {}
@@ -164,8 +177,8 @@ impl QueryAccessor<Value> for (usize, &str) {}
 impl query_accessor::Sealed<Value> for (usize, &str) {
 	fn take(self, response: &mut QueryResults) -> Result<Value> {
 		let (index, key) = self;
-		let mut values = match response.results.swap_remove(&index) {
-			Some(query_result) => query_result.values,
+		let values = match response.results.get_mut(&index) {
+			Some(query_result) => &mut query_result.values,
 			None => {
 				return Ok(Value::None);
 			}
@@ -179,7 +192,7 @@ impl query_accessor::Sealed<Value> for (usize, &str) {
 			bail!("{} values found for index {}, but expected 1", values.len(), index);
 		}
 
-		let mut value = values.pop().unwrap();
+		let value = values.get_mut(0).unwrap();
 
 		let value = match &mut value.value {
 			Some(ValueProtoEnum::Object(object)) => object.items.remove(key).unwrap_or_default(),
@@ -201,8 +214,8 @@ where
 {
 	fn take(self, results: &mut QueryResults) -> Result<Option<T>> {
 		let (index, key) = self;
-		let mut values = match results.results.swap_remove(&index) {
-			Some(query_result) => query_result.values,
+		let values = match results.results.get_mut(&index) {
+			Some(query_result) => &mut query_result.values,
 			None => {
 				return Ok(None);
 			}
@@ -216,7 +229,8 @@ where
 			bail!("{} values found for index {}, but expected 1", values.len(), index);
 		}
 
-		let mut value = values.pop().unwrap();
+		// let mut value = values.pop().unwrap();
+		let value = values.get_mut(0).unwrap();
 
 		match &mut value.value {
 			Some(ValueProtoEnum::Object(object)) => {
@@ -325,140 +339,3 @@ where
 		<(usize, &str) as query_accessor::Sealed<Vec<T>>>::stats(&(0_usize, *self), results)
 	}
 }
-
-// impl QueryStream<Value> for usize {}
-// impl query_stream::Sealed<Value> for usize {
-// 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
-// 		let stream = response
-// 			.live_queries
-// 			.swap_remove(&self)
-// 			.and_then(|result| match result {
-// 				Err(e) => {
-// 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
-// 						response.results.swap_remove(&self).and_then(|x| x.result.err().map(Err))
-// 					} else {
-// 						Some(Err(e))
-// 					}
-// 				}
-// 				result => Some(result),
-// 			})
-// 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-// 				true => Err(Error::NotLiveQuery(self).into()),
-// 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
-// 			})?;
-// 		Ok(method::QueryStream(Either::Left(stream)))
-// 	}
-// }
-
-// impl QueryStream<Value> for () {}
-// impl query_stream::Sealed<Value> for () {
-// 	fn query_stream(self, results: &mut QueryResults) -> Result<method::QueryStream<Value>> {
-// 		let mut streams = Vec::with_capacity(results.live_queries.len());
-
-// 		for (index, result) in mem::take(&mut results.live_queries) {
-// 			match result {
-// 				Ok(stream) => streams.push(stream),
-// 				Err(e) => {
-// 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
-// 						match results.results.swap_remove(&index) {
-// 							Some(query_result) => {
-// 								results.results.insert(
-// 									index,
-// 									None,
-// 								);
-// 								return Err(error);
-// 							}
-// 							None => {
-// 								bail!(Error::ResponseAlreadyTaken);
-// 							}
-// 						}
-// 					} else {
-// 						return Err(e);
-// 					}
-// 				}
-// 			}
-// 		}
-// 		Ok(method::QueryStream(Either::Right(select_all(streams))))
-// 	}
-// }
-
-// impl<R> QueryStream<Notification<R>> for usize where R: DeserializeOwned + Unpin {}
-// impl<R> query_stream::Sealed<Notification<R>> for usize
-// where
-// 	R: DeserializeOwned + Unpin,
-// {
-// 	fn query_stream(
-// 		self,
-// 		response: &mut QueryResponse,
-// 	) -> Result<method::QueryStream<Notification<R>>> {
-// 		let mut stream = response
-// 			.live_queries
-// 			.swap_remove(&self)
-// 			.and_then(|result| match result {
-// 				Err(e) => {
-// 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
-// 						response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
-// 					} else {
-// 						Some(Err(e))
-// 					}
-// 				}
-// 				result => Some(result),
-// 			})
-// 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-// 				true => Err(Error::NotLiveQuery(self).into()),
-// 				false => Err(Error::QueryIndexOutOfBounds(self).into()),
-// 			})?;
-// 		Ok(method::QueryStream(Either::Left(Stream {
-// 			client: stream.client.clone(),
-// 			id: mem::take(&mut stream.id),
-// 			rx: stream.rx.take(),
-// 			response_type: PhantomData,
-// 		})))
-// 	}
-// }
-
-// impl<R> QueryStream<Notification<R>> for () where R: DeserializeOwned + Unpin {}
-// impl<R> query_stream::Sealed<Notification<R>> for ()
-// where
-// 	R: DeserializeOwned + Unpin,
-// {
-// 	fn query_stream(
-// 		self,
-// 		response: &mut QueryResponse,
-// 	) -> Result<method::QueryStream<Notification<R>>> {
-// 		let mut streams = Vec::with_capacity(response.live_queries.len());
-// 		for (index, result) in mem::take(&mut response.live_queries) {
-// 			let mut stream = match result {
-// 				Ok(stream) => stream,
-// 				Err(e) => {
-// 					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
-// 						match response.results.swap_remove(&index) {
-// 							Some((stats, Err(error))) => {
-// 								response.results.insert(
-// 									index,
-// 									(stats, Err(Error::ResponseAlreadyTaken.into())),
-// 								);
-// 								return Err(error);
-// 							}
-// 							Some((_, Ok(..))) => unreachable!(
-// 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
-// 							),
-// 							None => {
-// 								bail!(Error::ResponseAlreadyTaken);
-// 							}
-// 						}
-// 					} else {
-// 						return Err(e);
-// 					}
-// 				}
-// 			};
-// 			streams.push(Stream {
-// 				client: stream.client.clone(),
-// 				id: mem::take(&mut stream.id),
-// 				rx: stream.rx.take(),
-// 				response_type: PhantomData,
-// 			});
-// 		}
-// 		Ok(method::QueryStream(Either::Right(select_all(streams))))
-// 	}
-// }

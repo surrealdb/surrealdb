@@ -5,7 +5,6 @@ use crate::api::method::BoxFuture;
 use crate::api::opt;
 use crate::method::WithStats;
 use crate::method::live::Subscribe;
-use crate::opt::IntoVariables;
 use anyhow::Context as AnyhowContext;
 use futures::StreamExt;
 use indexmap::IndexMap;
@@ -134,8 +133,8 @@ impl IntoFuture for WithStats<Query> {
 
 impl Query {
 	/// Chains a query onto an existing query
-	pub fn query(mut self, surql: impl Into<String>) -> Self {
-		self.queries.push(surql.into());
+	pub fn query(mut self, surql: impl opt::IntoQuery) -> Self {
+		self.queries.push(surql.into_query());
 		self
 	}
 
@@ -182,8 +181,8 @@ impl Query {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn bind(mut self, bindings: impl IntoVariables) -> Self {
-		let variables = bindings.into_variables();
+	pub fn bind(mut self, bindings: impl TryInto<Variables>) -> Self {
+		let variables = bindings.try_into().unwrap_or_default();
 
 		self.variables.extend(variables);
 

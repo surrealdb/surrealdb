@@ -18,7 +18,6 @@ use crate::expr::{
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
 use crate::rpc::V1Value;
-use crate::sql::SqlValue;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -31,7 +30,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::{Bound, Deref};
+use std::ops::{Bound, Deref, Index};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 
@@ -967,6 +966,32 @@ impl InfoStructure for Value {
 	}
 }
 
+impl Index<usize> for Value {
+	type Output = Self;
+
+	fn index(&self, index: usize) -> &Self::Output {
+		match self {
+			Value::Array(map) => {
+				map.0.get(index).unwrap_or(&Value::None)
+			}
+			_ => &Value::None,
+		}
+	}
+}
+
+impl Index<&str> for Value {
+	type Output = Self;
+
+	fn index(&self, index: &str) -> &Self::Output {
+		match self {
+			Value::Object(map) => {
+				map.0.get(index).unwrap_or(&Value::None)
+			}
+			_ => &Value::None,
+		}
+	}
+}
+
 // ------------------------------
 
 pub(crate) trait TryAdd<Rhs = Self> {
@@ -1414,6 +1439,23 @@ impl From<Id> for Value {
 	}
 }
 
+macro_rules! impl_from_slice {
+	($($len:literal),*$(,)?) => {
+		$(
+			impl From<[&str; $len]> for Value {
+				fn from(vs: [&str; $len]) -> Self {
+					let mut vals = Vec::new();
+					for v in vs {
+						vals.push(v.into());
+					}
+					Value::Array(Array(vals))
+				}
+			}
+		)*
+	};
+}
+impl_from_slice!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+
 impl TryFrom<Value> for serde_json::Value {
 	type Error = anyhow::Error;
 
@@ -1430,6 +1472,14 @@ impl TryFrom<serde_json::Value> for Value {
 	fn try_from(value: serde_json::Value) -> Result<Value> {
 		let v1_value = V1Value::try_from(value)?;
 		Ok(Value::try_from(v1_value)?)
+	}
+}
+
+impl FromStr for Value {
+	type Err = anyhow::Error;
+
+	fn from_str(s: &str) -> Result<Self> {
+		Ok(crate::syn::value(s)?.into())
 	}
 }
 

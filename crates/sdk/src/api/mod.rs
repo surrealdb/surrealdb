@@ -4,6 +4,7 @@ use crate::Result;
 use anyhow::Context;
 use std::fmt;
 use std::fmt::Debug;
+use std::time::Duration;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 
 macro_rules! transparent_wrapper{
@@ -160,7 +161,9 @@ impl Surreal {
 	/// ```
 	pub fn new(dst: Channel, endpoint: Endpoint) -> Self {
 		Self {
-			client: SurrealDbServiceClient::new(dst),
+			client: SurrealDbServiceClient::new(dst)
+				.max_encoding_message_size(usize::MAX)
+				.max_decoding_message_size(usize::MAX),
 			endpoint,
 		}
 	}
@@ -194,6 +197,11 @@ impl Surreal {
 				feature = "kv-surrealkv",
 			))]
 			{
+				use std::sync::Arc;
+
+				use surrealdb_core::dbs::{SurrealDB, SurrealDBArgs};
+				use tokio_util::sync::CancellationToken;
+
 				let (client, server) = tokio::io::duplex(64 * 1024);
 				let mut client = Some(client);
 				let channel = tonic::transport::Endpoint::try_from(endpoint.url.to_string())?
@@ -209,12 +217,29 @@ impl Surreal {
 					}))
 					.await?;
 
-				tokio::spawn(engine::local::native::serve(server, endpoint.clone()));
+				let cancellation_token = CancellationToken::new();
+
+				// TODO: STU - Plumb through the args
+				let surrealdb_args = SurrealDBArgs::memory_default();
+				let surrealdb = Arc::new(SurrealDB::start(surrealdb_args, cancellation_token).await?);
+
+				let incoming = tokio_stream::once(Ok::<_, std::io::Error>(server));
+				tokio::spawn(engine::local::native::serve(incoming, surrealdb.kvs()));
 				Ok(Surreal::new(channel, endpoint))
 			}
 		} else {
 			let channel =
-				tonic::transport::Endpoint::new(endpoint.url.to_string())?.connect().await?;
+				tonic::transport::Endpoint::new(endpoint.url.to_string())?
+				.http2_adaptive_window(true)
+				.http2_keep_alive_interval(Duration::from_secs(30))
+				.keep_alive_timeout(Duration::from_secs(10))
+				.keep_alive_while_idle(true)
+				.tcp_keepalive(Some(Duration::from_secs(30)))
+				.tcp_nodelay(true)
+				// Add connection pooling optimizations
+				.initial_connection_window_size(1024 * 1024) // 1MB
+				.initial_stream_window_size(1024 * 1024) // 1MB
+				.connect().await?;
 			Ok(Surreal::new(channel, endpoint))
 		}
 	}

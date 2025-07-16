@@ -11,7 +11,7 @@ pub struct SessionId(pub uuid::Uuid);
 
 /// Specifies the current session information when processing a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
+// #[non_exhaustive]
 pub struct Session {
 	/// The current session [`Auth`] information
 	pub au: Arc<Auth>,

@@ -207,7 +207,7 @@ impl Aggregator {
 		match a {
 			OptimisedAggregate::None => {
 				if self.array.is_none() {
-					self.array = Some(Array::new());
+					self.array = Some(Array::default());
 					// We don't need both the array and the first val
 					self.first_val = None;
 				}
@@ -257,7 +257,7 @@ impl Aggregator {
 
 	fn new_instance(&self) -> Self {
 		Self {
-			array: self.array.as_ref().map(|_| Array::new()),
+			array: self.array.as_ref().map(|_| Array::default()),
 			first_val: self.first_val.as_ref().map(|_| Value::None),
 			count: self.count.as_ref().map(|_| 0),
 			count_function: self.count_function.as_ref().map(|(f, _)| (f.clone(), 0)),

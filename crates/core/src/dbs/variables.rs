@@ -1,4 +1,4 @@
-use crate::expr::value::Value;
+use crate::expr::{value::Value, Thing};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -95,6 +95,26 @@ impl TryFrom<Variables> for rpc_proto::Variables {
 		for (k, v) in value.0.into_iter() {
 			vars.variables.insert(k, v.try_into()?);
 		}
+		Ok(vars)
+	}
+}
+
+impl TryFrom<(&str, &str)> for Variables {
+	type Error = anyhow::Error;
+
+	fn try_from(value: (&str, &str)) -> Result<Self, Self::Error> {
+		let mut vars = Self::new();
+		vars.insert(value.0.to_string(), value.1.into());
+		Ok(vars)
+	}
+}
+
+impl TryFrom<(&str, Thing)> for Variables {
+	type Error = anyhow::Error;
+
+	fn try_from(value: (&str, Thing)) -> Result<Self, Self::Error> {
+		let mut vars = Self::new();
+		vars.insert(value.0.to_string(), value.1.into());
 		Ok(vars)
 	}
 }
