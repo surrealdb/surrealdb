@@ -151,3 +151,7 @@ pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
 /// Used to limit file access
 pub static SKIP_IMPORT_SUCCESS_RESULTS: LazyLock<bool> =
 	LazyLock::new(|| std::env::var("SURREAL_SKIP_IMPORT_SUCCESS_RESULTS").is_ok());
+
+/// Specify the USER-AGENT string used by HTTP requests
+pub static SURREALDB_USER_AGENT: LazyLock<String> =
+	LazyLock::new(|| std::env::var("SURREAL_USER_AGENT").unwrap_or("SurrealDB".to_string()));
