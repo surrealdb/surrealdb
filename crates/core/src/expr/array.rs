@@ -10,7 +10,7 @@ use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
@@ -255,10 +255,15 @@ pub(crate) trait Complement<T> {
 }
 
 impl Complement<Array> for Array {
+	#[expect(clippy::mutable_key_type)]
 	fn complement(self, other: Self) -> Array {
-		let mut out = Array::new();
+		let mut out = Array::with_capacity(self.len());
+		let mut set = BTreeSet::new();
+		for i in other.iter() {
+			set.insert(i);
+		}
 		for v in self.into_iter() {
-			if !other.contains(&v) {
+			if !set.contains(&v) {
 				out.push(v)
 			}
 		}
@@ -273,8 +278,9 @@ pub(crate) trait Difference<T> {
 }
 
 impl Difference<Array> for Array {
-	fn difference(self, mut other: Array) -> Array {
-		let mut out = Array::new();
+	fn difference(self, other: Array) -> Array {
+		let mut out = Array::with_capacity(self.len() + other.len());
+		let mut other = VecDeque::from(other.0);
 		for v in self.into_iter() {
 			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
@@ -282,7 +288,7 @@ impl Difference<Array> for Array {
 				out.push(v);
 			}
 		}
-		out.append(&mut other);
+		out.append(&mut Vec::from(other));
 		out
 	}
 }
@@ -295,7 +301,7 @@ pub(crate) trait Flatten<T> {
 
 impl Flatten<Array> for Array {
 	fn flatten(self) -> Array {
-		let mut out = Array::new();
+		let mut out = Array::with_capacity(self.len());
 		for v in self.into_iter() {
 			match v {
 				Value::Array(mut a) => out.append(&mut a),
@@ -437,19 +443,16 @@ pub(crate) trait Uniq<T> {
 }
 
 impl Uniq<Array> for Array {
-	fn uniq(mut self) -> Array {
+	fn uniq(self) -> Array {
 		#[expect(clippy::mutable_key_type)]
-		let mut set: HashSet<&Value> = HashSet::new();
-		let mut to_remove: Vec<usize> = Vec::new();
-		for (i, item) in self.iter().enumerate() {
-			if !set.insert(item) {
-				to_remove.push(i);
+		let mut set = HashSet::with_capacity(self.len());
+		let mut to_return = Array::with_capacity(self.len());
+		for i in self.iter() {
+			if set.insert(i) {
+				to_return.push(i.clone());
 			}
 		}
-		for i in to_remove.iter().rev() {
-			self.remove(*i);
-		}
-		self
+		to_return
 	}
 }
 
