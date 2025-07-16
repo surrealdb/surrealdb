@@ -1,3 +1,4 @@
+use crate::cnf::SURREALDB_USER_AGENT;
 use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
 use crate::kvs::Datastore;
@@ -295,10 +296,14 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 // Attempts to fetch a JWKS object from a remote location and stores it in the cache if successful
 async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Result<JwkSet> {
 	let client = Client::new();
+	let req = client.get(url);
+	// Add a User-Agent header so that WAF rules don't reject the request
 	#[cfg(not(target_family = "wasm"))]
-	let res = client.get(url).timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
+	let req = req.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
+	#[cfg(not(target_family = "wasm"))]
+	let res = req.timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
 	#[cfg(target_family = "wasm")]
-	let res = client.get(url).send().await?;
+	let res = req.send().await?;
 	if !res.status().is_success() {
 		warn!(
 			"Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'",
@@ -366,7 +371,7 @@ mod tests {
 	use super::*;
 	use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 	use rand::{Rng, distributions::Alphanumeric};
-	use wiremock::matchers::{method, path};
+	use wiremock::matchers::{header, method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 
 	// Use unique path to prevent accidental cache reuse
@@ -437,6 +442,7 @@ mod tests {
 		let response = ResponseTemplate::new(200).set_body_json(jwks);
 		Mock::given(method("GET"))
 			.and(path(&jwks_path))
+			.and(header("user-agent", "SurrealDB"))
 			.respond_with(response)
 			.mount(&mock_server)
 			.await;

@@ -1,6 +1,6 @@
 [package]
 name = "surrealdb-macros"
-publish = true
+publish = false
 edition = "2024"
 version = "0.1.0"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
