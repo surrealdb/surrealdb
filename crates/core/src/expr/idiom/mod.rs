@@ -150,7 +150,7 @@ impl Idiom {
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Start(v)) => {
-				v.compute(stk, ctx, opt, doc)
+				stk.run(|stk| v.compute(stk, ctx, opt, doc))
 					.await?
 					.get(stk, ctx, opt, doc, self.as_ref().next())
 					.await

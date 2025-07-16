@@ -255,7 +255,7 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn compute(&self, stk: &mut Stk, v: &Expr, n: Node) -> Result<Node> {
 		Ok(if n == Node::Computable {
-			match v.compute(stk, self.ctx.ctx, self.ctx.opt, None).await {
+			match stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await {
 				Ok(v) => Node::Computed(v.into()),
 				Err(_) => Node::Unsupported(format!("Unsupported value: {}", v)),
 			}

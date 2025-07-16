@@ -69,7 +69,7 @@ impl RemoveIndexStatement {
 			cache.clear_tb(ns, db, &self.what);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

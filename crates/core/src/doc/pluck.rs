@@ -156,8 +156,8 @@ impl Document {
 								ctx.add_value("value", val);
 								let ctx = ctx.freeze();
 								// Process the PERMISSION clause
-								if !e
-									.compute(stk, &ctx, opt, Some(&self.current))
+								if !stk
+									.run(|stk| e.compute(stk, &ctx, opt, Some(&self.current)))
 									.await
 									.catch_return()?
 									.is_truthy()

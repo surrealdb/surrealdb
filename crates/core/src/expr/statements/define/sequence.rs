@@ -66,7 +66,7 @@ impl DefineSequenceStatement {
 		let (beg, end) = Prefix::new_st_range(ns, db, &sq.name)?;
 		txn.delr(beg..end).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

@@ -5,6 +5,7 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::expr::statements::access::AccessGrantStore;
+use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{
 	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
 };
@@ -30,7 +31,6 @@ use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[non_exhaustive]
 pub struct Transaction {
 	/// Is this is a local datastore transaction
 	local: bool,
@@ -812,7 +812,7 @@ impl Transaction {
 
 	/// Retrieve all model definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_configs(&self, ns: &str, db: &str) -> Result<Arc<[DefineConfigStatement]>> {
+	pub async fn all_db_configs(&self, ns: &str, db: &str) -> Result<Arc<[ConfigStore]>> {
 		let qey = cache::tx::Lookup::Cgs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_cgs(),
@@ -1410,12 +1410,7 @@ impl Transaction {
 
 	/// Retrieve a specific config definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_db_config(
-		&self,
-		ns: &str,
-		db: &str,
-		cg: &str,
-	) -> Result<Arc<DefineConfigStatement>> {
+	pub async fn get_db_config(&self, ns: &str, db: &str, cg: &str) -> Result<Arc<ConfigStore>> {
 		if let Some(val) = self.get_db_optional_config(ns, db, cg).await? {
 			Ok(val)
 		} else {
@@ -1432,14 +1427,14 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		cg: &str,
-	) -> Result<Option<Arc<DefineConfigStatement>>> {
+	) -> Result<Option<Arc<ConfigStore>>> {
 		let qey = cache::tx::Lookup::Cg(ns, db, cg);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Option::Some),
 			None => {
 				let key = crate::key::database::cg::new(ns, db, cg).encode()?;
 				if let Some(val) = self.get(key, None).await? {
-					let val: DefineConfigStatement = revision::from_slice(&val)?;
+					let val: ConfigStore = revision::from_slice(&val)?;
 					let val = Arc::new(val);
 					let entr = cache::tx::Entry::Any(val.clone());
 					self.cache.insert(qey, entr);
@@ -1692,7 +1687,6 @@ impl Transaction {
 
 	/// Ensures that a table, database, and namespace are all fully defined.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
 	pub async fn ensure_ns_db_tb(
 		&self,
 		ns: &str,
@@ -1705,7 +1699,6 @@ impl Transaction {
 
 	/// Ensure a specific table (and database, and namespace) exist.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
 	pub(crate) async fn check_ns_db_tb(
 		&self,
 		ns: &str,
@@ -1753,8 +1746,7 @@ impl Transaction {
 
 	/// Clears all keys from the transaction cache.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
-	pub fn clear(&self) {
+	pub fn clear_cache(&self) {
 		self.cache.clear()
 	}
 

@@ -103,7 +103,7 @@ impl Value {
 					_ => break,
 				},
 				Part::Value(v) => {
-					let v = v.compute(stk, ctx, opt, None).await.catch_return()?;
+					let v = stk.run(|stk| v.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match this {
 						Value::Object(obj) => {
 							let Some(x) = obj.get_mut(v.coerce_to::<String>()?.as_str()) else {
@@ -210,7 +210,8 @@ impl Value {
 					Value::Array(x) => {
 						for v in x.iter_mut() {
 							let doc = v.clone().into();
-							if w.compute(stk, ctx, opt, Some(&doc))
+							if stk
+								.run(|stk| w.compute(stk, ctx, opt, Some(&doc)))
 								.await
 								.catch_return()?
 								.is_truthy()

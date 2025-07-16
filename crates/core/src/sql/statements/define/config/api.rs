@@ -3,60 +3,32 @@ use std::fmt::{self, Display};
 use crate::sql::fmt::Fmt;
 
 use crate::sql::{Expr, Permission};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct RequestMiddleware(pub Vec<(String, Vec<Expr>)>);
-
-impl From<RequestMiddleware> for crate::api::middleware::RequestMiddleware {
-	fn from(v: RequestMiddleware) -> Self {
-		crate::api::middleware::RequestMiddleware(
-			v.0.into_iter().map(|(k, v)| (k, v.into_iter().map(Into::into).collect())).collect(),
-		)
-	}
-}
-
-impl From<crate::api::middleware::RequestMiddleware> for RequestMiddleware {
-	fn from(v: crate::api::middleware::RequestMiddleware) -> Self {
-		RequestMiddleware(
-			v.0.into_iter().map(|(k, v)| (k, v.into_iter().map(Into::into).collect())).collect(),
-		)
-	}
-}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiConfig {
-	pub middleware: Option<RequestMiddleware>,
-	pub permissions: Option<Permission>,
-}
-
-impl ApiConfig {
-	pub fn is_empty(&self) -> bool {
-		self.middleware.is_none() && self.permissions.is_none()
-	}
+	pub middleware: Vec<Middleware>,
+	pub permissions: Permission,
 }
 
 impl Display for ApiConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, " API")?;
 
-		if let Some(mw) = &self.middleware {
+		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;
 			write!(
 				f,
 				"{}",
-				Fmt::pretty_comma_separated(
-					mw.0.iter().map(|(k, v)| format!("{k}({})", Fmt::pretty_comma_separated(v)))
-				)
+				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| format!(
+					"{}({})",
+					m.name,
+					Fmt::pretty_comma_separated(m.args.iter())
+				)))
 			)?
 		}
 
-		if let Some(p) = &self.permissions {
-			write!(f, " PERMISSIONS {}", p)?;
-		}
+		write!(f, " PERMISSIONS {}", self.permissions)?;
 		Ok(())
 	}
 }
@@ -64,16 +36,39 @@ impl Display for ApiConfig {
 impl From<ApiConfig> for crate::expr::statements::define::config::api::ApiConfig {
 	fn from(v: ApiConfig) -> Self {
 		crate::expr::statements::define::config::api::ApiConfig {
-			middleware: v.middleware.map(Into::into),
-			permissions: v.permissions.map(Into::into),
+			middleware: v.middleware.into_iter().map(From::from).collect(),
+			permissions: v.permissions.into(),
 		}
 	}
 }
 impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig {
 	fn from(v: crate::expr::statements::define::config::api::ApiConfig) -> Self {
 		ApiConfig {
-			middleware: v.middleware.map(Into::into),
-			permissions: v.permissions.map(Into::into),
+			middleware: v.middleware.into_iter().map(From::from).collect(),
+			permissions: v.permissions.into(),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Middleware {
+	pub name: String,
+	pub args: Vec<Expr>,
+}
+
+impl From<Middleware> for crate::expr::statements::define::config::api::Middleware {
+	fn from(v: Middleware) -> Self {
+		crate::expr::statements::define::config::api::Middleware {
+			name: v.name,
+			args: v.args.into_iter().map(From::from).collect(),
+		}
+	}
+}
+impl From<crate::expr::statements::define::config::api::Middleware> for Middleware {
+	fn from(v: crate::expr::statements::define::config::api::Middleware) -> Self {
+		Middleware {
+			name: v.name,
+			args: v.args.into_iter().map(From::from).collect(),
 		}
 	}
 }

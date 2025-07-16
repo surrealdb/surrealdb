@@ -207,7 +207,10 @@ impl Document {
 						false => &self.current,
 					};
 					// Process the PATCH data clause
-					let data = data.compute(stk, ctx, opt, Some(current)).await.catch_return()?;
+					let data = stk
+						.run(|stk| data.compute(stk, ctx, opt, Some(current)))
+						.await
+						.catch_return()?;
 					self.current.doc.to_mut().patch(data)?
 				}
 				Data::MergeExpression(data) => {
@@ -217,7 +220,10 @@ impl Document {
 						false => &self.current,
 					};
 					// Process the MERGE data clause
-					let data = data.compute(stk, ctx, opt, Some(current)).await.catch_return()?;
+					let data = stk
+						.run(|stk| data.compute(stk, ctx, opt, Some(current)))
+						.await
+						.catch_return()?;
 					self.current.doc.to_mut().merge(data)?
 				}
 				Data::ReplaceExpression(data) => {
@@ -228,7 +234,10 @@ impl Document {
 						&self.current
 					};
 					// Process the REPLACE data clause
-					let data = data.compute(stk, ctx, opt, Some(current)).await.catch_return()?;
+					let data = stk
+						.run(|stk| data.compute(stk, ctx, opt, Some(current)))
+						.await
+						.catch_return()?;
 					self.current.doc.to_mut().replace(data)?
 				}
 				Data::ContentExpression(data) => {
@@ -239,7 +248,10 @@ impl Document {
 						&self.current
 					};
 					// Process the CONTENT data clause
-					let data = data.compute(stk, ctx, opt, Some(current)).await.catch_return()?;
+					let data = stk
+						.run(|stk| data.compute(stk, ctx, opt, Some(current)))
+						.await
+						.catch_return()?;
 					self.current.doc.to_mut().replace(data)?
 				}
 				Data::UnsetExpression(i) => {
@@ -250,9 +262,10 @@ impl Document {
 				Data::SetExpression(x) => {
 					if self.reduced(stk, ctx, opt, Current).await? {
 						for x in x.iter() {
-							let v = x
-								.value
-								.compute(stk, ctx, opt, Some(&self.current_reduced))
+							let v = stk
+								.run(|stk| {
+									x.value.compute(stk, ctx, opt, Some(&self.current_reduced))
+								})
 								.await
 								.catch_return()?;
 							match &x.operator {
@@ -322,9 +335,8 @@ impl Document {
 						}
 					} else {
 						for x in x.iter() {
-							let v = x
-								.value
-								.compute(stk, ctx, opt, Some(&self.current))
+							let v = stk
+								.run(|stk| x.value.compute(stk, ctx, opt, Some(&self.current)))
 								.await
 								.catch_return()?;
 							match &x.operator {
@@ -384,9 +396,10 @@ impl Document {
 					// Process ON DUPLICATE KEY clause
 					if self.reduced(stk, &ctx, opt, Current).await? {
 						for x in x.iter() {
-							let v = x
-								.value
-								.compute(stk, &ctx, opt, Some(&self.current_reduced))
+							let v = stk
+								.run(|stk| {
+									x.value.compute(stk, &ctx, opt, Some(&self.current_reduced))
+								})
 								.await
 								.catch_return()?;
 							match &x.operator {
@@ -456,9 +469,8 @@ impl Document {
 						}
 					} else {
 						for x in x.iter() {
-							let v = x
-								.value
-								.compute(stk, &ctx, opt, Some(&self.current))
+							let v = stk
+								.run(|stk| x.value.compute(stk, &ctx, opt, Some(&self.current)))
 								.await
 								.catch_return()?;
 							match &x.operator {

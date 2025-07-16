@@ -197,7 +197,8 @@ impl Value {
 						// Store the elements and positions to update
 						for (i, o) in arr.iter_mut().enumerate() {
 							let cur = o.clone().into();
-							if w.compute(stk, ctx, opt, Some(&cur))
+							if stk
+								.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
 								.await
 								.catch_return()?
 								.is_truthy()
@@ -219,7 +220,8 @@ impl Value {
 					} else {
 						for v in arr.iter_mut() {
 							let cur = v.clone().into();
-							if w.compute(stk, ctx, opt, Some(&cur))
+							if stk
+								.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
 								.await
 								.catch_return()?
 								.is_truthy()

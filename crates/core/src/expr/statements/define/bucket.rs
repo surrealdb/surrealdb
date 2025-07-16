@@ -58,7 +58,12 @@ impl DefineBucketStatement {
 		}
 		// Process the backend input
 		let backend = if let Some(ref url) = self.backend {
-			Some(url.compute(stk, ctx, opt, doc).await.catch_return()?.coerce_to::<String>()?)
+			Some(
+				stk.run(|stk| url.compute(stk, ctx, opt, doc))
+					.await
+					.catch_return()?
+					.coerce_to::<String>()?,
+			)
 		} else {
 			None
 		};
@@ -91,7 +96,7 @@ impl DefineBucketStatement {
 		};
 		txn.set(key, revision::to_vec(&ap)?, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

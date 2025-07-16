@@ -25,7 +25,7 @@ impl Version {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<u64> {
-		match self.0.compute(stk, ctx, opt, doc).await.catch_return()? {
+		match stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return()? {
 			Value::Datetime(v) => match v.to_u64() {
 				Some(ts) => Ok(ts),
 				_ => Err(anyhow::Error::new(Error::unreachable(

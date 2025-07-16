@@ -41,13 +41,13 @@ impl IfelseStatement {
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
 		for (cond, then) in &self.exprs {
-			let v = cond.compute(stk, ctx, opt, doc).await?;
+			let v = stk.run(|stk| cond.compute(stk, ctx, opt, doc)).await?;
 			if v.is_truthy() {
-				return then.compute(stk, ctx, opt, doc).await;
+				return stk.run(|stk| then.compute(stk, ctx, opt, doc)).await;
 			}
 		}
 		match self.close {
-			Some(ref v) => v.compute(stk, ctx, opt, doc).await,
+			Some(ref v) => stk.run(|stk| v.compute(stk, ctx, opt, doc)).await,
 			None => Ok(Value::None),
 		}
 	}

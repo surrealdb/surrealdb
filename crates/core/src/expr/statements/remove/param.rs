@@ -40,7 +40,7 @@ impl RemoveParamStatement {
 		let key = crate::key::database::pa::new(ns, db, &pa.name);
 		txn.del(key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

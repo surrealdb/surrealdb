@@ -50,7 +50,7 @@ impl RemoveSequenceStatement {
 		let key = Sq::new(ns, db, &sq.name);
 		txn.del(key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

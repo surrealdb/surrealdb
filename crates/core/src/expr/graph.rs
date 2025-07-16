@@ -124,19 +124,19 @@ pub enum GraphSubject {
 
 impl GraphSubject {
 	pub(crate) async fn compute(
-		self,
+		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<ComputedGraphSubject> {
 		match self {
-			GraphSubject::Table(ident) => Ok(ComputedGraphSubject::Table(ident)),
+			GraphSubject::Table(ident) => Ok(ComputedGraphSubject::Table(ident.clone())),
 			GraphSubject::Range {
 				table,
 				range,
 			} => Ok(ComputedGraphSubject::Range {
-				table,
+				table: table.clone(),
 				range: range.compute(stk, ctx, opt, doc).await?,
 			}),
 		}

@@ -1,5 +1,6 @@
 use crate::dbs::node::Node;
 use crate::expr::statements::access::AccessGrantStore;
+use crate::expr::statements::define::config::ConfigStore;
 use crate::expr::statements::define::{
 	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
 };
@@ -58,7 +59,7 @@ pub(crate) enum Entry {
 	/// A slice of DefineModelStatement specified on a database.
 	Mls(Arc<[DefineModelStatement]>),
 	/// A slice of DefineConfigStatement specified on a database.
-	Cgs(Arc<[DefineConfigStatement]>),
+	Cgs(Arc<[ConfigStore]>),
 	/// A slice of DefineParamStatement specified on a database.
 	Pas(Arc<[DefineParamStore]>),
 	/// A slice of DefineSequenceStatement specified on a namespace.
@@ -243,7 +244,7 @@ impl Entry {
 	}
 	/// Converts this cache entry into a slice of [`DefineConfigStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Cgs`].
-	pub(crate) fn try_into_cgs(self) -> Result<Arc<[DefineConfigStatement]>> {
+	pub(crate) fn try_into_cgs(self) -> Result<Arc<[ConfigStore]>> {
 		match self {
 			Entry::Cgs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Cgs"),

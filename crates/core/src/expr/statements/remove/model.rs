@@ -43,7 +43,7 @@ impl RemoveModelStatement {
 		let key = crate::key::database::ml::new(ns, db, &ml.name, &ml.version);
 		txn.del(key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// TODO Remove the model file from storage
 		// Ok all good
 		Ok(Value::None)

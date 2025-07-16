@@ -10,7 +10,7 @@ use crate::expr::statements::upsert::UpsertStatement;
 use crate::expr::statements::{DefineTableStatement, SelectStatement};
 use crate::expr::{
 	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
-	FunctionCall, Groups, Ident, Idiom, Literal, Part, View,
+	FunctionCall, Groups, Idiom, Literal, Part, View,
 };
 use crate::val::{Array, RecordId, RecordIdKey, Value};
 use anyhow::{Result, bail};
@@ -115,9 +115,8 @@ impl Document {
 						Some(cond) => {
 							// What do we do with the initial value on UPDATE and DELETE?
 							if !targeted_force
-								&& act != Action::Create && cond
-								.0
-								.compute(stk, ctx, opt, Some(&self.initial))
+								&& act != Action::Create && stk
+								.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.initial)))
 								.await
 								.catch_return()?
 								.is_truthy()
@@ -142,9 +141,8 @@ impl Document {
 							}
 							// What do we do with the current value on CREATE and UPDATE?
 							if act != Action::Delete
-								&& cond
-									.0
-									.compute(stk, ctx, opt, Some(&self.current))
+								&& stk
+									.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
 									.await
 									.catch_return()?
 									.is_truthy()
@@ -222,9 +220,8 @@ impl Document {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond
-								.0
-								.compute(stk, ctx, opt, Some(&self.current))
+							match stk
+								.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
 								.await
 								.catch_return()?
 							{
@@ -400,15 +397,15 @@ impl Document {
 				}
 				// Process the field projection
 				match expr {
-					Expr::FunctionCall(f) if f.receiver.is_rolling() => match f.receiver {
+					Expr::FunctionCall(f) if f.receiver.is_rolling() => match &f.receiver {
 						Function::Normal(x) if x == "count" => {
 							let val =
 								f.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
 						Function::Normal(name) if name == "time::min" => {
-							let val = f.arguments[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -426,8 +423,8 @@ impl Document {
 							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Function::Normal(name) if name == "time::max" => {
-							let val = f.arguments[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -445,8 +442,8 @@ impl Document {
 							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Function::Normal(name) if name == "math::sum" => {
-							let val = f.arguments[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -464,8 +461,8 @@ impl Document {
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
 						Function::Normal(name) if name == "math::min" => {
-							let val = f.arguments[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -483,8 +480,8 @@ impl Document {
 							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Function::Normal(name) if name == "math::max" => {
-							let val = f.arguments[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -502,8 +499,8 @@ impl Document {
 							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
 						Function::Normal(name) if name == "math::mean" => {
-							let val = f.arguments[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -523,8 +520,10 @@ impl Document {
 						f => fail!("Unexpected function {f:?} encountered"),
 					},
 					_ => {
-						let val =
-							expr.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
+						let val = stk
+							.run(|stk| expr.compute(stk, ctx, opt, Some(fdc.doc)))
+							.await
+							.catch_return()?;
 						self.set(&mut set_ops, idiom, val)?;
 					}
 				}
@@ -864,7 +863,7 @@ impl Document {
 		let group_select = Expr::Select(Box::new(SelectStatement {
 			expr: Fields::Select(vec![field.clone()]),
 			cond,
-			what: fdc.view.what.into_iter().map(|x| Expr::Table(x)).collect(),
+			what: fdc.view.what.iter().map(|x| Expr::Table(x.clone())).collect(),
 			group: Some(fdc.groups.clone()),
 			..SelectStatement::default()
 		}));

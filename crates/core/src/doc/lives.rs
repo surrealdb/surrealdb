@@ -223,7 +223,12 @@ impl Document {
 		// Check where condition
 		if let Some(cond) = stm.cond() {
 			// Check if the expression is truthy
-			if !cond.0.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
+			if !stk
+				.run(|stk| cond.0.compute(stk, ctx, opt, Some(doc)))
+				.await
+				.catch_return()?
+				.is_truthy()
+			{
 				// Ignore this document
 				return Err(IgnoreError::Ignore);
 			}
@@ -252,7 +257,12 @@ impl Document {
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);
 					// Process the PERMISSION clause
-					if !e.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
+					if !stk
+						.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
+						.await
+						.catch_return()?
+						.is_truthy()
+					{
 						return Err(IgnoreError::Ignore);
 					}
 				}

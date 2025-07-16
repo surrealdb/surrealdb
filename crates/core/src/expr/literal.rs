@@ -100,7 +100,7 @@ impl Literal {
 			Literal::Array(exprs) => {
 				let mut array = Vec::with_capacity(exprs.len());
 				for e in exprs.iter() {
-					array.push(e.compute(stk, ctx, opt, doc).await?);
+					array.push(stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?);
 				}
 				Value::Array(Array(array))
 			}
@@ -108,7 +108,7 @@ impl Literal {
 			Literal::Object(items) => {
 				let mut map = BTreeMap::new();
 				for i in items.iter() {
-					let v = i.value.compute(stk, ctx, opt, doc).await?;
+					let v = stk.run(|stk| i.value.compute(stk, ctx, opt, doc)).await?;
 					map.insert(i.key.clone(), v);
 				}
 				Value::Object(Object(map))

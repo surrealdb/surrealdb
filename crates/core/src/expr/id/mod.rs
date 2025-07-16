@@ -136,7 +136,7 @@ impl RecordIdKeyLit {
 			RecordIdKeyLit::Array(v) => {
 				let mut res = Vec::new();
 				for v in v.iter() {
-					let v = v.compute(stk, ctx, opt, doc).await.catch_return()?;
+					let v = stk.run(|stk| v.compute(stk, ctx, opt, doc)).await.catch_return()?;
 					res.push(v);
 				}
 				Ok(RecordIdKey::Array(Array(res)))
@@ -144,7 +144,10 @@ impl RecordIdKeyLit {
 			RecordIdKeyLit::Object(v) => {
 				let mut res = Object::default();
 				for entry in v.iter() {
-					let v = entry.value.compute(stk, ctx, opt, doc).await.catch_return()?;
+					let v = stk
+						.run(|stk| entry.value.compute(stk, ctx, opt, doc))
+						.await
+						.catch_return()?;
 					res.insert(entry.key.clone(), v);
 				}
 				Ok(RecordIdKey::Object(res))

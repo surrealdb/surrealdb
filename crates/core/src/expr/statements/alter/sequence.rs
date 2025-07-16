@@ -53,7 +53,7 @@ impl AlterSequenceStatement {
 		let key = Sq::new(ns, db, &self.name);
 		txn.set(key, revision::to_vec(&sq)?, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

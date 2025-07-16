@@ -103,7 +103,7 @@ impl DefineTableStatement {
 			cache.clear_tb(ns, db, &self.name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Record definition change
 		if dt.changefeed.is_some() {
 			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
@@ -137,7 +137,7 @@ impl DefineTableStatement {
 					cache.clear_tb(ns, db, ft);
 				}
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Process the view data
 				let stm = UpdateStatement {
 					what: vec![Expr::Table(ft.clone())],
@@ -152,7 +152,7 @@ impl DefineTableStatement {
 			cache.clear_tb(ns, db, &self.name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

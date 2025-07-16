@@ -59,7 +59,7 @@ impl DefineParamStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Parameter, &Base::Db)?;
 
-		let value = self.value.compute(stk, ctx, opt, doc).await.catch_return()?;
+		let value = stk.run(|stk| self.value.compute(stk, ctx, opt, doc)).await.catch_return()?;
 
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -96,7 +96,7 @@ impl DefineParamStatement {
 		)
 		.await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

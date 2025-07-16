@@ -67,14 +67,16 @@ impl InsertStatement {
 		// Parse the INTO expression
 		let into = match &self.into {
 			None => None,
-			Some(into) => match into.compute(stk, &ctx, opt, doc).await.catch_return()? {
-				Value::Table(into) => Some(into),
-				v => {
-					bail!(Error::InsertStatement {
-						value: v.to_string(),
-					})
+			Some(into) => {
+				match stk.run(|stk| into.compute(stk, &ctx, opt, doc)).await.catch_return()? {
+					Value::Table(into) => Some(into),
+					v => {
+						bail!(Error::InsertStatement {
+							value: v.to_string(),
+						})
+					}
 				}
-			},
+			}
 		};
 		// Parse the data expression
 		match &self.data {
@@ -85,7 +87,8 @@ impl InsertStatement {
 					let mut o = Value::empty_object();
 					// Set each field from the expression
 					for (k, v) in v.iter() {
-						let v = v.compute(stk, &ctx, opt, None).await.catch_return()?;
+						let v =
+							stk.run(|stk| v.compute(stk, &ctx, opt, None)).await.catch_return()?;
 						o.set(stk, &ctx, opt, k, v).await?;
 					}
 					// Specify the new table record id
@@ -96,7 +99,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = v.compute(stk, &ctx, opt, doc).await.catch_return()?;
+				let v = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await.catch_return()?;
 				match v {
 					Value::Array(v) => {
 						for v in v {

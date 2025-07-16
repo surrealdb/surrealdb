@@ -11,8 +11,9 @@ use crate::expr::{Base, Value};
 use crate::iam::{Action, ConfigKind, ResourceKind};
 
 use anyhow::{Result, bail};
-use api::ApiConfig;
+use api::{ApiConfig, ApiConfigStore};
 use graphql::GraphQLConfig;
+use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -25,6 +26,7 @@ pub struct DefineConfigStatement {
 	pub inner: ConfigInner,
 }
 
+/// The config struct as a computation target.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -33,13 +35,23 @@ pub enum ConfigInner {
 	Api(ApiConfig),
 }
 
+/// The config struct as it is stored on disk.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum ConfigStore {
+	GraphQL(GraphQLConfig),
+	Api(ApiConfigStore),
+}
+
 impl DefineConfigStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Config(ConfigKind::GraphQL), &Base::Db)?;
@@ -65,53 +77,48 @@ impl DefineConfigStatement {
 				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
+
+		let store = match &self.inner {
+			ConfigInner::GraphQL(g) => ConfigStore::GraphQL(g.clone()),
+			ConfigInner::Api(a) => ConfigStore::Api(a.compute(stk, ctx, opt, doc).await?),
+		};
+
 		// Process the statement
 		let key = crate::key::database::cg::new(ns, db, cg);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.replace(key, revision::to_vec(self)?).await?;
+		txn.replace(key, revision::to_vec(&store)?).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
 }
 
-impl ConfigInner {
+impl ConfigStore {
 	pub fn name(&self) -> String {
-		ConfigKind::from(self).to_string()
+		match self {
+			ConfigStore::GraphQL(_) => ConfigKind::GraphQL.to_string(),
+			ConfigStore::Api(_) => ConfigKind::Api.to_string(),
+		}
 	}
 
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
 		match self {
-			ConfigInner::GraphQL(g) => Ok(g),
+			ConfigStore::GraphQL(g) => Ok(g),
 			c => fail!("found {c} when a graphql config was expected"),
 		}
 	}
 
-	pub fn try_into_api(&self) -> Result<&ApiConfig> {
+	pub fn try_as_api(&self) -> Result<&ApiConfigStore> {
 		match self {
-			ConfigInner::Api(a) => Ok(a),
+			ConfigStore::Api(a) => Ok(a),
 			c => fail!("found {c} when a api config was expected"),
 		}
 	}
 }
 
-impl From<ConfigInner> for ConfigKind {
-	fn from(value: ConfigInner) -> Self {
-		(&value).into()
-	}
-}
-
-impl From<&ConfigInner> for ConfigKind {
-	fn from(value: &ConfigInner) -> Self {
-		match value {
-			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
-			ConfigInner::Api(_) => ConfigKind::Api,
-		}
-	}
-}
-
+/*
 impl InfoStructure for DefineConfigStatement {
 	fn structure(self) -> Value {
 		match self.inner {
@@ -119,6 +126,19 @@ impl InfoStructure for DefineConfigStatement {
 				"graphql" => v.structure()
 			)),
 			ConfigInner::Api(v) => Value::from(map!(
+				"api" => v.structure()
+			)),
+		}
+	}
+}*/
+
+impl InfoStructure for ConfigStore {
+	fn structure(self) -> Value {
+		match self {
+			ConfigStore::GraphQL(v) => Value::from(map!(
+				"graphql" => v.structure()
+			)),
+			ConfigStore::Api(v) => Value::from(map!(
 				"api" => v.structure()
 			)),
 		}
@@ -144,6 +164,15 @@ impl Display for ConfigInner {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
 			ConfigInner::Api(v) => Display::fmt(v, f),
+		}
+	}
+}
+
+impl Display for ConfigStore {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self {
+			ConfigStore::GraphQL(v) => Display::fmt(v, f),
+			ConfigStore::Api(v) => Display::fmt(v, f),
 		}
 	}
 }

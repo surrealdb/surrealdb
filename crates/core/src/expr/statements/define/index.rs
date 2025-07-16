@@ -128,7 +128,7 @@ impl DefineIndexStatement {
 			cache.clear_tb(ns, db, &self.what);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Process the index
 		#[cfg(not(target_family = "wasm"))]
 		self.async_index(stk, ctx, opt, doc, !self.concurrently).await?;

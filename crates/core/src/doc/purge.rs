@@ -67,7 +67,7 @@ impl Document {
 				_ => {
 					let what = vec![
 						Part::Start(Expr::Literal(Literal::RecordId(
-							(*rid).clone().into_literal(),
+							(**rid).clone().into_literal(),
 						))),
 						Part::Graph(Graph {
 							dir: Dir::Both,
@@ -157,7 +157,7 @@ impl Document {
 										),
 										operator: AssignOperator::Subtract,
 										value: Expr::Literal(Literal::RecordId(
-											(*rid).clone().into_literal(),
+											(**rid).clone().into_literal(),
 										)),
 									}]),
 									// This is a self contained value, we can set it NONE
@@ -211,8 +211,9 @@ impl Document {
 								// Construct the document for the compute method
 								let doc = CursorDoc::new(None, None, doc);
 
+								let opt = opt.clone().with_perms(false);
 								// Compute the custom instruction.
-								v.compute(stk, &ctx, &opt.clone().with_perms(false), Some(&doc))
+								stk.run(|stk| v.compute(stk, &ctx, &opt, Some(&doc)))
 									.await
 									.catch_return()
 									// Wrap any error in an error explaining what went wrong

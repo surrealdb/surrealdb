@@ -44,32 +44,6 @@ pub enum ConfigInner {
 	Api(ApiConfig),
 }
 
-impl DefineConfigStatement {}
-
-impl ConfigInner {
-	pub fn name(&self) -> String {
-		match self {
-			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
-			ConfigInner::Api(_) => ConfigKind::Api,
-		}
-		.to_string()
-	}
-
-	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
-		match self {
-			ConfigInner::GraphQL(g) => Ok(g),
-			c => fail!("found {c} when a graphql config was expected"),
-		}
-	}
-
-	pub fn try_into_api(&self) -> Result<&ApiConfig> {
-		match self {
-			ConfigInner::Api(a) => Ok(a),
-			c => fail!("found {c} when a api config was expected"),
-		}
-	}
-}
-
 impl Display for DefineConfigStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE CONFIG")?;

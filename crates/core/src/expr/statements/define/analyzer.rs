@@ -66,7 +66,7 @@ impl DefineAnalyzerStatement {
 		ctx.get_index_stores().mappers().load(&az).await?;
 		txn.set(key, revision::to_vec(&az)?, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

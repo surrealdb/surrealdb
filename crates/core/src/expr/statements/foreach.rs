@@ -52,7 +52,7 @@ impl ForeachStatement {
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
 		// Check the loop data
-		let data = self.range.compute(stk, ctx, opt, doc).await?;
+		let data = stk.run(|stk| self.range.compute(stk, ctx, opt, doc)).await?;
 		let iter = match data {
 			Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
 			Value::Range(r) => {

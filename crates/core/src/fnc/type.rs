@@ -180,7 +180,7 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 					let res =
 						RecordIdKeyRange::from_value_range((*v).clone()).ok_or_else(|| {
 							Error::IdInvalid {
-								value: arg2.as_raw_string(),
+								value: Value::Range(v).as_raw_string(),
 							}
 						})?;
 					RecordIdKey::Range(Box::new(res))

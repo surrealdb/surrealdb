@@ -6,7 +6,7 @@ use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
 use crate::sql::index::{Distance, HnswParams, MTreeParams, VectorType};
-use crate::sql::statements::define::config::api::{ApiConfig, RequestMiddleware};
+use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::{ConfigInner, graphql};
 use crate::sql::statements::define::user::PassType;
@@ -657,7 +657,10 @@ impl Parser<'_> {
 			kind,
 			actions: Vec::new(),
 			fallback: None,
-			config: None,
+			config: ApiConfig {
+				middleware: Vec::new(),
+				permissions: Permission::Full,
+			},
 			comment: None,
 		};
 
@@ -669,10 +672,7 @@ impl Parser<'_> {
 			match self.peek().kind {
 				t!("ANY") => {
 					self.pop_peek();
-					res.config = match self.parse_api_config(ctx).await? {
-						v if v.is_empty() => None,
-						v => Some(v),
-					};
+					res.config = self.parse_api_config(ctx).await?;
 
 					if self.eat(t!("THEN")) {
 						res.fallback = Some(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
@@ -680,7 +680,7 @@ impl Parser<'_> {
 				}
 				t!("DELETE") | t!("GET") | t!("PATCH") | t!("POST") | t!("PUT") | t!("TRACE") => {
 					let mut methods: Vec<Method> = vec![];
-					'methods: loop {
+					loop {
 						let method = match self.peek().kind {
 							t!("DELETE") => Method::Delete,
 							t!("GET") => Method::Get,
@@ -699,14 +699,11 @@ impl Parser<'_> {
 						methods.push(method);
 
 						if !self.eat(t!(",")) {
-							break 'methods;
+							break;
 						}
 					}
 
-					let config = match self.parse_api_config(ctx).await? {
-						v if v.is_empty() => None,
-						v => Some(v),
-					};
+					let config = self.parse_api_config(ctx).await?;
 
 					expected!(self, t!("THEN"));
 					let action = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
@@ -748,11 +745,11 @@ impl Parser<'_> {
 		let what = self.next_token_value()?;
 
 		let mut res = DefineEventStatement {
+			kind,
 			name,
 			what,
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
-			kind: DefineKind::Default,
 			comment: None,
 		};
 
@@ -1361,21 +1358,16 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("PERMISSIONS") => {
 					self.pop_peek();
-					config.permissions = Some(self.parse_permission_value(stk).await?);
+					config.permissions = self.parse_permission_value(stk).await?;
 				}
 				t!("MIDDLEWARE") => {
 					self.pop_peek();
 
-					let mut middleware: Vec<(String, Vec<Expr>)> = Vec::new();
-					// let mut parsed_custom = false;
+					let mut middleware = Vec::new();
 
 					loop {
 						let mut name = match self.peek_kind() {
 							t!("API") => {
-								// if parsed_custom {
-								// 	bail!("Cannot specify builtin middlewares after custom middlewares");
-								// }
-
 								self.pop_peek();
 								expected!(self, t!("::"));
 								"api::".to_string()
@@ -1400,14 +1392,17 @@ impl Parser<'_> {
 						expected!(self, t!("("));
 						let args = self.parse_function_args(stk).await?;
 
-						middleware.push((name, args));
+						middleware.push(Middleware {
+							name,
+							args,
+						});
 
 						if !self.eat(t!(",")) {
 							break;
 						}
 					}
 
-					config.middleware = Some(RequestMiddleware(middleware));
+					config.middleware = middleware;
 				}
 				_ => {
 					break;

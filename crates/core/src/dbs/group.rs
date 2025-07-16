@@ -157,7 +157,7 @@ impl GroupsCollector {
 										let mut args = vec![agr.take()];
 										for e in f.arguments.iter().skip(1) {
 											args.push(
-												e.compute(stk, ctx, opt, None)
+												stk.run(|stk| e.compute(stk, ctx, opt, None))
 													.await
 													.catch_return()?,
 											);

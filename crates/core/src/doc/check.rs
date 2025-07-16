@@ -319,7 +319,12 @@ impl Document {
 					false => &self.current,
 				};
 				// Check if the expression is truthy
-				if !cond.0.compute(stk, ctx, opt, Some(current)).await.catch_return()?.is_truthy() {
+				if !stk
+					.run(|stk| cond.0.compute(stk, ctx, opt, Some(current)))
+					.await
+					.catch_return()?
+					.is_truthy()
+				{
 					// Ignore this document
 					return Err(IgnoreError::Ignore);
 				}
@@ -362,7 +367,12 @@ impl Document {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
-						if !e.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
+						if !stk
+							.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
+							.await
+							.catch_return()?
+							.is_truthy()
+						{
 							return Err(IgnoreError::Ignore);
 						}
 					}
@@ -444,16 +454,18 @@ impl Document {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
-						if !e
-							.compute(
-								stk,
-								ctx,
-								opt,
-								Some(match stm.is_delete() {
-									true => &self.initial,
-									false => &self.current,
-								}),
-							)
+						if !stk
+							.run(|stk| {
+								e.compute(
+									stk,
+									ctx,
+									opt,
+									Some(match stm.is_delete() {
+										true => &self.initial,
+										false => &self.current,
+									}),
+								)
+							})
 							.await
 							.catch_return()?
 							.is_truthy()

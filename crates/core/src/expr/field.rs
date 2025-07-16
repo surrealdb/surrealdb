@@ -213,8 +213,7 @@ impl Fields {
 								let x = if f.arguments.is_empty() {
 									f.compute(stk, ctx, opt, Some(doc)).await.catch_return()?
 								} else {
-									f.arguments[0]
-										.compute(stk, ctx, opt, Some(doc))
+									stk.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(doc)))
 										.await
 										.catch_return()?
 								};
@@ -236,9 +235,11 @@ impl Fields {
 										let mut arguments = Vec::new();
 										for arg in f.arguments.iter() {
 											arguments.push(
-												arg.compute(stk, ctx, opt, Some(doc))
-													.await
-													.catch_return()?,
+												stk.run(|stk| {
+													arg.compute(stk, ctx, opt, Some(doc))
+												})
+												.await
+												.catch_return()?,
 											);
 										}
 
@@ -282,9 +283,11 @@ impl Fields {
 										let mut arguments = Vec::new();
 										for arg in f.arguments.iter() {
 											arguments.push(
-												arg.compute(stk, ctx, opt, Some(doc))
-													.await
-													.catch_return()?,
+												stk.run(|stk| {
+													arg.compute(stk, ctx, opt, Some(doc))
+												})
+												.await
+												.catch_return()?,
 											);
 										}
 
@@ -312,8 +315,8 @@ impl Fields {
 										}
 									}
 									_ => {
-										let expr = expr
-											.compute(stk, ctx, opt, Some(doc))
+										let expr = stk
+											.run(|stk| expr.compute(stk, ctx, opt, Some(doc)))
 											.await
 											.catch_return()?;
 
@@ -329,8 +332,10 @@ impl Fields {
 
 						// This expression is a normal field expression
 						_ => {
-							let expr =
-								expr.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
+							let expr = stk
+								.run(|stk| expr.compute(stk, ctx, opt, Some(doc)))
+								.await
+								.catch_return()?;
 							// Check if this is a single VALUE field expression
 							if self.is_single() {
 								out = expr;

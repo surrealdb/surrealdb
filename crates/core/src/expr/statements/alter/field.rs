@@ -156,11 +156,11 @@ impl AlterFieldStatement {
 		)
 		.await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Process possible recursive defitions
 		df.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

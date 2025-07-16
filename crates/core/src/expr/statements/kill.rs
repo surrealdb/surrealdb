@@ -36,7 +36,11 @@ impl KillStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Resolve live query id
-		let lid = match self.id.compute(stk, ctx, opt, None).await.catch_return()?.cast_to::<Uuid>()
+		let lid = match stk
+			.run(|stk| self.id.compute(stk, ctx, opt, None))
+			.await
+			.catch_return()?
+			.cast_to::<Uuid>()
 		{
 			Err(_) => {
 				bail!(Error::KillStatement {
@@ -69,7 +73,7 @@ impl KillStatement {
 					cache.new_live_queries_version(&val.ns, &val.db, &val.tb);
 				}
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 			}
 			None => {
 				bail!(Error::KillStatement {

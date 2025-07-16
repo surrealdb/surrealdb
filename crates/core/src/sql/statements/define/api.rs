@@ -15,7 +15,7 @@ pub struct DefineApiStatement {
 	pub path: Expr,
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
-	pub config: Option<ApiConfig>,
+	pub config: ApiConfig,
 	pub comment: Option<Strand>,
 }
 
@@ -30,13 +30,11 @@ impl Display for DefineApiStatement {
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
 
-		if self.config.is_some() || self.fallback.is_some() {
-			write!(f, "FOR any")?;
+		write!(f, "FOR any")?;
+		{
 			let indent = pretty_indent();
 
-			if let Some(config) = &self.config {
-				write!(f, "{}", config)?;
-			}
+			write!(f, "{}", self.config)?;
 
 			if let Some(fallback) = &self.fallback {
 				write!(f, "THEN {}", fallback)?;
@@ -65,7 +63,7 @@ impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
 			path: v.path.into(),
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
-			config: v.config.map(Into::into),
+			config: v.config.into(),
 			comment: v.comment.map(Into::into),
 		}
 	}
@@ -78,27 +76,9 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 			path: v.path.into(),
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
-			config: v.config.map(Into::into),
+			config: v.config.into(),
 			comment: v.comment.map(Into::into),
 		}
-	}
-}
-
-#[derive(Clone, Debug, Default)]
-#[non_exhaustive]
-pub struct ApiDefinition {
-	pub id: Option<u32>,
-	pub path: Path,
-	pub actions: Vec<ApiAction>,
-	pub fallback: Option<Expr>,
-	pub config: Option<ApiConfig>,
-	pub comment: Option<Strand>,
-}
-
-impl Display for ApiDefinition {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let da: DefineApiStatement = self.clone().into();
-		da.fmt(f)
 	}
 }
 
@@ -107,16 +87,14 @@ impl Display for ApiDefinition {
 pub struct ApiAction {
 	pub methods: Vec<Method>,
 	pub action: Expr,
-	pub config: Option<ApiConfig>,
+	pub config: ApiConfig,
 }
 
 impl Display for ApiAction {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
 		let indent = pretty_indent();
-		if let Some(config) = &self.config {
-			write!(f, "{}", config)?;
-		}
+		write!(f, "{}", self.config)?;
 		write!(f, "THEN {}", self.action)?;
 		Ok(())
 	}
@@ -127,7 +105,7 @@ impl From<ApiAction> for crate::expr::statements::define::ApiAction {
 		crate::expr::statements::define::ApiAction {
 			methods: v.methods,
 			action: v.action.into(),
-			config: v.config.map(Into::into),
+			config: v.config.into(),
 		}
 	}
 }
@@ -137,7 +115,7 @@ impl From<crate::expr::statements::define::ApiAction> for ApiAction {
 		ApiAction {
 			methods: v.methods,
 			action: v.action.into(),
-			config: v.config.map(Into::into),
+			config: v.config.into(),
 		}
 	}
 }

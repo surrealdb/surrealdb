@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 pub mod api;
 pub(super) mod invoke;
 
@@ -7,20 +5,19 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::err::Error;
-use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
-use crate::val::{Object, Value};
+use crate::val::{Array, Object, Strand, Value};
 use anyhow::{Result, bail};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct RequestMiddleware(pub Vec<(String, Vec<Expr>)>);
+pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);
 
 pub type CollectedMiddleware<'a> = Vec<(&'a String, &'a Vec<Value>)>;
 
 impl RequestMiddleware {
-	fn collect<'a>(slice: &'a [&'a RequestMiddleware]) -> Result<CollectedMiddleware<'a>> {
+	pub fn collect<'a>(slice: &'a [&'a RequestMiddleware]) -> Result<CollectedMiddleware<'a>> {
 		let mut middleware: CollectedMiddleware<'a> = Vec::new();
 		for map in slice {
 			for (k, v) in map.0.iter() {
@@ -44,6 +41,18 @@ impl RequestMiddleware {
 
 impl InfoStructure for RequestMiddleware {
 	fn structure(self) -> Value {
-		Value::Object(Object(self.0.into_iter().map(|(k, v)| (k, Value::from(v))).collect()))
+		Value::Object(Object(
+			self.0
+				.into_iter()
+				.map(|(k, v)| {
+					let value = v
+						.iter()
+						.map(|x| Value::Strand(Strand::new(x.to_string()).unwrap()))
+						.collect();
+
+					(k, Value::Array(Array(value)))
+				})
+				.collect(),
+		))
 	}
 }

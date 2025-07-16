@@ -622,8 +622,8 @@ impl RecurseInstruction {
 				expects,
 				inclusive,
 			} => {
-				let expects = expects
-					.compute(stk, ctx, opt, doc)
+				let expects = stk
+					.run(|stk| expects.compute(stk, ctx, opt, doc))
 					.await
 					.catch_return()?
 					.coerce_to::<RecordId>()?

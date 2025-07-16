@@ -95,7 +95,7 @@ impl LiveStatement {
 		// Get the id
 		let id = stm.id.0;
 		// Process the live query table
-		match stm.what.compute(stk, ctx, opt, doc).await.catch_return()? {
+		match skt.run(|stk| stm.what.compute(stk, ctx, opt, doc)).await.catch_return()? {
 			Value::Table(tb) => {
 				// Store the current Node ID
 				stm.node = nid.into();
@@ -122,7 +122,7 @@ impl LiveStatement {
 					cache.new_live_queries_version(ns, db, &tb);
 				}
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 			}
 			v => {
 				bail!(Error::LiveStatement {

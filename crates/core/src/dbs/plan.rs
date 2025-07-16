@@ -147,7 +147,7 @@ impl ExplainItem {
 				details: vec![
 					//TODO: Properly handle possible null byte.
 					("table", Value::Strand(Strand::new(tb.to_owned()).unwrap())),
-					("range", Value::Range(Box::new(r.into_value_range()))),
+					("range", Value::Range(Box::new(r.clone().into_value_range()))),
 					("direction", sc.to_string().into()),
 				],
 			},

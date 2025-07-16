@@ -41,7 +41,7 @@ impl RemoveBucketStatement {
 		let key = crate::key::database::bu::new(ns, db, &bu.name);
 		txn.del(key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

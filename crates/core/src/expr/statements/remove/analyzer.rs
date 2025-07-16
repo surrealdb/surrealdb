@@ -41,7 +41,7 @@ impl RemoveAnalyzerStatement {
 		let key = crate::key::database::az::new(ns, db, &az.name);
 		txn.del(key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Cleanup in-memory mappers if not used anymore
 		let azs = txn.all_db_analyzers(ns, db).await?;
 		ctx.get_index_stores().mappers().cleanup(&azs);

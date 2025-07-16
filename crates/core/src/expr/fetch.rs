@@ -83,7 +83,11 @@ impl Fetch {
 						// more efficient.
 						let mut arguments = Vec::new();
 						for arg in f.arguments.iter() {
-							arguments.push(arg.compute(stk, ctx, opt, None).await.catch_return()?);
+							arguments.push(
+								stk.run(|stk| arg.compute(stk, ctx, opt, None))
+									.await
+									.catch_return()?,
+							);
 						}
 
 						// replicate the same error that would happen with normal
@@ -98,7 +102,11 @@ impl Fetch {
 					Function::Normal(ref x) if x == "type::fields" => {
 						let mut arguments = Vec::new();
 						for arg in f.arguments.iter() {
-							arguments.push(arg.compute(stk, ctx, opt, None).await.catch_return()?);
+							arguments.push(
+								stk.run(|stk| arg.compute(stk, ctx, opt, None))
+									.await
+									.catch_return()?,
+							);
 						}
 
 						// replicate the same error that would happen with normal

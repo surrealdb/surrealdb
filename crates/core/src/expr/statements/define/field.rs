@@ -131,7 +131,7 @@ impl DefineFieldStatement {
 			cache.clear_tb(ns, db, &self.what);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Process possible recursive defitions
 		self.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// If this is an `in` field then check relation definitions
@@ -164,7 +164,7 @@ impl DefineFieldStatement {
 							cache.clear_tb(ns, db, &self.what);
 						}
 						// Clear the cache
-						txn.clear();
+						txn.clear_cache();
 					}
 				}
 			}
@@ -199,13 +199,13 @@ impl DefineFieldStatement {
 							cache.clear_tb(ns, db, &self.what);
 						}
 						// Clear the cache
-						txn.clear();
+						txn.clear_cache();
 					}
 				}
 			}
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

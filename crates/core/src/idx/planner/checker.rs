@@ -193,9 +193,8 @@ impl CheckerCacheEntry {
 						ir: None,
 						doc: val.into(),
 					};
-					let truthy = cond
-						.0
-						.compute(stk, ctx, opt, Some(&cursor_doc))
+					let truthy = stk
+						.run(|stk| cond.0.compute(stk, ctx, opt, Some(&cursor_doc)))
 						.await
 						.catch_return()?
 						.is_truthy();

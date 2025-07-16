@@ -261,7 +261,11 @@ impl<'a> BucketController<'a> {
 					let ctx = ctx.freeze();
 
 					// Process the PERMISSION clause
-					let res = e.compute(self.stk, &ctx, opt, self.doc).await.catch_return()?;
+					let res = self
+						.stk
+						.run(|stk| e.compute(stk, &ctx, opt, self.doc))
+						.await
+						.catch_return()?;
 					ensure!(
 						res.is_truthy(),
 						err::Error::BucketPermissions {

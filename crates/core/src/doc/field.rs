@@ -466,7 +466,8 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
+			let val =
+				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Return the modified value
@@ -502,7 +503,8 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
+			let val =
+				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Return the modified value
@@ -544,7 +546,8 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the ASSERT clause
-			let res = expr.compute(self.stk, &ctx, self.opt, doc).await.catch_return()?;
+			let res =
+				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(MutableContext::unfreeze(ctx)?);
 			// Check the ASSERT clause result
@@ -618,7 +621,11 @@ impl FieldEditContext<'_> {
 					// Freeze the new context
 					let ctx = ctx.freeze();
 					// Process the PERMISSION clause
-					let res = expr.compute(self.stk, &ctx, opt, doc).await.catch_return()?;
+					let res = self
+						.stk
+						.run(|stk| expr.compute(stk, &ctx, opt, doc))
+						.await
+						.catch_return()?;
 					// Unfreeze the new context
 					self.context = Some(MutableContext::unfreeze(ctx)?);
 					// If the specific permissions

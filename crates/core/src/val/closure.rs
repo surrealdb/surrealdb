@@ -73,7 +73,7 @@ impl Closure {
 		}
 
 		let ctx = ctx.freeze();
-		let result = self.body.compute(stk, &ctx, opt, doc).await.catch_return()?;
+		let result = stk.run(|stk| self.body.compute(stk, &ctx, opt, doc)).await.catch_return()?;
 		if let Some(returns) = &self.returns {
 			result
 				.coerce_to_kind(returns)

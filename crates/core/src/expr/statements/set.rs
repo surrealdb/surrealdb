@@ -39,7 +39,7 @@ impl SetStatement {
 				name: self.name.clone().into_string(),
 			})));
 		}
-		let result = self.what.compute(stk, ctx, opt, doc).await?;
+		let result = stk.run(|stk| self.what.compute(stk, ctx, opt, doc)).await?;
 		match self.kind {
 			Some(ref kind) => result
 				.coerce_to_kind(kind)

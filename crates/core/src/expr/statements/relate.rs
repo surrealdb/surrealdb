@@ -58,7 +58,7 @@ impl RelateStatement {
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
-			match self.from.compute(stk, &ctx, opt, doc).await.catch_return()? {
+			match stk.run(|stk| self.from.compute(stk, &ctx, opt, doc)).await.catch_return()? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -100,7 +100,7 @@ impl RelateStatement {
 		// Loop over the with targets
 		let with = {
 			let mut out = Vec::new();
-			match self.with.compute(stk, &ctx, opt, doc).await.catch_return()? {
+			match stk.run(|stk| self.with.compute(stk, &ctx, opt, doc)).await.catch_return()? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -143,7 +143,7 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match self.kind.compute(stk, &ctx, opt, doc).await.catch_return()? {
+				match stk.run(|stk| self.kind.compute(stk, &ctx, opt, doc)).await.catch_return()? {
 					// The relation has a specific record id
 					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w, None)),
 					// The relation does not have a specific record id

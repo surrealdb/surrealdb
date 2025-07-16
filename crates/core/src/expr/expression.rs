@@ -419,19 +419,19 @@ impl Expr {
 				if left.is_truthy() {
 					return Ok(left);
 				}
-				return right.compute(stk, ctx, opt, doc).await;
+				return stk.run(|stk| right.compute(stk, ctx, opt, doc)).await;
 			}
 			BinaryOperator::And => {
 				if !left.is_truthy() {
 					return Ok(left);
 				}
-				return right.compute(stk, ctx, opt, doc).await;
+				return stk.run(|stk| right.compute(stk, ctx, opt, doc)).await;
 			}
 			BinaryOperator::NullCoalescing => {
 				if !left.is_null() {
 					return Ok(left);
 				}
-				return right.compute(stk, ctx, opt, doc).await;
+				return stk.run(|stk| right.compute(stk, ctx, opt, doc)).await;
 			}
 			BinaryOperator::LessThan => fnc::operate::less_than(
 				&left,

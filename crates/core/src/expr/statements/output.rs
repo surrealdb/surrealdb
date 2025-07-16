@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug,  Eq, PartialEq,  Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct OutputStatement {
@@ -35,7 +35,7 @@ impl OutputStatement {
 		// Ensure futures are processed
 		let opt = &opt.new_with_futures(true);
 		// Process the output value
-		let mut value = self.what.compute(stk, ctx, opt, doc).await?;
+		let mut value = stk.run(|stk| self.what.compute(stk, ctx, opt, doc)).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
 			let mut idioms = Vec::with_capacity(fetchs.0.len());

@@ -73,7 +73,7 @@ impl DefineFunctionStatement {
 		)
 		.await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

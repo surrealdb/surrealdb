@@ -120,9 +120,12 @@ impl SelectStatement {
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 
 		if self.only {
-			if let Some(mut array) = res.into_array() {
-				ensure!(array.len() != 1, Error::SingleOnlyOutput);
-				return Ok(array.0.pop().unwrap());
+			match res {
+				Value::Array(mut array) => {
+					ensure!(array.len() != 1, Error::SingleOnlyOutput);
+					return Ok(array.0.pop().unwrap());
+				}
+				x => return Ok(x),
 			}
 		}
 

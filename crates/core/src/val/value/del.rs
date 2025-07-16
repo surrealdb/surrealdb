@@ -51,45 +51,47 @@ impl Value {
 							_ => Ok(()),
 						},
 					},
-					Part::Value(x) => match x.compute(stk, ctx, opt, None).await.catch_return()? {
-						Value::Number(n) => match path.len() {
-							1 => {
-								v.remove(&n.to_string());
-								Ok(())
-							}
-							_ => match v.get_mut(&n.to_string()) {
-								Some(v) if !v.is_nullish() => {
-									stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
+					Part::Value(x) => {
+						match stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()? {
+							Value::Number(n) => match path.len() {
+								1 => {
+									v.remove(&n.to_string());
+									Ok(())
 								}
-								_ => Ok(()),
+								_ => match v.get_mut(&n.to_string()) {
+									Some(v) if !v.is_nullish() => {
+										stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
+									}
+									_ => Ok(()),
+								},
 							},
-						},
-						Value::Strand(f) => match path.len() {
-							1 => {
-								v.remove(f.as_str());
-								Ok(())
-							}
-							_ => match v.get_mut(f.as_str()) {
-								Some(v) if !v.is_nullish() => {
-									stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
+							Value::Strand(f) => match path.len() {
+								1 => {
+									v.remove(f.as_str());
+									Ok(())
 								}
-								_ => Ok(()),
+								_ => match v.get_mut(f.as_str()) {
+									Some(v) if !v.is_nullish() => {
+										stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
+									}
+									_ => Ok(()),
+								},
 							},
-						},
-						Value::Thing(t) => match path.len() {
-							1 => {
-								v.remove(&t.to_string());
-								Ok(())
-							}
-							_ => match v.get_mut(&t.to_string()) {
-								Some(v) if !v.is_nullish() => {
-									stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
+							Value::Thing(t) => match path.len() {
+								1 => {
+									v.remove(&t.to_string());
+									Ok(())
 								}
-								_ => Ok(()),
+								_ => match v.get_mut(&t.to_string()) {
+									Some(v) if !v.is_nullish() => {
+										stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
+									}
+									_ => Ok(()),
+								},
 							},
-						},
-						_ => Ok(()),
-					},
+							_ => Ok(()),
+						}
+					}
 					Part::Destructure(parts) => {
 						for part in parts {
 							ensure!(
@@ -158,8 +160,8 @@ impl Value {
 							let mut new_res = Vec::new();
 							for (i, v) in v.0.iter().enumerate() {
 								let cur = v.clone().into();
-								if !w
-									.compute(stk, ctx, opt, Some(&cur))
+								if !stk
+									.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
 									.await
 									.catch_return()?
 									.is_truthy()
@@ -178,7 +180,8 @@ impl Value {
 								// Store the elements and positions to update
 								for (i, o) in v.iter_mut().enumerate() {
 									let cur = o.clone().into();
-									if w.compute(stk, ctx, opt, Some(&cur))
+									if stk
+										.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
 										.await
 										.catch_return()?
 										.is_truthy()
@@ -208,7 +211,8 @@ impl Value {
 								let path = path.next();
 								for v in v.iter_mut() {
 									let cur = v.clone().into();
-									if w.compute(stk, ctx, opt, Some(&cur))
+									if stk
+										.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
 										.await
 										.catch_return()?
 										.is_truthy()
@@ -222,7 +226,7 @@ impl Value {
 					}
 					Part::Value(x) => {
 						if let Value::Number(i) =
-							x.compute(stk, ctx, opt, None).await.catch_return()?
+							stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?
 						{
 							if path.len() == 1 {
 								if v.len() > i.to_usize() {

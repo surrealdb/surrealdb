@@ -5,14 +5,12 @@ use super::body::ApiBody;
 use super::context::InvocationContext;
 use super::convert;
 use super::method::Method;
-use super::middleware::CollectMiddleware;
+use super::middleware::invoke;
 use super::response::{ApiResponse, ResponseInstruction};
-use crate::api::middleware::RequestMiddleware;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Session};
 use crate::expr::FlowResultExt as _;
 use crate::expr::statements::define::ApiDefinition;
-use crate::expr::statements::define::config::api::ApiConfig;
 use crate::kvs::{Datastore, Transaction};
 use crate::val::{Object, Value};
 use anyhow::Result;
@@ -71,27 +69,36 @@ impl ApiInvocation {
 		api: &ApiDefinition,
 		body: ApiBody,
 	) -> Result<Option<(ApiResponse, ResponseInstruction)>> {
-		let (action, action_config) =
-			match api.actions.iter().find(|x| x.methods.contains(&self.method)) {
-				Some(v) => (&v.action, &v.config),
-				None => match &api.fallback {
-					Some(v) => (v, &None),
-					None => return Ok(None),
-				},
-			};
+		// TODO: Figure out if it is possible if multiple actions can have the same method, and if
+		// so should they all be run?
+		let method_action = api.actions.iter().find(|x| x.methods.contains(&self.method));
 
-		let mut configs: Vec<&ApiConfig> = Vec::new();
-		let global = ctx.tx().get_db_optional_config(opt.ns()?, opt.db()?, "api").await?;
-		configs.extend(global.as_ref().map(|v| v.inner.try_into_api()).transpose()?);
-		configs.extend(api.config.as_ref());
-		configs.extend(action_config);
-
-		let middleware: Vec<&RequestMiddleware> =
-			configs.into_iter().filter_map(|v| v.middleware.as_ref()).collect();
-		let builtin = middleware.collect()?;
+		if method_action.is_none() && api.fallback.is_none() {
+			// nothing to do, just return.
+			return Ok(None);
+		}
 
 		let mut inv_ctx = InvocationContext::default();
-		inv_ctx.apply_middleware(builtin)?;
+
+		// first run the middleware which is globally configured for the database.
+		let global = ctx.tx().get_db_optional_config(opt.ns()?, opt.db()?, "api").await?;
+		if let Some(config) = global.as_ref().map(|v| v.try_as_api()).transpose()? {
+			for m in config.middleware.iter() {
+				invoke::invoke(&mut inv_ctx, &m.name, m.args.clone())?;
+			}
+		}
+
+		// run the middl ware for the api definition.
+		for m in api.config.middleware.iter() {
+			invoke::invoke(&mut inv_ctx, &m.name, m.args.clone())?;
+		}
+
+		// run the middleware for the http method.
+		if let Some(method_action) = method_action {
+			for m in method_action.config.middleware.iter() {
+				invoke::invoke(&mut inv_ctx, &m.name, m.args.clone())?;
+			}
+		}
 
 		// Prepare the response headers and conversion
 		let res_instruction = if body.is_native() {
@@ -124,9 +131,15 @@ impl ApiInvocation {
 
 		// Compute the action
 
-		let res = action.compute(stk, &ctx, &opt, None).await.catch_return()?;
+		let Some(action) = method_action.map(|x| &x.action).or(api.fallback.as_ref()) else {
+			// condition already checked above.
+			// either method_action is some or api fallback is some.
+			unreachable!()
+		};
 
-		let mut res = ApiResponse::try_from(res)?;
+		let res = stk.run(|stk| action.compute(stk, &ctx, &opt, None)).await.catch_return()?;
+
+		let mut res = ApiResponse::from_action_result(res)?;
 		if let Some(headers) = inv_ctx.response_headers {
 			let mut headers = headers;
 			headers.extend(res.headers);

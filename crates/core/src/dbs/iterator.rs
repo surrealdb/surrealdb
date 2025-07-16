@@ -171,10 +171,11 @@ impl Iterator {
 					return Ok(());
 				}
 
-				let Part::Start(Expr::Literal(Literal::RecordId(from))) = x[0] else {
+				let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
 					return Ok(());
 				};
-				let Part::Graph(graph) = x[0] else {
+
+				let Part::Graph(ref graph) = x[0] else {
 					return Ok(());
 				};
 
@@ -200,14 +201,14 @@ impl Iterator {
 						what.push(s.compute(stk, ctx, opt, doc).await?);
 					}
 					// idiom matches the Edges pattern.
-					self.prepare_edges(stm_ctx.stm, from, graph.dir, what)?;
+					self.prepare_edges(stm_ctx.stm, from, graph.dir.clone(), what)?;
 				}
 			}
 			Expr::Literal(Literal::Array(array)) => {
 				self.prepare_array(stk, ctx, opt, doc, planner, stm_ctx, array).await?
 			}
 			x => {
-				let v = x.compute(stk, ctx, opt, doc).await.catch_return()?;
+				let v = stk.run(|stk| x.compute(stk, ctx, opt, doc)).await.catch_return()?;
 				match v {
 					Value::Thing(x) => self.prepare_thing(planner, stm_ctx, x).await?,
 					Value::Object(x) if !stm_ctx.stm.is_select() => {
@@ -398,7 +399,7 @@ impl Iterator {
 		stm_ctx: &StatementContext<'_>,
 		expr: &Expr,
 	) -> Result<()> {
-		let v = expr.compute(stk, ctx, opt, doc).await.catch_return()?;
+		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		match v {
 			Value::Object(o) if !stm_ctx.stm.is_select() => {
 				self.prepare_object(stm_ctx.stm, o)?;
@@ -439,13 +440,13 @@ impl Iterator {
 							.await;
 					}
 
-					let Part::Start(Expr::Literal(Literal::RecordId(from))) = x[0] else {
+					let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
 						return self
 							.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;
 					};
 
-					let Part::Graph(graph) = x[0] else {
+					let Part::Graph(ref graph) = x[0] else {
 						return self
 							.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;
@@ -473,7 +474,7 @@ impl Iterator {
 							what.push(s.compute(stk, ctx, opt, doc).await?);
 						}
 						// idiom matches the Edges pattern.
-						return self.prepare_edges(stm_ctx.stm, from, graph.dir, what);
+						return self.prepare_edges(stm_ctx.stm, from, graph.dir.clone(), what);
 					}
 
 					self.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?

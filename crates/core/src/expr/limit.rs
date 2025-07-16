@@ -26,7 +26,7 @@ impl Limit {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<u32> {
-		match self.0.compute(stk, ctx, opt, doc).await.catch_return() {
+		match stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return() {
 			// This is a valid limiting number
 			Ok(Value::Number(Number::Int(v))) if v >= 0 => {
 				if v > u32::MAX as i64 {

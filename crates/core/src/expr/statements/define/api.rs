@@ -12,9 +12,9 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 
-use super::config::api::ApiConfig;
+use super::config::api::{ApiConfig, ApiConfigStore};
 use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
@@ -25,7 +25,7 @@ pub struct DefineApiStatement {
 	pub path: Expr,
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
-	pub config: Option<ApiConfig>,
+	pub config: ApiConfig,
 	pub comment: Option<Strand>,
 }
 
@@ -41,7 +41,7 @@ impl DefineApiStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = (opt.ns()?, opt.db()?);
+		let (ns, db) = opt.ns_db()?;
 		// Check if the definition exists
 		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
 			match self.kind {
@@ -59,31 +59,43 @@ impl DefineApiStatement {
 			}
 		}
 
-		let path = self.path.compute(stk, ctx, opt, doc).await.catch_return()?;
+		let path = stk.run(|stk| self.path.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		// Process the statement
 		let path: Path = path.coerce_to::<String>()?.parse()?;
 		let name = path.to_string();
+
+		let config = self.config.compute(stk, ctx, opt, doc).await?;
+
 		let key = crate::key::database::ap::new(ns, db, &name);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
+
+		let mut actions = Vec::new();
+		for action in self.actions.iter() {
+			actions.push(ApiActionStore {
+				methods: action.methods.clone(),
+				action: action.action.clone(),
+				config: action.config.compute(stk, ctx, opt, doc).await?,
+			});
+		}
+
 		let ap = ApiDefinition {
 			// Don't persist the `IF NOT EXISTS` clause to schema
 			path,
-			actions: self.actions.clone(),
+			actions,
 			fallback: self.fallback.clone(),
-			config: self.config.clone(),
+			config,
 			comment: self.comment.clone(),
-			..Default::default()
 		};
 		txn.set(key, revision::to_vec(&ap)?, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
 }
 
-impl Display for DefineApiStatement {
+impl fmt::Display for DefineApiStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE API")?;
 		match self.kind {
@@ -94,13 +106,11 @@ impl Display for DefineApiStatement {
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
 
-		if self.config.is_some() || self.fallback.is_some() {
-			write!(f, "FOR any")?;
+		write!(f, "FOR any")?;
+		{
 			let indent = pretty_indent();
 
-			if let Some(config) = &self.config {
-				write!(f, "{}", config)?;
-			}
+			write!(f, "{}", self.config)?;
 
 			if let Some(fallback) = &self.fallback {
 				write!(f, "THEN {}", fallback)?;
@@ -127,7 +137,7 @@ impl InfoStructure for DefineApiStatement {
 		Value::from(Object(map! {
 			// TODO: Null byte validity
 			"path".to_string() => Strand::new(self.path.to_string()).unwrap().into(),
-			"config".to_string(), if let Some(config) = self.config => config.structure(),
+			"config".to_string() => self.config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
 			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
@@ -137,60 +147,99 @@ impl InfoStructure for DefineApiStatement {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
 pub struct ApiDefinition {
-	pub id: Option<u32>,
 	pub path: Path,
-	pub actions: Vec<ApiAction>,
+	pub actions: Vec<ApiActionStore>,
 	pub fallback: Option<Expr>,
-	pub config: Option<ApiConfig>,
+	pub config: ApiConfigStore,
 	pub comment: Option<Strand>,
 }
 
-impl From<ApiDefinition> for DefineApiStatement {
-	fn from(value: ApiDefinition) -> Self {
-		DefineApiStatement {
-			kind: DefineKind::Default,
-			path: value.path.to_string().into(),
-			actions: value.actions,
-			fallback: value.fallback,
-			config: value.config,
-			comment: value.comment,
+impl ApiDefinition {
+	/// Finds the api definition which most closely matches the segments of the path.
+	pub fn find_definition<'a>(
+		definitions: &'a [ApiDefinition],
+		segments: Vec<&str>,
+		method: Method,
+	) -> Option<(&'a ApiDefinition, Object)> {
+		let mut specificity = 0;
+		let mut res = None;
+		for api in definitions.iter() {
+			if let Some(params) = api.path.fit(segments.as_slice()) {
+				if api.fallback.is_some() || api.actions.iter().any(|x| x.methods.contains(&method))
+				{
+					let s = api.path.specificity();
+					if s > specificity {
+						specificity = s;
+						res = Some((api, params));
+					}
+				}
+			}
 		}
+
+		res
 	}
 }
 
 impl InfoStructure for ApiDefinition {
 	fn structure(self) -> Value {
-		let da: DefineApiStatement = self.into();
-		da.structure()
+		Value::from(Object(map! {
+			// TODO: Null byte validity
+			"path".to_string() => Strand::new(self.path.to_string()).unwrap().into(),
+			"config".to_string() => self.config.structure(),
+			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
+			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
+			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
+		}))
 	}
 }
 
-impl Display for ApiDefinition {
+impl fmt::Display for ApiDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let da: DefineApiStatement = self.clone().into();
-		da.fmt(f)
+		write!(f, "DEFINE API")?;
+		write!(f, " {}", self.path)?;
+		let indent = pretty_indent();
+
+		write!(f, "FOR any")?;
+		{
+			let indent = pretty_indent();
+
+			write!(f, "{}", self.config)?;
+
+			if let Some(fallback) = &self.fallback {
+				write!(f, "THEN {}", fallback)?;
+			}
+
+			drop(indent);
+		}
+
+		for action in &self.actions {
+			write!(f, "{}", action)?;
+		}
+
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {}", comment)?;
+		}
+
+		drop(indent);
+		Ok(())
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct ApiAction {
 	pub methods: Vec<Method>,
 	pub action: Expr,
-	pub config: Option<ApiConfig>,
+	pub config: ApiConfig,
 }
 
-impl Display for ApiAction {
+impl fmt::Display for ApiAction {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
 		let indent = pretty_indent();
-		if let Some(config) = &self.config {
-			write!(f, "{}", config)?;
-		}
+		write!(f, "{}", &self.config)?;
 		write!(f, "THEN {}", self.action)?;
 		drop(indent);
 		Ok(())
@@ -202,40 +251,37 @@ impl InfoStructure for ApiAction {
 		Value::from(map!(
 			"methods" => Value::from(self.methods.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
 			"action" => Value::from(self.action.to_string()),
-			"config", if let Some(config) = self.config => config.structure(),
+			"config" => self.config.structure(),
 		))
 	}
 }
 
-pub trait FindApi<'a> {
-	fn find_api(
-		&'a self,
-		segments: Vec<&'a str>,
-		method: Method,
-	) -> Option<(&'a ApiDefinition, Object)>;
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct ApiActionStore {
+	pub methods: Vec<Method>,
+	pub action: Expr,
+	pub config: ApiConfigStore,
 }
 
-impl<'a> FindApi<'a> for &'a [ApiDefinition] {
-	fn find_api(
-		&'a self,
-		segments: Vec<&'a str>,
-		method: Method,
-	) -> Option<(&'a ApiDefinition, Object)> {
-		let mut specifity = 0_u8;
-		let mut res = None;
-		for api in self.iter() {
-			if let Some(params) = api.path.fit(segments.as_slice()) {
-				if api.fallback.is_some() || api.actions.iter().any(|x| x.methods.contains(&method))
-				{
-					let s = api.path.specifity();
-					if s > specifity {
-						specifity = s;
-						res = Some((api, params));
-					}
-				}
-			}
-		}
+impl fmt::Display for ApiActionStore {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
+		let indent = pretty_indent();
+		write!(f, "{}", &self.config)?;
+		write!(f, "THEN {}", self.action)?;
+		drop(indent);
+		Ok(())
+	}
+}
 
-		res
+impl InfoStructure for ApiActionStore {
+	fn structure(self) -> Value {
+		Value::from(map!(
+			"methods" => Value::from(self.methods.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
+			"action" => Value::from(self.action.to_string()),
+			"config" => self.config.structure(),
+		))
 	}
 }

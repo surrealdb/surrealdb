@@ -71,7 +71,11 @@ impl Data {
 			Self::MergeExpression(v) | Self::ReplaceExpression(v) | Self::ContentExpression(v) => {
 				match v {
 					Expr::Param(_) | Expr::Literal(Literal::Object(_)) => {
-						let v = v.compute(stk, ctx, opt, None).await.catch_return()?.pick(path);
+						let v = stk
+							.run(|stk| v.compute(stk, ctx, opt, None))
+							.await
+							.catch_return()?
+							.pick(path);
 						if v.is_null() {
 							Ok(None)
 						} else {
@@ -83,7 +87,10 @@ impl Data {
 			}
 			Self::SetExpression(v) => match v.iter().find(|f| f.place.is_field(path)) {
 				Some(ass) => {
-					let v = ass.value.compute(stk, ctx, opt, None).await.catch_return()?;
+					let v = stk
+						.run(|stk| ass.value.compute(stk, ctx, opt, None))
+						.await
+						.catch_return()?;
 					if v.is_null() {
 						Ok(None)
 					} else {

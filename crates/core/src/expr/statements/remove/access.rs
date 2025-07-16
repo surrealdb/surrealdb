@@ -49,7 +49,7 @@ impl RemoveAccessStatement {
 				let key = crate::key::root::access::all::new(&ac.name);
 				txn.delp(key).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -76,7 +76,7 @@ impl RemoveAccessStatement {
 				let key = crate::key::namespace::access::all::new(opt.ns()?, &ac.name);
 				txn.delp(key).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -104,7 +104,7 @@ impl RemoveAccessStatement {
 				let key = crate::key::database::access::all::new(ns, db, &ac.name);
 				txn.delp(key).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}

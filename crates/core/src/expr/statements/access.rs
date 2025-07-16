@@ -350,7 +350,7 @@ pub async fn create_grant(
 	// Get the transaction.
 	let txn = ctx.tx();
 	// Clear the cache.
-	txn.clear();
+	txn.clear_cache();
 	// Read the access definition.
 	let ac = match base {
 		Base::Root => txn.get_root_access(&access).await?,
@@ -586,7 +586,7 @@ async fn compute_show(
 	// Get the transaction.
 	let txn = ctx.tx();
 	// Clear the cache.
-	txn.clear();
+	txn.clear_cache();
 	// Check if the access method exists.
 	match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
@@ -641,19 +641,22 @@ async fn compute_show(
 				// If provided, check if grant matches conditions.
 				if let Some(cond) = &stmt.cond {
 					// Redact grant before evaluating conditions.
-					let redacted_gr = Value::Object(gr.redacted().into_access_object());
-					if !cond
-						.0
-						.compute(
-							stk,
-							ctx,
-							opt,
-							Some(&CursorDoc {
-								rid: None,
-								ir: None,
-								doc: redacted_gr.into(),
-							}),
-						)
+					let redacted_gr = Value::Object(gr.clone().redacted().into_access_object());
+					if !stk
+						.run(|stk| async move {
+							cond.0
+								.compute(
+									stk,
+									ctx,
+									opt,
+									Some(&CursorDoc {
+										rid: None,
+										ir: None,
+										doc: redacted_gr.into(),
+									}),
+								)
+								.await
+						})
 						.await
 						.catch_return()?
 						.is_truthy()
@@ -664,7 +667,7 @@ async fn compute_show(
 				}
 
 				// Store revoked version of the redacted grant.
-				show.push(Value::Object(gr.redacted().into_access_object()));
+				show.push(Value::Object(gr.clone().redacted().into_access_object()));
 			}
 
 			Ok(Value::Array(show.into()))
@@ -687,7 +690,7 @@ pub async fn revoke_grant(
 	// Get the transaction
 	let txn = ctx.tx();
 	// Clear the cache
-	txn.clear();
+	txn.clear_cache();
 	// Check if the access method exists.
 	match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
@@ -784,19 +787,22 @@ pub async fn revoke_grant(
 				// If provided, check if grant matches conditions.
 				if let Some(cond) = &stmt.cond {
 					// Redact grant before evaluating conditions.
-					let redacted_gr = Value::Object(gr.redacted().into_access_object());
-					if !cond
-						.0
-						.compute(
-							stk,
-							ctx,
-							opt,
-							Some(&CursorDoc {
-								rid: None,
-								ir: None,
-								doc: redacted_gr.into(),
-							}),
-						)
+					let redacted_gr = Value::Object(gr.clone().redacted().into_access_object());
+					if !stk
+						.run(|stk| async move {
+							cond.0
+								.compute(
+									stk,
+									ctx,
+									opt,
+									Some(&CursorDoc {
+										rid: None,
+										ir: None,
+										doc: redacted_gr.into(),
+									}),
+								)
+								.await
+						})
 						.await
 						.catch_return()?
 						.is_truthy()
@@ -879,7 +885,7 @@ async fn compute_purge(
 	// Get the transaction.
 	let txn = ctx.tx();
 	// Clear the cache.
-	txn.clear();
+	txn.clear_cache();
 	// Check if the access method exists.
 	match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
@@ -957,7 +963,7 @@ async fn compute_purge(
 				opt.auth.id()
 			);
 
-			purged = purged + Value::Object(gr.redacted().into_access_object());
+			purged = purged + Value::Object(gr.clone().redacted().into_access_object());
 		}
 	}
 

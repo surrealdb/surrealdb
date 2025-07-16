@@ -47,7 +47,7 @@ impl Block {
 		// Loop over the statements
 		let mut res = Value::None;
 		for v in self.iter() {
-			res = v.compute(stk, &ctx, opt, doc).await?;
+			res = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
 		}
 		// Return nothing
 		Ok(res)

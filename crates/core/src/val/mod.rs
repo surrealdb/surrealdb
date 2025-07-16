@@ -673,6 +673,7 @@ impl fmt::Display for Value {
 			Value::Closure(v) => write!(f, "{v}"),
 			//Value::Refs(v) => write!(f, "{v}"),
 			Value::File(v) => write!(f, "{v}"),
+			Value::Table(v) => write!(f, "{v}"),
 		}
 	}
 }
