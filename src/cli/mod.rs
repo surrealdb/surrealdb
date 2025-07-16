@@ -84,14 +84,18 @@ struct Cli {
 	#[arg(global = true)]
 	#[arg(value_parser = CustomFilterParser::new())]
 	log_file_level: Option<CustomFilter>,
-	#[arg(help = "Override the logging level for OpenTelemetry", help_heading = "Logging")]
-	#[arg(env = "SURREAL_LOG_OTEL_LEVEL", long = "log-otel-level")]
-	#[arg(global = true)]
-	#[arg(value_parser = CustomFilterParser::new())]
-	log_otel_level: Option<CustomFilter>,
-	//
-	// Log file
-	//
+        #[arg(help = "Override the logging level for OpenTelemetry", help_heading = "Logging")]
+        #[arg(env = "SURREAL_LOG_OTEL_LEVEL", long = "log-otel-level")]
+        #[arg(global = true)]
+        #[arg(value_parser = CustomFilterParser::new())]
+        log_otel_level: Option<CustomFilter>,
+        #[arg(help = "Send logs to the specified host:port", help_heading = "Logging")]
+        #[arg(env = "SURREAL_LOG_SOCKET", long = "log-socket")]
+        #[arg(global = true)]
+        log_socket: Option<String>,
+        //
+        // Log file
+        //
 	#[arg(help = "Whether to enable log file output", help_heading = "Logging")]
 	#[arg(env = "SURREAL_LOG_FILE_ENABLED", long = "log-file-enabled")]
 	#[arg(global = true)]
@@ -117,11 +121,15 @@ struct Cli {
 	#[arg(env = "SURREAL_LOG_FILE_FORMAT", long = "log-file-format")]
 	#[arg(global = true)]
 	#[arg(default_value = "text")]
-	#[arg(value_enum)]
-	pub log_file_format: LogFormat,
-	//
-	// Version check
-	//
+        #[arg(value_enum)]
+        pub log_file_format: LogFormat,
+        #[arg(help = "Send file logs to the specified host:port", help_heading = "Logging")]
+        #[arg(env = "SURREAL_LOG_FILE_SOCKET", long = "log-file-socket")]
+        #[arg(global = true)]
+        pub log_file_socket: Option<String>,
+        //
+        // Version check
+        //
 	#[arg(help = "Whether to allow web check for client version upgrades at start")]
 	#[arg(env = "SURREAL_ONLINE_VERSION_CHECK", long)]
 	#[arg(default_value_t = true)]
@@ -218,17 +226,19 @@ pub async fn init() -> ExitCode {
 	// Check if we are running the server
 	let server = matches!(args.command, Commands::Start(_));
 	// Initialize opentelemetry and logging
-	let telemetry = crate::telemetry::builder()
-		.with_log_level("info")
-		.with_filter(args.log.clone())
-		.with_file_filter(args.log_file_level.clone())
-		.with_otel_filter(args.log_otel_level.clone())
-		.with_log_format(args.log_format)
-		.with_log_file_enabled(args.log_file_enabled)
-		.with_log_file_path(Some(args.log_file_path.clone()))
-		.with_log_file_name(Some(args.log_file_name.clone()))
-		.with_log_file_rotation(Some(args.log_file_rotation.as_str().to_string()))
-		.with_log_file_format(args.log_file_format);
+        let telemetry = crate::telemetry::builder()
+                .with_log_level("info")
+                .with_filter(args.log.clone())
+                .with_file_filter(args.log_file_level.clone())
+                .with_otel_filter(args.log_otel_level.clone())
+                .with_log_socket(args.log_socket.clone())
+                .with_log_format(args.log_format)
+                .with_log_file_enabled(args.log_file_enabled)
+                .with_log_file_path(Some(args.log_file_path.clone()))
+                .with_log_file_name(Some(args.log_file_name.clone()))
+                .with_log_file_rotation(Some(args.log_file_rotation.as_str().to_string()))
+                .with_log_file_format(args.log_file_format)
+                .with_log_file_socket(args.log_file_socket.clone());
 	// Extract the telemetry log guards
 	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command

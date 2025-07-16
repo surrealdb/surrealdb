@@ -45,15 +45,17 @@ pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 
 #[derive(Debug, Clone)]
 pub struct Builder {
-	format: LogFormat,
-	filter: CustomFilter,
-	file_filter: Option<CustomFilter>,
-	otel_filter: Option<CustomFilter>,
-	log_file_enabled: bool,
-	log_file_format: LogFormat,
-	log_file_path: Option<String>,
-	log_file_name: Option<String>,
-	log_file_rotation: Option<String>,
+        format: LogFormat,
+        filter: CustomFilter,
+        file_filter: Option<CustomFilter>,
+        otel_filter: Option<CustomFilter>,
+        log_socket: Option<String>,
+        log_file_socket: Option<String>,
+        log_file_enabled: bool,
+        log_file_format: LogFormat,
+        log_file_path: Option<String>,
+        log_file_name: Option<String>,
+        log_file_rotation: Option<String>,
 }
 
 pub fn builder() -> Builder {
@@ -62,19 +64,21 @@ pub fn builder() -> Builder {
 
 impl Default for Builder {
 	fn default() -> Self {
-		Self {
-			filter: CustomFilter {
-				env: EnvFilter::default(),
-				spans: std::collections::HashMap::new(),
-			},
-			format: LogFormat::Text,
-			file_filter: None,
-			otel_filter: None,
-			log_file_format: LogFormat::Text,
-			log_file_enabled: false,
-			log_file_path: Some("logs".to_string()),
-			log_file_name: Some("surrealdb.log".to_string()),
-			log_file_rotation: Some("daily".to_string()),
+                Self {
+                        filter: CustomFilter {
+                                env: EnvFilter::default(),
+                                spans: std::collections::HashMap::new(),
+                        },
+                        format: LogFormat::Text,
+                        file_filter: None,
+                        otel_filter: None,
+                        log_socket: None,
+                        log_file_socket: None,
+                        log_file_format: LogFormat::Text,
+                        log_file_enabled: false,
+                        log_file_path: Some("logs".to_string()),
+                        log_file_name: Some("surrealdb.log".to_string()),
+                        log_file_rotation: Some("daily".to_string()),
 		}
 	}
 }
@@ -114,10 +118,22 @@ impl Builder {
 	}
 
 	/// Set a custom log filter for otel output
-	pub fn with_otel_filter(mut self, filter: Option<CustomFilter>) -> Self {
-		self.otel_filter = filter;
-		self
-	}
+        pub fn with_otel_filter(mut self, filter: Option<CustomFilter>) -> Self {
+                self.otel_filter = filter;
+                self
+        }
+
+        /// Send logs to the provided socket address
+        pub fn with_log_socket(mut self, socket: Option<String>) -> Self {
+                self.log_socket = socket;
+                self
+        }
+
+        /// Send file logs to the provided socket address
+        pub fn with_log_file_socket(mut self, socket: Option<String>) -> Self {
+                self.log_file_socket = socket;
+                self
+        }
 
 	/// Set the terminal log output format
 	pub fn with_log_format(mut self, format: LogFormat) -> Self {
@@ -171,24 +187,35 @@ impl Builder {
 			.lossy(true)
 			.thread_name("surrealdb-logger-stderr")
 			.finish(std::io::stderr());
-		// Create the display destination layer
-		let output_layer = logs::output(self.filter.clone(), stdout, stderr, self.format)?;
-		// Create the otel destination layer
-		let telemetry_filter = self.otel_filter.clone().unwrap_or_else(|| self.filter.clone());
-		let telemetry_layer = traces::new(telemetry_filter)?;
-		// Setup a registry for composing layers
-		let registry = tracing_subscriber::registry();
-		// Setup output layer
-		let registry = registry.with(output_layer);
-		// Setup telemetry layer
-		let registry = registry.with(telemetry_layer);
-		// Setup file logging if enabled
-		let (file_layer, guards) = if self.log_file_enabled {
-			// Create the file appender based on rotation setting
-			let file_appender = {
-				// Parse the path and name
-				let path = self.log_file_path.as_deref().unwrap_or("logs");
-				let name = self.log_file_name.as_deref().unwrap_or("surrealdb.log");
+                // Create the display destination layer
+                let output_layer = logs::output(self.filter.clone(), stdout, stderr, self.format)?;
+                // Create the otel destination layer
+                let telemetry_filter = self.otel_filter.clone().unwrap_or_else(|| self.filter.clone());
+                let telemetry_layer = traces::new(telemetry_filter)?;
+                // Setup a registry for composing layers
+                let mut registry = tracing_subscriber::registry().with(output_layer);
+                let mut guards = vec![stdout_guard, stderr_guard];
+                // Setup optional socket layer
+                if let Some(addr) = &self.log_socket {
+                        let writer = logs::SocketWriter::connect(addr)?;
+                        let (sock, sock_guard) = NonBlockingBuilder::default()
+                                .lossy(false)
+                                .thread_name("surrealdb-logger-socket")
+                                .finish(writer);
+                        let socket_layer = logs::file(self.filter.clone(), sock, self.log_file_format)?;
+                        registry = registry.with(socket_layer);
+                        guards.push(sock_guard);
+                }
+                // Setup telemetry layer
+                registry = registry.with(telemetry_layer);
+
+                // Setup file logging if enabled
+                if self.log_file_enabled {
+                        // Create the file appender based on rotation setting
+                        let file_appender = {
+                                // Parse the path and name
+                                let path = self.log_file_path.as_deref().unwrap_or("logs");
+                                let name = self.log_file_name.as_deref().unwrap_or("surrealdb.log");
 				// Create the file appender based on rotation setting
 				match self.log_file_rotation.as_deref() {
 					Some("hourly") => tracing_appender::rolling::hourly(path, name),
@@ -202,44 +229,32 @@ impl Builder {
 				.lossy(false)
 				.thread_name("surrealdb-logger-file")
 				.finish(file_appender);
-			// Create the file destination layer
-			let file_filter = self.file_filter.clone().unwrap_or_else(|| self.filter.clone());
-			let file_layer = logs::file(file_filter, file, self.log_file_format)?;
-			(Some(file_layer), vec![stdout_guard, stderr_guard, file_guard])
-		} else {
-			(None, vec![stdout_guard, stderr_guard])
-		};
-		Ok(match (file_layer, *ENABLE_TOKIO_CONSOLE) {
-			(Some(file_layer), true) => {
-				// Setup logging layer
-				let registry = registry.with(file_layer);
-				// Create the Tokio Console destination layer
-				let console_layer = console::new()?;
-				// Setup the Tokio Console layer
-				let registry = registry.with(console_layer);
-				// Return the registry
-				(Box::new(registry), guards)
-			}
-			(Some(file_layer), false) => {
-				// Setup logging layer
-				let registry = registry.with(file_layer);
-				// Return the registry
-				(Box::new(registry), guards)
-			}
-			(None, true) => {
-				// Create the Tokio Console destination layer
-				let console_layer = console::new()?;
-				// Setup the Tokio Console layer
-				let registry = registry.with(console_layer);
-				// Return the registry
-				(Box::new(registry), guards)
-			}
-			(None, false) => {
-				// Return the registry
-				(Box::new(registry), guards)
-			}
-		})
-	}
+                        // Create the file destination layer
+                        let file_filter = self.file_filter.clone().unwrap_or_else(|| self.filter.clone());
+                        let file_layer = logs::file(file_filter.clone(), file, self.log_file_format)?;
+                        registry = registry.with(file_layer);
+                        guards.push(file_guard);
+                        if let Some(addr) = &self.log_file_socket {
+                                let writer = logs::SocketWriter::connect(addr)?;
+                                let (sock, sock_guard) = NonBlockingBuilder::default()
+                                        .lossy(false)
+                                        .thread_name("surrealdb-logger-file-socket")
+                                        .finish(writer);
+                                let socket_layer = logs::file(file_filter, sock, self.log_file_format)?;
+                                registry = registry.with(socket_layer);
+                                guards.push(sock_guard);
+                        }
+                }
+
+                Ok(match *ENABLE_TOKIO_CONSOLE {
+                        true => {
+                                let console_layer = console::new()?;
+                                let registry = registry.with(console_layer);
+                                (Box::new(registry), guards)
+                        }
+                        false => (Box::new(registry), guards),
+                })
+        }
 }
 
 pub fn shutdown() {
@@ -407,7 +422,7 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn test_tracing_filter() {
+        async fn test_tracing_filter() {
 		println!("Starting mock otlp server...");
 		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
 
@@ -460,6 +475,38 @@ mod tests {
 
 		let events = &spans.first().unwrap().events;
 		assert_eq!(1, events.len());
-		assert_eq!("debug", events.first().unwrap().name);
-	}
+                assert_eq!("debug", events.first().unwrap().name);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_log_socket() {
+                use std::io::Read;
+                use std::net::TcpListener;
+
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let addr = listener.local_addr().unwrap();
+
+                let handle = std::thread::spawn(move || {
+                        let (mut stream, _) = listener.accept().unwrap();
+                        let mut buf = Vec::new();
+                        stream.read_to_end(&mut buf).unwrap();
+                        buf
+                });
+
+                let (registry, guards) = telemetry::builder()
+                        .with_log_socket(Some(addr.to_string()))
+                        .build()
+                        .unwrap();
+
+                let _enter = registry.set_default();
+                info!("socket-output");
+
+                for guard in guards {
+                        drop(guard);
+                }
+
+                let bytes = handle.join().unwrap();
+                let msg = String::from_utf8_lossy(&bytes);
+                assert!(msg.contains("socket-output"));
+        }
 }
