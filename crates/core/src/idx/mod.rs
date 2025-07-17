@@ -193,8 +193,12 @@ impl IndexKeyBase {
 		Tt::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, doc_id, nid, uid, add)
 	}
 
-	fn new_tt_range(&self, term: &str) -> Result<(Key, Key)> {
-		Tt::range(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term)
+	fn new_tt_term_range(&self, term: &str) -> Result<(Key, Key)> {
+		Tt::term_range(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term)
+	}
+
+	fn new_tt_terms_range(&self) -> Result<(Key, Key)> {
+		Tt::terms_range(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
 	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> Dc {

@@ -1,5 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::err::Error;
 use crate::expr::index::FullTextParams;
 use crate::expr::{Idiom, Scoring, Thing, Value};
 use crate::idx::IndexKeyBase;
@@ -17,12 +18,12 @@ use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
 use crate::kvs::KeyDecode;
 use crate::kvs::Transaction;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::BitAnd;
 use uuid::Uuid;
 
@@ -302,32 +303,100 @@ impl FullTextIndex {
 	}
 
 	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {
-		// First we read the compacted documents
-		let mut docs = None;
-		let td = self.ikb.new_td(term, None);
-		if let Some(v) = tx.get(td, None).await? {
-			docs = Some(RoaringTreemap::deserialize_from(&mut v.as_slice())?);
-		}
-		// Then we read the not yet compacted term/documents if any
-		let (beg, end) = self.ikb.new_tt_range(term)?;
+		// We compute the not yet compacted term/documents if any
+		let (beg, end) = self.ikb.new_tt_term_range(term)?;
+		let mut deltas: HashMap<DocId, i64> = HashMap::new();
 		for k in tx.keys(beg..end, u32::MAX, None).await? {
 			let tt = Tt::decode(&k)?;
-			if let Some(docs) = &mut docs {
-				if tt.add {
-					docs.insert(tt.doc_id);
-				} else {
-					docs.remove(tt.doc_id);
-				}
-			} else if tt.add {
-				docs = Some(RoaringTreemap::from_iter(vec![tt.doc_id]));
+			let entry = deltas.entry(tt.doc_id).or_default();
+			if tt.add {
+				*entry += 1;
+			} else {
+				*entry -= 1;
 			}
 		}
-		// If `docs` is empty, we return `None`
-		Ok(docs.filter(|docs| !docs.is_empty()))
+		// Append the delta term docs to the compacted termdocs
+		let docs = self.append_term_docs_delta(tx, term, &mut deltas).await?;
+		// If the final `docs` is empty, we return `None`
+		if docs.is_empty() {
+			Ok(None)
+		} else {
+			Ok(Some(docs))
+		}
 	}
 
-	async fn compact_term_docs(&self, _tx: &Transaction) -> Result<()> {
-		todo!()
+	async fn append_term_docs_delta(
+		&self,
+		tx: &Transaction,
+		term: &str,
+		deltas: &mut HashMap<DocId, i64>,
+	) -> Result<RoaringTreemap> {
+		// We read the compacted term docs
+		let td = self.ikb.new_td(term, None);
+		let mut docs = match tx.get(td, None).await? {
+			None => RoaringTreemap::default(),
+			Some(v) => revision::from_slice(&v)?,
+		};
+		// And apply the deltas
+		for (doc_id, delta) in deltas {
+			match delta {
+				-1 => {
+					docs.remove(*doc_id);
+				}
+				1 => {
+					docs.insert(*doc_id);
+				}
+				0 => {}
+				_ => bail!(Error::CorruptedIndex(
+					"Invalid delta on FullTextindex::append_term_docs_delta()"
+				)),
+			}
+		}
+		Ok(docs)
+	}
+	async fn set_term_docs_delta(
+		&self,
+		tx: &Transaction,
+		term: &str,
+		mut deltas: HashMap<DocId, i64>,
+	) -> Result<HashMap<DocId, i64>> {
+		let docs = self.append_term_docs_delta(tx, term, &mut deltas).await?;
+		let td = self.ikb.new_td(term, None);
+		if docs.is_empty() {
+			tx.del(td).await?;
+		} else {
+			tx.set(td, revision::to_vec(&docs)?, None).await?;
+		}
+		deltas.clear();
+		Ok(deltas)
+	}
+
+	async fn compact_term_docs(&self, tx: &Transaction) -> Result<()> {
+		let (beg, end) = self.ikb.new_tt_terms_range()?;
+		let mut current_term = "".to_string();
+		let mut deltas: HashMap<DocId, i64> = HashMap::new();
+		for k in tx.keys(beg..end, u32::MAX, None).await? {
+			let tt = Tt::decode(&k)?;
+			// Is this a new term?
+			if current_term != tt.term {
+				if !current_term.is_empty() && !deltas.is_empty() {
+					deltas = self.set_term_docs_delta(tx, &current_term, deltas).await?;
+				}
+				current_term = tt.term.to_string();
+			}
+			// Update the deltas
+			let entry = deltas.entry(tt.doc_id).or_default();
+			if tt.add {
+				*entry += 1;
+			} else {
+				*entry -= 1;
+			}
+			tx.del(k).await?;
+		}
+		if !current_term.is_empty() && !deltas.is_empty() {
+			self.set_term_docs_delta(tx, &current_term, deltas).await?;
+		}
+		Ok(())
 	}
 
 	pub(in crate::idx) fn new_hits_iterator(
@@ -379,10 +448,11 @@ impl FullTextIndex {
 		// Compute the total number of documents (DocCount) and the total number of terms (DocLength)
 		// This key list is supposed to be small, subject to compaction.
 		// The root key is the compacted values, and the others are deltas from transaction not yet compacted.
-		for (_, v) in tx.getr(beg..end, None).await? {
+		for (k, v) in tx.getr(beg..end, None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
+			tx.del(k).await?;
 		}
 		Ok(dlc)
 	}

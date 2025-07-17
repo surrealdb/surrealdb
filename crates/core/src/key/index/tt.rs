@@ -74,24 +74,38 @@ impl<'a> Tt<'a> {
 		}
 	}
 
-	pub(crate) fn range(
+	pub(crate) fn term_range(
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
 		term: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
-		let prefix = TtPrefix::new(ns, db, tb, ix, term);
+		let prefix = TtTermPrefix::new(ns, db, tb, ix, term);
 		let mut beg = prefix.encode()?;
 		beg.extend([0; 41]);
 		let mut end = prefix.encode()?;
 		end.extend([255; 41]);
 		Ok((beg, end))
 	}
+
+	pub(crate) fn terms_range(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		ix: &'a str,
+	) -> Result<(Vec<u8>, Vec<u8>)> {
+		let prefix = TtTermsPrefix::new(ns, db, tb, ix);
+		let mut beg = prefix.encode()?;
+		beg.push(0);
+		let mut end = prefix.encode()?;
+		end.push(255);
+		Ok((beg, end))
+	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-struct TtPrefix<'a> {
+struct TtTermPrefix<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -106,9 +120,9 @@ struct TtPrefix<'a> {
 	_g: u8,
 	pub term: &'a str,
 }
-impl_key!(TtPrefix<'a>);
+impl_key!(TtTermPrefix<'a>);
 
-impl<'a> TtPrefix<'a> {
+impl<'a> TtTermPrefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -124,6 +138,42 @@ impl<'a> TtPrefix<'a> {
 			_f: b't',
 			_g: b't',
 			term,
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+struct TtTermsPrefix<'a> {
+	__: u8,
+	_a: u8,
+	pub ns: &'a str,
+	_b: u8,
+	pub db: &'a str,
+	_c: u8,
+	pub tb: &'a str,
+	_d: u8,
+	pub ix: &'a str,
+	_e: u8,
+	_f: u8,
+	_g: u8,
+}
+impl_key!(TtTermsPrefix<'a>);
+
+impl<'a> TtTermsPrefix<'a> {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb,
+			_d: b'+',
+			ix,
+			_e: b'!',
+			_f: b't',
+			_g: b't',
 		}
 	}
 }
@@ -153,12 +203,19 @@ mod tests {
 	}
 
 	#[test]
-	fn range() {
-		let (beg, end) = Tt::range("testns", "testdb", "testtb", "testix", "term").unwrap();
+	fn term_range() {
+		let (beg, end) = Tt::term_range("testns", "testdb", "testtb", "testix", "term").unwrap();
 		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
+	}
+
+	#[test]
+	fn terms_range() {
+		let (beg, end) = Tt::terms_range("testns", "testdb", "testtb", "testix").unwrap();
+		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!tt\0");
+		assert_eq!(end, b"/*testns\0*testdb\0*testtb\0+testix\0!tt\xff");
 	}
 }

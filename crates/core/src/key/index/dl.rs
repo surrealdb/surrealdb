@@ -57,11 +57,9 @@ mod tests {
 	#[test]
 	fn key() {
 		use super::*;
-		#[rustfmt::skip]
-		let id = 99;
-		let val = Dl::new("testns", "testdb", "testtb", "testix", id);
+		let val = Dl::new("testns", "testdb", "testtb", "testix", 16);
 		let enc = Dl::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dl\0\0\0\x01id\0");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dl\0\0\0\0\0\0\0\x10");
 
 		let dec = Dl::decode(&enc).unwrap();
 		assert_eq!(val, dec);
