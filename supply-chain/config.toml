@@ -230,10 +230,6 @@ criteria = "safe-to-deploy"
 version = "1.7.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.joaat]]
-version = "0.1.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.blowfish]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
@@ -621,6 +617,10 @@ criteria = "safe-to-run"
 [[exemptions.jiff-static]]
 version = "0.2.4"
 criteria = "safe-to-run"
+
+[[exemptions.joaat]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
 
 [[exemptions.jobserver]]
 version = "0.1.32"
