@@ -329,7 +329,7 @@ impl FullTextIndex {
 		&self,
 		tx: &Transaction,
 		term: &str,
-		deltas: &mut HashMap<DocId, i64>,
+		deltas: &HashMap<DocId, i64>,
 	) -> Result<RoaringTreemap> {
 		// We read the compacted term docs
 		let td = self.ikb.new_td(term, None);
@@ -358,17 +358,16 @@ impl FullTextIndex {
 		&self,
 		tx: &Transaction,
 		term: &str,
-		mut deltas: HashMap<DocId, i64>,
-	) -> Result<HashMap<DocId, i64>> {
-		let docs = self.append_term_docs_delta(tx, term, &mut deltas).await?;
+		deltas: &HashMap<DocId, i64>,
+	) -> Result<()> {
+		let docs = self.append_term_docs_delta(tx, term, deltas).await?;
 		let td = self.ikb.new_td(term, None);
 		if docs.is_empty() {
 			tx.del(td).await?;
 		} else {
 			tx.set(td, revision::to_vec(&docs)?, None).await?;
 		}
-		deltas.clear();
-		Ok(deltas)
+		Ok(())
 	}
 
 	async fn compact_term_docs(&self, tx: &Transaction) -> Result<()> {
@@ -380,7 +379,8 @@ impl FullTextIndex {
 			// Is this a new term?
 			if current_term != tt.term {
 				if !current_term.is_empty() && !deltas.is_empty() {
-					deltas = self.set_term_docs_delta(tx, &current_term, deltas).await?;
+					self.set_term_docs_delta(tx, &current_term, &deltas).await?;
+					deltas.clear();
 				}
 				current_term = tt.term.to_string();
 			}
@@ -394,7 +394,7 @@ impl FullTextIndex {
 			tx.del(k).await?;
 		}
 		if !current_term.is_empty() && !deltas.is_empty() {
-			self.set_term_docs_delta(tx, &current_term, deltas).await?;
+			self.set_term_docs_delta(tx, &current_term, &deltas).await?;
 		}
 		Ok(())
 	}
