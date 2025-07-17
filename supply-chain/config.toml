@@ -618,10 +618,6 @@ criteria = "safe-to-run"
 version = "0.2.4"
 criteria = "safe-to-run"
 
-[[exemptions.joaat]]
-version = "0.1.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.jobserver]]
 version = "0.1.32"
 criteria = "safe-to-deploy"
