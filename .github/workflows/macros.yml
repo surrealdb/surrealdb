@@ -58,7 +58,7 @@ jobs:
         run: |
           set -x
 
-          if [[ "${{ inputs.publish }}" == "false"]]; then
+          if [[ "${{ inputs.publish }}" == "false" ]]; then
             extraArgs="--dry-run"
           fi
 
