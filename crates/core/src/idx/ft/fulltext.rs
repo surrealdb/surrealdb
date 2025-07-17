@@ -435,14 +435,18 @@ impl FullTextIndex {
 	}
 	pub(in crate::idx) async fn new_scorer(&self, ctx: &Context) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
-			let dlc = self.compute_doc_length_and_count(&ctx.tx()).await?;
+			let dlc = self.compute_doc_length_and_count(&ctx.tx(), false).await?;
 			let sc = Scorer::new(dlc, bm25.clone());
 			return Ok(Some(sc));
 		}
 		Ok(None)
 	}
 
-	async fn compute_doc_length_and_count(&self, tx: &Transaction) -> Result<DocLengthAndCount> {
+	async fn compute_doc_length_and_count(
+		&self,
+		tx: &Transaction,
+		del_logs: bool,
+	) -> Result<DocLengthAndCount> {
 		let mut dlc = DocLengthAndCount::default();
 		let (beg, end) = self.ikb.new_dc_range()?;
 		// Compute the total number of documents (DocCount) and the total number of terms (DocLength)
@@ -452,13 +456,15 @@ impl FullTextIndex {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
-			tx.del(k).await?;
+			if del_logs {
+				tx.del(k).await?;
+			}
 		}
 		Ok(dlc)
 	}
 
 	async fn compact_doc_length_and_count(&self, tx: &Transaction) -> Result<()> {
-		let dlc = self.compute_doc_length_and_count(tx).await?;
+		let dlc = self.compute_doc_length_and_count(tx, true).await?;
 		let key = self.ikb.new_dc_compacted()?;
 		tx.set(key, revision::to_vec(&dlc)?, None).await?;
 		Ok(())
