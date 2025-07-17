@@ -197,7 +197,11 @@ impl Builder {
 				.lossy(false)
 				.thread_name("surrealdb-logger-socket")
 				.finish(writer);
-			let socket_layer = logs::file(self.filter.clone(), sock, self.log_file_format)?;
+			let socket_layer = logs::file(
+				self.otel_filter.clone().unwrap_or_else(|| self.filter.clone()),
+				sock,
+				self.log_file_format,
+			)?;
 			layers.push(socket_layer);
 			guards.push(sock_guard);
 		}
@@ -482,7 +486,7 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn test_log_socket() {
+	async fn test_log_to_socket() {
 		use std::io::Read;
 		use std::net::TcpListener;
 
@@ -496,8 +500,11 @@ mod tests {
 			buf
 		});
 
-		let (registry, guards) =
-			telemetry::builder().with_log_socket(Some(addr.to_string())).build().unwrap();
+		let (registry, guards) = telemetry::builder()
+			.with_log_socket(Some(addr.to_string()))
+			.with_log_level("all")
+			.build()
+			.unwrap();
 
 		let _enter = registry.set_default();
 		info!("socket-output");
