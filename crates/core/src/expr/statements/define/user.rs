@@ -35,14 +35,6 @@ pub struct DefineUserStatement {
 	pub comment: Option<Strand>,
 }
 
-/*
-#[expect(clippy::fallible_impl_from)]
-impl From<(Base, &str, &str, &str)> for DefineUserStatement {
-	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
-	}
-}
-*/
-
 impl DefineUserStatement {
 	pub fn new_with_password(base: Base, user: Strand, pass: &str, role: Ident) -> Self {
 		DefineUserStatement {

@@ -797,12 +797,14 @@ pub fn verify_grant_bearer(
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::dbs::Capabilities;
+	use crate::fnc::util::math::top::Top;
 	use crate::iam::Role;
+	use crate::sql::statements::define::user::PassType;
+	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};
+	use crate::{dbs::Capabilities, sql::statements::define::DefineKind};
 	use chrono::Duration;
 	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 	use regex::Regex;
@@ -2159,7 +2161,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2276,7 +2278,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2393,7 +2395,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2475,7 +2477,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Wait for the grant to expire
 				std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -2560,7 +2562,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Get grant identifier from key
 				let kid = key.split("-").collect::<Vec<&str>>()[2];
@@ -2654,7 +2656,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Remove bearer access method
 				ds.execute(format!("REMOVE ACCESS api ON {}", level.level).as_str(), &sess, None)
@@ -2741,7 +2743,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let _key = grant.get("key").unwrap().clone().as_string();
+				let _key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2826,7 +2828,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_string();
+				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Replace a character from the key prefix
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -2913,7 +2915,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_string();
+				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Remove a character from the bearer key
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3000,7 +3002,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_string();
+				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Replace a character from the key identifier
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3087,7 +3089,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_string();
+				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Replace a character from the key value
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3174,8 +3176,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					.clone()
 					.coerce_to::<Object>()
 					.unwrap();
-				let id = grant.get("id").unwrap().clone().as_string();
-				let key = grant.get("key").unwrap().clone().as_string();
+				let id = grant.get("id").unwrap().clone().as_raw_string();
+				let key = grant.get("key").unwrap().clone().as_raw_string();
 
 				// Test that returned key is in plain text
 				assert!(
@@ -3250,7 +3252,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3325,7 +3327,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3404,7 +3406,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3484,7 +3486,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3545,7 +3547,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Wait for the grant to expire
 			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -3609,7 +3611,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Get grant identifier from key
 			let kid = key.split("-").collect::<Vec<&str>>()[2];
@@ -3678,7 +3680,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Remove bearer access method
 			ds.execute("REMOVE ACCESS api ON DATABASE", &sess, None).await.unwrap();
@@ -3742,7 +3744,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let _key = grant.get("key").unwrap().clone().as_string();
+			let _key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3804,7 +3806,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Replace a character from the key prefix
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3870,7 +3872,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Remove a character from the bearer key
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3936,7 +3938,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Replace a character from the key identifier
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4002,7 +4004,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_string();
+			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Replace a character from the key value
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4068,8 +4070,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				.clone()
 				.coerce_to::<Object>()
 				.unwrap();
-			let id = grant.get("id").unwrap().clone().as_string();
-			let key = grant.get("key").unwrap().clone().as_string();
+			let id = grant.get("id").unwrap().clone().as_raw_string();
+			let key = grant.get("key").unwrap().clone().as_raw_string();
 
 			// Test that returned key is in plain text
 			let ok = Regex::new(r"surreal-bearer-[a-zA-Z0-9]{12}-[a-zA-Z0-9]{24}").unwrap();
@@ -4096,7 +4098,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		use crate::sql::Base;
 		use crate::sql::statements::DefineUserStatement;
 		use crate::sql::statements::define::DefineStatement;
-		use crate::sql::user::UserDuration;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -4127,23 +4128,28 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			};
 
 			let user = DefineUserStatement {
+				kind: DefineKind::Default,
 				base,
-				name: "user".into(),
+				name: Ident::new("user".to_owned()).unwrap(),
 				// This is the Argon2id hash for "pass" with a random salt.
-				hash: "$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
-					.to_string(),
-				code: "dummy".to_string(),
-				roles: vec!["nonexistent".into()],
-				duration: UserDuration::default(),
+				pass_type: PassType::Hash(
+					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
+						.to_string(),
+				),
+				roles: vec![Ident::new("nonexistent".to_owned()).unwrap()],
+				session_duration: None,
+				token_duration: None,
 				comment: None,
-				if_not_exists: false,
-				overwrite: false,
+			};
+
+			let ast = Ast {
+				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(
+					DefineStatement::User(user),
+				)))],
 			};
 
 			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
-				.await
-				.unwrap();
+			ds.process(ast.into(), &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				ns: level.ns.map(String::from),
@@ -4186,4 +4192,3 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 	}
 }
-*/

@@ -17,20 +17,17 @@ impl Value {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 
-	use super::*;
-	use crate::sql::SqlValue;
-	use crate::syn::Parse;
+	use crate::syn;
 
 	#[tokio::test]
 	async fn replace() {
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("{ other: true }").into();
-		let obj: Value = SqlValue::parse("{ other: true }").into();
+		let mut val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let res = syn::value("{ other: true }").unwrap();
+		let obj = syn::value("{ other: true }").unwrap();
 		val.replace(obj).unwrap();
 		assert_eq!(res, val);
 	}
-}*/
+}

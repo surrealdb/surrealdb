@@ -78,7 +78,14 @@ impl Operation {
 			}
 			Operation::Remove {
 				path,
-			} => todo!(),
+			} => {
+				map! {
+					// safety: does not contain null bytes.
+					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("add".to_owned()) }),
+					// TODO: Ensure null byte correctness
+					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+				}
+			}
 			Operation::Replace {
 				path,
 				value,

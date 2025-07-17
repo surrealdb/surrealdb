@@ -8,7 +8,7 @@ use crate::expr::{
 };
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, RecordId, Strand, Uuid, Value};
-use anyhow::{Result, bail, ensure};
+use anyhow::{bail, ensure, Result};
 use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;

@@ -396,7 +396,6 @@ impl Splitter {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::analyzer::tests::test_analyzer;
@@ -471,4 +470,4 @@ static LANGUAGE: &str = "Rust";"#,
 		)
 		.await;
 	}
-}*/
+}

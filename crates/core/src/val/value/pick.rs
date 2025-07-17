@@ -59,96 +59,88 @@ impl Value {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 
 	use super::*;
-	use crate::expr::id::RecordIdKeyLit;
 	use crate::expr::idiom::Idiom;
-	use crate::expr::thing::Thing;
-	use crate::sql::SqlValue;
 	use crate::sql::idiom::Idiom as SqlIdiom;
-	use crate::syn::Parse;
+	use crate::syn;
+	use crate::val::{RecordId, RecordIdKey};
 
 	#[test]
 	fn pick_none() {
 		let idi: Idiom = SqlIdiom::default().into();
-		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
 		let res = val.pick(&idi);
 		assert_eq!(res, val);
 	}
 
 	#[test]
 	fn pick_basic() {
-		let idi: Idiom = SqlIdiom::parse("test.something").into();
-		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let idi: Idiom = syn::idiom("test.something").unwrap().into();
+		let val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(123));
 	}
 
 	#[test]
 	fn pick_thing() {
-		let idi: Idiom = SqlIdiom::parse("test.other").into();
-		let val: Value = SqlValue::parse("{ test: { other: test:tobie, something: 123 } }").into();
+		let idi: Idiom = syn::idiom("test.other").unwrap().into();
+		let val = syn::value("{ test: { other: test:tobie, something: 123 } }").unwrap();
 		let res = val.pick(&idi);
 		assert_eq!(
 			res,
-			Value::from(Thing {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::from("tobie")
+			Value::from(RecordId {
+				table: String::from("test"),
+				key: RecordIdKey::String("tobie".to_owned())
 			})
 		);
 	}
 
 	#[test]
 	fn pick_array() {
-		let idi: Idiom = SqlIdiom::parse("test.something[1]").into();
-		let val: Value = SqlValue::parse("{ test: { something: [123, 456, 789] } }").into();
+		let idi: Idiom = syn::idiom("test.something[1]").unwrap().into();
+		let val = syn::value("{ test: { something: [123, 456, 789] } }").unwrap();
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(456));
 	}
 
 	#[test]
 	fn pick_array_thing() {
-		let idi: Idiom = SqlIdiom::parse("test.something[1]").into();
-		let val: Value =
-			SqlValue::parse("{ test: { something: [test:tobie, test:jaime] } }").into();
+		let idi: Idiom = syn::idiom("test.something[1]").unwrap().into();
+		let val = syn::value("{ test: { something: [test:tobie, test:jaime] } }").unwrap();
 		let res = val.pick(&idi);
 		assert_eq!(
 			res,
-			Value::from(Thing {
-				tb: String::from("test"),
-				id: RecordIdKeyLit::from("jaime")
+			Value::from(RecordId {
+				table: String::from("test"),
+				key: RecordIdKey::String("jaime".to_owned())
 			})
 		);
 	}
 
 	#[test]
 	fn pick_array_field() {
-		let idi: Idiom = SqlIdiom::parse("test.something[1].age").into();
-		let val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let idi: Idiom = syn::idiom("test.something[1].age").unwrap().into();
+		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(36));
 	}
 
 	#[test]
 	fn pick_array_fields() {
-		let idi: Idiom = SqlIdiom::parse("test.something[*].age").into();
-		let val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let idi: Idiom = syn::idiom("test.something[*].age").unwrap().into();
+		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
 	#[test]
 	fn pick_array_fields_flat() {
-		let idi: Idiom = SqlIdiom::parse("test.something.age").into();
-		let val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
+		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 }
-*/

@@ -87,30 +87,6 @@ impl Display for Graph {
 	}
 }
 
-/*
-impl GraphSubjects {
-	pub(crate) async fn compute(
-		self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Self> {
-		stk.scope(|scope| {
-			let futs = self.into_iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc)));
-			try_join_all_buffered(futs)
-		})
-		.await
-		.map(GraphSubjects)
-	}
-}
-
-impl Display for GraphSubjects {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&Fmt::comma_separated(&self.0), f)
-	}
-}*/
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

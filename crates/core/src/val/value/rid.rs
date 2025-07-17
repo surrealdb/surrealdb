@@ -7,32 +7,27 @@ impl Value {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 
 	use super::*;
-	use crate::expr::id::RecordIdKeyLit;
-	use crate::expr::thing::Thing;
-	use crate::sql::SqlValue;
-	use crate::syn::Parse;
+	use crate::syn;
+	use crate::val::{RecordId, RecordIdKey};
 
 	#[tokio::test]
 	async fn rid_none() {
-		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
 		let res = Value::None;
 		assert_eq!(res, val.rid());
 	}
 
 	#[tokio::test]
 	async fn rid_some() {
-		let val: Value =
-			SqlValue::parse("{ id: test:id, test: { other: null, something: 123 } }").into();
-		let res = Value::Thing(Thing {
-			tb: String::from("test"),
-			id: RecordIdKeyLit::from("id"),
+		let val = syn::value("{ id: test:id, test: { other: null, something: 123 } }").unwrap();
+		let res = Value::Thing(RecordId {
+			table: String::from("test"),
+			key: RecordIdKey::String("id".to_owned()),
 		});
 		assert_eq!(res, val.rid());
 	}
 }
-*/

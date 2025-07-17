@@ -96,193 +96,193 @@ pub enum ArrayBehaviour {
 	Full,
 }
 
-/*
 #[cfg(test)]
 mod tests {
 
 	use super::*;
-	use crate::sql::idiom::Idiom as SqlIdiom;
-	use crate::{sql::SqlValue, syn::Parse};
+	use crate::syn;
 
 	#[test]
 	fn every_empty() {
-		let val: Value = SqlValue::parse("{}").into();
+		let val = syn::value("{}").unwrap();
 		let res: Vec<Idiom> = vec![];
-		assert_eq!(res, val.every(None, false, false));
+		assert_eq!(res, val.every(None, false, ArrayBehaviour::Ignore));
 	}
 
 	#[test]
 	fn every_with_empty_objects_arrays() {
-		let val: Value =
-			SqlValue::parse("{ test: {}, status: false, something: {age: 45}, tags: []}").into();
+		let val = syn::value("{ test: {}, status: false, something: {age: 45}, tags: []}").unwrap();
 		let res: Vec<Idiom> = vec![
-			SqlIdiom::parse("something.age").into(),
-			SqlIdiom::parse("status").into(),
-			SqlIdiom::parse("tags").into(),
-			SqlIdiom::parse("test").into(),
+			syn::idiom("something.age").unwrap().into(),
+			syn::idiom("status").unwrap().into(),
+			syn::idiom("tags").unwrap().into(),
+			syn::idiom("test").unwrap().into(),
 		];
-		assert_eq!(res, val.every(None, false, false));
+		assert_eq!(res, val.every(None, false, ArrayBehaviour::Ignore));
 	}
 
 	#[test]
 	fn every_without_array_indexes() {
-		let val: Value = SqlValue::parse(
+		let val = syn::value(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).into();
-		let res: Vec<Idiom> = vec![SqlIdiom::parse("test.something").into()];
-		assert_eq!(res, val.every(None, false, false));
-	}
-
-	#[test]
-	fn every_recursive_without_array_indexes() {
-		let val: Value = SqlValue::parse(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).into();
-		let res: Vec<Idiom> = vec![
-			SqlIdiom::parse("test.something").into(),
-			SqlIdiom::parse("test.something[1].age").into(),
-			SqlIdiom::parse("test.something[1].tags").into(),
-			SqlIdiom::parse("test.something[0].age").into(),
-			SqlIdiom::parse("test.something[0].tags").into(),
-		];
-		assert_eq!(res, val.every(None, false, ArrayBehaviour::Nested));
+		).unwrap();
+		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap().into()];
+		assert_eq!(res, val.every(None, false, ArrayBehaviour::Ignore));
 	}
 
 	#[test]
 	fn every_including_array_indexes() {
-		let val: Value = SqlValue::parse(
+		let val = syn::value(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).into();
+		).unwrap();
 		let res: Vec<Idiom> = vec![
-			SqlIdiom::parse("test.something").into(),
-			SqlIdiom::parse("test.something[1].age").into(),
-			SqlIdiom::parse("test.something[1].tags").into(),
-			SqlIdiom::parse("test.something[1].tags[1]").into(),
-			SqlIdiom::parse("test.something[1].tags[0]").into(),
-			SqlIdiom::parse("test.something[0].age").into(),
-			SqlIdiom::parse("test.something[0].tags").into(),
-			SqlIdiom::parse("test.something[0].tags[1]").into(),
-			SqlIdiom::parse("test.something[0].tags[0]").into(),
+			syn::idiom("test.something").unwrap().into(),
+			syn::idiom("test.something[1].age").unwrap().into(),
+			syn::idiom("test.something[1].tags").unwrap().into(),
+			syn::idiom("test.something[1].tags[1]").unwrap().into(),
+			syn::idiom("test.something[1].tags[0]").unwrap().into(),
+			syn::idiom("test.something[0].age").unwrap().into(),
+			syn::idiom("test.something[0].tags").unwrap().into(),
+			syn::idiom("test.something[0].tags[1]").unwrap().into(),
+			syn::idiom("test.something[0].tags[0]").unwrap().into(),
 		];
-		assert_eq!(res, val.every(None, false, true));
+		assert_eq!(res, val.every(None, false, ArrayBehaviour::Full));
 	}
 
 	#[test]
 	fn every_including_intermediary_nodes_without_array_indexes() {
-		let val: Value = SqlValue::parse(
+		let val = syn::value(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).into();
+		).unwrap();
 		let res: Vec<Idiom> =
-			vec![SqlIdiom::parse("test").into(), SqlIdiom::parse("test.something").into()];
-		assert_eq!(res, val.every(None, true, false));
+			vec![syn::idiom("test").unwrap().into(), syn::idiom("test.something").unwrap().into()];
+		assert_eq!(res, val.every(None, true, ArrayBehaviour::Ignore));
 	}
 
 	#[test]
 	fn every_including_intermediary_nodes_including_array_indexes() {
-		let val: Value = SqlValue::parse(
+		let val = syn::value(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).into();
+		).unwrap();
 		let res: Vec<Idiom> = vec![
-			SqlIdiom::parse("test").into(),
-			SqlIdiom::parse("test.something").into(),
-			SqlIdiom::parse("test.something[1]").into(),
-			SqlIdiom::parse("test.something[1].age").into(),
-			SqlIdiom::parse("test.something[1].tags").into(),
-			SqlIdiom::parse("test.something[1].tags[1]").into(),
-			SqlIdiom::parse("test.something[1].tags[0]").into(),
-			SqlIdiom::parse("test.something[0]").into(),
-			SqlIdiom::parse("test.something[0].age").into(),
-			SqlIdiom::parse("test.something[0].tags").into(),
-			SqlIdiom::parse("test.something[0].tags[1]").into(),
-			SqlIdiom::parse("test.something[0].tags[0]").into(),
+			syn::idiom("test").unwrap().into(),
+			syn::idiom("test.something").unwrap().into(),
+			syn::idiom("test.something[1]").unwrap().into(),
+			syn::idiom("test.something[1].age").unwrap().into(),
+			syn::idiom("test.something[1].tags").unwrap().into(),
+			syn::idiom("test.something[1].tags[1]").unwrap().into(),
+			syn::idiom("test.something[1].tags[0]").unwrap().into(),
+			syn::idiom("test.something[0]").unwrap().into(),
+			syn::idiom("test.something[0].age").unwrap().into(),
+			syn::idiom("test.something[0].tags").unwrap().into(),
+			syn::idiom("test.something[0].tags[1]").unwrap().into(),
+			syn::idiom("test.something[0].tags[0]").unwrap().into(),
 		];
-		assert_eq!(res, val.every(None, true, true));
+		assert_eq!(res, val.every(None, true, ArrayBehaviour::Full));
 	}
 
 	#[test]
 	fn every_given_one_path_part() {
-		let val: Value = SqlValue::parse(
+		let val = syn::value(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).into();
+		).unwrap();
 		let res: Vec<Idiom> = vec![
-			SqlIdiom::parse("test").into(),
-			SqlIdiom::parse("test.something").into(),
-			SqlIdiom::parse("test.something[1]").into(),
-			SqlIdiom::parse("test.something[1].age").into(),
-			SqlIdiom::parse("test.something[1].tags").into(),
-			SqlIdiom::parse("test.something[1].tags[1]").into(),
-			SqlIdiom::parse("test.something[1].tags[0]").into(),
-			SqlIdiom::parse("test.something[0]").into(),
-			SqlIdiom::parse("test.something[0].age").into(),
-			SqlIdiom::parse("test.something[0].tags").into(),
-			SqlIdiom::parse("test.something[0].tags[1]").into(),
-			SqlIdiom::parse("test.something[0].tags[0]").into(),
+			syn::idiom("test").unwrap().into(),
+			syn::idiom("test.something").unwrap().into(),
+			syn::idiom("test.something[1]").unwrap().into(),
+			syn::idiom("test.something[1].age").unwrap().into(),
+			syn::idiom("test.something[1].tags").unwrap().into(),
+			syn::idiom("test.something[1].tags[1]").unwrap().into(),
+			syn::idiom("test.something[1].tags[0]").unwrap().into(),
+			syn::idiom("test.something[0]").unwrap().into(),
+			syn::idiom("test.something[0].age").unwrap().into(),
+			syn::idiom("test.something[0].tags").unwrap().into(),
+			syn::idiom("test.something[0].tags[1]").unwrap().into(),
+			syn::idiom("test.something[0].tags[0]").unwrap().into(),
 		];
-		assert_eq!(res, val.every(Some(&Idiom::from(SqlIdiom::parse("test"))), true, true));
+		assert_eq!(
+			res,
+			val.every(Some(&Idiom::from(syn::idiom("test").unwrap())), true, ArrayBehaviour::Full)
+		);
 	}
 
 	#[test]
 	fn every_given_two_path_parts() {
-		let val: Value = SqlValue::parse(
+		let val = syn::value(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).into();
+		).unwrap();
 		let res: Vec<Idiom> = vec![
-			SqlIdiom::parse("test.something").into(),
-			SqlIdiom::parse("test.something[1]").into(),
-			SqlIdiom::parse("test.something[1].age").into(),
-			SqlIdiom::parse("test.something[1].tags").into(),
-			SqlIdiom::parse("test.something[1].tags[1]").into(),
-			SqlIdiom::parse("test.something[1].tags[0]").into(),
-			SqlIdiom::parse("test.something[0]").into(),
-			SqlIdiom::parse("test.something[0].age").into(),
-			SqlIdiom::parse("test.something[0].tags").into(),
-			SqlIdiom::parse("test.something[0].tags[1]").into(),
-			SqlIdiom::parse("test.something[0].tags[0]").into(),
+			syn::idiom("test.something").unwrap().into(),
+			syn::idiom("test.something[1]").unwrap().into(),
+			syn::idiom("test.something[1].age").unwrap().into(),
+			syn::idiom("test.something[1].tags").unwrap().into(),
+			syn::idiom("test.something[1].tags[1]").unwrap().into(),
+			syn::idiom("test.something[1].tags[0]").unwrap().into(),
+			syn::idiom("test.something[0]").unwrap().into(),
+			syn::idiom("test.something[0].age").unwrap().into(),
+			syn::idiom("test.something[0].tags").unwrap().into(),
+			syn::idiom("test.something[0].tags[1]").unwrap().into(),
+			syn::idiom("test.something[0].tags[0]").unwrap().into(),
 		];
 		assert_eq!(
 			res,
-			val.every(Some(&Idiom::from(SqlIdiom::parse("test.something"))), true, true)
+			val.every(
+				Some(&Idiom::from(syn::idiom("test.something").unwrap())),
+				true,
+				ArrayBehaviour::Full
+			)
 		);
 	}
 
 	#[test]
 	fn every_including_intermediary_nodes_including_array_indexes_ending_all() {
-		let val: Value = SqlValue::parse(
+		let val = syn::value(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).into();
+		).unwrap();
 		let res: Vec<Idiom> = vec![
-			SqlIdiom::parse("test.something").into(),
-			SqlIdiom::parse("test.something[1]").into(),
-			SqlIdiom::parse("test.something[1].age").into(),
-			SqlIdiom::parse("test.something[1].tags").into(),
-			SqlIdiom::parse("test.something[1].tags[1]").into(),
-			SqlIdiom::parse("test.something[1].tags[0]").into(),
-			SqlIdiom::parse("test.something[0]").into(),
-			SqlIdiom::parse("test.something[0].age").into(),
-			SqlIdiom::parse("test.something[0].tags").into(),
-			SqlIdiom::parse("test.something[0].tags[1]").into(),
-			SqlIdiom::parse("test.something[0].tags[0]").into(),
+			syn::idiom("test.something").unwrap().into(),
+			syn::idiom("test.something[1]").unwrap().into(),
+			syn::idiom("test.something[1].age").unwrap().into(),
+			syn::idiom("test.something[1].tags").unwrap().into(),
+			syn::idiom("test.something[1].tags[1]").unwrap().into(),
+			syn::idiom("test.something[1].tags[0]").unwrap().into(),
+			syn::idiom("test.something[0]").unwrap().into(),
+			syn::idiom("test.something[0].age").unwrap().into(),
+			syn::idiom("test.something[0].tags").unwrap().into(),
+			syn::idiom("test.something[0].tags[1]").unwrap().into(),
+			syn::idiom("test.something[0].tags[0]").unwrap().into(),
 		];
 		assert_eq!(
 			res,
-			val.every(Some(&Idiom::from(SqlIdiom::parse("test.something.*"))), true, true)
+			val.every(
+				Some(&Idiom::from(syn::idiom("test.something.*").unwrap())),
+				true,
+				ArrayBehaviour::Full
+			)
 		);
 	}
 
 	#[test]
 	fn every_wildcards() {
-		let val: Value = SqlValue::parse(
+		let val = syn::value(
 			"{ test: { a: { color: 'red' }, b: { color: 'blue' }, c: { color: 'green' } } }",
 		)
-		.into();
+		.unwrap();
 
 		let res: Vec<Idiom> = vec![
-			SqlIdiom::parse("test.*.color").into(),
-			SqlIdiom::parse("test.*.color[2]").into(),
-			SqlIdiom::parse("test.*.color[1]").into(),
-			SqlIdiom::parse("test.*.color[0]").into(),
+			syn::idiom("test.*.color").unwrap().into(),
+			syn::idiom("test.*.color[2]").unwrap().into(),
+			syn::idiom("test.*.color[1]").unwrap().into(),
+			syn::idiom("test.*.color[0]").unwrap().into(),
 		];
 
-		assert_eq!(res, val.every(Some(&Idiom::from(SqlIdiom::parse("test.*.color"))), true, true));
+		assert_eq!(
+			res,
+			val.every(
+				Some(&Idiom::from(syn::idiom("test.*.color").unwrap())),
+				true,
+				ArrayBehaviour::Full
+			)
+		);
 	}
-}*/
+}

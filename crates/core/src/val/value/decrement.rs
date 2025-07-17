@@ -36,23 +36,20 @@ impl Value {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 
 	use super::*;
 	use crate::dbs::test::mock;
 	use crate::expr::idiom::Idiom;
-	use crate::sql::SqlValue;
-	use crate::sql::idiom::Idiom as SqlIdiom;
-	use crate::syn::Parse;
+	use crate::syn;
 
 	#[tokio::test]
 	async fn decrement_none() {
 		let (ctx, opt) = mock().await;
-		let idi: Idiom = SqlIdiom::parse("other").into();
-		let mut val: Value = SqlValue::parse("{ test: 100 }").into();
-		let res: Value = SqlValue::parse("{ test: 100, other: -10 }").into();
+		let idi: Idiom = syn::idiom("other").unwrap().into();
+		let mut val = syn::value("{ test: 100 }").unwrap();
+		let res = syn::value("{ test: 100, other: -10 }").unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10)))
@@ -65,9 +62,9 @@ mod tests {
 	#[tokio::test]
 	async fn decrement_number() {
 		let (ctx, opt) = mock().await;
-		let idi: Idiom = SqlIdiom::parse("test").into();
-		let mut val: Value = SqlValue::parse("{ test: 100 }").into();
-		let res: Value = SqlValue::parse("{ test: 90 }").into();
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = syn::value("{ test: 100 }").unwrap();
+		let res = syn::value("{ test: 90 }").unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10)))
@@ -80,9 +77,9 @@ mod tests {
 	#[tokio::test]
 	async fn decrement_array_number() {
 		let (ctx, opt) = mock().await;
-		let idi: Idiom = SqlIdiom::parse("test[1]").into();
-		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
-		let res: Value = SqlValue::parse("{ test: [100, 190, 300] }").into();
+		let idi: Idiom = syn::idiom("test[1]").unwrap().into();
+		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
+		let res = syn::value("{ test: [100, 190, 300] }").unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10)))
@@ -95,9 +92,9 @@ mod tests {
 	#[tokio::test]
 	async fn decrement_array_value() {
 		let (ctx, opt) = mock().await;
-		let idi: Idiom = SqlIdiom::parse("test").into();
-		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
-		let res: Value = SqlValue::parse("{ test: [100, 300] }").into();
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
+		let res = syn::value("{ test: [100, 300] }").unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(200)))
@@ -110,16 +107,15 @@ mod tests {
 	#[tokio::test]
 	async fn decrement_array_array() {
 		let (ctx, opt) = mock().await;
-		let idi: Idiom = SqlIdiom::parse("test").into();
-		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
-		let res: Value = SqlValue::parse("{ test: [200] }").into();
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
+		let res = syn::value("{ test: [200] }").unwrap();
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, SqlValue::parse("[100,300]").into()))
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, syn::value("[100,300]").unwrap()))
 			.finish()
 			.await
 			.unwrap();
 		assert_eq!(res, val);
 	}
 }
-*/

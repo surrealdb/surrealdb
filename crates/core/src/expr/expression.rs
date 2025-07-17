@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
 use crate::expr::operator::BindingPower;
+use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
 	IfelseStatement, InfoStatement, InsertStatement, OutputStatement, RebuildStatement,
@@ -11,19 +12,16 @@ use crate::expr::statements::{
 	UpsertStatement,
 };
 use crate::expr::{
-	BinaryOperator, Block, Constant, FlowResult, FunctionCall, Ident, Idiom, Literal, Mock, Param,
-	PostfixOperator, PrefixOperator,
+	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Ident, Idiom, Literal,
+	Mock, Param, PostfixOperator, PrefixOperator,
 };
 use crate::fnc;
-use crate::val::{Closure, Range, Strand, Value};
+use crate::val::{Array, Closure, Range, Strand, Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Bound;
-
-use super::ControlFlow;
-use super::statements::info::{self, InfoStructure};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -35,6 +33,7 @@ pub enum Expr {
 	Idiom(Idiom),
 	// Maybe move into Literal?
 	Table(Ident),
+	// This type can probably be removed in favour of range expressions.
 	Mock(Mock),
 	Block(Box<Block>),
 	Constant(Constant),
@@ -209,7 +208,16 @@ impl Expr {
 			}
 			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await,
 			Expr::Table(ident) => Ok(Value::Table(ident.clone().into())),
-			Expr::Mock(mock) => todo!(),
+			Expr::Mock(mock) => {
+				// NOTE(value pr): This is a breaking change but makes the most sense without having mock be part
+				// of the Value type.
+				// Mock is mostly used within `CREATE |thing:20|` to create a bunch of entries at
+				// one. Here it behaves similar to `CREATE ([thing:1,thing:2,thing:3...])` so when
+				// we encounted mock outside of create we return the array here instead.
+				//
+				let record_ids = mock.clone().into_iter().map(Value::Thing).collect();
+				Ok(Value::Array(Array(record_ids)))
+			}
 			Expr::Block(block) => block.compute(stk, ctx, &opt, doc).await,
 			Expr::Constant(constant) => constant.compute().map_err(ControlFlow::Err),
 			Expr::Prefix {

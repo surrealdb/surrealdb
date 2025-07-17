@@ -49,44 +49,11 @@ pub enum RecordIdKeyLit {
 	Range(Box<RecordIdKeyRangeLit>),
 }
 
-/*
-impl RecordIdKeyLit {
-	/// Create a record id key from a value.
-	///
-	/// Returns the original value if the key can't be created from the value.
-	pub fn from_value(v: Value) -> Result<Self, Value> {
-		match v {
-			Value::Number(Number::Int(v)) => Ok(v.into()),
-			Value::Strand(v) => Ok(v.into()),
-			Value::Array(v) => Ok(v.into()),
-			Value::Object(v) => Ok(v.into()),
-			Value::Range(v) => v.deref().to_owned().try_into(),
-			x => Err(x),
-		}
-	}
-}*/
-
 impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
 	fn from(v: RecordIdKeyRangeLit) -> Self {
 		Self::Range(Box::new(v))
 	}
 }
-
-/*
-impl RecordIdKeyLit {
-	/// Check if this Id matches a value
-	pub fn is(&self, val: &Value) -> bool {
-		match (self, val) {
-			(Self::Number(i), Value::Number(Number::Int(j))) if *i == *j => true,
-			(Self::String(i), Value::Strand(j)) if *i == j.0 => true,
-			(Self::Uuid(i), Value::Uuid(j)) if i == j => true,
-			(Self::Array(i), Value::Array(j)) if i == j => true,
-			(Self::Object(i), Value::Object(j)) if i == j => true,
-			(i, Value::Thing(t)) if i == &t.key => true,
-			_ => false,
-		}
-	}
-}*/
 
 impl Display for RecordIdKeyLit {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {

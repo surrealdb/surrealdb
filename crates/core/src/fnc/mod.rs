@@ -1575,16 +1575,14 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 	format!("{kind}::{name}")
 }
 
-/*
 #[cfg(test)]
 mod tests {
 	use regex::Regex;
 
 	use crate::dbs::Capabilities;
-	use crate::{
-		dbs::capabilities::ExperimentalTarget,
-		sql::{Function, Query, SqlValue, Statement, statements::OutputStatement},
-	};
+	use crate::sql::Expr;
+	use crate::val::Strand;
+	use crate::{dbs::capabilities::ExperimentalTarget, sql::Function};
 
 	#[tokio::test]
 	async fn implementations_are_present() {
@@ -1616,18 +1614,15 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let res = crate::syn::parse_with_capabilities(
-				&format!("RETURN {}()", name),
+			let res = crate::syn::expr_with_capabilities(
+				&format!("{}()", name),
 				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
 			);
 
-			if let Ok(Query(mut x)) = res {
-				match x.0.pop() {
-					Some(Statement::Output(OutputStatement {
-						what: SqlValue::Function(x),
-						..
-					})) => match *x {
-						Function::Normal(parsed_name, _) => {
+			if let Ok(expr) = res {
+				match expr {
+					Expr::FunctionCall(call) => match call.receiver {
+						Function::Normal(parsed_name) => {
 							if parsed_name != name {
 								problems
 									.push(format!("function `{name}` parsed as `{parsed_name}`"));
@@ -1647,7 +1642,7 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::expr::Value;
+				use crate::val::Value;
 
 				let name = name.replace("::", ".");
 				let sql =
@@ -1659,9 +1654,9 @@ mod tests {
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
-				if tmp == Value::from("object") {
+				if tmp == Value::Strand(Strand::new("object".to_owned()).unwrap()) {
 					// Assume this function is superseded by a module of the same name.
-				} else if tmp != Value::from("function") {
+				} else if tmp != Value::Strand(Strand::new("function".to_owned()).unwrap()) {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			}
@@ -1677,4 +1672,4 @@ mod tests {
 			);
 		}
 	}
-}*/
+}

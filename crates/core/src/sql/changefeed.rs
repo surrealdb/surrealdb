@@ -18,17 +18,6 @@ impl Display for ChangeFeed {
 	}
 }
 
-/*
-impl Default for ChangeFeed {
-	fn default() -> Self {
-		Self {
-			expiry: time::Duration::from_secs(0),
-			store_diff: false,
-		}
-	}
-}
-*/
-
 impl From<ChangeFeed> for crate::expr::ChangeFeed {
 	fn from(v: ChangeFeed) -> Self {
 		crate::expr::ChangeFeed {

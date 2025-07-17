@@ -1079,14 +1079,10 @@ impl FromIterator<(String, Value)> for Value {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
-
-	use chrono::TimeZone;
-
 	use super::*;
-	use crate::{sql::SqlValue, syn::Parse};
+	use chrono::TimeZone;
 
 	#[test]
 	fn check_none() {
@@ -1141,19 +1137,19 @@ mod tests {
 
 	#[test]
 	fn convert_string() {
-		assert_eq!(String::from("NONE"), Value::None.as_string());
-		assert_eq!(String::from("NULL"), Value::Null.as_string());
-		assert_eq!(String::from("true"), Value::Bool(true).as_string());
-		assert_eq!(String::from("false"), Value::Bool(false).as_string());
-		assert_eq!(String::from("0"), Value::from(0).as_string());
-		assert_eq!(String::from("1"), Value::from(1).as_string());
-		assert_eq!(String::from("-1"), Value::from(-1).as_string());
-		assert_eq!(String::from("1.1f"), Value::from(1.1).as_string());
-		assert_eq!(String::from("-1.1f"), Value::from(-1.1).as_string());
-		assert_eq!(String::from("3"), Value::from("3").as_string());
-		assert_eq!(String::from("true"), Value::from("true").as_string());
-		assert_eq!(String::from("false"), Value::from("false").as_string());
-		assert_eq!(String::from("something"), Value::from("something").as_string());
+		assert_eq!(String::from("NONE"), Value::None.as_raw_string());
+		assert_eq!(String::from("NULL"), Value::Null.as_raw_string());
+		assert_eq!(String::from("true"), Value::Bool(true).as_raw_string());
+		assert_eq!(String::from("false"), Value::Bool(false).as_raw_string());
+		assert_eq!(String::from("0"), Value::from(0).as_raw_string());
+		assert_eq!(String::from("1"), Value::from(1).as_raw_string());
+		assert_eq!(String::from("-1"), Value::from(-1).as_raw_string());
+		assert_eq!(String::from("1.1f"), Value::from(1.1).as_raw_string());
+		assert_eq!(String::from("-1.1f"), Value::from(-1.1).as_raw_string());
+		assert_eq!(String::from("3"), Value::from("3").as_raw_string());
+		assert_eq!(String::from("true"), Value::from("true").as_raw_string());
+		assert_eq!(String::from("false"), Value::from("false").as_raw_string());
+		assert_eq!(String::from("something"), Value::from("something").as_raw_string());
 	}
 
 	#[test]
@@ -1214,4 +1210,4 @@ mod tests {
 		let value = Value::from(vector);
 		assert!(matches!(value, Value::Array(Array(_))));
 	}
-}*/
+}

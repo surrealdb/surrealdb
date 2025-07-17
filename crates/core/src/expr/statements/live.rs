@@ -159,17 +159,15 @@ impl InfoStructure for LiveStatement {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 	use crate::dbs::{Action, Capabilities, Notification, Session};
-	use crate::expr::Thing;
 	use crate::expr::Value;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
-	use crate::sql::SqlValue;
-	use crate::syn::Parse;
+	use crate::syn;
+	use crate::val::{RecordId, RecordIdKey};
 	use anyhow::Result;
 
 	pub async fn new_ds() -> Result<Datastore> {
@@ -205,20 +203,20 @@ mod tests {
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name.as_str(), tb);
 		tx.cancel().await.unwrap();
 
 		// Initiate a Create record
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record: Value = SqlValue::parse(&format!(
+		let expected_record: Value = syn::value(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
 			}}]"
 		))
-		.into();
+		.unwrap();
 
 		let tmp = create_response.remove(0).result.unwrap();
 		assert_eq!(tmp, expected_record);
@@ -227,7 +225,7 @@ mod tests {
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name.as_str(), tb);
 		tx.cancel().await.unwrap();
 
 		// Validate notification
@@ -238,14 +236,17 @@ mod tests {
 			Notification::new(
 				live_id,
 				Action::Create,
-				Value::Thing(Thing::from((tb, "test_true"))),
-				SqlValue::parse(&format!(
+				Value::Thing(RecordId {
+					table: tb.to_owned(),
+					key: RecordIdKey::String("test_true".to_owned())
+				}),
+				syn::value(&format!(
 					"{{
 						id: {tb}:test_true,
 						condition: true,
 					}}"
 				))
-				.into(),
+				.unwrap(),
 			)
 		);
 	}
@@ -270,7 +271,7 @@ mod tests {
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name.as_str(), tb);
 		tx.cancel().await.unwrap();
 
 		// Initiate a live query statement
@@ -281,7 +282,7 @@ mod tests {
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
 		let table_occurrences = &*(tx.all_tb(ns, db, None).await.unwrap());
 		assert_eq!(table_occurrences.len(), 1);
-		assert_eq!(table_occurrences[0].name.0, tb);
+		assert_eq!(table_occurrences[0].name.as_str(), tb);
 		tx.cancel().await.unwrap();
 	}
-}*/
+}

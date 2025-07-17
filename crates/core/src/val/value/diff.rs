@@ -87,65 +87,66 @@ impl Value {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 
 	use super::*;
-	use crate::expr::Idiom;
-	use crate::{sql::SqlValue, syn::Parse};
+	use crate::syn;
 
 	#[test]
 	fn diff_none() {
-		let old: Value =
-			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
-		let now: Value =
-			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
-		let res: Value = SqlValue::parse("[]").into();
-		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
+		let old = syn::value("{ test: true, text: 'text', other: { something: true } }").unwrap();
+		let now = syn::value("{ test: true, text: 'text', other: { something: true } }").unwrap();
+		let res = syn::value("[]").unwrap();
+		let res = Operation::value_to_operations(res).unwrap();
+		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_add() {
-		let old: Value = SqlValue::parse("{ test: true }").into();
-		let now: Value = SqlValue::parse("{ test: true, other: 'test' }").into();
-		let res: Value = SqlValue::parse("[{ op: 'add', path: '/other', value: 'test' }]").into();
-		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
+		let old = syn::value("{ test: true }").unwrap();
+		let now = syn::value("{ test: true, other: 'test' }").unwrap();
+		let res = syn::value("[{ op: 'add', path: '/other', value: 'test' }]").unwrap();
+		let res = Operation::value_to_operations(res).unwrap();
+		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_remove() {
-		let old: Value = SqlValue::parse("{ test: true, other: 'test' }").into();
-		let now: Value = SqlValue::parse("{ test: true }").into();
-		let res: Value = SqlValue::parse("[{ op: 'remove', path: '/other' }]").into();
-		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
+		let old = syn::value("{ test: true, other: 'test' }").unwrap();
+		let now = syn::value("{ test: true }").unwrap();
+		let res = syn::value("[{ op: 'remove', path: '/other' }]").unwrap();
+		let res = Operation::value_to_operations(res).unwrap();
+		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_add_array() {
-		let old: Value = SqlValue::parse("{ test: [1,2,3] }").into();
-		let now: Value = SqlValue::parse("{ test: [1,2,3,4] }").into();
-		let res: Value = SqlValue::parse("[{ op: 'add', path: '/test/3', value: 4 }]").into();
-		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
+		let old = syn::value("{ test: [1,2,3] }").unwrap();
+		let now = syn::value("{ test: [1,2,3,4] }").unwrap();
+		let res = syn::value("[{ op: 'add', path: '/test/3', value: 4 }]").unwrap();
+		let res = Operation::value_to_operations(res).unwrap();
+		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_replace_embedded() {
-		let old: Value = SqlValue::parse("{ test: { other: 'test' } }").into();
-		let now: Value = SqlValue::parse("{ test: { other: false } }").into();
-		let res: Value =
-			SqlValue::parse("[{ op: 'replace', path: '/test/other', value: false }]").into();
-		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
+		let old = syn::value("{ test: { other: 'test' } }").unwrap();
+		let now = syn::value("{ test: { other: false } }").unwrap();
+		let res = syn::value("[{ op: 'replace', path: '/test/other', value: false }]").unwrap();
+		let res = Operation::value_to_operations(res).unwrap();
+		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_change_text() {
-		let old: Value = SqlValue::parse("{ test: { other: 'test' } }").into();
-		let now: Value = SqlValue::parse("{ test: { other: 'text' } }").into();
-		let res: Value = SqlValue::parse(
+		let old = syn::value("{ test: { other: 'test' } }").unwrap();
+		let now = syn::value("{ test: { other: 'text' } }").unwrap();
+		let res = syn::value(
 			"[{ op: 'change', path: '/test/other', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]",
 		)
-		.into();
-		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
+		.unwrap();
+		let res = Operation::value_to_operations(res).unwrap();
+		assert_eq!(res, old.diff(&now));
 	}
-}*/
+}

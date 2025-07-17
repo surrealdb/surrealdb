@@ -32,17 +32,15 @@ impl Value {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 
 	use super::*;
-	use crate::sql::SqlValue;
-	use crate::syn::Parse;
+	use crate::syn;
 
 	#[tokio::test]
 	async fn merge_none() {
-		let mut res: Value = SqlValue::parse(
+		let mut res = syn::value(
 			"{
 				test: true,
 				name: {
@@ -52,7 +50,7 @@ mod tests {
 				},
 			}",
 		)
-		.into();
+		.unwrap();
 		let none = Value::None;
 		match res.merge(none.clone()).unwrap_err().downcast() {
 			Ok(Error::InvalidMerge {
@@ -65,7 +63,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn merge_empty() {
-		let mut res: Value = SqlValue::parse(
+		let mut res = syn::value(
 			"{
 				test: true,
 				name: {
@@ -75,8 +73,8 @@ mod tests {
 				},
 			}",
 		)
-		.into();
-		let val: Value = SqlValue::parse(
+		.unwrap();
+		let val = syn::value(
 			"{
 				test: true,
 				name: {
@@ -86,7 +84,7 @@ mod tests {
 				},
 			}",
 		)
-		.into();
+		.unwrap();
 		let mrg = Value::Object(Default::default());
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
@@ -94,7 +92,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn merge_basic() {
-		let mut res: Value = SqlValue::parse(
+		let mut res = syn::value(
 			"{
 				test: true,
 				name: {
@@ -104,8 +102,8 @@ mod tests {
 				},
 			}",
 		)
-		.into();
-		let mrg: Value = SqlValue::parse(
+		.unwrap();
+		let mrg = syn::value(
 			"{
 				name: {
 					title: 'Mr',
@@ -114,8 +112,8 @@ mod tests {
 				tags: ['Rust', 'Golang', 'JavaScript'],
 			}",
 		)
-		.into();
-		let val: Value = SqlValue::parse(
+		.unwrap();
+		let val = syn::value(
 			"{
 				test: true,
 				name: {
@@ -126,14 +124,14 @@ mod tests {
 				tags: ['Rust', 'Golang', 'JavaScript'],
 			}",
 		)
-		.into();
+		.unwrap();
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn merge_new_object() {
-		let mut res: Value = SqlValue::parse(
+		let mut res = syn::value(
 			"{
 				test: true,
 				name: 'Tobie',
@@ -143,8 +141,8 @@ mod tests {
 				}
 			}",
 		)
-		.into();
-		let mrg: Value = SqlValue::parse(
+		.unwrap();
+		let mrg = syn::value(
 			"{
 				name: {
 					title: 'Mr',
@@ -156,8 +154,8 @@ mod tests {
 				}
 			}",
 		)
-		.into();
-		let val: Value = SqlValue::parse(
+		.unwrap();
+		let val = syn::value(
 			"{
 				test: true,
 				name: {
@@ -168,8 +166,8 @@ mod tests {
 				},
 			}",
 		)
-		.into();
+		.unwrap();
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}
-}*/
+}

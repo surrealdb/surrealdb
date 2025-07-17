@@ -22,12 +22,6 @@ impl LogicalPlan {
 	}
 }
 
-impl Display for LogicalPlan {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		todo!()
-	}
-}
-
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub enum TopLevelExpr {
 	Begin,

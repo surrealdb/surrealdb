@@ -59,12 +59,10 @@ fn empty_idiom() {
 	super::idiom("").unwrap_err();
 }
 
-/*
 #[test]
-fn empty_subquery() {
-	super::subquery("").unwrap_err();
+fn empty_expr() {
+	super::expr("").unwrap_err();
 }
-*/
 
 #[test]
 fn empty_json() {

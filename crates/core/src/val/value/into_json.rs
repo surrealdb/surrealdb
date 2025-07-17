@@ -196,7 +196,6 @@ impl From<val::Geometry> for Geometry {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 	use crate::expr;
@@ -487,4 +486,4 @@ mod tests {
 		let deserialized: Value = deserialized_sql_value.into();
 		assert_eq!(deserialized, expected_deserialized);
 	}
-}*/
+}

@@ -316,7 +316,6 @@ impl Analyzer {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 	use super::Analyzer;
@@ -325,8 +324,7 @@ mod tests {
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::sql::Statement;
-	use crate::sql::statements::DefineStatement;
+	use crate::sql::{DefineStatement, Expr};
 	use crate::syn;
 	use std::sync::Arc;
 
@@ -337,10 +335,14 @@ mod tests {
 		ctx.set_transaction(Arc::new(txn));
 		let ctx = ctx.freeze();
 
-		let mut stmt = syn::parse(&format!("DEFINE {def}")).unwrap();
-		let Some(Statement::Define(DefineStatement::Analyzer(az))) = stmt.0.0.pop() else {
+		let expr = syn::expr(&format!("DEFINE {def}")).unwrap();
+		let Expr::Define(d) = expr else {
 			panic!()
 		};
+		let DefineStatement::Analyzer(az) = *d else {
+			panic!()
+		};
+
 		let a = Analyzer::new(ctx.get_index_stores(), Arc::new(az.into())).unwrap();
 
 		let mut stack = reblessive::TreeStack::new();
@@ -373,4 +375,4 @@ mod tests {
 	async fn test_no_tokenizer() {
 		test_analyzer("ANALYZER test FILTERS lowercase", "ab", &["ab"]).await;
 	}
-}*/
+}

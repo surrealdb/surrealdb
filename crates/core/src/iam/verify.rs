@@ -699,11 +699,16 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::iam::token::{Audience, HEADER};
+	use crate::{
+		iam::token::{Audience, HEADER},
+		sql::{
+			Ast,
+			statements::define::{DefineKind, user::PassType},
+		},
+	};
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{EncodingKey, encode};
@@ -858,8 +863,7 @@ mod tests {
 		use crate::iam::Error as IamError;
 		use crate::sql::statements::DefineUserStatement;
 		use crate::sql::statements::define::DefineStatement;
-		use crate::sql::user::UserDuration;
-		use crate::sql::{Base, Statement};
+		use crate::sql::{Base, Expr, TopLevelExpr};
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -890,23 +894,28 @@ mod tests {
 			};
 
 			let user = DefineUserStatement {
+				kind: DefineKind::Default,
 				base,
 				name: "user".into(),
 				// This is the Argon2id hash for "pass" with a random salt.
-				hash: "$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
-					.to_string(),
-				code: "dummy".to_string(),
+				pass_type: PassType::PassHash(
+					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
+						.to_string(),
+				),
 				roles: vec!["nonexistent".into()],
-				duration: UserDuration::default(),
+				token_duration: None,
+				session_duration: None,
 				comment: None,
-				if_not_exists: false,
-				overwrite: false,
+			};
+
+			let ast = Ast {
+				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(
+					DefineStatement::User(user),
+				)))],
 			};
 
 			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(Statement::Define(DefineStatement::User(user)).into(), &sess, None)
-				.await
-				.unwrap();
+			ds.process(ast, &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				ns: level.ns.map(String::from),
@@ -2062,4 +2071,4 @@ mod tests {
 			}
 		}
 	}
-}*/
+}

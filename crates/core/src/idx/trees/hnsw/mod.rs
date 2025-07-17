@@ -426,7 +426,6 @@ where
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
 	use crate::ctx::{Context, MutableContext};
@@ -443,6 +442,7 @@ mod tests {
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
+	use crate::val::RecordIdKey;
 	use ahash::{HashMap, HashSet};
 	use anyhow::Result;
 	use ndarray::Array1;
@@ -846,7 +846,7 @@ mod tests {
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(&tx, &RecordIdKeyLit::Number(*doc_id as i64), &content).await?;
+			h.index_document(&tx, &RecordIdKey::Number(*doc_id as i64), &content).await?;
 		}
 		tx.commit().await?;
 
@@ -982,4 +982,4 @@ mod tests {
 		let vec = Vector::I16(Array1::from_vec(vec![x as i16, y as i16]));
 		vec.into()
 	}
-}*/
+}

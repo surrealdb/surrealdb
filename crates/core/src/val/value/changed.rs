@@ -42,61 +42,55 @@ impl Value {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
-
-	use super::*;
-	use crate::{sql::SqlValue, syn::Parse};
+	use crate::syn;
 
 	#[test]
 	fn changed_none() {
-		let old: Value =
-			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
-		let now: Value =
-			SqlValue::parse("{ test: true, text: 'text', other: { something: true } }").into();
-		let res: Value = SqlValue::parse("{}").into();
+		let old = syn::value("{ test: true, text: 'text', other: { something: true } }").unwrap();
+		let now = syn::value("{ test: true, text: 'text', other: { something: true } }").unwrap();
+		let res = syn::value("{}").unwrap();
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_add() {
-		let old: Value = SqlValue::parse("{ test: true }").into();
-		let now: Value = SqlValue::parse("{ test: true, other: 'test' }").into();
-		let res: Value = SqlValue::parse("{ other: 'test' }").into();
+		let old = syn::value("{ test: true }").unwrap();
+		let now = syn::value("{ test: true, other: 'test' }").unwrap();
+		let res = syn::value("{ other: 'test' }").unwrap();
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_remove() {
-		let old: Value = SqlValue::parse("{ test: true, other: 'test' }").into();
-		let now: Value = SqlValue::parse("{ test: true }").into();
-		let res: Value = SqlValue::parse("{ other: NONE }").into();
+		let old = syn::value("{ test: true, other: 'test' }").unwrap();
+		let now = syn::value("{ test: true }").unwrap();
+		let res = syn::value("{ other: NONE }").unwrap();
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_add_array() {
-		let old: Value = SqlValue::parse("{ test: [1,2,3] }").into();
-		let now: Value = SqlValue::parse("{ test: [1,2,3,4] }").into();
-		let res: Value = SqlValue::parse("{ test: [1,2,3,4] }").into();
+		let old = syn::value("{ test: [1,2,3] }").unwrap();
+		let now = syn::value("{ test: [1,2,3,4] }").unwrap();
+		let res = syn::value("{ test: [1,2,3,4] }").unwrap();
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_replace_embedded() {
-		let old: Value = SqlValue::parse("{ test: { other: 'test' } }").into();
-		let now: Value = SqlValue::parse("{ test: { other: false } }").into();
-		let res: Value = SqlValue::parse("{ test: { other: false } }").into();
+		let old = syn::value("{ test: { other: 'test' } }").unwrap();
+		let now = syn::value("{ test: { other: false } }").unwrap();
+		let res = syn::value("{ test: { other: false } }").unwrap();
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_change_text() {
-		let old: Value = SqlValue::parse("{ test: { other: 'test' } }").into();
-		let now: Value = SqlValue::parse("{ test: { other: 'text' } }").into();
-		let res: Value = SqlValue::parse("{ test: { other: 'text' } }").into();
+		let old = syn::value("{ test: { other: 'test' } }").unwrap();
+		let now = syn::value("{ test: { other: 'text' } }").unwrap();
+		let res = syn::value("{ test: { other: 'text' } }").unwrap();
 		assert_eq!(res, old.changed(&now));
 	}
 }
-*/
