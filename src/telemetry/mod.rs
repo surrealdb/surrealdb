@@ -50,7 +50,6 @@ pub struct Builder {
 	file_filter: Option<CustomFilter>,
 	otel_filter: Option<CustomFilter>,
 	log_socket: Option<String>,
-	log_file_socket: Option<String>,
 	log_file_enabled: bool,
 	log_file_format: LogFormat,
 	log_file_path: Option<String>,
@@ -73,7 +72,6 @@ impl Default for Builder {
 			file_filter: None,
 			otel_filter: None,
 			log_socket: None,
-			log_file_socket: None,
 			log_file_format: LogFormat::Text,
 			log_file_enabled: false,
 			log_file_path: Some("logs".to_string()),
@@ -126,12 +124,6 @@ impl Builder {
 	/// Send logs to the provided socket address
 	pub fn with_log_socket(mut self, socket: Option<String>) -> Self {
 		self.log_socket = socket;
-		self
-	}
-
-	/// Send file logs to the provided socket address
-	pub fn with_log_file_socket(mut self, socket: Option<String>) -> Self {
-		self.log_file_socket = socket;
 		self
 	}
 
@@ -193,8 +185,10 @@ impl Builder {
 		let telemetry_filter = self.otel_filter.clone().unwrap_or_else(|| self.filter.clone());
 		let telemetry_layer = traces::new(telemetry_filter)?;
 		// Setup a registry for composing layers
-		let mut registry = tracing_subscriber::registry().with(output_layer);
+		let registry = tracing_subscriber::registry().with(output_layer);
 		let mut guards = vec![stdout_guard, stderr_guard];
+		let mut layers = Vec::new();
+		let registry = registry.with(telemetry_layer);
 		// Setup optional socket layer
 		if let Some(addr) = &self.log_socket {
 			let writer = logs::SocketWriter::connect(addr)?;
@@ -203,11 +197,10 @@ impl Builder {
 				.thread_name("surrealdb-logger-socket")
 				.finish(writer);
 			let socket_layer = logs::file(self.filter.clone(), sock, self.log_file_format)?;
-			registry = registry.with(socket_layer);
+			layers.push(socket_layer);
 			guards.push(sock_guard);
 		}
 		// Setup telemetry layer
-		registry = registry.with(telemetry_layer);
 
 		// Setup file logging if enabled
 		if self.log_file_enabled {
@@ -231,28 +224,38 @@ impl Builder {
 				.finish(file_appender);
 			// Create the file destination layer
 			let file_filter = self.file_filter.clone().unwrap_or_else(|| self.filter.clone());
-			let file_layer = logs::file(file_filter.clone(), file, self.log_file_format)?;
-			registry = registry.with(file_layer);
+			let file_layer = logs::file(file_filter, file, self.log_file_format)?;
+			layers.push(file_layer);
 			guards.push(file_guard);
-			if let Some(addr) = &self.log_file_socket {
-				let writer = logs::SocketWriter::connect(addr)?;
-				let (sock, sock_guard) = NonBlockingBuilder::default()
-					.lossy(false)
-					.thread_name("surrealdb-logger-file-socket")
-					.finish(writer);
-				let socket_layer = logs::file(file_filter, sock, self.log_file_format)?;
-				registry = registry.with(socket_layer);
-				guards.push(sock_guard);
-			}
 		}
 
-		Ok(match *ENABLE_TOKIO_CONSOLE {
-			true => {
+		Ok(match (layers.len(), *ENABLE_TOKIO_CONSOLE) {
+			(0, true) => {
+				// Create the Tokio Console destination layer
 				let console_layer = console::new()?;
+				// Setup the Tokio Console layer
 				let registry = registry.with(console_layer);
+				// Return the registry
 				(Box::new(registry), guards)
 			}
-			false => (Box::new(registry), guards),
+			(0, false) => {
+				// Return the registry
+				(Box::new(registry), guards)
+			}
+			(_, true) => {
+				let registry = registry.with(layers);
+				// Create the Tokio Console destination layer
+				let console_layer = console::new()?;
+				// Setup the Tokio Console layer
+				let registry = registry.with(console_layer);
+				// Return the registry
+				(Box::new(registry), guards)
+			}
+			(_, false) => {
+				let registry = registry.with(layers);
+				// Return the registry
+				(Box::new(registry), guards)
+			}
 		})
 	}
 }

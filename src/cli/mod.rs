@@ -237,8 +237,7 @@ pub async fn init() -> ExitCode {
 		.with_log_file_path(Some(args.log_file_path.clone()))
 		.with_log_file_name(Some(args.log_file_name.clone()))
 		.with_log_file_rotation(Some(args.log_file_rotation.as_str().to_string()))
-		.with_log_file_format(args.log_file_format)
-		.with_log_file_socket(args.log_file_socket.clone());
+		.with_log_file_format(args.log_file_format);
 	// Extract the telemetry log guards
 	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
