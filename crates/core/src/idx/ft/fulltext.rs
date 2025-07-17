@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::index::FullTextParams;
+use crate::expr::statements::DefineAnalyzerStatement;
 use crate::expr::{Idiom, Scoring, Thing, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
@@ -25,6 +26,7 @@ use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
 use std::collections::{HashMap, HashSet};
 use std::ops::BitAnd;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 1)]
@@ -83,6 +85,16 @@ impl FullTextIndex {
 	) -> Result<Self> {
 		let az = tx.get_db_analyzer(&ikb.0.ns, &ikb.0.db, &p.az).await?;
 		ixs.mappers().check(&az).await?;
+		Self::with_analyzer(nid, ixs, az, ikb, p)
+	}
+
+	fn with_analyzer(
+		nid: Uuid,
+		ixs: &IndexStores,
+		az: Arc<DefineAnalyzerStatement>,
+		ikb: IndexKeyBase,
+		p: &FullTextParams,
+	) -> Result<Self> {
 		let analyzer = Analyzer::new(ixs, az)?;
 		let mut bm25 = None;
 		if let Scoring::Bm {
