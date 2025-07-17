@@ -674,3 +674,115 @@ impl Scorer {
 		numerator / (self.bm25.k1 * denominator + 1.0)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use crate::ctx::MutableContext;
+	use crate::dbs::Options;
+	use crate::expr::index::FullTextParams;
+	use crate::expr::statements::DefineAnalyzerStatement;
+	use crate::expr::{Array, Thing, Value};
+	use crate::idx::IndexKeyBase;
+	use crate::kvs::{Datastore, LockType::*, TransactionType};
+	use crate::sql::{Statement, statements::DefineStatement};
+	use crate::syn;
+	use reblessive::tree::Stk;
+	use std::sync::Arc;
+	use test_log::test;
+	use uuid::Uuid;
+
+	use super::FullTextIndex;
+
+	async fn concurrent_task(ds: Arc<Datastore>, az: Arc<DefineAnalyzerStatement>) {
+		let doc1: Thing = ("t", "doc1").into();
+		let content1 = Value::from(Array::from(vec![
+			"Enter a search term",
+			"Welcome",
+			"Docusaurus blogging features are powered by the blog plugin.",
+			"Simply add Markdown files (or folders) to the blog directory.",
+			"blog",
+			"Regular blog authors can be added to authors.yml.",
+			"authors.yml",
+			"The blog post date can be extracted from filenames, such as:",
+			"2019-05-30-welcome.md",
+			"2019-05-30-welcome/index.md",
+			"A blog post folder can be convenient to co-locate blog post images:",
+			"The blog supports tags as well!",
+			"And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.",
+			"blog: false",
+			"MDX Blog Post",
+			"Blog posts support Docusaurus Markdown features, such as MDX.",
+			"Use the power of React to create interactive blog posts.",
+			"Long Blog Post",
+			"This is the summary of a very long blog post,",
+			"Use a <!-- truncate --> comment to limit blog post size in the list view.",
+			"<!--",
+			"truncate",
+			"-->",
+			"First Blog Post",
+			"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
+		]));
+		let mut stack = reblessive::TreeStack::new();
+
+		let start = std::time::Instant::now();
+		while start.elapsed().as_secs() < 3 {
+			stack
+				.enter(|stk| remove_insert_task(stk, ds.as_ref(), az.clone(), &doc1, &content1))
+				.finish()
+				.await;
+		}
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn concurrent_test() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+			panic!()
+		};
+		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+		concurrent_task(ds.clone(), az.clone()).await;
+		let task1 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
+		let task2 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
+		let _ = tokio::try_join!(task1, task2).expect("Tasks failed");
+	}
+
+	async fn remove_insert_task(
+		stk: &mut Stk,
+		ds: &Datastore,
+		az: Arc<DefineAnalyzerStatement>,
+		rid: &Thing,
+		content: &Value,
+	) {
+		let mut ctx = MutableContext::default();
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		let txn = Arc::new(tx);
+		ctx.set_transaction(txn);
+		let ctx = ctx.freeze();
+		let nid = Uuid::from_u128(1);
+		let opt = Options::default().with_id(nid);
+		let ikb = IndexKeyBase::default();
+		let p = FullTextParams {
+			az: az.name.clone(),
+			sc: Default::default(),
+			hl: false,
+		};
+		let ixs = ctx.get_index_stores();
+		let fti = FullTextIndex::with_analyzer(nid, ixs, az, ikb, &p).unwrap();
+
+		let mut require_compaction = false;
+		fti.remove_content(stk, &ctx, &opt, rid, vec![content.clone()], &mut require_compaction)
+			.await
+			.unwrap();
+		fti.index_content(stk, &ctx, &opt, rid, vec![content.clone()], &mut require_compaction)
+			.await
+			.unwrap();
+
+		if require_compaction {
+			fti.compaction(&ctx.tx()).await.unwrap();
+		}
+
+		let tx = ctx.tx();
+		tx.commit().await.unwrap();
+	}
+}
