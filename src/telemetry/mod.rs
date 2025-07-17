@@ -189,6 +189,7 @@ impl Builder {
 		let mut guards = vec![stdout_guard, stderr_guard];
 		let mut layers = Vec::new();
 		let registry = registry.with(telemetry_layer);
+
 		// Setup optional socket layer
 		if let Some(addr) = &self.log_socket {
 			let writer = logs::SocketWriter::connect(addr)?;
@@ -200,7 +201,6 @@ impl Builder {
 			layers.push(socket_layer);
 			guards.push(sock_guard);
 		}
-		// Setup telemetry layer
 
 		// Setup file logging if enabled
 		if self.log_file_enabled {

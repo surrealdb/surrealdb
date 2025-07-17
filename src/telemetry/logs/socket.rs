@@ -5,24 +5,26 @@ use std::net::{TcpStream, ToSocketAddrs};
 /// TODO: reconnect when the connection fails
 /// TODO: metric when connection fails
 pub struct SocketWriter {
-    stream: TcpStream,
+	stream: TcpStream,
 }
 
 impl SocketWriter {
-    /// Connect to the given socket address.
-    pub fn connect<A: ToSocketAddrs>(addr: A) -> Result<Self> {
-        let stream = TcpStream::connect(addr)?;
-        stream.set_nodelay(true).ok();
-        Ok(Self { stream })
-    }
+	/// Connect to the given socket address.
+	pub fn connect<A: ToSocketAddrs>(addr: A) -> Result<Self> {
+		let stream = TcpStream::connect(addr)?;
+		stream.set_nodelay(true).ok();
+		Ok(Self {
+			stream,
+		})
+	}
 }
 
 impl Write for SocketWriter {
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        self.stream.write(buf)
-    }
+	fn write(&mut self, buf: &[u8]) -> Result<usize> {
+		self.stream.write(buf)
+	}
 
-    fn flush(&mut self) -> Result<()> {
-        self.stream.flush()
-    }
+	fn flush(&mut self) -> Result<()> {
+		self.stream.flush()
+	}
 }
