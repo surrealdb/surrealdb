@@ -194,7 +194,7 @@ impl Builder {
 		// Setup optional socket layer
 		if let Some(addr) = &self.log_socket {
 			let mut addrs_iter = addr.to_socket_addrs()?;
-			let first_address = addrs_iter.next().ok_or_else(|| "Decode error");
+			let first_address = addrs_iter.next().ok_or("No matching addresses");
 			let writer = logs::SocketWriter::connect(first_address.unwrap())?;
 			let (sock, sock_guard) = NonBlockingBuilder::default()
 				.lossy(false)
