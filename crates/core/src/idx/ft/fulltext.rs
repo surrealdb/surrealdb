@@ -30,7 +30,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 struct TermDocument {
 	f: TermFrequency,
 	o: Vec<Offset>,
@@ -687,13 +687,14 @@ impl Scorer {
 
 #[cfg(test)]
 mod tests {
-	use super::FullTextIndex;
+	use super::{FullTextIndex, TermDocument};
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::FullTextParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
+	use crate::idx::ft::offset::Offset;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 	use crate::sql::{Statement, statements::DefineStatement};
 	use crate::syn;
@@ -755,10 +756,10 @@ mod tests {
 			let ft_params = Arc::new(FullTextParams {
 				az: az.name.clone(),
 				sc: Default::default(),
-				hl: false,
+				hl: true,
 			});
 			let nid = Uuid::from_u128(1);
-			let ikb = IndexKeyBase::default();
+			let ikb = IndexKeyBase::new("testns", "testdb", "t", "i");
 			let opt = Options::default()
 				.with_id(nid)
 				.with_ns(Some("testns".into()))
@@ -828,16 +829,65 @@ mod tests {
 		}
 	}
 
-	async fn concurrent_doc_update(test: TestContext, rid: Arc<Thing>) {
+	async fn concurrent_doc_update(test: TestContext, rid: Arc<Thing>, mut count: usize) {
 		let mut stack = reblessive::TreeStack::new();
-		while test.start.elapsed().as_secs() < 3 {
+		while count > 0 && test.start.elapsed().as_millis() < 3000 {
 			stack.enter(|stk| test.remove_insert_task(stk, &rid)).finish().await;
+			count -= 1;
+		}
+	}
+
+	async fn concurrent_search(test: TestContext, doc_ids: Vec<Arc<Thing>>) {
+		while test.start.elapsed().as_millis() < 3500 {
+			let tx = test.new_tx(TransactionType::Read).await;
+			let expected = {
+				TermDocument {
+					f: 5,
+					o: vec![
+						Offset {
+							index: 2,
+							start: 44,
+							gen_start: 44,
+							end: 47,
+						},
+						Offset {
+							index: 3,
+							start: 42,
+							gen_start: 42,
+							end: 45,
+						},
+						Offset {
+							index: 16,
+							start: 4,
+							gen_start: 4,
+							end: 7,
+						},
+						Offset {
+							index: 18,
+							start: 8,
+							gen_start: 8,
+							end: 11,
+						},
+						Offset {
+							index: 19,
+							start: 59,
+							gen_start: 59,
+							end: 62,
+						},
+					],
+				}
+			};
+			for doc_id in &doc_ids {
+				let id = test.fti.get_doc_id(&tx, doc_id).await.unwrap().unwrap();
+				let td = test.fti.get_term_document(&tx, id, "the").await.unwrap();
+				assert_eq!(td.as_ref(), Some(&expected));
+			}
 		}
 	}
 
 	async fn compaction(test: TestContext) {
 		let duration = Duration::from_secs(1);
-		while test.start.elapsed().as_secs() < 4 {
+		while test.start.elapsed().as_millis() < 3500 {
 			sleep(duration).await;
 			loop {
 				let tx = test.new_tx(TransactionType::Write).await;
@@ -856,10 +906,15 @@ mod tests {
 		let doc2: Arc<Thing> = Arc::new(("t", "doc2").into());
 
 		let test = TestContext::new().await;
-		let task1 = tokio::spawn(concurrent_doc_update(test.clone(), doc1.clone()));
-		let task2 = tokio::spawn(concurrent_doc_update(test.clone(), doc2.clone()));
+		// Ensure the documents are pre-existing
+		concurrent_doc_update(test.clone(), doc1.clone(), 1).await;
+		concurrent_doc_update(test.clone(), doc2.clone(), 1).await;
+		// Prepare the concurrent tasks
+		let task1 = tokio::spawn(concurrent_doc_update(test.clone(), doc1.clone(), usize::MAX));
+		let task2 = tokio::spawn(concurrent_doc_update(test.clone(), doc2.clone(), usize::MAX));
 		let task3 = tokio::spawn(compaction(test.clone()));
-		let _ = tokio::try_join!(task1, task2, task3).expect("Tasks failed");
+		let task4 = tokio::spawn(concurrent_search(test.clone(), vec![doc1, doc2]));
+		let _ = tokio::try_join!(task1, task2, task3, task4).expect("Tasks failed");
 
 		// Check that logs have been compacted:
 		let tx = test.new_tx(TransactionType::Read).await;
@@ -869,3 +924,4 @@ mod tests {
 		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
 	}
 }
+c
