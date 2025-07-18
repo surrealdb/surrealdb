@@ -97,7 +97,7 @@ impl Parser<'_> {
 				};
 				let name = self.next_token_value()?;
 				expected!(self, t!("ON"));
-				let base = self.parse_base(false)?;
+				let base = self.parse_base()?;
 
 				RemoveStatement::Access(RemoveAccessStatement {
 					name,
@@ -232,7 +232,7 @@ impl Parser<'_> {
 				};
 				let name = self.next_token_value()?;
 				expected!(self, t!("ON"));
-				let base = self.parse_base(false)?;
+				let base = self.parse_base()?;
 
 				RemoveStatement::User(RemoveUserStatement {
 					name,

@@ -100,7 +100,6 @@ impl RemoveUserStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
-			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
 		}
 	}
 }
