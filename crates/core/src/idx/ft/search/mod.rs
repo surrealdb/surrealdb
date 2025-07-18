@@ -712,13 +712,14 @@ mod tests {
 	}
 
 	pub(super) async fn tx_fti(
+		ctx: &Context,
 		ds: &Datastore,
 		tt: TransactionType,
 		az: Arc<DefineAnalyzerStatement>,
 		order: u32,
 		hl: bool,
 	) -> (Context, Options, SearchIndex) {
-		let mut ctx = MutableContext::default();
+		let mut ctx = MutableContext::new(ctx);
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let p = SearchParams {
 			az: az.name.clone(),
@@ -757,6 +758,7 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
+		let ctx = ds.setup_ctx().unwrap().freeze();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
@@ -774,7 +776,7 @@ mod tests {
 			.enter(|stk| async {
 				// Add one document
 				let (ctx, opt, mut fti) =
-					tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, false).await;
+					tx_fti(&ctx, &ds, TransactionType::Write, az.clone(), btree_order, false).await;
 				fti.index_document(stk, &ctx, &opt, &doc1, vec![Value::from("hello the world")])
 					.await
 					.unwrap();
@@ -787,7 +789,7 @@ mod tests {
 			.enter(|stk| async {
 				// Add two documents
 				let (ctx, opt, mut fti) =
-					tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, false).await;
+					tx_fti(&ctx, &ds, TransactionType::Write, az.clone(), btree_order, false).await;
 				fti.index_document(stk, &ctx, &opt, &doc2, vec![Value::from("a yellow hello")])
 					.await
 					.unwrap();
@@ -802,7 +804,7 @@ mod tests {
 		stack
 			.enter(|stk| async {
 				let (ctx, opt, fti) =
-					tx_fti(&ds, TransactionType::Read, az.clone(), btree_order, false).await;
+					tx_fti(&ctx, &ds, TransactionType::Read, az.clone(), btree_order, false).await;
 				// Check the statistics
 				let statistics = fti.statistics(&ctx).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 7);
@@ -842,14 +844,14 @@ mod tests {
 			.enter(|stk| async {
 				// Reindex one document
 				let (ctx, opt, mut fti) =
-					tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, false).await;
+					tx_fti(&ctx, &ds, TransactionType::Write, az.clone(), btree_order, false).await;
 				fti.index_document(stk, &ctx, &opt, &doc3, vec![Value::from("nobar foo")])
 					.await
 					.unwrap();
 				finish(&ctx, fti).await;
 
 				let (ctx, opt, fti) =
-					tx_fti(&ds, TransactionType::Read, az.clone(), btree_order, false).await;
+					tx_fti(&ctx, &ds, TransactionType::Read, az.clone(), btree_order, false).await;
 
 				// We can still find 'foo'
 				let (hits, scr) = search(stk, &ctx, &opt, &fti, "foo").await;
@@ -869,7 +871,7 @@ mod tests {
 		{
 			// Remove documents
 			let (ctx, _, mut fti) =
-				tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, false).await;
+				tx_fti(&ctx, &ds, TransactionType::Write, az.clone(), btree_order, false).await;
 			fti.remove_document(&ctx, &doc1).await.unwrap();
 			fti.remove_document(&ctx, &doc2).await.unwrap();
 			fti.remove_document(&ctx, &doc3).await.unwrap();
@@ -879,7 +881,7 @@ mod tests {
 		stack
 			.enter(|stk| async {
 				let (ctx, opt, fti) =
-					tx_fti(&ds, TransactionType::Read, az.clone(), btree_order, false).await;
+					tx_fti(&ctx, &ds, TransactionType::Read, az.clone(), btree_order, false).await;
 				let (hits, _) = search(stk, &ctx, &opt, &fti, "hello").await;
 				assert!(hits.is_none());
 				let (hits, _) = search(stk, &ctx, &opt, &fti, "foo").await;
@@ -896,6 +898,7 @@ mod tests {
 		// Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
+			let ctx = ds.setup_ctx().unwrap().freeze();
 			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 				panic!()
@@ -912,7 +915,8 @@ mod tests {
 			stack
 				.enter(|stk| async {
 					let (ctx, opt, mut fti) =
-						tx_fti(&ds, TransactionType::Write, az.clone(), btree_order, hl).await;
+						tx_fti(&ctx, &ds, TransactionType::Write, az.clone(), btree_order, hl)
+							.await;
 					fti.index_document(
 						stk,
 						&ctx,
@@ -957,7 +961,7 @@ mod tests {
 			stack
 				.enter(|stk| async {
 					let (ctx, opt, fti) =
-						tx_fti(&ds, TransactionType::Read, az.clone(), btree_order, hl).await;
+						tx_fti(&ctx, &ds, TransactionType::Read, az.clone(), btree_order, hl).await;
 
 					let statistics = fti.statistics(&ctx).await.unwrap();
 					assert_eq!(statistics.terms.keys_count, 17);
@@ -1028,82 +1032,10 @@ mod tests {
 		test_ft_index_bm_25(true).await;
 	}
 
-	async fn concurrent_task(ds: Arc<Datastore>, az: Arc<DefineAnalyzerStatement>) {
-		let btree_order = 5;
-		let doc1: Thing = ("t", "doc1").into();
-		let content1 = Value::from(Array::from(vec![
-			"Enter a search term",
-			"Welcome",
-			"Docusaurus blogging features are powered by the blog plugin.",
-			"Simply add Markdown files (or folders) to the blog directory.",
-			"blog",
-			"Regular blog authors can be added to authors.yml.",
-			"authors.yml",
-			"The blog post date can be extracted from filenames, such as:",
-			"2019-05-30-welcome.md",
-			"2019-05-30-welcome/index.md",
-			"A blog post folder can be convenient to co-locate blog post images:",
-			"The blog supports tags as well!",
-			"And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.",
-			"blog: false",
-			"MDX Blog Post",
-			"Blog posts support Docusaurus Markdown features, such as MDX.",
-			"Use the power of React to create interactive blog posts.",
-			"Long Blog Post",
-			"This is the summary of a very long blog post,",
-			"Use a <!-- truncate --> comment to limit blog post size in the list view.",
-			"<!--",
-			"truncate",
-			"-->",
-			"First Blog Post",
-			"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
-		]));
-		let mut stack = reblessive::TreeStack::new();
-
-		let start = std::time::Instant::now();
-		while start.elapsed().as_secs() < 3 {
-			stack
-				.enter(|stk| {
-					remove_insert_task(stk, ds.as_ref(), az.clone(), btree_order, &doc1, &content1)
-				})
-				.finish()
-				.await;
-		}
-	}
-
-	// The test is ignored due to write-write conflicts.
-	#[ignore]
-	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn concurrent_test() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
-		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
-			panic!()
-		};
-		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
-		concurrent_task(ds.clone(), az.clone()).await;
-		let task1 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
-		let task2 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
-		let _ = tokio::try_join!(task1, task2).expect("Tasks failed");
-	}
-
-	async fn remove_insert_task(
-		stk: &mut Stk,
-		ds: &Datastore,
-		az: Arc<DefineAnalyzerStatement>,
-		btree_order: u32,
-		rid: &Thing,
-		content: &Value,
-	) {
-		let (ctx, opt, mut fti) = tx_fti(ds, TransactionType::Write, az, btree_order, false).await;
-		fti.remove_document(&ctx, rid).await.unwrap();
-		fti.index_document(stk, &ctx, &opt, rid, vec![content.clone()]).await.unwrap();
-		finish(&ctx, fti).await;
-	}
-
 	#[test(tokio::test)]
 	async fn remove_insert_sequence() {
 		let ds = Datastore::new("memory").await.unwrap();
+		let ctx = ds.setup_ctx().unwrap().freeze();
 		let mut stack = reblessive::TreeStack::new();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
@@ -1143,7 +1075,7 @@ mod tests {
 			debug!("Attempt {i}");
 			{
 				let (ctx, opt, mut fti) =
-					tx_fti(&ds, TransactionType::Write, az.clone(), 5, false).await;
+					tx_fti(&ctx, &ds, TransactionType::Write, az.clone(), 5, false).await;
 				stack
 					.enter(|stk| fti.index_document(stk, &ctx, &opt, &doc, vec![content.clone()]))
 					.finish()
@@ -1153,20 +1085,22 @@ mod tests {
 			}
 
 			{
-				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, az.clone(), 5, false).await;
+				let (ctx, _, fti) =
+					tx_fti(&ctx, &ds, TransactionType::Read, az.clone(), 5, false).await;
 				let s = fti.statistics(&ctx).await.unwrap();
 				assert_eq!(s.terms.keys_count, 113);
 			}
 
 			{
 				let (ctx, _, mut fti) =
-					tx_fti(&ds, TransactionType::Write, az.clone(), 5, false).await;
+					tx_fti(&ctx, &ds, TransactionType::Write, az.clone(), 5, false).await;
 				fti.remove_document(&ctx, &doc).await.unwrap();
 				finish(&ctx, fti).await;
 			}
 
 			{
-				let (ctx, _, fti) = tx_fti(&ds, TransactionType::Read, az.clone(), 5, false).await;
+				let (ctx, _, fti) =
+					tx_fti(&ctx, &ds, TransactionType::Read, az.clone(), 5, false).await;
 				let s = fti.statistics(&ctx).await.unwrap();
 				assert_eq!(s.terms.keys_count, 0);
 			}

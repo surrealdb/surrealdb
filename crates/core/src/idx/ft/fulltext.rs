@@ -328,7 +328,7 @@ impl FullTextIndex {
 			}
 		}
 		// Append the delta term docs to the compacted termdocs
-		let docs = self.append_term_docs_delta(tx, term, &mut deltas).await?;
+		let docs = self.append_term_docs_delta(tx, term, &deltas).await?;
 		// If the final `docs` is empty, we return `None`
 		if docs.is_empty() {
 			Ok(None)
@@ -677,7 +677,8 @@ impl Scorer {
 
 #[cfg(test)]
 mod tests {
-	use crate::ctx::MutableContext;
+	use super::FullTextIndex;
+	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::FullTextParams;
 	use crate::expr::statements::DefineAnalyzerStatement;
@@ -691,11 +692,13 @@ mod tests {
 	use test_log::test;
 	use uuid::Uuid;
 
-	use super::FullTextIndex;
-
-	async fn concurrent_task(ds: Arc<Datastore>, az: Arc<DefineAnalyzerStatement>) {
-		let doc1: Thing = ("t", "doc1").into();
-		let content1 = Value::from(Array::from(vec![
+	async fn concurrent_task(
+		ctx: Context,
+		ds: Arc<Datastore>,
+		doc: Arc<Thing>,
+		az: Arc<DefineAnalyzerStatement>,
+	) {
+		let content = Value::from(Array::from(vec![
 			"Enter a search term",
 			"Welcome",
 			"Docusaurus blogging features are powered by the blog plugin.",
@@ -727,7 +730,7 @@ mod tests {
 		let start = std::time::Instant::now();
 		while start.elapsed().as_secs() < 3 {
 			stack
-				.enter(|stk| remove_insert_task(stk, ds.as_ref(), az.clone(), &doc1, &content1))
+				.enter(|stk| remove_insert_task(stk, &ctx, ds.as_ref(), az.clone(), &doc, &content))
 				.finish()
 				.await;
 		}
@@ -736,25 +739,29 @@ mod tests {
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_test() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let ctx = ds.setup_ctx().unwrap().freeze();
 		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
 			panic!()
 		};
 		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
-		concurrent_task(ds.clone(), az.clone()).await;
-		let task1 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
-		let task2 = tokio::spawn(concurrent_task(ds.clone(), az.clone()));
+		let doc1: Arc<Thing> = Arc::new(("t", "doc1").into());
+		let doc2: Arc<Thing> = Arc::new(("t", "doc2").into());
+		concurrent_task(ctx.clone(), ds.clone(), doc1.clone(), az.clone()).await;
+		let task1 = tokio::spawn(concurrent_task(ctx.clone(), ds.clone(), doc2, az.clone()));
+		let task2 = tokio::spawn(concurrent_task(ctx.clone(), ds.clone(), doc1, az.clone()));
 		let _ = tokio::try_join!(task1, task2).expect("Tasks failed");
 	}
 
 	async fn remove_insert_task(
 		stk: &mut Stk,
+		ctx: &Context,
 		ds: &Datastore,
 		az: Arc<DefineAnalyzerStatement>,
 		rid: &Thing,
 		content: &Value,
 	) {
-		let mut ctx = MutableContext::default();
+		let mut ctx = MutableContext::new(ctx);
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 		let txn = Arc::new(tx);
 		ctx.set_transaction(txn);
@@ -768,7 +775,7 @@ mod tests {
 			hl: false,
 		};
 		let ixs = ctx.get_index_stores();
-		let fti = FullTextIndex::with_analyzer(nid, ixs, az, ikb, &p).unwrap();
+		let fti = FullTextIndex::with_analyzer(nid, ixs, az, ikb.clone(), &p).unwrap();
 
 		let mut require_compaction = false;
 		fti.remove_content(stk, &ctx, &opt, rid, vec![content.clone()], &mut require_compaction)
@@ -778,11 +785,12 @@ mod tests {
 			.await
 			.unwrap();
 
+		let tx = ctx.tx();
+
 		if require_compaction {
-			fti.compaction(&ctx.tx()).await.unwrap();
+			FullTextIndex::trigger_compaction(&ikb, &tx, nid).await.unwrap();
 		}
 
-		let tx = ctx.tx();
 		tx.commit().await.unwrap();
 	}
 }
