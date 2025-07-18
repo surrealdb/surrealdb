@@ -38,7 +38,6 @@ pub enum Expr {
 	},
 	// TODO: Factor out the call from the function expression.
 	FunctionCall(Box<FunctionCall>),
-	// TODO: Factor out the call from the function expression.
 	Closure(Box<Closure>),
 
 	Break,
@@ -59,7 +58,7 @@ pub enum Expr {
 	Upsert(Box<UpsertStatement>),
 	Alter(Box<AlterStatement>),
 	Info(Box<InfoStatement>),
-	Forach(Box<ForeachStatement>),
+	Foreach(Box<ForeachStatement>),
 	Let(Box<SetStatement>),
 }
 
@@ -150,7 +149,7 @@ impl fmt::Display for Expr {
 			Expr::Upsert(s) => write!(f, "{s}"),
 			Expr::Alter(s) => write!(f, "{s}"),
 			Expr::Info(s) => write!(f, "{s}"),
-			Expr::Forach(s) => write!(f, "{s}"),
+			Expr::Foreach(s) => write!(f, "{s}"),
 			Expr::Let(s) => write!(f, "{s}"),
 		}
 	}
@@ -209,7 +208,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Upsert(s) => crate::expr::Expr::Upsert(Box::new((*s).into())),
 			Expr::Alter(s) => crate::expr::Expr::Alter(Box::new((*s).into())),
 			Expr::Info(s) => crate::expr::Expr::Info(Box::new((*s).into())),
-			Expr::Forach(s) => crate::expr::Expr::Forach(Box::new((*s).into())),
+			Expr::Foreach(s) => crate::expr::Expr::Foreach(Box::new((*s).into())),
 			Expr::Let(s) => crate::expr::Expr::Let(Box::new((*s).into())),
 		}
 	}
@@ -224,7 +223,6 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Table(t) => Expr::Table(t.into()),
 			crate::expr::Expr::Mock(m) => Expr::Mock(m.into()),
 			crate::expr::Expr::Block(b) => Expr::Block(Box::new((*b).into())),
-			//crate::expr::Expr::Future(f) => Expr::Future(f.into()),
 			crate::expr::Expr::Constant(c) => Expr::Constant(c.into()),
 			crate::expr::Expr::Prefix {
 				op,
@@ -269,7 +267,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Upsert(s) => Expr::Upsert(Box::new((*s).into())),
 			crate::expr::Expr::Alter(s) => Expr::Alter(Box::new((*s).into())),
 			crate::expr::Expr::Info(s) => Expr::Info(Box::new((*s).into())),
-			crate::expr::Expr::Forach(s) => Expr::Forach(Box::new((*s).into())),
+			crate::expr::Expr::Foreach(s) => Expr::Foreach(Box::new((*s).into())),
 			crate::expr::Expr::Let(s) => Expr::Let(Box::new((*s).into())),
 		}
 	}

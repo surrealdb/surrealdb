@@ -16,7 +16,7 @@ use crate::val::Value;
 use anyhow::{Result, bail};
 use async_channel::Sender;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -609,6 +609,22 @@ impl MutableContext {
 		} else {
 			bail!(Error::BucketUnavailable(bu.into()))
 		}
+	}
+
+	pub fn attach_variables(&mut self, vars: BTreeMap<String, Value>) -> Result<(), Error> {
+		for (key, val) in vars {
+			// Check if the variable is a protected variable
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				// The user tried to set a protected variable
+				return Err(Error::InvalidParam {
+					name: key,
+				});
+			}
+
+			// The variable isn't protected and can be stored
+			self.add_value(key, val.into());
+		}
+		Ok(())
 	}
 }
 

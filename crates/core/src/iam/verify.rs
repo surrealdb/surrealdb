@@ -705,7 +705,7 @@ mod tests {
 	use crate::{
 		iam::token::{Audience, HEADER},
 		sql::{
-			Ast,
+			Ast, Ident,
 			statements::define::{DefineKind, user::PassType},
 		},
 	};
@@ -896,13 +896,13 @@ mod tests {
 			let user = DefineUserStatement {
 				kind: DefineKind::Default,
 				base,
-				name: "user".into(),
+				name: Ident::new("user".to_string()).unwrap(),
 				// This is the Argon2id hash for "pass" with a random salt.
-				pass_type: PassType::PassHash(
+				pass_type: PassType::Hash(
 					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
 						.to_string(),
 				),
-				roles: vec!["nonexistent".into()],
+				roles: vec![Ident::new("nonexistent".to_owned()).unwrap()],
 				token_duration: None,
 				session_duration: None,
 				comment: None,

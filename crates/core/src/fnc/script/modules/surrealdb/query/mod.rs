@@ -6,7 +6,7 @@ use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
 use reblessive::tree::Stk;
 
 use crate::ctx::Context;
-use crate::dbs::{Attach, Options};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResultExt as _;
 
@@ -75,11 +75,11 @@ pub fn query<'js>(
 			};
 
 			let mut context = MutableContext::new(query_ctx.context);
-			query
-				.clone()
-				.vars
-				.attach(&mut context)
-				.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+			if let Some(v) = query.clone().vars {
+				context
+					.attach_variables(v)
+					.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+			};
 			let context = context.freeze();
 
 			Stk::enter_scope(|stk| {

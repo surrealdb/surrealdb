@@ -73,7 +73,7 @@ pub enum Expr {
 	Upsert(Box<UpsertStatement>),
 	Alter(Box<AlterStatement>),
 	Info(Box<InfoStatement>),
-	Forach(Box<ForeachStatement>),
+	Foreach(Box<ForeachStatement>),
 	Let(Box<SetStatement>),
 }
 
@@ -111,7 +111,7 @@ impl Expr {
 			Expr::IfElse(s) => s.read_only(),
 			Expr::Select(s) => s.read_only(),
 			Expr::Let(s) => s.read_only(),
-			Expr::Forach(s) => s.read_only(),
+			Expr::Foreach(s) => s.read_only(),
 			Expr::Closure(s) => s.read_only(),
 			Expr::Create(_)
 			| Expr::Update(_)
@@ -171,7 +171,7 @@ impl Expr {
 			| Expr::Upsert(_)
 			| Expr::Alter(_)
 			| Expr::Info(_)
-			| Expr::Forach(_)
+			| Expr::Foreach(_)
 			| Expr::Let(_) => false,
 		}
 	}
@@ -277,7 +277,9 @@ impl Expr {
 			Expr::Info(info_statement) => {
 				info_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
-			Expr::Forach(foreach_statement) => foreach_statement.compute(stk, ctx, &opt, doc).await,
+			Expr::Foreach(foreach_statement) => {
+				foreach_statement.compute(stk, ctx, &opt, doc).await
+			}
 			Expr::Let(set_statement) => set_statement.compute(stk, ctx, &opt, doc).await,
 		}
 	}
@@ -614,7 +616,7 @@ impl fmt::Display for Expr {
 			Expr::Upsert(s) => write!(f, "{s}"),
 			Expr::Alter(s) => write!(f, "{s}"),
 			Expr::Info(s) => write!(f, "{s}"),
-			Expr::Forach(s) => write!(f, "{s}"),
+			Expr::Foreach(s) => write!(f, "{s}"),
 			Expr::Let(s) => write!(f, "{s}"),
 		}
 	}

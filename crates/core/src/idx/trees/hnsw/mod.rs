@@ -429,8 +429,8 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::ctx::{Context, MutableContext};
+	use crate::expr::RecordIdKeyLit;
 	use crate::expr::index::{Distance, HnswParams, VectorType};
-	use crate::expr::{RecordIdKeyLit, Value};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
@@ -442,7 +442,7 @@ mod tests {
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
-	use crate::val::RecordIdKey;
+	use crate::val::{RecordIdKey, Value};
 	use ahash::{HashMap, HashSet};
 	use anyhow::Result;
 	use ndarray::Array1;
@@ -623,7 +623,7 @@ mod tests {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(tx, &RecordIdKeyLit::Number(*doc_id as i64), &content).await.unwrap();
+			h.index_document(tx, &RecordIdKey::Number(*doc_id as i64), &content).await.unwrap();
 			match map.entry(obj.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
@@ -684,7 +684,7 @@ mod tests {
 	) -> Result<()> {
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.remove_document(tx, RecordIdKeyLit::Number(*doc_id as i64), &content).await?;
+			h.remove_document(tx, RecordIdKey::Number(*doc_id as i64), &content).await?;
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);

@@ -10,7 +10,7 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::Timestamp;
-use crate::dbs::{Attach, Capabilities, Executor, Notification, Options, Response, Session};
+use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
 use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan, TopLevelExpr};
@@ -899,7 +899,9 @@ impl Datastore {
 		// Start an execution context
 		sess.context(&mut ctx);
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(v) = vars {
+			ctx.attach_variables(v);
+		}
 		// Process all statements
 
 		let parser_settings = ParserSettings {
@@ -1031,7 +1033,9 @@ impl Datastore {
 		// Start an execution context
 		sess.context(&mut ctx);
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(v) = vars {
+			ctx.attach_variables(v);
+		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await
@@ -1093,7 +1097,9 @@ impl Datastore {
 		// Start an execution context
 		sess.context(&mut ctx);
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(v) = vars {
+			ctx.attach_variables(v);
+		}
 		let txn_type = if val.read_only() {
 			TransactionType::Read
 		} else {
@@ -1171,7 +1177,9 @@ impl Datastore {
 		// Start an execution context
 		sess.context(&mut ctx);
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(v) = vars {
+			ctx.attach_variables(v);
+		}
 		let txn_type = if val.read_only() {
 			TransactionType::Read
 		} else {
