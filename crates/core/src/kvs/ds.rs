@@ -780,60 +780,70 @@ impl Datastore {
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn index_compaction(&self, interval: &Duration) -> Result<()> {
+	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
 		let lh = LeaseHandler::new(
 			self.id,
 			self.transaction_factory.clone(),
 			TaskLeaseType::IndexCompaction,
-			*interval * 2,
+			interval * 2,
 		)?;
-		// Attempt to acquire a lease for the ChangeFeedCleanup task
-		// If we don't get the lease, another node is handling this task
-		if !lh.has_lease().await? {
-			return Ok(());
-		}
-		// Create a new transaction
-		let txn = self.transaction(Write, Optimistic).await?;
-		// Collect every item in the queue
-		let (beg, end) = Ic::range();
-		let previous = Ic::new("", "", "", "", Uuid::nil(), Uuid::nil());
-		// Returns an ordered list of indexes that require compaction
-		for (k, _) in txn.getr(beg..end, None).await? {
-			let ic = Ic::decode(&k)?;
-			// If the index has already been compacted, we can ignore the task
-			if previous.ix != ic.ix
-				|| previous.tb != ic.tb
-				|| previous.db != ic.db
-				|| previous.ns != ic.ns
-			{
-				match txn.get_tb_index(ic.ns, ic.db, ic.tb, ic.ix).await {
-					Ok(ix) => {
-						if let Index::FullText(p) = &ix.index {
-							let ft = FullTextIndex::new(
-								self.id(),
-								&self.index_stores,
-								&txn,
-								IndexKeyBase::from_ic(&ic),
-								p,
-							)
-							.await?;
-							ft.compaction(&txn).await?;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Create a new transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			// Collect every item in the queue
+			let (beg, end) = Ic::range();
+			let range = beg..end;
+			let previous = Ic::new("", "", "", "", Uuid::nil(), Uuid::nil());
+			let mut count = 0;
+			// Returns an ordered list of indexes that require compaction
+			for (k, _) in txn.getr(range.clone(), None).await? {
+				count += 1;
+				let ic = Ic::decode(&k)?;
+				// If the index has already been compacted, we can ignore the task
+				if previous.ix != ic.ix
+					|| previous.tb != ic.tb
+					|| previous.db != ic.db
+					|| previous.ns != ic.ns
+				{
+					match txn.get_tb_index(ic.ns, ic.db, ic.tb, ic.ix).await {
+						Ok(ix) => {
+							if let Index::FullText(p) = &ix.index {
+								let ft = FullTextIndex::new(
+									self.id(),
+									&self.index_stores,
+									&txn,
+									IndexKeyBase::from_ic(&ic),
+									p,
+								)
+								.await?;
+								ft.compaction(&txn).await?;
+							}
 						}
-					}
-					Err(e) => {
-						if matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
-							trace!(target: TARGET, "Index compaction: Index {} not found, skipping", ic.ix);
-						} else {
-							bail!(e);
+						Err(e) => {
+							if matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+								trace!(target: TARGET, "Index compaction: Index {} not found, skipping", ic.ix);
+							} else {
+								bail!(e);
+							}
 						}
 					}
 				}
+				lh.try_maintain_lease().await?;
 			}
-			txn.del(k).await?;
-			lh.try_maintain_lease().await?;
+			if count > 0 {
+				txn.delr(range).await?;
+				txn.commit().await?;
+			} else {
+				txn.cancel().await?;
+				return Ok(());
+			}
 		}
-		txn.commit().await?;
-		Ok(())
 	}
 
 	/// Performs a database import from SQL

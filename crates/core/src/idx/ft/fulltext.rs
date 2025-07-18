@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::expr::index::FullTextParams;
 use crate::expr::statements::DefineAnalyzerStatement;
 use crate::expr::{Idiom, Scoring, Thing, Value};
@@ -19,7 +18,7 @@ use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
 use crate::kvs::KeyDecode;
 use crate::kvs::Transaction;
-use anyhow::{Result, bail};
+use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
@@ -327,7 +326,7 @@ impl FullTextIndex {
 				*entry -= 1;
 			}
 		}
-		// Append the delta term docs to the compacted termdocs
+		// Append the delta term docs to the consolidated docs
 		let docs = self.append_term_docs_delta(tx, term, &deltas).await?;
 		// If the final `docs` is empty, we return `None`
 		if docs.is_empty() {
@@ -351,17 +350,10 @@ impl FullTextIndex {
 		};
 		// And apply the deltas
 		for (doc_id, delta) in deltas {
-			match delta {
-				-1 => {
-					docs.remove(*doc_id);
-				}
-				1 => {
-					docs.insert(*doc_id);
-				}
-				0 => {}
-				_ => bail!(Error::CorruptedIndex(
-					"Invalid delta on FullTextindex::append_term_docs_delta()"
-				)),
+			if *delta < 0 {
+				docs.remove(*doc_id);
+			} else if *delta > 0 {
+				docs.insert(*doc_id);
 			}
 		}
 		Ok(docs)
@@ -386,7 +378,8 @@ impl FullTextIndex {
 		let (beg, end) = self.ikb.new_tt_terms_range()?;
 		let mut current_term = "".to_string();
 		let mut deltas: HashMap<DocId, i64> = HashMap::new();
-		for k in tx.keys(beg..end, u32::MAX, None).await? {
+		let range = beg..end;
+		for k in tx.keys(range.clone(), u32::MAX, None).await? {
 			let tt = Tt::decode(&k)?;
 			// Is this a new term?
 			if current_term != tt.term {
@@ -403,8 +396,9 @@ impl FullTextIndex {
 			} else {
 				*entry -= 1;
 			}
-			tx.del(k).await?;
 		}
+		// Delete the logs
+		tx.delr(range).await?;
 		if !current_term.is_empty() && !deltas.is_empty() {
 			self.set_term_docs_delta(tx, &current_term, &deltas).await?;
 		}
@@ -457,20 +451,21 @@ impl FullTextIndex {
 	async fn compute_doc_length_and_count(
 		&self,
 		tx: &Transaction,
-		del_logs: bool,
+		compact_log: bool,
 	) -> Result<DocLengthAndCount> {
 		let mut dlc = DocLengthAndCount::default();
 		let (beg, end) = self.ikb.new_dc_range()?;
+		let range = beg..end;
 		// Compute the total number of documents (DocCount) and the total number of terms (DocLength)
 		// This key list is supposed to be small, subject to compaction.
 		// The root key is the compacted values, and the others are deltas from transaction not yet compacted.
-		for (k, v) in tx.getr(beg..end, None).await? {
+		for (_, v) in tx.getr(range.clone(), None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
-			if del_logs {
-				tx.del(k).await?;
-			}
+		}
+		if compact_log {
+			tx.delr(range).await?;
 		}
 		Ok(dlc)
 	}
@@ -684,113 +679,171 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, LockType::*, TransactionType};
+	use crate::key::root::ic::Ic;
+	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 	use crate::sql::{Statement, statements::DefineStatement};
 	use crate::syn;
 	use reblessive::tree::Stk;
 	use std::sync::Arc;
+	use std::time::{Duration, Instant};
 	use test_log::test;
+	use tokio::time::sleep;
 	use uuid::Uuid;
 
-	async fn concurrent_task(
+	#[derive(Clone)]
+	struct TestContext {
 		ctx: Context,
+		opt: Options,
+		nid: Uuid,
+		start: Arc<Instant>,
 		ds: Arc<Datastore>,
-		doc: Arc<Thing>,
-		az: Arc<DefineAnalyzerStatement>,
-	) {
-		let content = Value::from(Array::from(vec![
-			"Enter a search term",
-			"Welcome",
-			"Docusaurus blogging features are powered by the blog plugin.",
-			"Simply add Markdown files (or folders) to the blog directory.",
-			"blog",
-			"Regular blog authors can be added to authors.yml.",
-			"authors.yml",
-			"The blog post date can be extracted from filenames, such as:",
-			"2019-05-30-welcome.md",
-			"2019-05-30-welcome/index.md",
-			"A blog post folder can be convenient to co-locate blog post images:",
-			"The blog supports tags as well!",
-			"And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.",
-			"blog: false",
-			"MDX Blog Post",
-			"Blog posts support Docusaurus Markdown features, such as MDX.",
-			"Use the power of React to create interactive blog posts.",
-			"Long Blog Post",
-			"This is the summary of a very long blog post,",
-			"Use a <!-- truncate --> comment to limit blog post size in the list view.",
-			"<!--",
-			"truncate",
-			"-->",
-			"First Blog Post",
-			"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
-		]));
-		let mut stack = reblessive::TreeStack::new();
+		content: Arc<Value>,
+		ikb: IndexKeyBase,
+		fti: Arc<FullTextIndex>,
+	}
 
-		let start = std::time::Instant::now();
-		while start.elapsed().as_secs() < 3 {
-			stack
-				.enter(|stk| remove_insert_task(stk, &ctx, ds.as_ref(), az.clone(), &doc, &content))
-				.finish()
-				.await;
+	impl TestContext {
+		async fn new() -> Self {
+			let ds = Arc::new(Datastore::new("memory").await.unwrap());
+			let ctx = ds.setup_ctx().unwrap().freeze();
+			let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+			let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
+				panic!()
+			};
+			let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
+			let content = Arc::new(Value::from(Array::from(vec![
+				"Enter a search term",
+				"Welcome",
+				"Docusaurus blogging features are powered by the blog plugin.",
+				"Simply add Markdown files (or folders) to the blog directory.",
+				"blog",
+				"Regular blog authors can be added to authors.yml.",
+				"authors.yml",
+				"The blog post date can be extracted from filenames, such as:",
+				"2019-05-30-welcome.md",
+				"2019-05-30-welcome/index.md",
+				"A blog post folder can be convenient to co-locate blog post images:",
+				"The blog supports tags as well!",
+				"And if you don't want a blog: just delete this directory, and use blog: false in your Docusaurus config.",
+				"blog: false",
+				"MDX Blog Post",
+				"Blog posts support Docusaurus Markdown features, such as MDX.",
+				"Use the power of React to create interactive blog posts.",
+				"Long Blog Post",
+				"This is the summary of a very long blog post,",
+				"Use a <!-- truncate --> comment to limit blog post size in the list view.",
+				"<!--",
+				"truncate",
+				"-->",
+				"First Blog Post",
+				"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
+			])));
+			let ft_params = Arc::new(FullTextParams {
+				az: az.name.clone(),
+				sc: Default::default(),
+				hl: false,
+			});
+			let nid = Uuid::from_u128(1);
+			let ikb = IndexKeyBase::default();
+			let opt = Options::default().with_id(nid);
+			let fti = Arc::new(
+				FullTextIndex::with_analyzer(
+					nid,
+					ctx.get_index_stores(),
+					az.clone(),
+					ikb.clone(),
+					&ft_params,
+				)
+				.unwrap(),
+			);
+			let start = Arc::new(Instant::now());
+			Self {
+				ctx,
+				opt,
+				nid,
+				ikb,
+				start,
+				ds,
+				content,
+				fti,
+			}
+		}
+
+		async fn new_tx(&self, tt: TransactionType) -> Arc<Transaction> {
+			Arc::new(self.ds.transaction(tt, Optimistic).await.unwrap())
+		}
+
+		async fn remove_insert_task(&self, stk: &mut Stk, rid: &Thing) {
+			let mut ctx = MutableContext::new(&self.ctx);
+			let tx = self.new_tx(TransactionType::Write).await;
+			ctx.set_transaction(tx.clone());
+			let ctx = ctx.freeze();
+
+			let mut require_compaction = false;
+			self.fti
+				.remove_content(
+					stk,
+					&ctx,
+					&self.opt,
+					&rid,
+					vec![self.content.as_ref().clone()],
+					&mut require_compaction,
+				)
+				.await
+				.unwrap();
+			self.fti
+				.index_content(
+					stk,
+					&ctx,
+					&self.opt,
+					&rid,
+					vec![self.content.as_ref().clone()],
+					&mut require_compaction,
+				)
+				.await
+				.unwrap();
+
+			if require_compaction {
+				FullTextIndex::trigger_compaction(&self.ikb, &tx, self.nid).await.unwrap();
+			}
+
+			tx.commit().await.unwrap();
+		}
+	}
+
+	async fn concurrent_doc_update(test: TestContext, rid: Arc<Thing>) {
+		let mut stack = reblessive::TreeStack::new();
+		while test.start.elapsed().as_secs() < 3 {
+			stack.enter(|stk| test.remove_insert_task(stk, &rid)).finish().await;
+		}
+	}
+
+	async fn compaction(test: TestContext) {
+		let duration = Duration::from_secs(1);
+		while test.start.elapsed().as_secs() < 4 {
+			sleep(duration).await;
+			test.ds.index_compaction(duration).await.unwrap();
 		}
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_test() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
-		let ctx = ds.setup_ctx().unwrap().freeze();
-		let mut q = syn::parse("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
-		let Statement::Define(DefineStatement::Analyzer(az)) = q.0.0.pop().unwrap() else {
-			panic!()
-		};
-		let az: Arc<DefineAnalyzerStatement> = Arc::new(az.into());
 		let doc1: Arc<Thing> = Arc::new(("t", "doc1").into());
 		let doc2: Arc<Thing> = Arc::new(("t", "doc2").into());
-		concurrent_task(ctx.clone(), ds.clone(), doc1.clone(), az.clone()).await;
-		let task1 = tokio::spawn(concurrent_task(ctx.clone(), ds.clone(), doc2, az.clone()));
-		let task2 = tokio::spawn(concurrent_task(ctx.clone(), ds.clone(), doc1, az.clone()));
-		let _ = tokio::try_join!(task1, task2).expect("Tasks failed");
-	}
 
-	async fn remove_insert_task(
-		stk: &mut Stk,
-		ctx: &Context,
-		ds: &Datastore,
-		az: Arc<DefineAnalyzerStatement>,
-		rid: &Thing,
-		content: &Value,
-	) {
-		let mut ctx = MutableContext::new(ctx);
-		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let txn = Arc::new(tx);
-		ctx.set_transaction(txn);
-		let ctx = ctx.freeze();
-		let nid = Uuid::from_u128(1);
-		let opt = Options::default().with_id(nid);
-		let ikb = IndexKeyBase::default();
-		let p = FullTextParams {
-			az: az.name.clone(),
-			sc: Default::default(),
-			hl: false,
-		};
-		let ixs = ctx.get_index_stores();
-		let fti = FullTextIndex::with_analyzer(nid, ixs, az, ikb.clone(), &p).unwrap();
+		let test = TestContext::new().await;
+		let task1 = tokio::spawn(concurrent_doc_update(test.clone(), doc1.clone()));
+		let task2 = tokio::spawn(concurrent_doc_update(test.clone(), doc2.clone()));
+		let task3 = tokio::spawn(compaction(test.clone()));
+		let _ = tokio::try_join!(task1, task2, task3).expect("Tasks failed");
 
-		let mut require_compaction = false;
-		fti.remove_content(stk, &ctx, &opt, rid, vec![content.clone()], &mut require_compaction)
-			.await
-			.unwrap();
-		fti.index_content(stk, &ctx, &opt, rid, vec![content.clone()], &mut require_compaction)
-			.await
-			.unwrap();
-
-		let tx = ctx.tx();
-
-		if require_compaction {
-			FullTextIndex::trigger_compaction(&ikb, &tx, nid).await.unwrap();
-		}
-
-		tx.commit().await.unwrap();
+		// Check that logs have been compacted:
+		let tx = test.new_tx(TransactionType::Read).await;
+		let (beg, end) = Ic::range();
+		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
+		let (beg, end) = test.ikb.new_dc_range().unwrap();
+		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
+		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
+		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
 	}
 }
