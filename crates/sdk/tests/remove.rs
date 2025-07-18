@@ -13,7 +13,6 @@ use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::expr::Value;
 use surrealdb::iam::Role;
-use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn remove_statement_table() -> Result<()> {
@@ -34,7 +33,7 @@ async fn remove_statement_table() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -48,8 +47,7 @@ async fn remove_statement_table() -> Result<()> {
 			tables: {},
 			users: {}
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -169,7 +167,7 @@ async fn remove_statement_analyzer() -> Result<()> {
 	tmp.unwrap();
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -183,8 +181,7 @@ async fn remove_statement_analyzer() -> Result<()> {
 			tables: {},
 			users: {}
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	Ok(())
 }
@@ -212,7 +209,7 @@ async fn remove_statement_index() -> Result<()> {
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"{
 			events: {},
 			fields: {},
@@ -220,8 +217,7 @@ async fn remove_statement_index() -> Result<()> {
 			tables: {},
 			lives: {},
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	Ok(())
 }

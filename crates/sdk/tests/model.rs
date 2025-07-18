@@ -4,7 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::SqlValue;
+use surrealdb::expr::Value;
 
 #[tokio::test]
 async fn model_count() -> Result<()> {
@@ -21,12 +21,11 @@ async fn model_count() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[{
 			count: 1000
 		}]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -47,12 +46,11 @@ async fn model_range() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[{
 			count: 1000
 		}]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

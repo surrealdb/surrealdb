@@ -4,7 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::SqlValue;
+use surrealdb::expr::Value;
 
 #[tokio::test]
 async fn define_global_param() -> Result<()> {
@@ -24,7 +24,7 @@ async fn define_global_param() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"{
 			accesses: {},
 			analyzers: {},
@@ -38,19 +38,18 @@ async fn define_global_param() -> Result<()> {
 			tables: {},
 			users: {},
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[12345]").into();
+	let val = Value::parse("[12345]");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("[56789]").into();
+	let val = Value::parse("[56789]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -72,15 +71,14 @@ async fn define_protected_param() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[
 			{
 				other: true,
 				some: 'thing'
 			}
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;

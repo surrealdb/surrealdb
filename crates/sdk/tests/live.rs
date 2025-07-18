@@ -6,7 +6,7 @@ use helpers::skip_ok;
 use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::expr::Thing;
-use surrealdb::sql::SqlValue;
+use surrealdb::expr::Value;
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {
@@ -27,14 +27,13 @@ async fn live_permissions() -> Result<()> {
 	skip_ok(res, 1)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[
 			{
 				id: test:1,
 			},
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "test")).into())
@@ -58,14 +57,13 @@ async fn live_permissions() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[
 			{
 				id: test:3,
 			},
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

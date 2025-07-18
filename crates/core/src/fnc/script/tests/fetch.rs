@@ -10,6 +10,7 @@ use crate::{
 		Capabilities, Session,
 		capabilities::{NetTarget, Targets},
 	},
+	expr::value::Value,
 	kvs::Datastore,
 	syn,
 };
@@ -149,7 +150,7 @@ async fn test_fetch_error() {
 
 	assert_eq!(
 		res,
-		syn::value("{ body: {baz:2, foo:\"bar\"}, status: 500f }").unwrap().into(),
+		Value::from(syn::value("{ body: {baz:2, foo:\"bar\"}, status: 500f }").unwrap()),
 		"Unexpected result: {:?}",
 		res
 	);

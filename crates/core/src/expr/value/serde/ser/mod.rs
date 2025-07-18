@@ -515,7 +515,7 @@ mod tests {
 			String::from("foo") => Value::from("bar"),
 		};
 		let serialized = to_value(map.clone()).unwrap();
-		assert_eq!(serialized, map.into());
+		assert_eq!(serialized, Value::from(map));
 	}
 
 	#[test]

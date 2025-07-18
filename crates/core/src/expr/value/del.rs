@@ -281,8 +281,8 @@ mod tests {
 	async fn del_none() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = SqlIdiom::default().into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("{ test: { other: null, something: 123 } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -292,8 +292,8 @@ mod tests {
 	async fn del_reset() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = SqlIdiom::parse("test").into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("{ }").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("{ }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -303,8 +303,8 @@ mod tests {
 	async fn del_basic() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = SqlIdiom::parse("test.something").into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("{ test: { other: null } }").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("{ test: { other: null } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -314,8 +314,8 @@ mod tests {
 	async fn del_wrong() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = SqlIdiom::parse("test.something.wrong").into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("{ test: { other: null, something: 123 } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -325,8 +325,8 @@ mod tests {
 	async fn del_other() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = SqlIdiom::parse("test.other.something").into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("{ test: { other: null, something: 123 } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -336,8 +336,8 @@ mod tests {
 	async fn del_array() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = SqlIdiom::parse("test.something[1]").into();
-		let mut val: Value = SqlValue::parse("{ test: { something: [123, 456, 789] } }").into();
-		let res: Value = SqlValue::parse("{ test: { something: [123, 789] } }").into();
+		let mut val: Value = Value::parse("{ test: { something: [123, 456, 789] } }");
+		let res: Value = Value::parse("{ test: { something: [123, 789] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -367,8 +367,7 @@ mod tests {
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		)
 		.into();
-		let res: Value =
-			SqlValue::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }").into();
+		let res: Value = Value::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -382,8 +381,7 @@ mod tests {
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		)
 		.into();
-		let res: Value =
-			SqlValue::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }").into();
+		let res: Value = Value::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -413,8 +411,7 @@ mod tests {
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		)
 		.into();
-		let res: Value =
-			SqlValue::parse("{ test: { something: [{ name: 'A', age: 34 }] } }").into();
+		let res: Value = Value::parse("{ test: { something: [{ name: 'A', age: 34 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -428,8 +425,7 @@ mod tests {
 			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
 		)
 		.into();
-		let res: Value =
-			SqlValue::parse("{ test: { something: [{ name: 'B', age: 36 }] } }").into();
+		let res: Value = Value::parse("{ test: { something: [{ name: 'B', age: 36 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -443,8 +439,7 @@ mod tests {
 			"{ test: { 'city:london': true, something: [{ age: 34 }, { age: 36 }] } }",
 		)
 		.into();
-		let res: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let res: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::TreeStack::new();
 		stack.enter(|stk| val.del(stk, &ctx, &opt, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);

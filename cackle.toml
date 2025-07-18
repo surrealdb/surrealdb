@@ -9,7 +9,7 @@ features = ["default"]
 build_flags = ["--tests"]
 
 [sandbox]
-kind = "Bubblewrap"
+kind = "Disabled"
 
 [api.fs]
 include = ["rustix::fs", "tokio::fs"]
@@ -391,6 +391,9 @@ build.allow_build_instructions = ["cargo:rustc-check-cfg=*"]
 allow_apis = ["fs"]
 
 [pkg.ahash]
+allow_unsafe = true
+
+[pkg.flatbuffers]
 allow_unsafe = true
 
 [pkg.cc]
@@ -999,6 +1002,9 @@ build.allow_build_instructions = [
     "cargo:rustc-cfg=*",
     "cargo::rustc-check-cfg=*",
 ]
+
+[pkg.surrealdb-protocol]
+allow_unsafe = true
 
 [pkg.assert_fs]
 from.test.allow_apis = ["fs"]

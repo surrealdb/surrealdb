@@ -4,6 +4,7 @@ use parse::Parse;
 
 mod helpers;
 use helpers::*;
+use surrealdb_core::dbs::Variables;
 use surrealdb_core::expr::Value;
 use surrealdb_core::iam::Level;
 
@@ -15,7 +16,6 @@ use surrealdb::err::Error;
 use surrealdb::expr::{Idiom, Part};
 use surrealdb::iam::Role;
 use surrealdb::kvs::{LockType, TransactionType};
-use surrealdb::sql::SqlValue;
 use test_log::test;
 use tracing::info;
 
@@ -34,7 +34,7 @@ async fn define_statement_namespace() -> Result<()> {
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"{
 			accesses: {},
 			namespaces: { test: 'DEFINE NAMESPACE test' },
@@ -54,8 +54,7 @@ async fn define_statement_namespace() -> Result<()> {
 			},
 			users: {},
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -76,14 +75,13 @@ async fn define_statement_database() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -389,7 +387,7 @@ async fn define_statement_search_index() -> Result<()> {
 	}
 
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"{
 			events: {},
 			fields: {},
@@ -401,7 +399,7 @@ async fn define_statement_search_index() -> Result<()> {
 			lives: {},
 		}",
 	);
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 
 	let tmp = res.remove(0).result?;
 
@@ -1380,7 +1378,7 @@ async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 		KILL $lqid;
 	"
 	.to_owned();
-	let vars = map! { "lqid".to_string() => lqid };
+	let vars = Variables::from(map! { "lqid".to_string() => lqid });
 	let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 	assert_eq!(res.len(), 5);
 	res.remove(0).result.unwrap();

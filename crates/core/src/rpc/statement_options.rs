@@ -1,8 +1,5 @@
-use std::collections::BTreeMap;
-
 use crate::{
-	dbs::{Capabilities, sql_variables_to_expr_variables},
-	expr::Value,
+	dbs::{Capabilities, Variables},
 	sql::{Cond, Data, Fetchs, Fields, Limit, Number, Output, SqlValue, Start, Timeout, Version},
 	syn::{
 		fetchs_with_capabilities, fields_with_capabilities, output_with_capabilities,
@@ -96,7 +93,7 @@ pub(crate) struct StatementOptions {
 	pub timeout: Option<Timeout>,
 	/// - An object, containing variables to define during execution of the method
 	/// - For all (`select`, `insert`, `create`, `upsert`, `update`, `relate` and `delete`) methods
-	pub vars: Option<BTreeMap<String, SqlValue>>,
+	pub vars: Option<Variables>,
 	/// - A boolean, stating wether the LQ notifications should contain diffs
 	/// - For the `live` method
 	pub diff: bool,
@@ -232,7 +229,8 @@ impl StatementOptions {
 			// Process "vars" option
 			if let Some(v) = obj.remove("vars") {
 				if let SqlValue::Object(v) = v {
-					self.vars = Some(v.0)
+					let v: crate::expr::Object = v.into();
+					self.vars = Some(v.into())
 				} else {
 					return Err(RpcError::InvalidParams);
 				}
@@ -271,12 +269,9 @@ impl StatementOptions {
 		self.data.clone().map(|v| v.into())
 	}
 
-	pub(crate) fn merge_vars(&self, v: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
+	pub(crate) fn merge_vars(&self, v: &Variables) -> Variables {
 		match &self.vars {
-			Some(vars) => {
-				let mut vars = sql_variables_to_expr_variables(vars);
-				mrg! {vars, v}
-			}
+			Some(vars) => vars.merged(v.clone()),
 			None => v.clone(),
 		}
 	}

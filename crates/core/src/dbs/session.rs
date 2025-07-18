@@ -1,9 +1,8 @@
-use crate::ctx::MutableContext;
+use crate::dbs::Variables;
 use crate::expr::value::Value;
 use crate::iam::Auth;
 use crate::iam::{Level, Role};
 use chrono::Utc;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// Specifies the current session information when processing a query.
@@ -32,8 +31,8 @@ pub struct Session {
 	pub rd: Option<Value>,
 	/// The current expiration time of the session
 	pub exp: Option<i64>,
-	/// The parameters set
-	pub parameters: BTreeMap<String, Value>,
+	/// The variables set
+	pub variables: Variables,
 }
 
 impl Session {
@@ -104,13 +103,6 @@ impl Session {
 		vec![("access", access), ("auth", auth), ("token", token), ("session", session)]
 	}
 
-	/// Convert a session into a runtime
-	pub(crate) fn context(&self, ctx: &mut MutableContext) {
-		let vars = self.values().into_iter();
-
-		ctx.add_values(vars);
-	}
-
 	/// Create a system session for a given level and role
 	pub fn for_level(level: Level, role: Role) -> Session {
 		// Create a new session
@@ -148,7 +140,7 @@ impl Session {
 			tk: None,
 			rd: Some(rid),
 			exp: None,
-			parameters: Default::default(),
+			variables: Default::default(),
 		}
 	}
 

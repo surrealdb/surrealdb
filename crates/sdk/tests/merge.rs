@@ -4,7 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::SqlValue;
+use surrealdb::expr::Value;
 
 #[tokio::test]
 async fn merge_record() -> Result<()> {
@@ -24,7 +24,7 @@ async fn merge_record() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[
 			{
 				id: person:test,
@@ -35,12 +35,11 @@ async fn merge_record() -> Result<()> {
 				}
 			}
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[
 			{
 				id: person:test,
@@ -52,8 +51,7 @@ async fn merge_record() -> Result<()> {
 				}
 			}
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

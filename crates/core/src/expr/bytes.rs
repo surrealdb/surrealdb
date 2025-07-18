@@ -109,7 +109,7 @@ mod tests {
 		let val = Value::Bytes(Bytes(vec![1, 2, 3, 5]));
 		let serialized: Vec<u8> = revision::to_vec(&val).unwrap();
 		println!("{serialized:?}");
-		let deserialized = revision::from_slice(&serialized).unwrap();
+		let deserialized: Value = revision::from_slice(&serialized).unwrap();
 		assert_eq!(val, deserialized);
 	}
 

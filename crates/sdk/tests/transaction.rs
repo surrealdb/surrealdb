@@ -4,7 +4,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::sql::SqlValue;
+use surrealdb::expr::Value;
 
 #[tokio::test]
 async fn transaction_basic() -> Result<()> {
@@ -20,25 +20,23 @@ async fn transaction_basic() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[
 			{
 				id: person:tobie,
 			}
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[
 			{
 				id: person:jaime,
 			}
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -59,13 +57,12 @@ async fn transaction_with_return() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"{
 			tobie: person:tobie,
 			jaime: person:jaime,
 		}",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

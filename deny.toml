@@ -87,10 +87,6 @@ confidence-threshold = 0.95
 # Allow specific licenses on a per-crate basis, instead of globally.
 
 [[licenses.exceptions]]
-name = "ring"
-allow = ["OpenSSL"]
-
-[[licenses.exceptions]]
 name = "surreal"
 allow = ["BUSL-1.1"]
 
@@ -103,12 +99,12 @@ name = "surrealdb-core"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealml-core"
-allow = ["Apache-2.0"]
+name = "surrealdb-protocol"
+allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "unicode-ident"
-allow = ["Unicode-DFS-2016"]
+name = "surrealml-core"
+allow = ["Apache-2.0"]
 
 # Specify overrides for crates where licenses are hard to guess.
 

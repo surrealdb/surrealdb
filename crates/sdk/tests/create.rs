@@ -7,8 +7,8 @@ use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::expr::Thing;
+use surrealdb::expr::Value;
 use surrealdb::iam::Role;
-use surrealdb::sql::SqlValue;
 
 #[tokio::test]
 async fn create_or_insert_with_permissions() -> Result<()> {
@@ -37,31 +37,29 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[
 			{
 				id: demo:one,
 				user: user:test,
 			},
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = Value::parse(
 		"[
 			{
 				id: demo:two,
 				user: user:test,
 			},
 		]",
-	)
-	.into();
+	);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse("{ id: foo:bar}").into();
+	let val = Value::parse("{ id: foo:bar}");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -199,10 +197,10 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			if should_succeed {
 				assert!(res.is_ok(), "{}: {:?}", msg, res);
-				assert_ne!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
+				assert_ne!(res.unwrap(), Value::parse("[]"), "{}", msg);
 			} else if res.is_ok() {
 				// Permissions clause doesn't allow to query the table
-				assert_eq!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
+				assert_eq!(res.unwrap(), Value::parse("[]"), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -225,7 +223,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+				res.is_ok() && res.unwrap() != Value::parse("[]"),
 				"unexpected error creating person record"
 			);
 
@@ -235,7 +233,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+				res.is_ok() && res.unwrap() != Value::parse("[]"),
 				"unexpected error creating person record"
 			);
 
@@ -245,7 +243,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != SqlValue::parse("[]").into(),
+				res.is_ok() && res.unwrap() != Value::parse("[]"),
 				"unexpected error creating person record"
 			);
 
@@ -255,10 +253,10 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			if should_succeed {
 				assert!(res.is_ok(), "{}: {:?}", msg, res);
-				assert_ne!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
+				assert_ne!(res.unwrap(), Value::parse("[]"), "{}", msg);
 			} else if res.is_ok() {
 				// Permissions clause doesn't allow to query the table
-				assert_eq!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
+				assert_eq!(res.unwrap(), Value::parse("[]"), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -325,7 +323,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == SqlValue::parse("[]").into(),
+			res.unwrap() == Value::parse("[]"),
 			"{}",
 			"anonymous user should not be able to create a new record if the table exists but has no permissions"
 		);
@@ -353,7 +351,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			res.unwrap() != Value::parse("[]"),
 			"{}",
 			"anonymous user should be able to create a new record if the table exists and grants full permissions"
 		);
@@ -383,7 +381,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			res.unwrap() != Value::parse("[]"),
 			"{}",
 			"anonymous user should be able to create the table"
 		);
@@ -411,7 +409,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			res.unwrap() != Value::parse("[]"),
 			"{}",
 			"anonymous user should not be able to create a new record if the table exists but has no permissions"
 		);
@@ -439,7 +437,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != SqlValue::parse("[]").into(),
+			res.unwrap() != Value::parse("[]"),
 			"{}",
 			"anonymous user should be able to create a new record if the table exists and grants full permissions"
 		);

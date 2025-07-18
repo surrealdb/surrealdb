@@ -12,11 +12,16 @@ use crate::{
 use async_channel::{Receiver, Sender};
 use futures::{StreamExt, stream::poll_fn};
 use std::{
-	collections::{BTreeMap, HashMap, HashSet},
+	collections::{HashMap, HashSet},
 	sync::{Arc, atomic::AtomicI64},
 	task::Poll,
 };
-use surrealdb_core::{dbs::Session, iam::Level, kvs::Datastore, options::EngineOptions};
+use surrealdb_core::{
+	dbs::{Session, Variables},
+	iam::Level,
+	kvs::Datastore,
+	options::EngineOptions,
+};
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -112,7 +117,7 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let vars = Arc::new(RwLock::new(BTreeMap::default()));
+	let vars = Arc::new(RwLock::new(Variables::default()));
 	let live_queries = Arc::new(RwLock::new(HashMap::new()));
 	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
 

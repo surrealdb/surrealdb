@@ -127,6 +127,7 @@ chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
+flatbuffers.workspace = true
 fst.workspace = true
 futures.workspace = true
 fuzzy-matcher.workspace = true
@@ -185,6 +186,45 @@ reqwest = { workspace = true, default-features = false, features = [
 ], optional = true }
 tempfile = { workspace = true, optional = true }
 
+# WASM DEPENDENCY CONFIGURATION
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+pharos.workspace = true
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
+surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
+tokio = { workspace = true, default-features = false, features = [
+    "rt",
+    "sync",
+] }
+uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
+wasm-bindgen-futures.workspace = true
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+ws_stream_wasm.workspace = true
+
+# NON-WASM DEPENDENCY CONFIGURATION
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+rust-s3 = { workspace = true, optional = true }
+surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
+tokio = { workspace = true, default-features = false, features = [
+    "macros",
+    "io-util",
+    "io-std",
+    "fs",
+    "rt-multi-thread",
+    "time",
+    "sync",
+] }
+tokio-tungstenite = { workspace = true, optional = true }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+# OS-SPECIFIC ALLOCATOR DEPENDENCIES
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
+mimalloc = { workspace = true, optional = true, default-features = false }
+
+[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+jemallocator = { workspace = true, optional = true }
+
+# DEVELOPMENT DEPENDENCIES
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
@@ -199,40 +239,6 @@ tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
 
-[target.'cfg(target_family = "wasm")'.dependencies]
-getrandom = { workspace = true, features = ["wasm_js"] }
-pharos.workspace = true
-ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
-tokio = { workspace = true, default-features = false, features = [
-    "rt",
-    "sync",
-] }
-uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
-wasm-bindgen-futures.workspace = true
-wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
-ws_stream_wasm.workspace = true
-
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-tokio = { workspace = true, default-features = false, features = [
-    "macros",
-    "io-util",
-    "io-std",
-    "fs",
-    "rt-multi-thread",
-    "time",
-    "sync",
-] }
-tokio-tungstenite = { workspace = true, optional = true }
-uuid = { workspace = true, features = ["serde", "v4", "v7"] }
-
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
-mimalloc = { workspace = true, optional = true, default-features = false }
-
-[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
-jemallocator = { workspace = true, optional = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rust-s3 = { workspace = true, optional = true }
 
 [lints]
 workspace = true

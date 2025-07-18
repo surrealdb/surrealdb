@@ -91,15 +91,15 @@ mod tests {
 
 	use super::*;
 	use crate::expr::idiom::Idiom;
-	use crate::sql::SqlValue;
+
 	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn put_none() {
 		let idi: Idiom = SqlIdiom::default().into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("999").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("999");
 		val.put(&idi, Value::from(999));
 		assert_eq!(res, val);
 	}
@@ -108,7 +108,7 @@ mod tests {
 	async fn put_empty() {
 		let idi: Idiom = SqlIdiom::parse("test").into();
 		let mut val = Value::None;
-		let res: Value = SqlValue::parse("{ test: 999 }").into();
+		let res: Value = Value::parse("{ test: 999 }");
 		val.put(&idi, Value::from(999));
 		assert_eq!(res, val);
 	}
@@ -117,7 +117,7 @@ mod tests {
 	async fn put_blank() {
 		let idi: Idiom = SqlIdiom::parse("test.something").into();
 		let mut val = Value::None;
-		let res: Value = SqlValue::parse("{ test: { something: 999 } }").into();
+		let res: Value = Value::parse("{ test: { something: 999 } }");
 		val.put(&idi, Value::from(999));
 		assert_eq!(res, val);
 	}
@@ -125,8 +125,8 @@ mod tests {
 	#[tokio::test]
 	async fn put_reput() {
 		let idi: Idiom = SqlIdiom::parse("test").into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("{ test: 999 }").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("{ test: 999 }");
 		val.put(&idi, Value::from(999));
 		assert_eq!(res, val);
 	}
@@ -134,8 +134,8 @@ mod tests {
 	#[tokio::test]
 	async fn put_basic() {
 		let idi: Idiom = SqlIdiom::parse("test.something").into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("{ test: { other: null, something: 999 } }").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("{ test: { other: null, something: 999 } }");
 		val.put(&idi, Value::from(999));
 		assert_eq!(res, val);
 	}
@@ -143,9 +143,8 @@ mod tests {
 	#[tokio::test]
 	async fn put_allow() {
 		let idi: Idiom = SqlIdiom::parse("test.something.allow").into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null } }").into();
-		let res: Value =
-			SqlValue::parse("{ test: { other: null, something: { allow: 999 } } }").into();
+		let mut val: Value = Value::parse("{ test: { other: null } }");
+		let res: Value = Value::parse("{ test: { other: null, something: { allow: 999 } } }");
 		val.put(&idi, Value::from(999));
 		assert_eq!(res, val);
 	}
@@ -153,8 +152,8 @@ mod tests {
 	#[tokio::test]
 	async fn put_wrong() {
 		let idi: Idiom = SqlIdiom::parse("test.something.wrong").into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("{ test: { other: null, something: 123 } }");
 		val.put(&idi, Value::from(999));
 		assert_eq!(res, val);
 	}
@@ -162,9 +161,8 @@ mod tests {
 	#[tokio::test]
 	async fn put_other() {
 		let idi: Idiom = SqlIdiom::parse("test.other.something").into();
-		let mut val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Value =
-			SqlValue::parse("{ test: { other: { something: 999 }, something: 123 } }").into();
+		let mut val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Value = Value::parse("{ test: { other: { something: 999 }, something: 123 } }");
 		val.put(&idi, Value::from(999));
 		assert_eq!(res, val);
 	}
@@ -172,8 +170,8 @@ mod tests {
 	#[tokio::test]
 	async fn put_array() {
 		let idi: Idiom = SqlIdiom::parse("test.something[1]").into();
-		let mut val: Value = SqlValue::parse("{ test: { something: [123, 456, 789] } }").into();
-		let res: Value = SqlValue::parse("{ test: { something: [123, 999, 789] } }").into();
+		let mut val: Value = Value::parse("{ test: { something: [123, 456, 789] } }");
+		let res: Value = Value::parse("{ test: { something: [123, 999, 789] } }");
 		val.put(&idi, Value::from(999));
 		assert_eq!(res, val);
 	}
@@ -181,10 +179,8 @@ mod tests {
 	#[tokio::test]
 	async fn put_array_field() {
 		let idi: Idiom = SqlIdiom::parse("test.something[1].age").into();
-		let mut val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
-		let res: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 21 }] } }").into();
+		let mut val: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 21 }] } }");
 		val.put(&idi, Value::from(21));
 		assert_eq!(res, val);
 	}
@@ -192,10 +188,8 @@ mod tests {
 	#[tokio::test]
 	async fn put_array_fields() {
 		let idi: Idiom = SqlIdiom::parse("test.something[*].age").into();
-		let mut val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
-		let res: Value =
-			SqlValue::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }").into();
+		let mut val: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res: Value = Value::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }");
 		val.put(&idi, Value::from(21));
 		assert_eq!(res, val);
 	}
@@ -203,10 +197,8 @@ mod tests {
 	#[tokio::test]
 	async fn put_array_fields_flat() {
 		let idi: Idiom = SqlIdiom::parse("test.something.age").into();
-		let mut val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
-		let res: Value =
-			SqlValue::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }").into();
+		let mut val: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res: Value = Value::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }");
 		val.put(&idi, Value::from(21));
 		assert_eq!(res, val);
 	}
