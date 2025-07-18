@@ -3,8 +3,7 @@
 mod parse;
 use parse::Parse;
 mod helpers;
-use helpers::new_ds;
-use helpers::with_enough_stack;
+use helpers::{new_ds, with_enough_stack};
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;

@@ -1,9 +1,9 @@
 use crate::err::Error;
-use crate::expr::{Object, Value};
 use crate::idx::VersionedStore;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
 use crate::kvs::{Key, Transaction, Val};
+use crate::val::{Object, Value};
 #[cfg(debug_assertions)]
 use ahash::HashSet;
 use anyhow::{Result, bail};
@@ -1009,7 +1009,8 @@ mod tests {
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
 	};
 	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
-	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
+	use crate::kvs::LockType::*;
+	use crate::kvs::{Datastore, Key, Transaction, TransactionType};
 	use anyhow::Result;
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;

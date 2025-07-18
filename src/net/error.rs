@@ -1,7 +1,5 @@
-use axum::{
-	Json,
-	response::{IntoResponse, Response},
-};
+use axum::Json;
+use axum::response::{IntoResponse, Response};
 use http::{HeaderName, StatusCode};
 use opentelemetry::global::Error as OpentelemetryError;
 use serde::{Serialize, Serializer};

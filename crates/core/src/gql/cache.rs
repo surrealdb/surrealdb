@@ -1,13 +1,18 @@
 use tokio::sync::RwLock;
 
-use std::{collections::BTreeMap, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
+use std::collections::BTreeMap;
+use std::fmt::Debug;
+use std::hash::Hash;
+use std::marker::PhantomData;
+use std::sync::Arc;
 
 use async_graphql::dynamic::Schema;
 
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 
-use super::{error::GqlError, schema::generate_schema};
+use super::error::GqlError;
+use super::schema::generate_schema;
 
 #[async_trait::async_trait]
 pub trait Invalidator: Debug + Clone + Send + Sync + 'static {

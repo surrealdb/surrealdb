@@ -144,46 +144,36 @@
 //! }
 //! ```
 
+use crate::Result;
+use crate::api::conn::{Command, DbResponse, RequestData};
 use crate::api::err::Error;
-use crate::{
-	Result,
-	api::{
-		Connect, Response as QueryResponse, Surreal,
-		conn::{Command, DbResponse, RequestData},
-	},
-	method::Stats,
-	opt::{IntoEndpoint, Table},
-};
+use crate::api::{Connect, Response as QueryResponse, Surreal};
+use crate::method::Stats;
+use crate::opt::{IntoEndpoint, Table};
 #[cfg(not(target_family = "wasm"))]
 use anyhow::bail;
 use async_channel::Sender;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use indexmap::IndexMap;
+use std::collections::{BTreeMap, HashMap};
+use std::marker::PhantomData;
+use std::mem;
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
+use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use std::task::{Poll, ready};
-use std::{
-	collections::{BTreeMap, HashMap},
-	marker::PhantomData,
-	mem,
-	sync::Arc,
-};
-use surrealdb_core::expr::Function;
-use surrealdb_core::expr::LogicalPlan;
+use surrealdb_core::dbs::{Notification, Response, Session};
 use surrealdb_core::expr::statements::{
 	CreateStatement, DeleteStatement, InsertStatement, KillStatement, SelectStatement,
 	UpdateStatement, UpsertStatement,
 };
+use surrealdb_core::expr::{Data, Field, Function, LogicalPlan, Output, Value as CoreValue};
+use surrealdb_core::iam;
+use surrealdb_core::kvs::Datastore;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::{
-	dbs::{Notification, Response, Session},
-	expr::{Data, Field, Output, Value as CoreValue},
-	iam,
-	kvs::Datastore,
-};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio_util::bytes::BytesMut;

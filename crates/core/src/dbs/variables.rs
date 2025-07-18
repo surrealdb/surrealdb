@@ -1,17 +1,15 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::MutableContext;
 use crate::err::Error;
-use crate::expr::value::Value;
+use crate::val::Value;
 use anyhow::Result;
 use std::collections::BTreeMap;
-
-pub(crate) type Variables = Option<BTreeMap<String, Value>>;
 
 pub(crate) trait Attach {
 	fn attach(self, ctx: &mut MutableContext) -> Result<(), Error>;
 }
 
-impl Attach for Variables {
+impl Attach for Option<BTreeMap<String, Value>> {
 	fn attach(self, ctx: &mut MutableContext) -> Result<(), Error> {
 		match self {
 			Some(m) => {
@@ -34,8 +32,9 @@ impl Attach for Variables {
 	}
 }
 
+/*
 pub fn sql_variables_to_expr_variables(
-	variables: &BTreeMap<String, crate::sql::SqlValue>,
+	variables: &BTreeMap<String, crate::val::Value>,
 ) -> BTreeMap<String, crate::expr::Value> {
 	let mut expr_variables = BTreeMap::new();
 	for (key, val) in variables {
@@ -53,3 +52,4 @@ pub fn expr_variables_to_sql_variables(
 	}
 	sql_variables
 }
+*/

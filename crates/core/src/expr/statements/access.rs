@@ -4,10 +4,10 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::access_type::BearerAccessSubject;
 use crate::expr::{
-	AccessType, Array, Base, Cond, Datetime, Duration, FlowResultExt as _, Ident, Object, Strand,
-	Thing, Uuid, Value,
+	AccessType, Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, Ident, RecordIdLit,
 };
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Array, Datetime, Duration, Object, RecordId, Strand, Uuid, Value};
 use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;
@@ -30,9 +30,8 @@ pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
 	Show(AccessStatementShow),     // Show access grants.
@@ -41,9 +40,8 @@ pub enum AccessStatement {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AccessStatementGrant {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -51,9 +49,8 @@ pub struct AccessStatementGrant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AccessStatementShow {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -62,9 +59,8 @@ pub struct AccessStatementShow {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -73,9 +69,8 @@ pub struct AccessStatementRevoke {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct AccessStatementPurge {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -85,26 +80,67 @@ pub struct AccessStatementPurge {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct AccessGrant {
+pub struct AccessGrantStore {
 	pub id: Ident,                    // Unique grant identifier.
 	pub ac: Ident,                    // Access method used to create the grant.
 	pub creation: Datetime,           // Grant creation time.
 	pub expiration: Option<Datetime>, // Grant expiration time, if any.
 	pub revocation: Option<Datetime>, // Grant revocation time, if any.
-	pub subject: Subject,             // Subject of the grant.
+	pub subject: SubjectStore,        // Subject of the grant.
 	pub grant: Grant,                 // Grant data.
 }
 
-impl AccessGrant {
+impl AccessGrantStore {
+	/// Returns the surrealql object representation of the access grant
+	pub fn into_access_object(self) -> Object {
+		let mut res = Object::default();
+		res.insert("id".to_owned(), Value::from(self.id.into_raw_string()));
+		res.insert("ac".to_owned(), Value::from(self.ac.into_raw_string()));
+		res.insert("type".to_owned(), Value::from(self.grant.variant()));
+		res.insert("creation".to_owned(), Value::from(self.creation));
+		res.insert("expiration".to_owned(), Value::from(self.expiration));
+		res.insert("revocation".to_owned(), Value::from(self.revocation));
+		let mut sub = Object::default();
+		match self.subject {
+			SubjectStore::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
+			SubjectStore::User(name) => {
+				sub.insert("user".to_owned(), Value::from(name.into_raw_string()))
+			}
+		};
+		res.insert("subject".to_owned(), Value::from(sub));
+
+		let mut gr = Object::default();
+		match self.grant {
+			Grant::Jwt(jg) => {
+				gr.insert("jti".to_owned(), Value::from(jg.jti));
+				if let Some(token) = jg.token {
+					gr.insert("token".to_owned(), Value::from(token));
+				}
+			}
+			Grant::Record(rg) => {
+				gr.insert("rid".to_owned(), Value::from(rg.rid));
+				gr.insert("jti".to_owned(), Value::from(rg.jti));
+				if let Some(token) = rg.token {
+					gr.insert("token".to_owned(), Value::from(token));
+				}
+			}
+			Grant::Bearer(bg) => {
+				gr.insert("id".to_owned(), Value::from(bg.id.into_raw_string()));
+				gr.insert("key".to_owned(), Value::from(bg.key));
+			}
+		};
+		res.insert("grant".to_owned(), Value::from(gr));
+
+		res
+	}
+
 	/// Returns a version of the statement where potential secrets are redacted.
 	/// This function should be used when displaying the statement to datastore users.
 	/// This function should NOT be used when displaying the statement for export purposes.
-	pub fn redacted(&self) -> AccessGrant {
-		let mut ags = self.clone();
-		ags.grant = match ags.grant {
+	pub fn redacted(mut self) -> AccessGrantStore {
+		self.grant = match self.grant {
 			Grant::Jwt(mut gr) => {
 				// Token should not even be stored. We clear it just as a precaution.
 				gr.token = None;
@@ -121,9 +157,23 @@ impl AccessGrant {
 				Grant::Bearer(gr)
 			}
 		};
-		ags
+		self
 	}
+}
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct AccessGrant {
+	pub id: Ident,                    // Unique grant identifier.
+	pub ac: Ident,                    // Access method used to create the grant.
+	pub creation: Datetime,           // Grant creation time.
+	pub expiration: Option<Datetime>, // Grant expiration time, if any.
+	pub revocation: Option<Datetime>, // Grant revocation time, if any.
+	pub subject: Subject,             // Subject of the grant.
+	pub grant: Grant,                 // Grant data.
+}
+
+impl AccessGrant {
 	// Returns if the access grant is expired.
 	pub fn is_expired(&self) -> bool {
 		match &self.expiration {
@@ -143,71 +193,52 @@ impl AccessGrant {
 	}
 }
 
-impl From<AccessGrant> for Object {
-	fn from(grant: AccessGrant) -> Self {
-		let mut res = Object::default();
-		res.insert("id".to_owned(), Value::from(grant.id.to_raw()));
-		res.insert("ac".to_owned(), Value::from(grant.ac.to_raw()));
-		res.insert("type".to_owned(), Value::from(grant.grant.variant()));
-		res.insert("creation".to_owned(), Value::from(grant.creation));
-		res.insert("expiration".to_owned(), Value::from(grant.expiration));
-		res.insert("revocation".to_owned(), Value::from(grant.revocation));
-		let mut sub = Object::default();
-		match grant.subject {
-			Subject::Record(id) => sub.insert("record".to_owned(), Value::from(id)),
-			Subject::User(name) => sub.insert("user".to_owned(), Value::from(name.to_raw())),
-		};
-		res.insert("subject".to_owned(), Value::from(sub));
-
-		let mut gr = Object::default();
-		match grant.grant {
-			Grant::Jwt(jg) => {
-				gr.insert("jti".to_owned(), Value::from(jg.jti));
-				if let Some(token) = jg.token {
-					gr.insert("token".to_owned(), Value::from(token));
-				}
-			}
-			Grant::Record(rg) => {
-				gr.insert("rid".to_owned(), Value::from(rg.rid));
-				gr.insert("jti".to_owned(), Value::from(rg.jti));
-				if let Some(token) = rg.token {
-					gr.insert("token".to_owned(), Value::from(token));
-				}
-			}
-			Grant::Bearer(bg) => {
-				gr.insert("id".to_owned(), Value::from(bg.id.to_raw()));
-				gr.insert("key".to_owned(), Value::from(bg.key));
-			}
-		};
-		res.insert("grant".to_owned(), Value::from(gr));
-
-		res
-	}
-}
-
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum Subject {
-	Record(Thing),
+pub enum SubjectStore {
+	Record(RecordId),
 	User(Ident),
 }
 
-impl Subject {
+impl SubjectStore {
 	// Returns the main identifier of a subject as a string.
 	pub fn id(&self) -> String {
 		match self {
-			Subject::Record(id) => id.to_raw(),
-			Subject::User(name) => name.to_raw(),
+			SubjectStore::Record(id) => id.to_string(),
+			SubjectStore::User(name) => name.into_raw_string(),
 		}
 	}
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+pub enum Subject {
+	Record(RecordIdLit),
+	User(Ident),
+}
+
+impl Subject {
+	async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> FlowResult<SubjectStore> {
+		match self {
+			Subject::Record(record_id_lit) => {
+				Ok(SubjectStore::Record(record_id_lit.compute(stk, ctx, opt, doc).await?))
+			}
+			Subject::User(ident) => Ok(SubjectStore::User(ident.clone())),
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Grant {
 	Jwt(GrantJwt),
 	Record(GrantRecord),
@@ -226,7 +257,7 @@ impl Grant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantJwt {
@@ -235,7 +266,7 @@ pub struct GrantJwt {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantRecord {
@@ -245,7 +276,7 @@ pub struct GrantRecord {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GrantBearer {
@@ -264,10 +295,14 @@ impl GrantBearer {
 			random_string(1, &GRANT_BEARER_CHARACTER_POOL[10..]),
 			random_string(GRANT_BEARER_ID_LENGTH - 1, GRANT_BEARER_CHARACTER_POOL)
 		);
+		// Safety: id cannot contain a null byte guarenteed above.
+		let id = unsafe { Ident::new_unchecked(id) };
 		let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
+		// Safety: id cannot contain a null byte guarenteed above.
+		let key = unsafe { Strand::new_unchecked(format!("{prefix}-{id}-{secret}")) };
 		Self {
-			id: id.clone().into(),
-			key: format!("{prefix}-{id}-{secret}").into(),
+			id,
+			key,
 		}
 	}
 
@@ -277,7 +312,7 @@ impl GrantBearer {
 		// Unlike with passwords, brute force and rainbow tables are infeasable due to the key length.
 		// When hashing the bearer keys, the prefix and key identifier are kept as salt.
 		let mut hasher = Sha256::new();
-		hasher.update(self.key.as_string());
+		hasher.update(self.key.as_str());
 		let hash = hasher.finalize();
 		let hash_hex = format!("{hash:x}").into();
 
@@ -300,11 +335,13 @@ fn random_string(length: usize, pool: &[u8]) -> String {
 }
 
 pub async fn create_grant(
-	stmt: &AccessStatementGrant,
+	access: Ident,
+	base: Option<Base>,
+	subject: SubjectStore,
 	ctx: &Context,
 	opt: &Options,
-) -> Result<AccessGrant> {
-	let base = match &stmt.base {
+) -> Result<AccessGrantStore> {
+	let base = match &base {
 		Some(base) => base.clone(),
 		None => opt.selected_base()?,
 	};
@@ -313,14 +350,14 @@ pub async fn create_grant(
 	// Get the transaction.
 	let txn = ctx.tx();
 	// Clear the cache.
-	txn.clear();
+	txn.clear_cache();
 	// Read the access definition.
 	let ac = match base {
-		Base::Root => txn.get_root_access(&stmt.ac).await?,
-		Base::Ns => txn.get_ns_access(opt.ns()?, &stmt.ac).await?,
+		Base::Root => txn.get_root_access(&access).await?,
+		Base::Ns => txn.get_ns_access(opt.ns()?, &access).await?,
 		Base::Db => {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_db_access(ns, db, &stmt.ac).await?
+			txn.get_db_access(ns, db, &access).await?
 		}
 		_ => {
 			bail!(Error::Unimplemented(
@@ -330,16 +367,16 @@ pub async fn create_grant(
 		}
 	};
 	// Verify the access type.
-	match &ac.kind {
+	match &ac.access_type {
 		AccessType::Jwt(_) => {
 			Err(anyhow::Error::new(Error::Unimplemented(format!("Grants for JWT on {base}"))))
 		}
 		AccessType::Record(at) => {
-			match &stmt.subject {
-				Subject::User(_) => {
+			match &subject {
+				SubjectStore::User(_) => {
 					bail!(Error::AccessGrantInvalidSubject);
 				}
-				Subject::Record(_) => {
+				SubjectStore::Record(_) => {
 					// If the grant is being created for a record, a database must be selected.
 					ensure!(matches!(base, Base::Db), Error::DbEmpty);
 				}
@@ -351,7 +388,7 @@ pub async fn create_grant(
 			};
 			// Create a new bearer key.
 			let grant = GrantBearer::new(atb.kind.prefix());
-			let gr = AccessGrant {
+			let gr = AccessGrantStore {
 				ac: ac.name.clone(),
 				// Unique grant identifier.
 				// In the case of bearer grants, the key identifier.
@@ -363,7 +400,7 @@ pub async fn create_grant(
 				// The grant is initially not revoked.
 				revocation: None,
 				// Subject associated with the grant.
-				subject: stmt.subject.clone(),
+				subject,
 				// The contents of the grant.
 				grant: Grant::Bearer(grant.clone()),
 			};
@@ -412,8 +449,8 @@ pub async fn create_grant(
 			Ok(gr)
 		}
 		AccessType::Bearer(at) => {
-			match &stmt.subject {
-				Subject::User(user) => {
+			match &subject {
+				SubjectStore::User(user) => {
 					// Grant subject must match access method subject.
 					ensure!(
 						matches!(&at.subject, BearerAccessSubject::User),
@@ -432,7 +469,7 @@ pub async fn create_grant(
 						)),
 					};
 				}
-				Subject::Record(_) => {
+				SubjectStore::Record(_) => {
 					// If the grant is being created for a record, a database must be selected.
 					ensure!(matches!(base, Base::Db), Error::DbEmpty);
 					// Grant subject must match access method subject.
@@ -445,7 +482,7 @@ pub async fn create_grant(
 			};
 			// Create a new bearer key.
 			let grant = GrantBearer::new(at.kind.prefix());
-			let gr = AccessGrant {
+			let gr = AccessGrantStore {
 				ac: ac.name.clone(),
 				// Unique grant identifier.
 				// In the case of bearer grants, the key identifier.
@@ -457,7 +494,7 @@ pub async fn create_grant(
 				// The grant is initially not revoked.
 				revocation: None,
 				// Subject associated with the grant.
-				subject: stmt.subject.clone(),
+				subject,
 				// The contents of the grant.
 				grant: Grant::Bearer(grant.clone()),
 			};
@@ -522,12 +559,15 @@ pub async fn create_grant(
 
 async fn compute_grant(
 	stmt: &AccessStatementGrant,
+	stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
-	_doc: Option<&CursorDoc>,
-) -> Result<Value> {
-	let grant = create_grant(stmt, ctx, opt).await?;
-	Ok(Value::Object(grant.into()))
+	doc: Option<&CursorDoc>,
+) -> FlowResult<Value> {
+	let subject = stmt.subject.compute(stk, ctx, opt, doc).await?;
+
+	let grant = create_grant(stmt.ac.clone(), stmt.base.clone(), subject, ctx, opt).await?;
+	Ok(Value::Object(grant.into_access_object()))
 }
 
 async fn compute_show(
@@ -546,7 +586,7 @@ async fn compute_show(
 	// Get the transaction.
 	let txn = ctx.tx();
 	// Clear the cache.
-	txn.clear();
+	txn.clear_cache();
 	// Check if the access method exists.
 	match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
@@ -579,7 +619,7 @@ async fn compute_show(
 				)),
 			};
 
-			Ok(Value::Object(grant.redacted().into()))
+			Ok(Value::Object(grant.redacted().into_access_object()))
 		}
 		None => {
 			// Get all grants.
@@ -601,18 +641,22 @@ async fn compute_show(
 				// If provided, check if grant matches conditions.
 				if let Some(cond) = &stmt.cond {
 					// Redact grant before evaluating conditions.
-					let redacted_gr = Value::Object(gr.redacted().clone().into());
-					if !cond
-						.compute(
-							stk,
-							ctx,
-							opt,
-							Some(&CursorDoc {
-								rid: None,
-								ir: None,
-								doc: redacted_gr.into(),
-							}),
-						)
+					let redacted_gr = Value::Object(gr.clone().redacted().into_access_object());
+					if !stk
+						.run(|stk| async move {
+							cond.0
+								.compute(
+									stk,
+									ctx,
+									opt,
+									Some(&CursorDoc {
+										rid: None,
+										ir: None,
+										doc: redacted_gr.into(),
+									}),
+								)
+								.await
+						})
 						.await
 						.catch_return()?
 						.is_truthy()
@@ -623,7 +667,7 @@ async fn compute_show(
 				}
 
 				// Store revoked version of the redacted grant.
-				show.push(Value::Object(gr.redacted().clone().into()));
+				show.push(Value::Object(gr.clone().redacted().into_access_object()));
 			}
 
 			Ok(Value::Array(show.into()))
@@ -646,7 +690,7 @@ pub async fn revoke_grant(
 	// Get the transaction
 	let txn = ctx.tx();
 	// Clear the cache
-	txn.clear();
+	txn.clear_cache();
 	// Check if the access method exists.
 	match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
@@ -717,7 +761,7 @@ pub async fn revoke_grant(
 				opt.auth.id()
 			);
 
-			revoked.push(Value::Object(revoke.redacted().into()));
+			revoked.push(Value::Object(revoke.redacted().into_access_object()));
 		}
 		None => {
 			// Get all grants.
@@ -743,18 +787,22 @@ pub async fn revoke_grant(
 				// If provided, check if grant matches conditions.
 				if let Some(cond) = &stmt.cond {
 					// Redact grant before evaluating conditions.
-					let redacted_gr = Value::Object(gr.redacted().clone().into());
-					if !cond
-						.compute(
-							stk,
-							ctx,
-							opt,
-							Some(&CursorDoc {
-								rid: None,
-								ir: None,
-								doc: redacted_gr.into(),
-							}),
-						)
+					let redacted_gr = Value::Object(gr.clone().redacted().into_access_object());
+					if !stk
+						.run(|stk| async move {
+							cond.0
+								.compute(
+									stk,
+									ctx,
+									opt,
+									Some(&CursorDoc {
+										rid: None,
+										ir: None,
+										doc: redacted_gr.into(),
+									}),
+								)
+								.await
+						})
 						.await
 						.catch_return()?
 						.is_truthy()
@@ -802,7 +850,7 @@ pub async fn revoke_grant(
 				);
 
 				// Store revoked version of the redacted grant.
-				revoked.push(Value::Object(gr.redacted().into()));
+				revoked.push(Value::Object(gr.redacted().into_access_object()));
 			}
 		}
 	}
@@ -837,7 +885,7 @@ async fn compute_purge(
 	// Get the transaction.
 	let txn = ctx.tx();
 	// Clear the cache.
-	txn.clear();
+	txn.clear_cache();
 	// Check if the access method exists.
 	match base {
 		Base::Root => txn.get_root_access(&stmt.ac).await?,
@@ -915,7 +963,7 @@ async fn compute_purge(
 				opt.auth.id()
 			);
 
-			purged = purged + Value::Object(gr.redacted().clone().into());
+			purged = purged + Value::Object(gr.clone().redacted().into_access_object());
 		}
 	}
 
@@ -929,13 +977,19 @@ impl AccessStatement {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+		doc: Option<&CursorDoc>,
+	) -> FlowResult<Value> {
 		match self {
-			AccessStatement::Grant(stmt) => compute_grant(stmt, ctx, opt, _doc).await,
-			AccessStatement::Show(stmt) => compute_show(stmt, stk, ctx, opt, _doc).await,
-			AccessStatement::Revoke(stmt) => compute_revoke(stmt, stk, ctx, opt, _doc).await,
-			AccessStatement::Purge(stmt) => compute_purge(stmt, ctx, opt, _doc).await,
+			AccessStatement::Grant(stmt) => compute_grant(stmt, stk, ctx, opt, doc).await,
+			AccessStatement::Show(stmt) => {
+				compute_show(stmt, stk, ctx, opt, doc).await.map_err(ControlFlow::Err)
+			}
+			AccessStatement::Revoke(stmt) => {
+				compute_revoke(stmt, stk, ctx, opt, doc).await.map_err(ControlFlow::Err)
+			}
+			AccessStatement::Purge(stmt) => {
+				compute_purge(stmt, ctx, opt, doc).await.map_err(ControlFlow::Err)
+			}
 		}
 	}
 }
@@ -949,9 +1003,9 @@ impl Display for AccessStatement {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
-				match stmt.subject {
-					Subject::User(_) => write!(f, " FOR USER {}", stmt.subject.id())?,
-					Subject::Record(_) => write!(f, " FOR RECORD {}", stmt.subject.id())?,
+				match &stmt.subject {
+					Subject::User(x) => write!(f, " FOR USER {}", x.into_raw_string())?,
+					Subject::Record(x) => write!(f, " FOR RECORD {}", x.to_string())?,
 				}
 				Ok(())
 			}

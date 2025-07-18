@@ -1,18 +1,14 @@
 use std::cell::RefCell;
 
-use js::{
-	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
-	class::{JsClass, OwnedBorrow, Readable, Trace},
-	prelude::{Coerced, Opt},
-};
+use js::class::{JsClass, OwnedBorrow, Readable, Trace};
+use js::prelude::{Coerced, Opt};
+use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
 use reblessive::tree::Stk;
 
-use crate::{
-	ctx::Context,
-	dbs::{Attach, Options},
-	doc::CursorDoc,
-	expr::FlowResultExt as _,
-};
+use crate::ctx::Context;
+use crate::dbs::{Attach, Options};
+use crate::doc::CursorDoc;
+use crate::expr::FlowResultExt as _;
 
 mod classes;
 

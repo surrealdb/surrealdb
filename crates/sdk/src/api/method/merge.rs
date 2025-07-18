@@ -1,10 +1,9 @@
 use super::validate_data;
 use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
+use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
 use crate::value::Value;
 use serde::Serialize;

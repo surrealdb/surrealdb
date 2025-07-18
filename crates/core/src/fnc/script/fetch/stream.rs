@@ -1,4 +1,5 @@
-use std::{future::Future, pin::Pin};
+use std::future::Future;
+use std::pin::Pin;
 
 use async_channel::Receiver;
 use futures::{Stream, StreamExt};

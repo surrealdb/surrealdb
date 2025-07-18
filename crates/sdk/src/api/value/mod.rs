@@ -1,22 +1,20 @@
-use crate::{Result, error::Api as ApiError};
+use crate::Result;
+use crate::error::Api as ApiError;
 use chrono::{DateTime, Utc};
 use revision::revisioned;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{
-	cmp::{Ordering, PartialEq, PartialOrd},
-	fmt,
-	ops::{Deref, Index},
-	str::FromStr,
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use std::cmp::{Ordering, PartialEq, PartialOrd};
+use std::fmt;
+use std::ops::{Deref, Index};
+use std::str::FromStr;
+use surrealdb_core::dbs::Action as CoreAction;
+use surrealdb_core::expr::{
+	Array as CoreArray, Datetime as CoreDatetime, Number as CoreNumber, RecordIdKeyLit as CoreId,
+	Thing as CoreThing, Value as CoreValue,
 };
-use surrealdb_core::{
-	dbs::Action as CoreAction,
-	expr::{
-		Array as CoreArray, Datetime as CoreDatetime, Id as CoreId, Number as CoreNumber,
-		Thing as CoreThing, Value as CoreValue,
-	},
-	sql::SqlValue as CoreSqlValue,
-	syn,
-};
+use surrealdb_core::sql::SqlValue as CoreSqlValue;
+use surrealdb_core::syn;
 use uuid::Uuid;
 
 mod obj;
@@ -225,7 +223,7 @@ impl FromStr for Value {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		Ok(Value::from_inner(surrealdb_core::syn::value(s)?.into()))
+		Ok(Value::from_inner(surrealdb_core::syn::expr(s)?.into()))
 	}
 }
 

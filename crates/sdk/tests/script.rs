@@ -1,8 +1,7 @@
 #![cfg(feature = "scripting")]
 
 mod parse;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parse::Parse;
 mod helpers;
@@ -10,8 +9,7 @@ use helpers::new_ds;
 use rust_decimal::Decimal;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::expr::Geometry;
-use surrealdb::expr::Number;
+use surrealdb::expr::{Geometry, Number};
 use surrealdb::sql::SqlValue;
 use surrealdb_core::expr::Value;
 

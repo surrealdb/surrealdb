@@ -3,7 +3,6 @@ use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
 use crate::buc::BucketConnections;
-use crate::cf;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -11,16 +10,17 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::Timestamp;
-use crate::dbs::{
-	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
-};
+use crate::dbs::{Attach, Capabilities, Executor, Notification, Options, Response, Session};
 use crate::err::Error;
-use crate::expr::LogicalPlan;
-use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
+use crate::expr::statements::DefineUserStatement;
+use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::trees::btree::BTree;
 use crate::idx::trees::store::IndexStores;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[expect(unused_imports)]
@@ -29,10 +29,11 @@ use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::Query;
-use crate::syn;
+use crate::kvs::{LockType, TransactionType};
+use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
+use crate::val::{Strand, Value};
+use crate::{cf, syn};
 #[allow(unused_imports)]
 use anyhow::bail;
 use anyhow::{Result, ensure};
@@ -41,6 +42,7 @@ use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use futures::{Future, Stream};
 use reblessive::TreeStack;
+use std::collections::BTreeMap;
 use std::fmt;
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -52,8 +54,7 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
-use tracing::instrument;
-use tracing::trace;
+use tracing::{instrument, trace};
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
@@ -622,7 +623,14 @@ impl Datastore {
 			// Display information in the logs
 			info!(target: TARGET, "Credentials were provided, and no root users were found. The root user '{user}' will be created");
 			// Create and new root user definition
-			let stm = DefineUserStatement::from((Base::Root, user, pass, INITIAL_USER_ROLE));
+			let stm = DefineUserStatement::new_with_password(
+				Base::Root,
+				// TODO: Null byte validity.
+				Strand::new(user.to_owned()).unwrap(),
+				pass,
+				// TODO: Null byte validity, always correct here probably.
+				Ident::new(INITIAL_USER_ROLE.to_owned()).unwrap(),
+			);
 			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());
@@ -852,7 +860,7 @@ impl Datastore {
 		&self,
 		txt: &str,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
@@ -864,7 +872,7 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<BTreeMap<String, Value>>,
 		query: S,
 	) -> Result<Vec<Response>>
 	where
@@ -989,40 +997,19 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn process(
 		&self,
-		ast: Query,
+		ast: Ast,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>> {
-		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
-		// Check if anonymous actors can execute queries when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "process".to_string(),
-				resource: "query".to_string(),
-			})
-		})?;
-
-		// Create a new query options
-		let opt = self.setup_options(sess);
-
-		// Create a default context
-		let mut ctx = self.setup_ctx()?;
-		// Start an execution context
-		sess.context(&mut ctx);
-		// Store the query variables
-		vars.attach(&mut ctx)?;
-		// Process all statements
-		Executor::execute(self, ctx.freeze(), opt, ast).await
+		//TODO: Insert planner here.
+		self.process_plan(ast.into(), sess, vars).await
 	}
 
 	pub async fn process_plan(
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<BTreeMap<String, Value>>,
 	) -> Result<Vec<Response>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1069,7 +1056,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(&self, val: Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn compute(
+		&self,
+		val: Expr,
+		sess: &Session,
+		vars: Option<BTreeMap<String, Value>>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can compute values when auth is enabled
@@ -1102,8 +1094,14 @@ impl Datastore {
 		sess.context(&mut ctx);
 		// Store the query variables
 		vars.attach(&mut ctx)?;
+		let txn_type = if val.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
+
 		// Start a new transaction
-		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
 		// Freeze the context
@@ -1112,11 +1110,12 @@ impl Datastore {
 		let res =
 			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
-		match (res.is_ok(), val.writeable()) {
+		if res.is_ok() && matches!(txn_type, TransactionType::Read) {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.commit().await?,
+			txn.commit().await?
+		} else {
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.cancel().await?,
+			txn.cancel().await?
 		};
 		// Return result
 		res
@@ -1145,7 +1144,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(&self, val: &Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn evaluate(
+		&self,
+		val: &Expr,
+		sess: &Session,
+		vars: Option<BTreeMap<String, Value>>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
@@ -1168,8 +1172,13 @@ impl Datastore {
 		sess.context(&mut ctx);
 		// Store the query variables
 		vars.attach(&mut ctx)?;
+		let txn_type = if val.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
 		// Start a new transaction
-		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
+		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
 		// Freeze the context
@@ -1178,11 +1187,12 @@ impl Datastore {
 		let res =
 			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
 		// Store any data
-		match (res.is_ok(), val.writeable()) {
+		if res.is_ok() && txn_type == TransactionType::Write {
 			// If the compute was successful, then commit if writeable
-			(true, true) => txn.commit().await?,
+			txn.commit().await?;
+		} else {
 			// Cancel if the compute was an error, or if readonly
-			(_, _) => txn.cancel().await?,
+			txn.cancel().await?;
 		};
 		// Return result
 		res
@@ -1334,22 +1344,27 @@ mod test {
 
 	#[tokio::test]
 	pub async fn very_deep_query() -> Result<()> {
-		use crate::expr::{Expression, Future, Number, Operator, Value};
+		use crate::expr::{BinaryOperator, Expr, Literal};
 		use crate::kvs::Datastore;
+		use crate::val::{Number, Value};
 		use reblessive::{Stack, Stk};
 
 		// build query manually to bypass query limits.
 		let mut stack = Stack::new();
-		async fn build_query(stk: &mut Stk, depth: usize) -> Value {
+		async fn build_query(stk: &mut Stk, depth: usize) -> Expr {
 			if depth == 0 {
-				Value::Expression(Box::new(Expression::Binary {
-					l: Value::Number(Number::Int(1)),
-					o: Operator::Add,
-					r: Value::Number(Number::Int(1)),
-				}))
+				Expr::Binary {
+					left: Box::new(Expr::Literal(Literal::Integer(1))),
+					op: BinaryOperator::Add,
+					right: Box::new(Expr::Literal(Literal::Integer(1))),
+				}
 			} else {
 				let q = stk.run(|stk| build_query(stk, depth - 1)).await;
-				Value::Future(Box::new(Future::from(q)))
+				Expr::Binary {
+					left: Box::new(q),
+					op: BinaryOperator::Add,
+					right: Box::new(Expr::Literal(Literal::Integer(1))),
+				}
 			}
 		}
 		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
@@ -1371,7 +1386,7 @@ mod test {
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
-		let txn = dbs.transaction(val.writeable().into(), Optimistic).await?;
+		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?;
 		// Store the transaction
 		ctx.set_transaction(txn.enclose());
 		// Freeze the context

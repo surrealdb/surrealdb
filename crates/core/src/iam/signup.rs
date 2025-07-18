@@ -4,13 +4,13 @@ use crate::dbs::Session;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::expr::AccessType;
-use crate::expr::Object;
-use crate::expr::Value;
-use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
-use crate::iam::{Actor, Level};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::iam::{Actor, Auth, Level};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::val::{Object, Value};
 use anyhow::{Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
@@ -42,8 +42,6 @@ impl From<SignupData> for Value {
 }
 
 pub async fn signup(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SignupData> {
-	// Check vars contains only computed values
-	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -85,7 +83,7 @@ pub async fn db_access(
 
 	// Check the access method type
 	// Currently, only the record access method supports signup
-	let AccessType::Record(ref at) = av.kind else {
+	let AccessType::Record(ref at) = av.access_type else {
 		bail!(Error::AccessMethodMismatch)
 	};
 
@@ -123,7 +121,7 @@ pub async fn db_access(
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
 				ac: Some(ac.clone()),
-				id: Some(rid.to_raw()),
+				id: Some(rid.to_string()),
 				..Claims::default()
 			};
 			// AUTHENTICATE clause
@@ -212,7 +210,8 @@ pub async fn db_access(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{dbs::Capabilities, iam::Role};
+	use crate::dbs::Capabilities;
+	use crate::iam::Role;
 	use chrono::Duration;
 	use std::collections::HashMap;
 

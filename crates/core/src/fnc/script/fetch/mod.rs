@@ -1,4 +1,6 @@
-use std::{error::Error, fmt, sync::Arc};
+use std::error::Error;
+use std::fmt;
+use std::sync::Arc;
 
 use js::{Class, Ctx, Result};
 

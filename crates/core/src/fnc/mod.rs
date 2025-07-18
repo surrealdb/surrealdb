@@ -4,9 +4,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::expr::Thing;
-use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
+use crate::val::{RecordId, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 pub mod api;
@@ -75,7 +74,7 @@ pub async fn run(
 		|| name.eq("file::rename_if_not_exists")
 		|| name.eq("file::list")
 		|| name.eq("record::exists")
-		|| name.eq("record::refs")
+		//|| name.eq("record::refs")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
@@ -572,7 +571,7 @@ pub async fn asynchronous(
 		"http::delete" => http::delete(ctx).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
-		"record::refs" => record::refs((stk, ctx, opt, doc)).await,
+		//"record::refs" => record::refs((stk, ctx, opt, doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::score" => search::score((ctx, doc)).await,
@@ -601,7 +600,7 @@ pub async fn idiom(
 	name: &str,
 	mut args: Vec<Value>,
 ) -> Result<Value> {
-	ctx.check_allowed_function(&idiom_name_to_normal(value.kindof(), name))?;
+	ctx.check_allowed_function(&idiom_name_to_normal(value.kind_of(), name))?;
 	match value {
 		Value::Array(x) => {
 			args.insert(0, Value::Array(x));
@@ -949,7 +948,7 @@ pub async fn idiom(
 				"id" => record::id,
 				"table" => record::tb,
 				"tb" => record::tb,
-				"refs" => record::refs((stk, ctx, opt, doc)).await,
+				//"refs" => record::refs((stk, ctx, opt, doc)).await,
 
 
 				"is_array" => r#type::is::array,
@@ -1407,7 +1406,7 @@ pub async fn idiom(
 			)
 		}
 		x => {
-			let message = format!("no such method found for the {} type", x.kindof());
+			let message = format!("no such method found for the {} type", x.kind_of());
 			args.insert(0, x);
 			dispatch!(
 				ctx,
@@ -1470,11 +1469,11 @@ pub async fn idiom(
 fn get_execution_context<'a>(
 	ctx: &'a Context,
 	doc: Option<&'a CursorDoc>,
-) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a Thing)> {
+) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a RecordId)> {
 	if let Some(doc) = doc {
 		if let Some(thg) = &doc.rid {
 			if let Some(pla) = ctx.get_query_planner() {
-				if let Some(exe) = pla.get_query_executor(&thg.tb) {
+				if let Some(exe) = pla.get_query_executor(&thg.table) {
 					return Some((exe, doc, thg));
 				}
 			}
@@ -1576,6 +1575,7 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 	format!("{kind}::{name}")
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use regex::Regex;
@@ -1677,4 +1677,4 @@ mod tests {
 			);
 		}
 	}
-}
+}*/

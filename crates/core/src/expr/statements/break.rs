@@ -1,8 +1,8 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::ControlFlow;
-use crate::expr::value::Value;
-use crate::{ctx::Context, expr::FlowResult};
+use crate::expr::{ControlFlow, FlowResult};
+use crate::val::Value;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -16,8 +16,8 @@ pub struct BreakStatement;
 
 impl BreakStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		false
+	pub(crate) fn read_only(&self) -> bool {
+		true
 	}
 
 	/// Process this type returning a computed simple Value

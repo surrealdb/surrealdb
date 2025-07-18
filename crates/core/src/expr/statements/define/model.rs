@@ -4,28 +4,27 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Permission, Strand, Value};
+use crate::expr::{Base, Ident, Permission};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Write};
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineModelStatement {
+	pub kind: DefineKind,
 	pub hash: String,
 	pub name: Ident,
 	pub version: String,
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
 }
 
 impl DefineModelStatement {
@@ -43,12 +42,16 @@ impl DefineModelStatement {
 		// Check if the definition exists
 		let (ns, db) = opt.ns_db()?;
 		if txn.get_db_model(ns, db, &self.name, &self.version).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::MlAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::MlAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
@@ -59,15 +62,14 @@ impl DefineModelStatement {
 			key,
 			revision::to_vec(&DefineModelStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
+				kind: DefineKind::Default,
 				..self.clone()
 			})?,
 			None,
 		)
 		.await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -76,11 +78,10 @@ impl DefineModelStatement {
 impl fmt::Display for DefineModelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "DEFINE MODEL")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {

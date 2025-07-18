@@ -21,11 +21,9 @@ pub mod ia;
 pub mod ip;
 pub mod vm;
 
-use crate::expr::array::Array;
-use crate::expr::id::Id;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
+use crate::key::category::{Categorise, Category};
 use crate::kvs::{KeyEncode, impl_key};
+use crate::val::{Array, RecordIdKey};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -110,7 +108,7 @@ pub struct Index<'a> {
 	pub ix: &'a str,
 	_e: u8,
 	pub fd: Cow<'a, Array>,
-	pub id: Option<Cow<'a, Id>>,
+	pub id: Option<Cow<'a, RecordIdKey>>,
 }
 impl_key!(Index<'a>);
 
@@ -127,7 +125,7 @@ impl<'a> Index<'a> {
 		tb: &'a str,
 		ix: &'a str,
 		fd: &'a Array,
-		id: Option<&'a Id>,
+		id: Option<&'a RecordIdKey>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -211,7 +209,7 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let fd = vec!["testfd1", "testfd2"].into();
-		let id = "testid".into();
+		let id = RecordIdKey::String("testid".to_owned());
 		let val = Index::new("testns", "testdb", "testtb", "testix", &fd, Some(&id));
 		let enc = Index::encode(&val).unwrap();
 		assert_eq!(

@@ -1,15 +1,12 @@
 //! Response class implementation
 
 use super::{Blob, Headers};
-use crate::fnc::script::fetch::{
-	RequestError,
-	body::{Body, BodyKind},
-	util,
-};
+use crate::fnc::script::fetch::body::{Body, BodyKind};
+use crate::fnc::script::fetch::{RequestError, util};
 use bytes::Bytes;
-use js::{
-	ArrayBuffer, Class, Ctx, Exception, JsLifetime, Result, Value, class::Trace, prelude::Opt,
-};
+use js::class::Trace;
+use js::prelude::Opt;
+use js::{ArrayBuffer, Class, Ctx, Exception, JsLifetime, Result, Value};
 use reqwest::Url;
 
 mod init;
@@ -302,7 +299,8 @@ impl<'js> Response<'js> {
 #[cfg(test)]
 mod test {
 	use crate::fnc::script::fetch::test::create_test_context;
-	use js::{CatchResultExt, promise::Promise};
+	use js::CatchResultExt;
+	use js::promise::Promise;
 
 	#[tokio::test]
 	async fn basic_response_use() {

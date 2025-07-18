@@ -3,14 +3,11 @@ use crate::kvs::KeyEncode;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{
-	dbs::{Session, node::Timestamp},
-	kvs::{
-		LockType::*,
-		TransactionType::*,
-		clock::{FakeClock, SizedClock},
-	},
-};
+use crate::dbs::Session;
+use crate::dbs::node::Timestamp;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::kvs::clock::{FakeClock, SizedClock};
 
 // Timestamp to versionstamp tests
 // This translation mechanism is currently used by the garbage collector to determine which change feed entries to delete.

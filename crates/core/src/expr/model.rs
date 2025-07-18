@@ -2,9 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::ControlFlow;
-use crate::expr::FlowResult;
-use crate::expr::value::Value;
+use crate::expr::{ControlFlow, Expr, FlowResult, Permission};
+use crate::iam::Action;
+use crate::val::{Value, value};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -34,26 +34,18 @@ const ARGUMENTS: &str = "The model expects 1 argument. The argument can be eithe
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Model")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Model {
 	pub name: String,
 	pub version: String,
-	pub args: Vec<Value>,
 }
 
 impl fmt::Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ml::{}<{}>(", self.name, self.version)?;
-		for (idx, p) in self.args.iter().enumerate() {
-			if idx != 0 {
-				write!(f, ",")?;
-			}
-			write!(f, "{}", p)?;
-		}
-		write!(f, ")")
+		write!(f, "ml::{}<{}>", self.name, self.version)
 	}
 }
 
@@ -65,8 +57,10 @@ impl Model {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
+		args: Vec<Expr>,
 	) -> FlowResult<Value> {
-		use crate::expr::{FlowResultExt, value::CoerceError};
+		use crate::expr::FlowResultExt;
+		use crate::val::CoerceError;
 
 		// Ensure futures are run
 		let opt = &opt.new_with_futures(true);
@@ -105,14 +99,7 @@ impl Model {
 				}
 			}
 		}
-		// Compute the function arguments
-		let mut args = stk
-			.scope(|stk| {
-				try_join_all(self.args.iter().map(|v| {
-					stk.run(|stk| async { v.compute(stk, ctx, opt, doc).await.catch_return() })
-				}))
-			})
-			.await?;
+
 		// Check the minimum argument length
 		if args.len() != 1 {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
@@ -120,8 +107,10 @@ impl Model {
 				message: ARGUMENTS.into(),
 			})));
 		}
+
 		// Take the first and only specified argument
-		match args.swap_remove(0) {
+		let argument = args.pop();
+		match argument {
 			// Perform bufferered compute
 			Value::Object(v) => {
 				// Compute the model function arguments
@@ -235,6 +224,7 @@ impl Model {
 		_ctx: &Context,
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
+		_args: Vec<Value>,
 	) -> FlowResult<Value> {
 		Err(ControlFlow::from(anyhow::Error::new(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),

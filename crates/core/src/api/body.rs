@@ -10,12 +10,10 @@ use futures::StreamExt;
 use http::header::CONTENT_TYPE;
 
 use crate::err::Error;
-use crate::expr;
 use crate::expr::Bytesize;
-use crate::expr::Value;
-use crate::rpc::format::cbor;
-use crate::rpc::format::json;
-use crate::rpc::format::revision;
+use crate::rpc::format::{cbor, json, revision};
+use crate::val;
+use crate::val::Value;
 
 use super::context::InvocationContext;
 use super::err::ApiError;
@@ -94,7 +92,7 @@ impl ApiBody {
 			}
 
 			if ctx.request_body_raw {
-				Ok(value.coerce_to::<expr::Bytes>()?.into())
+				Ok(value.coerce_to::<val::Bytes>()?.into())
 			} else {
 				Ok(value)
 			}
@@ -102,7 +100,7 @@ impl ApiBody {
 			let bytes = self.stream(ctx.request_body_max).await?;
 
 			if ctx.request_body_raw {
-				Ok(Value::Bytes(crate::expr::Bytes(bytes)))
+				Ok(Value::Bytes(val::Bytes(bytes)))
 			} else {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
@@ -111,7 +109,7 @@ impl ApiBody {
 					Some("application/json") => json::parse_value(&bytes),
 					Some("application/cbor") => cbor::parse_value(bytes),
 					Some("application/surrealdb") => revision::parse_value(bytes),
-					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
+					_ => return Ok(Value::Bytes(crate::val::Bytes(bytes))),
 				};
 
 				parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))

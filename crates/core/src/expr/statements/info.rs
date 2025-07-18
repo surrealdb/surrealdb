@@ -2,12 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Object, Value, Version};
-use crate::iam::Action;
-use crate::iam::ResourceKind;
+use crate::expr::{Base, Ident, Version};
+use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
-use anyhow::Result;
-use anyhow::bail;
+use crate::val::{Object, Value};
+use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -15,37 +14,29 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 
-#[revisioned(revision = 5)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.
-	#[revision(override(revision = 2, discriminant = 1), override(revision = 3, discriminant = 1))]
-	Root(#[revision(start = 2)] bool),
+	Root(bool),
 
-	#[revision(override(revision = 2, discriminant = 3), override(revision = 3, discriminant = 3))]
-	Ns(#[revision(start = 2)] bool),
+	Ns(bool),
 
-	#[revision(override(revision = 2, discriminant = 5), override(revision = 3, discriminant = 5))]
-	Db(#[revision(start = 2)] bool, #[revision(start = 5)] Option<Version>),
+	Db(bool, Option<Version>),
 
-	#[revision(override(revision = 2, discriminant = 7), override(revision = 3, discriminant = 7))]
-	Tb(Ident, #[revision(start = 2)] bool, #[revision(start = 5)] Option<Version>),
+	Tb(Ident, bool, Option<Version>),
 
-	#[revision(override(revision = 2, discriminant = 9), override(revision = 3, discriminant = 9))]
-	User(Ident, Option<Base>, #[revision(start = 2)] bool),
+	User(Ident, Option<Base>, bool),
 
-	#[revision(start = 3)]
-	#[revision(override(revision = 3, discriminant = 10))]
 	Index(Ident, Ident, bool),
 }
 
 impl InfoStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		false
+	pub(crate) fn read_only(&self) -> bool {
+		true
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -62,26 +53,28 @@ impl InfoStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
-				Ok(match structured {
-					true => Value::from(map! {
+				if *structured {
+					let object = map! {
 						"accesses".to_string() => process(txn.all_root_accesses().await?.iter().map(|v| v.redacted()).collect()),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"system".to_string() => system().await,
 						"users".to_string() => process(txn.all_root_users().await?),
-					}),
-					false => Value::from(map! {
+					};
+					Ok(Value::Object(Object(object)))
+				} else {
+					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"namespaces".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns().await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -96,12 +89,13 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						}
-					}),
-				})
+					};
+					Ok(Value::Object(Object(object)))
+				}
 			}
 			InfoStatement::Ns(structured) => {
 				// Allowed to run?
@@ -111,36 +105,39 @@ impl InfoStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
-				Ok(match structured {
-					true => Value::from(map! {
+				if *structured {
+					let object = map! {
 						"accesses".to_string() => process(txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()).collect()),
 						"databases".to_string() => process(txn.all_db(ns).await?),
 						"users".to_string() => process(txn.all_ns_users(ns).await?),
-					}),
-					false => Value::from(map! {
+					};
+					Ok(Value::Object(Object(object)))
+				} else {
+					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"databases".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db(ns).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_users(ns).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
-					}),
-				})
+					};
+					Ok(Value::Object(Object(object)))
+				}
 			}
 			InfoStatement::Db(structured, version) => {
 				// Allowed to run?
@@ -155,8 +152,8 @@ impl InfoStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
-				Ok(match structured {
-					true => Value::from(map! {
+				let res = if *structured {
+					let object = map! {
 						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()).collect()),
 						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
@@ -168,12 +165,14 @@ impl InfoStatement {
 						"users".to_string() => process(txn.all_db_users(ns, db).await?),
 						"configs".to_string() => process(txn.all_db_configs(ns, db).await?),
 						"sequences".to_string() => process(txn.all_db_sequences(ns, db).await?),
-					}),
-					false => Value::from(map! {
+					};
+					Value::Object(Object(object))
+				} else {
+					let object = map! {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter().map(|v| v.redacted()) {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -187,7 +186,7 @@ impl InfoStatement {
 						"analyzers".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_analyzers( ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -201,54 +200,56 @@ impl InfoStatement {
 						"functions".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"models".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_models(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"params".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_params(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb(ns, db, version).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_users(ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
 						"configs".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_configs(ns, db).await?.iter() {
-								out.insert(v.inner.name(), v.to_string().into());
+								out.insert(v.name(), v.to_string().into());
 							}
 							out.into()
 						},
 						"sequences".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_sequences( ns, db).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
-					}),
-				})
+					};
+					Value::Object(Object(object))
+				};
+				Ok(res)
 			}
 			InfoStatement::Tb(tb, structured, version) => {
 				// Allowed to run?
@@ -275,7 +276,7 @@ impl InfoStatement {
 						"events".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -289,7 +290,7 @@ impl InfoStatement {
 						"indexes".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_indexes(ns, db, tb).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},
@@ -303,7 +304,7 @@ impl InfoStatement {
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_views(ns, db, tb).await?.iter() {
-								out.insert(v.name.to_raw(), v.to_string().into());
+								out.insert(v.name.into_raw_string(), v.to_string().into());
 							}
 							out.into()
 						},

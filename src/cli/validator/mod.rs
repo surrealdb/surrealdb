@@ -1,9 +1,7 @@
 use std::collections::HashSet;
-use std::{
-	path::{Path, PathBuf},
-	str::FromStr,
-	time::Duration,
-};
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
 
 use surrealdb::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,

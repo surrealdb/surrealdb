@@ -1,14 +1,10 @@
-use crate::expr::Datetime;
-use crate::expr::value::Value;
+use crate::val::{Datetime, Duration, Value};
 use anyhow::Result;
-use chrono::TimeZone;
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use super::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
 

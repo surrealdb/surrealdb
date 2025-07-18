@@ -1,18 +1,12 @@
 use std::str::FromStr;
 
-use wiremock::{
-	Mock, MockServer, ResponseTemplate,
-	matchers::{body_string, header, method, path},
-};
+use wiremock::matchers::{body_string, header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::{
-	dbs::{
-		Capabilities, Session,
-		capabilities::{NetTarget, Targets},
-	},
-	kvs::Datastore,
-	syn,
-};
+use crate::dbs::capabilities::{NetTarget, Targets};
+use crate::dbs::{Capabilities, Session};
+use crate::kvs::Datastore;
+use crate::syn;
 
 #[tokio::test]
 async fn test_fetch_get() {
@@ -149,7 +143,7 @@ async fn test_fetch_error() {
 
 	assert_eq!(
 		res,
-		syn::value("{ body: {baz:2, foo:\"bar\"}, status: 500f }").unwrap().into(),
+		syn::value("{ body: {baz:2, foo:\"bar\"}, status: 500f }").unwrap(),
 		"Unexpected result: {:?}",
 		res
 	);

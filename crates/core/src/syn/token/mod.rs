@@ -1,12 +1,14 @@
 //! Module specifying the token representation of the parser.
 
-use std::{fmt, hash::Hash};
+use std::fmt;
+use std::hash::Hash;
 
 mod keyword;
 pub use keyword::Keyword;
 pub(crate) use keyword::keyword_t;
 mod mac;
-use crate::sql::{Algorithm, language::Language};
+use crate::sql::Algorithm;
+use crate::sql::language::Language;
 pub(crate) use mac::t;
 
 /// A location in the source passed to the lexer.

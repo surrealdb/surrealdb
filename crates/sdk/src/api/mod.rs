@@ -3,15 +3,12 @@
 use crate::Result;
 use anyhow::ensure;
 use method::BoxFuture;
-use semver::BuildMetadata;
-use semver::Version;
-use semver::VersionReq;
+use semver::{BuildMetadata, Version, VersionReq};
 use std::fmt;
 use std::fmt::Debug;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::watch;
 
 macro_rules! transparent_wrapper{
@@ -129,9 +126,7 @@ mod conn;
 
 use self::conn::Router;
 use self::err::Error;
-use self::opt::Endpoint;
-use self::opt::EndpointKind;
-use self::opt::WaitFor;
+use self::opt::{Endpoint, EndpointKind, WaitFor};
 
 pub use method::query::Response;
 

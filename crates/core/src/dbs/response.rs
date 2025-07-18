@@ -1,11 +1,9 @@
-use crate::expr::Value as CoreValue;
-use crate::sql::statement::Statement;
+use crate::expr::{Expr, TopLevelExpr};
+use crate::val::Value as CoreValue;
 use anyhow::Result;
-use revision::Revisioned;
-use revision::revisioned;
-use serde::Deserialize;
-use serde::Serialize;
+use revision::{Revisioned, revisioned};
 use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
@@ -25,16 +23,16 @@ pub enum QueryType {
 }
 
 impl QueryType {
+	/// Returns if this query type is not live nor kill
 	fn is_other(&self) -> bool {
 		matches!(self, Self::Other)
 	}
-}
 
-impl From<&Statement> for QueryType {
-	fn from(stmt: &Statement) -> Self {
-		match stmt {
-			Statement::Live(_) => QueryType::Live,
-			Statement::Kill(_) => QueryType::Kill,
+	/// Returns the query type for the given toplevel expression.
+	pub fn for_toplevel_expr(expr: &TopLevelExpr) -> Self {
+		match expr {
+			TopLevelExpr::Live(_) => QueryType::Live,
+			TopLevelExpr::Kill(_) => QueryType::Kill,
 			_ => QueryType::Other,
 		}
 	}

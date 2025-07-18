@@ -1,17 +1,11 @@
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::Action;
-use crate::dbs::Notification;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::doc::CursorDoc;
-use crate::doc::Document;
+use crate::dbs::{Action, Notification, Options, Statement};
+use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::paths::AC;
-use crate::expr::paths::META;
-use crate::expr::paths::RD;
-use crate::expr::paths::TK;
+use crate::expr::FlowResultExt as _;
+use crate::expr::paths::{AC, META, RD, TK};
 use crate::expr::permission::Permission;
-use crate::expr::{FlowResultExt as _, Value};
+use crate::val::Value;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use std::sync::Arc;
@@ -75,9 +69,10 @@ impl Document {
 			let current = self.current.doc.as_arc();
 			let initial = self.initial.doc.as_arc();
 			// Check if this is a delete statement
-			let doc = match stm.is_delete() {
-				true => &self.initial,
-				false => &self.current,
+			let doc = if stm.is_delete() {
+				&self.initial
+			} else {
+				&self.current
 			};
 			// Ensure that a session exists on the LIVE query
 			let sess = match lv.session.as_ref() {
@@ -144,12 +139,7 @@ impl Document {
 					// Ensure futures are run
 					let lqopt: &Options = &lqopt.new_with_futures(true);
 					// Output the full document before any changes were applied
-					let mut result = doc
-						.doc
-						.as_ref()
-						.compute(stk, &lqctx, lqopt, Some(doc))
-						.await
-						.catch_return()?;
+					let mut result = (*doc.doc.as_ref()).clone();
 					// Remove metadata fields on output
 					result.del(stk, &lqctx, lqopt, &*META).await?;
 					(Action::Delete, result)
@@ -233,7 +223,12 @@ impl Document {
 		// Check where condition
 		if let Some(cond) = stm.cond() {
 			// Check if the expression is truthy
-			if !cond.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
+			if !stk
+				.run(|stk| cond.0.compute(stk, ctx, opt, Some(doc)))
+				.await
+				.catch_return()?
+				.is_truthy()
+			{
 				// Ignore this document
 				return Err(IgnoreError::Ignore);
 			}

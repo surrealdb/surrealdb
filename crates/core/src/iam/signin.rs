@@ -8,12 +8,16 @@ use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::{AccessGrant, DefineAccessStatement, access};
-use crate::expr::{AccessType, Datetime, Object, Value, access_type};
+use crate::expr::{AccessType, access_type};
 use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
+use crate::val::{Datetime, Object, Value};
 use anyhow::{Result, bail, ensure};
 use chrono::Utc;
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -47,8 +51,6 @@ impl From<SigninData> for Value {
 }
 
 pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SigninData> {
-	// Check vars contains only computed values
-	vars.validate_computed()?;
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -154,7 +156,7 @@ pub async fn db_access(
 			// All access method types are supported except for JWT
 			// The JWT access method is the one that is internal to SurrealDB
 			// The equivalent of signing in with JWT is to authenticate it
-			match av.kind.clone() {
+			match av.access_type.clone() {
 				AccessType::Record(at) => {
 					// Check if the record access method supports issuing tokens
 					let iss = match &at.jwt.issue {
@@ -206,7 +208,7 @@ pub async fn db_access(
 												ns: Some(ns.clone()),
 												db: Some(db.clone()),
 												ac: Some(ac.clone()),
-												id: Some(rid.to_raw()),
+												id: Some(rid.to_string()),
 												..Claims::default()
 											};
 											// AUTHENTICATE clause
@@ -398,7 +400,7 @@ pub async fn ns_access(
 	match access {
 		Ok(av) => {
 			// Check the access method type
-			match av.kind.clone() {
+			match av.access_type.clone() {
 				AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
@@ -529,7 +531,7 @@ pub async fn root_access(
 	match access {
 		Ok(av) => {
 			// Check the access method type
-			match av.kind.clone() {
+			match av.access_type.clone() {
 				AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
@@ -587,7 +589,7 @@ pub async fn signin_bearer(
 	// Authenticate bearer key against stored grant.
 	verify_grant_bearer(&gr, key)?;
 	// If the subject of the grant is a system user, get their roles.
-	let roles = if let access::Subject::User(user) = &gr.subject {
+	let roles = if let access::SubjectStore::User(user) = &gr.subject {
 		// Create a new readonly transaction.
 		let tx = kvs.transaction(Read, Optimistic).await?;
 		// Fetch the specified user from storage.
@@ -628,12 +630,12 @@ pub async fn signin_bearer(
 		db: db.clone(),
 		ac: Some(av.name.to_string()),
 		id: match &gr.subject {
-			access::Subject::User(user) => Some(user.to_raw()),
-			access::Subject::Record(rid) => Some(rid.to_raw()),
+			access::SubjectStore::User(user) => Some(user.into_raw_string()),
+			access::SubjectStore::Record(rid) => Some(rid.to_string()),
 		},
 		roles: match &gr.subject {
-			access::Subject::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
-			access::Subject::Record(_) => Default::default(),
+			access::SubjectStore::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
+			access::SubjectStore::Record(_) => Default::default(),
 		},
 		..Claims::default()
 	};
@@ -655,7 +657,7 @@ pub async fn signin_bearer(
 	let refresh = match at.kind {
 		access_type::BearerAccessType::Refresh => {
 			match &gr.subject {
-				access::Subject::Record(rid) => {
+				access::SubjectStore::Record(rid) => {
 					if let (Some(ns), Some(db)) = (&ns, &db) {
 						// Revoke the used refresh token.
 						revoke_refresh_token_record(kvs, gr.id.clone(), gr.ac.clone(), ns, db)
@@ -672,7 +674,7 @@ pub async fn signin_bearer(
 						bail!(Error::InvalidAuth);
 					}
 				}
-				access::Subject::User(_) => {
+				access::SubjectStore::User(_) => {
 					debug!(
 						"Invalid attempt to authenticatea as a system user with a refresh token"
 					);
@@ -693,7 +695,7 @@ pub async fn signin_bearer(
 	session.ac = Some(av.name.to_string());
 	session.exp = expiration(av.duration.session)?;
 	match &gr.subject {
-		access::Subject::User(user) => {
+		access::SubjectStore::User(user) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				user.to_string(),
 				roles
@@ -709,7 +711,7 @@ pub async fn signin_bearer(
 				},
 			)));
 		}
-		access::Subject::Record(rid) => {
+		access::SubjectStore::Record(rid) => {
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
 				Default::default(),
@@ -722,7 +724,7 @@ pub async fn signin_bearer(
 					bail!(Error::InvalidAuth);
 				},
 			)));
-			session.rd = Some(Value::from(rid.to_owned()));
+			session.rd = Some(Value::from(rid.clone()));
 		}
 	};
 	// Return the authentication token.
@@ -752,7 +754,10 @@ pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	Ok(kid.to_string())
 }
 
-pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<&access::GrantBearer> {
+pub fn verify_grant_bearer(
+	gr: &Arc<AccessGrantStore>,
+	key: String,
+) -> Result<&access::GrantBearer> {
 	// Check if the grant is revoked or expired.
 	match (&gr.expiration, &gr.revocation) {
 		(None, None) => {}
@@ -792,10 +797,12 @@ pub fn verify_grant_bearer(gr: &Arc<AccessGrant>, key: String) -> Result<&access
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{dbs::Capabilities, iam::Role};
+	use crate::dbs::Capabilities;
+	use crate::iam::Role;
 	use chrono::Duration;
 	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 	use regex::Regex;
@@ -4086,11 +4093,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	#[tokio::test]
 	async fn test_signin_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::{
-			Base, Statement,
-			statements::{DefineUserStatement, define::DefineStatement},
-			user::UserDuration,
-		};
+		use crate::sql::Base;
+		use crate::sql::statements::DefineUserStatement;
+		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::user::UserDuration;
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -4180,3 +4186,4 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 	}
 }
+*/

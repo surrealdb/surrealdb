@@ -1,10 +1,8 @@
 //! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
 
-use axum::{
-	Router,
-	extract::DefaultBodyLimit,
-	routing::{get, post},
-};
+use axum::Router;
+use axum::extract::DefaultBodyLimit;
+use axum::routing::{get, post};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
@@ -24,23 +22,24 @@ where
 #[cfg(feature = "ml")]
 mod implementation {
 	use anyhow::Context;
-	use axum::{Extension, body::Body, extract::Path, response::Response};
+	use axum::Extension;
+	use axum::body::Body;
+	use axum::extract::Path;
+	use axum::response::Response;
 	use bytes::Bytes;
 	use futures_util::StreamExt;
 	use http::StatusCode;
-	use surrealdb_core::{
-		dbs::{Session, capabilities::RouteTarget},
-		iam::{Action, ResourceKind, check::check_ns_db},
-		kvs::{LockType, TransactionType},
-		ml::storage::surml_file::SurMlFile,
-		sql::statements::{DefineModelStatement, DefineStatement},
-	};
+	use surrealdb_core::dbs::Session;
+	use surrealdb_core::dbs::capabilities::RouteTarget;
+	use surrealdb_core::iam::check::check_ns_db;
+	use surrealdb_core::iam::{Action, ResourceKind};
+	use surrealdb_core::kvs::{LockType, TransactionType};
+	use surrealdb_core::ml::storage::surml_file::SurMlFile;
+	use surrealdb_core::sql::statements::{DefineModelStatement, DefineStatement};
 
-	use crate::net::{
-		AppState,
-		error::{Error as NetError, ResponseError},
-		output::Output,
-	};
+	use crate::net::AppState;
+	use crate::net::error::{Error as NetError, ResponseError};
+	use crate::net::output::Output;
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(
@@ -150,13 +149,14 @@ mod implementation {
 
 #[cfg(not(feature = "ml"))]
 mod implementation {
-	use axum::{Extension, body::Body, extract::Path};
-	use surrealdb_core::dbs::{Session, capabilities::RouteTarget};
+	use axum::Extension;
+	use axum::body::Body;
+	use axum::extract::Path;
+	use surrealdb_core::dbs::Session;
+	use surrealdb_core::dbs::capabilities::RouteTarget;
 
-	use crate::net::{
-		AppState,
-		error::{Error as NetError, ResponseError},
-	};
+	use crate::net::AppState;
+	use crate::net::error::{Error as NetError, ResponseError};
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(

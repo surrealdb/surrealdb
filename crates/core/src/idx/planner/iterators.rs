@@ -1,15 +1,15 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::expr::Ident;
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Array, Ident, Number, Thing, Value};
 use crate::idx::docids::DocId;
 use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
-use crate::kvs::{Key, Val};
-use crate::kvs::{KeyEncode, Transaction};
+use crate::kvs::{Key, KeyEncode, Transaction, Val};
+use crate::val::{Array, Number, RecordId, Value};
 use anyhow::Result;
 use radix_trie::Trie;
 use rust_decimal::Decimal;
@@ -178,13 +178,13 @@ impl ThingIterator {
 
 pub(crate) enum IndexItemRecord {
 	/// We just collected the key
-	Key(Arc<Thing>, IteratorRecord),
+	Key(Arc<RecordId>, IteratorRecord),
 	/// We have collected the key and the value
-	KeyValue(Arc<Thing>, Arc<Value>, IteratorRecord),
+	KeyValue(Arc<RecordId>, Arc<Value>, IteratorRecord),
 }
 
 impl IndexItemRecord {
-	fn new(t: Arc<Thing>, ir: IteratorRecord, val: Option<Arc<Value>>) -> Self {
+	fn new(t: Arc<RecordId>, ir: IteratorRecord, val: Option<Arc<Value>>) -> Self {
 		if let Some(val) = val {
 			Self::KeyValue(t, val, ir)
 		} else {
@@ -192,17 +192,17 @@ impl IndexItemRecord {
 		}
 	}
 
-	fn new_key(t: Thing, ir: IteratorRecord) -> Self {
+	fn new_key(t: RecordId, ir: IteratorRecord) -> Self {
 		Self::Key(Arc::new(t), ir)
 	}
-	fn thing(&self) -> &Thing {
+	fn thing(&self) -> &RecordId {
 		match self {
 			Self::Key(t, _) => t,
 			Self::KeyValue(t, _, _) => t,
 		}
 	}
 
-	pub(crate) fn consume(self) -> (Arc<Thing>, Option<Arc<Value>>, IteratorRecord) {
+	pub(crate) fn consume(self) -> (Arc<RecordId>, Option<Arc<Value>>, IteratorRecord) {
 		match self {
 			Self::Key(t, ir) => (t, None, ir),
 			Self::KeyValue(t, v, ir) => (t, Some(v), ir),
@@ -967,7 +967,7 @@ impl UniqueEqualThingIterator {
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = tx.get(key, None).await? {
-				let rid: Thing = revision::from_slice(&val)?;
+				let rid: RecordId = revision::from_slice(&val)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());
 				return Ok(B::from_one(record));
 			}
@@ -1086,14 +1086,14 @@ impl UniqueRangeThingIterator {
 				return Ok(records);
 			}
 			if self.r.matches(&k) {
-				let rid: Thing = revision::from_slice(&v)?;
+				let rid: RecordId = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
 
 		if self.r.matches_end() {
 			if let Some(v) = tx.get(&self.r.end, None).await? {
-				let rid: Thing = revision::from_slice(&v)?;
+				let rid: RecordId = revision::from_slice(&v)?;
 				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 			}
 		}
@@ -1164,7 +1164,7 @@ impl UniqueRangeReverseThingIterator {
 			self.r.end_incl = false;
 			// tx.scanr is end exclusive, so we have to manually collect the value using a get
 			if let Some(v) = tx.get(&self.r.r.end, None).await? {
-				let rid: Thing = revision::from_slice(&v)?;
+				let rid: RecordId = revision::from_slice(&v)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());
 				limit -= 1;
 				if limit == 0 {
@@ -1196,7 +1196,7 @@ impl UniqueRangeReverseThingIterator {
 			records.add(record);
 		}
 		for (_, v) in res {
-			let rid: Thing = revision::from_slice(&v)?;
+			let rid: RecordId = revision::from_slice(&v)?;
 			records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 		}
 		Ok(records)
@@ -1278,7 +1278,7 @@ impl UniqueUnionThingIterator {
 			}
 			if let Some(val) = tx.get(key, None).await? {
 				count += 1;
-				let rid: Thing = revision::from_slice(&val)?;
+				let rid: RecordId = revision::from_slice(&val)?;
 				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
 				if results.len() >= limit {
 					break;
@@ -1420,7 +1420,7 @@ impl MatchesThingIterator {
 	}
 }
 
-pub(crate) type KnnIteratorResult = (Arc<Thing>, f64, Option<Arc<Value>>);
+pub(crate) type KnnIteratorResult = (Arc<RecordId>, f64, Option<Arc<Value>>);
 
 pub(crate) struct KnnIterator {
 	irf: IteratorRef,

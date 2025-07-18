@@ -1,11 +1,12 @@
+use crate::expr::operator::NearestNeighbor;
 use crate::expr::with::With;
-use crate::expr::{Array, Expression, Idiom, Number, Object};
-use crate::expr::{Operator, Value};
+use crate::expr::{self, BinaryOperator, Expr, Idiom};
 use crate::idx::ft::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
+use crate::val::{Array, Number, Object, Value};
 use anyhow::Result;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -17,7 +18,7 @@ pub(super) struct PlanBuilder {
 	/// Do we have at least one index?
 	has_indexes: bool,
 	/// List of expressions that are not ranges, backed by an index
-	non_range_indexes: Vec<(Arc<Expression>, IndexOption)>,
+	non_range_indexes: Vec<(Arc<Expr>, IndexOption)>,
 	/// List of indexes allowed in this plan
 	with_indexes: Option<Vec<IndexReference>>,
 	/// Group each possible optimisations local to a SubQuery
@@ -192,7 +193,7 @@ impl PlanBuilder {
 			if vals.is_empty() {
 				break;
 			}
-			if vals.iter().all(|v| v.is_none_or_null()) {
+			if vals.iter().all(|v| v.is_nullish()) {
 				break;
 			}
 			cont += 1;
@@ -266,7 +267,7 @@ impl PlanBuilder {
 		}
 	}
 
-	fn add_index_option(&mut self, group_ref: GroupRef, exp: Arc<Expression>, io: IndexOption) {
+	fn add_index_option(&mut self, group_ref: GroupRef, exp: Arc<Expr>, io: IndexOption) {
 		if let IndexOperator::RangePart(_, _) = io.op() {
 			let level = self.groups.entry(group_ref).or_default();
 			match level.ranges.entry(io.ixr.clone()) {
@@ -292,13 +293,13 @@ pub(super) enum Plan {
 	/// Index scan filtered on records matching a given expression
 	/// 1: The optional expression associated with the index
 	/// 2: A record strategy
-	SingleIndex(Option<Arc<Expression>>, IndexOption, RecordStrategy),
+	SingleIndex(Option<Arc<Expr>>, IndexOption, RecordStrategy),
 	/// Union of filtered index scans
 	/// 1: A list of expression and index options
 	/// 2: A list of index ranges
 	/// 3: A record strategy
 	MultiIndex(
-		Vec<(Arc<Expression>, IndexOption)>,
+		Vec<(Arc<Expr>, IndexOption)>,
 		Vec<(IndexReference, UnionRangeQueryBuilder)>,
 		RecordStrategy,
 	),
@@ -327,7 +328,7 @@ pub(super) enum IndexOperator {
 	Equality(Arc<Value>),
 	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
-	RangePart(Operator, Arc<Value>),
+	RangePart(BinaryOperator, Arc<Value>),
 	Matches(String, Option<MatchRef>),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
@@ -385,10 +386,10 @@ impl IndexOption {
 
 	pub(crate) fn explain(&self) -> Value {
 		let mut e = HashMap::new();
-		e.insert("index", Value::from(self.ix_ref().name.0.clone()));
+		e.insert("index", Value::from(self.ix_ref().name.clone().into_strand()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
-				e.insert("operator", Value::from(Operator::Equal.to_string()));
+				e.insert("operator", Value::from(BinaryOperator::Equal.to_string()));
 				e.insert("value", Self::reduce_array(v));
 			}
 			IndexOperator::Union(v) => {
@@ -405,7 +406,7 @@ impl IndexOption {
 				e.insert("joins", joins);
 			}
 			IndexOperator::Matches(qs, a) => {
-				e.insert("operator", Value::from(Operator::Matches(*a).to_string()));
+				e.insert("operator", Value::from(BinaryOperator::Matches(*a).to_string()));
 				e.insert("value", Value::from(qs.to_owned()));
 			}
 			IndexOperator::RangePart(op, v) => {
@@ -413,13 +414,15 @@ impl IndexOption {
 				e.insert("value", v.as_ref().to_owned());
 			}
 			IndexOperator::Knn(a, k) => {
-				let op = Value::from(Operator::Knn(*k, None).to_string());
+				let expr = NearestNeighbor::KTree(*k).to_string();
+				let op = Value::from(expr);
 				let val = Value::Array(Array::from(a.as_ref().clone()));
 				e.insert("operator", op);
 				e.insert("value", val);
 			}
 			IndexOperator::Ann(a, k, ef) => {
-				let op = Value::from(Operator::Ann(*k, *ef).to_string());
+				let expr = NearestNeighbor::Approximate(*k, *ef).to_string();
+				let op = Value::from(expr);
 				let val = Value::Array(Array::from(a.as_ref().clone()));
 				e.insert("operator", op);
 				e.insert("value", val);
@@ -512,7 +515,7 @@ impl From<&RangeValue> for Value {
 
 #[derive(Default)]
 pub(super) struct Group {
-	ranges: HashMap<IndexReference, Vec<(Arc<Expression>, IndexOption)>>,
+	ranges: HashMap<IndexReference, Vec<(Arc<Expr>, IndexOption)>>,
 }
 
 impl Group {
@@ -545,13 +548,13 @@ impl Group {
 
 #[derive(Default, Debug)]
 pub(super) struct UnionRangeQueryBuilder {
-	pub(super) exps: HashSet<Arc<Expression>>,
+	pub(super) exps: HashSet<Arc<Expr>>,
 	pub(super) from: RangeValue,
 	pub(super) to: RangeValue,
 }
 
 impl UnionRangeQueryBuilder {
-	fn new_aggregate(exp_ios: Vec<(Arc<Expression>, IndexOption)>) -> Option<Self> {
+	fn new_aggregate(exp_ios: Vec<(Arc<Expr>, IndexOption)>) -> Option<Self> {
 		if exp_ios.is_empty() {
 			return None;
 		}
@@ -562,7 +565,7 @@ impl UnionRangeQueryBuilder {
 		Some(b)
 	}
 
-	fn new(exp: Arc<Expression>, io: IndexOption) -> Option<Self> {
+	fn new(exp: Arc<Expr>, io: IndexOption) -> Option<Self> {
 		let mut b = Self::default();
 		if b.add(exp, io) {
 			Some(b)
@@ -571,13 +574,13 @@ impl UnionRangeQueryBuilder {
 		}
 	}
 
-	fn add(&mut self, exp: Arc<Expression>, io: IndexOption) -> bool {
+	fn add(&mut self, exp: Arc<Expr>, io: IndexOption) -> bool {
 		if let IndexOperator::RangePart(op, val) = io.op() {
 			match op {
-				Operator::LessThan => self.to.set_to(val),
-				Operator::LessThanOrEqual => self.to.set_to_inclusive(val),
-				Operator::MoreThan => self.from.set_from(val),
-				Operator::MoreThanOrEqual => self.from.set_from_inclusive(val),
+				BinaryOperator::LessThan => self.to.set_to(val),
+				BinaryOperator::LessThanEqual => self.to.set_to_inclusive(val),
+				BinaryOperator::MoreThan => self.from.set_from(val),
+				BinaryOperator::MoreThanEqual => self.from.set_from_inclusive(val),
 				_ => return false,
 			}
 			self.exps.insert(exp);
@@ -588,11 +591,10 @@ impl UnionRangeQueryBuilder {
 
 #[cfg(test)]
 mod tests {
-	use crate::expr::{Array, Idiom, Value};
+	use crate::expr::{Ident, Idiom};
 	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-	use crate::sql::Idiom as SqlIdiom;
-	use crate::syn::Parse;
+	use crate::val::{Array, Value};
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
@@ -602,14 +604,14 @@ mod tests {
 		let mut set = HashSet::new();
 		let io1 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::from(SqlIdiom::parse("test")).into()),
+			Some(Idiom::field(Ident::new("test".to_owned()).unwrap()).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);
 
 		let io2 = IndexOption::new(
 			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::from(SqlIdiom::parse("test")).into()),
+			Some(Idiom::field(Ident::new("test".to_owned()).unwrap()).into()),
 			IdiomPosition::Right,
 			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
 		);

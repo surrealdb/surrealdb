@@ -7,7 +7,7 @@ use std::fmt::Display;
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
-#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum TableType {
@@ -55,22 +55,21 @@ impl InfoStructure for TableType {
 			TableType::Relation(rel) => Value::from(map! {
 				"kind".to_string() => "RELATION".into(),
 				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
-					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
+					tables.into_iter().map(|t| t.into_strand()).map(Value::from).collect::<Vec<_>>().into(),
 				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
-					tables.into_iter().map(|t| t.0).collect::<Vec<_>>().into(),
+					tables.into_iter().map(|t| t.into_strand()).map(Value::from).collect::<Vec<_>>().into(),
 				"enforced".to_string() => rel.enforced.into()
 			}),
 		}
 	}
 }
 
-#[revisioned(revision = 2)]
-#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[revisioned(revision = 1)]
+#[derive(Debug, Default, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Relation {
 	pub from: Option<Kind>,
 	pub to: Option<Kind>,
-	#[revision(start = 2)]
 	pub enforced: bool,
 }

@@ -8,7 +8,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct GraphQLConfig {
@@ -17,7 +17,7 @@ pub struct GraphQLConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum TablesConfig {
@@ -29,7 +29,7 @@ pub enum TablesConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct TableConfig {
@@ -37,7 +37,7 @@ pub struct TableConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum FunctionsConfig {
@@ -87,12 +87,13 @@ impl From<String> for TableConfig {
 	}
 }
 
+/*
 pub fn val_to_ident(val: Value) -> Result<Ident, Value> {
 	match val {
-		Value::Strand(s) => Ok(s.0.into()),
-		Value::Table(n) => Ok(n.0.into()),
+		Value::Strand(s) => Ok(Ident::from_strand(s)),
+		Value::Table(n) => Ok(Ident::from_strand(n)),
 		Value::Idiom(ref i) => match &i[..] {
-			[Part::Field(n)] => Ok(n.to_raw().into()),
+			[Part::Field(n)] => Ok(n.clone()),
 			_ => Err(val),
 		},
 		_ => Err(val),
@@ -110,7 +111,7 @@ impl TryFrom<Value> for TableConfig {
 			_ => Err(value),
 		}
 	}
-}
+}*/
 
 impl Display for TableConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -188,10 +189,10 @@ impl InfoStructure for FunctionsConfig {
 			FunctionsConfig::None => Value::None,
 			FunctionsConfig::Auto => Value::Strand("AUTO".into()),
 			FunctionsConfig::Include(fs) => Value::from(map!(
-				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.to_raw())).collect()),
+				"include" => Value::Array(fs.into_iter().map(|i| Value::from(i.into_raw_string())).collect()),
 			)),
 			FunctionsConfig::Exclude(fs) => Value::from(map!(
-				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.to_raw())).collect()),
+				"exclude" => Value::Array(fs.into_iter().map(|i| Value::from(i.into_raw_string())).collect()),
 			)),
 		}
 	}

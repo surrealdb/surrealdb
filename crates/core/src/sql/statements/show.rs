@@ -1,14 +1,11 @@
-use crate::sql::{Datetime, Table};
+use crate::sql::Ident;
+use crate::val::Datetime;
 use crate::vs::VersionStamp;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ShowSince {
 	Timestamp(Datetime),
 	Versionstamp(u64),
@@ -48,12 +45,10 @@ impl From<crate::expr::statements::show::ShowSince> for ShowSince {
 }
 
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct ShowStatement {
-	pub table: Option<Table>,
+	pub table: Option<Ident>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }

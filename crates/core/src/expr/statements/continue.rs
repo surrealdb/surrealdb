@@ -1,7 +1,7 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{ControlFlow, Value};
-use crate::{ctx::Context, expr::FlowResult};
+use crate::expr::{ControlFlow, FlowResult, Value};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -15,8 +15,8 @@ pub struct ContinueStatement;
 
 impl ContinueStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		false
+	pub(crate) fn read_only(&self) -> bool {
+		true
 	}
 
 	/// Process this type returning a computed simple Value

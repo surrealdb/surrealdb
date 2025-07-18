@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveModelStatement {
@@ -43,7 +43,7 @@ impl RemoveModelStatement {
 		let key = crate::key::database::ml::new(ns, db, &ml.name, &ml.version);
 		txn.del(key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// TODO Remove the model file from storage
 		// Ok all good
 		Ok(Value::None)
@@ -57,7 +57,7 @@ impl Display for RemoveModelStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " ml::{}<{}>", self.name.0, self.version)?;
+		write!(f, " ml::{}<{}>", &*self.name, self.version)?;
 		Ok(())
 	}
 }

@@ -1,15 +1,9 @@
 use super::server;
-use crate::api::Connect;
-use crate::api::ExtraFeatures;
-use crate::api::OnceLockExt;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::api::conn;
 use crate::api::conn::Router;
 use crate::api::method::BoxFuture;
-use crate::api::opt::Endpoint;
-use crate::api::opt::IntoEndpoint;
 use crate::api::opt::endpoint::into_endpoint;
+use crate::api::opt::{Endpoint, IntoEndpoint};
+use crate::api::{Connect, ExtraFeatures, OnceLockExt, Result, Surreal, conn};
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::OnceLock;

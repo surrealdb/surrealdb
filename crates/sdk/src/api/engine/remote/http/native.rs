@@ -1,14 +1,10 @@
 use super::Client;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::api::conn;
-use crate::api::conn::Route;
-use crate::api::conn::Router;
+use crate::api::conn::{Route, Router};
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
+use crate::api::{ExtraFeatures, Result, Surreal, conn};
 use crate::opt::WaitFor;
 use async_channel::Receiver;
 use indexmap::IndexMap;

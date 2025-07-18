@@ -2,10 +2,12 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::fmt::Fmt;
 use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, Values};
+use crate::expr::{Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
+use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -13,20 +15,19 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use uuid::Uuid;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::DefineKind;
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineEventStatement {
+	pub kind: DefineKind,
 	pub name: Ident,
 	pub what: Ident,
-	pub when: Value,
-	pub then: Values,
+	pub when: Expr,
+	pub then: Vec<Expr>,
 	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
 }
 
 impl DefineEventStatement {
@@ -45,12 +46,16 @@ impl DefineEventStatement {
 		let txn = ctx.tx();
 		// Check if the definition exists
 		if txn.get_tb_event(ns, db, &self.what, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::EvAlreadyExists {
-					name: self.name.to_string(),
-				});
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::EvAlreadyExists {
+							name: self.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
@@ -61,9 +66,7 @@ impl DefineEventStatement {
 		txn.set(
 			key,
 			revision::to_vec(&DefineEventStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
+				kind: DefineKind::Default,
 				..self.clone()
 			})?,
 			None,
@@ -86,7 +89,7 @@ impl DefineEventStatement {
 			cache.clear_tb(ns, db, &self.what);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -95,13 +98,19 @@ impl DefineEventStatement {
 impl Display for DefineEventStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE EVENT",)?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
-		}
-		write!(f, " {} ON {} WHEN {} THEN {}", self.name, self.what, self.when, self.then)?;
+		write!(
+			f,
+			" {} ON {} WHEN {} THEN {}",
+			self.name,
+			self.what,
+			self.when,
+			Fmt::comma_separated(self.then.iter())
+		)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?
 		}
@@ -115,7 +124,7 @@ impl InfoStructure for DefineEventStatement {
 			"name".to_string() => self.name.structure(),
 			"what".to_string() => self.what.structure(),
 			"when".to_string() => self.when.structure(),
-			"then".to_string() => self.then.structure(),
+			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

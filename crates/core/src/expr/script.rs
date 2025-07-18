@@ -1,4 +1,4 @@
-use crate::expr::strand::no_nul_bytes;
+use crate::val::strand::no_nul_bytes;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};

@@ -1,5 +1,9 @@
 use super::FlowResultExt;
-use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, expr::datetime::Datetime};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::Expr;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -8,25 +12,12 @@ use std::fmt;
 
 use super::Value;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Version(
-	#[revision(end = 2, convert_fn = "convert_version_datetime")] pub Datetime,
-	#[revision(start = 2)] pub Value,
-);
+pub struct Version(pub Expr);
 
 impl Version {
-	fn convert_version_datetime(
-		&mut self,
-		_revision: u16,
-		old: Datetime,
-	) -> Result<(), revision::Error> {
-		self.0 = Value::Datetime(old);
-		Ok(())
-	}
-
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -34,7 +25,7 @@ impl Version {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<u64> {
-		match self.0.compute(stk, ctx, opt, doc).await.catch_return()? {
+		match stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return()? {
 			Value::Datetime(v) => match v.to_u64() {
 				Some(ts) => Ok(ts),
 				_ => Err(anyhow::Error::new(Error::unreachable(

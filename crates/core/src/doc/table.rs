@@ -1,30 +1,22 @@
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::{Force, Statement};
+use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::data::Data;
-use crate::expr::expression::Expression;
-use crate::expr::field::{Field, Fields};
-use crate::expr::idiom::Idiom;
-use crate::expr::number::Number;
-use crate::expr::operator::Operator;
-use crate::expr::part::Part;
+use crate::expr::data::Assignment;
 use crate::expr::paths::ID;
 use crate::expr::statements::delete::DeleteStatement;
 use crate::expr::statements::ifelse::IfelseStatement;
 use crate::expr::statements::upsert::UpsertStatement;
 use crate::expr::statements::{DefineTableStatement, SelectStatement};
-use crate::expr::subquery::Subquery;
-use crate::expr::thing::Thing;
-use crate::expr::value::{Value, Values};
-use crate::expr::{Cond, FlowResultExt as _, Function, Groups, View};
+use crate::expr::{
+	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
+	FunctionCall, Groups, Idiom, Literal, Part, View,
+};
+use crate::val::{Array, RecordId, RecordIdKey, Value};
 use anyhow::{Result, bail};
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
-
-type Ops = Vec<(Idiom, Operator, Value)>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Action {
@@ -46,6 +38,19 @@ struct FieldDataContext<'a> {
 	groups: &'a Groups,
 	group_ids: Vec<Value>,
 	doc: &'a CursorDoc,
+}
+
+fn accumulate_delete_expr(accum: &mut Option<Expr>, new: Expr) {
+	match accum.take() {
+		Some(old) => {
+			*accum = Some(Expr::Binary {
+				left: Box::new(old),
+				op: BinaryOperator::Or,
+				right: Box::new(new),
+			});
+		}
+		None => *accum = Some(new),
+	}
 }
 
 impl Document {
@@ -72,7 +77,9 @@ impl Document {
 			Force::Table(tb)
 				if tb.first().is_some_and(|tb| {
 					tb.view.as_ref().is_some_and(|v| {
-						self.id.as_ref().is_some_and(|id| v.what.iter().any(|p| p.0 == id.tb))
+						self.id.as_ref().is_some_and(|id| {
+							v.what.iter().any(|p| p.as_str() == id.table.as_str())
+						})
 					})
 				}) =>
 			{
@@ -108,8 +115,8 @@ impl Document {
 						Some(cond) => {
 							// What do we do with the initial value on UPDATE and DELETE?
 							if !targeted_force
-								&& act != Action::Create && cond
-								.compute(stk, ctx, opt, Some(&self.initial))
+								&& act != Action::Create && stk
+								.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.initial)))
 								.await
 								.catch_return()?
 								.is_truthy()
@@ -134,8 +141,8 @@ impl Document {
 							}
 							// What do we do with the current value on CREATE and UPDATE?
 							if act != Action::Delete
-								&& cond
-									.compute(stk, ctx, opt, Some(&self.current))
+								&& stk
+									.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
 									.await
 									.catch_return()?
 									.is_truthy()
@@ -205,16 +212,16 @@ impl Document {
 				// No GROUP BY clause is specified
 				None => {
 					// Set the current record id
-					let rid = Thing {
-						tb: ft.name.to_raw(),
-						id: rid.id.clone(),
+					let rid = RecordId {
+						table: ft.name.into_raw_string(),
+						key: rid.key.clone(),
 					};
 					// Check if a WHERE clause is specified
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond
-								.compute(stk, ctx, opt, Some(&self.current))
+							match stk
+								.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
 								.await
 								.catch_return()?
 							{
@@ -224,7 +231,9 @@ impl Document {
 										// Delete the value in the table
 										Action::Delete => {
 											let stm = DeleteStatement {
-												what: Values(vec![Value::from(rid)]),
+												what: vec![Expr::Literal(Literal::RecordId(
+													rid.into_literal(),
+												))],
 												..DeleteStatement::default()
 											};
 											// Execute the statement
@@ -233,7 +242,9 @@ impl Document {
 										// Update the value in the table
 										_ => {
 											let stm = UpsertStatement {
-												what: Values(vec![Value::from(rid)]),
+												what: vec![Expr::Literal(Literal::RecordId(
+													rid.into_literal(),
+												))],
 												data: Some(
 													self.full(stk, ctx, opt, &tb.expr).await?,
 												),
@@ -247,7 +258,9 @@ impl Document {
 								_ => {
 									// Delete the value in the table
 									let stm = DeleteStatement {
-										what: Values(vec![Value::from(rid)]),
+										what: vec![Expr::Literal(Literal::RecordId(
+											rid.into_literal(),
+										))],
 										..DeleteStatement::default()
 									};
 									// Execute the statement
@@ -262,7 +275,9 @@ impl Document {
 								// Delete the value in the table
 								Action::Delete => {
 									let stm = DeleteStatement {
-										what: Values(vec![Value::from(rid)]),
+										what: vec![Expr::Literal(Literal::RecordId(
+											rid.into_literal(),
+										))],
 										..DeleteStatement::default()
 									};
 									// Execute the statement
@@ -271,7 +286,9 @@ impl Document {
 								// Update the value in the table
 								_ => {
 									let stm = UpsertStatement {
-										what: Values(vec![Value::from(rid)]),
+										what: vec![Expr::Literal(Literal::RecordId(
+											rid.into_literal(),
+										))],
 										data: Some(self.full(stk, ctx, opt, &tb.expr).await?),
 										..UpsertStatement::default()
 									};
@@ -318,7 +335,7 @@ impl Document {
 	) -> Result<Data> {
 		let mut data = exp.compute(stk, ctx, opt, Some(&self.current), false).await?;
 		data.cut(ID.as_ref());
-		Ok(Data::ReplaceExpression(data))
+		Ok(Data::ReplaceExpression(data.into_literal()))
 	}
 	//
 	async fn data(
@@ -331,11 +348,11 @@ impl Document {
 		//
 		let (set_ops, del_ops) = self.fields(stk, ctx, opt, &fdc).await?;
 		//
-		let thg = Thing {
-			tb: fdc.ft.name.to_raw(),
-			id: fdc.group_ids.into(),
+		let thg = RecordId {
+			table: fdc.ft.name.into_raw_string(),
+			key: RecordIdKey::Array(Array(fdc.group_ids)),
 		};
-		let what = Values(vec![Value::from(thg.clone())]);
+		let what = vec![Expr::Literal(Literal::RecordId(thg.clone().into_literal()))];
 		let stm = UpsertStatement {
 			what,
 			data: Some(Data::SetExpression(set_ops)),
@@ -343,34 +360,14 @@ impl Document {
 		};
 		stm.compute(stk, ctx, opt, None).await?;
 
-		if !del_ops.is_empty() {
-			let mut iter = del_ops.into_iter();
-			if let Some((i, o, v)) = iter.next() {
-				let mut root = Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(i),
-					o,
-					r: v,
-				}));
-				for (i, o, v) in iter {
-					let exp = Value::Expression(Box::new(Expression::Binary {
-						l: Value::Idiom(i),
-						o,
-						r: v,
-					}));
-					root = Value::Expression(Box::new(Expression::Binary {
-						l: root,
-						o: Operator::Or,
-						r: exp,
-					}));
-				}
-				let what = Values(vec![Value::from(thg)]);
-				let stm = DeleteStatement {
-					what,
-					cond: Some(Cond(root)),
-					..DeleteStatement::default()
-				};
-				stm.compute(stk, ctx, opt, None).await?;
-			}
+		if let Some(del_cond) = del_ops {
+			let what = vec![Expr::Literal(Literal::RecordId(thg.into_literal()))];
+			let stm = DeleteStatement {
+				what,
+				cond: Some(Cond(del_cond)),
+				..DeleteStatement::default()
+			};
+			stm.compute(stk, ctx, opt, None).await?;
 		}
 		Ok(())
 	}
@@ -381,11 +378,11 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		fdc: &FieldDataContext<'_>,
-	) -> Result<(Ops, Ops)> {
-		let mut set_ops: Ops = vec![];
-		let mut del_ops: Ops = vec![];
+	) -> Result<(Vec<Assignment>, Option<Expr>)> {
+		let mut set_ops = Vec::new();
+		let mut del_ops = None;
 		//
-		for field in fdc.view.expr.other() {
+		for field in fdc.view.expr.iter_non_all_fields() {
 			// Process the field
 			if let Field::Single {
 				expr,
@@ -400,15 +397,15 @@ impl Document {
 				}
 				// Process the field projection
 				match expr {
-					Value::Function(f) if f.is_rolling() => match f.name() {
-						Some("count") => {
+					Expr::FunctionCall(f) if f.receiver.is_rolling() => match &f.receiver {
+						Function::Normal(x) if x == "count" => {
 							let val =
 								f.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						Some(name) if name == "time::min" => {
-							let val = f.args()[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+						Function::Normal(name) if name == "time::min" => {
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -416,7 +413,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.into_raw_string(),
 										message: format!(
 											"This function expects a datetime but found {val}"
 										),
@@ -425,9 +422,9 @@ impl Document {
 							};
 							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some(name) if name == "time::max" => {
-							let val = f.args()[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+						Function::Normal(name) if name == "time::max" => {
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -435,7 +432,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.into_raw_string(),
 										message: format!(
 											"This function expects a datetime but found {val}"
 										),
@@ -444,9 +441,9 @@ impl Document {
 							};
 							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some(name) if name == "math::sum" => {
-							let val = f.args()[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+						Function::Normal(name) if name == "math::sum" => {
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -454,7 +451,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.into_raw_string(),
 										message: format!(
 											"This function expects a number but found {val}"
 										),
@@ -463,9 +460,9 @@ impl Document {
 							};
 							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
 						}
-						Some(name) if name == "math::min" => {
-							let val = f.args()[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+						Function::Normal(name) if name == "math::min" => {
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -473,7 +470,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.into_raw_string(),
 										message: format!(
 											"This function expects a number but found {val}"
 										),
@@ -482,9 +479,9 @@ impl Document {
 							};
 							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some(name) if name == "math::max" => {
-							let val = f.args()[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+						Function::Normal(name) if name == "math::max" => {
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -492,7 +489,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.into_raw_string(),
 										message: format!(
 											"This function expects a number but found {val}"
 										),
@@ -501,9 +498,9 @@ impl Document {
 							};
 							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
 						}
-						Some(name) if name == "math::mean" => {
-							let val = f.args()[0]
-								.compute(stk, ctx, opt, Some(fdc.doc))
+						Function::Normal(name) if name == "math::mean" => {
+							let val = stk
+								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
 								.await
 								.catch_return()?;
 							let val = match val {
@@ -511,7 +508,7 @@ impl Document {
 								val => {
 									bail!(Error::InvalidAggregation {
 										name: name.to_string(),
-										table: fdc.ft.name.to_raw(),
+										table: fdc.ft.name.into_raw_string(),
 										message: format!(
 											"This function expects a number but found {val}"
 										),
@@ -523,8 +520,10 @@ impl Document {
 						f => fail!("Unexpected function {f:?} encountered"),
 					},
 					_ => {
-						let val =
-							expr.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
+						let val = stk
+							.run(|stk| expr.compute(stk, ctx, opt, Some(fdc.doc)))
+							.await
+							.catch_return()?;
 						self.set(&mut set_ops, idiom, val)?;
 					}
 				}
@@ -534,28 +533,48 @@ impl Document {
 	}
 
 	/// Set the field in the foreign table
-	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) -> Result<()> {
-		ops.push((key, Operator::Equal, val));
+	fn set(&self, ops: &mut Vec<Assignment>, key: Idiom, val: Value) -> Result<()> {
+		ops.push(Assignment {
+			place: key,
+			operator: AssignOperator::Assign,
+			value: val.into_literal(),
+		});
 		// Everything ok
 		Ok(())
 	}
 	/// Increment or decrement the field in the foreign table
 	fn chg(
 		&self,
-		set_ops: &mut Ops,
-		del_ops: &mut Ops,
+		set_ops: &mut Vec<Assignment>,
+		del_cond: &mut Option<Expr>,
 		act: &FieldAction,
 		key: Idiom,
 		val: Value,
 	) -> Result<()> {
 		match act {
 			FieldAction::Add => {
-				set_ops.push((key.clone(), Operator::Inc, val));
+				set_ops.push(Assignment {
+					place: key.clone(),
+					operator: AssignOperator::Add,
+					value: val.into_literal(),
+				});
 			}
 			FieldAction::Sub => {
-				set_ops.push((key.clone(), Operator::Dec, val));
+				set_ops.push(Assignment {
+					place: key.clone(),
+					operator: AssignOperator::Subtract,
+					value: val.into_literal(),
+				});
+
 				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key, Operator::Equal, Value::from(0)));
+				accumulate_delete_expr(
+					del_cond,
+					Expr::Binary {
+						left: Box::new(Expr::Idiom(key)),
+						op: BinaryOperator::Equal,
+						right: Box::new(Expr::Literal(Literal::Integer(1))),
+					},
+				);
 			}
 		}
 		// Everything ok
@@ -565,54 +584,75 @@ impl Document {
 	/// Set the new minimum value for the field in the foreign table
 	fn min(
 		&self,
-		set_ops: &mut Ops,
-		del_ops: &mut Ops,
+		set_ops: &mut Vec<Assignment>,
+		del_cond: &mut Option<Expr>,
 		fdc: &FieldDataContext,
 		field: &Field,
 		key: Idiom,
 		val: Value,
 	) -> Result<()> {
 		// Key for the value count
-		let mut key_c = Idiom::from(vec![Part::from("__")]);
-		key_c.0.push(Part::from(key.to_hash()));
-		key_c.0.push(Part::from("c"));
+		let mut key_c = Idiom(vec![Part::field("__".to_owned()).unwrap()]);
+		key_c.0.push(Part::field(key.to_hash()).unwrap());
+		key_c.0.push(Part::field("c".to_owned()).unwrap());
+
 		match fdc.act {
 			FieldAction::Add => {
-				set_ops.push((
-					key.clone(),
-					Operator::Equal,
-					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+				let val_lit = val.into_literal();
+				set_ops.push(Assignment {
+					place: key.clone(),
+					operator: AssignOperator::Assign,
+					value: Expr::IfElse(Box::new(IfelseStatement {
 						exprs: vec![(
-							Value::Expression(Box::new(Expression::Binary {
-								l: Value::Expression(Box::new(Expression::Binary {
-									l: Value::Idiom(key.clone()),
-									o: Operator::Exact,
-									r: Value::None,
-								})),
-								o: Operator::Or,
-								r: Value::Expression(Box::new(Expression::Binary {
-									l: Value::Idiom(key.clone()),
-									o: Operator::MoreThan,
-									r: val.clone(),
-								})),
-							})),
-							val,
+							Expr::Binary {
+								left: Box::new(Expr::Binary {
+									left: Box::new(Expr::Idiom(key.clone())),
+									op: BinaryOperator::ExactEqual,
+									right: Box::new(Expr::Literal(Literal::None)),
+								}),
+								op: BinaryOperator::Or,
+								right: Box::new(Expr::Binary {
+									left: Box::new(Expr::Idiom(key.clone())),
+									op: BinaryOperator::MoreThan,
+									right: Box::new(val_lit.clone()),
+								}),
+							},
+							val_lit,
 						)],
-						close: Some(Value::Idiom(key)),
-					}))),
-				));
-				set_ops.push((key_c, Operator::Inc, Value::from(1)))
+						close: Some(Expr::Idiom(key)),
+					})),
+				});
+				set_ops.push(Assignment {
+					place: key_c,
+					operator: AssignOperator::Add,
+					value: Expr::Literal(Literal::Integer(1)),
+				});
 			}
 			FieldAction::Sub => {
 				// If it is equal to the previous MIN value,
 				// as we can't know what was the previous MIN value,
 				// we have to recompute it
 				let subquery = Self::one_group_query(fdc, field, &key, val)?;
-				set_ops.push((key.clone(), Operator::Equal, subquery));
+				set_ops.push(Assignment {
+					place: key.clone(),
+					operator: AssignOperator::Assign,
+					value: subquery,
+				});
 				//  Decrement the number of values
-				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				set_ops.push(Assignment {
+					place: key_c.clone(),
+					operator: AssignOperator::Subtract,
+					value: Expr::Literal(Literal::Integer(1)),
+				});
 				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+				accumulate_delete_expr(
+					del_cond,
+					Expr::Binary {
+						left: Box::new(Expr::Idiom(key_c)),
+						op: BinaryOperator::Equal,
+						right: Box::new(Expr::Literal(Literal::Integer(0))),
+					},
+				)
 			}
 		}
 		// Everything ok
@@ -621,55 +661,75 @@ impl Document {
 	/// Set the new maximum value for the field in the foreign table
 	fn max(
 		&self,
-		set_ops: &mut Ops,
-		del_ops: &mut Ops,
+		set_ops: &mut Vec<Assignment>,
+		del_cond: &mut Option<Expr>,
 		fdc: &FieldDataContext,
 		field: &Field,
 		key: Idiom,
 		val: Value,
 	) -> Result<()> {
 		// Key for the value count
-		let mut key_c = Idiom::from(vec![Part::from("__")]);
-		key_c.0.push(Part::from(key.to_hash()));
-		key_c.0.push(Part::from("c"));
+		let mut key_c = Idiom(vec![Part::field("__".to_owned()).unwrap()]);
+		key_c.0.push(Part::field(key.to_hash()).unwrap());
+		key_c.0.push(Part::field("c".to_owned()).unwrap());
 		//
 		match fdc.act {
 			FieldAction::Add => {
-				set_ops.push((
-					key.clone(),
-					Operator::Equal,
-					Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+				let val_lit = val.into_literal();
+				set_ops.push(Assignment {
+					place: key.clone(),
+					operator: AssignOperator::Assign,
+					value: Expr::IfElse(Box::new(IfelseStatement {
 						exprs: vec![(
-							Value::Expression(Box::new(Expression::Binary {
-								l: Value::Expression(Box::new(Expression::Binary {
-									l: Value::Idiom(key.clone()),
-									o: Operator::Exact,
-									r: Value::None,
-								})),
-								o: Operator::Or,
-								r: Value::Expression(Box::new(Expression::Binary {
-									l: Value::Idiom(key.clone()),
-									o: Operator::LessThan,
-									r: val.clone(),
-								})),
-							})),
-							val,
+							Expr::Binary {
+								left: Box::new(Expr::Binary {
+									left: Box::new(Expr::Idiom(key.clone())),
+									op: BinaryOperator::ExactEqual,
+									right: Box::new(Expr::Literal(Literal::None)),
+								}),
+								op: BinaryOperator::Or,
+								right: Box::new(Expr::Binary {
+									left: Box::new(Expr::Idiom(key.clone())),
+									op: BinaryOperator::LessThan,
+									right: Box::new(val_lit.clone()),
+								}),
+							},
+							val_lit,
 						)],
-						close: Some(Value::Idiom(key)),
-					}))),
-				));
-				set_ops.push((key_c, Operator::Inc, Value::from(1)))
+						close: Some(Expr::Idiom(key)),
+					})),
+				});
+				set_ops.push(Assignment {
+					place: key_c,
+					operator: AssignOperator::Add,
+					value: Expr::Literal(Literal::Integer(1)),
+				})
 			}
 			FieldAction::Sub => {
 				// If it is equal to the previous MAX value,
 				// as we can't know what was the previous MAX value,
 				// we have to recompute the MAX
 				let subquery = Self::one_group_query(fdc, field, &key, val)?;
-				set_ops.push((key.clone(), Operator::Equal, subquery));
+				set_ops.push(Assignment {
+					place: key.clone(),
+					operator: AssignOperator::Assign,
+					value: subquery,
+				});
 				//  Decrement the number of values
-				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				set_ops.push(Assignment {
+					place: key_c.clone(),
+					operator: AssignOperator::Subtract,
+					value: Expr::Literal(Literal::Integer(1)),
+				});
 				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+				accumulate_delete_expr(
+					del_cond,
+					Expr::Binary {
+						left: Box::new(Expr::Idiom(key_c)),
+						op: BinaryOperator::Equal,
+						right: Box::new(Expr::Literal(Literal::Integer(0))),
+					},
+				)
 			}
 		}
 		// Everything ok
@@ -679,76 +739,82 @@ impl Document {
 	/// Set the new average value for the field in the foreign table
 	fn mean(
 		&self,
-		set_ops: &mut Ops,
-		del_ops: &mut Ops,
+		set_ops: &mut Vec<Assignment>,
+		del_cond: &mut Option<Expr>,
 		act: &FieldAction,
 		key: Idiom,
 		val: Value,
 	) -> Result<()> {
 		// Key for the value count
-		let mut key_c = Idiom::from(vec![Part::from("__")]);
-		key_c.0.push(Part::from(key.to_hash()));
-		key_c.0.push(Part::from("c"));
+
+		let key_c = Idiom(vec![
+			Part::field("__".to_owned()).unwrap(),
+			Part::field(key.to_hash()).unwrap(),
+			Part::field("c".to_owned()).unwrap(),
+		]);
 		//
-		set_ops.push((
-			key.clone(),
-			Operator::Equal,
-			Value::Expression(Box::new(Expression::Binary {
-				l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression::Binary {
-						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression::Binary {
-								l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression::Binary {
-										l: Value::Idiom(key),
-										o: Operator::Nco,
-										r: Value::Number(Number::Int(0)),
-									}),
-								)))),
-								o: Operator::Mul,
-								r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
-									Box::new(Expression::Binary {
-										l: Value::Idiom(key_c.clone()),
-										o: Operator::Nco,
-										r: Value::Number(Number::Int(0)),
-									}),
-								)))),
-							},
-						))))),
-						o: match act {
-							FieldAction::Sub => Operator::Sub,
-							FieldAction::Add => Operator::Add,
-						},
-						r: val,
+		set_ops.push(Assignment {
+			place: key.clone(),
+			operator: AssignOperator::Assign,
+			value: Expr::Binary {
+				left: Box::new(Expr::Binary {
+					left: Box::new(Expr::Binary {
+						left: Box::new(Expr::Binary {
+							left: Box::new(Expr::Idiom(key)),
+							op: BinaryOperator::NullCoalescing,
+							right: Box::new(Expr::Literal(Literal::Integer(0))),
+						}),
+						op: BinaryOperator::Multiply,
+						right: Box::new(Expr::Binary {
+							left: Box::new(Expr::Idiom(key_c.clone())),
+							op: BinaryOperator::NullCoalescing,
+							right: Box::new(Expr::Literal(Literal::Integer(0))),
+						}),
+					}),
+					op: match act {
+						FieldAction::Sub => BinaryOperator::Subtract,
+						FieldAction::Add => BinaryOperator::Add,
 					},
-				))))),
-				o: Operator::Div,
-				r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-					Expression::Binary {
-						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
-							Expression::Binary {
-								l: Value::Idiom(key_c.clone()),
-								o: Operator::Nco,
-								r: Value::Number(Number::Int(0)),
-							},
-						))))),
-						o: match act {
-							FieldAction::Sub => Operator::Sub,
-							FieldAction::Add => Operator::Add,
-						},
-						r: Value::from(1),
+					right: Box::new(val.into_literal()),
+				}),
+				op: BinaryOperator::Divide,
+				right: Box::new(Expr::Binary {
+					left: Box::new(Expr::Binary {
+						left: Box::new(Expr::Idiom(key_c.clone())),
+						op: BinaryOperator::NullCoalescing,
+						right: Box::new(Expr::Literal(Literal::Integer(0))),
+					}),
+					op: match act {
+						FieldAction::Sub => BinaryOperator::Subtract,
+						FieldAction::Add => BinaryOperator::Add,
 					},
-				))))),
-			})),
-		));
+					right: Box::new(Expr::Literal(Literal::Integer(1))),
+				}),
+			},
+		});
 		match act {
 			//  Increment the number of values
-			FieldAction::Add => set_ops.push((key_c, Operator::Inc, Value::from(1))),
+			FieldAction::Add => set_ops.push(Assignment {
+				place: key_c,
+				operator: AssignOperator::Add,
+				value: Expr::Literal(Literal::Integer(1)),
+			}),
 			FieldAction::Sub => {
 				//  Decrement the number of values
-				set_ops.push((key_c.clone(), Operator::Dec, Value::from(1)));
+				set_ops.push(Assignment {
+					place: key_c.clone(),
+					operator: AssignOperator::Subtract,
+					value: Expr::Literal(Literal::Integer(1)),
+				});
 				// Add a purge condition (delete record if the number of values is 0)
-				del_ops.push((key_c, Operator::Equal, Value::from(0)));
+				accumulate_delete_expr(
+					del_cond,
+					Expr::Binary {
+						left: Box::new(Expr::Idiom(key_c)),
+						op: BinaryOperator::Equal,
+						right: Box::new(Expr::Literal(Literal::Integer(0))),
+					},
+				)
 			}
 		}
 		// Everything ok
@@ -761,50 +827,50 @@ impl Document {
 		field: &Field,
 		key: &Idiom,
 		val: Value,
-	) -> Result<Value> {
+	) -> Result<Expr> {
 		// Build the condition merging the optional user provided condition and the group
 		let mut iter = fdc.groups.0.iter().enumerate();
 		let cond = if let Some((i, g)) = iter.next() {
-			let mut root = Value::Expression(Box::new(Expression::Binary {
-				l: Value::Idiom(g.0.clone()),
-				o: Operator::Equal,
-				r: fdc.group_ids[i].clone(),
-			}));
+			let mut root = Expr::Binary {
+				left: Box::new(Expr::Idiom(g.0.clone())),
+				op: BinaryOperator::Equal,
+				right: Box::new(fdc.group_ids[i].clone().into_literal()),
+			};
 			for (i, g) in iter {
-				let exp = Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(g.0.clone()),
-					o: Operator::Equal,
-					r: fdc.group_ids[i].clone(),
-				}));
-				root = Value::Expression(Box::new(Expression::Binary {
-					l: root,
-					o: Operator::And,
-					r: exp,
-				}));
+				let exp = Expr::Binary {
+					left: Box::new(Expr::Idiom(g.0.clone())),
+					op: BinaryOperator::Equal,
+					right: Box::new(fdc.group_ids[i].clone().into_literal()),
+				};
+				root = Expr::Binary {
+					left: Box::new(root),
+					op: BinaryOperator::And,
+					right: Box::new(exp),
+				};
 			}
 			if let Some(c) = &fdc.view.cond {
-				root = Value::Expression(Box::new(Expression::Binary {
-					l: root,
-					o: Operator::And,
-					r: c.0.clone(),
-				}));
+				root = Expr::Binary {
+					left: Box::new(root),
+					op: BinaryOperator::And,
+					right: Box::new(c.0.clone()),
+				};
 			}
 			Some(Cond(root))
 		} else {
 			fdc.view.cond.clone()
 		};
 
-		let group_select = Value::Subquery(Box::new(Subquery::Select(SelectStatement {
-			expr: Fields(vec![field.clone()], false),
+		let group_select = Expr::Select(Box::new(SelectStatement {
+			expr: Fields::Select(vec![field.clone()]),
 			cond,
-			what: (&fdc.view.what).into(),
+			what: fdc.view.what.iter().map(|x| Expr::Table(x.clone())).collect(),
 			group: Some(fdc.groups.clone()),
 			..SelectStatement::default()
-		})));
-		let array_first = Value::Function(Box::new(Function::Normal(
-			"array::first".to_string(),
-			vec![group_select],
-		)));
+		}));
+		let array_first = Expr::FunctionCall(Box::new(FunctionCall {
+			receiver: Function::Normal("array::first".to_string()),
+			arguments: vec![group_select],
+		}));
 		let ident = match field {
 			Field::Single {
 				alias: Some(alias),
@@ -815,17 +881,17 @@ impl Document {
 			},
 			f => fail!("Unexpected field type encountered: {f:?}"),
 		};
-		let compute_query = Value::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
-		Ok(Value::Subquery(Box::new(Subquery::Ifelse(IfelseStatement {
+		let compute_query = Expr::Idiom(Idiom(vec![Part::Start(array_first), Part::Field(ident)]));
+		Ok(Expr::IfElse(Box::new(IfelseStatement {
 			exprs: vec![(
-				Value::Expression(Box::new(Expression::Binary {
-					l: Value::Idiom(key.clone()),
-					o: Operator::Equal,
-					r: val.clone(),
-				})),
+				Expr::Binary {
+					left: Box::new(Expr::Idiom(key.clone())),
+					op: BinaryOperator::Equal,
+					right: Box::new(val.clone().into_literal()),
+				},
 				compute_query,
 			)],
-			close: Some(Value::Idiom(key.clone())),
-		}))))
+			close: Some(Expr::Idiom(key.clone())),
+		})))
 	}
 }

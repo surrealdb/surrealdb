@@ -2,25 +2,24 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Data, FlowResultExt as _, Output, Timeout, Value};
+use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
+use crate::val::RecordId;
 use anyhow::{Result, bail, ensure};
-
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RelateStatement {
-	#[revision(start = 2)]
 	pub only: bool,
-	pub kind: Value,
-	pub from: Value,
-	pub with: Value,
+	pub kind: Expr,
+	pub from: Expr,
+	pub with: Expr,
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,
@@ -30,8 +29,8 @@ pub struct RelateStatement {
 
 impl RelateStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
+	pub(crate) fn read_only(&self) -> bool {
+		false
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -59,7 +58,7 @@ impl RelateStatement {
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
-			match self.from.compute(stk, &ctx, opt, doc).await.catch_return()? {
+			match stk.run(|stk| self.from.compute(stk, &ctx, opt, doc)).await.catch_return()? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -101,7 +100,7 @@ impl RelateStatement {
 		// Loop over the with targets
 		let with = {
 			let mut out = Vec::new();
-			match self.with.compute(stk, &ctx, opt, doc).await.catch_return()? {
+			match stk.run(|stk| self.with.compute(stk, &ctx, opt, doc)).await.catch_return()? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -144,21 +143,26 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match &self.kind.compute(stk, &ctx, opt, doc).await.catch_return()? {
+				match stk.run(|stk| self.kind.compute(stk, &ctx, opt, doc)).await.catch_return()? {
 					// The relation has a specific record id
 					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w, None)),
 					// The relation does not have a specific record id
-					Value::Table(tb) => match &self.data {
+					Value::Table(tb) => match self.data {
 						// There is a data clause so check for a record id
-						Some(data) => {
+						Some(ref data) => {
 							let id = match data.rid(stk, &ctx, opt).await? {
-								Some(id) => id.generate(tb, false)?,
-								None => tb.generate(),
+								Some(id) => id.generate(tb.into_strand(), false)?,
+								None => RecordId::random_for_table(tb.into_string()),
 							};
 							i.ingest(Iterable::Relatable(f, id, w, None))
 						}
 						// There is no data clause so create a record id
-						None => i.ingest(Iterable::Relatable(f, tb.generate(), w, None)),
+						None => i.ingest(Iterable::Relatable(
+							f,
+							RecordId::random_for_table(tb.into_string()),
+							w,
+							None,
+						)),
 					},
 					// The relation can not be any other type
 					v => {
@@ -180,7 +184,7 @@ impl RelateStatement {
 			// This is a single record result
 			Value::Array(mut a) if self.only => match a.len() {
 				// There was exactly one result
-				1 => Ok(a.remove(0)),
+				1 => Ok(a.0.pop().unwrap()),
 				// There were no results
 				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
 			},

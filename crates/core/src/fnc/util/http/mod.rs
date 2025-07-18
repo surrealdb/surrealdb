@@ -1,8 +1,9 @@
 use crate::cnf::SURREALDB_USER_AGENT;
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::expr::{Bytes, Object, Strand, Value};
 use crate::syn;
+use crate::val::{Bytes, Object, Strand, Value};
+
 use anyhow::{Context as _, Result, bail};
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
@@ -21,9 +22,9 @@ pub(crate) fn uri_is_valid(uri: &str) -> bool {
 
 fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
 	match body {
-		Value::Bytes(v) => req.body(v.0),
-		Value::Strand(v) => req.body(v.0),
-		_ if body.is_some() => req.json(&body.into_json()),
+		Value::Bytes(v) => req.body(v.into_inner()),
+		Value::Strand(v) => req.body(v.into_string()),
+		_ if !body.is_nullish() => req.json(&body.into_json()),
 		_ => req,
 	}
 }

@@ -1,18 +1,11 @@
-use crate::sql::SqlValue;
-use crate::sql::fmt::is_pretty;
-use crate::sql::fmt::pretty_indent;
-use crate::sql::fmt::pretty_sequence_item;
+use crate::sql::Expr;
+use crate::sql::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::Write;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::str;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -40,17 +33,17 @@ impl Permissions {
 	}
 
 	pub fn is_none(&self) -> bool {
-		self.select == Permission::None
-			&& self.create == Permission::None
-			&& self.update == Permission::None
-			&& self.delete == Permission::None
+		matches!(self.select, Permission::None)
+			&& matches!(self.create, Permission::None)
+			&& matches!(self.update, Permission::None)
+			&& matches!(self.delete, Permission::None)
 	}
 
 	pub fn is_full(&self) -> bool {
-		self.select == Permission::Full
-			&& self.create == Permission::Full
-			&& self.update == Permission::Full
-			&& self.delete == Permission::Full
+		matches!(self.select, Permission::Full)
+			&& matches!(self.create, Permission::Full)
+			&& matches!(self.update, Permission::Full)
+			&& matches!(self.delete, Permission::Full)
 	}
 }
 
@@ -63,59 +56,49 @@ impl Display for Permissions {
 		if self.is_full() {
 			return write!(f, " FULL");
 		}
-		let mut lines = Vec::<(Vec<PermissionKind>, &Permission)>::new();
-		for (c, permission) in [
-			PermissionKind::Select,
-			PermissionKind::Create,
-			PermissionKind::Update,
-			PermissionKind::Delete,
-		]
-		.into_iter()
-		.zip([&self.select, &self.create, &self.update, &self.delete])
-		{
-			// Alternate permissions display implementation ignores delete permission
-			// This display is used to show field permissions, where delete has no effect
-			// Displaying the permission could mislead users into thinking it has an effect
-			// Additionally, including the permission will cause a parsing error in 3.0.0
-			if f.alternate() && matches!(c, PermissionKind::Delete) {
-				continue;
-			}
-
-			if let Some((existing, _)) = lines.iter_mut().find(|(_, p)| *p == permission) {
-				existing.push(c);
-			} else {
-				lines.push((vec![c], permission));
-			}
-		}
 		let indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {
 			f.write_char(' ')?;
 			None
 		};
-		for (i, (kinds, permission)) in lines.into_iter().enumerate() {
-			if i > 0 {
-				if is_pretty() {
-					pretty_sequence_item();
-				} else {
-					f.write_str(", ")?;
-				}
+
+		write!(f, "FOR SELECT ")?;
+		match self.select {
+			Permission::Specific(_) if is_pretty() => {
+				let _indent = pretty_indent();
+				self.select.fmt(f)?;
 			}
-			write!(f, "FOR ")?;
-			for (i, kind) in kinds.into_iter().enumerate() {
-				if i > 0 {
-					f.write_str(", ")?;
-				}
-				f.write_str(kind.as_str())?;
-			}
-			match permission {
-				Permission::Specific(_) if is_pretty() => {
-					let _indent = pretty_indent();
-					Display::fmt(permission, f)?;
-				}
-				_ => write!(f, " {permission}")?,
-			}
+			_ => write!(f, " {}", self.select)?,
 		}
+
+		write!(f, "FOR CREATE ")?;
+		match self.create {
+			Permission::Specific(_) if is_pretty() => {
+				let _indent = pretty_indent();
+				self.create.fmt(f)?;
+			}
+			_ => write!(f, " {}", self.create)?,
+		}
+
+		write!(f, "FOR UPDATE ")?;
+		match self.update {
+			Permission::Specific(_) if is_pretty() => {
+				let _indent = pretty_indent();
+				self.update.fmt(f)?;
+			}
+			_ => write!(f, " {}", self.update)?,
+		}
+
+		write!(f, "FOR DELETE ")?;
+		match self.delete {
+			Permission::Specific(_) if is_pretty() => {
+				let _indent = pretty_indent();
+				self.delete.fmt(f)?;
+			}
+			_ => write!(f, " {}", self.delete)?,
+		}
+
 		drop(indent);
 		Ok(())
 	}
@@ -143,7 +126,7 @@ impl From<crate::expr::Permissions> for Permissions {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum PermissionKind {
 	Select,
 	Create,
@@ -168,15 +151,13 @@ impl Display for PermissionKind {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Permission {
 	None,
 	#[default]
 	Full,
-	Specific(SqlValue),
+	Specific(Expr),
 }
 
 impl Permission {

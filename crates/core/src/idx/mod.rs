@@ -4,8 +4,8 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
+use crate::expr::RecordIdKeyLit;
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Id, Thing};
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
@@ -30,6 +30,7 @@ use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
 use crate::kvs::{Key, KeyEncode as _, Val};
+use crate::val::{RecordId, RecordIdKey};
 use anyhow::Result;
 use revision::Revisioned;
 use serde::Serialize;
@@ -56,8 +57,8 @@ impl IndexKeyBase {
 			inner: Arc::new(Inner {
 				ns: ns.to_string(),
 				db: db.to_string(),
-				tb: ix.what.to_raw(),
-				ix: ix.name.to_raw(),
+				tb: ix.what.into_raw_string(),
+				ix: ix.name.into_raw_string(),
 			}),
 		})
 	}
@@ -206,7 +207,7 @@ impl IndexKeyBase {
 		.encode()
 	}
 
-	fn new_hi_key(&self, id: Id) -> Result<Key> {
+	fn new_hi_key(&self, id: RecordIdKey) -> Result<Key> {
 		Hi::new(
 			self.inner.ns.as_str(),
 			self.inner.db.as_str(),
@@ -263,6 +264,7 @@ impl IndexKeyBase {
 }
 
 /// This trait provides `Revision` based default implementations for serialization/deserialization
+/// TODO: Look at this trait, is it really nessecary?
 trait VersionedStore
 where
 	Self: Sized + Serialize + DeserializeOwned + Revisioned,
@@ -278,4 +280,4 @@ where
 	}
 }
 
-impl VersionedStore for Thing {}
+impl VersionedStore for RecordId {}

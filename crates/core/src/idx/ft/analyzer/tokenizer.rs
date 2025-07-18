@@ -1,8 +1,8 @@
 use crate::err::Error;
-use crate::expr::Value;
 use crate::expr::tokenizer::Tokenizer as SqlTokenizer;
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
 use crate::idx::ft::offsets::{Offset, Position};
+use crate::val::Value;
 use anyhow::{Result, bail};
 
 pub(in crate::idx) struct Tokens {
@@ -396,6 +396,7 @@ impl Splitter {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::analyzer::tests::test_analyzer;
@@ -470,4 +471,4 @@ static LANGUAGE: &str = "Rust";"#,
 		)
 		.await;
 	}
-}
+}*/

@@ -4,14 +4,10 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-use super::Data;
-use super::Method;
-use super::RpcError;
-use super::RpcProtocolV1;
-use super::RpcProtocolV2;
+use super::{Data, Method, RpcError, RpcProtocolV1, RpcProtocolV2};
 use crate::dbs::Session;
 use crate::kvs::Datastore;
-use crate::sql::Array;
+use crate::val::Array;
 
 #[expect(async_fn_in_trait)]
 pub trait RpcContext {

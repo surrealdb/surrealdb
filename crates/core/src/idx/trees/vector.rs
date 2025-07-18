@@ -1,10 +1,9 @@
 use crate::err::Error;
 use crate::expr::index::{Distance, VectorType};
-use crate::expr::{Number, Value};
 use crate::fnc::util::math::ToFloat;
 use crate::idx::VersionedStore;
-use ahash::AHasher;
-use ahash::HashSet;
+use crate::val::{Number, Value};
+use ahash::{AHasher, HashSet};
 use anyhow::{Result, ensure};
 use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};

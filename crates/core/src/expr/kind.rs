@@ -1,23 +1,23 @@
 use super::escape::EscapeKey;
-use super::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Ident, Idiom, Number, Object, Part,
-	Range, Regex, Strand, Thing, Uuid,
-};
+use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{
-	Table, Value,
-	fmt::{Fmt, Pretty, is_pretty, pretty_indent},
+use crate::expr::{Expr, Ident, Idiom, Literal, Part, Value};
+use crate::val::{
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
+	Regex, Strand, Uuid,
 };
+
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter, Write};
+use std::hash::{Hash, Hasher};
 
 /// The kind, or data type, of a value or field.
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Kind {
@@ -52,12 +52,12 @@ pub enum Kind {
 	/// UUID type.
 	Uuid,
 	/// Regular expression type.
-	#[revision(start = 2)]
 	Regex,
 	/// A record type.
-	Record(Vec<Table>),
+	Record(Vec<Ident>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or `"polygon"`.
+	/// TODO(3.0): Change to use an enum
 	Geometry(Vec<String>),
 	/// An optional type.
 	Option(Box<Kind>),
@@ -77,9 +77,9 @@ pub enum Kind {
 	/// The literal type is used to represent a type that can only be a single value.
 	/// For example, `"a"` is a literal type which can only ever be `"a"`.
 	/// This can be used in the `Kind::Either` type to represent an enum.
-	Literal(Literal),
+	Literal(KindLiteral),
 	/// A references type representing a link to another table or field.
-	References(Option<Table>, Option<Idiom>),
+	References(Option<Ident>, Option<Idiom>),
 	/// A file type.
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
@@ -132,7 +132,7 @@ impl Kind {
 
 	/// Returns true if this type is a set or array.
 	pub(crate) fn is_array_like(&self) -> bool {
-		matches!(self, Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(Literal::Array(_)))
+		matches!(self, Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(KindLiteral::Array(_)))
 	}
 
 	// Return the kind of the contained value.
@@ -205,9 +205,9 @@ impl Kind {
 				Kind::Array(inner, len) | Kind::Set(inner, len) => {
 					return match path.first() {
 						Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
-						Some(Part::Index(i)) => {
+						Some(Part::Value(Expr::Literal(Literal::Integer(i)))) => {
 							if let Some(len) = len {
-								if i.as_usize() >= *len as usize {
+								if *i >= *len as i64 {
 									return false;
 								}
 							}
@@ -272,7 +272,7 @@ impl<T: HasKind, const SIZE: usize> HasKind for [T; SIZE] {
 	}
 }
 
-impl HasKind for Thing {
+impl HasKind for RecordId {
 	fn kind() -> Kind {
 		Kind::Record(Vec::new())
 	}
@@ -430,12 +430,14 @@ impl InfoStructure for Kind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub enum Literal {
+pub enum KindLiteral {
 	String(Strand),
-	Number(Number),
+	Integer(i64),
+	Float(f64),
+	Decimal(Decimal),
 	Duration(Duration),
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
@@ -443,11 +445,101 @@ pub enum Literal {
 	Bool(bool),
 }
 
-impl Literal {
+impl PartialEq for KindLiteral {
+	fn eq(&self, other: &Self) -> bool {
+		match self {
+			KindLiteral::String(strand) => {
+				if let KindLiteral::String(other) = other {
+					strand == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Integer(x) => {
+				if let KindLiteral::Integer(other) = other {
+					x == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Float(x) => {
+				if let KindLiteral::Float(other) = other {
+					x.to_bits() == other.to_bits()
+				} else {
+					false
+				}
+			}
+			KindLiteral::Decimal(decimal) => {
+				if let KindLiteral::Decimal(other) = other {
+					decimal == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Duration(duration) => {
+				if let KindLiteral::Duration(other) = other {
+					duration == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Array(kinds) => {
+				if let KindLiteral::Array(other) = other {
+					kinds == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::Object(btree_map) => {
+				if let KindLiteral::Object(other) = other {
+					btree_map == other
+				} else {
+					false
+				}
+			}
+			KindLiteral::DiscriminatedObject(a, b) => {
+				if let KindLiteral::DiscriminatedObject(c, d) = other {
+					a == c && b == d
+				} else {
+					false
+				}
+			}
+			KindLiteral::Bool(a) => {
+				if let KindLiteral::Bool(b) = other {
+					a == b
+				} else {
+					false
+				}
+			}
+		}
+	}
+}
+impl Eq for KindLiteral {}
+impl Hash for KindLiteral {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		std::mem::discriminant(self).hash(state);
+		match self {
+			KindLiteral::String(strand) => strand.hash(state),
+			KindLiteral::Integer(x) => x.hash(state),
+			KindLiteral::Float(x) => x.to_bits().hash(state),
+			KindLiteral::Decimal(decimal) => decimal.hash(state),
+			KindLiteral::Duration(duration) => duration.hash(state),
+			KindLiteral::Array(kinds) => kinds.hash(state),
+			KindLiteral::Object(btree_map) => btree_map.hash(state),
+			KindLiteral::DiscriminatedObject(a, b) => {
+				a.hash(state);
+				b.hash(state);
+			}
+			KindLiteral::Bool(x) => x.hash(state),
+		}
+	}
+}
+
+impl KindLiteral {
 	pub fn to_kind(&self) -> Kind {
 		match self {
 			Self::String(_) => Kind::String,
-			Self::Number(_) => Kind::Number,
+			Self::Integer(_) | Self::Float(_) | Self::Decimal(_) => Kind::Number,
 			Self::Duration(_) => Kind::Duration,
 			Self::Array(a) => {
 				if let Some(inner) = a.first() {
@@ -470,8 +562,16 @@ impl Literal {
 				Value::Strand(s) => s == v,
 				_ => false,
 			},
-			Self::Number(v) => match value {
-				Value::Number(n) => n == v,
+			Self::Integer(v) => match value {
+				Value::Number(n) => *n == Number::Int(*v),
+				_ => false,
+			},
+			Self::Float(v) => match value {
+				Value::Number(n) => *n == Number::Float(*v),
+				_ => false,
+			},
+			Self::Decimal(v) => match value {
+				Value::Number(n) => *n == Number::Decimal(*v),
 				_ => false,
 			},
 			Self::Duration(v) => match value {
@@ -569,21 +669,19 @@ impl Literal {
 		}
 
 		match self {
-			Literal::Array(x) => match path.first() {
+			KindLiteral::Array(x) => match path.first() {
 				Some(Part::All) => x.iter().all(|y| y.allows_nested_kind(&path[1..], kind)),
-				Some(Part::Index(i)) => {
-					if let Some(y) = x.get(i.as_usize()) {
-						y.allows_nested_kind(&path[1..], kind)
-					} else {
-						false
-					}
-				}
-				_ => false,
+				Some(part) => part
+					.as_old_index()
+					.and_then(|idx| x.get(idx))
+					.map(|x| x.allows_nested_kind(&path[1..], kind))
+					.unwrap_or(false),
+				None => false,
 			},
-			Literal::Object(x) => match path.first() {
+			KindLiteral::Object(x) => match path.first() {
 				Some(Part::All) => x.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind)),
 				Some(Part::Field(k)) => {
-					if let Some(y) = x.get(&k.0) {
+					if let Some(y) = x.get(&**k) {
 						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false
@@ -591,12 +689,12 @@ impl Literal {
 				}
 				_ => false,
 			},
-			Literal::DiscriminatedObject(_, discriminants) => match path.first() {
+			KindLiteral::DiscriminatedObject(_, discriminants) => match path.first() {
 				Some(Part::All) => discriminants
 					.iter()
 					.all(|o| o.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind))),
 				Some(Part::Field(k)) => discriminants.iter().all(|o| {
-					if let Some(y) = o.get(&k.0) {
+					if let Some(y) = o.get(&**k) {
 						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false
@@ -609,14 +707,16 @@ impl Literal {
 	}
 }
 
-impl Display for Literal {
+impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Literal::String(s) => write!(f, "{}", s),
-			Literal::Number(n) => write!(f, "{}", n),
-			Literal::Duration(d) => write!(f, "{}", d),
-			Literal::Bool(b) => write!(f, "{}", b),
-			Literal::Array(a) => {
+			KindLiteral::String(s) => write!(f, "{}", s),
+			KindLiteral::Integer(n) => write!(f, "{}", n),
+			KindLiteral::Float(n) => write!(f, "{}f", n),
+			KindLiteral::Decimal(n) => write!(f, "{}dec", n),
+			KindLiteral::Duration(d) => write!(f, "{}", d),
+			KindLiteral::Bool(b) => write!(f, "{}", b),
+			KindLiteral::Array(a) => {
 				let mut f = Pretty::from(f);
 				f.write_char('[')?;
 				if !a.is_empty() {
@@ -626,7 +726,7 @@ impl Display for Literal {
 				}
 				f.write_char(']')
 			}
-			Literal::Object(o) => {
+			KindLiteral::Object(o) => {
 				let mut f = Pretty::from(f);
 				if is_pretty() {
 					f.write_char('{')?;
@@ -651,7 +751,7 @@ impl Display for Literal {
 					f.write_str(" }")
 				}
 			}
-			Literal::DiscriminatedObject(_, discriminants) => {
+			KindLiteral::DiscriminatedObject(_, discriminants) => {
 				let mut f = Pretty::from(f);
 
 				for (i, o) in discriminants.iter().enumerate() {
@@ -713,7 +813,7 @@ mod tests {
 	#[case::regex(Kind::Regex, false)]
 	#[case::function(Kind::Function(None, None), false)]
 	#[case::function(Kind::Function(Some(vec![]), None), false)]
-	#[case::function(Kind::Function(Some(vec![Kind::Literal(Literal::String("a".into()))]), None), false)]
+	#[case::function(Kind::Function(Some(vec![Kind::Literal(KindLiteral::String("a".into()))]), None), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Any)), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Null)), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Bool)), false)]
@@ -726,32 +826,34 @@ mod tests {
 	#[case::option(Kind::Option(Box::new(Kind::Number)), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Object)), false)]
 	#[case::option(Kind::Option(Box::new(Kind::Point)), false)]
-	#[case::option(Kind::Option(Box::new(Kind::Literal(Literal::Bool(true)))), false)]
-	#[case::literal(Kind::Literal(Literal::String("a".into())), false)]
-	#[case::literal(Kind::Literal(Literal::Number(1.into())), false)]
-	#[case::literal(Kind::Literal(Literal::Duration(Duration::new(1, 0))), false)]
-	#[case::literal(Kind::Literal(Literal::Bool(true)), false)]
-	#[case::literal(Kind::Literal(Literal::Array(vec![])), true)]
+	#[case::option(Kind::Option(Box::new(Kind::Literal(KindLiteral::Bool(true)))), false)]
+	#[case::literal(Kind::Literal(KindLiteral::String("a".into())), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Integer(1)), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Float(1.0)), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Decimal(Decimal::from(1usize))), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Duration(Duration::new(1, 0))), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Bool(true)), false)]
+	#[case::literal(Kind::Literal(KindLiteral::Array(vec![])), true)]
 	#[case::array(Kind::Array(Box::new(Kind::Bool), None), true)]
-	#[case::array(Kind::Array(Box::new(Kind::Literal(Literal::String("a".into()))), None), true)]
+	#[case::array(Kind::Array(Box::new(Kind::Literal(KindLiteral::String("a".into()))), None), true)]
 	#[case::object(Kind::Object, false)]
 	#[case::geometry(Kind::Geometry(vec![]), false)]
 	#[case::geometry(Kind::Geometry(vec!["point".to_string()]), false)]
 	#[case::set(Kind::Set(Box::new(Kind::Bool), None), true)]
-	#[case::set(Kind::Set(Box::new(Kind::Literal(Literal::String("a".into()))), None), true)]
+	#[case::set(Kind::Set(Box::new(Kind::Literal(KindLiteral::String("a".into()))), None), true)]
 	#[case::either(Kind::Either(vec![]), false)]
 	#[case::either(Kind::Either(vec![Kind::Bool]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::String("a".into()))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Number(1.into()))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Duration(Duration::new(1, 0)))]), false)]
-	#[case::either(Kind::Either(vec![Kind::Literal(Literal::Bool(true))]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::String("a".into()))]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Integer(1))]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Duration(Duration::new(1, 0)))]), false)]
+	#[case::either(Kind::Either(vec![Kind::Literal(KindLiteral::Bool(true))]), false)]
 	#[case::range(Kind::Range, false)]
 	#[case::references(Kind::References(None, None), false)]
-	#[case::references(Kind::References(Some(Table("table".to_string())), None), false)]
-	#[case::references(Kind::References(Some(Table("table".to_string())), Some(Idiom(vec!["idiom".into()]))), false)]
+	#[case::references(Kind::References(Some(Ident::new("table".to_string()).unwrap()), None), false)]
+	#[case::references(Kind::References(Some(Ident::new("table".to_string()).unwrap()), Some(Idiom::field(Ident::new("idiom".to_owned()).unwrap()))), false)]
 	#[case::file(Kind::File(vec![]), false)]
-	#[case::file(Kind::File(vec![Ident("bucket".to_string())]), false)]
-	#[case::file(Kind::File(vec![Ident("bucket".to_string()), Ident("key".to_string())]), false)]
+	#[case::file(Kind::File(vec![Ident::new("bucket".to_string()).unwrap()]), false)]
+	#[case::file(Kind::File(vec![Ident::new("bucket".to_string()).unwrap(), Ident::new("key".to_string()).unwrap()]), false)]
 
 	fn is_array_like(#[case] kind: Kind, #[case] expected: bool) {
 		assert_eq!(kind.is_array_like(), expected);

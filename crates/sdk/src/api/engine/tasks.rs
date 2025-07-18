@@ -6,7 +6,8 @@ use futures::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb_core::{kvs::Datastore, options::EngineOptions};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_family = "wasm"))]
@@ -193,7 +194,8 @@ mod test {
 	use crate::engine::tasks;
 	use std::sync::Arc;
 	use std::time::Duration;
-	use surrealdb_core::{kvs::Datastore, options::EngineOptions};
+	use surrealdb_core::kvs::Datastore;
+	use surrealdb_core::options::EngineOptions;
 	use tokio_util::sync::CancellationToken;
 
 	#[test_log::test(tokio::test)]

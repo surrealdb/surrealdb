@@ -1,11 +1,10 @@
-use crate::{
-	Object, RecordId, RecordIdKey, Value,
-	api::{Result, err::Error},
-};
+use crate::api::Result;
+use crate::api::err::Error;
+use crate::{Object, RecordId, RecordIdKey, Value};
 use std::ops::{self, Bound};
 use surrealdb_core::expr::{
-	Edges as CoreEdges, Id as CoreId, IdRange as CoreIdRange, Table as CoreTable,
-	Thing as CoreThing,
+	Edges as CoreEdges, RecordIdKeyLit as CoreId, RecordIdKeyRangeLit as CoreIdRange,
+	Table as CoreTable, Thing as CoreThing,
 };
 use surrealdb_core::sql::Table as CoreSqlTable;
 
@@ -45,7 +44,7 @@ where
 	{
 		let range = KeyRange::from(range);
 		let res = CoreIdRange {
-			beg: range.start.map(RecordIdKey::into_inner),
+			start: range.start.map(RecordIdKey::into_inner),
 			end: range.end.map(RecordIdKey::into_inner),
 		};
 		let res = CoreThing::from((self.0.into(), res));

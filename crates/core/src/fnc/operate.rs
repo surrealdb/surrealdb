@@ -1,10 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::value::TryRem;
-use crate::expr::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
-use crate::expr::{Expression, Thing};
+use crate::expr::Expr;
 use crate::idx::planner::executor::QueryExecutor;
+use crate::val::{RecordId, TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -38,10 +37,11 @@ pub fn tco(a: Value, b: Value) -> Result<Value> {
 }
 
 pub fn nco(a: Value, b: Value) -> Result<Value> {
-	Ok(match a.is_some() {
-		true => a,
-		false => b,
-	})
+	if a.is_nullish() {
+		Ok(b)
+	} else {
+		Ok(a)
+	}
 }
 
 pub fn add(a: Value, b: Value) -> Result<Value> {
@@ -155,21 +155,21 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value> {
 enum ExecutorOption<'a> {
 	PreMatch,
 	None,
-	Execute(&'a QueryExecutor, &'a Thing),
+	Execute(&'a QueryExecutor, &'a RecordId),
 }
 
 fn get_executor_and_thing<'a>(
 	ctx: &'a Context,
 	doc: &'a CursorDoc,
-) -> Option<(&'a QueryExecutor, &'a Thing)> {
+) -> Option<(&'a QueryExecutor, &'a RecordId)> {
 	if let Some(thg) = &doc.rid {
 		if let Some(exe) = ctx.get_query_executor() {
-			if exe.is_table(&thg.tb) {
+			if exe.is_table(&thg.table) {
 				return Some((exe, thg.as_ref()));
 			}
 		}
 		if let Some(pla) = ctx.get_query_planner() {
-			if let Some(exe) = pla.get_query_executor(&thg.tb) {
+			if let Some(exe) = pla.get_query_executor(&thg.table) {
 				return Some((exe, thg));
 			}
 		}
@@ -180,7 +180,7 @@ fn get_executor_and_thing<'a>(
 fn get_executor_option<'a>(
 	ctx: &'a Context,
 	doc: Option<&'a CursorDoc>,
-	exp: &'a Expression,
+	exp: &'a Expr,
 ) -> ExecutorOption<'a> {
 	if let Some(doc) = doc {
 		if let Some((exe, thg)) = get_executor_and_thing(ctx, doc) {
@@ -200,7 +200,7 @@ pub(crate) async fn matches(
 	ctx: &Context,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
-	exp: &Expression,
+	exp: &Expr,
 	l: Value,
 	r: Value,
 ) -> Result<Value> {
@@ -217,7 +217,7 @@ pub(crate) async fn knn(
 	ctx: &Context,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
-	exp: &Expression,
+	exp: &Expr,
 ) -> Result<Value> {
 	match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),

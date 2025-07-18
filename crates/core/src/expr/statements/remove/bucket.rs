@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveBucketStatement {
@@ -41,7 +41,7 @@ impl RemoveBucketStatement {
 		let key = crate::key::database::bu::new(ns, db, &bu.name);
 		txn.del(key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

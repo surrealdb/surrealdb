@@ -2,8 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
+use crate::expr::{Cond, Explain, Expr, FlowResultExt as _, Output, Timeout, With, fmt::Fmt};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
+use crate::val::Value;
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -11,28 +12,25 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DeleteStatement {
-	#[revision(start = 2)]
 	pub only: bool,
-	pub what: Values,
-	#[revision(start = 3)]
+	pub what: Vec<Expr>,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	#[revision(start = 3)]
 	pub explain: Option<Explain>,
 }
 
 impl DeleteStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
+	pub(crate) fn read_only(&self) -> bool {
+		false
 	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -56,9 +54,8 @@ impl DeleteStatement {
 		let mut planner = QueryPlanner::new();
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the delete targets
-		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| {
+		for w in self.what.iter() {
+			i.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, w).await.map_err(|e| {
 				if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
 					let Ok(Error::InvalidStatementTarget {
 						value,
@@ -101,7 +98,7 @@ impl fmt::Display for DeleteStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}

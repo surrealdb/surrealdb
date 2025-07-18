@@ -1,25 +1,17 @@
 use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Error;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::conn::MlExportConfig;
+use crate::api::conn::{Command, MlExportConfig};
 use crate::api::method::BoxFuture;
-use crate::method::ExportConfig as Config;
-use crate::method::Model;
-use crate::method::OnceLockExt;
+use crate::api::{Connection, Error, ExtraFeatures, Result};
+use crate::method::{ExportConfig as Config, Model, OnceLockExt};
 use async_channel::Receiver;
-use futures::Stream;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use semver::Version;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use std::task::{Context, Poll};
 use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
 
 /// A database export future

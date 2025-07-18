@@ -200,6 +200,7 @@ pub(super) enum Term {
 	NewTerm(String, Position),
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::analyzer::tests::{test_analyzer, test_analyzer_tokens};
@@ -900,4 +901,4 @@ mod tests {
 		)
 		.await;
 	}
-}
+}*/

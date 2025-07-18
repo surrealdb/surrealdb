@@ -1,12 +1,11 @@
-use crate::expr::Value;
 use crate::rpc::RpcError;
 use crate::rpc::request::Request;
-use crate::sql::SqlValue;
 use crate::syn;
+use crate::val::Value;
 
 use super::ResTrait;
 
-pub fn parse_value(val: &[u8]) -> Result<SqlValue, RpcError> {
+pub fn parse_value(val: &[u8]) -> Result<Value, RpcError> {
 	syn::value_legacy_strand(std::str::from_utf8(val).or(Err(RpcError::ParseError))?)
 		.or(Err(RpcError::ParseError))
 }

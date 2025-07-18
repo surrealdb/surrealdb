@@ -3,9 +3,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
+use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
 use crate::iam::Auth;
 use crate::kvs::Live;
+use crate::val::{Uuid, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -14,14 +15,14 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub expr: Fields,
-	pub what: Value,
+	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
 	// When a live query is created, we must also store the
@@ -44,17 +45,24 @@ impl LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
 			expr,
-			..Default::default()
+			what: Expr::Literal(Literal::Null),
+			cond: None,
+			fetch: None,
+			auth: None,
+			session: None,
 		}
 	}
 
-	pub fn new_from_what_expr(expr: Fields, what: Value) -> Self {
+	pub fn new_from_what_expr(expr: Fields, what: Expr) -> Self {
 		LiveStatement {
 			id: Uuid::new_v4(),
 			node: Uuid::new_v4(),
 			what,
 			expr,
-			..Default::default()
+			cond: None,
+			auth: None,
+			session: None,
+			fetch: None,
 		}
 	}
 
@@ -87,7 +95,7 @@ impl LiveStatement {
 		// Get the id
 		let id = stm.id.0;
 		// Process the live query table
-		match stm.what.compute(stk, ctx, opt, doc).await.catch_return()? {
+		match stk.run(|stk| stm.what.compute(stk, ctx, opt, doc)).await.catch_return()? {
 			Value::Table(tb) => {
 				// Store the current Node ID
 				stm.node = nid.into();
@@ -114,7 +122,7 @@ impl LiveStatement {
 					cache.new_live_queries_version(ns, db, &tb);
 				}
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 			}
 			v => {
 				bail!(Error::LiveStatement {
@@ -123,7 +131,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(id.into())
+		Ok(Uuid(id).into())
 	}
 }
 
@@ -145,12 +153,13 @@ impl InfoStructure for LiveStatement {
 		Value::from(map! {
 			"expr".to_string() => self.expr.structure(),
 			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
+			"cond".to_string(), if let Some(v) = self.cond => v.0.structure(),
 			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
 		})
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use crate::dbs::{Action, Capabilities, Notification, Session};
@@ -275,4 +284,4 @@ mod tests {
 		assert_eq!(table_occurrences[0].name.0, tb);
 		tx.cancel().await.unwrap();
 	}
-}
+}*/

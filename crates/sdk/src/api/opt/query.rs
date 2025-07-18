@@ -1,19 +1,19 @@
 use super::Raw;
-use crate::{
-	Value,
-	api::{Response as QueryResponse, Result, err::Error},
-	method::{self, Stats, Stream, query::ValidQuery},
-	value::Notification,
-};
+use crate::Value;
+use crate::api::err::Error;
+use crate::api::{Response as QueryResponse, Result};
+use crate::method::query::ValidQuery;
+use crate::method::{self, Stats, Stream};
+use crate::value::Notification;
 use anyhow::bail;
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::mem;
-use surrealdb_core::expr::Value as CoreValue;
-use surrealdb_core::expr::from_value as from_core_value;
-use surrealdb_core::sql::{self, Statement, Statements, statements::*};
+use surrealdb_core::expr::{Value as CoreValue, from_value as from_core_value};
+use surrealdb_core::sql::statements::*;
+use surrealdb_core::sql::{self, Statement, Statements};
 
 pub struct Query(pub(crate) ValidQuery);
 /// A trait for converting inputs into SQL statements

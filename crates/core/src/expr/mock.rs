@@ -1,4 +1,5 @@
-use crate::expr::{Id, Thing, escape::EscapeIdent};
+use crate::expr::escape::EscapeIdent;
+use crate::val::{RecordId, RecordIdKey};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -12,15 +13,15 @@ pub struct IntoIter {
 }
 
 impl Iterator for IntoIter {
-	type Item = Thing;
-	fn next(&mut self) -> Option<Thing> {
+	type Item = RecordId;
+	fn next(&mut self) -> Option<RecordId> {
 		match &self.model {
 			Mock::Count(tb, c) => {
 				if self.index < *c {
 					self.index += 1;
-					Some(Thing {
-						tb: tb.to_string(),
-						id: Id::rand(),
+					Some(RecordId {
+						table: tb.to_string(),
+						key: RecordIdKey::rand(),
 					})
 				} else {
 					None
@@ -32,9 +33,9 @@ impl Iterator for IntoIter {
 				}
 				if self.index < *e {
 					self.index += 1;
-					Some(Thing {
-						tb: tb.to_string(),
-						id: Id::from(self.index),
+					Some(RecordId {
+						table: tb.to_string(),
+						key: RecordIdKey::from(self.index as i64),
 					})
 				} else {
 					None
@@ -45,10 +46,9 @@ impl Iterator for IntoIter {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Mock")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Mock {
 	Count(String, u64),
 	Range(String, u64, u64),
@@ -56,7 +56,7 @@ pub enum Mock {
 }
 
 impl IntoIterator for Mock {
-	type Item = Thing;
+	type Item = RecordId;
 	type IntoIter = IntoIter;
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {

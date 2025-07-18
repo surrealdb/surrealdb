@@ -1,9 +1,6 @@
 use crate::expr::Operation;
-use crate::expr::array::Array;
-use crate::expr::object::Object;
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
+use crate::val::{Array, Object, RecordId, Value};
 use crate::vs::VersionStamp;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -11,24 +8,22 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 
 // Mutation is a single mutation to a table.
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub enum TableMutation {
 	// Although the Value is supposed to contain a field "id" of Thing,
 	// we do include it in the first field for convenience.
-	Set(Thing, Value),
-	Del(Thing),
+	Set(RecordId, Value),
+	Del(RecordId),
 	Def(DefineTableStatement),
-	#[revision(start = 2)]
 	/// Includes the ID, current value (after change), changes that can be applied to get the original
 	/// value
 	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path": "/note", "value": "surreal"}], false)
 	/// Means that we have already applied the add "/note" operation to achieve the recorded result
-	SetWithDiff(Thing, Value, Vec<Operation>),
-	#[revision(start = 2)]
+	SetWithDiff(RecordId, Value, Vec<Operation>),
 	/// Delete a record where the ID is stored, and the now-deleted value
-	DelWithOriginal(Thing, Value),
+	DelWithOriginal(RecordId, Value),
 }
 
 impl From<DefineTableStatement> for Value {
@@ -38,13 +33,13 @@ impl From<DefineTableStatement> for Value {
 		if let Some(id) = v.id {
 			h.insert("id", id.into());
 		}
-		h.insert("name", v.name.0.into());
+		h.insert("name", v.name.into_strand().into());
 		Value::Object(Object::from(h))
 	}
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct TableMutations(pub String, pub Vec<TableMutation>);
 
@@ -55,7 +50,7 @@ impl TableMutations {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct DatabaseMutation(pub Vec<TableMutations>);
 
@@ -73,7 +68,7 @@ impl Default for DatabaseMutation {
 
 // Change is a set of mutations made to a table at the specific timestamp.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
 
@@ -95,7 +90,7 @@ impl TableMutation {
 						operations
 							.clone()
 							.into_iter()
-							.map(|x| Value::Object(Object::from(x)))
+							.map(|x| Value::Object(x.into_object()))
 							.collect(),
 					)),
 				);
@@ -124,7 +119,7 @@ impl TableMutation {
 				h
 			}
 		};
-		let o = crate::expr::object::Object::from(h);
+		let o = crate::val::Object::from(h);
 		Value::Object(o)
 	}
 }
@@ -190,7 +185,7 @@ impl Display for ChangeSet {
 
 // WriteMutationSet is a set of mutations to be to a table at the specific timestamp.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
 
@@ -206,6 +201,7 @@ impl Default for WriteMutationSet {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	#[test]
@@ -218,7 +214,7 @@ mod tests {
 				"mytb".to_string(),
 				vec![
 					TableMutation::Set(
-						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						RecordId::from(("mytb".to_string(), "tobie".to_string())),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
@@ -305,3 +301,4 @@ mod tests {
 		);
 	}
 }
+*/

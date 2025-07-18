@@ -1,12 +1,8 @@
 use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Error;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
-use crate::method::Model;
-use crate::method::OnceLockExt;
+use crate::api::{Connection, Error, ExtraFeatures, Result};
+use crate::method::{Model, OnceLockExt};
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;

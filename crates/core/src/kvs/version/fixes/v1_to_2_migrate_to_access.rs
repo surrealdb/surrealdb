@@ -4,10 +4,7 @@ use crate::{
 	expr::{
 		AccessType, Ident,
 		access_type::{JwtAccessVerify, JwtAccessVerifyKey},
-		statements::{
-			DefineAccessStatement,
-			define::{DefineScopeStatement, DefineTokenStatement},
-		},
+		statements::{DefineAccessStatement, define::DefineScopeStatement},
 	},
 	kvs::{KeyEncode as _, Transaction},
 };
@@ -248,7 +245,7 @@ async fn migrate_sc_tokens(
 
 fn merge_ac_and_tk(ac: DefineAccessStatement, tk: DefineTokenStatement) -> DefineAccessStatement {
 	let mut ac = ac;
-	ac.kind = match ac.kind {
+	ac.access_type = match ac.access_type {
 		AccessType::Record(ak) => {
 			let mut ak = ak;
 			ak.jwt.verify = JwtAccessVerify::Key(JwtAccessVerifyKey {

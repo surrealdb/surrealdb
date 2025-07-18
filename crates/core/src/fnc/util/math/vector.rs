@@ -1,7 +1,7 @@
 use crate::err::Error;
-use crate::expr::Number;
 use crate::fnc::util::math::deviation::deviation;
 use crate::fnc::util::math::mean::Mean;
+use crate::val::Number;
 use anyhow::{Result, ensure};
 use std::collections::HashSet;
 

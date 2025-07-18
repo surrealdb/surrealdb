@@ -47,8 +47,9 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
-use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
-use tower_http::sensitive_headers::SetSensitiveResponseHeadersLayer;
+use tower_http::sensitive_headers::{
+	SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer,
+};
 use tower_http::trace::TraceLayer;
 
 #[cfg(feature = "http-compression")]

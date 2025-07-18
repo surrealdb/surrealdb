@@ -4,9 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::index::{Distance, Index};
 use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{
-	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
-};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocIds;
 use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
@@ -35,6 +33,7 @@ use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
+use crate::val::{Array, Number, Object, RecordId, Value};
 use anyhow::{Result, ensure};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
@@ -43,6 +42,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::span::Record;
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
 
@@ -64,9 +64,9 @@ impl KnnBruteForceExpression {
 	}
 }
 
-pub(super) type KnnBruteForceExpressions = HashMap<Arc<Expression>, KnnBruteForceExpression>;
+pub(super) type KnnBruteForceExpressions = HashMap<Arc<Expr>, KnnBruteForceExpression>;
 
-pub(super) type KnnExpressions = HashSet<Arc<Expression>>;
+pub(super) type KnnExpressions = HashSet<Arc<Expr>>;
 
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
@@ -75,11 +75,11 @@ pub(super) struct InnerQueryExecutor {
 	table: String,
 	ft_map: HashMap<IndexReference, FtIndex>,
 	mr_entries: HashMap<MatchRef, FtEntry>,
-	exp_entries: HashMap<Arc<Expression>, FtEntry>,
+	exp_entries: HashMap<Arc<Expr>, FtEntry>,
 	it_entries: Vec<IteratorEntry>,
-	mt_entries: HashMap<Arc<Expression>, MtEntry>,
-	hnsw_entries: HashMap<Arc<Expression>, HnswEntry>,
-	knn_bruteforce_entries: HashMap<Arc<Expression>, KnnBruteForceEntry>,
+	mt_entries: HashMap<Arc<Expr>, MtEntry>,
+	hnsw_entries: HashMap<Arc<Expr>, HnswEntry>,
+	knn_bruteforce_entries: HashMap<Arc<Expr>, KnnBruteForceEntry>,
 }
 
 impl From<InnerQueryExecutor> for QueryExecutor {
@@ -89,8 +89,8 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 }
 
 pub(super) enum IteratorEntry {
-	Single(Option<Arc<Expression>>, IndexOption),
-	Range(HashSet<Arc<Expression>>, IndexReference, RangeValue, RangeValue),
+	Single(Option<Arc<Expr>>, IndexOption),
+	Range(HashSet<Arc<Expr>>, IndexReference, RangeValue, RangeValue),
 }
 
 impl IteratorEntry {
@@ -99,7 +99,7 @@ impl IteratorEntry {
 			Self::Single(_, io) => io.explain(),
 			Self::Range(_, ir, from, to) => {
 				let mut e = HashMap::default();
-				e.insert("index", Value::from(ir.name.0.clone()));
+				e.insert("index", Value::from(ir.name.clone().into_strand()));
 				e.insert("from", Value::from(from));
 				e.insert("to", Value::from(to));
 				Value::from(Object::from(e))
@@ -114,8 +114,8 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		table: &Table,
-		ios: Vec<(Arc<Expression>, IndexOption)>,
+		table: &Ident,
+		ios: Vec<(Arc<Expr>, IndexOption)>,
 		knns: KnnExpressions,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
@@ -241,7 +241,7 @@ impl InnerQueryExecutor {
 		}
 
 		Ok(Self {
-			table: table.0.clone(),
+			table: table.clone().into_string(),
 			ft_map,
 			mr_entries,
 			exp_entries,
@@ -265,9 +265,9 @@ impl QueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		thg: &Thing,
+		thg: &RecordId,
 		doc: Option<&CursorDoc>,
-		exp: &Expression,
+		exp: &Expr,
 	) -> Result<Value> {
 		if let Some(IterationStage::Iterate(e)) = ctx.get_iteration_stage() {
 			if let Some(results) = e {
@@ -305,7 +305,7 @@ impl QueryExecutor {
 	}
 
 	/// Returns `true` if the expression is matching the current iterator.
-	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expression) -> bool {
+	pub(crate) fn is_iterator_expression(&self, ir: IteratorRef, exp: &Expr) -> bool {
 		match self.0.it_entries.get(ir) {
 			Some(IteratorEntry::Single(Some(e), ..)) => exp.eq(e.as_ref()),
 			Some(IteratorEntry::Range(es, ..)) => es.contains(exp),
@@ -960,14 +960,14 @@ impl QueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		thg: &Thing,
-		exp: &Expression,
+		thg: &RecordId,
+		exp: &Expr,
 		l: Value,
 		r: Value,
 	) -> Result<bool> {
 		if let Some(ft) = self.0.exp_entries.get(exp) {
 			let ix = ft.0.index_option.ix_ref();
-			if self.0.table.eq(&ix.what.0) {
+			if self.0.table == *ix.what {
 				return self.matches_with_doc_id(ctx, thg, ft).await;
 			}
 			return self.matches_with_value(stk, ctx, opt, ft, l, r).await;
@@ -979,7 +979,12 @@ impl QueryExecutor {
 		}))
 	}
 
-	async fn matches_with_doc_id(&self, ctx: &Context, thg: &Thing, ft: &FtEntry) -> Result<bool> {
+	async fn matches_with_doc_id(
+		&self,
+		ctx: &Context,
+		thg: &RecordId,
+		ft: &FtEntry,
+	) -> Result<bool> {
 		// TODO ask emmanual
 		let doc_key = revision::to_vec(thg)?;
 		let tx = ctx.tx();
@@ -1054,7 +1059,7 @@ impl QueryExecutor {
 	pub(crate) async fn highlight(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		hlp: HighlightParams,
 		doc: &Value,
 	) -> Result<Value> {
@@ -1071,7 +1076,7 @@ impl QueryExecutor {
 	pub(crate) async fn offsets(
 		&self,
 		ctx: &Context,
-		thg: &Thing,
+		thg: &RecordId,
 		match_ref: Value,
 		partial: bool,
 	) -> Result<Value> {
@@ -1087,7 +1092,7 @@ impl QueryExecutor {
 		&self,
 		ctx: &Context,
 		match_ref: &Value,
-		rid: &Thing,
+		rid: &RecordId,
 		ir: Option<&Arc<IteratorRecord>>,
 	) -> Result<Value> {
 		if let Some(e) = self.get_ft_entry(match_ref) {

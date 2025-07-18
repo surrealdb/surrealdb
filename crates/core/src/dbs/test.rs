@@ -1,8 +1,9 @@
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
-use crate::iam::Auth;
-use crate::iam::Role;
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::iam::{Auth, Role};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use std::sync::Arc;
 
 pub async fn mock() -> (Context, Options) {

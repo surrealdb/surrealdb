@@ -1,14 +1,8 @@
 //! Implements token gluing logic.
-
-use crate::{
-	sql::{Datetime, Duration, Strand, Uuid},
-	syn::{
-		lexer::compound,
-		token::{Glued, Token, TokenKind, t},
-	},
-};
-
 use super::{GluedValue, ParseResult, Parser};
+use crate::syn::lexer::compound;
+use crate::syn::token::{Glued, Token, TokenKind, t};
+use crate::val::{Datetime, Duration, Strand, Uuid};
 
 impl Parser<'_> {
 	/// Glues the next token and returns the token after.
@@ -34,8 +28,22 @@ impl Parser<'_> {
 				self.token_buffer.clear();
 				let value = self.lexer.lex_compound(token, compound::numeric_kind)?;
 				match value.value {
-					compound::NumericKind::Number(x) => {
-						self.glued_value = GluedValue::Number(x);
+					compound::NumericKind::Float => {
+						self.glued_value = GluedValue::Number(compound::NumberKind::Float);
+						self.prepend_token(Token {
+							span: value.span,
+							kind: TokenKind::Glued(Glued::Number),
+						});
+					}
+					compound::NumericKind::Int => {
+						self.glued_value = GluedValue::Number(compound::NumberKind::Integer);
+						self.prepend_token(Token {
+							span: value.span,
+							kind: TokenKind::Glued(Glued::Number),
+						});
+					}
+					compound::NumericKind::Decimal => {
+						self.glued_value = GluedValue::Number(compound::NumberKind::Decimal);
 						self.prepend_token(Token {
 							span: value.span,
 							kind: TokenKind::Glued(Glued::Number),
@@ -54,8 +62,22 @@ impl Parser<'_> {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::numeric_kind)?;
 				match value.value {
-					compound::NumericKind::Number(x) => {
-						self.glued_value = GluedValue::Number(x);
+					compound::NumericKind::Int => {
+						self.glued_value = GluedValue::Number(compound::NumberKind::Integer);
+						self.prepend_token(Token {
+							span: value.span,
+							kind: TokenKind::Glued(Glued::Number),
+						});
+					}
+					compound::NumericKind::Float => {
+						self.glued_value = GluedValue::Number(compound::NumberKind::Float);
+						self.prepend_token(Token {
+							span: value.span,
+							kind: TokenKind::Glued(Glued::Number),
+						});
+					}
+					compound::NumericKind::Decimal => {
+						self.glued_value = GluedValue::Number(compound::NumberKind::Decimal);
 						self.prepend_token(Token {
 							span: value.span,
 							kind: TokenKind::Glued(Glued::Number),
@@ -73,7 +95,10 @@ impl Parser<'_> {
 			t!("\"") | t!("'") => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::strand)?;
-				self.glued_value = GluedValue::Strand(Strand(value.value));
+				// SAFETY: Lexer ensures that no null bytes are present in the string in
+				// value.value
+				self.glued_value =
+					GluedValue::Strand(unsafe { Strand::new_unchecked(value.value) });
 				self.prepend_token(Token {
 					span: value.span,
 					kind: TokenKind::Glued(Glued::Strand),

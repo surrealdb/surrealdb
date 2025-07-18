@@ -11,14 +11,13 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use uuid::Uuid;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
-	#[revision(start = 2)]
 	pub if_exists: bool,
 }
 
@@ -62,7 +61,7 @@ impl RemoveEventStatement {
 			cache.clear_tb(ns, db, &self.what);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

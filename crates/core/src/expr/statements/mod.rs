@@ -46,6 +46,7 @@ pub use self::kill::KillStatement;
 pub use self::live::LiveStatement;
 pub use self::option::OptionStatement;
 pub use self::output::OutputStatement;
+pub use self::rebuild::RebuildStatement;
 pub use self::relate::RelateStatement;
 pub use self::select::SelectStatement;
 pub use self::set::SetStatement;
@@ -61,8 +62,8 @@ pub use self::alter::{AlterStatement, AlterTableStatement};
 pub use self::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-	DefineTableStatement, DefineUserStatement,
+	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineParamStore,
+	DefineStatement, DefineTableStatement, DefineUserStatement,
 };
 
 pub use self::remove::{
@@ -71,5 +72,3 @@ pub use self::remove::{
 	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
 	RemoveUserStatement,
 };
-
-pub use self::define::FindApi;

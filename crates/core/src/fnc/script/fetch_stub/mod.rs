@@ -1,10 +1,8 @@
 //! stub implementations for the fetch API when `http` is not enabled.
 
-use js::{
-	Class, Ctx, Exception, Function, Object, Result,
-	class::{JsClass, Trace, Tracer},
-	function::Constructor,
-};
+use js::class::{JsClass, Trace, Tracer};
+use js::function::Constructor;
+use js::{Class, Ctx, Exception, Function, Object, Result};
 
 #[cfg(test)]
 mod test;

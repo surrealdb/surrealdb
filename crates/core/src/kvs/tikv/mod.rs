@@ -4,19 +4,15 @@ mod cnf;
 
 use crate::err::Error;
 use crate::key::debug::Sprintable;
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
 use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
+use crate::kvs::{Check, Key, Val};
 use crate::vs::VersionStamp;
 use anyhow::{Result, bail, ensure};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tikv::TimestampExt;
-use tikv::TransactionOptions;
-use tikv::{CheckLevel, Config, TransactionClient};
+use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 

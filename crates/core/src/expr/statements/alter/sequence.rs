@@ -13,7 +13,7 @@ use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AlterSequenceStatement {
@@ -53,7 +53,7 @@ impl AlterSequenceStatement {
 		let key = Sq::new(ns, db, &self.name);
 		txn.set(key, revision::to_vec(&sq)?, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

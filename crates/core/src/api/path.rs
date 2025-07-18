@@ -1,31 +1,25 @@
-use std::{
-	fmt::{self, Display, Formatter},
-	ops::Deref,
-	str::FromStr,
-};
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+use std::str::FromStr;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-	err::Error,
-	expr::{
-		Kind, Object, Value,
-		fmt::{Fmt, fmt_separated_by},
-	},
-	syn,
-};
+use crate::err::Error;
+use crate::expr::Kind;
+use crate::expr::fmt::{Fmt, fmt_separated_by};
+use crate::syn;
+use crate::val::{Object, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Path(pub Vec<Segment>);
 
 impl<'a> Path {
-	pub fn fit(&'a self, segments: impl Into<&'a [&'a str]>) -> Option<Object> {
+	/// TODO: Document what this does
+	pub fn fit(&'a self, segments: &'a [&'a str]) -> Option<Object> {
 		let mut obj = Object::default();
-		let segments: &'a [&'a str] = segments.into();
 		for (i, segment) in self.iter().enumerate() {
 			if let Some(res) = segment.fit(&segments[i..]) {
 				if let Some((k, v)) = res {
@@ -43,7 +37,7 @@ impl<'a> Path {
 		}
 	}
 
-	pub fn specifity(&self) -> u8 {
+	pub fn specificity(&self) -> u8 {
 		self.iter().map(|s| s.specificity()).sum()
 	}
 }
@@ -225,7 +219,7 @@ impl FromStr for Path {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Segment {

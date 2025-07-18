@@ -1,25 +1,15 @@
 use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 use quick_cache::sync::{Cache, GuardResult};
 use regex::RegexBuilder;
-use revision::revisioned;
-use serde::{
-	Deserialize, Deserializer, Serialize, Serializer,
-	de::{self, Visitor},
-};
 use std::cmp::Ordering;
-use std::fmt::Debug;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
-
-#[revisioned(revision = 1)]
 #[derive(Clone)]
-#[non_exhaustive]
-pub struct Regex(pub regex::Regex);
+pub struct Regex(regex::Regex);
 
 impl Regex {
 	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/' delimiters.
@@ -29,6 +19,7 @@ impl Regex {
 }
 
 pub(crate) fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
+	// TODO Move out regex cache
 	static REGEX_CACHE: LazyLock<Cache<String, regex::Regex>> =
 		LazyLock::new(|| Cache::new(REGEX_CACHE_SIZE.max(10)));
 	match REGEX_CACHE.get_value_or_guard(str, None) {
@@ -98,67 +89,15 @@ impl Display for Regex {
 	}
 }
 
-impl From<Regex> for crate::expr::Regex {
+impl From<Regex> for crate::val::Regex {
 	fn from(v: Regex) -> Self {
 		Self(v.0)
 	}
 }
 
-impl From<crate::expr::Regex> for Regex {
-	fn from(v: crate::expr::Regex) -> Self {
+impl From<crate::val::Regex> for Regex {
+	fn from(v: crate::val::Regex) -> Self {
 		Self(v.0)
-	}
-}
-
-impl Serialize for Regex {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		serializer.serialize_newtype_struct(TOKEN, self.0.as_str())
-	}
-}
-
-impl<'de> Deserialize<'de> for Regex {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: Deserializer<'de>,
-	{
-		struct RegexNewtypeVisitor;
-
-		impl<'de> Visitor<'de> for RegexNewtypeVisitor {
-			type Value = Regex;
-
-			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-				formatter.write_str("a regex newtype")
-			}
-
-			fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-			where
-				D: Deserializer<'de>,
-			{
-				struct RegexVisitor;
-
-				impl Visitor<'_> for RegexVisitor {
-					type Value = Regex;
-
-					fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-						formatter.write_str("a regex str")
-					}
-
-					fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-					where
-						E: de::Error,
-					{
-						Regex::from_str(value).map_err(|_| de::Error::custom("invalid regex"))
-					}
-				}
-
-				deserializer.deserialize_str(RegexVisitor)
-			}
-		}
-
-		deserializer.deserialize_newtype_struct(TOKEN, RegexNewtypeVisitor)
 	}
 }
 

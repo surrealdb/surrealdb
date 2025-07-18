@@ -1,20 +1,13 @@
 use crate::sql::ident::Ident;
 use crate::sql::scoring::Scoring;
+use crate::val::Number;
 
-use crate::sql::Number;
-use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum Index {
 	/// (Basic) non unique
-	#[default]
 	Idx,
 	/// Unique index
 	Uniq,
@@ -23,7 +16,6 @@ pub enum Index {
 	/// M-Tree index for distance based metrics
 	MTree(MTreeParams),
 	/// HNSW index for distance based metrics
-	#[revision(start = 2)]
 	Hnsw(HnswParams),
 }
 
@@ -51,10 +43,8 @@ impl From<crate::expr::index::Index> for Index {
 	}
 }
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -63,13 +53,9 @@ pub struct SearchParams {
 	pub doc_lengths_order: u32,
 	pub postings_order: u32,
 	pub terms_order: u32,
-	#[revision(start = 2)]
 	pub doc_ids_cache: u32,
-	#[revision(start = 2)]
 	pub doc_lengths_cache: u32,
-	#[revision(start = 2)]
 	pub postings_cache: u32,
-	#[revision(start = 2)]
 	pub terms_cache: u32,
 }
 
@@ -108,60 +94,16 @@ impl From<crate::expr::index::SearchParams> for SearchParams {
 	}
 }
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct MTreeParams {
 	pub dimension: u16,
-	#[revision(start = 1, end = 2, convert_fn = "convert_old_distance")]
-	pub _distance: Distance1, // TODO remove once 1.0 && 1.1 are EOL
-	#[revision(start = 2)]
 	pub distance: Distance,
 	pub vector_type: VectorType,
 	pub capacity: u16,
 	pub doc_ids_order: u32,
-	#[revision(start = 2)]
 	pub doc_ids_cache: u32,
-	#[revision(start = 2)]
 	pub mtree_cache: u32,
-}
-
-impl MTreeParams {
-	pub fn new(
-		dimension: u16,
-		distance: Distance,
-		vector_type: VectorType,
-		capacity: u16,
-		doc_ids_order: u32,
-		doc_ids_cache: u32,
-		mtree_cache: u32,
-	) -> Self {
-		Self {
-			dimension,
-			distance,
-			vector_type,
-			capacity,
-			doc_ids_order,
-			doc_ids_cache,
-			mtree_cache,
-		}
-	}
-
-	fn convert_old_distance(
-		&mut self,
-		_revision: u16,
-		d1: Distance1,
-	) -> Result<(), revision::Error> {
-		self.distance = match d1 {
-			Distance1::Euclidean => Distance::Euclidean,
-			Distance1::Manhattan => Distance::Manhattan,
-			Distance1::Cosine => Distance::Cosine,
-			Distance1::Hamming => Distance::Hamming,
-			Distance1::Minkowski(n) => Distance::Minkowski(n),
-		};
-		Ok(())
-	}
 }
 
 impl From<MTreeParams> for crate::expr::index::MTreeParams {
@@ -192,23 +134,8 @@ impl From<crate::expr::index::MTreeParams> for MTreeParams {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum Distance1 {
-	#[default]
-	Euclidean,
-	Manhattan,
-	Cosine,
-	Hamming,
-	Minkowski(Number),
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct HnswParams {
 	pub dimension: u16,
 	pub distance: Distance,
@@ -219,33 +146,6 @@ pub struct HnswParams {
 	pub extend_candidates: bool,
 	pub keep_pruned_connections: bool,
 	pub ml: Number,
-}
-
-impl HnswParams {
-	#[expect(clippy::too_many_arguments)]
-	pub fn new(
-		dimension: u16,
-		distance: Distance,
-		vector_type: VectorType,
-		m: u8,
-		m0: u8,
-		ml: Number,
-		ef_construction: u16,
-		extend_candidates: bool,
-		keep_pruned_connections: bool,
-	) -> Self {
-		Self {
-			dimension,
-			distance,
-			vector_type,
-			m,
-			m0,
-			ef_construction,
-			ml,
-			extend_candidates,
-			keep_pruned_connections,
-		}
-	}
 }
 
 impl From<HnswParams> for crate::expr::index::HnswParams {
@@ -280,10 +180,8 @@ impl From<crate::expr::index::HnswParams> for HnswParams {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Distance {
 	Chebyshev,
 	Cosine,
@@ -341,10 +239,8 @@ impl From<crate::expr::index::Distance> for Distance {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum VectorType {
 	#[default]
 	F64,

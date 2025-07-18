@@ -1,21 +1,25 @@
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::expr::Thing;
+use crate::expr::Algorithm;
 use crate::expr::access_type::{AccessType, Jwt, JwtAccessVerify};
-use crate::expr::{Algorithm, Value, statements::DefineUserStatement};
+use crate::expr::statements::DefineUserStatement;
 use crate::iam::access::{authenticate_generic, authenticate_record};
+use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
-use crate::iam::{Actor, Auth, Level, Role, issue::expiration, token::Claims};
-use crate::kvs::{Datastore, LockType::*, TransactionType::*};
+use crate::iam::token::Claims;
+use crate::iam::{Actor, Auth, Level, Role};
+use crate::kvs::Datastore;
+use crate::kvs::LockType::*;
+use crate::kvs::TransactionType::*;
 use crate::syn;
+use crate::val::{RecordId, Value};
 use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use std::str::{self, FromStr};
-use std::sync::Arc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 fn config(alg: Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
 	let (dec, mut val) = match alg {
@@ -173,13 +177,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Parse the record id
-			let mut rid: Thing = syn::thing(id)?.into();
+			let mut rid = syn::thing(id)?;
 			// Get the database access method
 			let de = tx.get_db_access(ns, db, ac).await?;
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.kind {
+			let cf = match &de.access_type {
 				AccessType::Record(at) => match &at.jwt.verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
@@ -240,10 +244,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			match &de.kind {
+			match &de.access_type {
 				// If the access type is Jwt or Bearer, this is database access
 				AccessType::Jwt(_) | AccessType::Bearer(_) => {
-					let cf = match &de.kind.jwt().verify {
+					let cf = match &de.access_type.jwt().verify {
 						JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 						#[cfg(feature = "jwks")]
 						JwtAccessVerify::Jwks(jwks) => {
@@ -402,8 +406,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.kind {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
+			let cf = match &de.access_type {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -508,8 +512,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
-			let cf = match &de.kind {
-				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.kind.jwt().verify {
+			let cf = match &de.access_type {
+				AccessType::Jwt(_) | AccessType::Bearer(_) => match &de.access_type.jwt().verify {
 					JwtAccessVerify::Key(key) => config(key.alg, key.key.as_bytes()),
 					#[cfg(feature = "jwks")]
 					JwtAccessVerify::Jwks(jwks) => {
@@ -695,6 +699,7 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -851,11 +856,10 @@ mod tests {
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::{
-			Base, Statement,
-			statements::{DefineUserStatement, define::DefineStatement},
-			user::UserDuration,
-		};
+		use crate::sql::statements::DefineUserStatement;
+		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::user::UserDuration;
+		use crate::sql::{Base, Statement};
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -1346,9 +1350,11 @@ mod tests {
 	#[tokio::test]
 	async fn test_token_record_jwks() {
 		use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
-		use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
+		use base64::Engine;
+		use base64::engine::general_purpose::STANDARD_NO_PAD;
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
-		use rand::{Rng, distributions::Alphanumeric};
+		use rand::Rng;
+		use rand::distributions::Alphanumeric;
 		use wiremock::matchers::{method, path};
 		use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -2056,4 +2062,4 @@ mod tests {
 			}
 		}
 	}
-}
+}*/

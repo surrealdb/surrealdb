@@ -1,26 +1,25 @@
 use super::Value;
 use crate::err::Error;
+use crate::expr::escape::QuoteStr;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Algorithm, escape::QuoteStr};
+use crate::expr::{Algorithm, Expr};
 use anyhow::Result;
-use revision::Error as RevisionError;
-use revision::revisioned;
+use revision::{Error as RevisionError, revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 
 /// The type of access methods available
-#[revisioned(revision = 2)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[revisioned(revision = 1)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
 	// TODO(gguillemas): Document once bearer access is no longer experimental.
-	#[revision(start = 2)]
 	Bearer(BearerAccess),
 }
 
@@ -129,7 +128,7 @@ impl AccessType {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccess {
 	// Verify is required
@@ -228,7 +227,7 @@ impl JwtAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
@@ -247,7 +246,7 @@ impl Default for JwtAccessIssue {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum JwtAccessVerify {
@@ -278,7 +277,7 @@ impl InfoStructure for JwtAccessVerify {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
@@ -297,18 +296,18 @@ impl Default for JwtAccessVerifyKey {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
 #[revisioned(revision = 4)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordAccess {
-	pub signup: Option<Value>,
-	pub signin: Option<Value>,
+	pub signup: Option<Expr>,
+	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
 	#[revision(start = 2, end = 3, convert_fn = "authenticate_revision")]
 	pub authenticate: Option<Value>,
@@ -348,7 +347,7 @@ impl Jwt for RecordAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BearerAccess {
 	pub kind: BearerAccessType,
@@ -375,7 +374,7 @@ impl Jwt for BearerAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum BearerAccessType {
@@ -404,7 +403,7 @@ impl FromStr for BearerAccessType {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
+#[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum BearerAccessSubject {

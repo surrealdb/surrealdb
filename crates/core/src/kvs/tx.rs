@@ -1,50 +1,36 @@
-use super::Key;
-use super::KeyEncode;
-use super::Val;
-use super::Version;
 use super::batch::Batch;
 use super::tr::Check;
-use super::util;
+use super::{Key, KeyEncode, Val, Version, util};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::expr::Id;
-use crate::expr::Permissions;
-use crate::expr::Value;
-use crate::expr::statements::AccessGrant;
-use crate::expr::statements::DefineAccessStatement;
-use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::statements::DefineDatabaseStatement;
-use crate::expr::statements::DefineEventStatement;
-use crate::expr::statements::DefineFieldStatement;
-use crate::expr::statements::DefineFunctionStatement;
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::statements::DefineModelStatement;
-use crate::expr::statements::DefineNamespaceStatement;
-use crate::expr::statements::DefineParamStatement;
-use crate::expr::statements::DefineTableStatement;
-use crate::expr::statements::DefineUserStatement;
-use crate::expr::statements::LiveStatement;
-use crate::expr::statements::define::BucketDefinition;
-use crate::expr::statements::define::DefineConfigStatement;
-use crate::expr::statements::define::{ApiDefinition, DefineSequenceStatement};
+use crate::expr::statements::access::AccessGrantStore;
+use crate::expr::statements::define::config::ConfigStore;
+use crate::expr::statements::define::{
+	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
+};
+use crate::expr::statements::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
+	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineNamespaceStatement, DefineParamStore, DefineTableStatement, DefineUserStatement,
+	LiveStatement,
+};
+use crate::expr::{Ident, Permissions};
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
-use crate::kvs::Transactor;
-use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
+use crate::kvs::{Transactor, cache};
+use crate::val::{RecordId, RecordIdKey, Value};
 use anyhow::Result;
-use futures::lock::Mutex;
-use futures::lock::MutexGuard;
+use futures::lock::{Mutex, MutexGuard};
 use futures::stream::Stream;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[non_exhaustive]
 pub struct Transaction {
 	/// Is this is a local datastore transaction
 	local: bool,
@@ -512,7 +498,7 @@ impl Transaction {
 
 	/// Retrieve all root access grants in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrant]>> {
+	pub async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Rgs(ra);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_rag(),
@@ -584,7 +570,11 @@ impl Transaction {
 
 	/// Retrieve all namespace access grants for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_ns_access_grants(&self, ns: &str, na: &str) -> Result<Arc<[AccessGrant]>> {
+	pub async fn all_ns_access_grants(
+		&self,
+		ns: &str,
+		na: &str,
+	) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Ngs(ns, na);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nag(),
@@ -665,7 +655,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		da: &str,
-	) -> Result<Arc<[AccessGrant]>> {
+	) -> Result<Arc<[AccessGrantStore]>> {
 		let qey = cache::tx::Lookup::Dgs(ns, db, da);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dag(),
@@ -786,7 +776,7 @@ impl Transaction {
 
 	/// Retrieve all param definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_params(&self, ns: &str, db: &str) -> Result<Arc<[DefineParamStatement]>> {
+	pub async fn all_db_params(&self, ns: &str, db: &str) -> Result<Arc<[DefineParamStore]>> {
 		let qey = cache::tx::Lookup::Pas(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_pas(),
@@ -822,7 +812,7 @@ impl Transaction {
 
 	/// Retrieve all model definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db_configs(&self, ns: &str, db: &str) -> Result<Arc<[DefineConfigStatement]>> {
+	pub async fn all_db_configs(&self, ns: &str, db: &str) -> Result<Arc<[ConfigStore]>> {
 		let qey = cache::tx::Lookup::Cgs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_cgs(),
@@ -1034,7 +1024,7 @@ impl Transaction {
 
 	/// Retrieve a specific root access grant.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_root_access_grant(&self, ac: &str, gr: &str) -> Result<Arc<AccessGrant>> {
+	pub async fn get_root_access_grant(&self, ac: &str, gr: &str) -> Result<Arc<AccessGrantStore>> {
 		let qey = cache::tx::Lookup::Rg(ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1045,7 +1035,7 @@ impl Transaction {
 						ac: ac.to_owned(),
 						gr: gr.to_owned(),
 					})?;
-				let val: AccessGrant = revision::from_slice(&val)?;
+				let val: AccessGrantStore = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1123,7 +1113,7 @@ impl Transaction {
 		ns: &str,
 		ac: &str,
 		gr: &str,
-	) -> Result<Arc<AccessGrant>> {
+	) -> Result<Arc<AccessGrantStore>> {
 		let qey = cache::tx::Lookup::Ng(ns, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1135,7 +1125,7 @@ impl Transaction {
 						gr: gr.to_owned(),
 						ns: ns.to_owned(),
 					})?;
-				let val: AccessGrant = revision::from_slice(&val)?;
+				let val: AccessGrantStore = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1226,7 +1216,7 @@ impl Transaction {
 		db: &str,
 		ac: &str,
 		gr: &str,
-	) -> Result<Arc<AccessGrant>> {
+	) -> Result<Arc<AccessGrantStore>> {
 		let qey = cache::tx::Lookup::Dg(ns, db, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1239,7 +1229,7 @@ impl Transaction {
 						ns: ns.to_owned(),
 						db: db.to_owned(),
 					})?;
-				let val: AccessGrant = revision::from_slice(&val)?;
+				let val: AccessGrantStore = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1400,7 +1390,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		pa: &str,
-	) -> Result<Arc<DefineParamStatement>> {
+	) -> Result<Arc<DefineParamStore>> {
 		let qey = cache::tx::Lookup::Pa(ns, db, pa);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1409,7 +1399,7 @@ impl Transaction {
 				let val = self.get(key, None).await?.ok_or_else(|| Error::PaNotFound {
 					name: pa.to_owned(),
 				})?;
-				let val: DefineParamStatement = revision::from_slice(&val)?;
+				let val: DefineParamStore = revision::from_slice(&val)?;
 				let val = Arc::new(val);
 				let entr = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entr);
@@ -1420,12 +1410,7 @@ impl Transaction {
 
 	/// Retrieve a specific config definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_db_config(
-		&self,
-		ns: &str,
-		db: &str,
-		cg: &str,
-	) -> Result<Arc<DefineConfigStatement>> {
+	pub async fn get_db_config(&self, ns: &str, db: &str, cg: &str) -> Result<Arc<ConfigStore>> {
 		if let Some(val) = self.get_db_optional_config(ns, db, cg).await? {
 			Ok(val)
 		} else {
@@ -1442,14 +1427,14 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		cg: &str,
-	) -> Result<Option<Arc<DefineConfigStatement>>> {
+	) -> Result<Option<Arc<ConfigStore>>> {
 		let qey = cache::tx::Lookup::Cg(ns, db, cg);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Option::Some),
 			None => {
 				let key = crate::key::database::cg::new(ns, db, cg).encode()?;
 				if let Some(val) = self.get(key, None).await? {
-					let val: DefineConfigStatement = revision::from_slice(&val)?;
+					let val: ConfigStore = revision::from_slice(&val)?;
 					let val = Arc::new(val);
 					let entr = cache::tx::Entry::Any(val.clone());
 					self.cache.insert(qey, entr);
@@ -1566,7 +1551,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKey,
 		version: Option<u64>,
 	) -> Result<Arc<Value>> {
 		// Cache is not versioned
@@ -1578,7 +1563,10 @@ impl Transaction {
 				Some(val) => {
 					let mut val: Value = revision::from_slice(&val)?;
 					// Inject the id field into the document
-					let rid = crate::expr::Thing::from((tb, id.clone()));
+					let rid = RecordId {
+						table: tb.to_owned(),
+						key: id.clone(),
+					};
 					val.def(&rid);
 					let val = cache::tx::Entry::Val(Arc::new(val));
 					val.try_into_val()
@@ -1600,7 +1588,10 @@ impl Transaction {
 						Some(val) => {
 							let mut val: Value = revision::from_slice(&val)?;
 							// Inject the id field into the document
-							let rid = crate::expr::Thing::from((tb, id.clone()));
+							let rid = RecordId {
+								table: tb.to_owned(),
+								key: id.clone(),
+							};
 							val.def(&rid);
 							let val = cache::tx::Entry::Val(Arc::new(val));
 							self.cache.insert(qey, val.clone());
@@ -1620,7 +1611,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKey,
 		val: Value,
 	) -> Result<()> {
 		// Set the value in the datastore
@@ -1639,7 +1630,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		id: &Id,
+		id: &RecordIdKey,
 		val: Arc<Value>,
 	) -> Result<()> {
 		// Set the value in the cache
@@ -1650,7 +1641,7 @@ impl Transaction {
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn del_record(&self, ns: &str, db: &str, tb: &str, id: &Id) -> Result<()> {
+	pub async fn del_record(&self, ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<()> {
 		// Set the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
 		self.del(&key).await?;
@@ -1696,7 +1687,6 @@ impl Transaction {
 
 	/// Ensures that a table, database, and namespace are all fully defined.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
 	pub async fn ensure_ns_db_tb(
 		&self,
 		ns: &str,
@@ -1709,7 +1699,6 @@ impl Transaction {
 
 	/// Ensure a specific table (and database, and namespace) exist.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
 	pub(crate) async fn check_ns_db_tb(
 		&self,
 		ns: &str,
@@ -1757,8 +1746,7 @@ impl Transaction {
 
 	/// Clears all keys from the transaction cache.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	#[inline(always)]
-	pub fn clear(&self) {
+	pub fn clear_cache(&self) {
 		self.cache.clear()
 	}
 
@@ -1792,7 +1780,8 @@ impl Transaction {
 						..
 					}) if !strict => {
 						let val = DefineNamespaceStatement {
-							name: ns.to_owned().into(),
+							// TODO: Null byte validity
+							name: unsafe { Ident::new_unchecked(ns.to_owned()) },
 							..Default::default()
 						};
 						let val = {
@@ -1849,7 +1838,7 @@ impl Transaction {
 						}
 						// Next, dynamically define the database
 						let val = DefineDatabaseStatement {
-							name: db.to_owned().into(),
+							name: unsafe { Ident::new_unchecked(ns.to_owned()) },
 							..Default::default()
 						};
 						let val = {
@@ -1916,7 +1905,7 @@ impl Transaction {
 						}
 						// Next, dynamically define the table
 						let val = DefineTableStatement {
-							name: tb.to_owned().into(),
+							name: unsafe { Ident::new_unchecked(ns.to_owned()) },
 							permissions: Permissions::none(),
 							..Default::default()
 						};

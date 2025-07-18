@@ -245,7 +245,6 @@ keyword! {
 	Array => "ARRAY",
 	Geometry => "GEOMETRY",
 	Record => "RECORD",
-	Future => "FUTURE",
 	Bool => "BOOL",
 	Bytes => "BYTES",
 	Datetime => "DATETIME",

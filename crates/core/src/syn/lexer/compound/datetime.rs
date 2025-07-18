@@ -2,11 +2,9 @@ use std::ops::RangeInclusive;
 
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 
-use crate::syn::{
-	error::{SyntaxError, bail, syntax_error},
-	lexer::Lexer,
-	token::{Token, t},
-};
+use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, t};
 
 pub fn datetime(lexer: &mut Lexer, start: Token) -> Result<DateTime<Utc>, SyntaxError> {
 	let double = match start.kind {

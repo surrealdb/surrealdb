@@ -111,7 +111,9 @@ impl SerdeState for State {}
 #[cfg(test)]
 mod tests {
 	use crate::idg::u32::U32;
-	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType::*};
+	use crate::kvs::LockType::*;
+	use crate::kvs::TransactionType::*;
+	use crate::kvs::{Datastore, Transaction};
 	use anyhow::Result;
 
 	async fn get_ids(ds: &Datastore) -> (Transaction, U32) {
