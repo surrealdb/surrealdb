@@ -2,8 +2,8 @@ use std::io::{Result, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 
 /// Simple writer that outputs log lines to a TCP socket.
-/// TODO: reconnect when the connection fails
-/// TODO: metric when connection fails
+/// TODO: reconnect when the connection fails?
+/// TODO: metric for when connection fails?
 pub struct SocketWriter {
 	stream: TcpStream,
 }
