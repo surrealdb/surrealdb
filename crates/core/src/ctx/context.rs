@@ -377,6 +377,14 @@ impl MutableContext {
 		self.sequences.as_ref()
 	}
 
+	pub(crate) fn try_get_sequences(&self) -> Result<&Sequences> {
+		if let Some(sqs) = self.get_sequences() {
+			Ok(sqs)
+		} else {
+			bail!(Error::Internal("Sequences are not supported in this context.".to_string(),))
+		}
+	}
+
 	// Get the current datastore cache
 	pub(crate) fn get_cache(&self) -> Option<Arc<DatastoreCache>> {
 		self.cache.clone()

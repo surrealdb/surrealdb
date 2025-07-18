@@ -46,7 +46,7 @@ use uuid::Uuid;
 
 #[non_exhaustive]
 pub struct Transaction {
-	/// Is this is a local datastore transaction
+	/// Is this is a local datastore transaction?
 	local: bool,
 	/// The underlying transactor
 	tx: Mutex<Transactor>,
@@ -54,7 +54,7 @@ pub struct Transaction {
 	cache: TransactionCache,
 	/// Cache the index updates
 	index_caches: IndexTreeCaches,
-	/// Does this supports reverse scan
+	/// Does this support reverse scan?
 	reverse_scan: bool,
 }
 
@@ -303,7 +303,7 @@ impl Transaction {
 		self.lock().await.keys(rng, limit, version).await
 	}
 
-	/// Retrieve a specific range of keys from the datastore.
+	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
 	/// This function fetches the full range of keys, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]

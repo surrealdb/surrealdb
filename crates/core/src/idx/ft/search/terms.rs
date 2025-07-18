@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) type TermId = u64;
 pub(crate) type TermLen = u32;
 
-pub(in crate::idx) struct Terms {
+pub(in crate::idx) struct SearchTerms {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<FstKeys>,
@@ -21,7 +21,7 @@ pub(in crate::idx) struct Terms {
 	next_term_id: TermId,
 }
 
-impl Terms {
+impl SearchTerms {
 	pub(super) async fn new(
 		tx: &Transaction,
 		index_key_base: IndexKeyBase,
@@ -201,8 +201,8 @@ impl VersionedStore for State {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::postings::TermFrequency;
-	use crate::idx::ft::terms::{State, Terms};
+	use crate::idx::ft::TermFrequency;
+	use crate::idx::ft::search::terms::{SearchTerms, State};
 	use crate::idx::{IndexKeyBase, VersionedStore};
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
@@ -239,13 +239,13 @@ mod tests {
 		ds: &Datastore,
 		order: u32,
 		tt: TransactionType,
-	) -> (Transaction, Terms) {
+	) -> (Transaction, SearchTerms) {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let t = Terms::new(&tx, IndexKeyBase::default(), order, tt, 100).await.unwrap();
+		let t = SearchTerms::new(&tx, IndexKeyBase::default(), order, tt, 100).await.unwrap();
 		(tx, t)
 	}
 
-	async fn finish(tx: Transaction, mut t: Terms) {
+	async fn finish(tx: Transaction, mut t: SearchTerms) {
 		t.finish(&tx).await.unwrap();
 		tx.commit().await.unwrap();
 	}

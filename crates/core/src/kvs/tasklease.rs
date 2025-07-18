@@ -15,6 +15,8 @@ use uuid::Uuid;
 pub(crate) enum TaskLeaseType {
 	/// Task for cleaning up old changefeed data
 	ChangeFeedCleanup,
+	/// Index compaction
+	IndexCompaction,
 }
 
 #[revisioned(revision = 1)]

@@ -1,18 +1,17 @@
 use crate::idx::docids::DocId;
-use crate::idx::ft::Bm25Params;
-use crate::idx::ft::doclength::{DocLength, DocLengths};
-use crate::idx::ft::postings::{Postings, TermFrequency};
-use crate::idx::ft::termdocs::TermsDocs;
+use crate::idx::ft::search::Bm25Params;
+use crate::idx::ft::search::doclength::DocLengths;
+use crate::idx::ft::search::postings::Postings;
+use crate::idx::ft::search::termdocs::SearchTermsDocs;
+use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::kvs::Transaction;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(super) type Score = f32;
-
 pub(crate) struct BM25Scorer {
 	postings: Arc<RwLock<Postings>>,
-	terms_docs: TermsDocs,
+	terms_docs: Arc<SearchTermsDocs>,
 	doc_lengths: Arc<RwLock<DocLengths>>,
 	average_doc_length: f32,
 	doc_count: f32,
@@ -22,7 +21,7 @@ pub(crate) struct BM25Scorer {
 impl BM25Scorer {
 	pub(super) fn new(
 		postings: Arc<RwLock<Postings>>,
-		terms_docs: TermsDocs,
+		terms_docs: Arc<SearchTermsDocs>,
 		doc_lengths: Arc<RwLock<DocLengths>>,
 		total_docs_length: u128,
 		doc_count: u64,
@@ -51,7 +50,7 @@ impl BM25Scorer {
 		Ok(self.compute_bm25_score(term_frequency as f32, term_doc_count as f32, doc_length as f32))
 	}
 
-	pub(crate) async fn score(&self, tx: &Transaction, doc_id: DocId) -> Result<Option<Score>> {
+	pub(crate) async fn score(&self, tx: &Transaction, doc_id: DocId) -> Result<Score> {
 		let mut sc = 0.0;
 		let p = self.postings.read().await;
 		for (term_id, docs) in self.terms_docs.iter().flatten() {
@@ -62,8 +61,7 @@ impl BM25Scorer {
 				}
 			}
 		}
-		drop(p);
-		Ok(Some(sc))
+		Ok(sc)
 	}
 
 	// https://en.wikipedia.org/wiki/Okapi_BM25

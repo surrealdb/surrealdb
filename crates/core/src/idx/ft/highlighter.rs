@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::expr::{Array, Idiom, Object, Value};
-use crate::idx::ft::offsets::{Offset, Position};
+use crate::idx::ft::Position;
+use crate::idx::ft::offset::Offset;
 use anyhow::{Result, ensure};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
