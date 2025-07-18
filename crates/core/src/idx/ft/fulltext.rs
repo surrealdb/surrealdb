@@ -1,3 +1,12 @@
+/// This module implements a concurrent full-text search index.
+///
+/// The full-text index allows for efficient text search operations with support for:
+/// - Concurrent read and write operations
+/// - BM25 scoring for relevance ranking
+/// - Highlighting of search terms in results
+/// - Efficient term frequency tracking
+/// - Document length normalization
+/// - Compaction of index data
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
@@ -31,23 +40,33 @@ use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
+/// Represents a term occurrence within a document
 struct TermDocument {
+	/// The frequency of the term in the document
 	f: TermFrequency,
+	/// The offsets of the term occurrences in the document
 	o: Vec<Offset>,
 }
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Default)]
+/// Tracks document length and count statistics for the index
 struct DocLengthAndCount {
+	/// The total length of all documents in the index
 	total_docs_length: i128,
+	/// The total number of documents in the index
 	doc_count: i64,
 }
 
+/// Represents the terms in a search query and their associated document sets
 pub(in crate::idx) struct QueryTerms {
+	/// The tokenized query terms
 	#[allow(dead_code)]
 	tokens: Tokens,
+	/// Document sets for each term (RoaringTreemap of document IDs)
 	#[allow(dead_code)]
 	docs: Vec<Option<RoaringTreemap>>,
+	/// Indicates if any terms in the query are not found in the index
 	#[allow(dead_code)]
 	has_unknown_terms: bool,
 }
@@ -67,15 +86,24 @@ impl QueryTerms {
 	}
 }
 
+/// The main full-text index implementation that supports concurrent read and write operations
 pub(crate) struct FullTextIndex {
+	/// The index key base used for key generation
 	ikb: IndexKeyBase,
+	/// The analyzer used for tokenizing and processing text
 	analyzer: Analyzer,
+	/// Whether highlighting is enabled for this index
 	highlighting: bool,
+	/// Mapping between document IDs and their database identifiers
 	doc_ids: SeqDocIds,
+	/// BM25 scoring parameters, if scoring is enabled
 	bm25: Option<Bm25Params>,
 }
 
 impl FullTextIndex {
+	/// Creates a new full-text index with the specified parameters
+	///
+	/// This method retrieves the analyzer from the database and then calls `with_analyzer`
 	pub(crate) async fn new(
 		nid: Uuid,
 		ixs: &IndexStores,
@@ -88,6 +116,9 @@ impl FullTextIndex {
 		Self::with_analyzer(nid, ixs, az, ikb, p)
 	}
 
+	/// Creates a new full-text index with the specified analyzer
+	///
+	/// This method initializes the index with the provided analyzer and parameters
 	fn with_analyzer(
 		nid: Uuid,
 		ixs: &IndexStores,
@@ -116,6 +147,10 @@ impl FullTextIndex {
 		})
 	}
 
+	/// Removes content from the full-text index
+	///
+	/// This method removes the specified content for a document from the index.
+	/// It returns the document ID if the document was found and removed.
 	pub(crate) async fn remove_content(
 		&self,
 		stk: &mut Stk,
@@ -177,6 +212,10 @@ impl FullTextIndex {
 		self.doc_ids.remove_doc_id(&ctx.tx(), doc_id).await
 	}
 
+	/// Indexes content in the full-text index
+	///
+	/// This method analyzes and indexes the specified content for a document.
+	/// It resolves the document ID, tokenizes the content, and stores term frequencies and offsets.
 	pub(crate) async fn index_content(
 		&self,
 		stk: &mut Stk,
@@ -278,6 +317,10 @@ impl FullTextIndex {
 		tx.set(key, "", None).await
 	}
 
+	/// Extracts query terms from a search string
+	///
+	/// This method tokenizes the query string and retrieves the document sets for each term.
+	/// It returns a QueryTerms object containing the tokens and their associated document sets.
 	pub(in crate::idx) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
@@ -317,19 +360,27 @@ impl FullTextIndex {
 	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {
 		// We compute the not yet compacted term/documents if any
 		let (beg, end) = self.ikb.new_tt_term_range(term)?;
+
+		// Track document ID deltas: positive values mean document contains the term,
+		// negative values mean document no longer contains the term
 		let mut deltas: HashMap<DocId, i64> = HashMap::new();
+
+		// Scan all term-document transaction logs for this term
 		for k in tx.keys(beg..end, u32::MAX, None).await? {
 			let tt = Tt::decode(&k)?;
 			let entry = deltas.entry(tt.doc_id).or_default();
+			// Increment or decrement the counter based on whether we're adding or removing the term
 			if tt.add {
 				*entry += 1;
 			} else {
 				*entry -= 1;
 			}
 		}
-		// Append the delta term docs to the consolidated docs
+
+		// Merge the delta changes with the consolidated document set
 		let docs = self.append_term_docs_delta(tx, term, &deltas).await?;
-		// If the final `docs` is empty, we return `None`
+
+		// If the final `docs` is empty, we return `None` to indicate no documents contain this term
 		if docs.is_empty() {
 			Ok(None)
 		} else {
@@ -343,24 +394,30 @@ impl FullTextIndex {
 		term: &str,
 		deltas: &HashMap<DocId, i64>,
 	) -> Result<RoaringTreemap> {
-		// We read the compacted term docs
+		// Retrieve the current compacted document set for this term
+		// This is the consolidated bitmap of all documents containing this term
 		let td = self.ikb.new_td(term, None);
 		let mut docs = match tx.get(td, None).await? {
-			None => RoaringTreemap::default(),
+			None => RoaringTreemap::default(), // No documents contain this term yet
 			Some(v) => revision::from_slice(&v)?,
 		};
-		// And apply the deltas
+
+		// Apply the delta changes to the document set
 		for (doc_id, delta) in deltas {
 			match 0.cmp(delta) {
+				// If delta is negative, the term was removed from this document
 				Ordering::Greater => {
 					docs.remove(*doc_id);
 				}
+				// If delta is positive, the term was added to this document
 				Ordering::Less => {
 					docs.insert(*doc_id);
 				}
+				// If delta is zero, no change needed (term was added and removed equal times)
 				Ordering::Equal => {}
 			}
 		}
+
 		Ok(docs)
 	}
 	async fn set_term_docs_delta(
@@ -379,24 +436,35 @@ impl FullTextIndex {
 		Ok(())
 	}
 
+	/// Compacts term documents by consolidating deltas and removing logs
+	///
+	/// This method processes all term document deltas, applies them to the consolidated term documents,
+	/// and removes the delta logs. It returns true if any compaction was performed.
 	async fn compact_term_docs(&self, tx: &Transaction) -> Result<bool> {
+		// Get the range of all term transaction logs
 		let (beg, end) = self.ikb.new_tt_terms_range()?;
 		let mut current_term = "".to_string();
 		let mut deltas: HashMap<DocId, i64> = HashMap::new();
 		let range = beg..end;
 		let mut has_log = false;
+
+		// Process all term transaction logs, grouped by term
 		for k in tx.keys(range.clone(), u32::MAX, None).await? {
 			let tt = Tt::decode(&k)?;
 			has_log = true;
-			// Is this a new term?
+
+			// If we've moved to a new term, consolidate the previous term's deltas
 			if current_term != tt.term {
+				// Apply accumulated deltas for the previous term (if any)
 				if !current_term.is_empty() && !deltas.is_empty() {
 					self.set_term_docs_delta(tx, &current_term, &deltas).await?;
 					deltas.clear();
 				}
+				// Start tracking the new term
 				current_term = tt.term.to_string();
 			}
-			// Update the deltas
+
+			// Accumulate deltas for the current term
 			let entry = deltas.entry(tt.doc_id).or_default();
 			if tt.add {
 				*entry += 1;
@@ -404,37 +472,58 @@ impl FullTextIndex {
 				*entry -= 1;
 			}
 		}
-		// Delete the logs
-		if has_log {
-			tx.delr(range).await?;
-		}
+
+		// Don't forget to process the last term if there was one
 		if !current_term.is_empty() && !deltas.is_empty() {
 			self.set_term_docs_delta(tx, &current_term, &deltas).await?;
 		}
+
+		// After processing all logs, remove them from the database
+		if has_log {
+			tx.delr(range).await?;
+		}
+
+		// Return whether any compaction was performed
 		Ok(has_log)
 	}
 
+	/// Creates a new iterator for search hits
+	///
+	/// This method creates an iterator over the documents that match all query terms.
+	/// It returns None if any term has no matching documents.
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
 		qt: &QueryTerms,
 	) -> Result<Option<FullTextHitsIterator>> {
+		// This will hold the intersection of document sets for all terms
 		let mut hits: Option<RoaringTreemap> = None;
+
+		// Process each term's document set
 		for opt_docs in qt.docs.iter() {
 			if let Some(docs) = opt_docs {
 				if let Some(h) = hits {
+					// Perform intersection with previous results (AND operation)
+					// This ensures we only keep documents that contain ALL terms
 					hits = Some(h.bitand(docs));
 				} else {
+					// First term's document set becomes our initial result set
 					hits = Some(docs.clone());
 				}
 			} else {
+				// If any term has no matching documents, the intersection will be empty
+				// We can return early as no documents will match all terms
 				return Ok(None);
 			}
 		}
+
+		// Create and return an iterator if we have matching documents
 		if let Some(hits) = hits {
 			if !hits.is_empty() {
 				return Ok(Some(FullTextHitsIterator::new(self.ikb.clone(), hits)));
 			}
 		}
+
+		// No documents match all terms
 		Ok(None)
 	}
 
@@ -457,6 +546,11 @@ impl FullTextIndex {
 		Ok(None)
 	}
 
+	/// Computes document length and count statistics for the index
+	///
+	/// This method calculates the total document length and count by aggregating all deltas.
+	/// If compact_log is provided, it will also remove the delta logs and set the flag to true
+	/// if any logs were removed.
 	async fn compute_doc_length_and_count(
 		&self,
 		tx: &Transaction,
@@ -484,6 +578,10 @@ impl FullTextIndex {
 		Ok(dlc)
 	}
 
+	/// Compacts document length and count statistics
+	///
+	/// This method consolidates document length and count statistics and removes the delta logs.
+	/// It returns true if any compaction was performed.
 	async fn compact_doc_length_and_count(&self, tx: &Transaction) -> Result<bool> {
 		let mut has_logs = false;
 		let dlc = self.compute_doc_length_and_count(tx, Some(&mut has_logs)).await?;
@@ -492,12 +590,19 @@ impl FullTextIndex {
 		Ok(has_logs)
 	}
 
+	/// Performs compaction on the full-text index
+	///
+	/// This method compacts both document length/count statistics and term documents.
+	/// It returns true if any compaction was performed.
 	pub(crate) async fn compaction(&self, tx: &Transaction) -> Result<bool> {
 		let r1 = self.compact_doc_length_and_count(tx).await?;
 		let r2 = self.compact_term_docs(tx).await?;
 		Ok(r1 || r2)
 	}
 
+	/// Triggers compaction for the full-text index
+	///
+	/// This method adds a compaction marker that will be processed by the compaction worker.
 	pub(crate) async fn trigger_compaction(
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
@@ -508,6 +613,10 @@ impl FullTextIndex {
 		Ok(())
 	}
 
+	/// Highlights search terms in a document
+	///
+	/// This method highlights the occurrences of search terms in the document value.
+	/// It uses the provided highlighting parameters to format the highlighted text.
 	pub(in crate::idx) async fn highlight(
 		&self,
 		tx: &Transaction,
@@ -570,12 +679,18 @@ impl FullTextIndex {
 	}
 }
 
+/// Iterator for full-text search hits that implements the MatchesHitsIterator trait
 pub(crate) struct FullTextHitsIterator {
+	/// The index key base used for key generation
 	ikb: IndexKeyBase,
+	/// Iterator over the document IDs in the search results
 	iter: IntoIter,
 }
 
 impl FullTextHitsIterator {
+	/// Creates a new iterator for full-text search hits
+	///
+	/// This method initializes an iterator with the index key base and a bitmap of matching document IDs.
 	fn new(ikb: IndexKeyBase, hits: RoaringTreemap) -> Self {
 		Self {
 			ikb,
@@ -594,6 +709,10 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 		self.iter.size_hint().0
 	}
 
+	/// Returns the next search hit in the iterator
+	///
+	/// This method retrieves the next document ID from the bitmap and resolves it to a Thing.
+	/// It returns None when there are no more hits.
 	async fn next(&mut self, tx: &Transaction) -> Result<Option<(Thing, DocId)>> {
 		for doc_id in self.iter.by_ref() {
 			if let Some(id) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
@@ -608,13 +727,21 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	}
 }
 
+/// Implements BM25 scoring for relevance ranking of search results
 pub(in crate::idx) struct Scorer {
+	/// BM25 scoring parameters (k1 and b)
 	bm25: Bm25Params,
+	/// The average document length in the index
 	average_doc_length: f32,
+	/// The total number of documents in the index
 	doc_count: f32,
 }
 
 impl Scorer {
+	/// Creates a new scorer with the specified parameters
+	///
+	/// This method initializes a scorer with document statistics and BM25 parameters.
+	/// It calculates the average document length for use in the BM25 algorithm.
 	fn new(dlc: DocLengthAndCount, bm25: Bm25Params) -> Self {
 		let doc_count = dlc.doc_count as f32;
 		let average_doc_length = (dlc.total_docs_length as f32) / doc_count;
@@ -637,6 +764,10 @@ impl Scorer {
 		Ok(self.compute_bm25_score(term_frequency as f32, term_doc_count as f32, doc_length as f32))
 	}
 
+	/// Calculates the overall score for a document based on query terms
+	///
+	/// This method computes the sum of BM25 scores for all matching terms in the document.
+	/// The score represents the relevance of the document to the query.
 	pub(crate) async fn score(
 		&self,
 		fti: &FullTextIndex,
@@ -662,26 +793,44 @@ impl Scorer {
 		Ok(sc)
 	}
 
-	// https://en.wikipedia.org/wiki/Okapi_BM25
-	// Including the lower-bounding term frequency normalization (2011 CIKM)
-	// Floor for Negative Scores
+	/// Computes the BM25 score for a term in a document
+	///
+	/// This method implements the Okapi BM25 scoring algorithm with:
+	/// - Lower-bounding term frequency normalization (2011 CIKM)
+	/// - Floor for negative scores
+	///
+	/// See: https://en.wikipedia.org/wiki/Okapi_BM25
 	fn compute_bm25_score(&self, term_freq: f32, term_doc_count: f32, doc_length: f32) -> f32 {
-		// (n(qi) + 0.5)
-		let denominator = term_doc_count + 0.5;
-		// (N - n(qi) + 0.5)
-		let numerator = self.doc_count - term_doc_count + 0.5;
-		// Calculate IDF with floor
+		// Step 1: Calculate the Inverse Document Frequency (IDF) component
+		// IDF = ln((N - n(qi) + 0.5) / (n(qi) + 0.5))
+		// where N is total document count and n(qi) is number of documents containing term qi
+		let denominator = term_doc_count + 0.5; // n(qi) + 0.5
+		let numerator = self.doc_count - term_doc_count + 0.5; // N - n(qi) + 0.5
+
+		// Apply floor to prevent negative IDF values (can happen with very common terms)
 		let idf = (numerator / denominator).ln().max(0.0);
+
+		// Handle potential NaN values (could occur if term is in all documents)
 		if idf.is_nan() {
 			return f32::NAN;
 		}
+
+		// Step 2: Apply lower-bounding term frequency normalization
+		// Instead of raw term frequency, use ln(1 + tf) to dampen the effect of high frequencies
 		let tf_prim = 1.0 + term_freq.ln();
-		// idf * (k1 + 1)
+
+		// Step 3: Calculate the numerator of the BM25 formula
+		// This combines the IDF with the normalized term frequency
 		let numerator = idf * (self.bm25.k1 + 1.0) * tf_prim;
-		// 1 - b + b * (|D| / avgDL)
-		let denominator = 1.0 - self.bm25.b + self.bm25.b * (doc_length / self.average_doc_length);
-		// numerator / (k1 * denominator + 1)
-		numerator / (self.bm25.k1 * denominator + 1.0)
+
+		// Step 4: Calculate the document length normalization factor
+		// This adjusts scores based on document length relative to average length
+		// Parameter b controls the impact of document length (0 = no impact, 1 = full normalization)
+		let length_norm = 1.0 - self.bm25.b + self.bm25.b * (doc_length / self.average_doc_length);
+
+		// Step 5: Combine all components to get the final BM25 score
+		// The k1 parameter controls term frequency saturation
+		numerator / (self.bm25.k1 * length_norm + 1.0)
 	}
 }
 
