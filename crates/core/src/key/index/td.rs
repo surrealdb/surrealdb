@@ -47,6 +47,19 @@ impl Categorise for Td<'_> {
 }
 
 impl<'a> Td<'a> {
+	/// Creates a new term-document mapping key
+	///
+	/// This constructor creates a key that maps a term to a document ID.
+	/// It's used by the full-text search engine to efficiently find documents
+	/// that contain specific terms during search operations.
+	///
+	/// # Arguments
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	/// * `term` - The term being indexed
+	/// * `id` - Optional document ID (Some for specific document, None for term prefix)
 	pub(crate) fn new(
 		ns: &'a str,
 		db: &'a str,

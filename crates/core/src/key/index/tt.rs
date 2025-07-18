@@ -57,6 +57,22 @@ impl Categorise for Tt<'_> {
 }
 
 impl<'a> Tt<'a> {
+	/// Creates a new term-document key
+	///
+	/// This constructor creates a key that represents a term occurrence in a document.
+	/// It's used by the full-text search engine to build the inverted index that maps
+	/// terms to the documents containing them.
+	///
+	/// # Arguments
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	/// * `term` - The term being indexed
+	/// * `doc_id` - The document ID where the term appears
+	/// * `nid` - Node ID for distributed transaction tracking
+	/// * `uid` - Transaction ID for concurrency control
+	/// * `add` - Whether this is an addition (true) or removal (false) operation
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ns: &'a str,
@@ -90,6 +106,21 @@ impl<'a> Tt<'a> {
 		}
 	}
 
+	/// Creates a key range for querying a specific term
+	///
+	/// This method generates a key range that can be used to query all occurrences
+	/// of a specific term across all documents in the full-text index. It's used
+	/// for term-specific searches and frequency analysis.
+	///
+	/// # Arguments
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	/// * `term` - The specific term to query
+	///
+	/// # Returns
+	/// A tuple of (start, end) keys that define the range for database queries
 	pub(crate) fn term_range(
 		ns: &'a str,
 		db: &'a str,
@@ -105,6 +136,21 @@ impl<'a> Tt<'a> {
 		Ok((beg, end))
 	}
 
+	/// Creates a key range for querying all terms in an index
+	///
+	/// This method generates a key range that can be used to query all terms
+	/// in the full-text index. It's used for operations that need to scan
+	/// all indexed terms, such as index maintenance, compaction, or complete
+	/// index scans.
+	///
+	/// # Arguments
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	///
+	/// # Returns
+	/// A tuple of (start, end) keys that define the range for database queries
 	pub(crate) fn terms_range(
 		ns: &'a str,
 		db: &'a str,

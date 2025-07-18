@@ -46,6 +46,18 @@ impl Categorise for Dl<'_> {
 }
 
 impl<'a> Dl<'a> {
+	/// Creates a new document length key
+	///
+	/// This constructor creates a key that stores the length of an individual document
+	/// in the full-text index. Document length is a critical factor in relevance scoring
+	/// algorithms like BM25, which normalize term frequencies based on document length.
+	///
+	/// # Arguments
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	/// * `id` - The document ID whose length is being stored
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: DocId) -> Self {
 		Self {
 			__: b'/',

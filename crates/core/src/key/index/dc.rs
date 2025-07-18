@@ -54,6 +54,20 @@ impl Categorise for Dc<'_> {
 }
 
 impl<'a> Dc<'a> {
+	/// Creates a new document count and length key
+	///
+	/// This constructor creates a key that represents document statistics for the full-text index.
+	/// It's used to track document count and length information, which is essential for
+	/// relevance scoring algorithms like BM25.
+	///
+	/// # Arguments
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	/// * `doc_id` - The document ID being tracked
+	/// * `nid` - Node ID for distributed transaction tracking
+	/// * `uid` - Transaction ID for concurrency control
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		ns: &'a str,
@@ -83,10 +97,38 @@ impl<'a> Dc<'a> {
 		}
 	}
 
+	/// Creates a root key for document count and length statistics
+	///
+	/// This method generates a root key that serves as the base for storing
+	/// aggregated document statistics. It's used for maintaining the overall
+	/// document count and total length information needed for scoring calculations.
+	///
+	/// # Arguments
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	///
+	/// # Returns
+	/// The encoded root key as a byte vector
 	pub(crate) fn new_root(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Result<Vec<u8>> {
 		DcPrefix::new(ns, db, tb, ix).encode()
 	}
 
+	/// Creates a key range for querying document count and length statistics
+	///
+	/// This method generates a key range that can be used to query all document
+	/// count and length statistics for a specific index. It's used for operations
+	/// like compaction, scoring calculations, and index maintenance.
+	///
+	/// # Arguments
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	///
+	/// # Returns
+	/// A tuple of (start, end) keys that define the range for database queries
 	pub(crate) fn range(
 		ns: &'a str,
 		db: &'a str,
