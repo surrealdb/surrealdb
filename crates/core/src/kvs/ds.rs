@@ -799,42 +799,43 @@ impl Datastore {
 			// Collect every item in the queue
 			let (beg, end) = Ic::range();
 			let range = beg..end;
-			let previous = Ic::new("", "", "", "", Uuid::nil(), Uuid::nil());
+			let mut previous: Option<IndexKeyBase> = None;
 			let mut count = 0;
 			// Returns an ordered list of indexes that require compaction
 			for (k, _) in txn.getr(range.clone(), None).await? {
 				count += 1;
+				lh.try_maintain_lease().await?;
 				let ic = Ic::decode(&k)?;
 				// If the index has already been compacted, we can ignore the task
-				if previous.ix != ic.ix
-					|| previous.tb != ic.tb
-					|| previous.db != ic.db
-					|| previous.ns != ic.ns
-				{
-					match txn.get_tb_index(ic.ns, ic.db, ic.tb, ic.ix).await {
-						Ok(ix) => {
-							if let Index::FullText(p) = &ix.index {
-								let ft = FullTextIndex::new(
-									self.id(),
-									&self.index_stores,
-									&txn,
-									IndexKeyBase::from_ic(&ic),
-									p,
-								)
-								.await?;
-								ft.compaction(&txn).await?;
-							}
+				if let Some(p) = &previous {
+					if p.match_ic(&ic) {
+						continue;
+					}
+				}
+				match txn.get_tb_index(ic.ns, ic.db, ic.tb, ic.ix).await {
+					Ok(ix) => {
+						if let Index::FullText(p) = &ix.index {
+							let ft = FullTextIndex::new(
+								self.id(),
+								&self.index_stores,
+								&txn,
+								IndexKeyBase::from_ic(&ic),
+								p,
+							)
+							.await?;
+							ft.compaction(&txn).await?;
 						}
-						Err(e) => {
-							if matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
-								trace!(target: TARGET, "Index compaction: Index {} not found, skipping", ic.ix);
-							} else {
-								bail!(e);
-							}
+					}
+					Err(e) => {
+						error!(target: TARGET, "Index compaction: Failed to get index: {}", e);
+						if matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+							trace!(target: TARGET, "Index compaction: Index {} not found, skipping", ic.ix);
+						} else {
+							bail!(e);
 						}
 					}
 				}
-				lh.try_maintain_lease().await?;
+				previous = Some(IndexKeyBase::from_ic(&ic));
 			}
 			if count > 0 {
 				txn.delr(range).await?;

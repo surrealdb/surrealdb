@@ -23,6 +23,7 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops::BitAnd;
 use std::sync::Arc;
@@ -350,10 +351,14 @@ impl FullTextIndex {
 		};
 		// And apply the deltas
 		for (doc_id, delta) in deltas {
-			if *delta < 0 {
-				docs.remove(*doc_id);
-			} else if *delta > 0 {
-				docs.insert(*doc_id);
+			match 0.cmp(delta) {
+				Ordering::Greater => {
+					docs.remove(*doc_id);
+				}
+				Ordering::Less => {
+					docs.insert(*doc_id);
+				}
+				Ordering::Equal => {}
 			}
 		}
 		Ok(docs)
@@ -374,13 +379,15 @@ impl FullTextIndex {
 		Ok(())
 	}
 
-	async fn compact_term_docs(&self, tx: &Transaction) -> Result<()> {
+	async fn compact_term_docs(&self, tx: &Transaction) -> Result<bool> {
 		let (beg, end) = self.ikb.new_tt_terms_range()?;
 		let mut current_term = "".to_string();
 		let mut deltas: HashMap<DocId, i64> = HashMap::new();
 		let range = beg..end;
+		let mut has_log = false;
 		for k in tx.keys(range.clone(), u32::MAX, None).await? {
 			let tt = Tt::decode(&k)?;
+			has_log = true;
 			// Is this a new term?
 			if current_term != tt.term {
 				if !current_term.is_empty() && !deltas.is_empty() {
@@ -398,11 +405,13 @@ impl FullTextIndex {
 			}
 		}
 		// Delete the logs
-		tx.delr(range).await?;
+		if has_log {
+			tx.delr(range).await?;
+		}
 		if !current_term.is_empty() && !deltas.is_empty() {
 			self.set_term_docs_delta(tx, &current_term, &deltas).await?;
 		}
-		Ok(())
+		Ok(has_log)
 	}
 
 	pub(in crate::idx) fn new_hits_iterator(
@@ -441,7 +450,7 @@ impl FullTextIndex {
 	}
 	pub(in crate::idx) async fn new_scorer(&self, ctx: &Context) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
-			let dlc = self.compute_doc_length_and_count(&ctx.tx(), false).await?;
+			let dlc = self.compute_doc_length_and_count(&ctx.tx(), None).await?;
 			let sc = Scorer::new(dlc, bm25.clone());
 			return Ok(Some(sc));
 		}
@@ -451,7 +460,7 @@ impl FullTextIndex {
 	async fn compute_doc_length_and_count(
 		&self,
 		tx: &Transaction,
-		compact_log: bool,
+		compact_log: Option<&mut bool>,
 	) -> Result<DocLengthAndCount> {
 		let mut dlc = DocLengthAndCount::default();
 		let (beg, end) = self.ikb.new_dc_range()?;
@@ -459,28 +468,34 @@ impl FullTextIndex {
 		// Compute the total number of documents (DocCount) and the total number of terms (DocLength)
 		// This key list is supposed to be small, subject to compaction.
 		// The root key is the compacted values, and the others are deltas from transaction not yet compacted.
+		let mut has_log = false;
 		for (_, v) in tx.getr(range.clone(), None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
+			has_log = true;
 		}
-		if compact_log {
-			tx.delr(range).await?;
+		if let Some(compact_log) = compact_log {
+			if has_log {
+				tx.delr(range).await?;
+				*compact_log = true;
+			}
 		}
 		Ok(dlc)
 	}
 
-	async fn compact_doc_length_and_count(&self, tx: &Transaction) -> Result<()> {
-		let dlc = self.compute_doc_length_and_count(tx, true).await?;
+	async fn compact_doc_length_and_count(&self, tx: &Transaction) -> Result<bool> {
+		let mut has_logs = false;
+		let dlc = self.compute_doc_length_and_count(tx, Some(&mut has_logs)).await?;
 		let key = self.ikb.new_dc_compacted()?;
 		tx.set(key, revision::to_vec(&dlc)?, None).await?;
-		Ok(())
+		Ok(has_logs)
 	}
 
-	pub(crate) async fn compaction(&self, tx: &Transaction) -> Result<()> {
-		self.compact_doc_length_and_count(tx).await?;
-		self.compact_term_docs(tx).await?;
-		Ok(())
+	pub(crate) async fn compaction(&self, tx: &Transaction) -> Result<bool> {
+		let r1 = self.compact_doc_length_and_count(tx).await?;
+		let r2 = self.compact_term_docs(tx).await?;
+		Ok(r1 || r2)
 	}
 
 	pub(crate) async fn trigger_compaction(
@@ -679,7 +694,6 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::expr::{Array, Thing, Value};
 	use crate::idx::IndexKeyBase;
-	use crate::key::root::ic::Ic;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 	use crate::sql::{Statement, statements::DefineStatement};
 	use crate::syn;
@@ -745,7 +759,10 @@ mod tests {
 			});
 			let nid = Uuid::from_u128(1);
 			let ikb = IndexKeyBase::default();
-			let opt = Options::default().with_id(nid);
+			let opt = Options::default()
+				.with_id(nid)
+				.with_ns(Some("testns".into()))
+				.with_db(Some("testdb".into()));
 			let fti = Arc::new(
 				FullTextIndex::with_analyzer(
 					nid,
@@ -785,7 +802,7 @@ mod tests {
 					stk,
 					&ctx,
 					&self.opt,
-					&rid,
+					rid,
 					vec![self.content.as_ref().clone()],
 					&mut require_compaction,
 				)
@@ -796,7 +813,7 @@ mod tests {
 					stk,
 					&ctx,
 					&self.opt,
-					&rid,
+					rid,
 					vec![self.content.as_ref().clone()],
 					&mut require_compaction,
 				)
@@ -822,7 +839,14 @@ mod tests {
 		let duration = Duration::from_secs(1);
 		while test.start.elapsed().as_secs() < 4 {
 			sleep(duration).await;
-			test.ds.index_compaction(duration).await.unwrap();
+			loop {
+				let tx = test.new_tx(TransactionType::Write).await;
+				let has_logs = test.fti.compaction(&tx).await.unwrap();
+				tx.commit().await.unwrap();
+				if !has_logs {
+					break;
+				}
+			}
 		}
 	}
 
@@ -839,11 +863,9 @@ mod tests {
 
 		// Check that logs have been compacted:
 		let tx = test.new_tx(TransactionType::Read).await;
-		let (beg, end) = Ic::range();
+		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
 		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
 		let (beg, end) = test.ikb.new_dc_range().unwrap();
-		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
-		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
 		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
 	}
 }

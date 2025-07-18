@@ -78,6 +78,10 @@ impl IndexKeyBase {
 		}))
 	}
 
+	pub(crate) fn match_ic(&self, ic: &Ic) -> bool {
+		self.0.ix == ic.ix && self.0.tb == ic.tb && self.0.db == ic.db && self.0.ns == ic.ns
+	}
+
 	fn new_bc_key(&self, term_id: TermId) -> Result<Key> {
 		Bc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id).encode()
 	}
