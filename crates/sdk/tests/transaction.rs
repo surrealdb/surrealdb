@@ -174,7 +174,7 @@ async fn transaction_with_throw() -> Result<()> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"An error occurred: there was an error"#
+		Some(e) if e.to_string() == r#"Execution halted with output: `there was an error`"#
 	));
 	//
 	Ok(())

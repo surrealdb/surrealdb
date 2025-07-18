@@ -803,7 +803,7 @@ impl Parser<'_> {
 		})
 	}
 
-	/// Parsers a THROW statement
+	/// Parses a THROW statement
 	///
 	/// # Parser State
 	/// Expects `THROW` to already be consumed.
