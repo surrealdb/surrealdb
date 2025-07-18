@@ -13,6 +13,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
+use std::net::ToSocketAddrs;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
@@ -49,6 +50,7 @@ pub struct Builder {
 	filter: CustomFilter,
 	file_filter: Option<CustomFilter>,
 	otel_filter: Option<CustomFilter>,
+	log_socket: Option<String>,
 	log_file_enabled: bool,
 	log_file_format: LogFormat,
 	log_file_path: Option<String>,
@@ -70,6 +72,7 @@ impl Default for Builder {
 			format: LogFormat::Text,
 			file_filter: None,
 			otel_filter: None,
+			log_socket: None,
 			log_file_format: LogFormat::Text,
 			log_file_enabled: false,
 			log_file_path: Some("logs".to_string()),
@@ -116,6 +119,12 @@ impl Builder {
 	/// Set a custom log filter for otel output
 	pub fn with_otel_filter(mut self, filter: Option<CustomFilter>) -> Self {
 		self.otel_filter = filter;
+		self
+	}
+
+	/// Send logs to the provided socket address
+	pub fn with_log_socket(mut self, socket: Option<String>) -> Self {
+		self.log_socket = socket;
 		self
 	}
 
@@ -177,13 +186,31 @@ impl Builder {
 		let telemetry_filter = self.otel_filter.clone().unwrap_or_else(|| self.filter.clone());
 		let telemetry_layer = traces::new(telemetry_filter)?;
 		// Setup a registry for composing layers
-		let registry = tracing_subscriber::registry();
-		// Setup output layer
-		let registry = registry.with(output_layer);
-		// Setup telemetry layer
+		let registry = tracing_subscriber::registry().with(output_layer);
+		let mut guards = vec![stdout_guard, stderr_guard];
+		let mut layers = Vec::new();
 		let registry = registry.with(telemetry_layer);
+
+		// Setup optional socket layer
+		if let Some(addr) = &self.log_socket {
+			let mut addrs_iter = addr.to_socket_addrs()?;
+			let first_address = addrs_iter.next().ok_or("No matching addresses");
+			let writer = logs::SocketWriter::connect(first_address.unwrap())?;
+			let (sock, sock_guard) = NonBlockingBuilder::default()
+				.lossy(false)
+				.thread_name("surrealdb-logger-socket")
+				.finish(writer);
+			let socket_layer = logs::file(
+				self.otel_filter.clone().unwrap_or_else(|| self.filter.clone()),
+				sock,
+				self.log_file_format,
+			)?;
+			layers.push(socket_layer);
+			guards.push(sock_guard);
+		}
+
 		// Setup file logging if enabled
-		let (file_layer, guards) = if self.log_file_enabled {
+		if self.log_file_enabled {
 			// Create the file appender based on rotation setting
 			let file_appender = {
 				// Parse the path and name
@@ -205,14 +232,12 @@ impl Builder {
 			// Create the file destination layer
 			let file_filter = self.file_filter.clone().unwrap_or_else(|| self.filter.clone());
 			let file_layer = logs::file(file_filter, file, self.log_file_format)?;
-			(Some(file_layer), vec![stdout_guard, stderr_guard, file_guard])
-		} else {
-			(None, vec![stdout_guard, stderr_guard])
-		};
-		Ok(match (file_layer, *ENABLE_TOKIO_CONSOLE) {
-			(Some(file_layer), true) => {
-				// Setup logging layer
-				let registry = registry.with(file_layer);
+			layers.push(file_layer);
+			guards.push(file_guard);
+		}
+
+		Ok(match (layers.len(), *ENABLE_TOKIO_CONSOLE) {
+			(0, true) => {
 				// Create the Tokio Console destination layer
 				let console_layer = console::new()?;
 				// Setup the Tokio Console layer
@@ -220,13 +245,12 @@ impl Builder {
 				// Return the registry
 				(Box::new(registry), guards)
 			}
-			(Some(file_layer), false) => {
-				// Setup logging layer
-				let registry = registry.with(file_layer);
+			(0, false) => {
 				// Return the registry
 				(Box::new(registry), guards)
 			}
-			(None, true) => {
+			(_, true) => {
+				let registry = registry.with(layers);
 				// Create the Tokio Console destination layer
 				let console_layer = console::new()?;
 				// Setup the Tokio Console layer
@@ -234,7 +258,8 @@ impl Builder {
 				// Return the registry
 				(Box::new(registry), guards)
 			}
-			(None, false) => {
+			(_, false) => {
+				let registry = registry.with(layers);
 				// Return the registry
 				(Box::new(registry), guards)
 			}
@@ -461,5 +486,38 @@ mod tests {
 		let events = &spans.first().unwrap().events;
 		assert_eq!(1, events.len());
 		assert_eq!("debug", events.first().unwrap().name);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn test_log_to_socket() {
+		use std::io::Read;
+		use std::net::TcpListener;
+
+		let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+		let addr = listener.local_addr().unwrap();
+
+		let handle = std::thread::spawn(move || {
+			let (mut stream, _) = listener.accept().unwrap();
+			let mut buf = Vec::new();
+			stream.read_to_end(&mut buf).unwrap();
+			buf
+		});
+
+		let (registry, guards) = telemetry::builder()
+			.with_log_socket(Some(addr.to_string()))
+			.with_log_level("all")
+			.build()
+			.unwrap();
+
+		let _enter = registry.set_default();
+		info!("socket-output");
+
+		for guard in guards {
+			drop(guard);
+		}
+
+		let bytes = handle.join().unwrap();
+		let msg = String::from_utf8_lossy(&bytes);
+		assert!(msg.contains("socket-output"));
 	}
 }
