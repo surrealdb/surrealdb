@@ -1,5 +1,5 @@
-mod expr;
-mod value;
+mod flatbuffers;
+mod protobuffers;
 
 pub use surrealdb_protocol::{TryFromValue, TryIntoValue};
 
@@ -11,7 +11,7 @@ pub trait ToFlatbuffers {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut ::flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr>;
+	) -> anyhow::Result<Self::Output<'bldr>>;
 }
 
 /// Trait for converting a flatbuffers builder type to a type.

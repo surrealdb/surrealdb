@@ -27,7 +27,7 @@ impl ToFlatbuffers for Value {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
 			Self::Null => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Null,
@@ -75,12 +75,12 @@ impl ToFlatbuffers for Value {
 				},
 				crate::expr::Number::Decimal(d) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Decimal,
-					value: Some(d.to_fb(builder).as_union_value()),
+					value: Some(d.to_fb(builder)?.as_union_value()),
 				},
 			},
 			Self::Strand(s) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::String,
-				value: Some(s.to_fb(builder).as_union_value()),
+				value: Some(s.to_fb(builder)?.as_union_value()),
 			},
 			Self::Bytes(b) => {
 				let bytes = builder.create_vector(b.as_slice());
@@ -99,35 +99,35 @@ impl ToFlatbuffers for Value {
 			}
 			Self::Thing(thing) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::RecordId,
-				value: Some(thing.to_fb(builder).as_union_value()),
+				value: Some(thing.to_fb(builder)?.as_union_value()),
 			},
 			Self::Duration(d) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Duration,
-				value: Some(d.to_fb(builder).as_union_value()),
+				value: Some(d.to_fb(builder)?.as_union_value()),
 			},
 			Self::Datetime(dt) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Datetime,
-				value: Some(dt.to_fb(builder).as_union_value()),
+				value: Some(dt.to_fb(builder)?.as_union_value()),
 			},
 			Self::Uuid(uuid) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Uuid,
-				value: Some(uuid.to_fb(builder).as_union_value()),
+				value: Some(uuid.to_fb(builder)?.as_union_value()),
 			},
 			Self::Object(obj) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Object,
-				value: Some(obj.to_fb(builder).as_union_value()),
+				value: Some(obj.to_fb(builder)?.as_union_value()),
 			},
 			Self::Array(arr) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Array,
-				value: Some(arr.to_fb(builder).as_union_value()),
+				value: Some(arr.to_fb(builder)?.as_union_value()),
 			},
 			Self::Geometry(geometry) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Geometry,
-				value: Some(geometry.to_fb(builder).as_union_value()),
+				value: Some(geometry.to_fb(builder)?.as_union_value()),
 			},
 			Self::File(file) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::File,
-				value: Some(file.to_fb(builder).as_union_value()),
+				value: Some(file.to_fb(builder)?.as_union_value()),
 			},
 			_ => {
 				// TODO: DO NOT PANIC, we just need to modify the Value enum which Mees is currently working on.
@@ -135,7 +135,7 @@ impl ToFlatbuffers for Value {
 			}
 		};
 
-		proto_fb::Value::create(builder, &args)
+		Ok(proto_fb::Value::create(builder, &args))
 	}
 }
 
@@ -238,13 +238,13 @@ impl ToFlatbuffers for i64 {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		proto_fb::Int64Value::create(
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		Ok(proto_fb::Int64Value::create(
 			builder,
 			&proto_fb::Int64ValueArgs {
 				value: *self,
 			},
-		)
+		))
 	}
 }
 
@@ -264,13 +264,13 @@ impl ToFlatbuffers for f64 {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		proto_fb::Float64Value::create(
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		Ok(proto_fb::Float64Value::create(
 			builder,
 			&proto_fb::Float64ValueArgs {
 				value: *self,
 			},
-		)
+		))
 	}
 }
 
@@ -290,14 +290,14 @@ impl ToFlatbuffers for String {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let value = builder.create_string(self);
-		proto_fb::StringValue::create(
+		Ok(proto_fb::StringValue::create(
 			builder,
 			&proto_fb::StringValueArgs {
 				value: Some(value),
 			},
-		)
+		))
 	}
 }
 
@@ -308,14 +308,14 @@ impl ToFlatbuffers for Decimal {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let value = builder.create_string(&self.to_string());
-		proto_fb::Decimal::create(
+		Ok(proto_fb::Decimal::create(
 			builder,
 			&proto_fb::DecimalArgs {
 				value: Some(value),
 			},
-		)
+		))
 	}
 }
 
@@ -326,14 +326,14 @@ impl ToFlatbuffers for std::time::Duration {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		proto_fb::Duration::create(
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		Ok(proto_fb::Duration::create(
 			builder,
 			&proto_fb::DurationArgs {
 				seconds: self.as_secs(),
 				nanos: self.subsec_nanos(),
 			},
-		)
+		))
 	}
 }
 
@@ -355,7 +355,7 @@ impl ToFlatbuffers for Duration {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		self.0.to_fb(builder)
 	}
 }
@@ -377,14 +377,14 @@ impl ToFlatbuffers for DateTime<Utc> {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		proto_fb::Timestamp::create(
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		Ok(proto_fb::Timestamp::create(
 			builder,
 			&proto_fb::TimestampArgs {
 				seconds: self.timestamp(),
 				nanos: self.timestamp_subsec_nanos(),
 			},
-		)
+		))
 	}
 }
 
@@ -407,14 +407,14 @@ impl ToFlatbuffers for Uuid {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let bytes = builder.create_vector(self.as_bytes());
-		proto_fb::Uuid::create(
+		Ok(proto_fb::Uuid::create(
 			builder,
 			&proto_fb::UuidArgs {
 				bytes: Some(bytes),
 			},
-		)
+		))
 	}
 }
 
@@ -435,16 +435,16 @@ impl ToFlatbuffers for Thing {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let table = builder.create_string(&self.tb);
-		let id = self.id.to_fb(builder);
-		proto_fb::RecordId::create(
+		let id = self.id.to_fb(builder)?;
+		Ok(proto_fb::RecordId::create(
 			builder,
 			&proto_fb::RecordIdArgs {
 				table: Some(table),
 				id: Some(id),
 			},
-		)
+		))
 	}
 }
 
@@ -478,49 +478,52 @@ impl ToFlatbuffers for Id {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		match self {
 			Id::Number(n) => {
-				let id = n.to_fb(builder).as_union_value();
-				proto_fb::Id::create(
+				let id = n.to_fb(builder)?.as_union_value();
+				Ok(proto_fb::Id::create(
 					builder,
 					&proto_fb::IdArgs {
 						id_type: proto_fb::IdType::Int64,
 						id: Some(id),
 					},
-				)
+				))
 			}
 			Id::String(s) => {
-				let id = s.to_fb(builder).as_union_value();
-				proto_fb::Id::create(
+				let id = s.to_fb(builder)?.as_union_value();
+				Ok(proto_fb::Id::create(
 					builder,
 					&proto_fb::IdArgs {
 						id_type: proto_fb::IdType::String,
 						id: Some(id),
 					},
-				)
+				))
 			}
 			Id::Uuid(uuid) => {
-				let id = uuid.to_fb(builder).as_union_value();
-				proto_fb::Id::create(
+				let id = uuid.to_fb(builder)?.as_union_value();
+				Ok(proto_fb::Id::create(
 					builder,
 					&proto_fb::IdArgs {
 						id_type: proto_fb::IdType::Uuid,
 						id: Some(id),
 					},
-				)
+				))
 			}
 			Id::Array(arr) => {
-				let id = arr.to_fb(builder).as_union_value();
-				proto_fb::Id::create(
+				let id = arr.to_fb(builder)?.as_union_value();
+				Ok(proto_fb::Id::create(
 					builder,
 					&proto_fb::IdArgs {
 						id_type: proto_fb::IdType::Array,
 						id: Some(id),
 					},
-				)
+				))
 			}
-			_ => panic!("Unsupported Id type for FlatBuffers serialization: {:?}", self),
+			_ => Err(anyhow::anyhow!(
+				"Unsupported Id type for FlatBuffers serialization: {:?}",
+				self
+			)),
 		}
 	}
 }
@@ -573,16 +576,16 @@ impl ToFlatbuffers for File {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let bucket = builder.create_string(&self.bucket);
 		let key = builder.create_string(&self.key);
-		proto_fb::File::create(
+		Ok(proto_fb::File::create(
 			builder,
 			&proto_fb::FileArgs {
 				bucket: Some(bucket),
 				key: Some(key),
 			},
-		)
+		))
 	}
 }
 
@@ -607,11 +610,11 @@ impl ToFlatbuffers for Object {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut entries = Vec::with_capacity(self.0.len());
 		for (key, value) in &self.0 {
 			let key_fb = builder.create_string(key);
-			let value_fb = value.to_fb(builder);
+			let value_fb = value.to_fb(builder)?;
 
 			let object_item = proto_fb::KeyValue::create(
 				builder,
@@ -624,12 +627,12 @@ impl ToFlatbuffers for Object {
 			entries.push(object_item);
 		}
 		let entries_vector = builder.create_vector(&entries);
-		proto_fb::Object::create(
+		Ok(proto_fb::Object::create(
 			builder,
 			&proto_fb::ObjectArgs {
 				items: Some(entries_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -659,18 +662,18 @@ impl ToFlatbuffers for Array {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut values = Vec::with_capacity(self.0.len());
 		for value in &self.0 {
-			values.push(value.to_fb(builder));
+			values.push(value.to_fb(builder)?);
 		}
 		let values_vector = builder.create_vector(&values);
-		proto_fb::Array::create(
+		Ok(proto_fb::Array::create(
 			builder,
 			&proto_fb::ArrayArgs {
 				values: Some(values_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -695,72 +698,72 @@ impl ToFlatbuffers for Geometry {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		match self {
 			Geometry::Point(point) => {
-				let geometry = point.to_fb(builder);
-				proto_fb::Geometry::create(
+				let geometry = point.to_fb(builder)?;
+				Ok(proto_fb::Geometry::create(
 					builder,
 					&proto_fb::GeometryArgs {
 						geometry_type: proto_fb::GeometryType::Point,
 						geometry: Some(geometry.as_union_value()),
 					},
-				)
+				))
 			}
 			Geometry::Line(line_string) => {
-				let geometry = line_string.to_fb(builder);
-				proto_fb::Geometry::create(
+				let geometry = line_string.to_fb(builder)?;
+				Ok(proto_fb::Geometry::create(
 					builder,
 					&proto_fb::GeometryArgs {
 						geometry_type: proto_fb::GeometryType::LineString,
 						geometry: Some(geometry.as_union_value()),
 					},
-				)
+				))
 			}
 			Geometry::Polygon(polygon) => {
-				let geometry = polygon.to_fb(builder);
-				proto_fb::Geometry::create(
+				let geometry = polygon.to_fb(builder)?;
+				Ok(proto_fb::Geometry::create(
 					builder,
 					&proto_fb::GeometryArgs {
 						geometry_type: proto_fb::GeometryType::Polygon,
 						geometry: Some(geometry.as_union_value()),
 					},
-				)
+				))
 			}
 			Geometry::MultiPoint(multi_point) => {
-				let geometry = multi_point.to_fb(builder);
-				proto_fb::Geometry::create(
+				let geometry = multi_point.to_fb(builder)?;
+				Ok(proto_fb::Geometry::create(
 					builder,
 					&proto_fb::GeometryArgs {
 						geometry_type: proto_fb::GeometryType::MultiPoint,
 						geometry: Some(geometry.as_union_value()),
 					},
-				)
+				))
 			}
 			Geometry::MultiLine(multi_line_string) => {
-				let geometry = multi_line_string.to_fb(builder);
-				proto_fb::Geometry::create(
+				let geometry = multi_line_string.to_fb(builder)?;
+				Ok(proto_fb::Geometry::create(
 					builder,
 					&proto_fb::GeometryArgs {
 						geometry_type: proto_fb::GeometryType::MultiLineString,
 						geometry: Some(geometry.as_union_value()),
 					},
-				)
+				))
 			}
 			Geometry::MultiPolygon(multi_polygon) => {
-				let geometry = multi_polygon.to_fb(builder);
-				proto_fb::Geometry::create(
+				let geometry = multi_polygon.to_fb(builder)?;
+				Ok(proto_fb::Geometry::create(
 					builder,
 					&proto_fb::GeometryArgs {
 						geometry_type: proto_fb::GeometryType::MultiPolygon,
 						geometry: Some(geometry.as_union_value()),
 					},
-				)
+				))
 			}
 			Geometry::Collection(geometries) => {
 				let mut geometries_vec = Vec::with_capacity(geometries.len());
 				for geometry in geometries {
-					geometries_vec.push(geometry.to_fb(builder));
+					geometries_vec.push(geometry.to_fb(builder)?);
 				}
 				let geometries_vector = builder.create_vector(&geometries_vec);
 
@@ -771,13 +774,13 @@ impl ToFlatbuffers for Geometry {
 					},
 				);
 
-				proto_fb::Geometry::create(
+				Ok(proto_fb::Geometry::create(
 					builder,
 					&proto_fb::GeometryArgs {
 						geometry_type: proto_fb::GeometryType::Collection,
 						geometry: Some(collection.as_union_value()),
 					},
-				)
+				))
 			}
 		}
 	}
@@ -851,14 +854,14 @@ impl ToFlatbuffers for geo::Point {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		proto_fb::Point::create(
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		Ok(proto_fb::Point::create(
 			builder,
 			&proto_fb::PointArgs {
 				x: self.x(),
 				y: self.y(),
 			},
-		)
+		))
 	}
 }
 
@@ -878,14 +881,14 @@ impl ToFlatbuffers for geo::Coord {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		proto_fb::Point::create(
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		Ok(proto_fb::Point::create(
 			builder,
 			&proto_fb::PointArgs {
 				x: self.x,
 				y: self.y,
 			},
-		)
+		))
 	}
 }
 
@@ -908,18 +911,18 @@ impl ToFlatbuffers for geo::LineString {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut points = Vec::with_capacity(self.0.len());
 		for point in &self.0 {
-			points.push(point.to_fb(builder));
+			points.push(point.to_fb(builder)?);
 		}
 		let points_vector = builder.create_vector(&points);
-		proto_fb::LineString::create(
+		Ok(proto_fb::LineString::create(
 			builder,
 			&proto_fb::LineStringArgs {
 				points: Some(points_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -943,20 +946,20 @@ impl ToFlatbuffers for geo::Polygon {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		let exterior = self.exterior().to_fb(builder);
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		let exterior = self.exterior().to_fb(builder)?;
 		let mut interiors = Vec::with_capacity(self.interiors().len());
 		for interior in self.interiors() {
-			interiors.push(interior.to_fb(builder));
+			interiors.push(interior.to_fb(builder)?);
 		}
 		let interiors_vector = builder.create_vector(&interiors);
-		proto_fb::Polygon::create(
+		Ok(proto_fb::Polygon::create(
 			builder,
 			&proto_fb::PolygonArgs {
 				exterior: Some(exterior),
 				interiors: Some(interiors_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -987,18 +990,18 @@ impl ToFlatbuffers for geo::MultiPoint {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut points = Vec::with_capacity(self.0.len());
 		for point in &self.0 {
-			points.push(point.to_fb(builder));
+			points.push(point.to_fb(builder)?);
 		}
 		let points_vector = builder.create_vector(&points);
-		proto_fb::MultiPoint::create(
+		Ok(proto_fb::MultiPoint::create(
 			builder,
 			&proto_fb::MultiPointArgs {
 				points: Some(points_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -1022,18 +1025,18 @@ impl ToFlatbuffers for geo::MultiLineString {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut lines = Vec::with_capacity(self.0.len());
 		for line in &self.0 {
-			lines.push(line.to_fb(builder));
+			lines.push(line.to_fb(builder)?);
 		}
 		let lines_vector = builder.create_vector(&lines);
-		proto_fb::MultiLineString::create(
+		Ok(proto_fb::MultiLineString::create(
 			builder,
 			&proto_fb::MultiLineStringArgs {
 				lines: Some(lines_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -1057,18 +1060,18 @@ impl ToFlatbuffers for geo::MultiPolygon {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut polygons = Vec::with_capacity(self.0.len());
 		for polygon in &self.0 {
-			polygons.push(polygon.to_fb(builder));
+			polygons.push(polygon.to_fb(builder)?);
 		}
 		let polygons_vector = builder.create_vector(&polygons);
-		proto_fb::MultiPolygon::create(
+		Ok(proto_fb::MultiPolygon::create(
 			builder,
 			&proto_fb::MultiPolygonArgs {
 				polygons: Some(polygons_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -1092,18 +1095,18 @@ impl ToFlatbuffers for Idiom {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut parts = Vec::with_capacity(self.0.len());
 		for part in &self.0 {
-			parts.push(part.to_fb(builder));
+			parts.push(part.to_fb(builder)?);
 		}
 		let parts_vector = builder.create_vector(&parts);
-		proto_fb::Idiom::create(
+		Ok(proto_fb::Idiom::create(
 			builder,
 			&proto_fb::IdiomArgs {
 				parts: Some(parts_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -1128,7 +1131,7 @@ impl ToFlatbuffers for Part {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
 			Self::All => {
 				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
@@ -1159,7 +1162,7 @@ impl ToFlatbuffers for Part {
 				}
 			}
 			Self::Field(ident) => {
-				let ident = ident.to_fb(builder);
+				let ident = ident.to_fb(builder)?;
 				proto_fb::PartArgs {
 					part_type: proto_fb::PartType::Field,
 					part: Some(ident.as_union_value()),
@@ -1167,35 +1170,35 @@ impl ToFlatbuffers for Part {
 			}
 			Self::Index(index) => {
 				let index: i64 = index.as_int();
-				let index_value = index.to_fb(builder);
+				let index_value = index.to_fb(builder)?;
 				proto_fb::PartArgs {
 					part_type: proto_fb::PartType::Index,
 					part: Some(index_value.as_union_value()),
 				}
 			}
 			Self::Where(value) => {
-				let value_fb = value.to_fb(builder).as_union_value();
+				let value_fb = value.to_fb(builder)?.as_union_value();
 				proto_fb::PartArgs {
 					part_type: proto_fb::PartType::Where,
 					part: Some(value_fb),
 				}
 			}
 			Self::Graph(graph) => {
-				let graph_fb = graph.to_fb(builder).as_union_value();
+				let graph_fb = graph.to_fb(builder)?.as_union_value();
 				proto_fb::PartArgs {
 					part_type: proto_fb::PartType::Graph,
 					part: Some(graph_fb),
 				}
 			}
 			Self::Value(value) => {
-				let value_fb = value.to_fb(builder).as_union_value();
+				let value_fb = value.to_fb(builder)?.as_union_value();
 				proto_fb::PartArgs {
 					part_type: proto_fb::PartType::Value,
 					part: Some(value_fb),
 				}
 			}
 			Self::Start(value) => {
-				let value_fb = value.to_fb(builder).as_union_value();
+				let value_fb = value.to_fb(builder)?.as_union_value();
 				proto_fb::PartArgs {
 					part_type: proto_fb::PartType::Start,
 					part: Some(value_fb),
@@ -1205,7 +1208,7 @@ impl ToFlatbuffers for Part {
 				let name = builder.create_string(name);
 				let mut args_vec = Vec::with_capacity(args.len());
 				for arg in args {
-					args_vec.push(arg.to_fb(builder));
+					args_vec.push(arg.to_fb(builder)?);
 				}
 				let args = builder.create_vector(&args_vec);
 
@@ -1225,7 +1228,7 @@ impl ToFlatbuffers for Part {
 			Self::Destructure(parts) => {
 				let mut parts_vec = Vec::with_capacity(parts.len());
 				for part in parts {
-					parts_vec.push(part.to_fb(builder));
+					parts_vec.push(part.to_fb(builder)?);
 				}
 				let parts = builder.create_vector(&parts_vec);
 
@@ -1249,9 +1252,10 @@ impl ToFlatbuffers for Part {
 				}
 			}
 			Self::Recurse(recurse, idiom, instruction) => {
-				let spec = recurse.to_fb(builder);
-				let idiom = idiom.as_ref().map(|i| i.to_fb(builder));
-				let recurse_operation = instruction.as_ref().map(|op| op.to_fb(builder));
+				let spec = recurse.to_fb(builder)?;
+				let idiom = idiom.as_ref().map(|i| i.to_fb(builder)).transpose()?;
+				let recurse_operation =
+					instruction.as_ref().map(|op| op.to_fb(builder)).transpose()?;
 
 				let recurse_fb = proto_fb::RecursePart::create(
 					builder,
@@ -1283,7 +1287,7 @@ impl ToFlatbuffers for Part {
 			}
 		};
 
-		proto_fb::Part::create(builder, &args)
+		Ok(proto_fb::Part::create(builder, &args))
 	}
 }
 
@@ -1387,14 +1391,14 @@ impl ToFlatbuffers for Ident {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let value = builder.create_string(&self.0);
-		proto_fb::Ident::create(
+		Ok(proto_fb::Ident::create(
 			builder,
 			&proto_fb::IdentArgs {
 				value: Some(value),
 			},
-		)
+		))
 	}
 }
 
@@ -1415,7 +1419,7 @@ impl ToFlatbuffers for Recurse {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
 			Self::Fixed(fixed) => {
 				let fixed_value = proto_fb::FixedSpec::create(
@@ -1446,7 +1450,7 @@ impl ToFlatbuffers for Recurse {
 			}
 		};
 
-		proto_fb::RecurseSpec::create(builder, &args)
+		Ok(proto_fb::RecurseSpec::create(builder, &args))
 	}
 }
 
@@ -1481,7 +1485,7 @@ impl ToFlatbuffers for RecurseInstruction {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
 			Self::Path {
 				inclusive,
@@ -1517,7 +1521,7 @@ impl ToFlatbuffers for RecurseInstruction {
 				expects,
 				inclusive,
 			} => {
-				let expects_value = expects.to_fb(builder);
+				let expects_value = expects.to_fb(builder)?;
 				let operation = proto_fb::RecurseShortest::create(
 					builder,
 					&proto_fb::RecurseShortestArgs {
@@ -1533,7 +1537,7 @@ impl ToFlatbuffers for RecurseInstruction {
 			}
 		};
 
-		proto_fb::RecurseOperation::create(builder, &args)
+		Ok(proto_fb::RecurseOperation::create(builder, &args))
 	}
 }
 
@@ -1586,17 +1590,17 @@ impl ToFlatbuffers for DestructurePart {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
 			Self::All(ident) => {
-				let ident = ident.to_fb(builder);
+				let ident = ident.to_fb(builder)?;
 				proto_fb::DestructurePartArgs {
 					part_type: proto_fb::DestructurePartType::All,
 					part: Some(ident.as_union_value()),
 				}
 			}
 			Self::Field(ident) => {
-				let ident = ident.to_fb(builder);
+				let ident = ident.to_fb(builder)?;
 				proto_fb::DestructurePartArgs {
 					part_type: proto_fb::DestructurePartType::Field,
 					part: Some(ident.as_union_value()),
@@ -1604,7 +1608,7 @@ impl ToFlatbuffers for DestructurePart {
 			}
 			Self::Aliased(ident, idiom) => {
 				let value = builder.create_string(&ident.0);
-				let alias = idiom.to_fb(builder);
+				let alias = idiom.to_fb(builder)?;
 				let alias = proto_fb::Alias::create(
 					builder,
 					&proto_fb::AliasArgs {
@@ -1622,7 +1626,7 @@ impl ToFlatbuffers for DestructurePart {
 				let name = builder.create_string(&name.0);
 				let mut parts_vec = Vec::with_capacity(parts.len());
 				for part in parts {
-					parts_vec.push(part.to_fb(builder));
+					parts_vec.push(part.to_fb(builder)?);
 				}
 				let parts_vector = builder.create_vector(&parts_vec);
 				let destructure_ident_parts = proto_fb::DestructureIdentParts::create(
@@ -1639,7 +1643,7 @@ impl ToFlatbuffers for DestructurePart {
 			}
 		};
 
-		proto_fb::DestructurePart::create(builder, &args)
+		Ok(proto_fb::DestructurePart::create(builder, &args))
 	}
 }
 
@@ -1699,30 +1703,32 @@ impl ToFlatbuffers for Graph {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		let dir = self.dir.to_fb(builder);
-		let expr = self.expr.as_ref().map(|e| e.to_fb(builder));
-		let what = self.what.to_fb(builder);
-		let cond = self.cond.as_ref().map(|c| c.to_fb(builder));
-		let split = self.split.as_ref().map(|s| s.to_fb(builder));
-		let group = self.group.as_ref().map(|g| g.to_fb(builder));
-		let order = self.order.as_ref().map(|o| o.to_fb(builder));
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		let dir = self.dir.to_fb(builder)?;
+		let expr = self.expr.as_ref().map(|e| e.to_fb(builder)).transpose()?;
+		let what = self.what.to_fb(builder)?;
+		let cond = self.cond.as_ref().map(|c| c.to_fb(builder)).transpose()?;
+		let split = self.split.as_ref().map(|s| s.to_fb(builder)).transpose()?;
+		let group = self.group.as_ref().map(|g| g.to_fb(builder)).transpose()?;
+		let order = self.order.as_ref().map(|o| o.to_fb(builder)).transpose()?;
 		let limit = match &self.limit {
 			Some(limit) => match limit.0 {
 				Value::Number(num) => Some(num.as_int() as u64),
-				_ => {
-					panic!("Limit must be a number")
-				}
+				_ => return Err(anyhow::anyhow!("Limit must be a number")),
 			},
 			None => None,
 		};
-		let start = self.start.as_ref().map(|s| match s.0 {
-			Value::Number(num) => num.as_int() as u64,
-			_ => panic!("Start must be a number"),
-		});
-		let alias = self.alias.as_ref().map(|a| a.to_fb(builder));
+		let start = self
+			.start
+			.as_ref()
+			.map(|s| match s.0 {
+				Value::Number(num) => Ok(num.as_int() as u64),
+				_ => Err(anyhow::anyhow!("Start must be a number")),
+			})
+			.transpose()?;
+		let alias = self.alias.as_ref().map(|a| a.to_fb(builder)).transpose()?;
 
-		proto_fb::Graph::create(
+		Ok(proto_fb::Graph::create(
 			builder,
 			&proto_fb::GraphArgs {
 				dir,
@@ -1736,7 +1742,7 @@ impl ToFlatbuffers for Graph {
 				start,
 				alias,
 			},
-		)
+		))
 	}
 }
 
@@ -1778,18 +1784,18 @@ impl ToFlatbuffers for Splits {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut splits = Vec::with_capacity(self.0.len());
 		for split in &self.0 {
-			splits.push(split.to_fb(builder));
+			splits.push(split.to_fb(builder)?);
 		}
 		let splits_vector = builder.create_vector(&splits);
-		proto_fb::Splits::create(
+		Ok(proto_fb::Splits::create(
 			builder,
 			&proto_fb::SplitsArgs {
 				splits: Some(splits_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -1814,7 +1820,7 @@ impl ToFlatbuffers for Split {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		self.0.to_fb(builder)
 	}
 }
@@ -1836,18 +1842,18 @@ impl ToFlatbuffers for Groups {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut groups = Vec::with_capacity(self.0.len());
 		for group in &self.0 {
-			groups.push(group.to_fb(builder));
+			groups.push(group.to_fb(builder)?);
 		}
 		let groups_vector = builder.create_vector(&groups);
-		proto_fb::Groups::create(
+		Ok(proto_fb::Groups::create(
 			builder,
 			&proto_fb::GroupsArgs {
 				groups: Some(groups_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -1872,7 +1878,7 @@ impl ToFlatbuffers for Group {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		self.0.to_fb(builder)
 	}
 }
@@ -1894,7 +1900,7 @@ impl ToFlatbuffers for Ordering {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
 			Self::Random => {
 				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
@@ -1904,7 +1910,7 @@ impl ToFlatbuffers for Ordering {
 				}
 			}
 			Self::Order(order_list) => {
-				let order_list = order_list.to_fb(builder);
+				let order_list = order_list.to_fb(builder)?;
 				proto_fb::OrderingSpecArgs {
 					ordering_type: proto_fb::OrderingType::Ordered,
 					ordering: Some(order_list.as_union_value()),
@@ -1912,7 +1918,7 @@ impl ToFlatbuffers for Ordering {
 			}
 		};
 
-		proto_fb::OrderingSpec::create(builder, &args)
+		Ok(proto_fb::OrderingSpec::create(builder, &args))
 	}
 }
 
@@ -1945,18 +1951,18 @@ impl ToFlatbuffers for OrderList {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut orders = Vec::with_capacity(self.0.len());
 		for order in &self.0 {
-			orders.push(order.to_fb(builder));
+			orders.push(order.to_fb(builder)?);
 		}
 		let orders_vector = builder.create_vector(&orders);
-		proto_fb::OrderList::create(
+		Ok(proto_fb::OrderList::create(
 			builder,
 			&proto_fb::OrderListArgs {
 				orders: Some(orders_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -1981,10 +1987,10 @@ impl ToFlatbuffers for Order {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
-		let value = self.value.to_fb(builder);
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		let value = self.value.to_fb(builder)?;
 
-		proto_fb::Order::create(
+		Ok(proto_fb::Order::create(
 			builder,
 			&proto_fb::OrderArgs {
 				value: Some(value),
@@ -1992,7 +1998,7 @@ impl ToFlatbuffers for Order {
 				numeric: self.numeric,
 				ascending: self.direction,
 			},
-		)
+		))
 	}
 }
 
@@ -2022,11 +2028,11 @@ impl ToFlatbuffers for Dir {
 	fn to_fb<'bldr>(
 		&self,
 		_builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		match self {
-			Dir::In => proto_fb::GraphDirection::In,
-			Dir::Out => proto_fb::GraphDirection::Out,
-			Dir::Both => proto_fb::GraphDirection::Both,
+			Dir::In => Ok(proto_fb::GraphDirection::In),
+			Dir::Out => Ok(proto_fb::GraphDirection::Out),
+			Dir::Both => Ok(proto_fb::GraphDirection::Both),
 		}
 	}
 }
@@ -2055,18 +2061,18 @@ impl ToFlatbuffers for GraphSubjects {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut subjects = Vec::with_capacity(self.0.len());
 		for subject in &self.0 {
-			subjects.push(subject.to_fb(builder));
+			subjects.push(subject.to_fb(builder)?);
 		}
 		let subjects_vector = builder.create_vector(&subjects);
-		proto_fb::GraphSubjects::create(
+		Ok(proto_fb::GraphSubjects::create(
 			builder,
 			&proto_fb::GraphSubjectsArgs {
 				subjects: Some(subjects_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -2091,7 +2097,7 @@ impl ToFlatbuffers for GraphSubject {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
 			Self::Table(table) => {
 				let table = builder.create_string(&table.0);
@@ -2108,8 +2114,8 @@ impl ToFlatbuffers for GraphSubject {
 			}
 			Self::Range(table, id_range) => {
 				let table = builder.create_string(&table.0);
-				let start = id_range.beg.to_fb(builder);
-				let end = id_range.end.to_fb(builder);
+				let start = id_range.beg.to_fb(builder)?;
+				let end = id_range.end.to_fb(builder)?;
 				let range_fb = proto_fb::TableIdRange::create(
 					builder,
 					&proto_fb::TableIdRangeArgs {
@@ -2126,7 +2132,7 @@ impl ToFlatbuffers for GraphSubject {
 			}
 		};
 
-		proto_fb::GraphSubject::create(builder, &args)
+		Ok(proto_fb::GraphSubject::create(builder, &args))
 	}
 }
 
@@ -2171,17 +2177,17 @@ impl ToFlatbuffers for Bound<Id> {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
 			Bound::Included(id) => {
-				let id_value = id.to_fb(builder);
+				let id_value = id.to_fb(builder)?;
 				proto_fb::IdBoundArgs {
 					id: Some(id_value),
 					inclusive: true,
 				}
 			}
 			Bound::Excluded(id) => {
-				let id_value = id.to_fb(builder);
+				let id_value = id.to_fb(builder)?;
 				proto_fb::IdBoundArgs {
 					id: Some(id_value),
 					inclusive: false,
@@ -2193,7 +2199,7 @@ impl ToFlatbuffers for Bound<Id> {
 			},
 		};
 
-		proto_fb::IdBound::create(builder, &args)
+		Ok(proto_fb::IdBound::create(builder, &args))
 	}
 }
 
@@ -2222,7 +2228,7 @@ impl ToFlatbuffers for Field {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
 			Field::All => {
 				let null = proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {});
@@ -2235,8 +2241,8 @@ impl ToFlatbuffers for Field {
 				expr,
 				alias,
 			} => {
-				let expr = expr.to_fb(builder);
-				let alias = alias.as_ref().map(|a| a.to_fb(builder));
+				let expr = expr.to_fb(builder)?;
+				let alias = alias.as_ref().map(|a| a.to_fb(builder)).transpose()?;
 				let single_field = proto_fb::SingleField::create(
 					builder,
 					&proto_fb::SingleFieldArgs {
@@ -2252,7 +2258,7 @@ impl ToFlatbuffers for Field {
 			}
 		};
 
-		proto_fb::Field::create(builder, &args)
+		Ok(proto_fb::Field::create(builder, &args))
 	}
 }
 
@@ -2288,7 +2294,7 @@ impl ToFlatbuffers for Fields {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut fields = Vec::with_capacity(self.0.len());
 		for field in &self.0 {
 			let args = match field {
@@ -2303,8 +2309,8 @@ impl ToFlatbuffers for Fields {
 					expr,
 					alias,
 				} => {
-					let expr = expr.to_fb(builder);
-					let alias = alias.as_ref().map(|a| a.to_fb(builder));
+					let expr = expr.to_fb(builder)?;
+					let alias = alias.as_ref().map(|a| a.to_fb(builder)).transpose()?;
 					let single_field = proto_fb::SingleField::create(
 						builder,
 						&proto_fb::SingleFieldArgs {
@@ -2324,13 +2330,13 @@ impl ToFlatbuffers for Fields {
 			fields.push(field_item);
 		}
 		let fields_vector = builder.create_vector(&fields);
-		proto_fb::Fields::create(
+		Ok(proto_fb::Fields::create(
 			builder,
 			&proto_fb::FieldsArgs {
 				single: self.1,
 				fields: Some(fields_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -2356,7 +2362,7 @@ impl ToFlatbuffers for Fetch {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		self.0.to_fb(builder)
 	}
 }
@@ -2380,12 +2386,12 @@ impl ToFlatbuffers for Fetchs {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut values = Vec::with_capacity(self.0.len());
 		for value in &self.0 {
-			values.push(value.to_fb(builder));
+			values.push(value.to_fb(builder)?);
 		}
-		builder.create_vector(&values)
+		Ok(builder.create_vector(&values))
 	}
 }
 
@@ -2409,11 +2415,11 @@ impl ToFlatbuffers for Variables {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let mut vars = Vec::with_capacity(self.len());
 		for (key, value) in self.iter() {
 			let key_str = builder.create_string(key);
-			let value_fb = value.to_fb(builder);
+			let value_fb = value.to_fb(builder)?;
 			let var = proto_fb::Variable::create(
 				builder,
 				&proto_fb::VariableArgs {
@@ -2424,12 +2430,12 @@ impl ToFlatbuffers for Variables {
 			vars.push(var);
 		}
 		let vars_vector = builder.create_vector(&vars);
-		proto_fb::Variables::create(
+		Ok(proto_fb::Variables::create(
 			builder,
 			&proto_fb::VariablesArgs {
 				items: Some(vars_vector),
 			},
-		)
+		))
 	}
 }
 
@@ -2456,47 +2462,47 @@ impl ToFlatbuffers for Operator {
 	fn to_fb<'bldr>(
 		&self,
 		_builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		match self {
-			Operator::Neg => proto_fb::Operator::Neg,
-			Operator::Not => proto_fb::Operator::Not,
-			Operator::Or => proto_fb::Operator::Or,
-			Operator::And => proto_fb::Operator::And,
-			Operator::Tco => proto_fb::Operator::Tco,
-			Operator::Nco => proto_fb::Operator::Nco,
-			Operator::Add => proto_fb::Operator::Add,
-			Operator::Sub => proto_fb::Operator::Sub,
-			Operator::Mul => proto_fb::Operator::Mul,
-			Operator::Div => proto_fb::Operator::Div,
-			Operator::Rem => proto_fb::Operator::Rem,
-			Operator::Pow => proto_fb::Operator::Pow,
-			Operator::Inc => proto_fb::Operator::Inc,
-			Operator::Dec => proto_fb::Operator::Dec,
-			Operator::Ext => proto_fb::Operator::Ext,
-			Operator::Equal => proto_fb::Operator::Equal,
-			Operator::Exact => proto_fb::Operator::Exact,
-			Operator::NotEqual => proto_fb::Operator::NotEqual,
-			Operator::AllEqual => proto_fb::Operator::AllEqual,
-			Operator::AnyEqual => proto_fb::Operator::AnyEqual,
-			Operator::LessThan => proto_fb::Operator::LessThan,
-			Operator::LessThanOrEqual => proto_fb::Operator::LessThanOrEqual,
-			Operator::MoreThan => proto_fb::Operator::GreaterThan,
-			Operator::MoreThanOrEqual => proto_fb::Operator::GreaterThanOrEqual,
-			Operator::Contain => proto_fb::Operator::Contain,
-			Operator::NotContain => proto_fb::Operator::NotContain,
-			Operator::ContainAll => proto_fb::Operator::ContainAll,
-			Operator::ContainAny => proto_fb::Operator::ContainAny,
-			Operator::ContainNone => proto_fb::Operator::ContainNone,
-			Operator::Inside => proto_fb::Operator::Inside,
-			Operator::NotInside => proto_fb::Operator::NotInside,
-			Operator::AllInside => proto_fb::Operator::AllInside,
-			Operator::AnyInside => proto_fb::Operator::AnyInside,
-			Operator::NoneInside => proto_fb::Operator::NoneInside,
-			Operator::Outside => proto_fb::Operator::Outside,
-			Operator::Intersects => proto_fb::Operator::Intersects,
-			Operator::Knn(_, _) => panic!("KNN operator not supported"),
-			Operator::Ann(_, _) => panic!("ANN operator not supported"),
-			Operator::Matches(_) => panic!("Matches not supported"),
+			Operator::Neg => Ok(proto_fb::Operator::Neg),
+			Operator::Not => Ok(proto_fb::Operator::Not),
+			Operator::Or => Ok(proto_fb::Operator::Or),
+			Operator::And => Ok(proto_fb::Operator::And),
+			Operator::Tco => Ok(proto_fb::Operator::Tco),
+			Operator::Nco => Ok(proto_fb::Operator::Nco),
+			Operator::Add => Ok(proto_fb::Operator::Add),
+			Operator::Sub => Ok(proto_fb::Operator::Sub),
+			Operator::Mul => Ok(proto_fb::Operator::Mul),
+			Operator::Div => Ok(proto_fb::Operator::Div),
+			Operator::Rem => Ok(proto_fb::Operator::Rem),
+			Operator::Pow => Ok(proto_fb::Operator::Pow),
+			Operator::Inc => Ok(proto_fb::Operator::Inc),
+			Operator::Dec => Ok(proto_fb::Operator::Dec),
+			Operator::Ext => Ok(proto_fb::Operator::Ext),
+			Operator::Equal => Ok(proto_fb::Operator::Equal),
+			Operator::Exact => Ok(proto_fb::Operator::Exact),
+			Operator::NotEqual => Ok(proto_fb::Operator::NotEqual),
+			Operator::AllEqual => Ok(proto_fb::Operator::AllEqual),
+			Operator::AnyEqual => Ok(proto_fb::Operator::AnyEqual),
+			Operator::LessThan => Ok(proto_fb::Operator::LessThan),
+			Operator::LessThanOrEqual => Ok(proto_fb::Operator::LessThanOrEqual),
+			Operator::MoreThan => Ok(proto_fb::Operator::GreaterThan),
+			Operator::MoreThanOrEqual => Ok(proto_fb::Operator::GreaterThanOrEqual),
+			Operator::Contain => Ok(proto_fb::Operator::Contain),
+			Operator::NotContain => Ok(proto_fb::Operator::NotContain),
+			Operator::ContainAll => Ok(proto_fb::Operator::ContainAll),
+			Operator::ContainAny => Ok(proto_fb::Operator::ContainAny),
+			Operator::ContainNone => Ok(proto_fb::Operator::ContainNone),
+			Operator::Inside => Ok(proto_fb::Operator::Inside),
+			Operator::NotInside => Ok(proto_fb::Operator::NotInside),
+			Operator::AllInside => Ok(proto_fb::Operator::AllInside),
+			Operator::AnyInside => Ok(proto_fb::Operator::AnyInside),
+			Operator::NoneInside => Ok(proto_fb::Operator::NoneInside),
+			Operator::Outside => Ok(proto_fb::Operator::Outside),
+			Operator::Intersects => Ok(proto_fb::Operator::Intersects),
+			Operator::Knn(_, _) => Err(anyhow::anyhow!("KNN operator not supported")),
+			Operator::Ann(_, _) => Err(anyhow::anyhow!("ANN operator not supported")),
+			Operator::Matches(_) => Err(anyhow::anyhow!("Matches not supported")),
 		}
 	}
 }
@@ -2555,7 +2561,7 @@ impl ToFlatbuffers for Data {
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
-	) -> Self::Output<'bldr> {
+	) -> anyhow::Result<Self::Output<'bldr>> {
 		let (contents_type, contents) = match self {
 			Data::EmptyExpression => (
 				proto_fb::DataContents::Empty,
@@ -2564,9 +2570,9 @@ impl ToFlatbuffers for Data {
 			Data::SetExpression(set) => {
 				let mut items = Vec::with_capacity(set.len());
 				for (idiom, operator, value) in set {
-					let idiom_fb = idiom.to_fb(builder);
-					let operator_fb = operator.to_fb(builder);
-					let value_fb = value.to_fb(builder);
+					let idiom_fb = idiom.to_fb(builder)?;
+					let operator_fb = operator.to_fb(builder)?;
+					let value_fb = value.to_fb(builder)?;
 					items.push(proto_fb::SetExpr::create(
 						builder,
 						&proto_fb::SetExprArgs {
@@ -2591,7 +2597,7 @@ impl ToFlatbuffers for Data {
 			Data::UnsetExpression(unset) => {
 				let mut items = Vec::with_capacity(unset.len());
 				for idiom in unset {
-					let idiom_fb = idiom.to_fb(builder);
+					let idiom_fb = idiom.to_fb(builder)?;
 					items.push(idiom_fb);
 				}
 				let unset_exprs = builder.create_vector(&items);
@@ -2607,23 +2613,23 @@ impl ToFlatbuffers for Data {
 				)
 			}
 			Data::PatchExpression(patch) => {
-				let patch_fb = patch.to_fb(builder);
+				let patch_fb = patch.to_fb(builder)?;
 				(proto_fb::DataContents::Patch, patch_fb.as_union_value())
 			}
 			Data::MergeExpression(merge) => {
-				let merge_fb = merge.to_fb(builder);
+				let merge_fb = merge.to_fb(builder)?;
 				(proto_fb::DataContents::Merge, merge_fb.as_union_value())
 			}
 			Data::ReplaceExpression(replace) => {
-				let replace_fb = replace.to_fb(builder);
+				let replace_fb = replace.to_fb(builder)?;
 				(proto_fb::DataContents::Replace, replace_fb.as_union_value())
 			}
 			Data::ContentExpression(content) => {
-				let content_fb = content.to_fb(builder);
+				let content_fb = content.to_fb(builder)?;
 				(proto_fb::DataContents::Content, content_fb.as_union_value())
 			}
 			Data::SingleExpression(single) => {
-				let single_fb = single.to_fb(builder);
+				let single_fb = single.to_fb(builder)?;
 				(proto_fb::DataContents::Value, single_fb.as_union_value())
 			}
 			Data::ValuesExpression(values) => {
@@ -2631,8 +2637,8 @@ impl ToFlatbuffers for Data {
 				for inner_values in values {
 					let mut inner_items = Vec::with_capacity(inner_values.len());
 					for (idiom, value) in inner_values {
-						let idiom_fb = idiom.to_fb(builder);
-						let value_fb = value.to_fb(builder);
+						let idiom_fb = idiom.to_fb(builder)?;
+						let value_fb = value.to_fb(builder)?;
 
 						inner_items.push(proto_fb::IdiomValuePair::create(
 							builder,
@@ -2667,9 +2673,9 @@ impl ToFlatbuffers for Data {
 			Data::UpdateExpression(update) => {
 				let mut items = Vec::with_capacity(update.len());
 				for (idiom, operator, value) in update {
-					let idiom_fb = idiom.to_fb(builder);
-					let operator_fb = operator.to_fb(builder);
-					let value_fb = value.to_fb(builder);
+					let idiom_fb = idiom.to_fb(builder)?;
+					let operator_fb = operator.to_fb(builder)?;
+					let value_fb = value.to_fb(builder)?;
 					items.push(proto_fb::SetExpr::create(
 						builder,
 						&proto_fb::SetExprArgs {
@@ -2693,13 +2699,13 @@ impl ToFlatbuffers for Data {
 			}
 		};
 
-		proto_fb::Data::create(
+		Ok(proto_fb::Data::create(
 			builder,
 			&proto_fb::DataArgs {
 				contents_type,
 				contents: Some(contents),
 			},
-		)
+		))
 	}
 }
 
@@ -2779,18 +2785,21 @@ impl ToFlatbuffers for SetExpr {
 	type Output<'a> = flatbuffers::WIPOffset<proto_fb::SetExpr<'a>>;
 
 	#[inline]
-	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
-		let idiom = self.0.to_fb(fbb);
-		let operator = self.1.to_fb(fbb);
-		let value = self.2.to_fb(fbb);
-		proto_fb::SetExpr::create(
+	fn to_fb<'a>(
+		&self,
+		fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
+	) -> anyhow::Result<Self::Output<'a>> {
+		let idiom = self.0.to_fb(fbb)?;
+		let operator = self.1.to_fb(fbb)?;
+		let value = self.2.to_fb(fbb)?;
+		Ok(proto_fb::SetExpr::create(
 			fbb,
 			&proto_fb::SetExprArgs {
 				idiom: Some(idiom),
 				operator,
 				value: Some(value),
 			},
-		)
+		))
 	}
 }
 
@@ -2810,15 +2819,18 @@ impl ToFlatbuffers for SetMultiExpr {
 	type Output<'a> = flatbuffers::WIPOffset<proto_fb::SetMultiExpr<'a>>;
 
 	#[inline]
-	fn to_fb<'a>(&self, fbb: &mut flatbuffers::FlatBufferBuilder<'a>) -> Self::Output<'a> {
-		let items = self.iter().map(|v| v.to_fb(fbb)).collect::<Vec<_>>();
+	fn to_fb<'a>(
+		&self,
+		fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
+	) -> anyhow::Result<Self::Output<'a>> {
+		let items = self.iter().map(|v| v.to_fb(fbb)).collect::<anyhow::Result<Vec<_>>>()?;
 		let items = fbb.create_vector(&items);
-		proto_fb::SetMultiExpr::create(
+		Ok(proto_fb::SetMultiExpr::create(
 			fbb,
 			&proto_fb::SetMultiExprArgs {
 				items: Some(items),
 			},
-		)
+		))
 	}
 }
 
@@ -3420,7 +3432,7 @@ mod tests {
 	#[case::file(Value::File(File { bucket: "test_bucket".to_string(), key: "test_key".to_string() }))]
 	fn test_flatbuffers_roundtrip(#[case] input: Value) {
 		let mut builder = flatbuffers::FlatBufferBuilder::new();
-		let input_fb = input.to_fb(&mut builder);
+		let input_fb = input.to_fb(&mut builder).expect("Failed to convert to FlatBuffer");
 		builder.finish_minimal(input_fb);
 		let buf = builder.finished_data();
 		let value_fb =
