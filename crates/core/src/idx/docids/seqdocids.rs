@@ -9,7 +9,22 @@ use anyhow::Result;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// Sequence-based DocIds store
+/// Sequence-based DocIds store for concurrent full-text search
+///
+/// This module implements a document ID management system for the concurrent full-text search
+/// implementation. It uses the distributed sequence mechanism to provide concurrent document ID
+/// creation, which is essential for the inverted index.
+///
+/// The `SeqDocIds` struct maintains bidirectional mappings between document IDs (numeric identifiers
+/// used internally by the full-text index) and record IDs (the actual identifiers of the documents
+/// being indexed). This allows for efficient lookup in both directions.
+///
+/// Key features:
+/// - Uses distributed sequences for concurrent ID generation
+/// - Maintains bidirectional mappings between DocIds and record IDs
+/// - Supports efficient ID resolution, retrieval, and removal
+/// - Enables concurrent document indexing operations
+/// - Allocates IDs in batches for better performance
 pub(crate) struct SeqDocIds {
 	ikb: IndexKeyBase,
 	nid: Uuid,
@@ -18,6 +33,14 @@ pub(crate) struct SeqDocIds {
 }
 
 impl SeqDocIds {
+	/// Creates a new SeqDocIds instance
+	///
+	/// Initializes a new document ID manager with the specified node ID and index key base.
+	/// Sets up the sequence domain for generating unique document IDs.
+	///
+	/// # Arguments
+	/// * `nid` - The node ID used for distributed sequence generation
+	/// * `ikb` - The index key base containing namespace, database, table, and index information
 	pub(in crate::idx) fn new(nid: Uuid, ikb: IndexKeyBase) -> Self {
 		Self {
 			nid,
@@ -27,6 +50,17 @@ impl SeqDocIds {
 		}
 	}
 
+	/// Retrieves a document ID for a given record ID
+	///
+	/// Looks up the document ID associated with the specified record ID.
+	///
+	/// # Arguments
+	/// * `tx` - The transaction to use for the lookup
+	/// * `id` - The record ID to look up
+	///
+	/// # Returns
+	/// * `Ok(Some(DocId))` - The document ID if found
+	/// * `Ok(None)` - If no document ID exists for the record ID
 	pub(in crate::idx) async fn get_doc_id(
 		&self,
 		tx: &Transaction,
@@ -39,6 +73,16 @@ impl SeqDocIds {
 		Ok(None)
 	}
 
+	/// Converts a raw value to a document ID
+	///
+	/// Validates and converts a byte array to a document ID.
+	///
+	/// # Arguments
+	/// * `val` - The raw value to convert
+	///
+	/// # Returns
+	/// * `Ok(DocId)` - The converted document ID
+	/// * `Err` - If the value has an invalid format
 	fn val_to_doc_id(val: Val) -> Result<DocId> {
 		// Validate the length and convert to array (zero copy)
 		let val: [u8; 8] = val.as_slice().try_into().map_err(|_| {
@@ -50,6 +94,19 @@ impl SeqDocIds {
 		Ok(u64::from_be_bytes(val))
 	}
 
+	/// Resolves a record ID to a document ID, creating a new one if needed
+	///
+	/// This is a key method for the concurrent full-text search implementation.
+	/// It either retrieves an existing document ID for a record ID or generates
+	/// a new one using the distributed sequence mechanism.
+	///
+	/// # Arguments
+	/// * `ctx` - The context containing transaction and sequence information
+	/// * `id` - The record ID to resolve
+	///
+	/// # Returns
+	/// * `Ok(Resolved::Existing(DocId))` - If the document ID already exists
+	/// * `Ok(Resolved::New(DocId))` - If a new document ID was created
 	pub(in crate::idx) async fn resolve_doc_id(&self, ctx: &Context, id: Id) -> Result<Resolved> {
 		let id_key = self.ikb.new_id_key(id.clone());
 		let tx = ctx.tx();
@@ -75,6 +132,19 @@ impl SeqDocIds {
 		Ok(Resolved::New(new_doc_id))
 	}
 
+	/// Retrieves a record ID for a given document ID
+	///
+	/// Looks up the record ID associated with the specified document ID.
+	/// This is the reverse lookup of `get_doc_id`.
+	///
+	/// # Arguments
+	/// * `ikb` - The index key base containing namespace, database, table, and index information
+	/// * `tx` - The transaction to use for the lookup
+	/// * `doc_id` - The document ID to look up
+	///
+	/// # Returns
+	/// * `Ok(Some(Id))` - The record ID if found
+	/// * `Ok(None)` - If no record ID exists for the document ID
 	pub(in crate::idx) async fn get_id(
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
@@ -87,6 +157,14 @@ impl SeqDocIds {
 		}
 	}
 
+	/// Removes a document ID and its associated record ID
+	///
+	/// Deletes both the forward (record ID to document ID) and reverse
+	/// (document ID to record ID) mappings for a document.
+	///
+	/// # Arguments
+	/// * `tx` - The transaction to use for the removal
+	/// * `doc_id` - The document ID to remove
 	pub(in crate::idx) async fn remove_doc_id(
 		&self,
 		tx: &Transaction,

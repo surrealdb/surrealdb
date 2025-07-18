@@ -1,4 +1,19 @@
 //! Stores the doc length
+//!
+//! This key is used in the concurrent full-text search implementation to store
+//! the length of individual documents in the index. Document length is a critical
+//! factor in relevance scoring algorithms like BM25, which normalize term frequencies
+//! based on document length.
+//!
+//! The key structure includes:
+//! - Namespace, database, table, and index identifiers
+//! - Document ID
+//!
+//! This key is essential for:
+//! - Calculating accurate relevance scores for search results
+//! - Supporting document length normalization
+//! - Enabling proper ranking of search results based on term frequency and document length
+//! - Providing document-specific statistics for the full-text search engine
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;

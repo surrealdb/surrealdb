@@ -1,4 +1,20 @@
 //! Stores the term/document frequency and offsets for a document
+//!
+//! This key is used in the concurrent full-text search implementation to store
+//! document count and length information. It tracks statistics about documents
+//! in the full-text index, which are essential for relevance scoring algorithms
+//! like BM25.
+//!
+//! The key structure includes:
+//! - Namespace, database, table, and index identifiers
+//! - Document ID
+//! - Transaction IDs (nid, uid) for concurrency control
+//!
+//! This key is essential for:
+//! - Maintaining document statistics for scoring calculations
+//! - Supporting document length normalization in search results
+//! - Enabling efficient compaction of index data
+//! - Providing accurate document count information for the index
 
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;

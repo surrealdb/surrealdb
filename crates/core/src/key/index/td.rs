@@ -1,4 +1,18 @@
 //! Stores the term/document frequency and offsets
+//!
+//! This key is used in the concurrent full-text search implementation to store
+//! term-document relationships. It maps terms to document IDs, allowing for
+//! efficient lookup of documents containing specific terms.
+//!
+//! The key structure includes:
+//! - Namespace, database, table, and index identifiers
+//! - The term being indexed
+//! - An optional document ID
+//!
+//! This key is essential for:
+//! - Quickly finding documents that contain specific terms
+//! - Supporting term-based document retrieval
+//! - Enabling efficient text search operations
 
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
