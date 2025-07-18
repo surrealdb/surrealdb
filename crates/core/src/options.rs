@@ -6,10 +6,22 @@ use std::time::Duration;
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct EngineOptions {
+	/// Interval for refreshing node membership information
 	pub node_membership_refresh_interval: Duration,
+	/// Interval for checking node membership status
 	pub node_membership_check_interval: Duration,
+	/// Interval for cleaning up inactive nodes from the cluster
 	pub node_membership_cleanup_interval: Duration,
+	/// Interval for garbage collecting expired changefeed data
 	pub changefeed_gc_interval: Duration,
+	/// Interval for running the index compaction process
+	///
+	/// The index compaction thread runs at this interval to process indexes
+	/// that have been marked for compaction. Compaction helps optimize index
+	/// performance, particularly for full-text indexes, by consolidating changes
+	/// and removing unnecessary data.
+	///
+	/// Default: 5 seconds
 	pub index_compaction_interval: Duration,
 }
 

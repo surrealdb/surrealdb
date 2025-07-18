@@ -779,6 +779,28 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Processes the index compaction queue
+	///
+	/// This method is called periodically by the index compaction thread to process
+	/// indexes that have been marked for compaction. It acquires a distributed lease
+	/// to ensure only one node in a cluster performs the compaction at a time.
+	///
+	/// The method scans the index compaction queue (stored as `Ic` keys) and processes
+	/// each index that needs compaction. Currently, only full-text indexes support
+	/// compaction, which helps optimize their performance by consolidating changes
+	/// and removing unnecessary data.
+	///
+	/// After processing an index, it is removed from the compaction queue.
+	///
+	/// # Arguments
+	///
+	/// * `interval` - The time interval between compaction runs, used to calculate
+	///   the lease duration
+	///
+	/// # Returns
+	///
+	/// * `Result<()>` - Ok if the compaction was successful or if another node
+	///   is handling the compaction, Error otherwise
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
 		let lh = LeaseHandler::new(

@@ -602,7 +602,13 @@ impl FullTextIndex {
 
 	/// Triggers compaction for the full-text index
 	///
-	/// This method adds a compaction marker that will be processed by the compaction worker.
+	/// This method adds an entry to the index compaction queue by creating an `Ic` key
+	/// for the specified index. The index compaction thread will later process this entry
+	/// and perform the actual compaction of the index.
+	///
+	/// Compaction helps optimize full-text index performance by consolidating term
+	/// frequency data and document length information, which can become fragmented
+	/// after many updates to the index.
 	pub(crate) async fn trigger_compaction(
 		ikb: &IndexKeyBase,
 		tx: &Transaction,

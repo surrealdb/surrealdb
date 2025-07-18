@@ -175,6 +175,24 @@ fn spawn_task_changefeed_cleanup(
 	}))
 }
 
+/// Spawns a background task for index compaction
+///
+/// This function creates a background task that periodically runs the index compaction
+/// process. The compaction process optimizes indexes (particularly full-text indexes)
+/// by consolidating changes and removing unnecessary data, which helps maintain
+/// query performance over time.
+///
+/// The task runs at the interval specified by `opts.index_compaction_interval`.
+///
+/// # Arguments
+///
+/// * `dbs` - The datastore instance
+/// * `canceller` - Token used to cancel the task when the engine is shutting down
+/// * `opts` - Engine options containing the compaction interval
+///
+/// # Returns
+///
+/// * A pinned task that can be awaited
 fn spawn_task_index_compaction(
 	dbs: Arc<Datastore>,
 	canceller: CancellationToken,
