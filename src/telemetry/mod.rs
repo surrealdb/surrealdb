@@ -13,6 +13,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
 	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
+use std::net::ToSocketAddrs;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tracing::{Level, Subscriber};
@@ -123,7 +124,24 @@ impl Builder {
 
 	/// Send logs to the provided socket address
 	pub fn with_log_socket(mut self, socket: Option<String>) -> Self {
-		self.log_socket = socket;
+		if let Some(ipaddr_str) = socket {
+			let ipaddr_iter = ipaddr_str.to_socket_addrs();
+			match ipaddr_iter {
+				Ok(mut iter) => match iter.next() {
+					None => {
+						error!("no resolved addres for {ipaddr_str}");
+						return self;
+					}
+					Some(addr) => {
+						self.log_socket = Some(addr.to_string())
+					}
+				},
+				Err(err) => {
+					error!("error getting socket : {err}");
+					return self;
+				}
+			}
+		}
 		self
 	}
 
