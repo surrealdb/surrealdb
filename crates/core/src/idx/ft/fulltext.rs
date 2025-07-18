@@ -924,4 +924,3 @@ mod tests {
 		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
 	}
 }
-c
