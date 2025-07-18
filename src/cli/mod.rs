@@ -123,10 +123,6 @@ struct Cli {
 	#[arg(default_value = "text")]
 	#[arg(value_enum)]
 	pub log_file_format: LogFormat,
-	#[arg(help = "Send file logs to the specified host:port", help_heading = "Logging")]
-	#[arg(env = "SURREAL_LOG_FILE_SOCKET", long = "log-file-socket")]
-	#[arg(global = true)]
-	pub log_file_socket: Option<String>,
 	//
 	// Version check
 	//
