@@ -709,7 +709,7 @@ impl RecurseInstruction {
 				expects,
 				inclusive,
 			} => {
-				let expects = expects
+				let expects: Value = expects
 					.compute(stk, ctx, opt, doc)
 					.await
 					.catch_return()?

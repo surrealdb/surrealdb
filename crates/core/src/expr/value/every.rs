@@ -112,15 +112,14 @@ mod tests {
 
 	#[test]
 	fn every_empty() {
-		let val: Value = SqlValue::parse("{}").into();
+		let val: Value = Value::parse("{}");
 		let res: Vec<Idiom> = vec![];
 		assert_eq!(res, val.every(None, false, false));
 	}
 
 	#[test]
 	fn every_with_empty_objects_arrays() {
-		let val: Value =
-			SqlValue::parse("{ test: {}, status: false, something: {age: 45}, tags: []}").into();
+		let val: Value = Value::parse("{ test: {}, status: false, something: {age: 45}, tags: []}");
 		let res: Vec<Idiom> = vec![
 			SqlIdiom::parse("something.age").into(),
 			SqlIdiom::parse("status").into(),

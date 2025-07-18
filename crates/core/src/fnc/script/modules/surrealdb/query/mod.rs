@@ -7,12 +7,7 @@ use js::{
 };
 use reblessive::tree::Stk;
 
-use crate::{
-	ctx::Context,
-	dbs::{Attach, Options},
-	doc::CursorDoc,
-	expr::FlowResultExt as _,
-};
+use crate::{ctx::Context, dbs::Options, doc::CursorDoc, expr::FlowResultExt as _};
 
 mod classes;
 
@@ -79,11 +74,12 @@ pub fn query<'js>(
 			};
 
 			let mut context = MutableContext::new(query_ctx.context);
-			query
-				.clone()
-				.vars
-				.attach(&mut context)
-				.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+			if let Some(vars) = query.clone().vars {
+				context
+					.attach_variables(vars.into())
+					.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+			}
+
 			let context = context.freeze();
 
 			Stk::enter_scope(|stk| {
