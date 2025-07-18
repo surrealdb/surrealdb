@@ -124,24 +124,7 @@ impl Builder {
 
 	/// Send logs to the provided socket address
 	pub fn with_log_socket(mut self, socket: Option<String>) -> Self {
-		if let Some(ipaddr_str) = socket {
-			let ipaddr_iter = ipaddr_str.to_socket_addrs();
-			match ipaddr_iter {
-				Ok(mut iter) => match iter.next() {
-					None => {
-						error!("no resolved addres for {ipaddr_str}");
-						return self;
-					}
-					Some(addr) => {
-						self.log_socket = Some(addr.to_string())
-					}
-				},
-				Err(err) => {
-					error!("error getting socket : {err}");
-					return self;
-				}
-			}
-		}
+		self.log_socket = socket;
 		self
 	}
 
@@ -210,7 +193,9 @@ impl Builder {
 
 		// Setup optional socket layer
 		if let Some(addr) = &self.log_socket {
-			let writer = logs::SocketWriter::connect(addr)?;
+			let mut addrs_iter = addr.to_socket_addrs()?;
+			let first_address = addrs_iter.next().ok_or_else(|| "Decode error");
+			let writer = logs::SocketWriter::connect(first_address.unwrap())?;
 			let (sock, sock_guard) = NonBlockingBuilder::default()
 				.lossy(false)
 				.thread_name("surrealdb-logger-socket")
