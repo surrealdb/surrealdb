@@ -32,6 +32,18 @@ impl From<Bytes> for Vec<u8> {
 	}
 }
 
+impl From<Bytes> for bytes::Bytes {
+	fn from(bytes: Bytes) -> Self {
+		bytes.0.into()
+	}
+}
+
+impl From<bytes::Bytes> for Bytes {
+	fn from(bytes: bytes::Bytes) -> Self {
+		Bytes(bytes.into())
+	}
+}
+
 impl Deref for Bytes {
 	type Target = Vec<u8>;
 
@@ -109,7 +121,7 @@ mod tests {
 		let val = Value::Bytes(Bytes(vec![1, 2, 3, 5]));
 		let serialized: Vec<u8> = revision::to_vec(&val).unwrap();
 		println!("{serialized:?}");
-		let deserialized = revision::from_slice(&serialized).unwrap();
+		let deserialized: Value = revision::from_slice(&serialized).unwrap();
 		assert_eq!(val, deserialized);
 	}
 

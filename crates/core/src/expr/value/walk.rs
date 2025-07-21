@@ -77,18 +77,16 @@ mod tests {
 	#[test]
 	fn walk_blank() {
 		let idi: Idiom = SqlIdiom::default().into();
-		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
-		let res: Vec<(Idiom, Value)> = vec![(
-			Idiom::default(),
-			SqlValue::parse("{ test: { other: null, something: 123 } }").into(),
-		)];
+		let val: Value = Value::parse("{ test: { other: null, something: 123 } }");
+		let res: Vec<(Idiom, Value)> =
+			vec![(Idiom::default(), Value::parse("{ test: { other: null, something: 123 } }"))];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_basic() {
 		let idi: Idiom = SqlIdiom::parse("test.something").into();
-		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let val: Value = Value::parse("{ test: { other: null, something: 123 } }");
 		let res: Vec<(Idiom, Value)> =
 			vec![(SqlIdiom::parse("test.something").into(), Value::from(123))];
 		assert_eq!(res, val.walk(&idi));
@@ -97,7 +95,7 @@ mod tests {
 	#[test]
 	fn walk_empty() {
 		let idi: Idiom = SqlIdiom::parse("test.missing").into();
-		let val: Value = SqlValue::parse("{ test: { other: null, something: 123 } }").into();
+		let val: Value = Value::parse("{ test: { other: null, something: 123 } }");
 		let res: Vec<(Idiom, Value)> = vec![(SqlIdiom::parse("test.missing").into(), Value::None)];
 		assert_eq!(res, val.walk(&idi));
 	}
@@ -105,8 +103,7 @@ mod tests {
 	#[test]
 	fn walk_empty_object() {
 		let idi: Idiom = SqlIdiom::parse("none.something.age").into();
-		let val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let val: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<(Idiom, Value)> =
 			vec![(SqlIdiom::parse("none.something.age").into(), Value::None)];
 		assert_eq!(res, val.walk(&idi));
@@ -115,8 +112,7 @@ mod tests {
 	#[test]
 	fn walk_empty_array() {
 		let idi: Idiom = SqlIdiom::parse("none.something.*.age").into();
-		let val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let val: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<(Idiom, Value)> = vec![];
 		assert_eq!(res, val.walk(&idi));
 	}
@@ -124,8 +120,7 @@ mod tests {
 	#[test]
 	fn walk_empty_array_index() {
 		let idi: Idiom = SqlIdiom::parse("none.something[0].age").into();
-		let val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let val: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<(Idiom, Value)> =
 			vec![(SqlIdiom::parse("none.something[0].age").into(), Value::None)];
 		assert_eq!(res, val.walk(&idi));
@@ -134,11 +129,10 @@ mod tests {
 	#[test]
 	fn walk_array() {
 		let idi: Idiom = SqlIdiom::parse("test.something").into();
-		let val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let val: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = vec![(
 			SqlIdiom::parse("test.something").into(),
-			SqlValue::parse("[{ age: 34 }, { age: 36 }]").into(),
+			Value::parse("[{ age: 34 }, { age: 36 }]"),
 		)];
 		assert_eq!(res, val.walk(&idi));
 	}
@@ -146,8 +140,7 @@ mod tests {
 	#[test]
 	fn walk_array_field() {
 		let idi: Idiom = SqlIdiom::parse("test.something[*].age").into();
-		let val: Value =
-			SqlValue::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }").into();
+		let val: Value = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<(Idiom, Value)> = vec![
 			(SqlIdiom::parse("test.something[0].age").into(), Value::from(34)),
 			(SqlIdiom::parse("test.something[1].age").into(), Value::from(36)),
@@ -164,11 +157,11 @@ mod tests {
 		let res: Vec<(Idiom, Value)> = vec![
 			(
 				SqlIdiom::parse("test.something[0].tags").into(),
-				SqlValue::parse("['code', 'databases']").into(),
+				Value::parse("['code', 'databases']"),
 			),
 			(
 				SqlIdiom::parse("test.something[1].tags").into(),
-				SqlValue::parse("['design', 'operations']").into(),
+				Value::parse("['design', 'operations']"),
 			),
 		];
 		assert_eq!(res, val.walk(&idi));
