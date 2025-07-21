@@ -1,4 +1,33 @@
-//! Stores sequence batches for FullTextIndex / DocIDs
+//! Sequence Batch Key (`Ib`) for Full-Text Index Document IDs
+//!
+//! The `Ib` key stores sequence batches for full-text index document IDs. It's part of the 
+//! distributed sequence mechanism that enables concurrent document ID generation across multiple nodes.
+//!
+//! ## Key Structure
+//! ```
+//! /*{namespace}*{database}*{table}+{index}!ib{start}
+//! ```
+//!
+//! ## Purpose
+//! - **Batch Management**: Stores ranges of document IDs that can be allocated by different nodes
+//! - **Concurrency**: Enables multiple nodes to generate unique document IDs without conflicts  
+//! - **Performance**: Reduces contention by pre-allocating ID ranges in batches
+//!
+//! ## Usage in Full-Text Search
+//! The `Ib` key works together with `Id` keys to manage document identification:
+//! 1. Document IDs are allocated in batches using distributed sequences
+//! 2. Multiple nodes can allocate from different batches simultaneously
+//! 3. This enables lock-free ID generation and reduces database contention
+//!
+//! ## Category
+//! - **Category**: `SequenceBatch`
+//! - **Domain**: Full-text search document ID management
+//!
+//! ## Concurrency Benefits
+//! - **Lock-free ID Generation**: Nodes can allocate IDs from pre-allocated batches
+//! - **Reduced Contention**: Batch-based allocation minimizes database contention
+//! - **Scalability**: Multiple nodes can index documents concurrently
+//! - **Consistency**: Ensures unique document IDs across the entire cluster
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KeyEncode, impl_key};
 use serde::{Deserialize, Serialize};
