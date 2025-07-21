@@ -5,8 +5,8 @@ use super::access::{
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
-use crate::dbs::Session;
 use crate::dbs::capabilities::ExperimentalTarget;
+use crate::dbs::{Session, Variables};
 use crate::err::Error;
 use crate::expr::statements::{AccessGrant, DefineAccessStatement, access};
 use crate::expr::{AccessType, Datetime, Object, Value, access_type};
@@ -182,7 +182,7 @@ pub async fn db_access(
 						// This record access allows signin
 						Some(val) => {
 							// Setup the query params
-							let vars = Some(vars.0);
+							let vars = Some(Variables::from(vars));
 							// Setup the system session for finding the signin record
 							let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 							sess.ip.clone_from(&session.ip);

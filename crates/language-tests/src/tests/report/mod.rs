@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::collections::BTreeMap;
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use crate::tests::schema::{self, TestConfig};
@@ -8,7 +7,7 @@ use crate::tests::{
 	schema::{BoolOr, TestDetailsResults},
 	set::TestId,
 };
-use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::{Session, Variables};
 use surrealdb_core::expr::Value as SurValue;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn::error::RenderedError;
@@ -624,10 +623,11 @@ impl TestReport {
 		};
 
 		let run_vars = match value {
-			Ok(ref x) => BTreeMap::from([("result".to_string(), x.clone())]),
-			Err(ref e) => {
-				BTreeMap::from([("error".to_string(), SurValue::Strand(e.clone().into()).clone())])
-			}
+			Ok(ref x) => Variables::from_iter([("result".to_string(), x.clone())]),
+			Err(ref e) => Variables::from_iter([(
+				"error".to_string(),
+				SurValue::Strand(e.clone().into()).clone(),
+			)]),
 		};
 
 		let session = Session::viewer().with_ns("match").with_db("match");

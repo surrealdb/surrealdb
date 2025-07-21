@@ -1826,6 +1826,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
+name = "flatbuffers"
+version = "25.2.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1045398c1bfd89168b5fd3f1fc11f6e70b34f6f66300c87d44d3de849463abf1"
+dependencies = [
+ "bitflags 2.9.0",
+ "rustc_version",
+ "serde",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5779,6 +5790,7 @@ dependencies = [
  "dmp",
  "env_logger",
  "ext-sort",
+ "flatbuffers",
  "flate2",
  "foundationdb",
  "fst",
@@ -5838,6 +5850,7 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
+ "surrealdb-protocol",
  "surrealdb-tikv-client",
  "surrealkv",
  "surrealml-core",
@@ -5873,6 +5886,29 @@ dependencies = [
  "serde",
  "storekey",
  "syn 2.0.100",
+]
+
+[[package]]
+name = "surrealdb-protocol"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37827e7976caa8071614d59cdecc758c6a5820974bc31a75185001a8161a08ce"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "flatbuffers",
+ "futures",
+ "geo",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+ "rust_decimal",
+ "semver",
+ "serde",
+ "serde_json",
+ "tonic 0.12.3",
+ "uuid",
 ]
 
 [[package]]
@@ -6831,9 +6867,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.16.0"
+version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "458f7a779bf54acc9f347480ac654f68407d3aab21269a6e3c9f922acd9e2da9"
+checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
  "arbitrary",
  "getrandom 0.3.2",
