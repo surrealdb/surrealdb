@@ -1,6 +1,6 @@
 //! Document ID Mapping Key (`Id`) for Full-Text Index
 //!
-//! The `Id` key stores the mapping between SurrealDB record IDs (`Thing`) and internal numeric 
+//! The `Id` key stores the mapping between SurrealDB record IDs (`Thing`) and internal numeric
 //! document IDs (`DocId`) used by the full-text search engine.
 //!
 //! ## Key Structure
