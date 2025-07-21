@@ -1,11 +1,10 @@
-use crate::idx::ft::{MatchRef, SearchOperator};
+use super::SqlValue;
+use crate::idx::ft::MatchRef;
 use crate::sql::index::Distance;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
-
-use super::SqlValue;
 
 /// Binary operators.
 #[revisioned(revision = 3)]
@@ -45,7 +44,7 @@ pub enum Operator {
 	AllLike, // *~
 	#[revision(end = 3, convert_fn = "like_convert")]
 	AnyLike, // ?~
-	Matches(Option<MatchRef>, Option<SearchOperator>), // @{ref}@
+	Matches(Option<MatchRef>, Option<BooleanOperator>), // @{ref},{AND|OR}@
 	//
 	LessThan,        // <
 	LessThanOrEqual, // <=
@@ -131,12 +130,10 @@ impl fmt::Display for Operator {
 					} else {
 						write!(f, "@{r}@")
 					}
+				} else if let Some(o) = operator {
+					write!(f, "@{o}@")
 				} else {
-					if let Some(o) = operator {
-						write!(f, "@{o}@")
-					} else {
-						f.write_str("@@")
-					}
+					f.write_str("@@")
 				}
 			}
 			Self::Knn(k, dist) => {
@@ -176,7 +173,7 @@ impl From<Operator> for crate::expr::Operator {
 			Operator::NotEqual => crate::expr::Operator::NotEqual,
 			Operator::AllEqual => crate::expr::Operator::AllEqual,
 			Operator::AnyEqual => crate::expr::Operator::AnyEqual,
-			Operator::Matches(r, o) => crate::expr::Operator::Matches(r, o),
+			Operator::Matches(r, o) => crate::expr::Operator::Matches(r, o.map(Into::into)),
 			Operator::LessThan => crate::expr::Operator::LessThan,
 			Operator::LessThanOrEqual => crate::expr::Operator::LessThanOrEqual,
 			Operator::MoreThan => crate::expr::Operator::MoreThan,
@@ -222,7 +219,7 @@ impl From<crate::expr::Operator> for Operator {
 			crate::expr::Operator::NotEqual => Self::NotEqual,
 			crate::expr::Operator::AllEqual => Self::AllEqual,
 			crate::expr::Operator::AnyEqual => Self::AnyEqual,
-			crate::expr::Operator::Matches(r, o) => Self::Matches(r, o),
+			crate::expr::Operator::Matches(r, o) => Self::Matches(r, o.map(Into::into)),
 			crate::expr::Operator::LessThan => Self::LessThan,
 			crate::expr::Operator::LessThanOrEqual => Self::LessThanOrEqual,
 			crate::expr::Operator::MoreThan => Self::MoreThan,
@@ -241,6 +238,43 @@ impl From<crate::expr::Operator> for Operator {
 			crate::expr::Operator::Intersects => Self::Intersects,
 			crate::expr::Operator::Knn(k, d) => Self::Knn(k, d.map(Into::into)),
 			crate::expr::Operator::Ann(k, ef) => Self::Ann(k, ef),
+		}
+	}
+}
+
+/// Binary operators.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum BooleanOperator {
+	And,
+	Or,
+}
+
+impl fmt::Display for BooleanOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Or => f.write_str("OR"),
+			Self::And => f.write_str("AND"),
+		}
+	}
+}
+
+impl From<BooleanOperator> for crate::expr::BooleanOperator {
+	fn from(v: BooleanOperator) -> Self {
+		match v {
+			BooleanOperator::And => crate::expr::BooleanOperator::And,
+			BooleanOperator::Or => crate::expr::BooleanOperator::Or,
+		}
+	}
+}
+
+impl From<crate::expr::BooleanOperator> for BooleanOperator {
+	fn from(v: crate::expr::BooleanOperator) -> Self {
+		match v {
+			crate::expr::BooleanOperator::And => BooleanOperator::And,
+			crate::expr::BooleanOperator::Or => BooleanOperator::Or,
 		}
 	}
 }

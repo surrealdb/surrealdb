@@ -1,6 +1,6 @@
 use super::Value;
 use crate::expr::index::Distance;
-use crate::idx::ft::{MatchRef, SearchOperator};
+use crate::idx::ft::MatchRef;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -44,7 +44,7 @@ pub enum Operator {
 	AllLike, // *~
 	#[revision(end = 3, convert_fn = "like_convert")]
 	AnyLike, // ?~
-	Matches(Option<MatchRef>, Option<SearchOperator>), // @{ref}@
+	Matches(Option<MatchRef>, Option<BooleanOperator>), // @{ref}@
 	//
 	LessThan,        // <
 	LessThanOrEqual, // <=
@@ -123,9 +123,15 @@ impl fmt::Display for Operator {
 			Self::NoneInside => f.write_str("NONEINSIDE"),
 			Self::Outside => f.write_str("OUTSIDE"),
 			Self::Intersects => f.write_str("INTERSECTS"),
-			Self::Matches(reference) => {
+			Self::Matches(reference, operator) => {
 				if let Some(r) = reference {
-					write!(f, "@{r}@")
+					if let Some(o) = operator {
+						write!(f, "@{r},{o}@")
+					} else {
+						write!(f, "@{r}@")
+					}
+				} else if let Some(o) = operator {
+					write!(f, "@{o}@")
 				} else {
 					f.write_str("@@")
 				}
@@ -140,6 +146,24 @@ impl fmt::Display for Operator {
 			Self::Ann(k, ef) => {
 				write!(f, "<|{k},{ef}|>")
 			}
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[non_exhaustive]
+pub enum BooleanOperator {
+	And,
+	Or,
+}
+
+impl fmt::Display for BooleanOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::And => f.write_str("AND"),
+			Self::Or => f.write_str("OR"),
 		}
 	}
 }
@@ -189,7 +213,7 @@ impl BindingPower {
 			| Operator::LessThanOrEqual
 			| Operator::MoreThan
 			| Operator::MoreThanOrEqual
-			| Operator::Matches(_)
+			| Operator::Matches(_, _)
 			| Operator::Contain
 			| Operator::NotContain
 			| Operator::ContainAll

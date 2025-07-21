@@ -176,7 +176,7 @@ impl InnerQueryExecutor {
 						}
 					};
 					if let Some(e) = search_entry {
-						if let Matches(_, Some(mr)) = e.0.index_option.op() {
+						if let Matches(_, Some(mr), _) = e.0.index_option.op() {
 							let mr_entry = PerMatchRefEntry::Search(e.clone());
 							ensure!(
 								mr_entries.insert(*mr, mr_entry).is_none(),
@@ -215,7 +215,7 @@ impl InnerQueryExecutor {
 						}
 					};
 					if let Some(e) = fulltext_entry {
-						if let Matches(_, Some(mr)) = e.0.io.op() {
+						if let Matches(_, Some(mr), _) = e.0.io.op() {
 							let mr_entry = PerMatchRefEntry::FullText(e.clone());
 							ensure!(
 								mr_entries.insert(*mr, mr_entry).is_none(),
@@ -997,7 +997,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _) = io.op() {
+			if let Matches(_, _, _) = io.op() {
 				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(io.ix_ref()) {
 					if let Some(PerExpressionEntry::Search(se)) = self.0.exp_entries.get(exp) {
 						let hits = si.new_hits_iterator(&se.0.terms_docs)?;
@@ -1016,7 +1016,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _) = io.op() {
+			if let Matches(_, _, _) = io.op() {
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
 				{
 					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
@@ -1352,7 +1352,7 @@ impl SearchEntry {
 		si: &SearchIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _) = io.op() {
+		if let Matches(qs, _, _) = io.op() {
 			let (terms_list, terms_set, terms_docs) =
 				si.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let terms_docs = Arc::new(terms_docs);
@@ -1388,7 +1388,7 @@ impl FullTextEntry {
 		fti: &FullTextIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _) = io.op() {
+		if let Matches(qs, _, _) = io.op() {
 			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let scorer = fti.new_scorer(ctx).await?;
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
