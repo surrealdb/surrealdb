@@ -1,4 +1,39 @@
-//! Store the numeric DocId for a given Id
+//! Document ID Mapping Key (`Id`) for Full-Text Index
+//!
+//! The `Id` key stores the mapping between SurrealDB record IDs (`Thing`) and internal numeric 
+//! document IDs (`DocId`) used by the full-text search engine.
+//!
+//! ## Key Structure
+//! ```
+//! /*{namespace}*{database}*{table}+{index}!id{record_id}
+//! ```
+//!
+//! ## Purpose
+//! - **ID Translation**: Converts between user-facing record IDs and internal numeric document IDs
+//! - **Bidirectional Mapping**: Works with `Bi` keys to provide reverse lookups
+//! - **Index Efficiency**: Numeric document IDs are more efficient for internal search operations
+//!
+//! ## Usage in Full-Text Search
+//! The `Id` key is essential for the full-text search pipeline:
+//! 1. **Indexing Phase**: Record IDs are converted to document IDs using `Id` keys
+//! 2. **Search Phase**: Results use document IDs internally for efficiency
+//! 3. **Result Retrieval**: Document IDs are converted back to record IDs for user presentation
+//!
+//! ## Category
+//! - **Category**: `IndexInvertedDocIds`
+//! - **Domain**: Full-text search document ID mapping
+//!
+//! ## Integration with Document ID Lifecycle
+//! 1. **ID Resolution**: When a document is indexed, its record ID is mapped to a numeric document ID
+//! 2. **Storage**: The `Id` key stores: `record_id → doc_id`
+//! 3. **Allocation**: If no mapping exists, a new document ID is allocated from the sequence (using `Ib` keys)
+//! 4. **Reverse Mapping**: A complementary `Bi` key stores: `doc_id → record_id`
+//!
+//! ## Performance Characteristics
+//! - **Space Efficient**: Numeric document IDs are smaller than full record IDs
+//! - **Cache Friendly**: Sequential numeric IDs improve cache locality
+//! - **Concurrent Safe**: Works with distributed sequence mechanism to prevent ID conflicts
+//! - **Scalable**: Efficient lookups scale with the number of indexed documents
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
