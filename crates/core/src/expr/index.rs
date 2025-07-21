@@ -59,11 +59,10 @@ pub struct SearchParams {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct FullTextParams {
-	pub az: Ident,
-	pub hl: bool,
-	pub sc: Scoring,
+	pub analyzer: Ident,
+	pub highlight: bool,
+	pub scoring: Scoring,
 }
 
 #[revisioned(revision = 2)]
@@ -275,8 +274,8 @@ impl Display for Index {
 				Ok(())
 			}
 			Self::FullText(p) => {
-				write!(f, "FULLTEXT ANALYZER {} {}", p.az, p.sc,)?;
-				if p.hl {
+				write!(f, "FULLTEXT ANALYZER {} {}", p.analyzer, p.scoring,)?;
+				if p.highlight {
 					f.write_str(" HIGHLIGHTS")?
 				}
 				Ok(())
