@@ -1,4 +1,4 @@
-use crate::idx::ft::search::MatchRef;
+use crate::idx::ft::{MatchRef, SearchOperator};
 use crate::sql::index::Distance;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -45,7 +45,7 @@ pub enum Operator {
 	AllLike, // *~
 	#[revision(end = 3, convert_fn = "like_convert")]
 	AnyLike, // ?~
-	Matches(Option<MatchRef>), // @{ref}@
+	Matches(Option<MatchRef>, Option<SearchOperator>), // @{ref}@
 	//
 	LessThan,        // <
 	LessThanOrEqual, // <=
@@ -124,11 +124,19 @@ impl fmt::Display for Operator {
 			Self::NoneInside => f.write_str("NONEINSIDE"),
 			Self::Outside => f.write_str("OUTSIDE"),
 			Self::Intersects => f.write_str("INTERSECTS"),
-			Self::Matches(reference) => {
+			Self::Matches(reference, operator) => {
 				if let Some(r) = reference {
-					write!(f, "@{r}@")
+					if let Some(o) = operator {
+						write!(f, "@{r},{o}@")
+					} else {
+						write!(f, "@{r}@")
+					}
 				} else {
-					f.write_str("@@")
+					if let Some(o) = operator {
+						write!(f, "@{o}@")
+					} else {
+						f.write_str("@@")
+					}
 				}
 			}
 			Self::Knn(k, dist) => {
@@ -168,7 +176,7 @@ impl From<Operator> for crate::expr::Operator {
 			Operator::NotEqual => crate::expr::Operator::NotEqual,
 			Operator::AllEqual => crate::expr::Operator::AllEqual,
 			Operator::AnyEqual => crate::expr::Operator::AnyEqual,
-			Operator::Matches(r) => crate::expr::Operator::Matches(r),
+			Operator::Matches(r, o) => crate::expr::Operator::Matches(r, o),
 			Operator::LessThan => crate::expr::Operator::LessThan,
 			Operator::LessThanOrEqual => crate::expr::Operator::LessThanOrEqual,
 			Operator::MoreThan => crate::expr::Operator::MoreThan,
@@ -214,7 +222,7 @@ impl From<crate::expr::Operator> for Operator {
 			crate::expr::Operator::NotEqual => Self::NotEqual,
 			crate::expr::Operator::AllEqual => Self::AllEqual,
 			crate::expr::Operator::AnyEqual => Self::AnyEqual,
-			crate::expr::Operator::Matches(r) => Self::Matches(r),
+			crate::expr::Operator::Matches(r, o) => Self::Matches(r, o),
 			crate::expr::Operator::LessThan => Self::LessThan,
 			crate::expr::Operator::LessThanOrEqual => Self::LessThanOrEqual,
 			crate::expr::Operator::MoreThan => Self::MoreThan,
@@ -283,7 +291,7 @@ impl BindingPower {
 			| Operator::LessThanOrEqual
 			| Operator::MoreThan
 			| Operator::MoreThanOrEqual
-			| Operator::Matches(_)
+			| Operator::Matches(_, _)
 			| Operator::Contain
 			| Operator::NotContain
 			| Operator::ContainAll

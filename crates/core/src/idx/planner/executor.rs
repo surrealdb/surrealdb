@@ -9,12 +9,13 @@ use crate::expr::{
 };
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
+use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::ft::search::scorer::BM25Scorer;
 use crate::idx::ft::search::termdocs::SearchTermsDocs;
 use crate::idx::ft::search::terms::SearchTerms;
-use crate::idx::ft::search::{MatchRef, SearchIndex, TermIdList, TermIdSet};
+use crate::idx::ft::search::{SearchIndex, TermIdList, TermIdSet};
 use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{

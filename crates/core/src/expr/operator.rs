@@ -1,11 +1,10 @@
+use super::Value;
 use crate::expr::index::Distance;
-use crate::idx::ft::search::MatchRef;
+use crate::idx::ft::{MatchRef, SearchOperator};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
-
-use super::Value;
 
 /// Binary operators.
 #[revisioned(revision = 3)]
@@ -45,7 +44,7 @@ pub enum Operator {
 	AllLike, // *~
 	#[revision(end = 3, convert_fn = "like_convert")]
 	AnyLike, // ?~
-	Matches(Option<MatchRef>), // @{ref}@
+	Matches(Option<MatchRef>, Option<SearchOperator>), // @{ref}@
 	//
 	LessThan,        // <
 	LessThanOrEqual, // <=
