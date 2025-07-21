@@ -112,7 +112,7 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let vars = Arc::new(RwLock::new(BTreeMap::default()));
+	let vars = Arc::new(RwLock::new(Variables::default()));
 	let live_queries = Arc::new(RwLock::new(HashMap::new()));
 	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
 

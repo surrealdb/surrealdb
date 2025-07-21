@@ -684,6 +684,13 @@ impl InfoStructure for Value {
 	}
 }
 
+#[cfg(test)]
+impl crate::syn::Parse<Self> for Value {
+	fn parse(val: &str) -> Self {
+		Value::from(crate::sql::SqlValue::parse(val))
+	}
+}
+
 // ------------------------------
 
 pub(crate) trait TryAdd<Rhs = Self> {

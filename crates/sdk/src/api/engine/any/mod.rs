@@ -308,6 +308,7 @@ mod tests {
 
 	use super::*;
 	use crate::Value;
+	use crate::expr::Value as CoreValue;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
 
@@ -336,7 +337,7 @@ mod tests {
 
 		assert_eq!(
 			users.into_inner(),
-			Object::default().into(),
+			CoreValue::from(Object::default()),
 			"there should be no users in the system"
 		);
 	}

@@ -760,7 +760,7 @@ mod tests {
 				expected.iter().map(|n| Value::from(*n as i64)).collect::<Vec<_>>().into();
 			assert_eq!(
 				slice((initial_values, Optional(beg), Optional(lim))).unwrap(),
-				expected_values.into()
+				Value::from(expected_values)
 			);
 		}
 
@@ -777,7 +777,7 @@ mod tests {
 	#[test]
 	fn array_join() {
 		fn test(arr: Array, sep: &str, expected: &str) {
-			assert_eq!(join((arr, sep.to_string())).unwrap(), expected.into());
+			assert_eq!(join((arr, sep.to_string())).unwrap(), Value::from(expected));
 		}
 
 		test(Vec::<Value>::new().into(), ",", "");

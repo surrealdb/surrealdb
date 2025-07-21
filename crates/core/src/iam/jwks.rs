@@ -1,4 +1,3 @@
-use crate::cnf::SURREALDB_USER_AGENT;
 use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
 use crate::kvs::Datastore;
@@ -298,7 +297,7 @@ async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Resul
 	let req = client.get(url);
 	// Add a User-Agent header so that WAF rules don't reject the request
 	#[cfg(not(target_family = "wasm"))]
-	let req = req.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
+	let req = req.header(reqwest::header::USER_AGENT, &*crate::cnf::SURREALDB_USER_AGENT);
 	#[cfg(not(target_family = "wasm"))]
 	let res = req.timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
 	#[cfg(target_family = "wasm")]

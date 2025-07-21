@@ -1,21 +1,146 @@
-/*
-pub fn sql_variables_to_expr_variables(
-	variables: &BTreeMap<String, crate::val::Value>,
-) -> BTreeMap<String, crate::expr::Value> {
-	let mut expr_variables = BTreeMap::new();
-	for (key, val) in variables {
-		expr_variables.insert(key.clone(), val.clone().into());
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+use crate::expr::{Object, Thing, Value};
+use surrealdb_protocol::proto::v1 as proto;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[repr(transparent)]
+pub struct Variables(pub BTreeMap<String, Value>);
+
+impl Variables {
+	/// Create a new empty variables map.
+	#[inline]
+	pub fn new() -> Self {
+		Self(BTreeMap::new())
 	}
-	expr_variables
+
+	/// Insert a new variable into the map.
+	#[inline]
+	pub fn insert(&mut self, key: String, value: Value) {
+		self.0.insert(key, value);
+	}
+
+	/// Remove a variable from the map.
+	#[inline]
+	pub fn remove(&mut self, key: &str) {
+		self.0.remove(key);
+	}
+
+	#[inline]
+	pub fn append(&mut self, other: &mut Variables) {
+		self.0.append(&mut other.0);
+	}
+
+	/// Extend the variables map with another variables map.
+	#[inline]
+	pub fn extend(&mut self, other: Variables) {
+		self.0.extend(other.0);
+	}
+
+	/// Check if the variables map is empty.
+	#[inline]
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+
+	/// Get the number of variables in the map.
+	#[inline]
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+
+	/// Get an iterator over the variables in the map.
+	#[inline]
+	pub fn iter(&self) -> std::collections::btree_map::Iter<String, Value> {
+		self.0.iter()
+	}
+
+	/// Merge another variables map into the current one.
+	#[inline]
+	pub fn merge(&mut self, other: impl Into<Variables>) {
+		self.0.extend(other.into().0);
+	}
+
+	/// Merge another variables map into a new variables map.
+	#[inline]
+	pub fn merged(&self, other: impl Into<Variables>) -> Variables {
+		let mut vars = self.clone();
+		vars.merge(other.into());
+		vars
+	}
 }
 
-pub fn expr_variables_to_sql_variables(
-	variables: &BTreeMap<String, crate::expr::Value>,
-) -> BTreeMap<String, crate::sql::SqlValue> {
-	let mut sql_variables = BTreeMap::new();
-	for (key, val) in variables {
-		sql_variables.insert(key.clone(), val.clone().into());
+impl IntoIterator for Variables {
+	type Item = (String, Value);
+	type IntoIter = std::collections::btree_map::IntoIter<String, Value>;
+
+	#[inline]
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
 	}
-	sql_variables
 }
-*/
+
+impl FromIterator<(String, Value)> for Variables {
+	fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
+		Self(iter.into_iter().collect())
+	}
+}
+
+impl From<Object> for Variables {
+	fn from(obj: Object) -> Self {
+		Self(obj.0)
+	}
+}
+
+impl From<BTreeMap<String, Value>> for Variables {
+	fn from(map: BTreeMap<String, Value>) -> Self {
+		Self(map)
+	}
+}
+
+impl TryFrom<proto::Variables> for Variables {
+	type Error = anyhow::Error;
+
+	fn try_from(value: proto::Variables) -> Result<Self, Self::Error> {
+		let mut vars = Self::new();
+		for (k, v) in value.variables.into_iter() {
+			vars.insert(k, v.try_into()?);
+		}
+		Ok(vars)
+	}
+}
+
+impl TryFrom<Variables> for proto::Variables {
+	type Error = anyhow::Error;
+
+	fn try_from(value: Variables) -> Result<Self, Self::Error> {
+		let mut vars = Self {
+			variables: BTreeMap::new(),
+		};
+		for (k, v) in value.0.into_iter() {
+			vars.variables.insert(k, v.try_into()?);
+		}
+		Ok(vars)
+	}
+}
+
+impl TryFrom<(&str, &str)> for Variables {
+	type Error = anyhow::Error;
+
+	fn try_from(value: (&str, &str)) -> Result<Self, Self::Error> {
+		let mut vars = Self::new();
+		vars.insert(value.0.to_string(), value.1.into());
+		Ok(vars)
+	}
+}
+
+impl TryFrom<(&str, Thing)> for Variables {
+	type Error = anyhow::Error;
+
+	fn try_from(value: (&str, Thing)) -> Result<Self, Self::Error> {
+		let mut vars = Self::new();
+		vars.insert(value.0.to_string(), value.1.into());
+		Ok(vars)
+	}
+}

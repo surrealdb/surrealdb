@@ -94,6 +94,10 @@ impl Uuid {
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}
+
+	pub fn from_slice(slice: &[u8]) -> Result<Self, uuid::Error> {
+		Ok(Self(uuid::Uuid::from_slice(slice)?))
+	}
 }
 
 impl Display for Uuid {

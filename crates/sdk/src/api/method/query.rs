@@ -987,7 +987,10 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), vec![CoreValue::from(true), CoreValue::from(false)].into());
+		assert_eq!(
+			value.into_inner(),
+			CoreValue::from(vec![CoreValue::from(true), CoreValue::from(false)])
+		);
 
 		let mut response = Response {
 			results: to_map(vec![Ok(vec![true, false].into())]),
@@ -1013,7 +1016,7 @@ mod tests {
 		};
 
 		let records = map.swap_remove(&0).unwrap().1.unwrap();
-		assert_eq!(records, vec![true, false].into());
+		assert_eq!(records, CoreValue::from(vec![CoreValue::from(true), CoreValue::from(false)]));
 	}
 
 	#[test]

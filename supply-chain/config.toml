@@ -31,6 +31,9 @@ audit-as-crates-io = true
 [policy.surrealdb-core]
 audit-as-crates-io = true
 
+[policy.surrealdb-macros]
+audit-as-crates-io = true
+
 [[exemptions.Inflector]]
 version = "0.11.4"
 criteria = "safe-to-deploy"
@@ -225,10 +228,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.blake3]]
 version = "1.7.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.joaat]]
-version = "0.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.blowfish]]
@@ -1393,10 +1392,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.utf-8]]
 version = "0.7.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.uuid]]
-version = "1.16.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.valuable]]

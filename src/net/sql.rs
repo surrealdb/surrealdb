@@ -18,6 +18,7 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
+use surrealdb_core::dbs::Variables;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
@@ -51,7 +52,7 @@ async fn post_handler(
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Execute the received sql query
-	match db.execute(sql, &session, params.0.parse().into()).await {
+	match db.execute(sql, &session, Some(Variables::from(params.0.parse()))).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {

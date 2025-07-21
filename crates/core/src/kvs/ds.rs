@@ -10,7 +10,7 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::Timestamp;
-use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session};
+use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
 use crate::err::Error;
 use crate::expr::statements::DefineUserStatement;
 use crate::expr::{Base, Expr, FlowResultExt as _, Ident, LogicalPlan, TopLevelExpr};
@@ -860,7 +860,7 @@ impl Datastore {
 		&self,
 		txt: &str,
 		sess: &Session,
-		vars: Option<BTreeMap<String, Value>>,
+		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
@@ -872,7 +872,7 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Option<BTreeMap<String, Value>>,
+		vars: Option<Variables>,
 		query: S,
 	) -> Result<Vec<Response>>
 	where
@@ -897,10 +897,10 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		if let Some(v) = vars {
-			ctx.attach_variables(v);
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
 		}
 		// Process all statements
 
@@ -1001,7 +1001,7 @@ impl Datastore {
 		&self,
 		ast: Ast,
 		sess: &Session,
-		vars: Option<BTreeMap<String, Value>>,
+		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
 		//TODO: Insert planner here.
 		self.process_plan(ast.into(), sess, vars).await
@@ -1011,7 +1011,7 @@ impl Datastore {
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Option<BTreeMap<String, Value>>,
+		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1031,10 +1031,10 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		if let Some(v) = vars {
-			ctx.attach_variables(v);
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
 		}
 
 		// Process all statements
@@ -1064,7 +1064,7 @@ impl Datastore {
 		&self,
 		val: Expr,
 		sess: &Session,
-		vars: Option<BTreeMap<String, Value>>,
+		vars: Option<Variables>,
 	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1095,17 +1095,16 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		if let Some(v) = vars {
-			ctx.attach_variables(v);
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
 		}
 		let txn_type = if val.read_only() {
 			TransactionType::Read
 		} else {
 			TransactionType::Write
 		};
-
 		// Start a new transaction
 		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
@@ -1154,7 +1153,7 @@ impl Datastore {
 		&self,
 		val: &Expr,
 		sess: &Session,
-		vars: Option<BTreeMap<String, Value>>,
+		vars: Option<Variables>,
 	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1175,10 +1174,10 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		if let Some(v) = vars {
-			ctx.attach_variables(v);
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
 		}
 		let txn_type = if val.read_only() {
 			TransactionType::Read
@@ -1310,6 +1309,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
 	}
+
 	pub fn setup_ctx(&self) -> Result<MutableContext> {
 		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,

@@ -118,7 +118,7 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
 		}
 		//
 		let tmp = res.next().unwrap()?;
-		let val = SqlValue::parse("[ { fut: [42] } ]").into();
+		let val = Value::parse("[ { fut: [42] } ]");
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -158,14 +158,13 @@ fn ok_graph_traversal_depth() -> Result<()> {
 			//
 			match tmp {
 				Ok(res) => {
-					let val = SqlValue::parse(&format!(
+					let val = Value::parse(&format!(
 						"[
 							{{
 								res: [node:{n}],
 							}}
 						]"
-					))
-					.into();
+					));
 					assert_eq!(res, val);
 				}
 				Err(res) => {

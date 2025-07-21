@@ -1,7 +1,7 @@
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
-use crate::dbs::Session;
 use crate::dbs::capabilities::ExperimentalTarget;
+use crate::dbs::{Session, Variables};
 use crate::err::Error;
 use crate::expr::AccessType;
 use crate::iam::issue::{config, expiration};
@@ -96,7 +96,7 @@ pub async fn db_access(
 		bail!(Error::AccessRecordNoSignup);
 	};
 	// Setup the query params
-	let vars = Some(vars.0);
+	let vars = Some(Variables::from(vars));
 	// Setup the system session for finding the signup record
 	let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 	sess.ip.clone_from(&session.ip);

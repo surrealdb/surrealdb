@@ -13,7 +13,6 @@ use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
 #[cfg(not(target_family = "wasm"))]
 use tokio::runtime::Handle;
-use tokio::task;
 use url::Url;
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
@@ -83,7 +82,7 @@ async fn request(
 		let count = *crate::cnf::MAX_HTTP_REDIRECTS;
 		let ctx_clone = ctx.clone();
 		let policy = Policy::custom(move |attempt: Attempt| {
-			let check = task::block_in_place(|| {
+			let check = tokio::task::block_in_place(|| {
 				Handle::current().block_on(ctx_clone.check_allowed_net(attempt.url()))
 			});
 			if let Err(e) = check {

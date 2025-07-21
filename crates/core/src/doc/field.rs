@@ -199,44 +199,41 @@ impl Document {
 				// been modified. If it has just been
 				// omitted then we reset it, otherwise
 				// we throw a field readonly error.
-				if fd.readonly {
-					// Check if we are updating the
-					// document, and check if the new
-					// field value is now different to
-					// the old field value in any way.
-					if !self.is_new() {
-						if val.ne(&old) {
-							// Check the data clause type
-							match stm.data() {
-								// If the field is NONE, we assume
-								// that the field was ommitted when
-								// using a CONTENT clause, and we
-								// revert the value to the old value.
-								Some(Data::ContentExpression(_)) if val.is_none() => {
-									self.current
-										.doc
-										.to_mut()
-										.set(stk, ctx, opt, &k, old.as_ref().clone())
-										.await?;
-									continue;
-								}
-								// If the field has been modified
-								// and the user didn't use a CONTENT
-								// clause, then this should not be
-								// allowed, and we throw an error.
-								_ => {
-									bail!(Error::FieldReadonly {
-										field: fd.name.clone(),
-										thing: rid.to_string(),
-									});
-								}
-							}
+				//
+				// Check if we are updating the
+				// document, and check if the new
+				// field value is now different to
+				// the old field value in any way.
+				if fd.readonly && !self.is_new() && val.ne(&*old) {
+					// Check the data clause type
+					match stm.data() {
+						// If the field is NONE, we assume
+						// that the field was ommitted when
+						// using a CONTENT clause, and we
+						// revert the value to the old value.
+						Some(Data::ContentExpression(_)) if val.is_none() => {
+							self.current
+								.doc
+								.to_mut()
+								.set(stk, ctx, opt, &k, old.as_ref().clone())
+								.await?;
+							continue;
 						}
-						// If this field was not modified then
-						// we can continue without needing to
-						// process the field in any other way.
-						continue;
+						// If the field has been modified
+						// and the user didn't use a CONTENT
+						// clause, then this should not be
+						// allowed, and we throw an error.
+						_ => {
+							bail!(Error::FieldReadonly {
+								field: fd.name.clone(),
+								thing: rid.to_string(),
+							});
+						}
 					}
+					// If this field was not modified then
+					// we can continue without needing to
+					// process the field in any other way.
+					continue;
 				}
 				// Generate the field context
 				let mut field = FieldEditContext {

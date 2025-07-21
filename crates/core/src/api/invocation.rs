@@ -53,7 +53,7 @@ impl ApiInvocation {
 
 		let mut ctx = ds.setup_ctx()?;
 		ctx.set_transaction(tx);
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		let ctx = &ctx.freeze();
 
 		let mut stack = TreeStack::new();
