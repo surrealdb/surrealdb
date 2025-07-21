@@ -125,18 +125,18 @@ pub struct FullTextParams {
 impl From<FullTextParams> for crate::expr::index::FullTextParams {
 	fn from(v: FullTextParams) -> Self {
 		crate::expr::index::FullTextParams {
-			az: v.az.into(),
-			hl: v.hl,
-			sc: v.sc.into(),
+			analyzer: v.az.into(),
+			highlight: v.hl,
+			scoring: v.sc.into(),
 		}
 	}
 }
 impl From<crate::expr::index::FullTextParams> for FullTextParams {
 	fn from(v: crate::expr::index::FullTextParams) -> Self {
 		Self {
-			az: v.az.into(),
-			hl: v.hl,
-			sc: v.sc.into(),
+			az: v.analyzer.into(),
+			hl: v.highlight,
+			sc: v.scoring.into(),
 		}
 	}
 }

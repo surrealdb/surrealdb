@@ -540,7 +540,8 @@ impl SearchIndex {
 				self.doc_lengths.clone(),
 				self.state.total_docs_lengths,
 				self.state.doc_count,
-				bm25.clone(),
+				bm25.k1,
+				bm25.b,
 			)));
 		}
 		Ok(None)

@@ -157,12 +157,7 @@ impl Analyzer {
 				dl += 1;
 				let s = tks.get_token_string(tk)?;
 				let o = tk.new_offset(i as u32);
-				match tfos.entry(s) {
-					Entry::Vacant(e) => {
-						e.insert(vec![o]);
-					}
-					Entry::Occupied(mut e) => e.get_mut().push(o),
-				}
+				tfos.entry(s).or_default().push(o);
 			}
 		}
 		Ok((dl, tfos))

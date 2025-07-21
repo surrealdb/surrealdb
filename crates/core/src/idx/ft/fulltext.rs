@@ -111,7 +111,7 @@ impl FullTextIndex {
 		ikb: IndexKeyBase,
 		p: &FullTextParams,
 	) -> Result<Self> {
-		let az = tx.get_db_analyzer(&ikb.0.ns, &ikb.0.db, &p.az).await?;
+		let az = tx.get_db_analyzer(&ikb.0.ns, &ikb.0.db, &p.analyzer).await?;
 		ixs.mappers().check(&az).await?;
 		Self::with_analyzer(nid, ixs, az, ikb, p)
 	}
@@ -131,7 +131,7 @@ impl FullTextIndex {
 		if let Scoring::Bm {
 			k1,
 			b,
-		} = p.sc
+		} = p.scoring
 		{
 			bm25 = Some(Bm25Params {
 				k1,
@@ -140,7 +140,7 @@ impl FullTextIndex {
 		}
 		Ok(Self {
 			analyzer,
-			highlighting: p.hl,
+			highlighting: p.highlight,
 			doc_ids: SeqDocIds::new(nid, ikb.clone()),
 			ikb,
 			bm25,
@@ -276,13 +276,11 @@ impl FullTextIndex {
 		let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, o) in offsets {
-			{
-				let key = self.ikb.new_td(t, Some(id));
-				td.f = o.len() as TermFrequency;
-				td.o = o;
-				tx.set(key, revision::to_vec(&td)?, None).await?;
-				self.set_tt(tx, t, id, nid, true).await?;
-			}
+			let key = self.ikb.new_td(t, Some(id));
+			td.f = o.len() as TermFrequency;
+			td.o = o;
+			tx.set(key, revision::to_vec(&td)?, None).await?;
+			self.set_tt(tx, t, id, nid, true).await?;
 		}
 		Ok(dl)
 	}
@@ -615,7 +613,7 @@ impl FullTextIndex {
 		nid: Uuid,
 	) -> Result<()> {
 		let ic = ikb.new_ic_key(nid);
-		tx.put(ic, b"0", None).await?;
+		tx.put(ic, "", None).await?;
 		Ok(())
 	}
 
@@ -735,12 +733,12 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 
 /// Implements BM25 scoring for relevance ranking of search results
 pub(in crate::idx) struct Scorer {
-	/// BM25 scoring parameters (k1 and b)
-	bm25: Bm25Params,
-	/// The average document length in the index
-	average_doc_length: f32,
-	/// The total number of documents in the index
-	doc_count: f32,
+	/// precomputed BM25 scoring parameters
+	k1: f64,
+	k1_plus_1: f64,
+	one_minus_b: f64,
+	b_over_avg_len: f64,
+	doc_count: f64,
 }
 
 impl Scorer {
@@ -749,25 +747,17 @@ impl Scorer {
 	/// This method initializes a scorer with document statistics and BM25 parameters.
 	/// It calculates the average document length for use in the BM25 algorithm.
 	fn new(dlc: DocLengthAndCount, bm25: Bm25Params) -> Self {
-		let doc_count = dlc.doc_count as f32;
-		let average_doc_length = (dlc.total_docs_length as f32) / doc_count;
+		let doc_count = dlc.doc_count as f64;
+		let average_doc_length = (dlc.total_docs_length as f64) / doc_count;
+		let k1 = bm25.k1 as f64;
+		let b = bm25.b as f64;
 		Self {
-			bm25,
+			k1,
+			k1_plus_1: k1 + 1.0,
+			one_minus_b: 1.0 - b,
+			b_over_avg_len: b / average_doc_length,
 			doc_count,
-			average_doc_length,
 		}
-	}
-
-	async fn term_score(
-		&self,
-		fti: &FullTextIndex,
-		tx: &Transaction,
-		doc_id: DocId,
-		term_doc_count: DocLength,
-		term_frequency: TermFrequency,
-	) -> Result<Score> {
-		let doc_length = fti.get_doc_length(tx, doc_id).await?.unwrap_or(0);
-		Ok(self.compute_bm25_score(term_frequency as f32, term_doc_count as f32, doc_length as f32))
 	}
 
 	/// Calculates the overall score for a document based on query terms
@@ -783,6 +773,7 @@ impl Scorer {
 	) -> Result<Score> {
 		let mut sc = 0.0;
 		let tl = qt.tokens.list();
+		let doc_length = fti.get_doc_length(tx, doc_id).await?.unwrap_or(0) as f64;
 		for (i, d) in qt.docs.iter().enumerate() {
 			if let Some(docs) = d {
 				if docs.contains(doc_id) {
@@ -790,53 +781,58 @@ impl Scorer {
 						let term = qt.tokens.get_token_string(token)?;
 						let td = fti.get_term_document(tx, doc_id, term).await?;
 						if let Some(td) = td {
-							sc += self.term_score(fti, tx, doc_id, docs.len(), td.f).await?;
+							sc +=
+								self.compute_bm25_score(td.f as f64, docs.len() as f64, doc_length)
 						}
 					}
 				}
 			}
 		}
-		Ok(sc)
+		Ok(sc as f32)
 	}
 
-	/// Computes the BM25 score for a term in a document
+	/// Computes the Okapi-BM25 score for a single term.
 	///
-	/// This method implements the Okapi BM25 scoring algorithm with:
-	/// - Lower-bounding term frequency normalization (2011 CIKM)
-	/// - Floor for negative scores
+	/// Variant:
+	/// • IDF is clamped to ≥ 0 (avoids negative weights for very common terms).
+	/// • Term-frequency is lower-bounded with 1 + ln(tf) as proposed in
+	///   “Lower-Bounding Term Frequency Normalization” (Lv & Zhai, CIKM 2011).
 	///
-	/// See: https://en.wikipedia.org/wiki/Okapi_BM25
-	fn compute_bm25_score(&self, term_freq: f32, term_doc_count: f32, doc_length: f32) -> f32 {
-		// Step 1: Calculate the Inverse Document Frequency (IDF) component
-		// IDF = ln((N - n(qi) + 0.5) / (n(qi) + 0.5))
-		// where N is total document count and n(qi) is number of documents containing term qi
-		let denominator = term_doc_count + 0.5; // n(qi) + 0.5
-		let numerator = self.doc_count - term_doc_count + 0.5; // N - n(qi) + 0.5
-
-		// Apply floor to prevent negative IDF values (can happen with very common terms)
-		let idf = (numerator / denominator).ln().max(0.0);
-
-		// Handle potential NaN values (could occur if term is in all documents)
-		if idf.is_nan() {
-			return f32::NAN;
+	/// score =
+	///     idf · (k1 + 1) · tf′
+	///     ---------------------------------------------
+	///     tf′ + k1 · (1 − b + b · doc_len / avg_doc_len)
+	///
+	/// where
+	///   idf = ln((N − n(qᵢ) + 0.5)/(n(qᵢ) + 0.5)), clamped to ≥ 0
+	///   tf′ = 1 + ln(tf)
+	fn compute_bm25_score(&self, term_freq: f64, term_doc_count: f64, doc_length: f64) -> f64 {
+		// Early return for zero-term frequency
+		if term_freq <= 0.0 {
+			return 0.0;
 		}
 
-		// Step 2: Apply lower-bounding term frequency normalization
-		// Instead of raw term frequency, use ln(1 + tf) to dampen the effect of high frequencies
-		let tf_prim = 1.0 + term_freq.ln();
+		// ---------- 1. Inverse Document Frequency (IDF) ---------------------
+		let denominator = term_doc_count + 0.5; // n(qᵢ) + 0.5
+		let numerator = self.doc_count - term_doc_count + 0.5; // N − n(qᵢ) + 0.5
+		let idf = (numerator / denominator).ln().max(0.0); // floor at 0
 
-		// Step 3: Calculate the numerator of the BM25 formula
-		// This combines the IDF with the normalized term frequency
-		let numerator = idf * (self.bm25.k1 + 1.0) * tf_prim;
+		// Early return for zero IDF (very common terms)
+		if idf == 0.0 {
+			return 0.0;
+		}
 
-		// Step 4: Calculate the document length normalization factor
-		// This adjusts scores based on document length relative to average length
-		// Parameter b controls the impact of document length (0 = no impact, 1 = full normalization)
-		let length_norm = 1.0 - self.bm25.b + self.bm25.b * (doc_length / self.average_doc_length);
+		// ---------- 2. Lower-bounded term-frequency -------------------------
+		let tf_prime = 1.0 + term_freq.ln(); // 1 + ln(tf)
 
-		// Step 5: Combine all components to get the final BM25 score
-		// The k1 parameter controls term frequency saturation
-		numerator / (self.bm25.k1 * length_norm + 1.0)
+		// ---------- 3. Document-length normalisation -----------------------
+		let length_norm = self.one_minus_b + self.b_over_avg_len * doc_length;
+
+		// ---------- 4. Okapi BM25 (optimized) ------------------------------
+		let numerator = idf * self.k1_plus_1 * tf_prime;
+		let denominator = tf_prime + self.k1 * length_norm;
+
+		numerator / denominator
 	}
 }
 
@@ -909,9 +905,9 @@ mod tests {
 				"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
 			])));
 			let ft_params = Arc::new(FullTextParams {
-				az: az.name.clone(),
-				sc: Default::default(),
-				hl: true,
+				analyzer: az.name.clone(),
+				scoring: Default::default(),
+				highlight: true,
 			});
 			let nid = Uuid::from_u128(1);
 			let ikb = IndexKeyBase::new("testns", "testdb", "t", "i");
