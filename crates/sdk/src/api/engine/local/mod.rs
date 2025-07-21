@@ -164,12 +164,8 @@ use indexmap::IndexMap;
 use std::pin::pin;
 #[cfg(not(target_family = "wasm"))]
 use std::task::{Poll, ready};
-use std::{
-	collections::{BTreeMap, HashMap},
-	marker::PhantomData,
-	mem,
-	sync::Arc,
-};
+use std::{collections::HashMap, marker::PhantomData, mem, sync::Arc};
+use surrealdb_core::dbs::Variables;
 use surrealdb_core::expr::Function;
 use surrealdb_core::expr::LogicalPlan;
 use surrealdb_core::expr::statements::{
@@ -590,7 +586,7 @@ async fn kill_live_query(
 	kvs: &Datastore,
 	id: Uuid,
 	session: &Session,
-	vars: BTreeMap<String, CoreValue>,
+	vars: Variables,
 ) -> Result<CoreValue> {
 	let mut kill_plan = KillStatement::default();
 	kill_plan.id = id.into();
@@ -606,7 +602,7 @@ async fn router(
 	}: RequestData,
 	kvs: &Arc<Datastore>,
 	session: &Arc<RwLock<Session>>,
-	vars: &Arc<RwLock<BTreeMap<String, CoreValue>>>,
+	vars: &Arc<RwLock<Variables>>,
 	live_queries: &Arc<RwLock<LiveQueryMap>>,
 ) -> Result<DbResponse> {
 	match command {
@@ -826,10 +822,10 @@ async fn router(
 		Command::Query {
 			txn: _,
 			query,
-			mut variables,
+			variables,
 		} => {
 			let mut vars = vars.read().await.clone();
-			vars.append(&mut variables.0);
+			vars.merge(variables);
 			let response = kvs.process(query, &*session.read().await, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))
@@ -837,10 +833,10 @@ async fn router(
 		Command::RawQuery {
 			txn: _,
 			query,
-			mut variables,
+			variables,
 		} => {
 			let mut vars = vars.read().await.clone();
-			vars.append(&mut variables.0);
+			vars.merge(variables);
 			let response = kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?;
 			let response = process(response);
 			Ok(DbResponse::Query(response))

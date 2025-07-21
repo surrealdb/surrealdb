@@ -2,19 +2,20 @@ use anyhow::Result;
 use anyhow::ensure;
 #[cfg(not(target_family = "wasm"))]
 use async_graphql::BatchRequest;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::dbs::Variables;
 #[cfg(not(target_family = "wasm"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::expr::Object;
 use crate::rpc::Data;
 use crate::rpc::Method;
 use crate::rpc::RpcContext;
 use crate::rpc::RpcError;
 use crate::{
 	dbs::{QueryType, Response, capabilities::MethodTarget},
-	expr::Value,
+	expr::Value as ExprValue,
 	rpc::args::Take,
 	sql::{
 		Array, Fields, Function, Model, Output, Query, SqlValue, Strand,
@@ -42,7 +43,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Execute the desired method
 		match method {
-			Method::Ping => Ok(Value::None.into()),
+			Method::Ping => Ok(ExprValue::None.into()),
 			Method::Info => self.info().await,
 			Method::Use => self.yuse(params).await,
 			Method::Signup => self.signup(params).await,
@@ -118,7 +119,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Drop the mutex guard
 		std::mem::drop(guard);
 		// Return nothing
-		Ok(Value::None.into())
+		Ok(ExprValue::None.into())
 	}
 
 	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of a string.
@@ -135,7 +136,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
-		let out: Result<Value> =
+		let out: Result<ExprValue> =
 			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
 				.await
 				.map(|v| v.token.into());
@@ -161,7 +162,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
-		let out: Result<Value> =
+		let out: Result<ExprValue> =
 			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
 				.await
 				// The default `signin` method just returns the token
@@ -186,9 +187,9 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().as_ref().clone();
 		// Attempt authentication, mutating the session
-		let out: Result<Value> = crate::iam::verify::token(self.kvs(), &mut session, &token.0)
+		let out: Result<ExprValue> = crate::iam::verify::token(self.kvs(), &mut session, &token.0)
 			.await
-			.map(|_| Value::None);
+			.map(|_| ExprValue::None);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -211,7 +212,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Drop the mutex guard
 		std::mem::drop(guard);
 		// Return nothing on success
-		Ok(Value::None.into())
+		Ok(ExprValue::None.into())
 	}
 
 	async fn reset(&self) -> Result<Data, RpcError> {
@@ -230,7 +231,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Cleanup live queries
 		self.cleanup_lqs().await;
 		// Return nothing on success
-		Ok(Value::None.into())
+		Ok(ExprValue::None.into())
 	}
 
 	// ------------------------------
@@ -265,13 +266,13 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::InvalidParams);
 		};
 		// Specify the query parameters
-		let var = Some(map! {
-			key.0.clone() => Value::None,
+		let var = Variables::from(map! {
+			key.0.clone() => ExprValue::None,
 		});
 		// Compute the specified parameter
-		match self.kvs().compute(val.into(), &self.session(), var).await? {
+		match self.kvs().compute(val.into(), &self.session(), Some(var)).await? {
 			// Remove the variable if undefined
-			Value::None => {
+			ExprValue::None => {
 				// Get the context lock
 				let mutex = self.lock().clone();
 				// Lock the context for update
@@ -279,7 +280,7 @@ pub trait RpcProtocolV1: RpcContext {
 				// Clone the parameters
 				let mut session = self.session().as_ref().clone();
 				// Remove the set parameter
-				session.parameters.remove(&key.0);
+				session.variables.remove(&key.0);
 				// Store the updated session
 				self.set_session(Arc::new(session));
 				// Drop the mutex guard
@@ -294,7 +295,7 @@ pub trait RpcProtocolV1: RpcContext {
 				// Clone the parameters
 				let mut session = self.session().as_ref().clone();
 				// Remove the set parameter
-				session.parameters.insert(key.0, v);
+				session.variables.insert(key.0, v);
 				// Store the updated session
 				self.set_session(Arc::new(session));
 				// Drop the mutex guard
@@ -302,7 +303,7 @@ pub trait RpcProtocolV1: RpcContext {
 			}
 		};
 		// Return nothing
-		Ok(Value::Null.into())
+		Ok(ExprValue::Null.into())
 	}
 
 	async fn unset(&self, params: Array) -> Result<Data, RpcError> {
@@ -321,13 +322,13 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the parameters
 		let mut session = self.session().as_ref().clone();
 		// Remove the set parameter
-		session.parameters.remove(&key.0);
+		session.variables.remove(&key.0);
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
 		std::mem::drop(guard);
 		// Return nothing
-		Ok(Value::Null.into())
+		Ok(ExprValue::Null.into())
 	}
 
 	// ------------------------------
@@ -347,7 +348,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.query_inner(SqlValue::Query(sql), var).await?;
 		// Extract the first query result
@@ -371,7 +372,7 @@ pub trait RpcProtocolV1: RpcContext {
 		)
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.query_inner(SqlValue::Query(sql), var).await?;
 		// Extract the first query result
@@ -400,7 +401,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -408,7 +409,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -439,7 +440,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -447,7 +448,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -476,7 +477,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -484,7 +485,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -524,7 +525,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -557,7 +558,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -565,7 +566,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -598,7 +599,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -606,7 +607,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -639,7 +640,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -647,7 +648,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -680,7 +681,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -688,7 +689,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -723,7 +724,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -731,7 +732,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -759,7 +760,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.into();
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(sql, &self.session(), var).await?;
 		// Extract the first query result
@@ -767,7 +768,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.remove(0)
 			.result
 			.or_else(|e| match e.downcast_ref() {
-				Some(Error::SingleOnlyOutput) => Ok(Value::None),
+				Some(Error::SingleOnlyOutput) => Ok(ExprValue::None),
 				_ => Err(e),
 			})?
 			.into())
@@ -804,10 +805,10 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the query variables
 		let vars = match vars {
 			SqlValue::Object(v) => {
-				let mut v: crate::expr::Object = v.into();
-				Some(mrg! {v.0, self.session().parameters})
+				let v: Object = v.into();
+				Some(self.session().variables.merged(v))
 			}
-			SqlValue::None | SqlValue::Null => Some(self.session().parameters.clone()),
+			SqlValue::None | SqlValue::Null => Some(self.session().variables.clone()),
 			_ => return Err(RpcError::InvalidParams),
 		};
 		// Execute the specified query
@@ -856,7 +857,7 @@ pub trait RpcProtocolV1: RpcContext {
 			_ => Function::Normal(name, args).into(),
 		};
 		// Specify the query parameters
-		let var = Some(self.session().parameters.clone());
+		let var = Some(self.session().variables.clone());
 		// Execute the function on the database
 		let mut res = self.kvs().process(func, &self.session(), var).await?;
 		// Extract the first query result
@@ -981,18 +982,14 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
 		// Output the graphql response
-		Ok(Value::Strand(out.into()).into())
+		Ok(ExprValue::Strand(out.into()).into())
 	}
 
 	// ------------------------------
 	// Private methods
 	// ------------------------------
 
-	async fn query_inner(
-		&self,
-		query: SqlValue,
-		vars: Option<BTreeMap<String, Value>>,
-	) -> Result<Vec<Response>> {
+	async fn query_inner(&self, query: SqlValue, vars: Option<Variables>) -> Result<Vec<Response>> {
 		// If no live query handler force realtime off
 		ensure!(Self::LQ_SUPPORT || !self.session().rt, RpcError::BadLQConfig);
 		// Execute the query on the database
@@ -1014,12 +1011,12 @@ pub trait RpcProtocolV1: RpcContext {
 	async fn handle_live_query_results(&self, res: &Response) {
 		match &res.query_type {
 			QueryType::Live => {
-				if let Ok(Value::Uuid(lqid)) = &res.result {
+				if let Ok(ExprValue::Uuid(lqid)) = &res.result {
 					self.handle_live(&lqid.0).await;
 				}
 			}
 			QueryType::Kill => {
-				if let Ok(Value::Uuid(lqid)) = &res.result {
+				if let Ok(ExprValue::Uuid(lqid)) = &res.result {
 					self.handle_kill(&lqid.0).await;
 				}
 			}

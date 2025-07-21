@@ -18,12 +18,12 @@ use async_channel::{Receiver, Sender};
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::stream::poll_fn;
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::task::Poll;
+use surrealdb_core::dbs::Variables;
 use tokio::sync::RwLock;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -108,7 +108,7 @@ pub(crate) async fn run_router(
 		.with_capabilities(address.config.capabilities);
 
 	let kvs = Arc::new(kvs);
-	let vars = Arc::new(RwLock::new(BTreeMap::new()));
+	let vars = Arc::new(RwLock::new(Variables::new()));
 	let live_queries = Arc::new(RwLock::new(HashMap::new()));
 	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
 

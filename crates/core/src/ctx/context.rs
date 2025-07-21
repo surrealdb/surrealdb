@@ -3,7 +3,7 @@ use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-use crate::dbs::{Capabilities, Notification};
+use crate::dbs::{Capabilities, Notification, Session, Variables};
 use crate::err::Error;
 use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
@@ -469,6 +469,28 @@ impl MutableContext {
 				.map(|ctx| ctx.cancelled.clone())
 				.collect(),
 		)
+	}
+
+	/// Attach a session to the context and add any session variables to the context.
+	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
+		self.add_values(session.values());
+		if !session.variables.is_empty() {
+			self.attach_variables(session.variables.clone())?;
+		}
+		Ok(())
+	}
+
+	/// Attach variables to the context.
+	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
+		for (key, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				return Err(Error::InvalidParam {
+					name: key.clone(),
+				});
+			}
+			self.add_value(key, val.into());
+		}
+		Ok(())
 	}
 
 	//

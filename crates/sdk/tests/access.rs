@@ -7,8 +7,9 @@ use helpers::new_ds;
 use regex::Regex;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::{Capabilities, Session};
+use surrealdb::expr::Value as ExprValue;
 use surrealdb::iam::Role;
-use surrealdb::sql::{Base, SqlValue};
+use surrealdb::sql::Base;
 use surrealdb_core::iam::Level;
 use tokio::time::Duration;
 
@@ -979,7 +980,7 @@ async fn permissions_access_grant() {
 
 				if should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
-					assert_ne!(res.unwrap(), SqlValue::parse("[]").into(), "{}", msg);
+					assert_ne!(res.unwrap(), ExprValue::parse("[]"), "{}", msg);
 				} else {
 					let err = res.unwrap_err().to_string();
 					assert!(

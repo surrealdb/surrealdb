@@ -190,7 +190,7 @@ impl Document {
 					// document, and check if the new
 					// field value is now different to
 					// the old field value in any way.
-					if !self.is_new() && val.ne(&old) {
+					if !self.is_new() && val.ne(&*old) {
 						// Check the data clause type
 						match stm.data() {
 							// If the field is NONE, we assume
@@ -565,7 +565,7 @@ impl FieldEditContext<'_> {
 				// The field PERMISSIONS clause
 				// is NONE, meaning that this
 				// change will be reverted.
-				Permission::None => match val.eq(&self.old) {
+				Permission::None => match val.eq(&*self.old) {
 					false => self.old.as_ref().clone(),
 					true => val,
 				},
@@ -609,7 +609,7 @@ impl FieldEditContext<'_> {
 					// updated, meanint that this
 					// change will be reverted.
 					match res.is_truthy() {
-						false => match val.eq(&self.old) {
+						false => match val.eq(&*self.old) {
 							false => self.old.as_ref().clone(),
 							true => val,
 						},
