@@ -74,9 +74,9 @@ pub fn query<'js>(
 			};
 
 			let mut context = MutableContext::new(query_ctx.context);
-			if let Some(vars) = query.clone().vars {
+			if let Some(vars) = &query.vars {
 				context
-					.attach_variables(vars.into())
+					.attach_variables(vars.clone().into())
 					.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
 			}
 

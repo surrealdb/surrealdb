@@ -161,18 +161,6 @@ impl TryFrom<TimestampProto> for crate::expr::Datetime {
 	}
 }
 
-impl From<crate::expr::Bytes> for bytes::Bytes {
-	fn from(bytes: crate::expr::Bytes) -> Self {
-		bytes.0.into()
-	}
-}
-
-impl From<bytes::Bytes> for crate::expr::Bytes {
-	fn from(bytes: bytes::Bytes) -> Self {
-		crate::expr::Bytes(bytes.into())
-	}
-}
-
 impl TryFrom<UuidProto> for crate::expr::Uuid {
 	type Error = uuid::Error;
 

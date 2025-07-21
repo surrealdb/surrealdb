@@ -32,6 +32,18 @@ impl From<Bytes> for Vec<u8> {
 	}
 }
 
+impl From<Bytes> for bytes::Bytes {
+	fn from(bytes: Bytes) -> Self {
+		bytes.0.into()
+	}
+}
+
+impl From<bytes::Bytes> for Bytes {
+	fn from(bytes: bytes::Bytes) -> Self {
+		Bytes(bytes.into())
+	}
+}
+
 impl Deref for Bytes {
 	type Target = Vec<u8>;
 

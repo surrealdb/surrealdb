@@ -174,10 +174,10 @@ impl FromFlatbuffers for Value {
 			}
 			proto_fb::ValueType::Bytes => {
 				let bytes_value = input.value_as_bytes().expect("Guaranteed to be Bytes");
-				let value = Vec::<u8>::from_fb(
+				let bytes = crate::expr::Bytes::from_fb(
 					bytes_value.value().expect("Bytes value is guaranteed to be present"),
 				)?;
-				Ok(Value::Bytes(crate::expr::Bytes(value)))
+				Ok(Value::Bytes(bytes))
 			}
 			proto_fb::ValueType::RecordId => {
 				let record_id_value =
@@ -462,12 +462,12 @@ impl FromFlatbuffers for Thing {
 	}
 }
 
-impl FromFlatbuffers for Vec<u8> {
+impl FromFlatbuffers for crate::expr::Bytes {
 	type Input<'a> = flatbuffers::Vector<'a, u8>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
-		Ok(input.bytes().to_vec())
+		Ok(crate::expr::Bytes(input.bytes().to_vec()))
 	}
 }
 
