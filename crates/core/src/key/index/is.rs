@@ -1,4 +1,25 @@
-//! Stores index sequence states for FullTextSearch/DocIDS
+//! Index Sequence State Key Structure
+//!
+//! This module defines the `Is` key structure used to store distributed sequence states
+//! for full-text search document ID generation. The key enables concurrent indexing
+//! by maintaining a sequence state per node in a distributed system.
+//!
+//! # Purpose
+//!
+//! The `Is` key stores the state of distributed sequences used to provide unique numeric
+//! IDs to documents during full-text indexing operations. This allows multiple nodes
+//! to concurrently index documents while maintaining unique document identifiers.
+//!
+//! # Key Structure
+//!
+//! The key follows the pattern: `/*{ns}*{db}*{tb}+{ix}!ib{nid}`
+//!
+//! Where:
+//! - `ns`: Namespace identifier
+//! - `db`: Database identifier
+//! - `tb`: Table identifier
+//! - `ix`: Index identifier
+//! - `nid`: Node UUID (16 bytes, compact serialized)
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
@@ -43,7 +64,7 @@ impl<'a> Is<'a> {
 			ix,
 			_e: b'!',
 			_f: b'i',
-			_g: b'b',
+			_g: b's',
 			nid,
 		}
 	}
@@ -63,7 +84,7 @@ mod tests {
 			Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
 		);
 		let enc = Is::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!ib\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!is\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f");
 
 		let dec = Is::decode(&enc).unwrap();
 		assert_eq!(val, dec);
