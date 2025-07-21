@@ -1,6 +1,6 @@
 //! Sequence Batch Key (`Ib`) for Full-Text Index Document IDs
 //!
-//! The `Ib` key stores sequence batches for full-text index document IDs. It's part of the 
+//! The `Ib` key stores sequence batches for full-text index document IDs. It's part of the
 //! distributed sequence mechanism that enables concurrent document ID generation across multiple nodes.
 //!
 //! ## Key Structure
