@@ -44,6 +44,7 @@ pub(crate) mod part;
 pub(crate) mod paths;
 pub(crate) mod permission;
 pub(crate) mod plan;
+pub(crate) mod record;
 pub(crate) mod record_id;
 pub(crate) mod reference;
 pub(crate) mod scoring;
