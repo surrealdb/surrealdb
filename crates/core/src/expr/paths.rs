@@ -28,7 +28,3 @@ pub static TK: LazyLock<[Part; 1]> =
 pub static IN: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("in".to_owned()).unwrap()]);
 
 pub static OUT: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("out".to_owned()).unwrap()]);
-
-pub static META: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("__".to_owned()).unwrap()]);
-
-pub static EDGE: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::field("__".to_owned()).unwrap()]);
