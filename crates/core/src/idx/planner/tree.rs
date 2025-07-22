@@ -6,7 +6,7 @@ use crate::expr::{
 	With,
 	order::{OrderList, Ordering},
 };
-use crate::expr::{BooleanOperator, FlowResultExt as _};
+use crate::expr::{BooleanOperation, FlowResultExt as _};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
@@ -529,7 +529,7 @@ impl<'a> TreeBuilder<'a> {
 				return Some(IndexOperator::Matches(
 					v.to_raw_string(),
 					*mr,
-					bo.clone().unwrap_or(BooleanOperator::And),
+					bo.clone().unwrap_or(BooleanOperation::And),
 				));
 			}
 		}

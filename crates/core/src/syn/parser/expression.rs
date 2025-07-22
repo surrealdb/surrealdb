@@ -5,7 +5,7 @@ use std::ops::Bound;
 use super::mac::{expected_whitespace, unexpected};
 use crate::idx::ft::MatchRef;
 use crate::sql::operator::BindingPower;
-use crate::sql::operator::BooleanOperator;
+use crate::sql::operator::BooleanOperation;
 use crate::sql::{
 	Cast, Expression, Function, Number, Operator, Part, Range, SqlValue, value::TryNeg,
 };
@@ -292,11 +292,11 @@ impl Parser<'_> {
 		}
 	}
 
-	fn parse_match_boolean_operator(&mut self) -> ParseResult<Option<BooleanOperator>> {
+	fn parse_match_boolean_operator(&mut self) -> ParseResult<Option<BooleanOperation>> {
 		if self.eat(t!("AND")) {
-			Ok(Some(BooleanOperator::And))
+			Ok(Some(BooleanOperation::And))
 		} else if self.eat(t!("OR")) {
-			Ok(Some(BooleanOperator::Or))
+			Ok(Some(BooleanOperation::Or))
 		} else {
 			Ok(None)
 		}

@@ -5,7 +5,8 @@ use crate::err::Error;
 use crate::expr::index::{Distance, Index};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{
-	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
+	Array, BooleanOperation, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table,
+	Thing, Value,
 };
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
@@ -36,7 +37,7 @@ use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -1016,11 +1017,11 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _, _) = io.op() {
+			if let Matches(_, _, bo) = io.op() {
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
 				{
 					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
-						let hits = fti.new_hits_iterator(&fte.0.qt)?;
+						let hits = fti.new_hits_iterator(&fte.0.qt, bo.clone());
 						let it = MatchesThingIterator::new(ir, hits);
 						return Ok(Some(ThingIterator::FullTextMatches(it)));
 					}
@@ -1352,7 +1353,12 @@ impl SearchEntry {
 		si: &SearchIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _, _) = io.op() {
+		if let Matches(qs, _, bo) = io.op() {
+			if !matches!(bo, BooleanOperation::And) {
+				bail!(Error::Unimplemented(
+					"SEARCH indexes only support AND operations".to_string()
+				))
+			}
 			let (terms_list, terms_set, terms_docs) =
 				si.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let terms_docs = Arc::new(terms_docs);

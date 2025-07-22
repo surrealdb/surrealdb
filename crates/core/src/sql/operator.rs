@@ -51,7 +51,7 @@ pub enum Operator {
 	)]
 	Matches(Option<MatchRef>), // @{ref}
 	#[revision(start = 4)]
-	Matches(Option<MatchRef>, Option<BooleanOperator>), // @{ref},{AND|OR}@
+	Matches(Option<MatchRef>, Option<BooleanOperation>), // @{ref},{AND|OR}@
 	//
 	LessThan,        // <
 	LessThanOrEqual, // <=
@@ -256,17 +256,17 @@ impl From<crate::expr::Operator> for Operator {
 	}
 }
 
-/// Binary operators.
+/// Boolean operation executed by the full-text index
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub enum BooleanOperator {
+pub enum BooleanOperation {
 	And,
 	Or,
 }
 
-impl fmt::Display for BooleanOperator {
+impl fmt::Display for BooleanOperation {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Or => f.write_str("OR"),
@@ -275,20 +275,20 @@ impl fmt::Display for BooleanOperator {
 	}
 }
 
-impl From<BooleanOperator> for crate::expr::BooleanOperator {
-	fn from(v: BooleanOperator) -> Self {
+impl From<BooleanOperation> for crate::expr::BooleanOperation {
+	fn from(v: BooleanOperation) -> Self {
 		match v {
-			BooleanOperator::And => crate::expr::BooleanOperator::And,
-			BooleanOperator::Or => crate::expr::BooleanOperator::Or,
+			BooleanOperation::And => crate::expr::BooleanOperation::And,
+			BooleanOperation::Or => crate::expr::BooleanOperation::Or,
 		}
 	}
 }
 
-impl From<crate::expr::BooleanOperator> for BooleanOperator {
-	fn from(v: crate::expr::BooleanOperator) -> Self {
+impl From<crate::expr::BooleanOperation> for BooleanOperation {
+	fn from(v: crate::expr::BooleanOperation) -> Self {
 		match v {
-			crate::expr::BooleanOperator::And => BooleanOperator::And,
-			crate::expr::BooleanOperator::Or => BooleanOperator::Or,
+			crate::expr::BooleanOperation::And => BooleanOperation::And,
+			crate::expr::BooleanOperation::Or => BooleanOperation::Or,
 		}
 	}
 }

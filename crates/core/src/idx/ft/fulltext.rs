@@ -11,7 +11,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{Idiom, Scoring, Thing, Value};
+use crate::expr::{BooleanOperation, Idiom, Scoring, Thing, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
@@ -492,12 +492,30 @@ impl FullTextIndex {
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
 		qt: &QueryTerms,
-	) -> Result<Option<FullTextHitsIterator>> {
+		bo: BooleanOperation,
+	) -> Option<FullTextHitsIterator> {
+		let hits = match bo {
+			BooleanOperation::And => Self::and_operation(&qt.docs),
+			BooleanOperation::Or => Self::or_operation(&qt.docs),
+		};
+
+		// Create and return an iterator if we have matching documents
+		if let Some(hits) = hits {
+			if !hits.is_empty() {
+				return Some(FullTextHitsIterator::new(self.ikb.clone(), hits));
+			}
+		}
+
+		// No documents match the terms
+		None
+	}
+
+	fn and_operation(docs: &[Option<RoaringTreemap>]) -> Option<RoaringTreemap> {
 		// This will hold the intersection of document sets for all terms
 		let mut hits: Option<RoaringTreemap> = None;
 
 		// Process each term's document set
-		for opt_docs in qt.docs.iter() {
+		for opt_docs in docs.iter() {
 			if let Some(docs) = opt_docs {
 				if let Some(h) = hits {
 					// Perform intersection with previous results (AND operation)
@@ -510,19 +528,14 @@ impl FullTextIndex {
 			} else {
 				// If any term has no matching documents, the intersection will be empty
 				// We can return early as no documents will match all terms
-				return Ok(None);
+				return None;
 			}
 		}
+		hits
+	}
 
-		// Create and return an iterator if we have matching documents
-		if let Some(hits) = hits {
-			if !hits.is_empty() {
-				return Ok(Some(FullTextHitsIterator::new(self.ikb.clone(), hits)));
-			}
-		}
-
-		// No documents match all terms
-		Ok(None)
+	fn or_operation(_docs: &[Option<RoaringTreemap>]) -> Option<RoaringTreemap> {
+		todo!()
 	}
 
 	pub(in crate::idx) async fn get_doc_id(

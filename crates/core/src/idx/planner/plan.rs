@@ -1,4 +1,4 @@
-use crate::expr::operator::BooleanOperator;
+use crate::expr::operator::BooleanOperation;
 use crate::expr::with::With;
 use crate::expr::{Array, Expression, Idiom, Number, Object};
 use crate::expr::{Operator, Value};
@@ -329,7 +329,7 @@ pub(super) enum IndexOperator {
 	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Arc<Value>),
-	Matches(String, Option<MatchRef>, BooleanOperator),
+	Matches(String, Option<MatchRef>, BooleanOperation),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
 	/// false = ascending, true = descending
