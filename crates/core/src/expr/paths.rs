@@ -24,7 +24,3 @@ pub static TK: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from(OBJ_PATH_TOKEN
 pub static IN: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("in")]);
 
 pub static OUT: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("out")]);
-
-pub static META: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("__")]);
-
-pub static EDGE: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::from("__")]);

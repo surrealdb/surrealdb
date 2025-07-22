@@ -15,7 +15,6 @@ use crate::expr::Thing;
 use crate::expr::dir::Dir;
 use crate::expr::edges::Edges;
 use crate::expr::graph::GraphSubjects;
-use crate::expr::paths::EDGE;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::reference::ReferenceDeleteStrategy;

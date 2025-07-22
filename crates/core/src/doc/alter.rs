@@ -8,7 +8,6 @@ use crate::err::Error;
 use crate::expr::FlowResultExt;
 use crate::expr::data::Data;
 use crate::expr::operator::Operator;
-use crate::expr::paths::EDGE;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::value::Value;

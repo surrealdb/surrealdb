@@ -6,7 +6,7 @@ use crate::expr::{
 	Part, Value,
 	fmt::{Fmt, fmt_separated_by},
 	part::{Next, NextMethod},
-	paths::{ID, IN, META, OUT},
+	paths::{ID, IN, OUT},
 };
 use md5::{Digest, Md5};
 use reblessive::tree::Stk;

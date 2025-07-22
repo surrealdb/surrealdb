@@ -7,7 +7,6 @@ use crate::doc::CursorDoc;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::expr::paths::AC;
-use crate::expr::paths::META;
 use crate::expr::paths::RD;
 use crate::expr::paths::TK;
 use crate::expr::permission::Permission;

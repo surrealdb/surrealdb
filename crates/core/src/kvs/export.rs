@@ -3,7 +3,6 @@ use super::Transaction;
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::Value;
-use crate::expr::paths::EDGE;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::statements::DefineTableStatement;

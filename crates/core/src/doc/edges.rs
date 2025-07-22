@@ -7,7 +7,6 @@ use crate::err::Error;
 use crate::expr::Dir;
 use crate::expr::Relation;
 use crate::expr::TableType;
-use crate::expr::paths::EDGE;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::value::Value;
