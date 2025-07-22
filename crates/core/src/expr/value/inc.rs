@@ -30,15 +30,15 @@ mod tests {
 
 	use super::*;
 	use crate::expr::idiom::Idiom;
-	use crate::sql::SqlValue;
+
 	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn::Parse;
 
 	#[tokio::test]
 	async fn increment_none() {
 		let idi: Idiom = SqlIdiom::parse("other").into();
-		let mut val: Value = SqlValue::parse("{ test: 100 }").into();
-		let res: Value = SqlValue::parse("{ test: 100, other: +10 }").into();
+		let mut val: Value = Value::parse("{ test: 100 }");
+		let res: Value = Value::parse("{ test: 100, other: +10 }");
 		val.inc(&idi, Value::from(10));
 		assert_eq!(res, val);
 	}
@@ -46,8 +46,8 @@ mod tests {
 	#[tokio::test]
 	async fn increment_number() {
 		let idi: Idiom = SqlIdiom::parse("test").into();
-		let mut val: Value = SqlValue::parse("{ test: 100 }").into();
-		let res: Value = SqlValue::parse("{ test: 110 }").into();
+		let mut val: Value = Value::parse("{ test: 100 }");
+		let res: Value = Value::parse("{ test: 110 }");
 		val.inc(&idi, Value::from(10));
 		assert_eq!(res, val);
 	}
@@ -55,8 +55,8 @@ mod tests {
 	#[tokio::test]
 	async fn increment_array_number() {
 		let idi: Idiom = SqlIdiom::parse("test[1]").into();
-		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
-		let res: Value = SqlValue::parse("{ test: [100, 210, 300] }").into();
+		let mut val: Value = Value::parse("{ test: [100, 200, 300] }");
+		let res: Value = Value::parse("{ test: [100, 210, 300] }");
 		val.inc(&idi, Value::from(10));
 		assert_eq!(res, val);
 	}
@@ -64,8 +64,8 @@ mod tests {
 	#[tokio::test]
 	async fn increment_array_value() {
 		let idi: Idiom = SqlIdiom::parse("test").into();
-		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
-		let res: Value = SqlValue::parse("{ test: [100, 200, 300, 200] }").into();
+		let mut val: Value = Value::parse("{ test: [100, 200, 300] }");
+		let res: Value = Value::parse("{ test: [100, 200, 300, 200] }");
 		val.inc(&idi, Value::from(200));
 		assert_eq!(res, val);
 	}
@@ -73,9 +73,9 @@ mod tests {
 	#[tokio::test]
 	async fn increment_array_array() {
 		let idi: Idiom = SqlIdiom::parse("test").into();
-		let mut val: Value = SqlValue::parse("{ test: [100, 200, 300] }").into();
-		let res: Value = SqlValue::parse("{ test: [100, 200, 300, 100, 300, 400, 500] }").into();
-		val.inc(&idi, SqlValue::parse("[100, 300, 400, 500]").into());
+		let mut val: Value = Value::parse("{ test: [100, 200, 300] }");
+		let res: Value = Value::parse("{ test: [100, 200, 300, 100, 300, 400, 500] }");
+		val.inc(&idi, Value::parse("[100, 300, 400, 500]"));
 		assert_eq!(res, val);
 	}
 }

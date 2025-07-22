@@ -11,9 +11,7 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::Timestamp;
-use crate::dbs::{
-	Attach, Capabilities, Executor, Notification, Options, Response, Session, Variables,
-};
+use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
 use crate::err::Error;
 use crate::expr::LogicalPlan;
 use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
@@ -852,7 +850,7 @@ impl Datastore {
 		&self,
 		txt: &str,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
@@ -864,7 +862,7 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 		query: S,
 	) -> Result<Vec<Response>>
 	where
@@ -889,9 +887,11 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Process all statements
 
 		let parser_settings = ParserSettings {
@@ -991,7 +991,7 @@ impl Datastore {
 		&self,
 		ast: Query,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1011,9 +1011,11 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Process all statements
 		Executor::execute(self, ctx.freeze(), opt, ast).await
 	}
@@ -1022,7 +1024,7 @@ impl Datastore {
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Variables,
+		vars: Option<Variables>,
 	) -> Result<Vec<Response>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1042,9 +1044,11 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await
@@ -1069,7 +1073,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(&self, val: Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn compute(
+		&self,
+		val: Value,
+		sess: &Session,
+		vars: Option<Variables>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can compute values when auth is enabled
@@ -1099,9 +1108,11 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
@@ -1145,7 +1156,12 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(&self, val: &Value, sess: &Session, vars: Variables) -> Result<Value> {
+	pub async fn evaluate(
+		&self,
+		val: &Value,
+		sess: &Session,
+		vars: Option<Variables>,
+	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
@@ -1165,9 +1181,11 @@ impl Datastore {
 			ctx.add_notifications(Some(&channel.0));
 		}
 		// Start an execution context
-		sess.context(&mut ctx);
+		ctx.attach_session(sess)?;
 		// Store the query variables
-		vars.attach(&mut ctx)?;
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars)?;
+		}
 		// Start a new transaction
 		let txn = self.transaction(val.writeable().into(), Optimistic).await?.enclose();
 		// Store the transaction
@@ -1292,6 +1310,7 @@ impl Datastore {
 			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
 	}
+
 	pub fn setup_ctx(&self) -> Result<MutableContext> {
 		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,

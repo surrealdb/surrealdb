@@ -1,11 +1,15 @@
-use surrealdb::sql::SqlValue;
-use surrealdb::sql::Thing;
-use surrealdb::sql::thing;
-use surrealdb::sql::value;
+use surrealdb::expr::Value;
+use surrealdb::sql::{SqlValue, Thing, thing, value};
 
 #[allow(dead_code)]
 pub trait Parse<T> {
 	fn parse(val: &str) -> T;
+}
+
+impl Parse<Value> for Value {
+	fn parse(val: &str) -> Value {
+		SqlValue::parse(val).into()
+	}
 }
 
 impl Parse<SqlValue> for SqlValue {

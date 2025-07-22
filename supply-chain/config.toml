@@ -1394,10 +1394,6 @@ criteria = "safe-to-deploy"
 version = "0.7.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.uuid]]
-version = "1.16.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.valuable]]
 version = "0.1.1"
 criteria = "safe-to-deploy"

@@ -17,12 +17,12 @@ use axum_extra::TypedHeader;
 use axum_extra::extract::Query;
 use bytes::Bytes;
 use serde::Deserialize;
-use std::collections::BTreeMap;
 use std::str;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::expr::Value;
 use surrealdb::iam::check::check_ns_db;
+use surrealdb_core::dbs::Variables;
 use surrealdb_core::kvs::Datastore;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -69,7 +69,7 @@ async fn execute_and_return(
 	db: &Datastore,
 	sql: &str,
 	session: &Session,
-	vars: BTreeMap<String, Value>,
+	vars: Variables,
 	accept: Option<&Accept>,
 ) -> Result<Output, anyhow::Error> {
 	match db.execute(sql, session, Some(vars)).await {
@@ -123,12 +123,12 @@ async fn select_all(
 		_ => "SELECT type::fields($fields) FROM type::table($table) LIMIT $limit START $start",
 	};
 	// Specify the request variables
-	let vars = map! {
+	let vars = Variables::from(map! {
 		String::from("table") => Value::from(table),
 		String::from("start") => Value::from(query.start.unwrap_or(0)),
 		String::from("limit") => Value::from(query.limit.unwrap_or(100)),
 		String::from("fields") => Value::from(query.fields.unwrap_or_default()),
-	};
+	});
 	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
 }
 
@@ -154,11 +154,11 @@ async fn create_all(
 			// Specify the request statement
 			let sql = "CREATE type::table($table) CONTENT $data";
 			// Specify the request variables
-			let vars = map! {
+			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
 				String::from("data") => Value::from(data),
 				=> params.parse()
-			};
+			});
 
 			execute_and_return(db, sql, &session, vars, accept.as_deref())
 				.await
@@ -190,11 +190,11 @@ async fn update_all(
 			// Specify the request statement
 			let sql = "UPDATE type::table($table) CONTENT $data";
 			// Specify the request variables
-			let vars = map! {
+			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
 				String::from("data") => Value::from(data),
 				=> params.parse()
-			};
+			});
 			execute_and_return(db, sql, &session, vars, accept.as_deref())
 				.await
 				.map_err(ResponseError)
@@ -225,11 +225,11 @@ async fn modify_all(
 			// Specify the request statement
 			let sql = "UPDATE type::table($table) MERGE $data";
 			// Specify the request variables
-			let vars = map! {
+			let vars = Variables::from(map! {
 				String::from("table") => table.into(),
 				String::from("data") => data.into(),
 				=> params.parse()
-			};
+			});
 			execute_and_return(db, sql, &session, vars, accept.as_deref())
 				.await
 				.map_err(ResponseError)
@@ -254,10 +254,10 @@ async fn delete_all(
 	// Specify the request statement
 	let sql = "DELETE type::table($table) RETURN BEFORE";
 	// Specify the request variables
-	let vars = map! {
+	let vars = Variables::from(map! {
 		String::from("table") => Value::from(table),
 		=> params.parse()
-	};
+	});
 	// Execute the query and return the result
 	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
 }
@@ -290,11 +290,11 @@ async fn select_one(
 		Err(_) => id.into(),
 	};
 	// Specify the request variables
-	let vars = map! {
+	let vars = Variables::from(map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => rid,
 		String::from("fields") => Value::from(query.fields.unwrap_or_default()),
-	};
+	});
 	// Execute the query and return the result
 	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
 }
@@ -326,12 +326,12 @@ async fn create_one(
 			// Specify the request statement
 			let sql = "CREATE type::thing($table, $id) CONTENT $data";
 			// Specify the request variables
-			let vars = map! {
+			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
 				String::from("id") => rid,
 				String::from("data") => data.into(),
 				=> params.parse()
-			};
+			});
 			// Execute the query and return the result
 			execute_and_return(db, sql, &session, vars, accept.as_deref())
 				.await
@@ -368,12 +368,12 @@ async fn update_one(
 			// Specify the request statement
 			let sql = "UPSERT type::thing($table, $id) CONTENT $data";
 			// Specify the request variables
-			let vars = map! {
+			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
 				String::from("id") => rid,
 				String::from("data") => data.into(),
 				=> params.parse()
-			};
+			});
 			// Execute the query and return the result
 			execute_and_return(db, sql, &session, vars, accept.as_deref())
 				.await
@@ -410,12 +410,12 @@ async fn modify_one(
 			// Specify the request statement
 			let sql = "UPSERT type::thing($table, $id) MERGE $data";
 			// Specify the request variables
-			let vars = map! {
+			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
 				String::from("id") => rid,
 				String::from("data") => data.into(),
 				=> params.parse()
-			};
+			});
 			// Execute the query and return the result
 			execute_and_return(db, sql, &session, vars, accept.as_deref())
 				.await
@@ -445,10 +445,10 @@ async fn delete_one(
 		Err(_) => id.into(),
 	};
 	// Specify the request variables
-	let vars = map! {
+	let vars = Variables::from(map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => rid,
-	};
+	});
 	// Execute the query and return the result
 	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
 }
