@@ -4,11 +4,33 @@ use crate::val::TryAdd;
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::borrow::Borrow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::{
 	Deref, {self},
 };
 use std::str;
+
+#[derive(Eq, PartialEq, Ord, PartialOrd, Debug)]
+#[repr(transparent)]
+pub struct StrandRef(str);
+
+impl StrandRef {
+	pub const unsafe fn new_unchecked(s: &str) -> &StrandRef {
+		unsafe {
+			// This is safe as StrandRef has the same representation as str.
+			std::mem::transmute(s)
+		}
+	}
+}
+
+impl ToOwned for StrandRef {
+	type Owned = Strand;
+
+	fn to_owned(&self) -> Self::Owned {
+		Strand(self.0.to_owned())
+	}
+}
 
 /// A string that doesn't contain NUL bytes.
 #[revisioned(revision = 1)]
@@ -46,6 +68,13 @@ impl Strand {
 	}
 }
 
+impl Borrow<StrandRef> for Strand {
+	fn borrow(&self) -> &StrandRef {
+		// Safety:  both strand and strandref uphold no null bytes.
+		unsafe { StrandRef::new_unchecked(self.as_str()) }
+	}
+}
+
 impl From<String> for Strand {
 	fn from(s: String) -> Self {
 		// TODO: For now, fix this in the future.
@@ -60,6 +89,7 @@ impl From<&str> for Strand {
 	}
 }
 
+// TODO: Change this to str, possibly.
 impl Deref for Strand {
 	type Target = str;
 	fn deref(&self) -> &Self::Target {

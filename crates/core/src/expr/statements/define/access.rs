@@ -246,9 +246,9 @@ impl InfoStructure for DefineAccessStatement {
 			"base".to_string() => self.base.structure(),
 			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
 			"duration".to_string() => Value::from(map!{
-				"session".to_string() => self.duration.session.into(),
-				"grant".to_string(), if self.access_type.can_issue_grants() => self.duration.grant.into(),
-				"token".to_string(), if self.access_type.can_issue_tokens() => self.duration.token.into(),
+				"session".to_string() => self.duration.session.map(Value::from).unwrap_or(Value::None),
+				"grant".to_string(), if self.access_type.can_issue_grants() => self.duration.grant.map(Value::from).unwrap_or(Value::None),
+				"token".to_string(), if self.access_type.can_issue_tokens() => self.duration.token.map(Value::from).unwrap_or(Value::None),
 			}),
 			"kind".to_string() => self.access_type.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),

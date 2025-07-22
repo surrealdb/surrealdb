@@ -8,7 +8,7 @@ use crate::expr::{
 };
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, RecordId, Strand, Uuid, Value};
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;
@@ -96,12 +96,18 @@ impl AccessGrantStore {
 	/// Returns the surrealql object representation of the access grant
 	pub fn into_access_object(self) -> Object {
 		let mut res = Object::default();
-		res.insert("id".to_owned(), Value::from(self.id.into_raw_string()));
-		res.insert("ac".to_owned(), Value::from(self.ac.into_raw_string()));
+		res.insert("id".to_owned(), Value::from(self.id.into_strand()));
+		res.insert("ac".to_owned(), Value::from(self.ac.into_strand()));
 		res.insert("type".to_owned(), Value::from(self.grant.variant()));
 		res.insert("creation".to_owned(), Value::from(self.creation));
-		res.insert("expiration".to_owned(), Value::from(self.expiration));
-		res.insert("revocation".to_owned(), Value::from(self.revocation));
+		res.insert(
+			"expiration".to_owned(),
+			self.expiration.map(Value::from).unwrap_or(Value::None),
+		);
+		res.insert(
+			"revocation".to_owned(),
+			self.revocation.map(Value::from).unwrap_or(Value::None),
+		);
 		let mut sub = Object::default();
 		match self.subject {
 			SubjectStore::Record(id) => sub.insert("record".to_owned(), Value::from(id)),

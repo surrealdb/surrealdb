@@ -28,6 +28,15 @@ impl Range {
 			end: Bound::Unbounded,
 		}
 	}
+
+	/// Creates a new range with the first argument as the start bound and the second as the end
+	/// bound.
+	pub const fn new(start: Bound<Value>, end: Bound<Value>) -> Self {
+		Range {
+			start,
+			end,
+		}
+	}
 }
 
 impl PartialOrd for Range {

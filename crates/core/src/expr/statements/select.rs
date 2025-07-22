@@ -6,10 +6,10 @@ use crate::expr::fmt::Fmt;
 use crate::expr::order::Ordering;
 use crate::expr::{
 	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Idioms, Limit, Splits, Start,
-	Timeout, Version, With,
+	Timeout, With,
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::val::Value;
+use crate::val::{Datetime, Value};
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -37,7 +37,7 @@ pub struct SelectStatement {
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
@@ -92,7 +92,13 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 		let version = match &self.version {
-			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+			Some(v) => Some(
+				v.compute(stk, ctx, opt, doc)
+					.await
+					.catch_return()?
+					.cast_to::<Datetime>()?
+					.to_version_stamp()?,
+			),
 			_ => None,
 		};
 		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
@@ -169,7 +175,7 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " {v}")?
+			write!(f, " VERSION {v}")?
 		}
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?

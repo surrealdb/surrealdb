@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::dbs::Variables;
 use crate::expr::Expr;
 use crate::val::Value as SurValue;
 use crate::{sql, syn};
@@ -14,16 +15,16 @@ pub struct Query {
 	#[qjs(skip_trace)]
 	pub(crate) query: Expr,
 	#[qjs(skip_trace)]
-	pub(crate) vars: Option<BTreeMap<String, SurValue>>,
+	pub(crate) vars: Option<Variables>,
 }
 
 #[derive(Default, Clone)]
 #[non_exhaustive]
-pub struct QueryVariables(pub BTreeMap<String, SurValue>);
+pub struct QueryVariables(pub Variables);
 
 impl QueryVariables {
 	pub fn new() -> Self {
-		QueryVariables(BTreeMap::new())
+		QueryVariables(Variables::new())
 	}
 
 	pub fn from_value<'js>(ctx: &Ctx<'js>, val: Value<'js>) -> Result<Self> {
@@ -114,6 +115,6 @@ impl Query {
 	}
 
 	pub fn bind(&mut self, key: Coerced<String>, value: SurValue) {
-		self.vars.get_or_insert_with(BTreeMap::new).insert(key.0, value);
+		self.vars.get_or_insert_with(Variables::new).insert(key.0, value);
 	}
 }

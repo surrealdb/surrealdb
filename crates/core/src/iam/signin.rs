@@ -217,7 +217,9 @@ pub async fn db_access(
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
 												sess.rd = Some(rid.clone().into());
-												sess.tk = Some((&claims).into());
+												sess.tk = Some(
+													claims.clone().into_claims_object().into(),
+												);
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
 												rid = authenticate_record(kvs, &sess, au).await?;
@@ -257,7 +259,7 @@ pub async fn db_access(
 											let enc =
 												encode(&Header::new(iss.alg.into()), &claims, &key);
 											// Set the authentication on the session
-											session.tk = Some((&claims).into());
+											session.tk = Some(claims.into_claims_object().into());
 											session.ns = Some(ns.clone());
 											session.db = Some(db.clone());
 											session.ac = Some(ac.clone());
@@ -356,7 +358,7 @@ pub async fn db_user(
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
-			session.tk = Some((&val).into());
+			session.tk = Some(val.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.exp = expiration(u.duration.session)?;
@@ -444,7 +446,7 @@ pub async fn ns_user(
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
-			session.tk = Some((&val).into());
+			session.tk = Some(val.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.exp = expiration(u.duration.session)?;
 			session.au =
@@ -494,7 +496,7 @@ pub async fn root_user(
 			// Create the authentication token
 			let enc = encode(&HEADER, &val, &key);
 			// Set the authentication on the session
-			session.tk = Some(val.into());
+			session.tk = Some(val.into_claims_object().into());
 			session.exp = expiration(u.duration.session)?;
 			session.au = Arc::new((&u, Level::Root).try_into().map_err(Error::from)?);
 			// Check the authentication token
@@ -648,7 +650,7 @@ pub async fn signin_bearer(
 			(None, None) => Session::editor(),
 			(None, Some(_)) => bail!(Error::NsEmpty),
 		};
-		sess.tk = Some((&claims).into());
+		sess.tk = Some(claims.clone().into_claims_object().into());
 		sess.ip.clone_from(&session.ip);
 		sess.or.clone_from(&session.or);
 		authenticate_generic(kvs, &sess, au).await?;
@@ -689,7 +691,7 @@ pub async fn signin_bearer(
 	// Create the authentication token.
 	let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 	// Set the authentication on the session.
-	session.tk = Some((&claims).into());
+	session.tk = Some(claims.into_claims_object().into());
 	session.ns.clone_from(&ns);
 	session.db.clone_from(&db);
 	session.ac = Some(av.name.to_string());

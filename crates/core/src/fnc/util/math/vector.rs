@@ -306,6 +306,7 @@ pub trait Normalize {
 impl Normalize for Vec<Number> {
 	fn normalize(&self) -> Vec<Number> {
 		let m = self.magnitude();
+		// TODO: What about zero magnitude vectors?
 		self.iter().map(|a| vector_div(a, &m)).collect()
 	}
 }

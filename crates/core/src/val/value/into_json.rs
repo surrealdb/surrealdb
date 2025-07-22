@@ -199,7 +199,7 @@ impl From<val::Geometry> for Geometry {
 #[cfg(test)]
 mod tests {
 	use crate::expr;
-	use crate::val::{self, Value};
+	use crate::val::{self, RecordId, RecordIdKey, Value};
 
 	use chrono::DateTime;
 	use chrono::Utc;
@@ -328,9 +328,9 @@ mod tests {
 		])),
 	)]
 	#[case::thing(
-		Value::Thing(Thing { tb: "foo".to_string(), id: "bar".into()}) ,
+		Value::Thing(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
 		json!("foo:bar"),
-		Value::Thing(Thing { tb: "foo".to_string(), id: "bar".into()}) ,
+		Value::Thing(RecordId{ table: "foo".to_string(), key: RecordIdKey::String("bar".into())}) ,
 	)]
 	#[case::array(
 		Value::Array(val::Array(vec![])),
@@ -451,15 +451,15 @@ mod tests {
 		Value::Geometry(val::Geometry::Collection(vec![])),
 	)]
 	#[case::geometry_collection_with_point(
-		Value::Geometry(val::Geometry::Collection(vec![expr::Geometry::Point(point! { x: 10., y: 20. })])),
+		Value::Geometry(val::Geometry::Collection(vec![val::Geometry::Point(point! { x: 10., y: 20. })])),
 		json!({
 		"type": "GeometryCollection",
 		"geometries": [ { "type": "Point", "coordinates": [10., 20.] } ],
 	}),
-		Value::Geometry(val::Geometry::Collection(vec![expr::Geometry::Point(point! { x: 10., y: 20. })])),
+		Value::Geometry(val::Geometry::Collection(vec![val::Geometry::Point(point! { x: 10., y: 20. })])),
 	)]
 	#[case::geometry_collection_with_line(
-		Value::Geometry(val::Geometry::Collection(vec![expr::Geometry::Line(line_string![
+		Value::Geometry(val::Geometry::Collection(vec![val::Geometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])])),
@@ -467,7 +467,7 @@ mod tests {
 			"type": "GeometryCollection",
 			"geometries": [ { "type": "LineString", "coordinates": [[0., 0.], [10., 0.]] } ],
 		}),
-		Value::Geometry(val::Geometry::Collection(vec![expr::Geometry::Line(line_string![
+		Value::Geometry(val::Geometry::Collection(vec![val::Geometry::Line(line_string![
 			( x: 0., y: 0. ),
 			( x: 10., y: 0. ),
 		])])),

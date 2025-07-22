@@ -252,7 +252,7 @@ pub async fn filter_index(
 				let mut res = Vec::with_capacity(array.len());
 				for (i, arg) in array.into_iter().enumerate() {
 					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
-						res.push(i);
+						res.push(Value::from(i as i64));
 					}
 				}
 				Value::from(res)
@@ -292,7 +292,7 @@ pub async fn find(
 				Value::None
 			}
 		}
-		value => array.into_iter().find(|v: &Value| *v == value).into(),
+		value => array.into_iter().find(|v: &Value| *v == value).unwrap_or(Value::None),
 	})
 }
 
@@ -324,7 +324,7 @@ pub async fn find_index(
 					None
 				}
 			})
-			.into(),
+			.unwrap_or(Value::None),
 	})
 }
 
@@ -508,7 +508,7 @@ pub fn min((array,): (Array,)) -> Result<Value> {
 }
 
 pub fn pop((mut array,): (Array,)) -> Result<Value> {
-	Ok(array.pop().into())
+	Ok(array.pop().unwrap_or(Value::None))
 }
 
 pub fn prepend((mut array, value): (Array, Value)) -> Result<Value> {

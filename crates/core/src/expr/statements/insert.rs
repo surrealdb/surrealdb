@@ -3,11 +3,9 @@ use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
-use crate::expr::{
-	Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Timeout, Value, Version,
-};
+use crate::expr::{Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
-use crate::val::{RecordId, Strand, Table};
+use crate::val::{Datetime, RecordId, Strand, Table};
 use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
@@ -28,7 +26,7 @@ pub struct InsertStatement {
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub relation: bool,
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 }
 
 impl InsertStatement {
@@ -50,7 +48,13 @@ impl InsertStatement {
 		let mut i = Iterator::new();
 		// Propagate the version to the underlying datastore
 		let version = match &self.version {
-			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+			Some(v) => Some(
+				v.compute(stk, ctx, opt, doc)
+					.await
+					.catch_return()?
+					.cast_to::<Datetime>()?
+					.to_version_stamp()?,
+			),
 			_ => None,
 		};
 		// Ensure futures are stored

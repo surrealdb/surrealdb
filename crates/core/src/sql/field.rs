@@ -17,6 +17,10 @@ impl Fields {
 		Fields::Select(vec![Field::All])
 	}
 
+	pub fn none() -> Fields {
+		Fields::Select(vec![])
+	}
+
 	pub fn contains_all(&self) -> bool {
 		match self {
 			Fields::Value(field) => matches!(**field, Field::All),

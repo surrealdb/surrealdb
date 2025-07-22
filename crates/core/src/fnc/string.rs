@@ -1,7 +1,7 @@
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util::string;
-use crate::val::{Regex, Value};
+use crate::val::{Regex, Strand, Value};
 use anyhow::{Result, ensure};
 
 use super::args::{Any, Cast, Optional};
@@ -163,7 +163,12 @@ pub fn slug((string,): (String,)) -> Result<Value> {
 }
 
 pub fn split((val, chr): (String, String)) -> Result<Value> {
-	Ok(val.split(&chr).collect::<Vec<&str>>().into())
+	// TODO: Null byte validity
+	Ok(val
+		.split(&chr)
+		.map(|x| Value::from(Strand::new(x.to_owned()).unwrap()))
+		.collect::<Vec<_>>()
+		.into())
 }
 
 pub fn starts_with((val, chr): (String, String)) -> Result<Value> {
@@ -179,7 +184,11 @@ pub fn uppercase((string,): (String,)) -> Result<Value> {
 }
 
 pub fn words((string,): (String,)) -> Result<Value> {
-	Ok(string.split_whitespace().collect::<Vec<&str>>().into())
+	Ok(string
+		.split_whitespace()
+		.map(|v| Value::from(Strand::new(v.to_owned()).unwrap()))
+		.collect::<Vec<_>>()
+		.into())
 }
 
 pub mod distance {

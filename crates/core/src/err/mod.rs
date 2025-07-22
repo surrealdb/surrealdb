@@ -843,6 +843,10 @@ pub enum Error {
 	#[error("Timestamp arithmetic error: {0}")]
 	TimestampOverflow(String),
 
+	/// Represents a failure in timestamp arithmetic related to database internals
+	#[error("Invalid timestamp '{0}', datetime lies outside of valid timestamp range")]
+	InvalidTimestamp(String),
+
 	/// Internal server error
 	/// This should be used extremely sporadically, since we lose the type of error as a consequence
 	/// There will be times when it is useful, such as with unusual type conversion errors

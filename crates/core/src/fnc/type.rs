@@ -323,11 +323,16 @@ pub mod is {
 mod tests {
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
-	use crate::val::Value;
+	use crate::val::{Strand, Value};
 
 	#[test]
 	fn is_array() {
-		let value = super::is::array((vec!["hello", "world"].into(),)).unwrap();
+		let value = super::is::array((vec![
+			Value::Strand(Strand::new("hello".to_owned()).unwrap()),
+			Value::Strand(Strand::new("world".to_owned()).unwrap()),
+		]
+		.into(),))
+		.unwrap();
 		assert_eq!(value, Value::Bool(true));
 
 		let value = super::is::array(("test".into(),)).unwrap();

@@ -672,7 +672,7 @@ mod tests {
 		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
-		assert_eq!(res, Value::from(vec![34, 36]));
+		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
 	}
 
 	#[tokio::test]
@@ -682,7 +682,7 @@ mod tests {
 		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
-		assert_eq!(res, Value::from(vec![34, 36]));
+		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
 	}
 
 	#[tokio::test]
@@ -692,7 +692,7 @@ mod tests {
 		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
-		assert_eq!(res, Value::from(vec![36]));
+		assert_eq!(res, [Value::from(36i64)].into_iter().collect::<Value>());
 	}
 
 	#[tokio::test]

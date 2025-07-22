@@ -581,7 +581,7 @@ impl FieldEditContext<'_> {
 				// is NONE, meaning that this
 				// change will be reverted.
 				Permission::None => {
-					if !val.eq(&self.old) {
+					if val != *self.old {
 						self.old.as_ref().clone()
 					} else {
 						val
@@ -632,7 +632,7 @@ impl FieldEditContext<'_> {
 					// change will be reverted.
 					if res.is_truthy() {
 						val
-					} else if val.eq(&self.old) {
+					} else if val == *self.old {
 						val
 					} else {
 						self.old.as_ref().clone()

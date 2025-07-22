@@ -47,7 +47,7 @@ pub fn bottom((array, c): (Vec<Number>, i64)) -> Result<Value> {
 			message: String::from("The second argument must be an integer greater than 0."),
 		}
 	);
-	Ok(array.bottom(c).into())
+	Ok(array.bottom(c).into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn ceil((arg,): (Number,)) -> Result<Value> {
@@ -216,7 +216,7 @@ pub fn top((array, c): (Vec<Number>, i64)) -> Result<Value> {
 			message: String::from("The second argument must be an integer greater than 0."),
 		}
 	);
-	Ok(array.top(c).into())
+	Ok(array.top(c).into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn trimean((mut array,): (Vec<Number>,)) -> Result<Value> {

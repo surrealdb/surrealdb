@@ -53,7 +53,6 @@ pub(crate) mod table_type;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
 pub(crate) mod user;
-pub(crate) mod version;
 pub(crate) mod view;
 pub(crate) mod with;
 
@@ -106,10 +105,23 @@ pub use self::scoring::Scoring;
 pub use self::script::Script;
 pub use self::split::{Split, Splits};
 pub use self::start::Start;
-pub use self::statements::{CreateStatement, DefineStatement, SelectStatement};
+pub use self::statements::{
+	AccessGrant, AccessStatement, AlterStatement, AlterTableStatement, AnalyzeStatement,
+	BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
+	CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
+	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+	DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement, DefineParamStatement,
+	DefineStatement, DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement,
+	IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement,
+	OutputStatement, RebuildStatement, RelateStatement, RemoveAccessStatement,
+	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement,
+	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
+	SelectStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement, UpdateStatement,
+	UpsertStatement, UseStatement,
+};
 pub use self::table_type::{Relation, TableType};
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
-pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;

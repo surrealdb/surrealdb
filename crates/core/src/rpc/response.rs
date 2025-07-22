@@ -1,6 +1,7 @@
 use crate::dbs::Notification;
 use crate::val::Value;
 use crate::{dbs, expr};
+use anyhow::Result;
 use revision::revisioned;
 use serde::Serialize;
 
@@ -9,7 +10,6 @@ use serde::Serialize;
 // In future, they will possibly be merged to avoid having to keep them in sync.
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize)]
-#[non_exhaustive]
 pub enum Data {
 	/// Generally methods return a `expr::Value`
 	Other(Value),
@@ -20,35 +20,9 @@ pub enum Data {
 	// Add new variants here
 }
 
-impl From<Value> for Data {
-	fn from(v: Value) -> Self {
-		Data::Other(v)
-	}
-}
-
-impl From<String> for Data {
-	fn from(v: String) -> Self {
-		Data::Other(Value::from(v))
-	}
-}
-
-impl From<Notification> for Data {
-	fn from(n: Notification) -> Self {
-		Data::Live(n)
-	}
-}
-
-impl From<Vec<dbs::Response>> for Data {
-	fn from(v: Vec<dbs::Response>) -> Self {
-		Data::Query(v)
-	}
-}
-
-impl TryFrom<Data> for Value {
-	type Error = anyhow::Error;
-
-	fn try_from(val: Data) -> Result<Self, Self::Error> {
-		match val {
+impl Data {
+	pub fn into_value(self) -> Result<Value> {
+		match self {
 			Data::Query(v) => expr::to_value(v),
 			Data::Live(v) => expr::to_value(v),
 			Data::Other(v) => Ok(v),

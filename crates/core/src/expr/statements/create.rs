@@ -3,9 +3,9 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
-use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Version};
+use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::val::Value;
+use crate::val::{Datetime, Value};
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -31,7 +31,7 @@ pub struct CreateStatement {
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 }
 
 impl CreateStatement {
@@ -51,7 +51,13 @@ impl CreateStatement {
 		let stm = Statement::from(self);
 		// Propagate the version to the underlying datastore
 		let version = match &self.version {
-			Some(v) => Some(v.compute(stk, ctx, opt, doc).await?),
+			Some(v) => Some(
+				v.compute(stk, ctx, opt, doc)
+					.await
+					.catch_return()?
+					.cast_to::<Datetime>()?
+					.to_version_stamp()?,
+			),
 			_ => None,
 		};
 		// Ensure futures are stored
@@ -115,7 +121,7 @@ impl fmt::Display for CreateStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " {v}")?
+			write!(f, " VERSION {v}")?
 		}
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?

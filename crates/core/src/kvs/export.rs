@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::expr::paths::{EDGE, IN, OUT};
 use crate::expr::statements::DefineTableStatement;
 use crate::key::thing;
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, Strand, Value};
 use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
@@ -99,7 +99,8 @@ impl From<Config> for Value {
 			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
-				TableConfig::Some(v) => v.into()
+				// TODO: Null byte validity
+				TableConfig::Some(v) => v.into_iter().map(|x| Value::Strand(Strand::new(x).unwrap())).collect::<Vec<_>>().into()
 			},
 		);
 

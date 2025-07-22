@@ -408,12 +408,12 @@ impl SharedVector {
 #[cfg(test)]
 impl From<&Vector> for Value {
 	fn from(v: &Vector) -> Self {
-		let vec: Vec<Number> = match v {
-			Vector::F64(a) => a.iter().map(|i| Number::Float(*i)).collect(),
-			Vector::F32(a) => a.iter().map(|i| Number::Float(*i as f64)).collect(),
-			Vector::I64(a) => a.iter().map(|i| Number::Int(*i)).collect(),
-			Vector::I32(a) => a.iter().map(|i| Number::Int(*i as i64)).collect(),
-			Vector::I16(a) => a.iter().map(|i| Number::Int(*i as i64)).collect(),
+		let vec: Vec<_> = match v {
+			Vector::F64(a) => a.iter().map(|i| Number::Float(*i)).map(Value::from).collect(),
+			Vector::F32(a) => a.iter().map(|i| Number::Float(*i as f64)).map(Value::from).collect(),
+			Vector::I64(a) => a.iter().map(|i| Number::Int(*i)).map(Value::from).collect(),
+			Vector::I32(a) => a.iter().map(|i| Number::Int(*i as i64)).map(Value::from).collect(),
+			Vector::I16(a) => a.iter().map(|i| Number::Int(*i as i64)).map(Value::from).collect(),
 		};
 		Value::from(vec)
 	}

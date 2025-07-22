@@ -17,7 +17,7 @@ pub struct CreateStatement {
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 }
 
 impl fmt::Display for CreateStatement {

@@ -34,7 +34,7 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 }
 
 fn check(r: &mut Vec<Response>, tmp: &str) {
-	let tmp = syn::parse(tmp).unwrap();
+	let tmp = syn::value(tmp).unwrap();
 	let val = match r.remove(0).result {
 		Ok(v) => v,
 		Err(err) => panic!("{err}"),

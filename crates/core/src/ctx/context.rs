@@ -632,22 +632,6 @@ impl MutableContext {
 			bail!(Error::BucketUnavailable(bu.into()))
 		}
 	}
-
-	pub fn attach_variables(&mut self, vars: BTreeMap<String, Value>) -> Result<(), Error> {
-		for (key, val) in vars {
-			// Check if the variable is a protected variable
-			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
-				// The user tried to set a protected variable
-				return Err(Error::InvalidParam {
-					name: key,
-				});
-			}
-
-			// The variable isn't protected and can be stored
-			self.add_value(key, val.into());
-		}
-		Ok(())
-	}
 }
 
 #[cfg(test)]

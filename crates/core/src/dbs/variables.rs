@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::expr::{Object, Thing, Value};
+use crate::val::{Object, Value};
 use surrealdb_protocol::proto::v1 as proto;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -121,26 +121,6 @@ impl TryFrom<Variables> for proto::Variables {
 		for (k, v) in value.0.into_iter() {
 			vars.variables.insert(k, v.try_into()?);
 		}
-		Ok(vars)
-	}
-}
-
-impl TryFrom<(&str, &str)> for Variables {
-	type Error = anyhow::Error;
-
-	fn try_from(value: (&str, &str)) -> Result<Self, Self::Error> {
-		let mut vars = Self::new();
-		vars.insert(value.0.to_string(), value.1.into());
-		Ok(vars)
-	}
-}
-
-impl TryFrom<(&str, Thing)> for Variables {
-	type Error = anyhow::Error;
-
-	fn try_from(value: (&str, Thing)) -> Result<Self, Self::Error> {
-		let mut vars = Self::new();
-		vars.insert(value.0.to_string(), value.1.into());
 		Ok(vars)
 	}
 }

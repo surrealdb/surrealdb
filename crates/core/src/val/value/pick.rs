@@ -1,5 +1,4 @@
 use crate::expr::part::{Next, Part};
-use crate::expr::{Expr, Literal};
 use crate::val::Value;
 
 impl Value {
@@ -133,7 +132,7 @@ mod tests {
 		let idi: Idiom = syn::idiom("test.something[*].age").unwrap().into();
 		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
 		let res = val.pick(&idi);
-		assert_eq!(res, Value::from(vec![34, 36]));
+		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
 	}
 
 	#[test]
@@ -141,6 +140,6 @@ mod tests {
 		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
 		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
 		let res = val.pick(&idi);
-		assert_eq!(res, Value::from(vec![34, 36]));
+		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
 	}
 }

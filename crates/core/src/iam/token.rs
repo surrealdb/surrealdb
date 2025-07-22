@@ -1,5 +1,5 @@
 use crate::syn;
-use crate::val::{Object, Value};
+use crate::val::{Object, Strand, Value};
 use jsonwebtoken::{Algorithm, Header};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -72,63 +72,77 @@ pub struct Claims {
 	pub custom_claims: Option<HashMap<String, serde_json::Value>>,
 }
 
-impl From<Claims> for Value {
-	fn from(v: Claims) -> Value {
+impl Claims {
+	pub fn into_claims_object(self) -> Object {
 		// Set default value
 		let mut out = Object::default();
+		// TODO: Null byte validity
 		// Add iss field if set
-		if let Some(iss) = v.iss {
+		if let Some(iss) = self.iss {
 			out.insert("iss".to_string(), iss.into());
 		}
 		// Add sub field if set
-		if let Some(sub) = v.sub {
+		if let Some(sub) = self.sub {
 			out.insert("sub".to_string(), sub.into());
 		}
 		// Add aud field if set
-		if let Some(aud) = v.aud {
+		if let Some(aud) = self.aud {
 			match aud {
-				Audience::Single(v) => out.insert("aud".to_string(), v.into()),
-				Audience::Multiple(v) => out.insert("aud".to_string(), v.into()),
+				Audience::Single(v) => out
+					.insert("aud".to_string(), vec![Value::Strand(Strand::new(v).unwrap())].into()),
+				Audience::Multiple(v) => out.insert(
+					"aud".to_string(),
+					v.into_iter()
+						.map(|s| Value::Strand(Strand::new(s).unwrap()))
+						.collect::<Vec<_>>()
+						.into(),
+				),
 			};
 		}
 		// Add iat field if set
-		if let Some(iat) = v.iat {
+		if let Some(iat) = self.iat {
 			out.insert("iat".to_string(), iat.into());
 		}
 		// Add nbf field if set
-		if let Some(nbf) = v.nbf {
+		if let Some(nbf) = self.nbf {
 			out.insert("nbf".to_string(), nbf.into());
 		}
 		// Add exp field if set
-		if let Some(exp) = v.exp {
+		if let Some(exp) = self.exp {
 			out.insert("exp".to_string(), exp.into());
 		}
 		// Add jti field if set
-		if let Some(jti) = v.jti {
+		if let Some(jti) = self.jti {
 			out.insert("jti".to_string(), jti.into());
 		}
 		// Add NS field if set
-		if let Some(ns) = v.ns {
+		if let Some(ns) = self.ns {
 			out.insert("NS".to_string(), ns.into());
 		}
 		// Add DB field if set
-		if let Some(db) = v.db {
+		if let Some(db) = self.db {
 			out.insert("DB".to_string(), db.into());
 		}
 		// Add AC field if set
-		if let Some(ac) = v.ac {
+		if let Some(ac) = self.ac {
 			out.insert("AC".to_string(), ac.into());
 		}
 		// Add ID field if set
-		if let Some(id) = v.id {
+		if let Some(id) = self.id {
 			out.insert("ID".to_string(), id.into());
 		}
 		// Add RL field if set
-		if let Some(role) = v.roles {
-			out.insert("RL".to_string(), role.into());
+		if let Some(role) = self.roles {
+			out.insert(
+				"RL".to_string(),
+				role.into_iter()
+					.map(|x| Value::from(Strand::new(x).unwrap()))
+					.collect::<Vec<_>>()
+					.into(),
+			);
 		}
 		// Add custom claims if set
-		if let Some(custom_claims) = v.custom_claims {
+		if let Some(custom_claims) = self.custom_claims {
 			for (claim, value) in custom_claims {
 				// Serialize the raw JSON string representing the claim value
 				let claim_json = match serde_json::to_string(&value) {
@@ -150,88 +164,6 @@ impl From<Claims> for Value {
 			}
 		}
 		// Return value
-		out.into()
-	}
-}
-
-impl From<&Claims> for Value {
-	fn from(v: &Claims) -> Value {
-		// Set default value
-		let mut out = Object::default();
-		// Add iss field if set
-		if let Some(iss) = &v.iss {
-			out.insert("iss".to_string(), iss.clone().into());
-		}
-		// Add sub field if set
-		if let Some(sub) = &v.sub {
-			out.insert("sub".to_string(), sub.clone().into());
-		}
-		// Add aud field if set
-		if let Some(aud) = &v.aud {
-			match aud {
-				Audience::Single(v) => out.insert("aud".to_string(), v.clone().into()),
-				Audience::Multiple(v) => out.insert("aud".to_string(), v.clone().into()),
-			};
-		}
-		// Add iat field if set
-		if let Some(iat) = v.iat {
-			out.insert("iat".to_string(), iat.into());
-		}
-		// Add nbf field if set
-		if let Some(nbf) = v.nbf {
-			out.insert("nbf".to_string(), nbf.into());
-		}
-		// Add exp field if set
-		if let Some(exp) = v.exp {
-			out.insert("exp".to_string(), exp.into());
-		}
-		// Add jti field if set
-		if let Some(jti) = &v.jti {
-			out.insert("jti".to_string(), jti.clone().into());
-		}
-		// Add NS field if set
-		if let Some(ns) = &v.ns {
-			out.insert("NS".to_string(), ns.clone().into());
-		}
-		// Add DB field if set
-		if let Some(db) = &v.db {
-			out.insert("DB".to_string(), db.clone().into());
-		}
-		// Add AC field if set
-		if let Some(ac) = &v.ac {
-			out.insert("AC".to_string(), ac.clone().into());
-		}
-		// Add ID field if set
-		if let Some(id) = &v.id {
-			out.insert("ID".to_string(), id.clone().into());
-		}
-		// Add RL field if set
-		if let Some(role) = &v.roles {
-			out.insert("RL".to_string(), role.clone().into());
-		}
-		// Add custom claims if set
-		if let Some(custom_claims) = &v.custom_claims {
-			for (claim, value) in custom_claims {
-				// Serialize the raw JSON string representing the claim value
-				let claim_json = match serde_json::to_string(&value) {
-					Ok(claim_json) => claim_json,
-					Err(err) => {
-						debug!("Failed to serialize token claim '{}': {}", claim, err);
-						continue;
-					}
-				};
-				// Parse that JSON string into the corresponding SurrealQL value
-				let claim_value = match syn::json(&claim_json) {
-					Ok(claim_value) => claim_value,
-					Err(err) => {
-						debug!("Failed to parse token claim '{}': {}", claim, err);
-						continue;
-					}
-				};
-				out.insert(claim.to_owned(), claim_value.into());
-			}
-		}
-		// Return value
-		out.into()
+		out
 	}
 }

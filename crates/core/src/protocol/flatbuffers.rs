@@ -1,18 +1,21 @@
 use crate::dbs::Variables;
-use crate::expr::graph::{GraphSubject, GraphSubjects};
+use crate::expr::graph::GraphSubject;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::part::{DestructurePart, Recurse, RecurseInstruction};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
 use surrealdb_protocol::proto::prost_types;
 
+use crate::val::{
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, RecordIdKey,
+	Strand, Table, Uuid, Value,
+};
+
 use crate::expr::{
-	Array, Cond, Data, Datetime, Dir, Duration, Fetch, Fetchs, Field, Fields, File, Geometry,
-	Graph, Group, Groups, Id, IdRange, Ident, Idiom, Limit, Number, Object, Operator, Order, Part,
-	Split, Splits, Start, Strand, Table, Thing, Timeout, Uuid, Value, idiom,
+	Cond, Data, Dir, Fetch, Fetchs, Field, Fields, Graph, Group, Groups, Ident, Idiom, Limit,
+	Order, Part, Split, Splits, Start, Timeout, idiom,
 };
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
-use core::panic;
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -29,6 +32,13 @@ impl ToFlatbuffers for Value {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
 		let args = match self {
+			Self::None => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::NONE,
+				value: Some(
+					proto_fb::NullValue::create(builder, &proto_fb::NullValueArgs {})
+						.as_union_value(),
+				),
+			},
 			Self::Null => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Null,
 				value: Some(
@@ -49,7 +59,7 @@ impl ToFlatbuffers for Value {
 				),
 			},
 			Self::Number(n) => match n {
-				crate::expr::Number::Int(i) => proto_fb::ValueArgs {
+				Number::Int(i) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Int64,
 					value: Some(
 						proto_fb::Int64Value::create(
@@ -61,7 +71,7 @@ impl ToFlatbuffers for Value {
 						.as_union_value(),
 					),
 				},
-				crate::expr::Number::Float(f) => proto_fb::ValueArgs {
+				Number::Float(f) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Float64,
 					value: Some(
 						proto_fb::Float64Value::create(
@@ -73,7 +83,7 @@ impl ToFlatbuffers for Value {
 						.as_union_value(),
 					),
 				},
-				crate::expr::Number::Decimal(d) => proto_fb::ValueArgs {
+				Number::Decimal(d) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Decimal,
 					value: Some(d.to_fb(builder)?.as_union_value()),
 				},
@@ -129,10 +139,10 @@ impl ToFlatbuffers for Value {
 				value_type: proto_fb::ValueType::File,
 				value: Some(file.to_fb(builder)?.as_union_value()),
 			},
-			_ => {
-				// TODO: DO NOT PANIC, we just need to modify the Value enum which Mees is currently working on.
-				panic!("Unsupported value type for Flatbuffers serialization: {:?}", self);
-			}
+			// no proto_fb for range.
+			Self::Range(_) => todo!(),
+			// Things which might not be computed
+			Self::Closure(_) | Self::Table(_) | Self::Regex(_) => todo!(),
 		};
 
 		Ok(proto_fb::Value::create(builder, &args))
@@ -145,6 +155,9 @@ impl FromFlatbuffers for Value {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.value_type() {
+			// TODO: Should none be send across the wire? It is generally intended to delete
+			// entries from objects.
+			proto_fb::ValueType::NONE => Ok(Value::None),
 			proto_fb::ValueType::Null => Ok(Value::Null),
 			proto_fb::ValueType::Bool => {
 				Ok(Value::Bool(input.value_as_bool().expect("Guaranteed to be a Bool").value()))
@@ -170,11 +183,12 @@ impl FromFlatbuffers for Value {
 					.value()
 					.expect("String value is guaranteed to be present")
 					.to_string();
-				Ok(Value::Strand(Strand(value)))
+				// TODO: Null byte validity
+				Ok(Value::Strand(Strand::new(value).unwrap()))
 			}
 			proto_fb::ValueType::Bytes => {
 				let bytes_value = input.value_as_bytes().expect("Guaranteed to be Bytes");
-				let bytes = crate::expr::Bytes::from_fb(
+				let bytes = Bytes::from_fb(
 					bytes_value.value().expect("Bytes value is guaranteed to be present"),
 				)?;
 				Ok(Value::Bytes(bytes))
@@ -182,7 +196,7 @@ impl FromFlatbuffers for Value {
 			proto_fb::ValueType::RecordId => {
 				let record_id_value =
 					input.value_as_record_id().expect("Guaranteed to be a RecordId");
-				let thing = Thing::from_fb(record_id_value)?;
+				let thing = RecordId::from_fb(record_id_value)?;
 				Ok(Value::Thing(thing))
 			}
 			proto_fb::ValueType::Duration => {
@@ -319,6 +333,8 @@ impl ToFlatbuffers for Decimal {
 	}
 }
 
+// TODO: Remove these so that you don't accidentally send an unwrapped duration?
+// Or remove the duration wrapper.
 impl ToFlatbuffers for std::time::Duration {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Duration<'bldr>>;
 
@@ -428,7 +444,7 @@ impl FromFlatbuffers for Uuid {
 	}
 }
 
-impl ToFlatbuffers for Thing {
+impl ToFlatbuffers for RecordId {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::RecordId<'bldr>>;
 
 	#[inline]
@@ -437,7 +453,7 @@ impl ToFlatbuffers for Thing {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
 		let table = builder.create_string(&self.tb);
-		let id = self.id.to_fb(builder)?;
+		let id = self.key.to_fb(builder)?;
 		Ok(proto_fb::RecordId::create(
 			builder,
 			&proto_fb::RecordIdArgs {
@@ -448,30 +464,32 @@ impl ToFlatbuffers for Thing {
 	}
 }
 
-impl FromFlatbuffers for Thing {
+impl FromFlatbuffers for RecordId {
 	type Input<'a> = proto_fb::RecordId<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let table = input.table().ok_or_else(|| anyhow::anyhow!("Missing table in RecordId"))?;
-		let id = Id::from_fb(input.id().ok_or_else(|| anyhow::anyhow!("Missing id in RecordId"))?)?;
-		Ok(Thing {
-			tb: table.to_string(),
-			id,
+		let key = RecordIdKey::from_fb(
+			input.id().ok_or_else(|| anyhow::anyhow!("Missing id in RecordId"))?,
+		)?;
+		Ok(RecordId {
+			table: table.to_string(),
+			key,
 		})
 	}
 }
 
-impl FromFlatbuffers for crate::expr::Bytes {
+impl FromFlatbuffers for Bytes {
 	type Input<'a> = flatbuffers::Vector<'a, u8>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
-		Ok(crate::expr::Bytes(input.bytes().to_vec()))
+		Ok(Bytes(input.bytes().to_vec()))
 	}
 }
 
-impl ToFlatbuffers for Id {
+impl ToFlatbuffers for RecordIdKey {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Id<'bldr>>;
 
 	#[inline]
@@ -480,7 +498,7 @@ impl ToFlatbuffers for Id {
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
 		match self {
-			Id::Number(n) => {
+			RecordIdKey::Number(n) => {
 				let id = n.to_fb(builder)?.as_union_value();
 				Ok(proto_fb::Id::create(
 					builder,
@@ -490,7 +508,7 @@ impl ToFlatbuffers for Id {
 					},
 				))
 			}
-			Id::String(s) => {
+			RecordIdKey::String(s) => {
 				let id = s.to_fb(builder)?.as_union_value();
 				Ok(proto_fb::Id::create(
 					builder,
@@ -500,7 +518,7 @@ impl ToFlatbuffers for Id {
 					},
 				))
 			}
-			Id::Uuid(uuid) => {
+			RecordIdKey::Uuid(uuid) => {
 				let id = uuid.to_fb(builder)?.as_union_value();
 				Ok(proto_fb::Id::create(
 					builder,
@@ -510,7 +528,7 @@ impl ToFlatbuffers for Id {
 					},
 				))
 			}
-			Id::Array(arr) => {
+			RecordIdKey::Array(arr) => {
 				let id = arr.to_fb(builder)?.as_union_value();
 				Ok(proto_fb::Id::create(
 					builder,
@@ -520,7 +538,9 @@ impl ToFlatbuffers for Id {
 					},
 				))
 			}
-			_ => Err(anyhow::anyhow!(
+			RecordIdKey::Range(_) => todo!(),
+			// TODO: Remove in follow up PR with removeal of Object record ids
+			RecordIdKey::Object(_) => Err(anyhow::anyhow!(
 				"Unsupported Id type for FlatBuffers serialization: {:?}",
 				self
 			)),
@@ -528,7 +548,7 @@ impl ToFlatbuffers for Id {
 	}
 }
 
-impl FromFlatbuffers for Id {
+impl FromFlatbuffers for RecordIdKey {
 	type Input<'a> = proto_fb::Id<'a>;
 
 	#[inline]
@@ -537,12 +557,12 @@ impl FromFlatbuffers for Id {
 			proto_fb::IdType::Int64 => {
 				let id_value =
 					input.id_as_int_64().ok_or_else(|| anyhow::anyhow!("Expected Int64 Id"))?;
-				Ok(Id::Number(id_value.value()))
+				Ok(RecordIdKey::Number(id_value.value()))
 			}
 			proto_fb::IdType::String => {
 				let id_value =
 					input.id_as_string().ok_or_else(|| anyhow::anyhow!("Expected String Id"))?;
-				Ok(Id::String(
+				Ok(RecordIdKey::String(
 					id_value
 						.value()
 						.ok_or_else(|| anyhow::anyhow!("Missing String value"))?
@@ -553,13 +573,13 @@ impl FromFlatbuffers for Id {
 				let id_value =
 					input.id_as_uuid().ok_or_else(|| anyhow::anyhow!("Expected Uuid Id"))?;
 				let uuid = Uuid::from_fb(id_value)?;
-				Ok(Id::Uuid(uuid))
+				Ok(RecordIdKey::Uuid(uuid))
 			}
 			proto_fb::IdType::Array => {
 				let id_value =
 					input.id_as_array().ok_or_else(|| anyhow::anyhow!("Expected Array Id"))?;
 				let array = Array::from_fb(id_value)?;
-				Ok(Id::Array(array))
+				Ok(RecordIdKey::Array(array))
 			}
 			_ => Err(anyhow::anyhow!(
 				"Unsupported Id type for FlatBuffers deserialization: {:?}",
@@ -1110,6 +1130,7 @@ impl ToFlatbuffers for Idiom {
 	}
 }
 
+/*
 impl FromFlatbuffers for Idiom {
 	type Input<'a> = proto_fb::Idiom<'a>;
 
@@ -3390,6 +3411,8 @@ impl TryFrom<proto::Limit> for crate::expr::Limit {
 	}
 }
 
+*/
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -3412,23 +3435,23 @@ mod tests {
 	#[case::duration(Value::Duration(Duration::new(1, 0)))]
 	#[case::datetime(Value::Datetime(Datetime(DateTime::<Utc>::from_timestamp(1_000_000_000, 0).unwrap())))]
 	#[case::uuid(Value::Uuid(Uuid::new_v4()))]
-	#[case::string(Value::Strand(Strand("Hello, World!".to_string())))]
-	#[case::bytes(Value::Bytes(crate::expr::Bytes(vec![1, 2, 3, 4, 5])))]
-	#[case::thing(Value::Thing(Thing { tb: "test_table".to_string(), id: Id::Number(42) }))] // Example Thing
-	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::Strand(Strand("value".to_string())))]))))]
+	#[case::string(Value::Strand(Strand::new("Hello, World!".to_string()).unwrap()))]
+	#[case::bytes(Value::Bytes(Bytes(vec![1, 2, 3, 4, 5])))]
+	#[case::thing(Value::Thing(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
+	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::Strand(Strand::new("value".to_owned()).unwrap()))]))))]
 	#[case::array(Value::Array(Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	#[case::geometry::point(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]
 	#[case::geometry::line(Value::Geometry(Geometry::Line(geo::LineString(vec![geo::Coord { x: 1.0, y: 2.0 }, geo::Coord { x: 3.0, y: 4.0 }]))))]
 	#[case::geometry::polygon(Value::Geometry(Geometry::Polygon(geo::Polygon::new(
-        geo::LineString(vec![geo::Coord { x: 0.0, y: 0.0 }, geo::Coord { x: 1.0, y: 1.0 }, geo::Coord { x: 0.0, y: 1.0 }]),
-        vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
-    ))))]
+		geo::LineString(vec![geo::Coord { x: 0.0, y: 0.0 }, geo::Coord { x: 1.0, y: 1.0 }, geo::Coord { x: 0.0, y: 1.0 }]),
+		vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
+	))))]
 	#[case::geometry::multipoint(Value::Geometry(Geometry::MultiPoint(geo::MultiPoint(vec![geo::Point::new(1.0, 2.0), geo::Point::new(3.0, 4.0)]))))]
 	#[case::geometry::multiline(Value::Geometry(Geometry::MultiLine(geo::MultiLineString(vec![geo::LineString(vec![geo::Coord { x: 1.0, y: 2.0 }, geo::Coord { x: 3.0, y: 4.0 }])] ))))]
 	#[case::geometry::multipolygon(Value::Geometry(Geometry::MultiPolygon(geo::MultiPolygon(vec![geo::Polygon::new(
-        geo::LineString(vec![geo::Coord { x: 0.0, y: 0.0 }, geo::Coord { x: 1.0, y: 1.0 }, geo::Coord { x: 0.0, y: 1.0 }]),
-        vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
-    )]))))]
+		geo::LineString(vec![geo::Coord { x: 0.0, y: 0.0 }, geo::Coord { x: 1.0, y: 1.0 }, geo::Coord { x: 0.0, y: 1.0 }]),
+		vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
+	)]))))]
 	#[case::file(Value::File(File { bucket: "test_bucket".to_string(), key: "test_key".to_string() }))]
 	fn test_flatbuffers_roundtrip(#[case] input: Value) {
 		let mut builder = flatbuffers::FlatBufferBuilder::new();

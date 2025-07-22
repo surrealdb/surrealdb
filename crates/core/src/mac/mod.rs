@@ -160,6 +160,25 @@ macro_rules! run {
 	};
 }
 
+/// Macro which creates a StrandRef a str like type which is guarenteed to not contain null bytes.
+#[macro_export]
+macro_rules! strand {
+	($e:expr) => {
+		const {
+			let s: &str = $e;
+			let mut len = s.len();
+			while len > 0 {
+				len -= 1;
+				if s.as_bytes()[len] == 0 {
+					panic!("used strand! macro on strand with null bytes")
+				}
+			}
+			// Safe as the condition is checked above
+			unsafe { $crate::val::StrandRef::new_unchecked(s) }
+		}
+	};
+}
+
 #[cfg(test)]
 mod test {
 	use crate::err::Error;

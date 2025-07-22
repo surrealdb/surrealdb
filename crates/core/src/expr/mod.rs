@@ -57,7 +57,6 @@ pub(crate) mod table_type;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
 pub(crate) mod user;
-pub(crate) mod version;
 pub(crate) mod view;
 pub(crate) mod with;
 
@@ -116,7 +115,6 @@ pub use self::statements::{
 pub use self::table_type::{Relation, TableType};
 pub use self::timeout::Timeout;
 pub use self::tokenizer::Tokenizer;
-pub use self::version::Version;
 pub use self::view::View;
 pub use self::with::With;
 

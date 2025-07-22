@@ -60,6 +60,12 @@ impl Fields {
 	pub(crate) fn all() -> Self {
 		Fields::Select(vec![Field::All])
 	}
+
+	/// Create a field projection with no fields
+	pub(crate) fn none() -> Self {
+		Fields::Select(vec![])
+	}
+
 	/// Check to see if this field is a `*` projection
 	pub fn has_all_selection(&self) -> bool {
 		match self {

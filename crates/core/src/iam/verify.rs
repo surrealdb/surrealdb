@@ -147,7 +147,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Convert the token to a SurrealQL object value
-	let value = (&token_data.claims).into();
+	let value = Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
@@ -206,7 +206,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(ns).with_db(db);
 				sess.rd = Some(rid.clone().into());
-				sess.tk = Some((&token_data.claims).into());
+				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
@@ -268,7 +268,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					if let Some(au) = &de.authenticate {
 						// Setup the system session for executing the clause
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
-						sess.tk = Some((&token_data.claims).into());
+						sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
@@ -328,7 +328,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
-						sess.tk = Some((&token_data.claims).into());
+						sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						let rid = authenticate_record(kvs, &sess, au).await?;
@@ -428,7 +428,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor().with_ns(ns);
-				sess.tk = Some((&token_data.claims).into());
+				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;
@@ -534,7 +534,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor();
-				sess.tk = Some((&token_data.claims).into());
+				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;

@@ -1,4 +1,5 @@
 use crate::sql::{Ident, escape::EscapeIdent};
+use crate::val::Strand;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -6,7 +7,7 @@ use std::{fmt, str};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Param(pub String);
+pub struct Param(String);
 
 impl Param {
 	/// Create a new identifier
@@ -25,6 +26,10 @@ impl Param {
 	/// Caller should ensure that the string does not contain a null byte.
 	pub unsafe fn new_unchecked(str: String) -> Self {
 		Self(str)
+	}
+
+	pub fn from_strand(strand: Strand) -> Self {
+		Param(strand.into_string())
 	}
 
 	pub fn ident(self) -> Ident {

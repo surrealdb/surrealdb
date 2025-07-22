@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::expr::escape::QuoteStr;
 use crate::syn;
 use crate::val::{Duration, Strand, TrySub};
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
@@ -100,6 +100,10 @@ impl Datetime {
 	/// Convert to nanosecond timestamp.
 	pub fn to_u64(&self) -> Option<u64> {
 		self.0.timestamp_nanos_opt().map(|v| v as u64)
+	}
+
+	pub fn to_version_stamp(&self) -> Result<u64> {
+		self.to_u64().ok_or_else(|| bail!(Error::TimestampOverflow(self.to_string())))
 	}
 
 	/// Convert to nanosecond timestamp.

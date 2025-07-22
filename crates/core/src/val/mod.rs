@@ -43,7 +43,7 @@ pub use self::number::{DecimalExt, Number};
 pub use self::object::Object;
 pub use self::range::Range;
 pub use self::regex::Regex;
-pub use self::strand::Strand;
+pub use self::strand::{Strand, StrandRef};
 pub use self::table::Table;
 pub use self::thing::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::uuid::Uuid;
@@ -148,25 +148,6 @@ impl Value {
 		}
 	}
 
-	/// Check if this Value is a single Thing
-	pub fn is_thing_single(&self) -> bool {
-		match self {
-			Value::Thing(t) => !matches!(t.key, RecordIdKey::Range(_)),
-			_ => false,
-		}
-	}
-
-	/// Check if this Value is a single Thing
-	pub fn is_thing_range(&self) -> bool {
-		matches!(
-			self,
-			Value::Thing(RecordId {
-				key: RecordIdKey::Range { .. },
-				..
-			})
-		)
-	}
-
 	/// Check if this Value is a Thing, and belongs to a certain table
 	pub fn is_record_of_table(&self, table: String) -> bool {
 		match self {
@@ -249,15 +230,6 @@ impl Value {
 			Value::Geometry(Geometry::Collection(_)) => {
 				types.iter().any(|t| matches!(t.as_str(), "feature" | "collection"))
 			}
-			_ => false,
-		}
-	}
-
-	/// Returns if selecting on this value returns a single result.
-	pub fn is_singular_selector(&self) -> bool {
-		match self {
-			Value::Object(_) => true,
-			t @ Value::Thing(_) => t.is_thing_single(),
 			_ => false,
 		}
 	}
@@ -684,13 +656,6 @@ impl InfoStructure for Value {
 	}
 }
 
-#[cfg(test)]
-impl crate::syn::Parse<Self> for Value {
-	fn parse(val: &str) -> Self {
-		Value::from(crate::sql::SqlValue::parse(val))
-	}
-}
-
 // ------------------------------
 
 pub(crate) trait TryAdd<Rhs = Self> {
@@ -971,26 +936,9 @@ macro_rules! impl_from_number {
 }
 impl_from_number!(i8, i16, i32, i64, u8, u16, u32, isize, f32, f64, Decimal);
 
-impl<T> From<Vec<T>> for Value
-where
-	Value: From<T>,
-{
-	fn from(value: Vec<T>) -> Self {
-		let v = value.into_iter().map(Value::from).collect();
-		Value::Array(Array(v))
-	}
-}
-
-impl<T> From<Option<T>> for Value
-where
-	Value: From<T>,
-{
-	fn from(value: Option<T>) -> Self {
-		if let Some(x) = value {
-			Value::from(x)
-		} else {
-			Value::None
-		}
+impl From<Vec<Value>> for Value {
+	fn from(value: Vec<Value>) -> Self {
+		Value::Array(Array(value))
 	}
 }
 

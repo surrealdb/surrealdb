@@ -11,6 +11,15 @@ pub struct Ast {
 	pub expressions: Vec<TopLevelExpr>,
 }
 
+impl Ast {
+	/// Creates an ast with a signle expression
+	pub fn single_expr(expr: Expr) -> Self {
+		Ast {
+			expressions: vec![TopLevelExpr::Expr(expr)],
+		}
+	}
+}
+
 impl From<expr::LogicalPlan> for Ast {
 	fn from(value: expr::LogicalPlan) -> Self {
 		Ast {

@@ -9,7 +9,7 @@ use crate::err::Error;
 use crate::expr::Kind;
 use crate::expr::fmt::{Fmt, fmt_separated_by};
 use crate::syn;
-use crate::val::{Object, Value};
+use crate::val::{Array, Object, Strand, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -221,7 +221,6 @@ impl FromStr for Path {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Segment {
 	Fixed(String),
 	Dynamic(String, Option<Kind>),
@@ -245,7 +244,16 @@ impl Segment {
 
 					val.map(|val| Some((x.to_owned(), val)))
 				}
-				Self::Rest(x) => Some(Some((x.to_owned(), segments.to_vec().into()))),
+				Self::Rest(x) => {
+					// TODO: Null byte validity
+					let values = segments
+						.iter()
+						.copied()
+						.map(|x| Value::Strand(Strand::new(x.to_owned()).unwrap()))
+						.collect::<Vec<_>>();
+
+					Some(Some((x.to_owned(), Value::Array(Array(values)))))
+				}
 				_ => None,
 			}
 		} else {

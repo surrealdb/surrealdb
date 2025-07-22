@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Version};
+use crate::expr::{Base, Expr, FlowResultExt, Ident};
 use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
-use crate::val::{Object, Value};
+use crate::val::{Datetime, Object, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -24,9 +24,9 @@ pub enum InfoStatement {
 
 	Ns(bool),
 
-	Db(bool, Option<Version>),
+	Db(bool, Option<Expr>),
 
-	Tb(Ident, bool, Option<Version>),
+	Tb(Ident, bool, Option<Expr>),
 
 	User(Ident, Option<Base>, bool),
 
@@ -146,7 +146,13 @@ impl InfoStatement {
 				let (ns, db) = opt.ns_db()?;
 				// Convert the version to u64 if present
 				let version = match version {
-					Some(v) => Some(v.compute(stk, ctx, opt, None).await?),
+					Some(v) => Some(
+						v.compute(stk, ctx, opt, None)
+							.await
+							.catch_return()?
+							.cast_to::<Datetime>()?
+							.to_version_stamp()?,
+					),
 					_ => None,
 				};
 				// Get the transaction
@@ -258,21 +264,28 @@ impl InfoStatement {
 				let (ns, db) = opt.ns_db()?;
 				// Convert the version to u64 if present
 				let version = match version {
-					Some(v) => Some(v.compute(stk, ctx, opt, None).await?),
+					Some(v) => Some(
+						v.compute(stk, ctx, opt, None)
+							.await
+							.catch_return()?
+							.cast_to::<Datetime>()?
+							.to_version_stamp()?,
+					),
 					_ => None,
 				};
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
-				Ok(match structured {
-					true => Value::from(map! {
+				Ok(if *structured {
+					Value::from(map! {
 						"events".to_string() => process(txn.all_tb_events(ns, db, tb).await?),
 						"fields".to_string() => process(txn.all_tb_fields(ns, db, tb, version).await?),
 						"indexes".to_string() => process(txn.all_tb_indexes(ns, db, tb).await?),
 						"lives".to_string() => process(txn.all_tb_lives(ns, db, tb).await?),
 						"tables".to_string() => process(txn.all_tb_views(ns, db, tb).await?),
-					}),
-					false => Value::from(map! {
+					})
+				} else {
+					Value::from(map! {
 						"events".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
@@ -308,7 +321,7 @@ impl InfoStatement {
 							}
 							out.into()
 						},
-					}),
+					})
 				})
 			}
 			InfoStatement::User(user, base, structured) => {
@@ -329,9 +342,10 @@ impl InfoStatement {
 					_ => bail!(Error::InvalidLevel(base.to_string())),
 				};
 				// Ok all good
-				Ok(match structured {
-					true => res.as_ref().clone().structure(),
-					false => Value::from(res.to_string()),
+				Ok(if *structured {
+					res.as_ref().clone().structure()
+				} else {
+					Value::from(res.to_string())
 				})
 			}
 			#[cfg_attr(target_family = "wasm", expect(unused_variables))]
@@ -415,7 +429,7 @@ async fn system() -> Value {
 	Value::from(map! {
 		"available_parallelism".to_string() => info.available_parallelism.into(),
 		"cpu_usage".to_string() => info.cpu_usage.into(),
-		"load_average".to_string() => info.load_average.to_vec().into(),
+		"load_average".to_string() => info.load_average.iter().map(|x| Value::from(*x)).collect::<Vec<_>>().into(),
 		"memory_usage".to_string() => info.memory_usage.into(),
 		"physical_cores".to_string() => info.physical_cores.into(),
 		"memory_allocated".to_string() => info.memory_allocated.into(),

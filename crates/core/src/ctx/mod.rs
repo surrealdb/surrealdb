@@ -21,8 +21,8 @@
 // or http://opensource.org/licenses/MIT>, at your option. This file may not be
 // used, copied, modified, or distributed except according to those terms.
 
-pub use self::canceller::*;
-pub use self::context::*;
+pub use self::canceller::Canceller;
+pub use self::context::{Context, MutableContext};
 
 pub mod cancellation;
 pub mod canceller;

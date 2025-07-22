@@ -235,8 +235,8 @@ impl InfoStructure for DefineUserStatement {
 			"hash".to_string() => self.hash.into(),
 			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
 			"duration".to_string() => Value::from(map! {
-				"token".to_string() => self.duration.token.into(),
-				"session".to_string() => self.duration.session.into(),
+				"token".to_string() => self.duration.token.map(Value::from).unwrap_or(Value::None),
+				"session".to_string() => self.duration.session.map(Value::from).unwrap_or(Value::None),
 			}),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})

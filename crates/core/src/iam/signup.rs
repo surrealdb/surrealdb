@@ -129,7 +129,7 @@ pub async fn db_access(
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.rd = Some(rid.clone().into());
-				sess.tk = Some((&claims).into());
+				sess.tk = Some(claims.clone().into_claims_object().into());
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
@@ -164,7 +164,7 @@ pub async fn db_access(
 			// Create the authentication token
 			let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 			// Set the authentication on the session
-			session.tk = Some((&claims).into());
+			session.tk = Some(claims.into_claims_object().into());
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.ac = Some(ac.clone());
