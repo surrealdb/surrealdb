@@ -2,6 +2,7 @@ use super::Transaction;
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{EDGE, IN, OUT};
+use crate::val::Value;
 use crate::expr::statements::DefineTableStatement;
 use crate::key::thing;
 use crate::val::{RecordId, Strand, Value};

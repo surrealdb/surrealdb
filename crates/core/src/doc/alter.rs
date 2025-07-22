@@ -4,7 +4,7 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::expr::data::Data;
-use crate::expr::paths::{EDGE, ID, IN, OUT};
+use crate::expr::paths::{EDGE, ID};
 use crate::expr::{AssignOperator, FlowResultExt};
 use crate::val::{RecordId, Value};
 use anyhow::{Result, bail, ensure};
