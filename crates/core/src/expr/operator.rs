@@ -1,13 +1,13 @@
 use super::Value;
 use crate::expr::index::Distance;
 use crate::idx::ft::MatchRef;
-use revision::revisioned;
+use revision::{Error, revisioned};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
 
 /// Binary operators.
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -44,7 +44,14 @@ pub enum Operator {
 	AllLike, // *~
 	#[revision(end = 3, convert_fn = "like_convert")]
 	AnyLike, // ?~
-	Matches(Option<MatchRef>, Option<BooleanOperator>), // @{ref}@
+	#[revision(
+		end = 4,
+		convert_fn = "convert_old_matches",
+		fields_name = "OldMatchesOperatorField"
+	)]
+	Matches(Option<MatchRef>), // @{ref}@
+	#[revision(start = 4)]
+	Matches(Option<MatchRef>, Option<BooleanOperator>), // @{ref},{AND|OR}@
 	//
 	LessThan,        // <
 	LessThanOrEqual, // <=
@@ -75,6 +82,13 @@ pub enum Operator {
 impl Operator {
 	fn like_convert<T>(_: T, _revision: u16) -> Result<Self, revision::Error> {
 		Err(revision::Error::Conversion("Like operators are no longer supported".to_owned()))
+	}
+
+	fn convert_old_matches(
+		field: OldMatchesOperatorField,
+		_revision: u16,
+	) -> anyhow::Result<Self, Error> {
+		Ok(Operator::Matches(field.0, None))
 	}
 }
 
