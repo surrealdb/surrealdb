@@ -9,7 +9,6 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::expr::output::Output;
-use crate::expr::paths::META;
 use crate::expr::permission::Permission;
 use crate::expr::{FlowResultExt as _, Operation};
 use crate::iam::Action;
