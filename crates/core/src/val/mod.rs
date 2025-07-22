@@ -28,6 +28,7 @@ pub mod geometry;
 pub mod number;
 pub mod object;
 pub mod range;
+pub mod record;
 pub mod regex;
 pub mod strand;
 pub mod table;
