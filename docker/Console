@@ -1,0 +1,15 @@
+# STAGE: builder
+# This stage is used to build the Tokio Console linux binary
+###
+
+FROM docker.io/rust:1.88.0 AS builder
+WORKDIR /usr/src/tokio-console
+COPY --link . .
+RUN cargo install --locked --path tokio-console
+
+#
+# Production image
+#
+FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod
+COPY --from=builder /usr/local/cargo/bin/tokio-console /usr/bin/tokio-console
+CMD ["tokio-console"]
