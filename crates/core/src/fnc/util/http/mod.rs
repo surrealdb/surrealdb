@@ -22,7 +22,10 @@ fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
 	match body {
 		Value::Bytes(v) => req.body(v.0),
 		Value::Strand(v) => req.body(v.0),
-		_ if body.is_some() => req.json(&body.into_json()),
+		_ if body.is_some() => {
+			let json_value = body.into_json().expect("Failed to convert Value to JSON");
+			req.json(&json_value)
+		}
 		_ => req,
 	}
 }

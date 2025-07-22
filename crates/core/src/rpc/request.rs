@@ -1,12 +1,13 @@
+use crate::dbs::Variables;
+use crate::expr::Duration;
+use crate::expr::{Data, Fetchs, Fields, Value};
+use crate::iam::{SigninParams, SignupParams};
+use crate::rpc::protocol::v1::types::{V1Array, V1Number, V1Value};
+use crate::rpc::{Method, RpcError};
+use ciborium::Value as CborValue;
+use serde::{Deserialize, Serialize};
+
 use uuid::Uuid;
-
-use crate::rpc::Method;
-use crate::rpc::RpcError;
-use crate::rpc::format::cbor::Cbor;
-use crate::sql::Array;
-use crate::sql::Number;
-use crate::sql::SqlValue;
-
 pub static ID: &str = "id";
 pub static METHOD: &str = "method";
 pub static PARAMS: &str = "params";
@@ -14,70 +15,89 @@ pub static VERSION: &str = "version";
 pub static TXN: &str = "txn";
 
 #[derive(Debug)]
-pub struct Request {
-	pub id: Option<SqlValue>,
+pub struct V1Request {
+	pub id: Option<V1Value>,
 	pub version: Option<u8>,
 	pub txn: Option<Uuid>,
 	pub method: Method,
-	pub params: Array,
+	pub params: V1Array,
 }
 
-impl TryFrom<Cbor> for Request {
+impl TryFrom<CborValue> for V1Request {
 	type Error = RpcError;
-	fn try_from(val: Cbor) -> Result<Self, RpcError> {
-		SqlValue::try_from(val).map_err(|_| RpcError::InvalidRequest)?.try_into()
+	fn try_from(val: CborValue) -> Result<Self, RpcError> {
+		V1Value::from_cbor(val).map_err(|err| RpcError::InvalidRequest(err.to_string()))?.try_into()
 	}
 }
 
-impl TryFrom<SqlValue> for Request {
+impl TryFrom<V1Value> for V1Request {
 	type Error = RpcError;
-	fn try_from(val: SqlValue) -> Result<Self, RpcError> {
+	fn try_from(val: V1Value) -> Result<Self, RpcError> {
 		// Fetch the 'id' argument
 		let id = match val.get_field_value("id") {
-			v if v.is_none() => None,
-			v if v.is_null() => Some(v),
-			v if v.is_uuid() => Some(v),
-			v if v.is_number() => Some(v),
-			v if v.is_strand() => Some(v),
-			v if v.is_datetime() => Some(v),
-			_ => return Err(RpcError::InvalidRequest),
+			V1Value::None => None,
+			V1Value::Null => Some(V1Value::Null),
+			V1Value::Uuid(v) => Some(V1Value::Uuid(v)),
+			V1Value::Number(v) => Some(V1Value::Number(v)),
+			V1Value::Strand(v) => Some(V1Value::Strand(v)),
+			V1Value::Datetime(v) => Some(V1Value::Datetime(v)),
+			unexpected => {
+				return Err(RpcError::InvalidRequest(format!("Unexpected id: {:?}", unexpected)));
+			}
 		};
 
 		// Fetch the 'version' argument
 		let version = match val.get_field_value(VERSION) {
-			v if v.is_none() => None,
-			v if v.is_null() => None,
-			SqlValue::Number(v) => match v {
-				Number::Int(1) => Some(1),
-				Number::Int(2) => Some(2),
-				_ => return Err(RpcError::InvalidRequest),
+			V1Value::None => None,
+			V1Value::Null => None,
+			V1Value::Number(v) => match v {
+				V1Number::Int(1) => Some(1),
+				V1Number::Int(2) => Some(2),
+				unexpected => {
+					return Err(RpcError::InvalidRequest(format!(
+						"Unexpected version: {:?}",
+						unexpected
+					)));
+				}
 			},
-			_ => return Err(RpcError::InvalidRequest),
+			unexpected => {
+				return Err(RpcError::InvalidRequest(format!(
+					"Unexpected version: {:?}",
+					unexpected
+				)));
+			}
 		};
 		// Fetch the 'txn' argument
 		let txn = match val.get_field_value(TXN) {
-			SqlValue::None => None,
-			SqlValue::Null => None,
-			SqlValue::Uuid(x) => Some(x.0),
-			SqlValue::Strand(x) => {
-				Some(Uuid::try_parse(&x.0).map_err(|_| RpcError::InvalidRequest)?)
+			V1Value::None => None,
+			V1Value::Null => None,
+			V1Value::Uuid(x) => Some(x.0),
+			V1Value::Strand(x) => Some(
+				Uuid::try_parse(&x.0).map_err(|err| RpcError::InvalidRequest(err.to_string()))?,
+			),
+			unexpected => {
+				return Err(RpcError::InvalidRequest(format!("Unexpected txn: {:?}", unexpected)));
 			}
-			_ => return Err(RpcError::InvalidRequest),
 		};
 		// Fetch the 'method' argument
 		let method = match val.get_field_value(METHOD) {
-			SqlValue::Strand(v) => v.to_raw(),
-			_ => return Err(RpcError::InvalidRequest),
+			V1Value::Strand(v) => v.0,
+			unexpected => {
+				return Err(RpcError::InvalidRequest(format!(
+					"Unexpected method: {:?}",
+					unexpected
+				)));
+			}
 		};
 		// Fetch the 'params' argument
 		let params = match val.get_field_value(PARAMS) {
-			SqlValue::Array(v) => v,
-			_ => Array::new(),
+			V1Value::Array(v) => v,
+			_ => V1Array::default(),
 		};
 		// Parse the specified method
 		let method = Method::parse_case_sensitive(method);
 		// Return the parsed request
-		Ok(Request {
+		Ok(V1Request {
 			id,
 			method,
 			params,
@@ -85,4 +105,201 @@ impl TryFrom<SqlValue> for Request {
 			txn,
 		})
 	}
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PingParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InfoParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UseParams {
+	pub namespace: Option<String>,
+	pub database: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthenticateParams {
+	pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvalidateParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateParams {
+	pub only: Option<bool>,
+	pub what: Value,
+	pub data: Option<Value>,
+	pub output: Option<Value>,
+	pub timeout: Option<Duration>,
+	pub parallel: Option<bool>,
+	pub version: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KillParams {
+	pub live_uuid: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveParams {
+	pub what: Value,
+	pub expr: Fields,
+	pub cond: Option<Value>,
+	pub fetch: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetParams {
+	pub key: String,
+	pub value: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnsetParams {
+	pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectParams {
+	pub expr: Fields,
+	pub omit: Option<Value>,
+	pub only: Option<bool>,
+	pub what: Value,
+	pub with: Option<Value>,
+	pub cond: Option<Value>,
+	pub split: Option<Value>,
+	pub group: Option<Value>,
+	pub order: Option<Value>,
+	pub start: Option<u64>,
+	pub limit: Option<u64>,
+	pub fetch: Option<Fetchs>,
+	pub version: Option<Value>,
+	pub timeout: Option<Duration>,
+	pub parallel: Option<bool>,
+	pub explain: Option<Value>,
+	pub tempfiles: Option<bool>,
+	pub variables: Variables,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InsertParams {
+	pub into: Value,
+	pub data: Value,
+	pub ignore: Option<bool>,
+	pub update: Option<Value>,
+	pub output: Option<Value>,
+	pub timeout: Option<Duration>,
+	pub parallel: Option<bool>,
+	pub relation: Option<bool>,
+	pub version: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertParams {
+	pub only: Option<bool>,
+	pub what: Value,
+	pub with: Option<Value>,
+	pub data: Option<Data>,
+	pub cond: Option<Value>,
+	pub output: Option<Value>,
+	pub timeout: Option<Duration>,
+	pub parallel: Option<bool>,
+	pub explain: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateParams {
+	pub only: Option<bool>,
+	pub what: Value,
+	pub with: Option<Value>,
+	pub data: Option<Data>,
+	pub cond: Option<Value>,
+	pub output: Option<Value>,
+	pub timeout: Option<Duration>,
+	pub parallel: Option<bool>,
+	pub explain: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteParams {
+	pub only: Option<bool>,
+	pub what: Value,
+	pub with: Option<Value>,
+	pub cond: Option<Value>,
+	pub output: Option<Value>,
+	pub timeout: Option<Duration>,
+	pub parallel: Option<bool>,
+	pub explain: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryParams {
+	pub query: String,
+	pub variables: Variables,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelateParams {
+	pub only: Option<bool>,
+	pub kind: Value,
+	pub from: Value,
+	pub with: Option<Value>,
+	pub uniq: Option<bool>,
+	pub data: Option<Value>,
+	pub output: Option<Value>,
+	pub timeout: Option<Duration>,
+	pub parallel: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunParams {
+	pub name: String,
+	pub version: Option<String>,
+	pub args: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphQlParams {
+	pub query: String,
+	pub variables: Variables,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Command {
+	Health(HealthParams),
+	Version(VersionParams),
+	Ping(PingParams),
+	Info(InfoParams),
+	Use(UseParams),
+	Signup(SignupParams),
+	Signin(SigninParams),
+	Authenticate(AuthenticateParams),
+	Invalidate(InvalidateParams),
+	Create(CreateParams),
+	Reset(ResetParams),
+	Kill(KillParams),
+	Live(LiveParams),
+	Set(SetParams),
+	Unset(UnsetParams),
+	Select(SelectParams),
+	Insert(InsertParams),
+	Upsert(UpsertParams),
+	Update(UpdateParams),
+	Delete(DeleteParams),
+	Query(QueryParams),
+	Relate(RelateParams),
+	Run(RunParams),
+	GraphQl(GraphQlParams),
 }

@@ -42,12 +42,12 @@ pub mod base64 {
 pub mod cbor {
 	use crate::err::Error;
 	use crate::expr::{Bytes, Value};
-	use crate::rpc::format::cbor::Cbor;
+	use crate::rpc::V1Value;
 	use anyhow::Result;
 	use ciborium::Value as Data;
 
 	pub fn encode((arg,): (Value,)) -> Result<Value> {
-		let val: Cbor = arg.try_into().map_err(|_| Error::InvalidArguments {
+		let val = arg.into_cbor().map_err(|_| Error::InvalidArguments {
 			name: "encoding::cbor::encode".to_owned(),
 			message: "Value could not be encoded into CBOR".to_owned(),
 		})?;
@@ -55,7 +55,7 @@ pub mod cbor {
 		// Create a new vector for encoding output
 		let mut res = Vec::new();
 		// Serialize the value into CBOR binary data
-		ciborium::into_writer(&val.0, &mut res).map_err(|_| Error::InvalidArguments {
+		ciborium::into_writer(&val, &mut res).map_err(|_| Error::InvalidArguments {
 			name: "encoding::cbor::encode".to_owned(),
 			message: "Value could not be encoded into CBOR".to_owned(),
 		})?;
@@ -64,19 +64,19 @@ pub mod cbor {
 	}
 
 	pub fn decode((arg,): (Bytes,)) -> Result<Value> {
-		let cbor = ciborium::from_reader::<Data, _>(&mut arg.as_slice())
-			.map_err(|_| Error::InvalidArguments {
+		let cbor = ciborium::from_reader::<Data, _>(&mut arg.as_slice()).map_err(|_| {
+			Error::InvalidArguments {
 				name: "encoding::cbor::decode".to_owned(),
 				message: "invalid cbor".to_owned(),
-			})
-			.map(Cbor)?;
+			}
+		})?;
 
-		Value::try_from(cbor)
-			.map_err(|v: &str| Error::InvalidArguments {
-				name: "encoding::cbor::decode".to_owned(),
-				message: v.to_owned(),
-			})
-			.map_err(anyhow::Error::new)
+		let v1_value = V1Value::from_cbor(cbor).map_err(|v| Error::InvalidArguments {
+			name: "encoding::cbor::decode".to_owned(),
+			message: v.to_string(), // TODO: this is a hack to get the error message
+		})?;
+
+		Ok(Value::try_from(v1_value)?)
 	}
 }
 

@@ -1,12 +1,12 @@
 use crate::err::Error;
-use crate::expr::{Object, Value};
+use crate::rpc::{V1Object, V1Value};
 use anyhow::Result;
 use http::HeaderMap;
 use std::{collections::BTreeMap, mem};
 
-pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<Object> {
+pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<V1Object> {
 	let mut next_key = None;
-	let mut next_value = Value::None;
+	let mut next_value = V1Value::None;
 	let mut first_value = true;
 	let mut res = BTreeMap::new();
 
@@ -14,14 +14,14 @@ pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<Object> {
 	// This is handled by returning the key name first and then return multiple values with key
 	// name = None.
 	for (k, v) in headers.into_iter() {
-		let v = Value::Strand(v.to_str().map_err(Error::from)?.to_owned().into());
+		let v = V1Value::Strand(v.to_str().map_err(Error::from)?.to_owned().into());
 
 		if let Some(k) = k {
 			let k = k.as_str().to_owned();
 			// new key, if we had accumulated a key insert it first and then update
 			// accumulated state.
 			if let Some(k) = next_key.take() {
-				let v = mem::replace(&mut next_value, Value::None);
+				let v = mem::replace(&mut next_value, V1Value::None);
 				res.insert(k, v);
 			}
 			next_key = Some(k);
@@ -31,11 +31,11 @@ pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<Object> {
 			// no new key, but this is directly after the first value, turn the header value into an array of
 			// values.
 			first_value = false;
-			next_value = Value::Array(vec![next_value, v].into())
+			next_value = V1Value::Array(vec![next_value, v].into())
 		} else {
 			// Since it is not a new key and a new value it must be atleast a third header
 			// value and `next_value` is already updated to an array.
-			let Value::Array(ref mut array) = next_value else {
+			let V1Value::Array(ref mut array) = next_value else {
 				unreachable!()
 			};
 			array.push(v);
@@ -44,9 +44,9 @@ pub(crate) fn headermap_to_object(headers: HeaderMap) -> Result<Object> {
 
 	// Insert final key if there is one.
 	if let Some(x) = next_key {
-		let v = mem::replace(&mut next_value, Value::None);
+		let v = mem::replace(&mut next_value, V1Value::None);
 		res.insert(x, v);
 	}
 
-	Ok(Object(res))
+	Ok(V1Object(res))
 }

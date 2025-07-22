@@ -19,7 +19,6 @@ use http::header::CONTENT_TYPE;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::ExperimentalTarget;
 use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::expr::Value;
 use surrealdb::expr::statements::FindApi;
 use surrealdb::kvs::LockType;
 use surrealdb::kvs::TransactionType;
@@ -32,6 +31,7 @@ use surrealdb_core::api::{
 	body::ApiBody, invocation::ApiInvocation, method::Method as ApiMethod,
 	response::ResponseInstruction,
 };
+use surrealdb_core::rpc::V1Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
@@ -129,19 +129,19 @@ async fn handler(
 		match res_instruction {
 			ResponseInstruction::Raw => {
 				match body {
-					Value::Strand(v) => {
+					V1Value::Strand(v) => {
 						res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
 							|_| ApiError::Unreachable("Expected a valid format".into()),
 						)?);
 						v.0.into_bytes()
 					}
-					Value::Bytes(v) => {
+					V1Value::Bytes(v) => {
 						res.headers.entry(CONTENT_TYPE).or_insert(
 							"application/octet-stream".parse().map_err(|_| {
 								ApiError::Unreachable("Expected a valid format".into())
 							})?,
 						);
-						v.into()
+						v.into_inner()
 					}
 					v => {
 						return Err(ApiError::InvalidApiResponse(format!(

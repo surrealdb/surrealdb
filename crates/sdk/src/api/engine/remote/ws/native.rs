@@ -641,7 +641,6 @@ mod tests {
 	use std::io::Write;
 	use std::time::SystemTime;
 	use surrealdb_core::expr::{Array, Value};
-	use surrealdb_core::rpc::format::cbor::Cbor;
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {
@@ -768,9 +767,9 @@ mod tests {
 		{
 			// CBor
 			let (duration, payload) = timed(&|| {
-				let cbor: Cbor = vector.clone().try_into().unwrap();
+				let cbor = vector.clone().into_cbor().unwrap();
 				let mut res = Vec::new();
-				ciborium::into_writer(&cbor.0, &mut res).unwrap();
+				ciborium::into_writer(&cbor, &mut res).unwrap();
 				res
 			});
 			results.push((payload.len(), CBOR, duration, payload.len() as f32 / ref_payload));

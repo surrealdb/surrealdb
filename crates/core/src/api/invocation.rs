@@ -17,6 +17,7 @@ use crate::{
 		statements::define::{ApiDefinition, config::api::ApiConfig},
 	},
 	kvs::{Datastore, Transaction},
+	rpc::V1Value,
 };
 use anyhow::Result;
 use http::HeaderMap;
@@ -39,7 +40,7 @@ impl ApiInvocation {
 			"body" => body,
 			"method" => self.method.to_string().into(),
 			"query" => Value::Object(self.query.into()),
-			"headers" => Value::Object(convert::headermap_to_object(self.headers)?),
+			"headers" => Value::Object(Object::try_from(convert::headermap_to_object(self.headers)?)?),
 		};
 
 		Ok(obj.into())
@@ -129,6 +130,7 @@ impl ApiInvocation {
 
 		let res = action.compute(stk, &ctx, &opt, None).await.catch_return()?;
 
+		let res = V1Value::try_from(res)?;
 		let mut res = ApiResponse::try_from(res)?;
 		if let Some(headers) = inv_ctx.response_headers {
 			let mut headers = headers;

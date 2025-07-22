@@ -235,7 +235,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json();
+		let v = cs.into_value().into_json().unwrap();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
@@ -297,7 +297,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json();
+		let v = cs.into_value().into_json().unwrap();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use http::{
 	HeaderMap, StatusCode,
 	header::{ACCEPT, CONTENT_TYPE},
@@ -6,7 +7,7 @@ use http::{
 use crate::{
 	err::Error,
 	expr::{Object, Value},
-	rpc::format::Format,
+	rpc::{V1Object, V1Value, format::Format},
 };
 
 use super::{convert, err::ApiError, invocation::ApiInvocation};
@@ -15,18 +16,27 @@ use super::{convert, err::ApiError, invocation::ApiInvocation};
 pub struct ApiResponse {
 	pub raw: Option<bool>,
 	pub status: StatusCode,
-	pub body: Option<Value>,
+	pub body: Option<V1Value>,
 	pub headers: HeaderMap,
 }
 
-impl TryFrom<Value> for ApiResponse {
+impl TryFrom<V1Value> for ApiResponse {
 	type Error = Error;
-	fn try_from(value: Value) -> Result<Self, Self::Error> {
-		if let Value::Object(mut opts) = value {
-			let raw = opts.remove("raw").map(|v| v.cast_to()).transpose()?;
+	fn try_from(value: V1Value) -> Result<Self, Self::Error> {
+		if let V1Value::Object(mut opts) = value {
+			let raw = opts
+				.remove("raw")
+				.map(|v| {
+					let v = Value::try_from(v)
+						.map_err(|err| Error::Thrown(format!("Invalid raw value: {err}")))?;
+					v.cast_to().map_err(|err| Error::Thrown(format!("Invalid raw value: {err}")))
+				})
+				.transpose()?;
 			let status = opts
 				.remove("status")
 				.map(|v| -> Result<StatusCode, Error> {
+					let v = Value::try_from(v)
+						.map_err(|err| Error::Thrown(format!("Invalid status value: {err}")))?;
 					// Convert to int
 					let v: i64 = v.coerce_to()?;
 
@@ -46,7 +56,11 @@ impl TryFrom<Value> for ApiResponse {
 
 			let headers = opts
 				.remove("headers")
-				.map(|v| v.coerce_to::<Object>()?.try_into())
+				.map(|v| {
+					let v = Value::try_from(v)
+						.map_err(|err| Error::Thrown(format!("Invalid headers value: {err}")))?;
+					v.coerce_to::<Object>()?.try_into()
+				})
 				.transpose()?
 				.unwrap_or_default();
 
@@ -68,18 +82,16 @@ impl TryFrom<Value> for ApiResponse {
 	}
 }
 
-impl TryInto<Value> for ApiResponse {
+impl TryFrom<ApiResponse> for V1Value {
 	type Error = anyhow::Error;
-	fn try_into(self) -> Result<Value, Self::Error> {
-		Ok(Value::Object(
-			map! {
-				"raw" => Value::from(self.raw.unwrap_or(false)),
-				"status" => Value::from(self.status.as_u16() as i64),
-				"headers" => Value::Object(convert::headermap_to_object(self.headers)?),
-				"body", if let Some(body) = self.body => body,
-			}
-			.into(),
-		))
+
+	fn try_from(response: ApiResponse) -> Result<V1Value, Self::Error> {
+		Ok(V1Value::Object(V1Object(map! {
+			"raw".to_string() => V1Value::from(response.raw.unwrap_or(false)),
+			"status".to_string() => V1Value::from(response.status.as_u16() as i64),
+			"headers".to_string() => V1Value::Object(convert::headermap_to_object(response.headers).context("Invalid headers value")?),
+			"body".to_string(), if let Some(body) = response.body => body,
+		})))
 	}
 }
 

@@ -461,10 +461,10 @@ async fn router(
 		} => {
 			let req_path = base_url.join("export")?;
 			let config = config.unwrap_or_default();
-			let config_value: CoreValue = config.into();
+			let config_value = CoreValue::from(config).into_json()?;
 			let request = client
 				.post(req_path)
-				.body(config_value.into_json().to_string())
+				.body(config_value.to_string())
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")
@@ -481,7 +481,7 @@ async fn router(
 			let config_value: CoreValue = config.into();
 			let request = client
 				.post(req_path)
-				.body(config_value.into_json().to_string())
+				.body(config_value.into_json()?.to_string())
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")

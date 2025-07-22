@@ -1,14 +1,15 @@
 use crate::rpc::RpcError;
 use crate::rpc::format::ResTrait;
-use crate::rpc::request::Request;
-use crate::sql::SqlValue;
+use crate::rpc::protocol::v1::types::V1Value;
+use crate::rpc::request::V1Request;
 use revision::Revisioned;
 
-pub fn parse_value(val: Vec<u8>) -> Result<SqlValue, RpcError> {
-	SqlValue::deserialize_revisioned(&mut val.as_slice()).map_err(|_| RpcError::ParseError)
+pub fn parse_value(val: Vec<u8>) -> Result<V1Value, RpcError> {
+	V1Value::deserialize_revisioned(&mut val.as_slice())
+		.map_err(|err| RpcError::ParseError(err.to_string()))
 }
 
-pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
+pub fn req(val: Vec<u8>) -> Result<V1Request, RpcError> {
 	parse_value(val)?.try_into()
 }
 

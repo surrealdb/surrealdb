@@ -328,7 +328,7 @@ fn process(
 						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
 						String::from("result") => data.into_inner(),
 					});
-					value.into_json().to_string()
+					value.into_json().unwrap().to_string()
 				}
 				// Yes prettify the JSON response
 				(true, true) => {
@@ -337,7 +337,7 @@ fn process(
 						&mut buf,
 						PrettyFormatter::with_indent(b"\t"),
 					);
-					data.into_inner().into_json().serialize(&mut serializer).unwrap();
+					data.into_inner().into_json().unwrap().serialize(&mut serializer).unwrap();
 					let output = String::from_utf8(buf).unwrap();
 					format!(
 						"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
@@ -370,7 +370,7 @@ fn process(
 		(true, false) => {
 			let value =
 				CoreValue::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>());
-			serde_json::to_string(&value.into_json()).unwrap()
+			serde_json::to_string(&value.into_json().unwrap()).unwrap()
 		}
 		// Yes prettify the JSON response
 		(true, true) => vec
@@ -382,7 +382,7 @@ fn process(
 					&mut buf,
 					PrettyFormatter::with_indent(b"\t"),
 				);
-				value.into_inner().into_json().serialize(&mut serializer).unwrap();
+				value.into_inner().into_json().unwrap().serialize(&mut serializer).unwrap();
 				let output = String::from_utf8(buf).unwrap();
 				let query_num = index + 1;
 				let execution_time = stats.execution_time.unwrap_or_default();

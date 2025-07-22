@@ -1,4 +1,3 @@
-pub mod failure;
 pub mod format;
 pub mod http;
 pub mod response;

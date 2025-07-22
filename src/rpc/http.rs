@@ -2,12 +2,11 @@ use crate::cnf::{PKG_NAME, PKG_VERSION};
 use std::sync::Arc;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::rpc::Data;
 use surrealdb_core::rpc::RpcContext;
 use surrealdb_core::rpc::RpcError;
 use surrealdb_core::rpc::RpcProtocolV1;
-use surrealdb_core::rpc::RpcProtocolV2;
-use surrealdb_core::sql::Array;
+use surrealdb_core::rpc::V1Array;
+use surrealdb_core::rpc::V1Data;
 use tokio::sync::Semaphore;
 
 use surrealdb_core::gql::{Pessimistic, SchemaCache};
@@ -48,7 +47,7 @@ impl RpcContext for Http {
 		// Do nothing as HTTP is stateless
 	}
 	/// The version information for this RPC context
-	fn version_data(&self) -> Data {
+	fn version_data(&self) -> V1Data {
 		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
 	}
 
@@ -78,24 +77,12 @@ impl RpcContext for Http {
 
 impl RpcProtocolV1 for Http {
 	/// Parameters can't be set or unset on HTTP RPC context
-	async fn set(&self, _params: Array) -> Result<Data, RpcError> {
+	async fn set(&self, _params: V1Array) -> Result<V1Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
 	/// Parameters can't be set or unset on HTTP RPC context
-	async fn unset(&self, _params: Array) -> Result<Data, RpcError> {
-		Err(RpcError::MethodNotFound)
-	}
-}
-
-impl RpcProtocolV2 for Http {
-	/// Parameters can't be set or unset on HTTP RPC context
-	async fn set(&self, _params: Array) -> Result<Data, RpcError> {
-		Err(RpcError::MethodNotFound)
-	}
-
-	/// Parameters can't be set or unset on HTTP RPC context
-	async fn unset(&self, _params: Array) -> Result<Data, RpcError> {
+	async fn unset(&self, _params: V1Array) -> Result<V1Data, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 }

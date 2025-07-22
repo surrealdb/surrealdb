@@ -1,35 +1,31 @@
 mod convert;
 
-pub use convert::Cbor;
-
-use crate::expr::Value;
 use crate::rpc::RpcError;
-use crate::rpc::request::Request;
-use crate::sql::SqlValue;
-use ciborium::Value as Data;
+use crate::rpc::protocol::v1::types::V1Value;
+use crate::rpc::request::V1Request;
+pub use ciborium::Value as CborValue;
 
 use super::ResTrait;
 
-pub fn parse_value(val: Vec<u8>) -> Result<SqlValue, RpcError> {
-	let cbor = ciborium::from_reader::<Data, _>(&mut val.as_slice())
-		.map_err(|_| RpcError::ParseError)
-		.map(Cbor)?;
+pub fn parse_value(val: Vec<u8>) -> Result<V1Value, RpcError> {
+	let cbor = ciborium::from_reader::<CborValue, _>(&mut val.as_slice())
+		.map_err(|err| RpcError::ParseError(err.to_string()))?;
 
-	SqlValue::try_from(cbor).map_err(|v: &str| RpcError::Thrown(v.into()))
+	V1Value::from_cbor(cbor).map_err(|v| RpcError::Thrown(v.to_string()))
 }
 
-pub fn req(val: Vec<u8>) -> Result<Request, RpcError> {
+pub fn req(val: Vec<u8>) -> Result<V1Request, RpcError> {
 	parse_value(val)?.try_into()
 }
 
 pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
 	// Convert the response into a value
-	let val: Value = res.into();
-	let val: Cbor = val.try_into()?;
+	let val: V1Value = res.into();
+	let val = val.into_cbor()?;
 	// Create a new vector for encoding output
 	let mut res = Vec::new();
 	// Serialize the value into CBOR binary data
-	ciborium::into_writer(&val.0, &mut res).unwrap();
+	ciborium::into_writer(&val, &mut res).unwrap();
 	// Return the message length, and message as binary
 	Ok(res)
 }

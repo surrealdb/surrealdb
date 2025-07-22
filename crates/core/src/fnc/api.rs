@@ -8,6 +8,7 @@ use crate::{
 	ctx::Context,
 	dbs::Options,
 	expr::{Object, Value, statements::FindApi},
+	rpc::V1Value,
 };
 
 use super::args::Optional;
@@ -59,7 +60,10 @@ pub async fn invoke(
 		};
 
 		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await {
-			Ok(Some(v)) => Ok(v.0.try_into()?),
+			Ok(Some(v)) => {
+				let v = V1Value::try_from(v.0)?;
+				Ok(Value::try_from(v)?)
+			}
 			Err(e) => Err(e),
 			_ => Ok(Value::None),
 		}

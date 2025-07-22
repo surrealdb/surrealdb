@@ -13,9 +13,7 @@ use crate::err::Error;
 use crate::expr;
 use crate::expr::Bytesize;
 use crate::expr::Value;
-use crate::rpc::format::cbor;
-use crate::rpc::format::json;
-use crate::rpc::format::revision;
+use crate::rpc::format::parse_expr_value_from_content_type;
 
 use super::context::InvocationContext;
 use super::err::ApiError;
@@ -107,14 +105,9 @@ impl ApiBody {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
 
-				let parsed = match content_type {
-					Some("application/json") => json::parse_value(&bytes),
-					Some("application/cbor") => cbor::parse_value(bytes),
-					Some("application/surrealdb") => revision::parse_value(bytes),
-					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
-				};
-
-				parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
+				let value = parse_expr_value_from_content_type(content_type, bytes)
+					.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))?;
+				Ok(value)
 			}
 		}
 	}

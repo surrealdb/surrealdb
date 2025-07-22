@@ -1,6 +1,7 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
 use crate::err::Error;
+use crate::rpc::V1Value;
 use crate::sql::id::range::IdRange;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
@@ -163,13 +164,6 @@ impl SqlValue {
 				end: fields.0.end,
 			})),
 		}))
-	}
-
-	pub(crate) fn get_field_value(&self, name: &str) -> SqlValue {
-		match self {
-			SqlValue::Object(v) => v.get(name).cloned().unwrap_or(SqlValue::None),
-			_ => SqlValue::None,
-		}
 	}
 }
 
@@ -466,8 +460,18 @@ impl SqlValue {
 	///
 	/// This converts certain types like `Thing` into their simpler formats
 	/// instead of the format used internally by SurrealDB.
-	pub fn into_json(self) -> Json {
-		self.into()
+	pub fn into_json(self) -> anyhow::Result<Json> {
+		let v1_value: V1Value = self.try_into()?;
+		Ok(v1_value.into_json())
+	}
+
+	/// Converts this Value into a CBOR value
+	///
+	/// This converts certain types like `Thing` into their simpler formats
+	/// instead of the format used internally by SurrealDB.
+	pub fn into_cbor(self) -> anyhow::Result<ciborium::Value> {
+		let v1_value: V1Value = self.try_into()?;
+		Ok(v1_value.into_cbor()?)
 	}
 
 	// -----------------------------------

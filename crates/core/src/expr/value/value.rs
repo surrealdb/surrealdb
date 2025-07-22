@@ -17,6 +17,7 @@ use crate::expr::{
 	model::Model,
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::rpc::V1Value;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -25,7 +26,6 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as Json;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -453,12 +453,19 @@ impl Value {
 		}
 	}
 
-	/// Converts a `surrealdb::sq::Value` into a `serde_json::Value`
+	/// Converts a [`Value`] into a [`serde_json::Value`].
 	///
 	/// This converts certain types like `Thing` into their simpler formats
 	/// instead of the format used internally by SurrealDB.
-	pub fn into_json(self) -> Json {
-		self.into()
+	pub fn into_json(self) -> anyhow::Result<serde_json::Value> {
+		let v1_value: V1Value = self.try_into()?;
+		Ok(v1_value.into_json())
+	}
+
+	/// Converts a [`Value`] into a [`ciborium::Value`].
+	pub fn into_cbor(self) -> anyhow::Result<ciborium::Value> {
+		let v1_value: V1Value = self.try_into()?;
+		Ok(v1_value.into_cbor()?)
 	}
 
 	// -----------------------------------

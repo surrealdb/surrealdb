@@ -5,7 +5,6 @@ use crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_SIZE;
 use crate::cnf::WEBSOCKET_RESPONSE_FLUSH_PERIOD;
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 use crate::rpc::CONN_CLOSED_ERR;
-use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
 use crate::rpc::response::{IntoRpcResponse, failure};
 use crate::telemetry;
@@ -24,14 +23,14 @@ use surrealdb::dbs::Session;
 use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
-use surrealdb::rpc::Data;
 use surrealdb::rpc::Method;
 use surrealdb::rpc::RpcContext;
 use surrealdb::rpc::format::Format;
-use surrealdb::sql::Array;
-use surrealdb::sql::SqlValue;
+use surrealdb_core::rpc::Failure;
 use surrealdb_core::rpc::RpcProtocolV1;
-use surrealdb_core::rpc::RpcProtocolV2;
+use surrealdb_core::rpc::V1Array;
+use surrealdb_core::rpc::V1Data;
+use surrealdb_core::rpc::V1Value;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -353,7 +352,7 @@ impl Websocket {
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
 					span.record(
 						"rpc.request_id",
-						req.id.clone().map(SqlValue::as_string).unwrap_or_default(),
+						req.id.clone().map(V1Value::as_string).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(req.method.to_str()).with_size(len),
@@ -369,7 +368,7 @@ impl Websocket {
 							// Don't start processing if we are gracefully shutting down
 							if shutdown.is_cancelled() {
 								// Process the response
-								failure(req.id.map(Into::into), Failure::custom(SERVER_SHUTTING_DOWN))
+								failure(req.id, Failure::custom(SERVER_SHUTTING_DOWN))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -377,7 +376,7 @@ impl Websocket {
 							// Check to see whether we have available memory
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
-								failure(req.id.map(Into::into), Failure::custom(SERVER_OVERLOADED))
+								failure(req.id, Failure::custom(SERVER_OVERLOADED))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -386,7 +385,7 @@ impl Websocket {
 							else {
 								// Process the message
 								Self::process_message(rpc.clone(), req.version, req.txn, req.method, req.params).await
-									.into_response(req.id.map(Into::into))
+									.into_response(req.id)
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -413,12 +412,12 @@ impl Websocket {
 		version: Option<u8>,
 		txn: Option<Uuid>,
 		method: Method,
-		params: Array,
-	) -> Result<Data, Failure> {
+		params: V1Array,
+	) -> Result<V1Data, Failure> {
 		debug!("Process RPC request");
 		// Check that the method is a valid method
 		if !method.is_valid() {
-			return Err(Failure::METHOD_NOT_FOUND);
+			return Err(Failure::method_not_found(method.to_str()));
 		}
 		// Execute the specified method
 		RpcContext::execute(rpc.as_ref(), version, txn, method, params).await.map_err(Into::into)
@@ -443,7 +442,6 @@ impl Websocket {
 }
 
 impl RpcProtocolV1 for Websocket {}
-impl RpcProtocolV2 for Websocket {}
 
 impl RpcContext for Websocket {
 	/// The datastore for this RPC interface
@@ -463,7 +461,7 @@ impl RpcContext for Websocket {
 		self.session.store(session);
 	}
 	/// The version information for this RPC context
-	fn version_data(&self) -> Data {
+	fn version_data(&self) -> V1Data {
 		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
 	}
 

@@ -1,14 +1,15 @@
 use crate::expr::serde::{deserialize, serialize};
 use crate::rpc::RpcError;
 use crate::rpc::format::ResTrait;
-use crate::rpc::request::Request;
-use crate::sql::SqlValue;
+use crate::rpc::protocol::v1::types::V1Value;
+use crate::rpc::request::V1Request;
 
-pub fn parse_value(val: &[u8]) -> Result<SqlValue, RpcError> {
-	deserialize::<SqlValue>(val).map_err(|_| RpcError::ParseError)
+pub fn parse_value(val: &[u8]) -> Result<V1Value, RpcError> {
+	let val = deserialize::<V1Value>(val).map_err(|err| RpcError::ParseError(err.to_string()))?;
+	Ok(val)
 }
 
-pub fn req(val: &[u8]) -> Result<Request, RpcError> {
+pub fn req(val: &[u8]) -> Result<V1Request, RpcError> {
 	parse_value(val)?.try_into()
 }
 

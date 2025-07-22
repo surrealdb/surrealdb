@@ -639,7 +639,7 @@ async fn router(
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Invalidate => {
-			iam::clear::clear(&mut *session.write().await)?;
+			iam::clear::clear(&mut *session.write().await);
 			Ok(DbResponse::Other(CoreValue::None))
 		}
 		Command::Create {
