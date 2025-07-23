@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::record::Record;
 use crate::expr::Value;
 use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
@@ -37,7 +38,7 @@ pub async fn score(
 pub async fn highlight(
 	(ctx, doc): (&Context, Option<&CursorDoc>),
 	(prefix, suffix, match_ref, Optional(partial)): (Value, Value, Value, Optional<bool>),
-) -> Result<Value> {
+) -> Result<Record> {
 	if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
 		let hlp = HighlightParams {
 			prefix,
@@ -48,7 +49,7 @@ pub async fn highlight(
 
 		return exe.highlight(ctx, thg, hlp, doc.doc.as_ref()).await;
 	}
-	Ok(Value::None)
+	Ok(Default::default())
 }
 
 pub async fn offsets(

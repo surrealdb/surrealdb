@@ -72,7 +72,7 @@ impl Document {
 	/// This function only clears the document in
 	/// memory, and does not store this on disk.
 	pub(super) fn clear_record_data(&mut self) {
-		*self.current.doc.to_mut() = Value::None
+		*self.current.doc.to_mut().data = Value::None
 	}
 	/// Sets the default field data that should be
 	/// present on this document. For normal records
@@ -90,7 +90,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Set default field values
-		self.current.doc.to_mut().def(&rid);
+		self.current.doc.to_mut().data.def(&rid);
 		// This is a RELATE statement, so reset fields
 		if let Workable::Relate(l, r, _) = &self.extras {
 			// Mark that this is an edge node

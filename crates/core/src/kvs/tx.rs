@@ -8,6 +8,7 @@ use super::util;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
 use crate::err::Error;
+use crate::expr::record::Record;
 use crate::expr::Id;
 use crate::expr::Permissions;
 use crate::expr::Value;
@@ -1568,7 +1569,7 @@ impl Transaction {
 		tb: &str,
 		id: &Id,
 		version: Option<u64>,
-	) -> Result<Arc<Value>> {
+	) -> Result<Arc<Record>> {
 		// Cache is not versioned
 		if version.is_some() {
 			// Fetch the record from the datastore
@@ -1576,15 +1577,15 @@ impl Transaction {
 			match self.get(key, version).await? {
 				// The value exists in the datastore
 				Some(val) => {
-					let mut val: Value = revision::from_slice(&val)?;
+					let mut val: Record = revision::from_slice(&val)?;
 					// Inject the id field into the document
 					let rid = crate::expr::Thing::from((tb, id.clone()));
-					val.def(&rid);
+					val.data.def(&rid);
 					let val = cache::tx::Entry::Val(Arc::new(val));
 					val.try_into_val()
 				}
 				// The value is not in the datastore
-				None => Ok(Arc::new(Value::None)),
+				None => Ok(Arc::new(Default::default())),
 			}
 		} else {
 			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
@@ -1598,16 +1599,16 @@ impl Transaction {
 					match self.get(key, None).await? {
 						// The value exists in the datastore
 						Some(val) => {
-							let mut val: Value = revision::from_slice(&val)?;
+							let mut val: Record = revision::from_slice(&val)?;
 							// Inject the id field into the document
 							let rid = crate::expr::Thing::from((tb, id.clone()));
-							val.def(&rid);
+							val.data.def(&rid);
 							let val = cache::tx::Entry::Val(Arc::new(val));
 							self.cache.insert(qey, val.clone());
 							val.try_into_val()
 						}
 						// The value is not in the datastore
-						None => Ok(Arc::new(Value::None)),
+						None => Ok(Arc::new(Default::default())),
 					}
 				}
 			}
@@ -1621,7 +1622,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		id: &Id,
-		val: Value,
+		val: Record,
 	) -> Result<()> {
 		// Set the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
@@ -1640,7 +1641,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		id: &Id,
-		val: Arc<Value>,
+		val: Arc<Record>,
 	) -> Result<()> {
 		// Set the value in the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);

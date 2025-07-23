@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::expr::record::{Metadata, Record};
 use crate::expr::{Array, Idiom, Object, Value};
 use crate::idx::ft::Position;
 use crate::idx::ft::offset::Offset;
@@ -24,6 +25,7 @@ impl HighlightParams {
 }
 
 pub(super) struct Highlighter {
+	metadata: Option<Metadata>,
 	prefix: Vec<char>,
 	suffix: Vec<char>,
 	fields: Vec<(Idiom, Value)>,
@@ -31,12 +33,14 @@ pub(super) struct Highlighter {
 }
 
 impl Highlighter {
-	pub(super) fn new(hlp: HighlightParams, idiom: &Idiom, doc: &Value) -> Self {
+	pub(super) fn new(hlp: HighlightParams, idiom: &Idiom, doc: &Record) -> Self {
+		let metadata = doc.metadata.clone();
 		let prefix = hlp.prefix.to_raw_string().chars().collect();
 		let suffix = hlp.suffix.to_raw_string().chars().collect();
 		// Extract the fields we want to highlight
-		let fields = doc.walk(idiom);
+		let fields = doc.data.walk(idiom);
 		Self {
+			metadata,
 			fields,
 			prefix,
 			suffix,
@@ -68,12 +72,13 @@ impl Highlighter {
 	}
 }
 
-impl TryFrom<Highlighter> for Value {
+impl TryFrom<Highlighter> for Record {
 	type Error = anyhow::Error;
 
 	fn try_from(hl: Highlighter) -> Result<Self> {
+		let metadata = hl.metadata;
 		if hl.fields.is_empty() {
-			return Ok(Self::None);
+			return Ok(Record { metadata, data: Default::default() });
 		}
 		let mut vals = vec![];
 		for (_, f) in hl.fields {
@@ -112,9 +117,9 @@ impl TryFrom<Highlighter> for Value {
 			}
 		}
 		Ok(match res.len() {
-			0 => Value::None,
-			1 => res.remove(0),
-			_ => Value::from(res),
+			0 => Record { metadata, data: Default::default() },
+			1 => Record { metadata, data: res.remove(0) },
+			_ => Record { metadata, data: Value::from(res) },
 		})
 	}
 }

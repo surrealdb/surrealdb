@@ -4,6 +4,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
+use crate::expr::record::Record;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Id, Object, Thing, Value};
 use crate::idx::IndexKeyBase;
@@ -519,7 +520,7 @@ impl Building {
 			self.is_beyond_threshold(Some(*count))?;
 			let key = thing::Thing::decode(&k)?;
 			// Parse the value
-			let val: Value = revision::from_slice(&v)?;
+			let val: Record = revision::from_slice(&v)?;
 			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
 
 			let opt_values;

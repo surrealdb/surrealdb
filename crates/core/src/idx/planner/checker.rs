@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
+use crate::expr::record::Record;
 use crate::expr::{Cond, FlowResultExt as _, Thing, Value};
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
@@ -153,7 +154,7 @@ impl MTreeChecker<'_> {
 }
 
 struct CheckerCacheEntry {
-	record: Option<(Arc<Thing>, Arc<Value>)>,
+	record: Option<(Arc<Thing>, Arc<Record>)>,
 	truthy: bool,
 }
 
@@ -186,7 +187,7 @@ impl CheckerCacheEntry {
 			let rid = Arc::new(rid);
 			let txn = ctx.tx();
 			let val = Iterable::fetch_thing(&txn, opt, &rid).await?;
-			if !val.is_none_or_null() {
+			if !val.data.is_none_or_null() {
 				let (value, truthy) = {
 					let mut cursor_doc = CursorDoc {
 						rid: Some(rid.clone()),

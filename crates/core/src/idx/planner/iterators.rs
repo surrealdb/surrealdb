@@ -1,5 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::expr::record::Record;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Array, Ident, Number, Thing, Value};
 use crate::idx::docids::DocId;
@@ -183,11 +184,11 @@ pub(crate) enum IndexItemRecord {
 	/// We just collected the key
 	Key(Arc<Thing>, IteratorRecord),
 	/// We have collected the key and the value
-	KeyValue(Arc<Thing>, Arc<Value>, IteratorRecord),
+	KeyValue(Arc<Thing>, Arc<Record>, IteratorRecord),
 }
 
 impl IndexItemRecord {
-	fn new(t: Arc<Thing>, ir: IteratorRecord, val: Option<Arc<Value>>) -> Self {
+	fn new(t: Arc<Thing>, ir: IteratorRecord, val: Option<Arc<Record>>) -> Self {
 		if let Some(val) = val {
 			Self::KeyValue(t, val, ir)
 		} else {
@@ -205,7 +206,7 @@ impl IndexItemRecord {
 		}
 	}
 
-	pub(crate) fn consume(self) -> (Arc<Thing>, Option<Arc<Value>>, IteratorRecord) {
+	pub(crate) fn consume(self) -> (Arc<Thing>, Option<Arc<Record>>, IteratorRecord) {
 		match self {
 			Self::Key(t, ir) => (t, None, ir),
 			Self::KeyValue(t, v, ir) => (t, Some(v), ir),
@@ -1425,7 +1426,7 @@ where
 	}
 }
 
-pub(crate) type KnnIteratorResult = (Arc<Thing>, f64, Option<Arc<Value>>);
+pub(crate) type KnnIteratorResult = (Arc<Thing>, f64, Option<Arc<Record>>);
 
 pub(crate) struct KnnIterator {
 	irf: IteratorRef,

@@ -184,6 +184,7 @@ impl Idiom {
 				Some(v) => {
 					v.doc
 						.as_ref()
+						.data
 						.get(stk, ctx, opt, doc, self)
 						.await?
 						.compute(stk, ctx, opt, doc)

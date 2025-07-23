@@ -7,9 +7,6 @@ use crate::err::Error;
 use crate::expr::Dir;
 use crate::expr::Relation;
 use crate::expr::TableType;
-use crate::expr::paths::IN;
-use crate::expr::paths::OUT;
-use crate::expr::value::Value;
 use anyhow::{Result, ensure};
 
 impl Document {
@@ -75,9 +72,7 @@ impl Document {
 			let key = crate::key::graph::new(ns, db, &r.tb, &r.id, i, &rid);
 			txn.set(key, vec![], opt.version).await?;
 			// Store the edges on the record
-			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
-			self.current.doc.to_mut().put(&*IN, l.clone().into());
-			self.current.doc.to_mut().put(&*OUT, r.clone().into());
+			self.current.doc.to_mut().update_edges(l.clone().into(), r.clone().into());
 		}
 		// Carry on
 		Ok(())

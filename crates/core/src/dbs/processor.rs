@@ -5,6 +5,7 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::expr::dir::Dir;
 use crate::expr::id::range::IdRange;
+use crate::expr::record::Record;
 use crate::expr::{Edges, Table, Thing, Value};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
@@ -970,7 +971,7 @@ impl Iterable {
 		txn: &Transaction,
 		opt: &Options,
 		thg: &Thing,
-	) -> Result<Arc<Value>> {
+	) -> Result<Arc<Record>> {
 		// Fetch and parse the data from the store
 		let (ns, db) = opt.ns_db()?;
 		let val = txn.get_record(ns, db, &thg.tb, &thg.id, None).await?;
