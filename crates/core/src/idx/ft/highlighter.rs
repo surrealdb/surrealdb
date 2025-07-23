@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::expr::Idiom;
-use crate::idx::ft::offsets::{Offset, Position};
+use crate::idx::ft::Position;
+use crate::idx::ft::offset::Offset;
 use crate::val::{Array, Object, Value};
 use anyhow::{Result, ensure};
 use std::collections::btree_map::Entry as BEntry;

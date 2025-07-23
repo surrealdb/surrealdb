@@ -1,12 +1,11 @@
 use crate::idx::docids::DocId;
+use crate::idx::ft::DocLength;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore, Payload};
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType};
 use anyhow::Result;
-
-pub(super) type DocLength = u64;
 
 pub(super) struct DocLengths {
 	state_key: Key,
@@ -95,7 +94,7 @@ impl DocLengths {
 #[cfg(test)]
 mod tests {
 	use crate::idx::IndexKeyBase;
-	use crate::idx::ft::doclength::DocLengths;
+	use crate::idx::ft::search::doclength::DocLengths;
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 

@@ -3,8 +3,8 @@ use crate::dbs::Options;
 use crate::expr::Ident;
 use crate::expr::statements::DefineIndexStatement;
 use crate::idx::docids::DocId;
-use crate::idx::ft::termdocs::TermsDocs;
-use crate::idx::ft::{FtIndex, HitsIterator};
+use crate::idx::ft::fulltext::FullTextHitsIterator;
+use crate::idx::ft::search::SearchHitsIterator;
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
@@ -119,7 +119,8 @@ pub(crate) enum ThingIterator {
 	UniqueRangeReverse(UniqueRangeReverseThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
-	Matches(MatchesThingIterator),
+	SearchMatches(MatchesThingIterator<SearchHitsIterator>),
+	FullTextMatches(MatchesThingIterator<FullTextHitsIterator>),
 	Knn(KnnIterator),
 	Multiples(Box<MultipleIterators>),
 }
@@ -142,7 +143,8 @@ impl ThingIterator {
 			Self::UniqueRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::IndexUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_batch(ctx, txn, size).await,
-			Self::Matches(i) => i.next_batch(ctx, txn, size).await,
+			Self::SearchMatches(i) => i.next_batch(ctx, txn, size).await,
+			Self::FullTextMatches(i) => i.next_batch(ctx, txn, size).await,
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
@@ -167,7 +169,8 @@ impl ThingIterator {
 			Self::UniqueRangeReverse(i) => i.next_count(txn, size).await,
 			Self::IndexUnion(i) => i.next_count(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_count(ctx, txn, size).await,
-			Self::Matches(i) => i.next_count(ctx, txn, size).await,
+			Self::SearchMatches(i) => i.next_count(ctx, txn, size).await,
+			Self::FullTextMatches(i) => i.next_count(ctx, txn, size).await,
 			Self::Knn(i) => i.next_count(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
@@ -1342,29 +1345,31 @@ impl UniqueJoinThingIterator {
 	}
 }
 
-pub(crate) struct MatchesThingIterator {
-	irf: IteratorRef,
-	hits_left: usize,
-	hits: Option<HitsIterator>,
+pub(crate) trait MatchesHitsIterator {
+	fn len(&self) -> usize;
+	async fn next(&mut self, tx: &Transaction) -> Result<Option<(RecordId, DocId)>>;
 }
 
-impl MatchesThingIterator {
-	pub(super) async fn new(
-		irf: IteratorRef,
-		fti: &FtIndex,
-		terms_docs: TermsDocs,
-	) -> Result<Self> {
-		let hits = fti.new_hits_iterator(terms_docs)?;
-		let hits_left = if let Some(h) = &hits {
-			h.len()
-		} else {
-			0
-		};
-		Ok(Self {
+pub(crate) struct MatchesThingIterator<T>
+where
+	T: MatchesHitsIterator,
+{
+	irf: IteratorRef,
+	hits_left: usize,
+	hits: Option<T>,
+}
+
+impl<T> MatchesThingIterator<T>
+where
+	T: MatchesHitsIterator,
+{
+	pub(super) fn new(irf: IteratorRef, hits: Option<T>) -> Self {
+		let hits_left = hits.as_ref().map(|h| h.len()).unwrap_or(0);
+		Self {
 			irf,
 			hits,
 			hits_left,
-		})
+		}
 	}
 
 	async fn next_batch<B: IteratorBatch>(

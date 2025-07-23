@@ -11,6 +11,8 @@ pub mod bp;
 pub mod bs;
 pub mod bt;
 pub mod bu;
+pub mod dc;
+pub mod dl;
 pub mod hd;
 pub mod he;
 pub mod hi;
@@ -18,7 +20,12 @@ pub mod hl;
 pub mod hs;
 pub mod hv;
 pub mod ia;
+pub mod ib;
+pub mod id;
 pub mod ip;
+pub mod is;
+pub mod td;
+pub mod tt;
 pub mod vm;
 
 use crate::key::category::{Categorise, Category};
@@ -95,7 +102,6 @@ impl<'a> PrefixIds<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub struct Index<'a> {
 	__: u8,
 	_a: u8,

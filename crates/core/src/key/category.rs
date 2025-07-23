@@ -30,6 +30,8 @@ pub enum Category {
 	User,
 	/// crate::key::root::tl                 /!tl{tl}
 	TaskLease,
+	/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uuid}
+	IndexCompaction,
 	///
 	/// ------------------------------
 	///
@@ -136,6 +138,14 @@ pub enum Category {
 	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
 	IndexTerms,
+	/// crate::key::index::dc                /*{ns}*{db}*{tb}+{ix}!dc{id}
+	IndexFullTextDocCountAndLength,
+	/// crate::key::index::dl                /*{ns}*{db}*{tb}+{ix}!dl{id}
+	IndexDocLength,
+	/// crate::key::index::td                /*{ns}*{db}*{tb}+{ix}!td{term}{id}
+	IndexTermDocument,
+	/// crate::key::index::tt                /*{ns}*{db}*{tb}+{ix}!td{term}{uuid}{uuid}
+	IndexTermDocuments,
 	/// crate::key::index::he                /*{ns}*{db}*{tb}+{ix}!he{id}
 	IndexHnswElements,
 	/// crate::key::index::hd                /*{ns}*{db}*{tb}+{ix}!hd{id}
@@ -146,8 +156,12 @@ pub enum Category {
 	IndexHnswVec,
 	/// crate::key::index::ia                /*{ns}*{db}*{tb}+{ix}!ia{id}
 	IndexAppendings,
+	/// crate::key::index::ib                /*{ns}*{db}*{tb}+{ix}!ib{id}
+	IndexInvertedDocIds,
 	/// crate::key::index::ip                /*{ns}*{db}*{tb}+{ix}!ip{id}
 	IndexPrimaryAppending,
+	/// crate::key::index::is                /*{ns}*{db}*{tb}+{ix}!is{uuid}
+	IndexFullTextDocIdsSequenceState,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -228,6 +242,8 @@ impl Display for Category {
 			Self::IndexBTreeNode => "IndexBTreeNode",
 			Self::IndexTermDocFrequency => "IndexTermDocFrequency",
 			Self::IndexDocKeys => "IndexDocKeys",
+			Self::IndexDocLength => "IndexDocLength",
+			Self::IndexTermDocument => "IndexTermDocument",
 			Self::IndexTermList => "IndexTermList",
 			Self::IndexBTreeNodeDocLengths => "IndexBTreeNodeDocLengths",
 			Self::IndexOffset => "IndexOffset",
@@ -249,6 +265,11 @@ impl Display for Category {
 			Self::SequenceState => "SequenceState",
 			Self::SequenceBatch => "SequenceBatch",
 			Self::TaskLease => "TaskLease",
+			Self::IndexInvertedDocIds => "IndexInvertedDocIds",
+			Self::IndexFullTextDocIdsSequenceState => "IndexFullTextDocIdsSequenceState",
+			Self::IndexFullTextDocCountAndLength => "IndexFullTextDocCountAndLength",
+			Self::IndexTermDocuments => "IndexTermDocuments",
+			Self::IndexCompaction => "IndexCompaction",
 		};
 		write!(f, "{}", name)
 	}

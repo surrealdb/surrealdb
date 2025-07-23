@@ -1,13 +1,12 @@
 use crate::idx::docids::DocId;
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::TermFrequency;
+use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType};
 use anyhow::Result;
-
-pub(super) type TermFrequency = u64;
 
 pub(super) struct Postings {
 	state_key: Key,
@@ -95,7 +94,7 @@ impl Postings {
 #[cfg(test)]
 mod tests {
 	use crate::idx::IndexKeyBase;
-	use crate::idx::ft::postings::Postings;
+	use crate::idx::ft::search::postings::Postings;
 	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};

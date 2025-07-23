@@ -1,5 +1,5 @@
 //! Stores doc keys for doc_ids
-use crate::idx::trees::store::NodeId;
+use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ pub struct Bi<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub node_id: NodeId,
+	pub id: DocId,
 }
 impl_key!(Bi<'a>);
 
@@ -30,7 +30,7 @@ impl Categorise for Bi<'_> {
 }
 
 impl<'a> Bi<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: DocId) -> Self {
 		Bi {
 			__: b'/',
 			_a: b'*',
@@ -44,7 +44,7 @@ impl<'a> Bi<'a> {
 			_e: b'!',
 			_f: b'b',
 			_g: b'i',
-			node_id,
+			id,
 		}
 	}
 }

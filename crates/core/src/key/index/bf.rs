@@ -1,6 +1,6 @@
 //! Stores Term/Doc frequency
 use crate::idx::docids::DocId;
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::search::terms::TermId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};

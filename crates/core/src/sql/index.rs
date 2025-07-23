@@ -11,12 +11,14 @@ pub enum Index {
 	Idx,
 	/// Unique index
 	Uniq,
-	/// Index with Full-Text search capabilities
+	/// Index with Full-Text search capabilities - single writer
 	Search(SearchParams),
-	/// M-Tree index for distance based metrics
+	/// M-Tree index for distance-based metrics
 	MTree(MTreeParams),
 	/// HNSW index for distance based metrics
 	Hnsw(HnswParams),
+	/// Index with Full-Text search capabilities supporting multiple writers
+	FullText(FullTextParams),
 }
 
 impl From<Index> for crate::expr::index::Index {
@@ -27,6 +29,7 @@ impl From<Index> for crate::expr::index::Index {
 			Index::Search(p) => Self::Search(p.into()),
 			Index::MTree(p) => Self::MTree(p.into()),
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
+			Index::FullText(p) => Self::FullText(p.into()),
 		}
 	}
 }
@@ -39,6 +42,7 @@ impl From<crate::expr::index::Index> for Index {
 			crate::expr::index::Index::Search(p) => Self::Search(p.into()),
 			crate::expr::index::Index::MTree(p) => Self::MTree(p.into()),
 			crate::expr::index::Index::Hnsw(p) => Self::Hnsw(p.into()),
+			crate::expr::index::Index::FullText(p) => Self::FullText(p.into()),
 		}
 	}
 }
@@ -90,6 +94,33 @@ impl From<crate::expr::index::SearchParams> for SearchParams {
 			doc_lengths_cache: v.doc_lengths_cache,
 			postings_cache: v.postings_cache,
 			terms_cache: v.terms_cache,
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct FullTextParams {
+	pub az: Ident,
+	pub hl: bool,
+	pub sc: Scoring,
+}
+
+impl From<FullTextParams> for crate::expr::index::FullTextParams {
+	fn from(v: FullTextParams) -> Self {
+		crate::expr::index::FullTextParams {
+			analyzer: v.az.into(),
+			highlight: v.hl,
+			scoring: v.sc.into(),
+		}
+	}
+}
+impl From<crate::expr::index::FullTextParams> for FullTextParams {
+	fn from(v: crate::expr::index::FullTextParams) -> Self {
+		Self {
+			az: v.analyzer.into(),
+			hl: v.highlight,
+			sc: v.scoring.into(),
 		}
 	}
 }
@@ -282,6 +313,13 @@ impl Display for Index {
 					p.postings_cache,
 					p.terms_cache
 				)?;
+				if p.hl {
+					f.write_str(" HIGHLIGHTS")?
+				}
+				Ok(())
+			}
+			Self::FullText(p) => {
+				write!(f, "FULLTEXT ANALYZER {} {}", p.az, p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
 				}

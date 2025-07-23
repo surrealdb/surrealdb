@@ -2,7 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::{Iterable, Options};
 use crate::doc::CursorDoc;
 use crate::expr::{Cond, Expr, FlowResultExt as _, Literal};
-use crate::idx::docids::{DocId, DocIds};
+use crate::idx::docids::DocId;
+use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
@@ -100,7 +101,7 @@ impl<'a> MTreeConditionChecker<'a> {
 	pub(in crate::idx) async fn check_truthy(
 		&mut self,
 		stk: &mut Stk,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		doc_id: DocId,
 	) -> Result<bool> {
 		match self {
@@ -117,7 +118,7 @@ impl<'a> MTreeConditionChecker<'a> {
 
 	pub(in crate::idx) async fn convert_result(
 		&mut self,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		res: VecDeque<(DocId, f64)>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		match self {
@@ -134,7 +135,7 @@ pub struct MTreeChecker<'a> {
 impl MTreeChecker<'_> {
 	async fn convert_result(
 		&self,
-		doc_ids: &DocIds,
+		doc_ids: &BTreeDocIds,
 		res: VecDeque<(DocId, f64)>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		if res.is_empty() {
@@ -221,7 +222,12 @@ pub struct MTreeCondChecker<'a> {
 }
 
 impl MTreeCondChecker<'_> {
-	async fn check_truthy(&mut self, stk: &mut Stk, doc_ids: &DocIds, doc_id: u64) -> Result<bool> {
+	async fn check_truthy(
+		&mut self,
+		stk: &mut Stk,
+		doc_ids: &BTreeDocIds,
+		doc_id: u64,
+	) -> Result<bool> {
 		match self.cache.entry(doc_id) {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {

@@ -152,9 +152,9 @@ async fn handler(
 				}
 
 				let (header, val) = match format {
-					Format::Json => ("application/json", json::res(body)?),
-					Format::Cbor => ("application/cbor", cbor::res(body)?),
-					Format::Revision => ("application/surrealdb", revision::res(body)?),
+					Format::Json => ("application/json", json::encode(body)?),
+					Format::Cbor => ("application/cbor", cbor::encode(body)?),
+					Format::Revision => ("application/surrealdb", revision::encode(&body)?),
 					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
 				};
 

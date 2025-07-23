@@ -1,32 +1,32 @@
 use crate::idx::docids::DocId;
-use crate::idx::ft::Bm25Params;
-use crate::idx::ft::doclength::{DocLength, DocLengths};
-use crate::idx::ft::postings::{Postings, TermFrequency};
-use crate::idx::ft::termdocs::TermsDocs;
+use crate::idx::ft::search::doclength::DocLengths;
+use crate::idx::ft::search::postings::Postings;
+use crate::idx::ft::search::termdocs::SearchTermsDocs;
+use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::kvs::Transaction;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(super) type Score = f32;
-
 pub(crate) struct BM25Scorer {
 	postings: Arc<RwLock<Postings>>,
-	terms_docs: TermsDocs,
+	terms_docs: Arc<SearchTermsDocs>,
 	doc_lengths: Arc<RwLock<DocLengths>>,
 	average_doc_length: f32,
 	doc_count: f32,
-	bm25: Bm25Params,
+	k1: f32,
+	b: f32,
 }
 
 impl BM25Scorer {
 	pub(super) fn new(
 		postings: Arc<RwLock<Postings>>,
-		terms_docs: TermsDocs,
+		terms_docs: Arc<SearchTermsDocs>,
 		doc_lengths: Arc<RwLock<DocLengths>>,
 		total_docs_length: u128,
 		doc_count: u64,
-		bm25: Bm25Params,
+		k1: f32,
+		b: f32,
 	) -> Self {
 		Self {
 			postings,
@@ -34,7 +34,8 @@ impl BM25Scorer {
 			doc_lengths,
 			average_doc_length: (total_docs_length as f32) / (doc_count as f32),
 			doc_count: doc_count as f32,
-			bm25,
+			k1,
+			b,
 		}
 	}
 
@@ -51,7 +52,7 @@ impl BM25Scorer {
 		Ok(self.compute_bm25_score(term_frequency as f32, term_doc_count as f32, doc_length as f32))
 	}
 
-	pub(crate) async fn score(&self, tx: &Transaction, doc_id: DocId) -> Result<Option<Score>> {
+	pub(crate) async fn score(&self, tx: &Transaction, doc_id: DocId) -> Result<Score> {
 		let mut sc = 0.0;
 		let p = self.postings.read().await;
 		for (term_id, docs) in self.terms_docs.iter().flatten() {
@@ -62,8 +63,7 @@ impl BM25Scorer {
 				}
 			}
 		}
-		drop(p);
-		Ok(Some(sc))
+		Ok(sc)
 	}
 
 	// https://en.wikipedia.org/wiki/Okapi_BM25
@@ -79,10 +79,10 @@ impl BM25Scorer {
 		}
 		let tf_prim = 1.0 + term_freq.ln();
 		// idf * (k1 + 1)
-		let numerator = idf * (self.bm25.k1 + 1.0) * tf_prim;
+		let numerator = idf * (self.k1 + 1.0) * tf_prim;
 		// 1 - b + b * (|D| / avgDL)
-		let denominator = 1.0 - self.bm25.b + self.bm25.b * (doc_length / self.average_doc_length);
+		let denominator = 1.0 - self.b + self.b * (doc_length / self.average_doc_length);
 		// numerator / (k1 * denominator + 1)
-		numerator / (self.bm25.k1 * denominator + 1.0)
+		numerator / (self.k1 * denominator + 1.0)
 	}
 }

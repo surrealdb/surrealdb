@@ -5,9 +5,9 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::statements::DefineIndexStatement;
+use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
-use crate::key::index::ia::Ia;
-use crate::key::index::ip::Ip;
 use crate::key::thing;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
@@ -311,9 +311,9 @@ impl QueueSequences {
 struct Building {
 	ctx: Context,
 	opt: Options,
+	ikb: IndexKeyBase,
 	tf: TransactionFactory,
 	ix: Arc<DefineIndexStatement>,
-	tb: String,
 	status: Arc<RwLock<BuildingStatus>>,
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
@@ -326,11 +326,13 @@ impl Building {
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<Self> {
+		let (ns, db) = opt.ns_db()?;
+		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		Ok(Self {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
+			ikb,
 			tf,
-			tb: ix.what.into_raw_string(),
 			ix,
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
@@ -372,26 +374,16 @@ impl Building {
 		// Get the idx of this appended record from the sequence
 		let idx = queue.add_update();
 		// Store the appending
-		let ia = self.new_ia_key(idx)?;
+		let ia = self.ikb.new_ia_key(idx);
 		tx.set(ia, revision::to_vec(&a)?, None).await?;
 		// Do we already have a primary appending?
-		let ip = self.new_ip_key(rid.key.clone())?;
+		let ip = self.ikb.new_ip_key(rid.key.clone());
 		if tx.get(ip.clone(), None).await?.is_none() {
 			// If not, we set it
 			tx.set(ip, revision::to_vec(&PrimaryAppending(idx))?, None).await?;
 		}
 		drop(queue);
 		Ok(ConsumeResult::Enqueued)
-	}
-
-	fn new_ia_key(&self, i: u32) -> Result<Ia> {
-		let (ns, db) = self.opt.ns_db()?;
-		Ok(Ia::new(ns, db, &self.ix.what, &self.ix.name, i))
-	}
-
-	fn new_ip_key(&self, id: RecordIdKey) -> Result<Ip> {
-		let (ns, db) = self.opt.ns_db()?;
-		Ok(Ip::new(ns, db, &self.ix.what, &self.ix.name, id))
 	}
 
 	async fn new_read_tx(&self) -> Result<Transaction> {
@@ -411,14 +403,14 @@ impl Building {
 		{
 			self.set_status(BuildingStatus::Cleaning).await;
 			let ctx = self.new_write_tx_ctx().await?;
-			let key = crate::key::index::all::new(ns, db, &self.tb, &self.ix.name);
+			let key = crate::key::index::all::new(ns, db, self.ikb.table(), self.ikb.index());
 			let tx = ctx.tx();
 			tx.delp(key).await?;
 			tx.commit().await?;
 		}
 		// First iteration, we index every key
-		let beg = thing::prefix(ns, db, &self.tb)?;
-		let end = thing::suffix(ns, db, &self.tb)?;
+		let beg = thing::prefix(ns, db, self.ikb.table())?;
+		let end = thing::suffix(ns, db, self.ikb.table())?;
 		let mut next = Some(beg..end);
 		let mut initial_count = 0;
 		// Set the initial status
@@ -517,6 +509,7 @@ impl Building {
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
 	) -> Result<()> {
+		let rc = AtomicBool::new(false);
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
@@ -536,11 +529,11 @@ impl Building {
 			let opt_values;
 
 			// Do we already have an appended value?
-			let ip = self.new_ip_key(rid.key.clone())?;
+			let ip = self.ikb.new_ip_key(rid.key.clone());
 			if let Some(v) = tx.get(ip, None).await? {
 				// Then we take the old value of the appending value as the initial indexing value
 				let pa: PrimaryAppending = revision::from_slice(&v)?;
-				let ia = self.new_ia_key(pa.0)?;
+				let ia = self.ikb.new_ia_key(pa.0);
 				let v = tx
 					.get(ia, None)
 					.await?
@@ -559,7 +552,7 @@ impl Building {
 			// Index the record
 			let mut io =
 				IndexOperation::new(ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
-			stack.enter(|stk| io.compute(stk)).finish().await?;
+			stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
 
 			// Increment the count and update the status
 			*count += 1;
@@ -570,6 +563,9 @@ impl Building {
 			})
 			.await;
 		}
+		// Check if we trigger the compaction
+		self.check_index_compaction(tx, &rc).await?;
+		// We're done
 		Ok(())
 	}
 
@@ -581,26 +577,27 @@ impl Building {
 		initial: usize,
 		count: &mut usize,
 	) -> Result<()> {
+		let rc = AtomicBool::new(false);
 		let mut stack = TreeStack::new();
 		for i in range {
 			if self.is_aborted().await {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let ia = self.new_ia_key(i)?;
+			let ia = self.ikb.new_ia_key(i);
 			if let Some(v) = tx.get(ia.clone(), None).await? {
 				tx.del(ia).await?;
 				let a: Appending = revision::from_slice(&v)?;
 				let rid = RecordId {
-					table: self.tb.clone(),
+					table: self.ikb.table().to_string(),
 					key: a.id,
 				};
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
-				stack.enter(|stk| io.compute(stk)).finish().await?;
+				stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
 
 				// We can delete the ip record if any
-				let ip = self.new_ip_key(rid.key)?;
+				let ip = self.ikb.new_ip_key(rid.key);
 				tx.del(ip).await?;
 
 				*count += 1;
@@ -612,9 +609,20 @@ impl Building {
 				.await;
 			}
 		}
+		// Check if we trigger the compaction
+		self.check_index_compaction(tx, &rc).await?;
+		// We're done
 		Ok(())
 	}
 
+	async fn check_index_compaction(&self, tx: &Transaction, rc: &AtomicBool) -> Result<()> {
+		if !rc.load(Ordering::Relaxed) {
+			return Ok(());
+		}
+		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
+		rc.store(false, Ordering::Relaxed);
+		Ok(())
+	}
 	/// Abort the current indexing process.
 	fn abort(&self) {
 		// We use `Ordering::Relaxed` as the called does not require to be synchronized.

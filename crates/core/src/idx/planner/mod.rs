@@ -280,7 +280,6 @@ impl QueryPlanner {
 			ctx.opt,
 			&t,
 			tree.index_map.options,
-			tree.knn_expressions,
 			tree.knn_brute_force_expressions,
 			tree.knn_condition,
 		)

@@ -1,6 +1,7 @@
 use crate::expr::fmt::Fmt;
 use crate::expr::index::Distance;
 use crate::expr::{Expr, Ident, Kind};
+use crate::idx::ft::search::MatchRef;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -140,7 +141,7 @@ pub enum BinaryOperator {
 	RangeSkipInclusive,
 
 	// `@@`
-	Matches(Option<u8>),
+	Matches(Option<MatchRef>),
 	// `<|k,..|>`
 	NearestNeighbor(Box<NearestNeighbor>),
 }

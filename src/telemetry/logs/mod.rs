@@ -7,6 +7,9 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
+mod socket;
+pub use socket::SocketWriter;
+
 pub fn file<S>(
 	filter: CustomFilter,
 	file: NonBlocking,

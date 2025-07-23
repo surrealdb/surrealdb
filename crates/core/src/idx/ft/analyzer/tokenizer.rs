@@ -1,11 +1,12 @@
 use crate::err::Error;
 use crate::expr::tokenizer::Tokenizer as SqlTokenizer;
+use crate::idx::ft::Position;
 use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
-use crate::idx::ft::offsets::{Offset, Position};
+use crate::idx::ft::offset::Offset;
 use crate::val::Value;
 use anyhow::{Result, bail};
 
-pub(in crate::idx) struct Tokens {
+pub(in crate::idx::ft) struct Tokens {
 	/// The input string
 	i: String,
 	/// The final list of tokens
@@ -13,14 +14,14 @@ pub(in crate::idx) struct Tokens {
 }
 
 impl Tokens {
-	pub(super) fn new(i: String) -> Self {
+	pub(in crate::idx::ft) fn new(i: String) -> Self {
 		Self {
 			i,
 			t: Vec::new(),
 		}
 	}
 
-	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&'a str> {
+	pub(in crate::idx::ft) fn get_token_string<'a>(&'a self, t: &'a Token) -> Result<&'a str> {
 		t.get_str(&self.i)
 	}
 
@@ -59,7 +60,7 @@ impl Tokens {
 		})
 	}
 
-	pub(super) fn list(&self) -> &Vec<Token> {
+	pub(in crate::idx::ft) fn list(&self) -> &Vec<Token> {
 		&self.t
 	}
 }
@@ -77,7 +78,7 @@ impl TryFrom<Tokens> for Value {
 }
 
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
-pub(super) enum Token {
+pub(in crate::idx::ft) enum Token {
 	Ref {
 		chars: (Position, Position, Position),
 		bytes: (Position, Position),
@@ -118,7 +119,7 @@ impl Token {
 		}
 	}
 
-	pub(super) fn new_offset(&self, i: u32) -> Offset {
+	pub(in crate::idx::ft) fn new_offset(&self, i: u32) -> Offset {
 		match self {
 			Token::Ref {
 				chars,
@@ -144,7 +145,7 @@ impl Token {
 		}
 	}
 
-	pub(super) fn get_char_len(&self) -> u32 {
+	pub(in crate::idx::ft) fn get_char_len(&self) -> u32 {
 		match self {
 			Token::Ref {
 				len,

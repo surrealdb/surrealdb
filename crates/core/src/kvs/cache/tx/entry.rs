@@ -218,6 +218,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Sqs"),
 		}
 	}
+
 	/// Converts this cache entry into a slice of [`DefineFunctionStatement`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fcs`].
 	pub(crate) fn try_into_fcs(self) -> Result<Arc<[DefineFunctionStatement]>> {

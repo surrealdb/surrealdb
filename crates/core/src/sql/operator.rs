@@ -1,6 +1,5 @@
-use crate::sql::fmt::Fmt;
 use crate::sql::index::Distance;
-use crate::sql::{Expr, Ident, Kind};
+use crate::sql::{Expr, Ident, Kind, fmt::Fmt};
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

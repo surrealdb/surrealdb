@@ -27,10 +27,12 @@ pub enum Index {
 	MTree(MTreeParams),
 	/// HNSW index for distance based metrics
 	Hnsw(HnswParams),
+	/// Index with Full-Text search capabilities supporting multiple writers
+	FullText(FullTextParams),
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq,  Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SearchParams {
 	pub az: Ident,
@@ -47,7 +49,16 @@ pub struct SearchParams {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq,  Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct FullTextParams {
+	pub analyzer: Ident,
+	pub highlight: bool,
+	pub scoring: Scoring,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct MTreeParams {
 	pub dimension: u16,
@@ -60,7 +71,7 @@ pub struct MTreeParams {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq,  Serialize, Deserialize, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Distance1 {
 	#[default]
@@ -72,7 +83,7 @@ pub enum Distance1 {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq,  Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct HnswParams {
 	pub dimension: u16,
@@ -114,7 +125,7 @@ impl HnswParams {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq,  Serialize, Deserialize, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Distance {
 	Chebyshev,
@@ -204,6 +215,13 @@ impl Display for Index {
 					p.terms_cache
 				)?;
 				if p.hl {
+					f.write_str(" HIGHLIGHTS")?
+				}
+				Ok(())
+			}
+			Self::FullText(p) => {
+				write!(f, "FULLTEXT ANALYZER {} {}", p.analyzer, p.scoring,)?;
+				if p.highlight {
 					f.write_str(" HIGHLIGHTS")?
 				}
 				Ok(())

@@ -1,17 +1,16 @@
 use crate::err::Error;
+use crate::idx::docids::{DocId, Resolved};
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use anyhow::Result;
 use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
-pub type DocId = u64;
-
-pub struct DocIds {
+/// BTree based DocIds store
+pub(crate) struct BTreeDocIds {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<TrieKeys>,
@@ -20,14 +19,14 @@ pub struct DocIds {
 	next_doc_id: DocId,
 }
 
-impl DocIds {
+impl BTreeDocIds {
 	pub async fn new(
 		tx: &Transaction,
 		tt: TransactionType,
 		ikb: IndexKeyBase,
 		default_btree_order: u32,
 		cache_size: u32,
-	) -> Result<Self> {
+	) -> anyhow::Result<Self> {
 		let state_key: Key = ikb.new_bd_key(None)?;
 		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
 			VersionedStore::try_from(val)?
@@ -70,24 +69,29 @@ impl DocIds {
 		doc_id
 	}
 
-	pub(crate) async fn get_doc_id(&self, tx: &Transaction, doc_key: Key) -> Result<Option<DocId>> {
+	pub(crate) async fn get_doc_id(
+		&self,
+		tx: &Transaction,
+		doc_key: Key,
+	) -> anyhow::Result<Option<DocId>> {
 		self.btree.search(tx, &self.store, &doc_key).await
 	}
 
 	/// Returns the doc_id for the given doc_key.
-	/// If the doc_id does not exists, a new one is created, and associated to the given key.
+	/// If the doc_id does not exists, a new one is created, and associated with the given key.
 	pub(in crate::idx) async fn resolve_doc_id(
 		&mut self,
 		tx: &Transaction,
 		doc_key: Key,
-	) -> Result<Resolved> {
+	) -> anyhow::Result<Resolved> {
 		{
 			if let Some(doc_id) = self.btree.search_mut(tx, &mut self.store, &doc_key).await? {
 				return Ok(Resolved::Existing(doc_id));
 			}
 		}
 		let doc_id = self.get_next_doc_id();
-		tx.set(self.index_key_base.new_bi_key(doc_id)?, doc_key.clone(), None).await?;
+		let bi = self.index_key_base.new_bi_key(doc_id);
+		tx.set(bi, doc_key.clone(), None).await?;
 		self.btree.insert(tx, &mut self.store, doc_key, doc_id).await?;
 		Ok(Resolved::New(doc_id))
 	}
@@ -96,9 +100,10 @@ impl DocIds {
 		&mut self,
 		tx: &Transaction,
 		doc_key: Key,
-	) -> Result<Option<DocId>> {
+	) -> anyhow::Result<Option<DocId>> {
 		if let Some(doc_id) = self.btree.delete(tx, &mut self.store, doc_key).await? {
-			tx.del(self.index_key_base.new_bi_key(doc_id)?).await?;
+			let bi = self.index_key_base.new_bi_key(doc_id);
+			tx.del(bi).await?;
 			if let Some(available_ids) = &mut self.available_ids {
 				available_ids.insert(doc_id);
 			} else {
@@ -116,8 +121,8 @@ impl DocIds {
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
-	) -> Result<Option<Key>> {
-		let doc_id_key = self.index_key_base.new_bi_key(doc_id)?;
+	) -> anyhow::Result<Option<Key>> {
+		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
 		if let Some(val) = tx.get(doc_id_key, None).await? {
 			Ok(Some(val))
 		} else {
@@ -125,11 +130,11 @@ impl DocIds {
 		}
 	}
 
-	pub(in crate::idx) async fn statistics(&self, tx: &Transaction) -> Result<BStatistics> {
+	pub(in crate::idx) async fn statistics(&self, tx: &Transaction) -> anyhow::Result<BStatistics> {
 		self.btree.statistics(tx, &self.store).await
 	}
 
-	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
+	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> anyhow::Result<()> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let btree = self.btree.inc_generation().clone();
 			let state = State {
@@ -153,7 +158,7 @@ struct State {
 }
 
 impl VersionedStore for State {
-	fn try_from(val: Val) -> Result<Self> {
+	fn try_from(val: Val) -> anyhow::Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -220,45 +225,22 @@ impl State {
 	}
 }
 
-#[derive(Debug, PartialEq)]
-pub(in crate::idx) enum Resolved {
-	New(DocId),
-	Existing(DocId),
-}
-
-impl Resolved {
-	pub(in crate::idx) fn doc_id(&self) -> &DocId {
-		match self {
-			Resolved::New(doc_id) => doc_id,
-			Resolved::Existing(doc_id) => doc_id,
-		}
-	}
-
-	pub(in crate::idx) fn was_existing(&self) -> bool {
-		match self {
-			Resolved::New(_) => false,
-			Resolved::Existing(_) => true,
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use crate::idx::IndexKeyBase;
-	use crate::idx::docids::{DocIds, Resolved};
-	use crate::kvs::LockType::*;
-	use crate::kvs::TransactionType::*;
+	use crate::idx::docids::btdocids::{BTreeDocIds, Resolved};
 	use crate::kvs::{Datastore, Transaction, TransactionType};
+	use crate::kvs::{LockType, TransactionType::*};
 
 	const BTREE_ORDER: u32 = 7;
 
-	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Transaction, DocIds) {
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let d = DocIds::new(&tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100).await.unwrap();
+	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Transaction, BTreeDocIds) {
+		let tx = ds.transaction(tt, LockType::Optimistic).await.unwrap();
+		let d = BTreeDocIds::new(&tx, tt, IndexKeyBase::default(), BTREE_ORDER, 100).await.unwrap();
 		(tx, d)
 	}
 
-	async fn finish(tx: Transaction, mut d: DocIds) {
+	async fn finish(tx: Transaction, mut d: BTreeDocIds) {
 		d.finish(&tx).await.unwrap();
 		tx.commit().await.unwrap();
 	}
