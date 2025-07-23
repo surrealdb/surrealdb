@@ -89,6 +89,10 @@ struct Cli {
 	#[arg(global = true)]
 	#[arg(value_parser = CustomFilterParser::new())]
 	log_otel_level: Option<CustomFilter>,
+	#[arg(help = "Send logs to the specified host:port", help_heading = "Logging")]
+	#[arg(env = "SURREAL_LOG_SOCKET", long = "log-socket")]
+	#[arg(global = true)]
+	log_socket: Option<String>,
 	//
 	// Log file
 	//
@@ -223,6 +227,7 @@ pub async fn init() -> ExitCode {
 		.with_filter(args.log.clone())
 		.with_file_filter(args.log_file_level.clone())
 		.with_otel_filter(args.log_otel_level.clone())
+		.with_log_socket(args.log_socket.clone())
 		.with_log_format(args.log_format)
 		.with_log_file_enabled(args.log_file_enabled)
 		.with_log_file_path(Some(args.log_file_path.clone()))
