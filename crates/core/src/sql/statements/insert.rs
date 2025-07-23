@@ -60,7 +60,7 @@ impl From<InsertStatement> for crate::expr::statements::InsertStatement {
 			timeout: v.timeout.map(Into::into),
 			parallel: v.parallel,
 			relation: v.relation,
-			version: v.version.map(|x| crate::expr::Version(x.into())),
+			version: v.version.map(From::from),
 		}
 	}
 }
@@ -76,7 +76,7 @@ impl From<crate::expr::statements::InsertStatement> for InsertStatement {
 			timeout: v.timeout.map(Into::into),
 			parallel: v.parallel,
 			relation: v.relation,
-			version: v.version.map(|x| x.0.into()),
+			version: v.version.map(From::from),
 		}
 	}
 }

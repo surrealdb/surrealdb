@@ -77,10 +77,12 @@ pub enum Value {
 	Bytes(Bytes),
 	Table(Table),
 	Thing(RecordId),
-	Regex(Regex),
 	File(File),
-	Closure(Box<Closure>),
 	Range(Box<Range>),
+	#[serde(skip)]
+	Regex(Regex),
+	#[serde(skip)]
+	Closure(Box<Closure>),
 }
 
 impl Eq for Value {}
@@ -1151,18 +1153,4 @@ mod tests {
 		assert_eq!(res, dec);
 	}
 	*/
-
-	#[test]
-	fn test_value_from_vec_i32() {
-		let vector: Vec<i32> = vec![1, 2, 3, 4, 5, 6];
-		let value = Value::from(vector);
-		assert!(matches!(value, Value::Array(Array(_))));
-	}
-
-	#[test]
-	fn test_value_from_vec_f32() {
-		let vector: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-		let value = Value::from(vector);
-		assert!(matches!(value, Value::Array(Array(_))));
-	}
 }

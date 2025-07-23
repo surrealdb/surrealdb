@@ -27,17 +27,13 @@ pub enum Format {
 	Unsupported, // Unsupported format
 }
 
-pub trait ResTrait: Serialize + Into<Value> + Revisioned {}
-
-impl<T: Serialize + Into<Value> + Revisioned> ResTrait for T {}
-
 impl From<&str> for Format {
 	fn from(v: &str) -> Self {
 		match v {
-			s if s == PROTOCOLS[0] => Format::Json,
-			s if s == PROTOCOLS[1] => Format::Cbor,
-			s if s == PROTOCOLS[2] => Format::Bincode,
-			s if s == PROTOCOLS[3] => Format::Revision,
+			"json" => Format::Json,
+			"cbor" => Format::Cbor,
+			"bincode" => Format::Bincode,
+			"revision" => Format::Revision,
 			_ => Format::Unsupported,
 		}
 	}
@@ -45,36 +41,31 @@ impl From<&str> for Format {
 
 impl Format {
 	/// Process a request using the specified format
-	pub fn req(&self, val: impl Into<Vec<u8>>) -> Result<Request, RpcError> {
-		let val = val.into();
-		match self {
-			Self::Json => json::req(&val),
-			Self::Cbor => cbor::req(val),
-			Self::Bincode => bincode::req(&val),
-			Self::Revision => revision::req(val),
-			Self::Unsupported => Err(RpcError::InvalidRequest),
-		}
+	pub fn req(&self, val: &[u8]) -> Result<Request, RpcError> {
+		let val = self.parse_value(val)?;
+		let object = val.into_object().ok_or(RpcError::InvalidRequest)?;
+		Request::from_object(object)
 	}
 
 	/// Process a response using the specified format
-	pub fn res(&self, val: impl ResTrait) -> Result<Vec<u8>, RpcError> {
+	pub fn res(&self, val: Value) -> Result<Vec<u8>, RpcError> {
 		match self {
-			Self::Json => json::res(val),
-			Self::Cbor => cbor::res(val),
-			Self::Bincode => bincode::res(val),
-			Self::Revision => revision::res(val),
+			Self::Json => json::encode(val),
+			Self::Cbor => cbor::encode(val),
+			Self::Bincode => bincode::encode(&val),
+			Self::Revision => revision::encode(&val),
 			Self::Unsupported => Err(RpcError::InvalidRequest),
 		}
 	}
 
 	/// Process a request using the specified format
-	pub fn parse_value(&self, val: impl Into<Vec<u8>>) -> Result<Value, RpcError> {
+	pub fn parse_value(&self, val: &[u8]) -> Result<Value, RpcError> {
 		let val = val.into();
 		match self {
-			Self::Json => json::parse_value(&val),
-			Self::Cbor => cbor::parse_value(val),
-			Self::Bincode => bincode::parse_value(&val),
-			Self::Revision => revision::parse_value(val),
+			Self::Json => json::decode(val),
+			Self::Cbor => cbor::decode(val),
+			Self::Bincode => bincode::decode(val),
+			Self::Revision => revision::decode(val),
 			Self::Unsupported => Err(RpcError::InvalidRequest),
 		}
 	}

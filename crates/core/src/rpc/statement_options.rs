@@ -1,7 +1,5 @@
-use crate::dbs::{Capabilities, Variables, sql_variables_to_expr_variables};
-use crate::sql::{
-	Cond, Data, Expr, Fetchs, Fields, Limit, Literal, Output, Start, Timeout, Version,
-};
+use crate::dbs::{Capabilities, Variables};
+use crate::sql::{Cond, Data, Expr, Fetchs, Fields, Limit, Literal, Output, Start, Timeout};
 use crate::syn;
 use crate::val::{Number, Object, Value};
 
@@ -19,11 +17,11 @@ pub(crate) enum RpcData {
 impl From<RpcData> for Data {
 	fn from(data: RpcData) -> Self {
 		match data {
-			RpcData::Patch(v) => Data::PatchExpression(v),
-			RpcData::Merge(v) => Data::MergeExpression(v),
-			RpcData::Replace(v) => Data::ReplaceExpression(v),
-			RpcData::Content(v) => Data::ContentExpression(v),
-			RpcData::Single(v) => Data::SingleExpression(v),
+			RpcData::Patch(v) => Data::PatchExpression(v.into_literal().into()),
+			RpcData::Merge(v) => Data::MergeExpression(v.into_literal().into()),
+			RpcData::Replace(v) => Data::ReplaceExpression(v.into_literal().into()),
+			RpcData::Content(v) => Data::ContentExpression(v.into_literal().into()),
+			RpcData::Single(v) => Data::SingleExpression(v.into_literal().into()),
 		}
 	}
 }
@@ -195,7 +193,7 @@ impl StatementOptions {
 		// Process "version" option
 		if let Some(v) = obj.remove("version") {
 			let v = match v {
-				v @ Value::Datetime(d) => Expr::Literal(Literal::Datetime(d)),
+				Value::Datetime(d) => Expr::Literal(Literal::Datetime(d)),
 				Value::Strand(v) => syn::expr_with_capabilities(v.as_str(), capabilities)?,
 				_ => {
 					return Err(RpcError::InvalidParams);

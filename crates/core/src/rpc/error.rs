@@ -25,6 +25,10 @@ pub enum RpcError {
 	BadGQLConfig,
 	#[error("Error: {0}")]
 	Thrown(String),
+	#[error("Could not serialize surreal value: {0}")]
+	Serialize(String),
+	#[error("Could not deserialize surreal value: {0}")]
+	Deserialize(String),
 }
 
 impl From<anyhow::Error> for RpcError {

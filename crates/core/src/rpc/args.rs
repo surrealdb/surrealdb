@@ -28,7 +28,7 @@ impl Extractor for Option<Value> {
 
 macro_rules! impl_tuple{
 	($($I:ident),*$(,)?) => {
-		impl<$($I),*> Extractor for ($($I,)*){
+		impl<$($I: Extractor),*> Extractor for ($($I,)*){
 			#[allow(non_snake_case)]
 			fn take<I>(iterator: &mut I) -> Option<Self>
 			where

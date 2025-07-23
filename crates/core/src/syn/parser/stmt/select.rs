@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::SelectStatement;
-use crate::sql::{Field, Fields, Idioms, Limit, Order, Split, Splits, Start, Version};
+use crate::sql::{Field, Fields, Idioms, Limit, Order, Split, Splits, Start};
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Span, t};
@@ -49,7 +49,7 @@ impl Parser<'_> {
 		};
 		let fetch = self.try_parse_fetch(stk).await?;
 		let version = if self.eat(t!("VERSION")) {
-			Some(Version(self.parse_expr_field(stk).await?))
+			Some(self.parse_expr_field(stk).await?)
 		} else {
 			None
 		};

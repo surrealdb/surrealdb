@@ -1,25 +1,14 @@
-use crate::dbs::Variables;
-use crate::expr::graph::GraphSubject;
-use crate::expr::order::{OrderList, Ordering};
-use crate::expr::part::{DestructurePart, Recurse, RecurseInstruction};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use surrealdb_protocol::proto::prost_types;
 
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, RecordId, RecordIdKey,
-	Strand, Table, Uuid, Value,
+	Strand, Uuid, Value,
 };
 
-use crate::expr::{
-	Cond, Data, Dir, Fetch, Fetchs, Field, Fields, Graph, Group, Groups, Ident, Idiom, Limit,
-	Order, Part, Split, Splits, Start, Timeout, idiom,
-};
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
-use std::ops::Bound;
-use surrealdb_protocol::proto::v1 as proto;
 
 use surrealdb_protocol::fb::v1 as proto_fb;
 
@@ -297,6 +286,24 @@ impl FromFlatbuffers for f64 {
 	}
 }
 
+impl ToFlatbuffers for Strand {
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::StringValue<'bldr>>;
+
+	#[inline]
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		let value = builder.create_string(self.as_str());
+		Ok(proto_fb::StringValue::create(
+			builder,
+			&proto_fb::StringValueArgs {
+				value: Some(value),
+			},
+		))
+	}
+}
+
 impl ToFlatbuffers for String {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::StringValue<'bldr>>;
 
@@ -452,7 +459,7 @@ impl ToFlatbuffers for RecordId {
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
-		let table = builder.create_string(&self.tb);
+		let table = builder.create_string(&self.table);
 		let id = self.key.to_fb(builder)?;
 		Ok(proto_fb::RecordId::create(
 			builder,
@@ -1108,6 +1115,7 @@ impl FromFlatbuffers for geo::MultiPolygon {
 	}
 }
 
+/*
 impl ToFlatbuffers for Idiom {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Idiom<'bldr>>;
 
@@ -1130,7 +1138,6 @@ impl ToFlatbuffers for Idiom {
 	}
 }
 
-/*
 impl FromFlatbuffers for Idiom {
 	type Input<'a> = proto_fb::Idiom<'a>;
 

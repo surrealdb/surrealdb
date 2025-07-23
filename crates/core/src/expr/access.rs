@@ -1,6 +1,6 @@
+use crate::expr::Ident;
 use crate::expr::escape::EscapeIdent;
 use crate::expr::fmt::Fmt;
-use crate::expr::{Ident, RecordIdKeyLit};
 use crate::val::strand::no_nul_bytes;
 use crate::val::{Duration, RecordId, RecordIdKey};
 use revision::revisioned;

@@ -1,4 +1,5 @@
 use super::escape::EscapeKey;
+use crate::key::index::bt::Bt;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::{Ident, Idiom};
 use crate::val::{Duration, Strand};
@@ -373,7 +374,6 @@ impl From<KindLiteral> for crate::expr::kind::KindLiteral {
 				crate::expr::kind::KindLiteral::Array(a.into_iter().map(Into::into).collect())
 			}
 			KindLiteral::Object(o) => crate::expr::kind::KindLiteral::Object(
-				// TODO: DiscriminatedObject
 				o.into_iter().map(|(k, v)| (k, v.into())).collect(),
 			),
 			KindLiteral::Bool(b) => crate::expr::kind::KindLiteral::Bool(b),
@@ -395,12 +395,6 @@ impl From<crate::expr::kind::KindLiteral> for KindLiteral {
 			crate::expr::kind::KindLiteral::Object(o) => {
 				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
 			}
-			crate::expr::kind::KindLiteral::DiscriminatedObject(k, o) => Self::DiscriminatedObject(
-				k,
-				o.into_iter()
-					.map(|o| o.into_iter().map(|(k, v)| (k, v.into())).collect())
-					.collect(),
-			),
 			crate::expr::kind::KindLiteral::Bool(b) => Self::Bool(b),
 		}
 	}

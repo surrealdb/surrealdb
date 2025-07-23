@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::sql::{CreateStatement, Version};
+use crate::sql::CreateStatement;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
 
@@ -14,7 +14,7 @@ impl Parser<'_> {
 		let data = self.try_parse_data(ctx).await?;
 		let output = self.try_parse_output(ctx).await?;
 		let version = if self.eat(t!("VERSION")) {
-			Some(Version(self.parse_expr_field(ctx).await?))
+			Some(self.parse_expr_field(ctx).await?)
 		} else {
 			None
 		};

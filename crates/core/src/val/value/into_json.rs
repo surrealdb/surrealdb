@@ -1,204 +1,147 @@
-use crate::val::{self, Number, Value};
-use serde::Serialize;
-use serde_json::{Map, Value as JsonValue, json};
+use crate::val::{Geometry, Number, Value};
+use chrono::SecondsFormat;
+use geo::{LineString, Point, Polygon};
+use serde_json::{Map, Number as JsonNumber, Value as JsonValue, json};
 
-impl From<Value> for serde_json::Value {
-	fn from(value: Value) -> Self {
-		match value {
+impl Value {
+	/// Converts the value into a json representation of the value.
+	/// Returns None if there are non serializable values present in the value.
+	// TODO: Remove the JsonValue intermediate and implement a json formatter for Value.
+	pub fn into_json_value(self) -> Option<JsonValue> {
+		// This function goes through some extra length to manually implement the encoding into
+		// json value. This is done to ensure clarity and stability in regards to how the value varients are
+		// converted.
+
+		let res = match self {
 			// These value types are simple values which
 			// can be used in query responses sent to
 			// the client.
 			Value::None | Value::Null => JsonValue::Null,
-			Value::Bool(boolean) => boolean.into(),
+			Value::Bool(boolean) => JsonValue::Bool(boolean),
 			Value::Number(number) => match number {
-				Number::Int(int) => int.into(),
-				Number::Float(float) => float.into(),
-				Number::Decimal(decimal) => json!(decimal),
+				Number::Int(int) => JsonValue::Number(JsonNumber::from(int)),
+				Number::Float(float) => {
+					// This is replicating serde_json::to_string default behavior.
+					// f64 will convert to null if it is either NaN of infinity.
+					if let Some(number) = JsonNumber::from_f64(float) {
+						JsonValue::Number(number)
+					} else {
+						JsonValue::Null
+					}
+				}
+				Number::Decimal(decimal) => JsonValue::String(decimal.to_string()),
 			},
-			Value::Strand(strand) => strand.into_string().into(),
-			Value::Duration(duration) => duration.to_raw().into(),
-			Value::Datetime(datetime) => json!(datetime.0),
-			Value::Uuid(uuid) => json!(uuid.0),
-			Value::Array(array) => JsonValue::Array(Array::from(array).0),
-			Value::Object(object) => JsonValue::Object(Object::from(object).0),
-			Value::Geometry(geo) => Geometry::from(geo).0,
-			Value::Bytes(bytes) => json!(bytes.0),
-			Value::Thing(thing) => thing.to_string().into(),
-			Value::Regex(regex) => json!(regex),
+			Value::Strand(strand) => JsonValue::String(strand.into_string()),
+			Value::Duration(duration) => JsonValue::String(duration.to_raw()),
+			Value::Datetime(datetime) => {
+				JsonValue::String(datetime.0.to_rfc3339_opts(SecondsFormat::AutoSi, true))
+			}
+			Value::Uuid(uuid) => {
+				// This buffer is the exact size needed to be able to encode the uuid.
+				let mut buffer = [0u8; uuid::fmt::Hyphenated::LENGTH];
+				let string = uuid.0.hyphenated().encode_lower(&mut buffer).to_string();
+				JsonValue::String(string)
+			}
+			Value::Array(array) => JsonValue::Array(
+				array
+					.0
+					.into_iter()
+					.map(Value::into_json_value)
+					.collect::<Option<Vec<JsonValue>>>()?,
+			),
+			Value::Object(object) => {
+				let mut map = Map::with_capacity(object.len());
+				for (k, v) in object.0 {
+					map.insert(k, v.into_json_value()?);
+				}
+				JsonValue::Object(map)
+			}
+			Value::Geometry(geo) => geometry_into_json_value(geo),
+			Value::Bytes(bytes) => {
+				JsonValue::Array(bytes.0.into_iter().map(|x| JsonValue::Number(x.into())).collect())
+			}
+			Value::Thing(thing) => JsonValue::String(thing.to_string()),
+			// TODO: Maybe remove
+			Value::Regex(regex) => JsonValue::String(regex.0.to_string()),
+			Value::File(file) => JsonValue::String(file.to_string()),
+			// This kind of breaks the behaviour
+			// TODO: look at the serialization here.
+			Value::Range(range) => JsonValue::String(range.to_string()),
 			// These Value types are un-computed values
 			// and are not used in query responses sent
 			// to the client.
-			Value::Table(table) => json!(table),
-			Value::Range(range) => json!(range),
-			//Value::Future(future) => json!(future),
-			Value::Closure(closure) => json!(closure),
-			Value::File(file) => file.to_string().into(),
+			Value::Table(table) => return None,
+			Value::Closure(closure) => return None,
+		};
+		Some(res)
+	}
+}
+
+fn geometry_into_json_value(geo: Geometry) -> JsonValue {
+	match geo {
+		Geometry::Point(point) => json!({
+			"type": "Point",
+			"coordinates": point_into_json_value(point)
+		}),
+		Geometry::Line(line_string) => {
+			json!({
+				"type": "LineString",
+				"coordinates": line_into_json_value(line_string)
+			})
+		}
+		Geometry::Polygon(polygon) => {
+			json!({
+				"type": "Polygon",
+				"coordinates": polygon_into_json_value(polygon)
+			})
+		}
+		Geometry::MultiPoint(multi_point) => {
+			json!({
+				"type": "MultiPoint",
+				"coordinates": multi_point.into_iter().map(point_into_json_value).collect::<Vec<_>>(),
+			})
+		}
+		Geometry::MultiLine(multi_line_string) => {
+			json!({
+				"type": "MultiLineString",
+				"coordinates": multi_line_string.into_iter().map(line_into_json_value).collect::<Vec<_>>(),
+			})
+		}
+		Geometry::MultiPolygon(multi_polygon) => {
+			json!({
+				"type": "MultiPolygon",
+				"coordinates": multi_polygon.into_iter().map(polygon_into_json_value).collect::<Vec<_>>(),
+			})
+		}
+		Geometry::Collection(items) => {
+			json!({
+				"type": "GeometryCollection",
+				"geometries": items.into_iter().map(geometry_into_json_value).collect::<Vec<_>>(),
+			})
 		}
 	}
 }
 
-#[derive(Serialize)]
-struct Array(Vec<JsonValue>);
-
-impl From<val::Array> for Array {
-	fn from(arr: val::Array) -> Self {
-		let mut vec = Vec::with_capacity(arr.len());
-		for value in arr {
-			vec.push(value.into());
-		}
-		Self(vec)
-	}
+fn point_into_json_value(point: Point) -> JsonValue {
+	vec![JsonValue::from(point.x()), JsonValue::from(point.y())].into()
 }
 
-#[derive(Serialize)]
-struct Object(Map<String, JsonValue>);
-
-impl From<val::Object> for Object {
-	fn from(obj: val::Object) -> Self {
-		let mut map = Map::with_capacity(obj.len());
-		for (key, value) in obj {
-			map.insert(key.clone(), value.into());
-		}
-		Self(map)
-	}
+fn line_into_json_value(line_string: LineString) -> JsonValue {
+	line_string.points().map(point_into_json_value).collect::<Vec<_>>().into()
 }
 
-#[derive(Serialize)]
-enum CoordinatesType {
-	Point,
-	LineString,
-	Polygon,
-	MultiPoint,
-	MultiLineString,
-	MultiPolygon,
-}
-
-#[derive(Serialize)]
-struct Coordinates {
-	#[serde(rename = "type")]
-	typ: CoordinatesType,
-	coordinates: JsonValue,
-}
-
-struct GeometryCollection;
-
-impl Serialize for GeometryCollection {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		s.serialize_str("GeometryCollection")
-	}
-}
-
-#[derive(Serialize)]
-struct Geometries {
-	#[serde(rename = "type")]
-	typ: GeometryCollection,
-	geometries: Vec<JsonValue>,
-}
-
-#[derive(Serialize)]
-struct Geometry(JsonValue);
-
-impl From<val::Geometry> for Geometry {
-	fn from(geo: val::Geometry) -> Self {
-		Self(match geo {
-			val::Geometry::Point(v) => json!(Coordinates {
-				typ: CoordinatesType::Point,
-				coordinates: vec![json!(v.x()), json!(v.y())].into(),
-			}),
-			val::Geometry::Line(v) => json!(Coordinates {
-				typ: CoordinatesType::LineString,
-				coordinates: v
-					.points()
-					.map(|p| vec![json!(p.x()), json!(p.y())].into())
-					.collect::<Vec<JsonValue>>()
-					.into(),
-			}),
-			val::Geometry::Polygon(v) => json!(Coordinates {
-				typ: CoordinatesType::Polygon,
-				coordinates: vec![
-					v.exterior()
-						.points()
-						.map(|p| vec![json!(p.x()), json!(p.y())].into())
-						.collect::<Vec<JsonValue>>()
-				]
-				.into_iter()
-				.chain(
-					v.interiors()
-						.iter()
-						.map(|i| {
-							i.points()
-								.map(|p| vec![json!(p.x()), json!(p.y())].into())
-								.collect::<Vec<JsonValue>>()
-						})
-						.collect::<Vec<Vec<JsonValue>>>(),
-				)
-				.collect::<Vec<Vec<JsonValue>>>()
-				.into(),
-			}),
-			val::Geometry::MultiPoint(v) => json!(Coordinates {
-				typ: CoordinatesType::MultiPoint,
-				coordinates: v
-					.0
-					.iter()
-					.map(|v| vec![json!(v.x()), json!(v.y())].into())
-					.collect::<Vec<JsonValue>>()
-					.into()
-			}),
-			val::Geometry::MultiLine(v) => json!(Coordinates {
-				typ: CoordinatesType::MultiLineString,
-				coordinates: v
-					.0
-					.iter()
-					.map(|v| {
-						v.points()
-							.map(|v| vec![json!(v.x()), json!(v.y())].into())
-							.collect::<Vec<JsonValue>>()
-					})
-					.collect::<Vec<Vec<JsonValue>>>()
-					.into()
-			}),
-			val::Geometry::MultiPolygon(v) => json!(Coordinates {
-				typ: CoordinatesType::MultiPolygon,
-				coordinates: v
-					.0
-					.iter()
-					.map(|v| {
-						vec![
-							v.exterior()
-								.points()
-								.map(|p| vec![json!(p.x()), json!(p.y())].into())
-								.collect::<Vec<JsonValue>>(),
-						]
-						.into_iter()
-						.chain(
-							v.interiors()
-								.iter()
-								.map(|i| {
-									i.points()
-										.map(|p| vec![json!(p.x()), json!(p.y())].into())
-										.collect::<Vec<JsonValue>>()
-								})
-								.collect::<Vec<Vec<JsonValue>>>(),
-						)
-						.collect::<Vec<Vec<JsonValue>>>()
-					})
-					.collect::<Vec<Vec<Vec<JsonValue>>>>()
-					.into(),
-			}),
-			val::Geometry::Collection(v) => json!(Geometries {
-				typ: GeometryCollection,
-				geometries: v.into_iter().map(Geometry::from).map(|x| x.0).collect(),
-			}),
-		})
-	}
+fn polygon_into_json_value(polygon: Polygon) -> JsonValue {
+	polygon
+		.exterior()
+		.points()
+		.map(point_into_json_value)
+		.chain(polygon.exterior().points().map(point_into_json_value))
+		.collect::<Vec<_>>()
+		.into()
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::expr;
 	use crate::val::{self, RecordId, RecordIdKey, Value};
 
 	use chrono::DateTime;
@@ -478,7 +421,7 @@ mod tests {
 		#[case] expected: Json,
 		#[case] expected_deserialized: Value,
 	) {
-		let json_value = Json::from(value.clone());
+		let json_value = value.into_json_value().unwrap();
 		assert_eq!(json_value, expected);
 
 		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");

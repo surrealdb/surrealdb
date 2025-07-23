@@ -147,7 +147,7 @@ impl InfoStatement {
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
-						v.compute(stk, ctx, opt, None)
+						stk.run(|stk| v.compute(stk, ctx, opt, None))
 							.await
 							.catch_return()?
 							.cast_to::<Datetime>()?
@@ -265,7 +265,7 @@ impl InfoStatement {
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
-						v.compute(stk, ctx, opt, None)
+						stk.run(|stk| v.compute(stk, ctx, opt, None))
 							.await
 							.catch_return()?
 							.cast_to::<Datetime>()?

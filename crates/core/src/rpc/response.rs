@@ -1,7 +1,6 @@
+use crate::dbs;
 use crate::dbs::Notification;
-use crate::val::Value;
-use crate::{dbs, expr};
-use anyhow::Result;
+use crate::val::{Object, Strand, Value};
 use revision::revisioned;
 use serde::Serialize;
 
@@ -21,11 +20,17 @@ pub enum Data {
 }
 
 impl Data {
-	pub fn into_value(self) -> Result<Value> {
+	pub fn into_value(self) -> Value {
 		match self {
-			Data::Query(v) => expr::to_value(v),
-			Data::Live(v) => expr::to_value(v),
-			Data::Other(v) => Ok(v),
+			Data::Query(v) => v.into_iter().map(|x| x.into_value()).collect(),
+			Data::Live(v) => Value::from(Object(map! {
+				"id".to_owned() => v.id.into(),
+				"action".to_owned() => Strand::new(v.action.to_string()).unwrap().into(),
+				"record".to_owned() => v.record,
+				"result".to_owned() => v.result,
+
+			})),
+			Data::Other(v) => v,
 		}
 	}
 }

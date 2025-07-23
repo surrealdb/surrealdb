@@ -106,9 +106,9 @@ impl ApiBody {
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
 
 				let parsed = match content_type {
-					Some("application/json") => json::parse_value(&bytes),
-					Some("application/cbor") => cbor::parse_value(bytes),
-					Some("application/surrealdb") => revision::parse_value(bytes),
+					Some("application/json") => json::decode(&bytes),
+					Some("application/cbor") => cbor::decode(&bytes),
+					Some("application/surrealdb") => revision::decode(&bytes),
 					_ => return Ok(Value::Bytes(crate::val::Bytes(bytes))),
 				};
 

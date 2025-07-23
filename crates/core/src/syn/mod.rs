@@ -34,24 +34,24 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 	lexer::keywords::could_be_reserved(s)
 }
 
-pub fn parse_with<F, R>(input: &str, f: F) -> Result<R>
+pub fn parse_with<F, R>(input: &[u8], f: F) -> Result<R>
 where
 	F: AsyncFnOnce(&mut Parser, &mut Stk) -> ParseResult<R>,
 {
 	parse_with_settings(input, settings_from_capabilities(&Capabilities::all()), f)
 }
 
-pub fn parse_with_settings<F, R>(input: &str, settings: ParserSettings, f: F) -> Result<R>
+pub fn parse_with_settings<F, R>(input: &[u8], settings: ParserSettings, f: F) -> Result<R>
 where
 	F: for<'a> AsyncFnOnce(&'a mut Parser<'a>, &'a mut Stk) -> ParseResult<R>,
 {
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-	let mut parser = Parser::new_with_settings(input.as_bytes(), settings);
+	let mut parser = Parser::new_with_settings(input, settings);
 	let mut stack = Stack::new();
 	stack
 		.enter(|stk| f(&mut parser, stk))
 		.finish()
-		.map_err(|e| e.render_on(input))
+		.map_err(|e| e.render_on_bytes(input))
 		.map_err(Error::InvalidQuery)
 		.map_err(anyhow::Error::new)
 }
@@ -100,9 +100,11 @@ pub fn parse(input: &str) -> Result<Ast> {
 pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Ast> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
-	parse_with_settings(input, settings_from_capabilities(capabilities), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
+	parse_with_settings(
+		input.as_bytes(),
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_query(stk).await,
+	)
 }
 
 /// Parses a SurrealQL [`Value`].
@@ -117,9 +119,11 @@ pub fn expr(input: &str) -> Result<Expr> {
 pub fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
-	parse_with_settings(input, settings_from_capabilities(capabilities), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
+	parse_with_settings(
+		input.as_bytes(),
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_expr_field(stk).await,
+	)
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`]
@@ -127,7 +131,7 @@ pub fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Resul
 pub fn json(input: &str) -> Result<Value> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 
-	parse_with(input, async |parser, stk| parser.parse_json(stk).await)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_json(stk).await)
 }
 
 /// Parses a SurrealQL [`Idiom`]
@@ -135,7 +139,7 @@ pub fn json(input: &str) -> Result<Value> {
 pub fn idiom(input: &str) -> Result<Idiom> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
 
-	parse_with(input, async |parser, stk| parser.parse_plain_idiom(stk).await)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_plain_idiom(stk).await)
 }
 
 /// Parse a datetime without enclosing delimiters from a string.
@@ -177,7 +181,7 @@ pub fn duration(input: &str) -> Result<Duration> {
 pub fn thing(input: &str) -> Result<RecordId> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 
-	parse_with(input, async |parser, stk| parser.parse_value_record_id(stk).await)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_value_record_id(stk).await)
 }
 
 /// Parse a record id including ranges.
@@ -185,7 +189,7 @@ pub fn thing(input: &str) -> Result<RecordId> {
 pub fn thing_with_range(input: &str) -> Result<RecordIdLit> {
 	trace!(target: TARGET, "Parsing SurrealQL thing");
 
-	parse_with(input, async |parser, stk| parser.parse_thing_with_range(stk).await)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_thing_with_range(stk).await)
 }
 
 /// Parse a block, expects the value to be wrapped in `{}`.
@@ -193,7 +197,7 @@ pub fn thing_with_range(input: &str) -> Result<RecordIdLit> {
 pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 
-	parse_with(input, async |parser, stk| {
+	parse_with(input.as_bytes(), async |parser, stk| {
 		let token = parser.peek();
 		match token.kind {
 			t!("{") => {
@@ -213,9 +217,11 @@ pub fn block(input: &str) -> Result<Block> {
 pub(crate) fn fields_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Fields> {
 	trace!(target: TARGET, "Parsing select fields");
 
-	parse_with_settings(input, settings_from_capabilities(capabilities), async |parser, stk| {
-		parser.parse_fields(stk).await
-	})
+	parse_with_settings(
+		input.as_bytes(),
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_fields(stk).await,
+	)
 }
 
 /// Parses fields for a SELECT statement
@@ -223,9 +229,11 @@ pub(crate) fn fields_with_capabilities(input: &str, capabilities: &Capabilities)
 pub(crate) fn fetchs_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Fetchs> {
 	trace!(target: TARGET, "Parsing fetch fields");
 
-	parse_with_settings(input, settings_from_capabilities(capabilities), async |parser, stk| {
-		parser.parse_fetchs(stk).await
-	})
+	parse_with_settings(
+		input.as_bytes(),
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_fetchs(stk).await,
+	)
 }
 
 /// Parses an output for a RETURN clause
@@ -235,9 +243,11 @@ pub(crate) fn output_with_capabilities(input: &str, capabilities: &Capabilities)
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
-	parse_with_settings(input, settings_from_capabilities(capabilities), async |parser, stk| {
-		parser.parse_output(stk).await
-	})
+	parse_with_settings(
+		input.as_bytes(),
+		settings_from_capabilities(capabilities),
+		async |parser, stk| parser.parse_output(stk).await,
+	)
 }
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
@@ -252,7 +262,9 @@ pub fn expr_legacy_strand(input: &str) -> Result<Expr> {
 		..Default::default()
 	};
 
-	parse_with_settings(input, settings, async |parser, stk| parser.parse_expr_field(stk).await)
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_expr_field(stk).await
+	})
 }
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
@@ -266,7 +278,9 @@ pub fn value(input: &str) -> Result<Value> {
 		..Default::default()
 	};
 
-	parse_with_settings(input, settings, async |parser, stk| parser.parse_value(stk).await)
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_value(stk).await
+	})
 }
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
@@ -281,7 +295,9 @@ pub fn value_legacy_strand(input: &str) -> Result<Value> {
 		..Default::default()
 	};
 
-	parse_with_settings(input, settings, async |parser, stk| parser.parse_value(stk).await)
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_value(stk).await
+	})
 }
 
 /// Parses JSON into an inert SurrealQL [`Value`] and parses values within strings.
@@ -296,7 +312,9 @@ pub fn json_legacy_strand(input: &str) -> Result<Value> {
 		..Default::default()
 	};
 
-	parse_with_settings(input, settings, async |parser, stk| parser.parse_json(stk).await)
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_json(stk).await
+	})
 }
 
 /// Parse a kind from a string.
@@ -304,5 +322,5 @@ pub fn json_legacy_strand(input: &str) -> Result<Value> {
 pub fn kind(input: &str) -> Result<Kind> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
-	parse_with(input, async |parser, stk| parser.parse_inner_kind(stk).await)
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_inner_kind(stk).await)
 }

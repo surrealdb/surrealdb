@@ -11,9 +11,10 @@ use std::str;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+pub(crate) const REGEX_TOKEN: &str = "$surrealdb::private::sql::Regex";
+
 #[revisioned(revision = 1)]
 #[derive(Clone)]
-#[non_exhaustive]
 pub struct Regex(pub regex::Regex);
 
 impl Regex {
@@ -90,6 +91,58 @@ impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let t = self.0.to_string().replace('/', "\\/");
 		write!(f, "/{}/", &t)
+	}
+}
+
+impl Serialize for Regex {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		serializer.serialize_newtype_struct(REGEX_TOKEN, self.0.as_str())
+	}
+}
+
+impl<'de> Deserialize<'de> for Regex {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		struct RegexNewtypeVisitor;
+
+		impl<'de> Visitor<'de> for RegexNewtypeVisitor {
+			type Value = Regex;
+
+			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+				formatter.write_str("a regex newtype")
+			}
+
+			fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+			where
+				D: Deserializer<'de>,
+			{
+				struct RegexVisitor;
+
+				impl Visitor<'_> for RegexVisitor {
+					type Value = Regex;
+
+					fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+						formatter.write_str("a regex str")
+					}
+
+					fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+					where
+						E: de::Error,
+					{
+						Regex::from_str(value).map_err(|_| de::Error::custom("invalid regex"))
+					}
+				}
+
+				deserializer.deserialize_str(RegexVisitor)
+			}
+		}
+
+		deserializer.deserialize_newtype_struct(REGEX_TOKEN, RegexNewtypeVisitor)
 	}
 }
 

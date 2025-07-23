@@ -32,6 +32,27 @@ impl ToOwned for StrandRef {
 	}
 }
 
+/// Fast way of removing null bytes in place without having to realloc the string.
+fn remove_null_bytes(s: String) -> String {
+	let mut bytes = s.into_bytes();
+	let mut write = 0;
+	for i in 0..bytes.len() {
+		let b = bytes[i];
+		if b == 0 {
+			continue;
+		}
+		bytes[write] = b;
+		write += 1;
+	}
+	// remove duplicated bytes at the end.
+	bytes.truncate(write);
+	unsafe {
+		// Safety: bytes were derived from a string,
+		// we only removed all bytes which were 0 so we still have a valid utf8 string.
+		String::from_utf8_unchecked(bytes)
+	}
+}
+
 /// A string that doesn't contain NUL bytes.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
@@ -47,6 +68,12 @@ impl Strand {
 		} else {
 			Some(Strand(s))
 		}
+	}
+
+	/// Create a new strand from a string.
+	/// Removes all null bytes if there are any
+	pub fn new_lossy(s: String) -> Strand {
+		Strand(remove_null_bytes(s))
 	}
 
 	/// Create a new strand, without checking the string.

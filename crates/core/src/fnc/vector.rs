@@ -164,9 +164,12 @@ mod tests {
 		let scalar_float = Number::Float(1.51);
 
 		let result: Result<Value> = scale((input_vector.clone(), scalar_float));
-		let expected_output =
-			vec![1.51, 3.02, 4.53, 6.04].into_iter().map(Number::Float).map(Value::from).collect();
-		assert_eq!(result.unwrap(), Value::from(expected_output));
+		let expected_output = vec![1.51, 3.02, 4.53, 6.04]
+			.into_iter()
+			.map(Number::Float)
+			.map(Value::from)
+			.collect::<Value>();
+		assert_eq!(result.unwrap(), expected_output);
 	}
 
 	#[test]

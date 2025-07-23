@@ -94,7 +94,7 @@ impl TryFrom<Value> for ValueProto {
 				bucket: file.bucket,
 				key: file.key,
 			}),
-			Value::Table(_) | Value::Closure(_) => {
+			Value::Table(_) | Value::Closure(_) | Value::Regex(_) => {
 				return Err(anyhow::anyhow!("Value is not network compatible: {:?}", value));
 			}
 		};

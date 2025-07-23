@@ -49,7 +49,7 @@ impl InsertStatement {
 		// Propagate the version to the underlying datastore
 		let version = match &self.version {
 			Some(v) => Some(
-				v.compute(stk, ctx, opt, doc)
+				stk.run(|stk| v.compute(stk, ctx, opt, doc))
 					.await
 					.catch_return()?
 					.cast_to::<Datetime>()?

@@ -1,18 +1,13 @@
-use crate::expr::serde::{deserialize, serialize};
 use crate::rpc::RpcError;
-use crate::rpc::format::ResTrait;
 use crate::rpc::request::Request;
 use crate::val::Value;
 
-pub fn parse_value(val: &[u8]) -> Result<Value, RpcError> {
-	deserialize::<Value>(val).map_err(|_| RpcError::ParseError)
+pub fn encode(value: &Value) -> Result<Vec<u8>, RpcError> {
+	let mut res = Vec::new();
+	bincode::serialize_into(&mut res, value).map_err(|e| RpcError::Serialize(e.to_string()))?;
+	Ok(res)
 }
 
-pub fn req(val: &[u8]) -> Result<Request, RpcError> {
-	parse_value(val)?.try_into()
-}
-
-pub fn res(res: impl ResTrait) -> Result<Vec<u8>, RpcError> {
-	// Serialize the response with full internal type information
-	Ok(serialize(&res).unwrap())
+pub fn decode(value: &[u8]) -> Result<Value, RpcError> {
+	bincode::deserialize_from(value).map_err(|e| RpcError::Deserialize(e.to_string()))
 }

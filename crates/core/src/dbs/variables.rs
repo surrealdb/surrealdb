@@ -99,6 +99,7 @@ impl From<BTreeMap<String, Value>> for Variables {
 	}
 }
 
+/*
 impl TryFrom<proto::Variables> for Variables {
 	type Error = anyhow::Error;
 
@@ -123,4 +124,4 @@ impl TryFrom<Variables> for proto::Variables {
 		}
 		Ok(vars)
 	}
-}
+}*/
