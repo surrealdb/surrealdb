@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -29,6 +29,9 @@ pub enum Index {
 	/// HNSW index for distance based metrics
 	#[revision(start = 2)]
 	Hnsw(HnswParams),
+	/// Index with Full-Text search capabilities supporting multiple writers
+	#[revision(start = 3)]
+	FullText(FullTextParams),
 }
 
 #[revisioned(revision = 2)]
@@ -51,6 +54,15 @@ pub struct SearchParams {
 	pub postings_cache: u32,
 	#[revision(start = 2)]
 	pub terms_cache: u32,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct FullTextParams {
+	pub analyzer: Ident,
+	pub highlight: bool,
+	pub scoring: Scoring,
 }
 
 #[revisioned(revision = 2)]
@@ -257,6 +269,13 @@ impl Display for Index {
 					p.terms_cache
 				)?;
 				if p.hl {
+					f.write_str(" HIGHLIGHTS")?
+				}
+				Ok(())
+			}
+			Self::FullText(p) => {
+				write!(f, "FULLTEXT ANALYZER {} {}", p.analyzer, p.scoring,)?;
+				if p.highlight {
 					f.write_str(" HIGHLIGHTS")?
 				}
 				Ok(())
