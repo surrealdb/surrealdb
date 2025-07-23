@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::expr::Ident;
 use crate::expr::dir::Dir;
 use crate::expr::graph::ComputedGraphSubject;
+use crate::expr::record::Record;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
@@ -1000,7 +1001,7 @@ impl Iterable {
 		txn: &Transaction,
 		opt: &Options,
 		thg: &RecordId,
-	) -> Result<Arc<Value>> {
+	) -> Result<Arc<Record>> {
 		// Fetch and parse the data from the store
 		let (ns, db) = opt.ns_db()?;
 		let val = txn.get_record(ns, db, &thg.table, &thg.key, None).await?;

@@ -150,7 +150,7 @@ impl Idiom {
 			// Otherwise use the current document
 			_ => match doc {
 				// There is a current document
-				Some(v) => v.doc.as_ref().get(stk, ctx, opt, doc, self).await,
+				Some(v) => v.doc.as_ref().data.get(stk, ctx, opt, doc, self).await,
 				// There isn't any document
 				None => Value::None.get(stk, ctx, opt, doc, self.next_method()).await,
 			},

@@ -14,6 +14,7 @@ use crate::expr::statements::{
 	LiveStatement,
 };
 use crate::expr::{Ident, Permissions};
+use crate::expr::record::Record;
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
@@ -1527,25 +1528,26 @@ impl Transaction {
 		tb: &str,
 		id: &RecordIdKey,
 		version: Option<u64>,
-	) -> Result<Arc<Value>> {
+	) -> Result<Arc<Record>> {
 		// Cache is not versioned
 		if version.is_some() {
 			// Fetch the record from the datastore
 			let key = crate::key::thing::new(ns, db, tb, id);
 			match self.get(&key, version).await? {
 				// The value exists in the datastore
-				Some(mut val) => {
+				Some(val) => {
+					let mut val: Record = revision::from_slice(&val)?;
 					// Inject the id field into the document
 					let rid = RecordId {
 						table: tb.to_owned(),
 						key: id.clone(),
 					};
-					val.def(&rid);
+					val.data.def(&rid);
 					let val = cache::tx::Entry::Val(Arc::new(val));
 					val.try_into_val()
 				}
 				// The value is not in the datastore
-				None => Ok(Arc::new(Value::None)),
+				None => Ok(Arc::new(Default::default())),
 			}
 		} else {
 			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
@@ -1558,19 +1560,20 @@ impl Transaction {
 					let key = crate::key::thing::new(ns, db, tb, id);
 					match self.get(&key, None).await? {
 						// The value exists in the datastore
-						Some(mut val) => {
+						Some(val) => {
+							let mut val: Record = revision::from_slice(&val)?;
 							// Inject the id field into the document
 							let rid = RecordId {
 								table: tb.to_owned(),
 								key: id.clone(),
 							};
-							val.def(&rid);
+							val.data.def(&rid);
 							let val = cache::tx::Entry::Val(Arc::new(val));
 							self.cache.insert(qey, val.clone());
 							val.try_into_val()
 						}
 						// The value is not in the datastore
-						None => Ok(Arc::new(Value::None)),
+						None => Ok(Arc::new(Default::default())),
 					}
 				}
 			}
@@ -1584,7 +1587,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		id: &RecordIdKey,
-		val: Value,
+		val: Record,
 	) -> Result<()> {
 		// Set the value in the datastore
 		let key = crate::key::thing::new(ns, db, tb, id);
@@ -1603,7 +1606,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		id: &RecordIdKey,
-		val: Arc<Value>,
+		val: Arc<Record>,
 	) -> Result<()> {
 		// Set the value in the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);

@@ -8,6 +8,7 @@ use crate::expr::statements::define::{
 };
 use crate::expr::statements::live::LiveStatement;
 use crate::expr::{Base, FlowResultExt as _, Ident};
+use crate::expr::record::Record;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
@@ -44,19 +45,19 @@ pub(crate) struct CursorDoc {
 
 #[derive(Clone, Debug)]
 pub(crate) struct CursorValue {
-	mutable: Value,
-	read_only: Option<Arc<Value>>,
+	mutable: Record,
+	read_only: Option<Arc<Record>>,
 }
 
 impl CursorValue {
-	pub(crate) fn to_mut(&mut self) -> &mut Value {
+	pub(crate) fn to_mut(&mut self) -> &mut Record {
 		if let Some(ro) = self.read_only.take() {
 			self.mutable = ro.as_ref().clone();
 		}
 		&mut self.mutable
 	}
 
-	pub(crate) fn as_arc(&mut self) -> Arc<Value> {
+	pub(crate) fn as_arc(&mut self) -> Arc<Record> {
 		match &self.read_only {
 			None => {
 				let v = Arc::new(mem::take(&mut self.mutable));
@@ -67,7 +68,7 @@ impl CursorValue {
 		}
 	}
 
-	pub(crate) fn as_ref(&self) -> &Value {
+	pub(crate) fn as_ref(&self) -> &Record {
 		if let Some(ro) = &self.read_only {
 			ro.as_ref()
 		} else {
@@ -75,7 +76,7 @@ impl CursorValue {
 		}
 	}
 
-	pub(crate) fn into_owned(self) -> Value {
+	pub(crate) fn into_owned(self) -> Record {
 		if let Some(ro) = &self.read_only {
 			ro.as_ref().clone()
 		} else {
@@ -85,7 +86,7 @@ impl CursorValue {
 }
 
 impl Deref for CursorValue {
-	type Target = Value;
+	type Target = Record;
 	fn deref(&self) -> &Self::Target {
 		self.as_ref()
 	}
@@ -105,26 +106,26 @@ impl CursorDoc {
 	}
 }
 
-impl From<Value> for CursorValue {
-	fn from(value: Value) -> Self {
+impl From<Record> for CursorValue {
+	fn from(record: Record) -> Self {
 		Self {
-			mutable: value,
+			mutable: record,
 			read_only: None,
 		}
 	}
 }
 
-impl From<Arc<Value>> for CursorValue {
-	fn from(value: Arc<Value>) -> Self {
+impl From<Arc<Record>> for CursorValue {
+	fn from(record: Arc<Record>) -> Self {
 		Self {
-			mutable: Value::None,
-			read_only: Some(value),
+			mutable: Default::default(),
+			read_only: Some(record),
 		}
 	}
 }
 
-impl From<Value> for CursorDoc {
-	fn from(val: Value) -> Self {
+impl From<Record> for CursorDoc {
+	fn from(val: Record) -> Self {
 		Self {
 			rid: None,
 			ir: None,
@@ -136,13 +137,13 @@ impl From<Value> for CursorDoc {
 	}
 }
 
-impl From<Arc<Value>> for CursorDoc {
-	fn from(doc: Arc<Value>) -> Self {
+impl From<Arc<Record>> for CursorDoc {
+	fn from(doc: Arc<Record>) -> Self {
 		Self {
 			rid: None,
 			ir: None,
 			doc: CursorValue {
-				mutable: Value::None,
+				mutable: Default::default(),
 				read_only: Some(doc),
 			},
 		}
@@ -167,7 +168,7 @@ impl Document {
 		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
 		r#gen: Option<Ident>,
-		val: Arc<Value>,
+		val: Arc<Record>,
 		extras: Workable,
 		retry: bool,
 		rs: RecordStrategy,
@@ -192,7 +193,7 @@ impl Document {
 
 	/// Check if document is being created
 	pub fn is_new(&self) -> bool {
-		self.initial.doc.as_ref().is_none()
+		self.initial.doc.as_ref().data.is_none()
 	}
 
 	/// Check if this is the first iteration. When
@@ -202,7 +203,7 @@ impl Document {
 	/// value in the storage engine, then we retry the
 	/// document processing, and this will return false.
 	pub(crate) fn is_iteration_initial(&self) -> bool {
-		!self.retry && self.initial.doc.as_ref().is_none()
+		!self.retry && self.initial.doc.as_ref().data.is_none()
 	}
 
 	/// Check if the the record id for this document
@@ -249,7 +250,7 @@ impl Document {
 	}
 
 	/// Update the document for a retry to update after an insert failed.
-	pub fn modify_for_update_retry(&mut self, id: RecordId, value: Arc<Value>) {
+	pub fn modify_for_update_retry(&mut self, id: RecordId, value: Arc<Record>) {
 		let retry = Arc::new(id);
 		self.id = Some(retry.clone());
 		self.r#gen = None;
@@ -317,21 +318,22 @@ impl Document {
 		for target in targets {
 			// Get the full document
 			let full = target.0;
+			let record = full.doc.as_ref();
 			// Process the full document
-			let mut out = (*full.doc).clone();
+			let mut out = record.clone();
 			// Loop over each field in document
 			for fd in fds.iter() {
 				// Loop over each field in document
-				for k in out.each(&fd.name).iter() {
+				for k in out.data.each(&fd.name).iter() {
 					// Process the field permissions
 					match &fd.permissions.select {
 						Permission::Full => (),
-						Permission::None => out.cut(k),
+						Permission::None => out.data.cut(k),
 						Permission::Specific(e) => {
 							// Disable permissions
 							let opt = &opt.new_with_perms(false);
 							// Get the initial value
-							let val = Arc::new(full.doc.as_ref().pick(k));
+							let val = Arc::new(record.data.pick(k));
 							// Configure the context
 							let mut ctx = MutableContext::new(ctx);
 							ctx.add_value("value", val);
@@ -343,7 +345,7 @@ impl Document {
 								.catch_return()?
 								.is_truthy()
 							{
-								out.cut(k);
+								out.data.cut(k);
 							}
 						}
 					}

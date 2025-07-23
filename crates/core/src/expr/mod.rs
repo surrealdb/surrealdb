@@ -28,6 +28,7 @@ pub(crate) mod graph;
 pub(crate) mod group;
 pub(crate) mod id;
 pub(crate) mod ident;
+pub(crate) mod record;
 pub(crate) mod idiom;
 pub(crate) mod kind;
 pub(crate) mod language;

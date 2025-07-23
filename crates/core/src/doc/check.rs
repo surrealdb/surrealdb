@@ -99,7 +99,7 @@ impl Document {
 		_stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
 		// Check if this record exists
-		if self.id.is_some() && self.current.doc.is_none() {
+		if self.id.is_some() && self.current.doc.data.is_none() {
 			return Err(IgnoreError::Ignore);
 		}
 		// Carry on

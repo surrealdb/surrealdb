@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::index::{Distance, Index};
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
+use crate::expr::record::Record;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
 use crate::idx::IndexKeyBase;
@@ -1247,8 +1248,8 @@ impl QueryExecutor {
 		ctx: &Context,
 		thg: &RecordId,
 		hlp: HighlightParams,
-		doc: &Value,
-	) -> Result<Value> {
+		doc: &Record,
+	) -> Result<Record> {
 		match self.get_match_ref_entry(hlp.match_ref()) {
 			Some(PerMatchRefEntry::Search(se)) => {
 				if let Some(si) = self.get_search_index(se) {
@@ -1271,7 +1272,7 @@ impl QueryExecutor {
 			}
 			_ => {}
 		}
-		Ok(Value::None)
+		Ok(Default::default())
 	}
 
 	pub(crate) async fn offsets(

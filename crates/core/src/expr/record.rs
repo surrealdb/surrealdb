@@ -1,4 +1,5 @@
-use crate::expr::Object;
+use crate::expr::Thing;
+use crate::expr::Value;
 use revision::revisioned;
 use serde::Deserialize;
 use serde::Serialize;
@@ -7,19 +8,42 @@ use serde::Serialize;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub(crate) struct Record {
-	metadata: Option<Metadata>,
-	data: Object,
+pub struct Record {
+	pub(crate) metadata: Option<Metadata>,
+	// TODO (DB-655): Switch to `Object`.
+	pub(crate) data: Value,
 }
 
 impl Record {
-	pub fn is_edge(&self) -> bool {
+	pub const fn is_edge(&self) -> bool {
 		match &self.metadata {
 			Some(Metadata {
-				record_type: Some(RecordType::Edge),
+				record_type: Some(RecordType::Edge {
+					..
+				}),
 				..
 			}) => true,
 			_ => false,
+		}
+	}
+
+	pub(crate) fn update_edges(&mut self, incoming: Thing, outgoing: Thing) {
+		let rtype = Some(RecordType::Edge {
+			incoming,
+			outgoing,
+		});
+		match &mut self.metadata {
+			Some(Metadata {
+				record_type,
+				..
+			}) => {
+				*record_type = rtype;
+			}
+			metadata => {
+				*metadata = Some(Metadata {
+					record_type: rtype,
+				});
+			}
 		}
 	}
 }
@@ -37,5 +61,8 @@ pub(crate) struct Metadata {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub(crate) enum RecordType {
-	Edge,
+	Edge {
+		incoming: Thing,
+		outgoing: Thing,
+	},
 }

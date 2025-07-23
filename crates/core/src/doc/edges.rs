@@ -70,9 +70,7 @@ impl Document {
 			let key = crate::key::graph::new(ns, db, &r.table, &r.key, i, &rid);
 			txn.set(&key, &(), opt.version).await?;
 			// Store the edges on the record
-			self.current.doc.to_mut().put(&*EDGE, Value::Bool(true));
-			self.current.doc.to_mut().put(&*IN, l.clone().into());
-			self.current.doc.to_mut().put(&*OUT, r.clone().into());
+			self.current.doc.to_mut().update_edges(l.clone().into(), r.clone().into());
 		}
 		// Carry on
 		Ok(())

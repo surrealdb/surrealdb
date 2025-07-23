@@ -1,6 +1,7 @@
 use crate::dbs::node::Node;
 use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::config::ConfigStore;
+use crate::expr::record::Record;
 use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
@@ -18,7 +19,7 @@ pub(crate) enum Entry {
 	/// A cached entry of any type
 	Any(Arc<dyn Any + Send + Sync>),
 	/// A cached record document content
-	Val(Arc<Value>),
+	Val(Arc<Record>),
 	/// A slice of Node specified at the root.
 	Nds(Arc<[Node]>),
 	/// A slice of DefineUserStatement specified at the root.
@@ -296,9 +297,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Lvs"),
 		}
 	}
-	/// Converts this cache entry into a single [`Value`].
+	/// Converts this cache entry into a single [`Record`].
 	/// This panics if called on a cache entry that is not an [`Entry::Val`].
-	pub(crate) fn try_into_val(self) -> Result<Arc<Value>> {
+	pub(crate) fn try_into_val(self) -> Result<Arc<Record>> {
 		match self {
 			Entry::Val(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Val"),

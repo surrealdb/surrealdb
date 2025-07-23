@@ -3,6 +3,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
+use crate::expr::record::Record;
 use crate::expr::statements::DefineIndexStatement;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
@@ -521,7 +522,7 @@ impl Building {
 			self.is_beyond_threshold(Some(*count))?;
 			let key = thing::Thing::decode_key(&k)?;
 			// Parse the value
-			let val: Value = revision::from_slice(&v)?;
+			let val: Record = revision::from_slice(&v)?;
 			let rid: Arc<RecordId> = RecordId {
 				table: key.tb.to_owned(),
 				key: key.id,
