@@ -15,12 +15,10 @@ pub async fn exists((ctx, opt): (&Context, Option<&Options>), (arg,): (String,))
 			// If error is table not found, return false,
 			// otherwise propagate the error.
 			if err.is::<Error>()
-				&& err.downcast_ref::<Error>().map_or(false, |e| match e {
-					Error::TbNotFound {
-						..
-					} => true,
-					_ => false,
-				}) {
+				&& err
+					.downcast_ref::<Error>()
+					.is_some_and(|e| matches!(e, Error::TbNotFound { .. }))
+			{
 				// Table does not exist
 				Ok(Value::Bool(false))
 			} else {
