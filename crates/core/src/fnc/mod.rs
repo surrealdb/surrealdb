@@ -33,6 +33,7 @@ pub mod sequence;
 pub mod session;
 pub mod sleep;
 pub mod string;
+pub mod table;
 pub mod time;
 pub mod r#type;
 pub mod util;
