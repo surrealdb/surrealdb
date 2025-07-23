@@ -26,6 +26,7 @@ impl Tl {
 	pub(crate) fn new(task: &TaskLeaseType) -> Self {
 		let task = match task {
 			TaskLeaseType::ChangeFeedCleanup => 1,
+			TaskLeaseType::IndexCompaction => 2,
 		};
 		Self {
 			__: b'/',

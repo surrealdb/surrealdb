@@ -1,7 +1,7 @@
-use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
+use super::{KeyDecode, export};
 use crate::buc::BucketConnections;
 use crate::cf;
 use crate::ctx::MutableContext;
@@ -13,12 +13,15 @@ use crate::dbs::capabilities::{
 use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
 use crate::err::Error;
-use crate::expr::LogicalPlan;
 use crate::expr::{Base, FlowResultExt as _, Value, statements::DefineUserStatement};
+use crate::expr::{Index, LogicalPlan};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::store::IndexStores;
+use crate::key::root::ic::Ic;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[expect(unused_imports)]
@@ -774,6 +777,96 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Processes the index compaction queue
+	///
+	/// This method is called periodically by the index compaction thread to process
+	/// indexes that have been marked for compaction. It acquires a distributed lease
+	/// to ensure only one node in a cluster performs the compaction at a time.
+	///
+	/// The method scans the index compaction queue (stored as `Ic` keys) and processes
+	/// each index that needs compaction. Currently, only full-text indexes support
+	/// compaction, which helps optimize their performance by consolidating changes
+	/// and removing unnecessary data.
+	///
+	/// After processing an index, it is removed from the compaction queue.
+	///
+	/// # Arguments
+	///
+	/// * `interval` - The time interval between compaction runs, used to calculate
+	///   the lease duration
+	///
+	/// # Returns
+	///
+	/// * `Result<()>` - Ok if the compaction was successful or if another node
+	///   is handling the compaction, Error otherwise
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
+		let lh = LeaseHandler::new(
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			interval * 2,
+		)?;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Create a new transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			// Collect every item in the queue
+			let (beg, end) = Ic::range();
+			let range = beg..end;
+			let mut previous: Option<IndexKeyBase> = None;
+			let mut count = 0;
+			// Returns an ordered list of indexes that require compaction
+			for (k, _) in txn.getr(range.clone(), None).await? {
+				count += 1;
+				lh.try_maintain_lease().await?;
+				let ic = Ic::decode(&k)?;
+				// If the index has already been compacted, we can ignore the task
+				if let Some(p) = &previous {
+					if p.match_ic(&ic) {
+						continue;
+					}
+				}
+				match txn.get_tb_index(ic.ns, ic.db, ic.tb, ic.ix).await {
+					Ok(ix) => {
+						if let Index::FullText(p) = &ix.index {
+							let ft = FullTextIndex::new(
+								self.id(),
+								&self.index_stores,
+								&txn,
+								IndexKeyBase::from_ic(&ic),
+								p,
+							)
+							.await?;
+							ft.compaction(&txn).await?;
+						}
+					}
+					Err(e) => {
+						error!(target: TARGET, "Index compaction: Failed to get index: {}", e);
+						if matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+							trace!(target: TARGET, "Index compaction: Index {} not found, skipping", ic.ix);
+						} else {
+							bail!(e);
+						}
+					}
+				}
+				previous = Some(IndexKeyBase::from_ic(&ic));
+			}
+			if count > 0 {
+				txn.delr(range).await?;
+				txn.commit().await?;
+			} else {
+				txn.cancel().await?;
+				return Ok(());
+			}
+		}
+	}
+
 	/// Performs a database import from SQL
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
@@ -785,7 +878,7 @@ impl Datastore {
 		self.execute(sql, sess, None).await
 	}
 
-	/// Run the datastore shutdown tasks, perfoming any necessary cleanup
+	/// Run the datastore shutdown tasks, performing any necessary cleanup
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs

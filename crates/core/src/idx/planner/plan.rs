@@ -1,7 +1,7 @@
 use crate::expr::with::With;
 use crate::expr::{Array, Expression, Idiom, Number, Object};
 use crate::expr::{Operator, Value};
-use crate::idx::ft::MatchRef;
+use crate::idx::ft::search::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };

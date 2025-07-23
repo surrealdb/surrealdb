@@ -1,62 +1,10 @@
 use crate::err::Error;
-use crate::idx::IndexKeyBase;
-use crate::idx::docids::DocId;
-use crate::idx::ft::terms::TermId;
-use crate::kvs::{Transaction, Val};
+use crate::idx::ft::Position;
+use crate::kvs::Val;
 use anyhow::Result;
+use revision::revisioned;
 
-pub(super) type Position = u32;
-
-pub(super) struct Offsets {
-	index_key_base: IndexKeyBase,
-}
-
-impl Offsets {
-	pub(super) fn new(index_key_base: IndexKeyBase) -> Self {
-		Self {
-			index_key_base,
-		}
-	}
-
-	pub(super) async fn set_offsets(
-		&self,
-		tx: &Transaction,
-		doc_id: DocId,
-		term_id: TermId,
-		offsets: OffsetRecords,
-	) -> Result<()> {
-		let key = self.index_key_base.new_bo_key(doc_id, term_id)?;
-		let val: Val = offsets.try_into()?;
-		tx.set(key, val, None).await?;
-		Ok(())
-	}
-
-	pub(super) async fn get_offsets(
-		&self,
-		tx: &Transaction,
-		doc_id: DocId,
-		term_id: TermId,
-	) -> Result<Option<OffsetRecords>> {
-		let key = self.index_key_base.new_bo_key(doc_id, term_id)?;
-		if let Some(val) = tx.get(key, None).await? {
-			let offsets = val.try_into()?;
-			Ok(Some(offsets))
-		} else {
-			Ok(None)
-		}
-	}
-
-	pub(super) async fn remove_offsets(
-		&self,
-		tx: &Transaction,
-		doc_id: DocId,
-		term_id: TermId,
-	) -> Result<()> {
-		let key = self.index_key_base.new_bo_key(doc_id, term_id)?;
-		tx.del(key).await
-	}
-}
-
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Offset {
 	pub(super) index: u32,
@@ -79,7 +27,7 @@ impl Offset {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub(super) struct OffsetRecords(pub(super) Vec<Offset>);
 
 impl TryFrom<OffsetRecords> for Val {
@@ -144,7 +92,7 @@ impl TryFrom<Val> for OffsetRecords {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::offsets::{Offset, OffsetRecords};
+	use crate::idx::ft::offset::{Offset, OffsetRecords};
 	use crate::kvs::Val;
 
 	#[test]

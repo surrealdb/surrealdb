@@ -239,7 +239,7 @@ impl IndexStores {
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
 		let (ns, db) = opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, ix)?;
+		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
 
@@ -310,7 +310,7 @@ impl IndexStores {
 
 	async fn remove_index(&self, ns: &str, db: &str, ix: &DefineIndexStatement) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
-			let ikb = IndexKeyBase::new(ns, db, ix)?;
+			let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 			self.remove_hnsw_index(ikb).await?;
 		}
 		Ok(())
