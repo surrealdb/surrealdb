@@ -124,7 +124,6 @@ blake3.workspace = true
 bytes.workspace = true
 castaway.workspace = true
 chrono = { workspace = true, features = ["serde"] }
-ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
 flatbuffers.workspace = true
@@ -133,6 +132,7 @@ futures.workspace = true
 fuzzy-matcher.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true }
+half.workspace = true
 http.workspace = true
 hex.workspace = true
 ipnet.workspace = true
