@@ -23,7 +23,7 @@ pub async fn exists((ctx, opt): (&Context, Option<&Options>), (arg,): (String,))
 				Ok(Value::Bool(false))
 			} else {
 				// Some other error, propagate it
-				Err(err.into())
+				Err(err)
 			}
 		} else {
 			// Table exists
