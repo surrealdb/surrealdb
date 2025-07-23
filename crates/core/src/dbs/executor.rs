@@ -1,4 +1,3 @@
-use crate::cnf::SLOW_QUERY_LOG_THRESHOLD;
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::Force;
@@ -106,12 +105,12 @@ impl Executor {
 		Ok(())
 	}
 
-	fn check_slow_log(start: &Instant, stm: &impl Display) {
-		let threshold_ms = *SLOW_QUERY_LOG_THRESHOLD;
-		if threshold_ms > 0 {
-			let elapsed = start.elapsed().as_millis() as u64;
-			if elapsed >= threshold_ms {
-				warn!("Slow query detected - time: {} - query: {}", elapsed, stm)
+	fn check_slow_log(&self, start: &Instant, stm: &impl Display) {
+		println!("CHECK_SLOW_LOG {:?} + {stm}", self.ctx.slow_log_threshold());
+		if let Some(threshold) = self.ctx.slow_log_threshold() {
+			let elapsed = start.elapsed();
+			if elapsed > threshold {
+				warn!("Slow query detected - time: {elapsed:#?} - query: {stm}")
 			}
 		}
 	}
@@ -140,7 +139,7 @@ impl Executor {
 					.finish()
 					.await;
 				// Check if we dump the slow log
-				Self::check_slow_log(start, &stm);
+				self.check_slow_log(start, &stm);
 				match res {
 					Ok(val) => {
 						// Set the parameter
@@ -173,7 +172,7 @@ impl Executor {
 					.enter(|stk| plan.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
 					.await;
-				Self::check_slow_log(start, &plan);
+				self.check_slow_log(start, &plan);
 				res
 			}
 		};

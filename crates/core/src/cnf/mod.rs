@@ -135,10 +135,6 @@ pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
 pub static ACCESSIBLE_OUTPUT: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ACCESSIBLE_OUTPUT", bool, false);
 
-/// The minimum execution time in milliseconds to trigger slow query logging (default: 0, disabled)
-pub static SLOW_QUERY_LOG_THRESHOLD: LazyLock<u64> =
-	lazy_env_parse!("SURREAL_SLOW_QUERY_LOG_THRESHOLD", u64, 0);
-
 /// Specify the USER-AGENT string used by HTTP requests
 pub static SURREALDB_USER_AGENT: LazyLock<String> =
 	LazyLock::new(|| std::env::var("SURREAL_USER_AGENT").unwrap_or("SurrealDB".to_string()));
