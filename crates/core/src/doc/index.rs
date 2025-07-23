@@ -1,14 +1,16 @@
 use crate::ctx::Context;
+use crate::dbs::Force;
 use crate::dbs::Options;
-use crate::dbs::{Force, Statement};
+use crate::dbs::Statement;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::array::Array;
-use crate::expr::index::{HnswParams, Index, MTreeParams, SearchParams};
+use crate::expr::index::{FullTextParams, HnswParams, Index, MTreeParams, SearchParams};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{FlowResultExt as _, Part, Thing, Value};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::FtIndex;
+use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 #[cfg(not(target_family = "wasm"))]
@@ -78,7 +80,7 @@ impl Document {
 				// The index builder consumed the value, which means it is currently building the index asynchronously,
 				// we don't index the document and let the index builder do it later.
 				ConsumeResult::Enqueued => return Ok(()),
-				// The index builder is done, the index has been built, we can proceed normally
+				// The index builder is done, the index has been built; we can proceed normally
 				ConsumeResult::Ignored(o, n) => (o, n),
 			}
 		} else {
@@ -92,7 +94,8 @@ impl Document {
 		match &ix.index {
 			Index::Uniq => ic.index_unique(ctx).await?,
 			Index::Idx => ic.index_non_unique(ctx).await?,
-			Index::Search(p) => ic.index_full_text(stk, ctx, p).await?,
+			Index::Search(p) => ic.index_search(stk, ctx, p).await?,
+			Index::FullText(p) => ic.index_fulltext(stk, ctx, p).await?,
 			Index::MTree(p) => ic.index_mtree(stk, ctx, p).await?,
 			Index::Hnsw(p) => ic.index_hnsw(ctx, p).await?,
 		}
@@ -382,16 +385,11 @@ impl<'a> IndexOperation<'a> {
 		})
 	}
 
-	async fn index_full_text(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		p: &SearchParams,
-	) -> Result<()> {
+	async fn index_search(&mut self, stk: &mut Stk, ctx: &Context, p: &SearchParams) -> Result<()> {
 		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
+		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
 
-		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
+		let mut ft = SearchIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(stk, ctx, self.opt, self.rid, n).await?;
@@ -401,10 +399,42 @@ impl<'a> IndexOperation<'a> {
 		ft.finish(ctx).await
 	}
 
+	async fn index_fulltext(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		p: &FullTextParams,
+	) -> Result<()> {
+		let (ns, db) = self.opt.ns_db()?;
+		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
+		let tx = ctx.tx();
+		// Build a FullText instance
+		let fti =
+			FullTextIndex::new(self.opt.id()?, ctx.get_index_stores(), &tx, ikb.clone(), p).await?;
+		let mut rc = false;
+		// Delete the old index data
+		let doc_id = if let Some(o) = self.o.take() {
+			fti.remove_content(stk, ctx, self.opt, self.rid, o, &mut rc).await?
+		} else {
+			None
+		};
+		// Create the new index data
+		if let Some(n) = self.n.take() {
+			fti.index_content(stk, ctx, self.opt, self.rid, n, &mut rc).await?;
+		} else if let Some(doc_id) = doc_id {
+			fti.remove_doc(ctx, doc_id).await?;
+		}
+		// Do we need to trigger the compaction?
+		if rc {
+			FullTextIndex::trigger_compaction(&ikb, &tx, self.opt.id()?).await?;
+		}
+		Ok(())
+	}
+
 	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
 		let (ns, db) = self.opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
+		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {

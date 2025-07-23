@@ -1,19 +1,18 @@
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
-use crate::idx::ft::doclength::DocLength;
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::DocLength;
+use crate::idx::ft::search::terms::TermId;
 use crate::kvs::Transaction;
 use anyhow::Result;
 use roaring::RoaringTreemap;
-use std::sync::Arc;
 
-pub(in crate::idx) type TermsDocs = Arc<Vec<Option<(TermId, RoaringTreemap)>>>;
+pub(in crate::idx) type SearchTermsDocs = Vec<Option<(TermId, RoaringTreemap)>>;
 
-pub(super) struct TermDocs {
+pub(in crate::idx) struct SearchTermDocs {
 	index_key_base: IndexKeyBase,
 }
 
-impl TermDocs {
+impl SearchTermDocs {
 	pub(super) fn new(index_key_base: IndexKeyBase) -> Self {
 		Self {
 			index_key_base,
