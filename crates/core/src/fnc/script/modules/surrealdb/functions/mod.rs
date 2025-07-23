@@ -26,6 +26,7 @@ mod search;
 mod sequence;
 mod session;
 mod string;
+mod table;
 mod time;
 mod r#type;
 mod value;
@@ -62,7 +63,8 @@ impl_module_def!(
 	"time" => (time::Package),
 	"type" => (r#type::Package),
 	"value" => (value::Package),
-	"vector" => (vector::Package)
+	"vector" => (vector::Package),
+	"table" => (table::Package)
 );
 
 fn run(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
