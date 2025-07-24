@@ -89,7 +89,7 @@ impl Ord for RrfDoc {
 }
 
 pub async fn rrf(
-	_ctx: &Context,
+	ctx: &Context,
 	(results, limit, rrf_constant): (Array, i64, Optional<i64>),
 ) -> Result<Value> {
 	let limit = if limit < 1 {
@@ -120,6 +120,7 @@ pub async fn rrf(
 	let mut documents: HashMap<Value, (f64, Vec<Object>)> = HashMap::new();
 
 	// Process each result list
+	let mut count = 0;
 	for result_list in results.into_iter() {
 		if let Value::Array(array) = result_list {
 			// Process each document in this result list
@@ -147,6 +148,10 @@ pub async fn rrf(
 						}
 					}
 				}
+				if ctx.is_done(count % 100 == 0).await? {
+					break;
+				}
+				count += 1;
 			}
 		}
 	}
@@ -162,6 +167,10 @@ pub async fn rrf(
 				scored_docs.push(RrfDoc(score, id, objects));
 			}
 		}
+		if ctx.is_done(count % 100 == 0).await? {
+			break;
+		}
+		count += 1;
 	}
 
 	// Take top `limit` results and create the final array
@@ -176,6 +185,10 @@ pub async fn rrf(
 		obj.insert("id".to_string(), doc.1);
 		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
+		if ctx.is_done(count % 100 == 0).await? {
+			break;
+		}
+		count += 1;
 	}
 	// Return the result
 	Ok(Value::Array(result_array))
