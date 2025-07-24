@@ -11,5 +11,6 @@ impl_module_def!(
 	"analyze" => fut Async,
 	"highlight" => fut Async,
 	"offsets" => fut Async,
+	"rrf" => fut Async,
 	"score" => fut Async
 );

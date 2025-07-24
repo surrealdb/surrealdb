@@ -66,6 +66,16 @@ pub async fn offsets(
 	Ok(Value::None)
 }
 
+/// Internal structure for storing documents during RRF (Reciprocal Rank Fusion) processing.
+///
+/// This tuple struct contains:
+/// - `f64`: The accumulated RRF score for the document
+/// - `Value`: The document ID used to identify the same document across different result lists
+/// - `Vec<Object>`: Collection of original objects from different search results that will be merged
+///
+/// The struct implements comparison traits (`Eq`, `Ord`, `PartialEq`, `PartialOrd`) based solely
+/// on the RRF score (first field) to enable efficient sorting and heap operations during the
+/// top-k selection process.
 struct RrfDoc(f64, Value, Vec<Object>);
 
 impl PartialEq for RrfDoc {
@@ -88,6 +98,41 @@ impl Ord for RrfDoc {
 	}
 }
 
+/// Implements Reciprocal Rank Fusion (RRF) to combine multiple ranked result lists.
+///
+/// RRF is a method for combining results from different search algorithms (e.g., vector search
+/// and full-text search) by computing a unified score based on the reciprocal of each document's
+/// rank in each result list. The algorithm uses the formula: `1 / (k + rank)` where `k` is the
+/// RRF constant and `rank` is the 1-based position in the result list.
+///
+/// # Parameters
+///
+/// * `ctx` - The execution context for cancellation checking and transaction management
+/// * `results` - An array of result lists, where each list contains documents with an "id" field
+/// * `limit` - Maximum number of documents to return (must be ≥ 1)
+/// * `rrf_constant` - Optional RRF constant (k) for score calculation (defaults to 60.0, must be ≥ 0)
+///
+/// # Returns
+///
+/// Returns a `Value::Array` containing the top `limit` documents sorted by RRF score in descending
+/// order. Each document includes:
+/// - All original fields from the input documents (merged if the same document appears in multiple lists)
+/// - `id`: The document identifier
+/// - `rrf_score`: The computed RRF score as a float
+///
+/// # Errors
+///
+/// * `Error::InvalidArguments` - If `limit` < 1 or `rrf_constant` < 0
+/// * Context cancellation errors if the operation is cancelled during processing
+///
+/// # Example
+///
+/// ```surql
+/// -- Combine vector search and full-text search results
+/// LET $vector_results = SELECT id, distance FROM docs WHERE embedding <|5|> $query_vector;
+/// LET $text_results = SELECT id, ft_score FROM docs WHERE text @@ 'search terms';
+/// RETURN search::rrf([$vector_results, $text_results], 10, 60);
+/// ```
 pub async fn rrf(
 	ctx: &Context,
 	(results, limit, rrf_constant): (Array, i64, Optional<i64>),
@@ -115,34 +160,36 @@ pub async fn rrf(
 		return Ok(Value::Array(Array::new()));
 	}
 
-	// Map to store the original documents, objects and scores
+	// Map to store document IDs with their accumulated RRF scores and original objects
+	// Key: document ID, Value: (accumulated_rrf_score, vector_of_original_objects)
 	#[expect(clippy::mutable_key_type)]
 	let mut documents: HashMap<Value, (f64, Vec<Object>)> = HashMap::new();
 
-	// Process each result list
+	// Process each result list from the input array (e.g., vector search results, full-text search results)
 	let mut count = 0;
 	for result_list in results.into_iter() {
 		if let Value::Array(array) = result_list {
-			// Process each document in this result list
+			// Process each document in this result list, using enumerate to get 0-based rank
 			for (rank, doc) in array.into_iter().enumerate() {
 				if let Value::Object(mut obj) = doc {
-					// Extract the ID from the document
+					// Extract the document ID (required for RRF to identify same documents across lists)
 					if let Some(id_value) = obj.remove("id") {
-						// Calculate RRF contribution: 1 / (k + rank + 1)
-						// rank is 0-based, but RRF uses 1-based ranking
+						// Calculate RRF contribution using the standard formula: 1 / (k + rank + 1)
+						// where k is the RRF constant and rank is converted from 0-based to 1-based
 						let rrf_contribution = 1.0 / (rrf_constant + (rank + 1) as f64);
 
-						// Store the document (use the first occurrence or merge if needed)
+						// Store or merge the document based on whether we've seen this ID before
 						match documents.entry(id_value) {
-							// Insert the first occurrence
+							// First time seeing this document ID - store it with its RRF contribution
 							Entry::Vacant(entry) => {
 								entry.insert((rrf_contribution, vec![obj]));
 							}
-							// Or merge
+							// Document ID already exists - accumulate RRF scores and merge objects
 							Entry::Occupied(e) => {
 								let (score, objects) = e.into_mut();
-								// Add to RRF score
+								// Accumulate RRF scores (this is the core of RRF fusion)
 								*score += rrf_contribution;
+								// Keep all original objects for later merging
 								objects.push(obj);
 							}
 						}
@@ -156,15 +203,18 @@ pub async fn rrf(
 		}
 	}
 
-	// Convert to vector and sort by RRF score (descending)
+	// Use a min-heap (BinaryHeap) to efficiently maintain only the top `limit` documents
+	// This avoids sorting all documents when we only need the top-k results
 	let mut scored_docs = BinaryHeap::with_capacity(limit);
 	for (id, (score, objects)) in documents {
 		if scored_docs.len() < limit {
+			// Heap not full yet - add document directly
 			scored_docs.push(RrfDoc(score, id, objects));
 		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek() {
+			// Heap is full - only add if this document has a higher score than the minimum
 			if score > *min_score {
-				scored_docs.pop();
-				scored_docs.push(RrfDoc(score, id, objects));
+				scored_docs.pop(); // Remove the lowest scoring document
+				scored_docs.push(RrfDoc(score, id, objects)); // Add the new higher scoring document
 			}
 		}
 		if ctx.is_done(count % 100 == 0).await? {
@@ -173,15 +223,17 @@ pub async fn rrf(
 		count += 1;
 	}
 
-	// Take top `limit` results and create the final array
+	// Extract the top `limit` results from the heap and build the final result array
+	// Note: BinaryHeap.pop() returns documents in descending order by RRF score (highest first)
 	let mut result_array = Array::new();
 	while let Some(doc) = scored_docs.pop() {
-		// Merge the documents
+		// Merge all objects from the same document ID across different result lists
+		// This combines fields like 'distance' from vector search and 'ft_score' from full-text search
 		let mut obj = Object::default();
 		for mut o in doc.2 {
 			obj.append(&mut o.0);
 		}
-		// Add the ID and the RRF score
+		// Add the document ID back (was removed during processing) and the computed RRF score
 		obj.insert("id".to_string(), doc.1);
 		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
@@ -190,6 +242,6 @@ pub async fn rrf(
 		}
 		count += 1;
 	}
-	// Return the result
+	// Return the fused results sorted by RRF score in descending order
 	Ok(Value::Array(result_array))
 }
