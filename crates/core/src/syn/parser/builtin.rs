@@ -452,7 +452,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::MAXIMUM") => PathKind::Constant(Constant::TimeMax),
 		UniCase::ascii("duration::MAX") => PathKind::Constant(Constant::DurationMax),
 		//
-		UniCase::ascii("table::exists") => PathKind::Function,
+		UniCase::ascii("schema::table::exists") => PathKind::Function,
 };
 
 const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;

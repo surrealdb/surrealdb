@@ -1,12 +1,12 @@
-use super::fut;
 use crate::fnc::script::modules::impl_module_def;
-use js::prelude::Async;
+
+mod table;
 
 #[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(
 	Package,
-	"table",
-	"exists" => fut Async
+	"string",
+	"table" => (table::Package)
 );
