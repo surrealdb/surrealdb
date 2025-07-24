@@ -246,6 +246,10 @@ pub async fn rrf(
 	Ok(Value::Array(result_array))
 }
 
+enum LinearNorm {
+	MinMax,
+	ZScore,
+}
 pub async fn linear(
 	ctx: &Context,
 	(results, weights, limit, norm): (Array, Array, i64, String),
@@ -264,8 +268,18 @@ pub async fn linear(
 			message: "The results and the weights array should have the same length".to_string(),
 		});
 	}
+	// Validate that all weights are numeric
+	for (i, weight) in weights.iter().enumerate() {
+		if !matches!(weight, Value::Number(_)) {
+			anyhow::bail!(Error::InvalidArguments {
+				name: "search::linear".to_string(),
+				message: format!("Weight at index {} must be a number", i),
+			});
+		}
+	}
 	let norm = match norm.as_str() {
-		"minmax" | "zscore" => norm,
+		"minmax" => LinearNorm::MinMax,
+		"zscore" => LinearNorm::ZScore,
 		_ => anyhow::bail!(Error::InvalidArguments {
 			name: "search::linear".to_string(),
 			message: "Norm must be 'minmax' or 'zscore'".to_string()
@@ -274,5 +288,163 @@ pub async fn linear(
 	if results.is_empty() {
 		return Ok(Value::Array(Array::new()));
 	}
-	todo!()
+
+	let results_len = results.len();
+
+	// Map to store document IDs with their scores from each result list and original objects
+	// Key: document ID, Value: (scores_vector, vector_of_original_objects)
+	#[expect(clippy::mutable_key_type)]
+	let mut documents: HashMap<Value, (Vec<f64>, Vec<Object>)> = HashMap::new();
+
+	// First pass: collect all documents and their scores from each result list
+	let mut count = 0;
+	for (list_idx, result_list) in results.into_iter().enumerate() {
+		if let Value::Array(array) = result_list {
+			for doc in array.into_iter() {
+				if let Value::Object(mut obj) = doc {
+					// Extract the document ID
+					if let Some(id_value) = obj.remove("id") {
+						// Extract score from the document - look for common score fields
+						let score = if let Some(Value::Number(n)) = obj.get("distance") {
+							// For distance metrics, lower is better, so we invert it
+							1.0 / (1.0 + n.as_float())
+						} else if let Some(Value::Number(n)) = obj.get("ft_score") {
+							n.as_float()
+						} else if let Some(Value::Number(n)) = obj.get("score") {
+							n.as_float()
+						} else {
+							// If no score field found, use rank-based scoring (higher rank = lower score)
+							1.0 / (1.0 + count as f64)
+						};
+
+						// Store or merge the document
+						match documents.entry(id_value) {
+							Entry::Vacant(entry) => {
+								let mut scores = vec![0.0; results_len];
+								scores[list_idx] = score;
+								entry.insert((scores, vec![obj]));
+							}
+							Entry::Occupied(e) => {
+								let (scores, objects) = e.into_mut();
+								scores[list_idx] = score;
+								objects.push(obj);
+							}
+						}
+					}
+				}
+				if ctx.is_done(count % 100 == 0).await? {
+					break;
+				}
+				count += 1;
+			}
+		}
+	}
+
+	// Second pass: normalize scores and compute weighted linear combination
+	let mut all_scores_by_list: Vec<Vec<f64>> = vec![Vec::new(); results_len];
+
+	// Collect all scores for normalization
+	for (scores, _) in documents.values() {
+		for (list_idx, &score) in scores.iter().enumerate() {
+			if score > 0.0 {
+				all_scores_by_list[list_idx].push(score);
+			}
+		}
+	}
+
+	// Normalize scores for each result list
+	let mut normalized_params: Vec<(f64, f64)> = Vec::new();
+	for list_scores in &all_scores_by_list {
+		if list_scores.is_empty() {
+			normalized_params.push((0.0, 1.0));
+			continue;
+		}
+
+		match norm {
+			LinearNorm::MinMax => {
+				let min_score = list_scores.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+				let max_score = list_scores.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+				let range = max_score - min_score;
+				if range > 0.0 {
+					normalized_params.push((min_score, range));
+				} else {
+					normalized_params.push((min_score, 1.0));
+				}
+			}
+			LinearNorm::ZScore => {
+				let mean = list_scores.iter().sum::<f64>() / list_scores.len() as f64;
+				let variance = list_scores.iter().map(|&x| (x - mean).powi(2)).sum::<f64>()
+					/ list_scores.len() as f64;
+				let std_dev = variance.sqrt();
+				if std_dev > 0.0 {
+					normalized_params.push((mean, std_dev));
+				} else {
+					normalized_params.push((mean, 1.0));
+				}
+			}
+		}
+	}
+
+	// Use a min-heap to efficiently maintain only the top `limit` documents
+	let mut scored_docs = BinaryHeap::with_capacity(limit);
+
+	for (id, (scores, objects)) in documents {
+		// Compute weighted linear combination of normalized scores
+		let mut combined_score = 0.0;
+		for (list_idx, &score) in scores.iter().enumerate() {
+			if score > 0.0 {
+				let weight = if let Some(Value::Number(w)) = weights.get(list_idx) {
+					w.as_float()
+				} else {
+					1.0
+				};
+
+				let normalized_score = match norm {
+					LinearNorm::MinMax => {
+						let (min_val, range) = normalized_params[list_idx];
+						(score - min_val) / range
+					}
+					LinearNorm::ZScore => {
+						let (mean, std_dev) = normalized_params[list_idx];
+						(score - mean) / std_dev
+					}
+				};
+
+				combined_score += weight * normalized_score;
+			}
+		}
+
+		if scored_docs.len() < limit {
+			scored_docs.push(RrfDoc(combined_score, id, objects));
+		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek() {
+			if combined_score > *min_score {
+				scored_docs.pop();
+				scored_docs.push(RrfDoc(combined_score, id, objects));
+			}
+		}
+		if ctx.is_done(count % 100 == 0).await? {
+			break;
+		}
+		count += 1;
+	}
+
+	// Build the final result array
+	let mut result_array = Array::new();
+	while let Some(doc) = scored_docs.pop() {
+		// Merge all objects from the same document ID
+		let mut obj = Object::default();
+		for mut o in doc.2 {
+			obj.append(&mut o.0);
+		}
+		// Add the document ID and the computed linear score
+		obj.insert("id".to_string(), doc.1);
+		obj.insert("linear_score".to_string(), Value::Number(Number::Float(doc.0)));
+		result_array.push(Value::Object(obj));
+		if ctx.is_done(count % 100 == 0).await? {
+			break;
+		}
+		count += 1;
+	}
+
+	Ok(Value::Array(result_array))
 }

@@ -23,7 +23,7 @@ value = "[]"
 error = "Incorrect arguments for function search::linear(). The results and the weights array should have the same length"
 
 [[test.results]]
-error = "Incorrect arguments for function search::linear(). Norm must be 'minmax' or 'zcore'"
+error = "Incorrect arguments for function search::linear(). Weight at index 0 must be a number"
 
 */
 
