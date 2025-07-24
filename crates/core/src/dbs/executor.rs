@@ -106,7 +106,6 @@ impl Executor {
 	}
 
 	fn check_slow_log(&self, start: &Instant, stm: &impl Display) {
-		println!("CHECK_SLOW_LOG {:?} + {stm}", self.ctx.slow_log_threshold());
 		if let Some(threshold) = self.ctx.slow_log_threshold() {
 			let elapsed = start.elapsed();
 			if elapsed > threshold {
