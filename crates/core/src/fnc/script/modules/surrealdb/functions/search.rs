@@ -10,6 +10,7 @@ impl_module_def!(
 	"search",
 	"analyze" => fut Async,
 	"highlight" => fut Async,
+	"linear" => fut Async,
 	"offsets" => fut Async,
 	"rrf" => fut Async,
 	"score" => fut Async

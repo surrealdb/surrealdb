@@ -575,6 +575,7 @@ pub async fn asynchronous(
 		"record::refs" => record::refs((stk, ctx, opt, doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
+		"search::linear" => search::linear(ctx).await,
 		"search::rrf" => search::rrf(ctx).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,

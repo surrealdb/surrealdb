@@ -306,6 +306,7 @@
 "rand::uuid::v4("
 "rand::uuid::v7("
 "search::analyze("
+"search::linear("
 "search::rrf("
 "search::score("
 "search::highlight("

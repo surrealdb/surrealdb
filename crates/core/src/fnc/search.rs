@@ -245,3 +245,34 @@ pub async fn rrf(
 	// Return the fused results sorted by RRF score in descending order
 	Ok(Value::Array(result_array))
 }
+
+pub async fn linear(
+	ctx: &Context,
+	(results, weights, limit, norm): (Array, Array, i64, String),
+) -> Result<Value> {
+	let limit = if limit < 1 {
+		anyhow::bail!(Error::InvalidArguments {
+			name: "search::linear".to_string(),
+			message: "Limit must be at least 1".to_string(),
+		});
+	} else {
+		limit as usize
+	};
+	if weights.len() != results.len() {
+		anyhow::bail!(Error::InvalidArguments {
+			name: "search::linear".to_string(),
+			message: "The results and the weights array should have the same length".to_string(),
+		});
+	}
+	let norm = match norm.as_str() {
+		"minmax" | "zscore" => norm,
+		_ => anyhow::bail!(Error::InvalidArguments {
+			name: "search::linear".to_string(),
+			message: "Norm must be 'minmax' or 'zscore'".to_string()
+		}),
+	};
+	if results.is_empty() {
+		return Ok(Value::Array(Array::new()));
+	}
+	todo!()
+}
