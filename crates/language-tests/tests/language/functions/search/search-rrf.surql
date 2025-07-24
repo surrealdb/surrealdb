@@ -29,7 +29,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[]"
+value = "[{ distance: 0.0034969844824588314f, ft_score: 0.5366538763046265f, id: test:1, rrf_score: 0.03278688524590164f }, { distance: 0.056393806565797844f, id: test:3, rrf_score: 0.016129032258064516f }]"
 
 */
 -- Sample data ---------------------------------------------------------------
@@ -50,11 +50,11 @@ DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST 
 LET $qvec = [0.12, 0.18, 0.27];
 
 -- Vector search: top 2 nearest neighbours
-LET $vs = SELECT id FROM test WHERE embedding <|2,100|> $qvec;
+LET $vs = SELECT id, vector::distance::knn() as distance FROM test WHERE embedding <|2,100|> $qvec;
 
 -- Full‑text search: top 2 lexical matches
-LET $ft = SELECT id, search::score(1) as score FROM test
-          WHERE text @1@ 'graph' ORDER BY score DESC LIMIT 2;
+LET $ft = SELECT id, search::score(1) as ft_score FROM test
+          WHERE text @1@ 'graph' ORDER BY ft_score DESC LIMIT 2;
 
 -- Fuse with Reciprocal Rank Fusion (k defaults to 60 if omitted)
 RETURN search::rrf([$vs, $ft], 2, 60);

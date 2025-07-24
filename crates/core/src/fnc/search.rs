@@ -3,11 +3,13 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Array, Value};
+use crate::expr::{Number, Object};
 use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
 use anyhow::Result;
 use reblessive::tree::Stk;
+use std::collections::HashMap;
 
 use super::args::Optional;
 
@@ -89,6 +91,58 @@ pub async fn rrf(
 	if results.is_empty() {
 		return Ok(Value::Array(Array::new()));
 	}
-	// Eg of array: [[{ id: test:1 }, { id: test:3 }], [{ id: test:1, score: 0.5366538763046265f }]]
-	todo!("Implement the actual RRF (Reciprocal Rank Fusion) algorithm")
+
+	// Map to store the original documents objects and scores
+	let mut documents: HashMap<Value, (f64, Vec<Object>)> = HashMap::new();
+
+	// Process each result list
+	for result_list in results.into_iter() {
+		if let Value::Array(array) = result_list {
+			// Process each document in this result list
+			for (rank, doc) in array.into_iter().enumerate() {
+				if let Value::Object(mut obj) = doc {
+					// Extract the ID from the document
+					if let Some(id_value) = obj.remove("id") {
+						// Calculate RRF contribution: 1 / (k + rank + 1)
+						// rank is 0-based, but RRF uses 1-based ranking
+						let rrf_contribution = 1.0 / (rrf_constant + (rank + 1) as f64);
+
+						// Store the document (use the first occurrence or merge if needed)
+						match documents.get_mut(&id_value) {
+							// Insert the first occurrence
+							None => {
+								documents.insert(id_value, (rrf_contribution, vec![obj]));
+							}
+							// Or merge
+							Some((score, objects)) => {
+								// Add to RRF score
+								*score += rrf_contribution;
+								objects.push(obj);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Convert to vector and sort by RRF score (descending)
+	let mut scored_docs: Vec<_> = documents.into_iter().collect();
+	scored_docs.sort_by(|a, b| b.1.0.partial_cmp(&a.1.0).unwrap_or(std::cmp::Ordering::Equal));
+
+	// Take top `limit` results and create the final array
+	let mut result_array = Array::new();
+	for (id, (rrf_score, objects)) in scored_docs.into_iter().take(limit) {
+		// Merge the documents
+		let mut obj = Object::default();
+		for mut o in objects {
+			obj.append(&mut o.0);
+		}
+		// Add the ID and the RRF score
+		obj.insert("id".to_string(), id);
+		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(rrf_score)));
+		result_array.push(Value::Object(obj));
+	}
+	// Return the result
+	Ok(Value::Array(result_array))
 }
