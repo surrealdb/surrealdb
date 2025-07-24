@@ -1,19 +1,20 @@
 use std::borrow::Borrow;
 use std::collections::btree_map::{IntoIter as BIntoIter, Iter as BIter, IterMut as BIterMut};
 use std::iter::FusedIterator;
-use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue};
+
+use surrealdb_core::val;
 
 use super::Value;
 
 transparent_wrapper! {
 	#[derive(Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
-	pub struct Object(CoreObject)
+	pub struct Object(val::Object)
 }
 impl_serialize_wrapper!(Object);
 
 impl Object {
 	pub fn new() -> Self {
-		Object(CoreObject::default())
+		Object(val::Object::default())
 	}
 
 	pub fn clear(&mut self) {
@@ -89,7 +90,7 @@ impl Object {
 }
 
 pub struct IntoIter {
-	iter: BIntoIter<String, CoreValue>,
+	iter: BIntoIter<String, val::Value>,
 }
 
 impl Iterator for IntoIter {
@@ -132,7 +133,7 @@ impl IntoIterator for Object {
 
 #[derive(Clone)]
 pub struct Iter<'a> {
-	iter: BIter<'a, String, CoreValue>,
+	iter: BIter<'a, String, val::Value>,
 }
 
 impl<'a> IntoIterator for &'a Object {
@@ -187,7 +188,7 @@ impl ExactSizeIterator for Iter<'_> {
 }
 
 pub struct IterMut<'a> {
-	iter: BIterMut<'a, String, CoreValue>,
+	iter: BIterMut<'a, String, val::Value>,
 }
 
 impl<'a> IntoIterator for &'a mut Object {

@@ -304,11 +304,10 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 
-	use surrealdb_core::expr::Object;
+	use surrealdb_core::val;
 
 	use super::*;
 	use crate::Value;
-	use crate::expr::Value as CoreValue;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
 
@@ -337,7 +336,7 @@ mod tests {
 
 		assert_eq!(
 			users.into_inner(),
-			CoreValue::from(Object::default()),
+			val::Value::from(val::Object::default()),
 			"there should be no users in the system"
 		);
 	}

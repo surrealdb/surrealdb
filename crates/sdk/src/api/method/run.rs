@@ -1,16 +1,15 @@
-use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
-use crate::expr::Value;
 use crate::method::OnceLockExt;
+use crate::{Surreal, api};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_content::{Serializer, Value as Content};
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Array, to_value};
+use surrealdb_core::val;
 
 /// A run future
 #[derive(Debug)]
@@ -52,15 +51,16 @@ where
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
 			let (name, version) = function?;
-			let value = match args.map_err(crate::error::Db::from)? {
-				// Tuples are treated as multiple function arguments
-				Content::Tuple(tup) => tup,
-				// Everything else is treated as a single argument
-				content => vec![content],
-			};
-			let args = match to_value(value)? {
-				Value::Array(array) => array,
-				value => Array::from(vec![value]),
+			let value =
+				match args.map_err(|x| crate::error::Api::DeSerializeValue(x.to_string()))? {
+					// Tuples are treated as multiple function arguments
+					Content::Tuple(tup) => tup,
+					// Everything else is treated as a single argument
+					content => vec![content],
+				};
+			let args = match api::value::to_core_value(value)? {
+				val::Value::Array(array) => array,
+				value => val::Array::from(vec![value]),
 			};
 			router
 				.execute(Command::Run {

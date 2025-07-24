@@ -1,7 +1,7 @@
 use crate::api::conn::{Command, Router};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::{Connection, ExtraFeatures, Result};
+use crate::api::{self, Connection, ExtraFeatures, Result};
 use crate::engine::any::Any;
 use crate::method::{Live, OnceLockExt, Query, Select};
 use crate::opt::Resource;
@@ -15,12 +15,10 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
-use surrealdb_core::expr::Value as CoreValue;
-use surrealdb_core::sql::statements::LiveStatement;
-use surrealdb_core::sql::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, SqlValue as CoreSqlValue,
-	Statement, Table, Thing as SqlThing,
+use surrealdb_core::expr::{
+	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, LiveStatement, TopLevelExpr,
 };
+use surrealdb_core::val;
 use uuid::Uuid;
 
 #[cfg(not(target_family = "wasm"))]
@@ -45,46 +43,83 @@ where
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
 			return Err(Error::LiveQueriesNotSupported.into());
 		}
-		let mut fields = Fields::default();
-		fields.0 = vec![Field::All];
-		let mut stmt = LiveStatement::new(fields);
-		let mut table = Table::default();
+		let mut stmt = LiveStatement::new(Fields::all());
 		match resource? {
 			Resource::Table(table) => {
-				let mut core_table = Table::default();
-				core_table.0 = table;
-				stmt.what = core_table.into()
+				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(table) });
 			}
 			Resource::RecordId(record) => {
-				let record: SqlThing = record.into_inner().into();
-				table.0.clone_from(&record.tb);
-				stmt.what = table.into();
-				let mut ident = Ident::default();
-				ID.clone_into(&mut ident.0);
-				let mut idiom = Idiom::default();
-				idiom.0 = vec![Part::from(ident)];
-				let mut cond = Cond::default();
-				cond.0 = CoreSqlValue::Expression(Box::new(Expression::new(
-					idiom.into(),
-					Operator::Equal,
-					record.into(),
-				)));
-				stmt.cond = Some(cond);
+				let record = record.into_inner();
+				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table) });
+				let ident = Ident::new("id".to_string()).unwrap();
+				let cond = Expr::Binary {
+					left: Box::new(Expr::Idiom(Idiom::field(ident))),
+					op: BinaryOperator::Equal,
+					right: Box::new(record.key.into_value().into_literal()),
+				};
+				stmt.cond = Some(Cond(cond));
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
 			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
-			Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
 			Resource::Range(range) => {
-				let range = range.into_inner();
-				table.0.clone_from(&range.tb);
-				stmt.what = table.into();
-				stmt.cond = range.to_cond().map(Into::into);
+				let record = range.into_inner();
+
+				let val::RecordIdKey::Range(range) = record.key else {
+					panic!("invalid resource?");
+				};
+
+				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table) });
+
+				let id = Expr::Idiom(Idiom::field(Ident::new("id".to_string()).unwrap()));
+
+				let left = match range.start {
+					std::ops::Bound::Included(x) => Some(Expr::Binary {
+						left: Box::new(id.clone()),
+						op: BinaryOperator::MoreThanEqual,
+						right: Box::new(x.into_value().into_literal()),
+					}),
+					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
+						left: Box::new(id.clone()),
+						op: BinaryOperator::MoreThan,
+						right: Box::new(x.into_value().into_literal()),
+					}),
+					std::ops::Bound::Unbounded => None,
+				};
+				let right = match range.end {
+					std::ops::Bound::Included(x) => Some(Expr::Binary {
+						left: Box::new(id),
+						op: BinaryOperator::LessThanEqual,
+						right: Box::new(x.into_value().into_literal()),
+					}),
+					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
+						left: Box::new(id),
+						op: BinaryOperator::LessThan,
+						right: Box::new(x.into_value().into_literal()),
+					}),
+					std::ops::Bound::Unbounded => None,
+				};
+
+				let cond = match (left, right) {
+					(Some(l), Some(r)) => Some(Cond(Expr::Binary {
+						left: Box::new(l),
+						op: BinaryOperator::And,
+						right: Box::new(r),
+					})),
+					(Some(x), None) | (None, Some(x)) => Some(Cond(x)),
+					_ => None,
+				};
+
+				stmt.cond = cond
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
-		let query =
-			Query::normal(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
-		let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
+		let query = Query::normal(
+			client.clone(),
+			vec![TopLevelExpr::Live(Box::new(stmt))],
+			Default::default(),
+			false,
+		);
+		let val::Value::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
 			return Err(Error::InternalError(
 				"successufull live query didn't return a uuid".to_string(),
 			)
@@ -278,7 +313,7 @@ where
 	let action = notification.action;
 	match action {
 		CoreAction::Killed => None,
-		action => match surrealdb_core::expr::from_value(notification.result) {
+		action => match api::value::from_core_value(notification.result) {
 			Ok(data) => Some(Ok(Notification {
 				query_id,
 				data,

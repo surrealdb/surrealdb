@@ -13,6 +13,7 @@ use protocol::{Client, Test};
 use semver::Version;
 use std::ops::Bound;
 use std::sync::LazyLock;
+use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::sql::statements::{BeginStatement, CommitStatement};
 use types::{USER, User};
 
@@ -94,12 +95,12 @@ async fn api() {
 		.await
 		.unwrap();
 	let _: QueryResponse = DB
-		.query(BeginStatement::default())
+		.query(TopLevelExpr::Begin)
 		.query("CREATE account:one SET balance = 135605.16")
 		.query("CREATE account:two SET balance = 91031.31")
 		.query("UPDATE account:one SET balance += 300.00")
 		.query("UPDATE account:two SET balance -= 300.00")
-		.query(CommitStatement::default())
+		.query(TopLevelExpr::Commit)
 		.await
 		.unwrap();
 

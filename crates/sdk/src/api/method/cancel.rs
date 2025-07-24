@@ -1,6 +1,7 @@
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result, Surreal};
 use std::future::IntoFuture;
+use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::sql::statements::CancelStatement;
 
 /// A transaction cancellation future
@@ -19,7 +20,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(CancelStatement::default()).await?;
+			self.client.query(TopLevelExpr::Cancel).await?;
 			Ok(self.client)
 		})
 	}

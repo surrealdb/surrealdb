@@ -9,7 +9,6 @@ use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
 use uuid::Uuid;
 
 /// A patch future
@@ -51,11 +50,12 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let mut vec = Vec::with_capacity(patches.len());
 				for result in patches {
-					let content = result.map_err(crate::error::Db::from)?;
-					let value = to_core_value(content)?;
+					let content =
+						result.map_err(|x| crate::error::Api::DeSerializeValue(x.to_string()))?;
+					let value = crate::api::value::to_core_value(content)?;
 					vec.push(value);
 				}
-				let patches = CoreValue::from(vec);
+				let patches = surrealdb_core::val::Value::from(vec);
 				let router = client.inner.router.extract()?;
 				let cmd = Command::Patch {
 					txn,

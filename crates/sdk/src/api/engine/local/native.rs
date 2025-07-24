@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::task::Poll;
-use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::{Session, Variables};
 use surrealdb_core::iam::Level;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;

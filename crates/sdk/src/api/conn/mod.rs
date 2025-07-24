@@ -3,12 +3,13 @@ use crate::api::method::BoxFuture;
 use crate::api::method::query::Response;
 use crate::api::opt::Endpoint;
 use crate::api::{ExtraFeatures, Result, Surreal};
+use crate::value;
 use crate::{Value, api};
 use async_channel::{Receiver, Sender};
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicI64, Ordering};
-use surrealdb_core::expr::{Value as CoreValue, from_value as from_core_value};
+use surrealdb_core::val::Value as CoreValue;
 
 mod cmd;
 pub(crate) use cmd::Command;
@@ -102,7 +103,7 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send(command).await?;
 			let value = self.recv(rx).await?;
-			from_core_value(value)
+			value::from_core_value(value)
 		})
 	}
 
@@ -115,7 +116,7 @@ impl Router {
 			let rx = self.send(command).await?;
 			match self.recv(rx).await? {
 				CoreValue::None | CoreValue::Null => Ok(None),
-				value => from_core_value(value),
+				value => value::from_core_value(value),
 			}
 		})
 	}
@@ -132,7 +133,7 @@ impl Router {
 				CoreValue::Array(array) => CoreValue::Array(array),
 				value => vec![value].into(),
 			};
-			from_core_value(value)
+			value::from_core_value(value)
 		})
 	}
 

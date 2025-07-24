@@ -3,7 +3,7 @@ use super::{Stream, live};
 use crate::api::conn::Command;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::{Connection, ExtraFeatures, Result, opt};
+use crate::api::{self, Connection, ExtraFeatures, Result, opt};
 use crate::method::{OnceLockExt, Stats, WithStats};
 use crate::value::Notification;
 use crate::{Surreal, Value};
@@ -19,9 +19,8 @@ use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
-use surrealdb_core::sql;
-use surrealdb_core::sql::Statement;
+use surrealdb_core::expr::{LogicalPlan, TopLevelExpr};
+use surrealdb_core::val;
 use uuid::Uuid;
 
 /// A query future
@@ -47,12 +46,12 @@ where
 pub(crate) enum ValidQuery {
 	Raw {
 		query: Cow<'static, str>,
-		bindings: CoreObject,
+		bindings: val::Object,
 	},
 	Normal {
-		query: Vec<Statement>,
+		query: Vec<TopLevelExpr>,
 		register_live_queries: bool,
-		bindings: CoreObject,
+		bindings: val::Object,
 	},
 }
 
@@ -62,8 +61,8 @@ where
 {
 	pub(crate) fn normal(
 		client: Cow<'r, Surreal<C>>,
-		query: Vec<Statement>,
-		bindings: CoreObject,
+		query: Vec<TopLevelExpr>,
+		bindings: val::Object,
 		register_live_queries: bool,
 	) -> Self {
 		Query {
@@ -135,22 +134,20 @@ where
 					register_live_queries,
 					bindings,
 				} => {
-					let query_statements = query;
-
 					// Collect the indexes of the live queries which should be registerd.
 					let query_indicies = if register_live_queries {
-						query_statements
+						query
 							.iter()
 							// BEGIN, COMMIT, and CANCEL don't return a result.
 							.filter(|x| {
 								!matches!(
 									x,
-									Statement::Begin(_)
-										| Statement::Commit(_) | Statement::Cancel(_)
+									TopLevelExpr::Begin
+										| TopLevelExpr::Commit | TopLevelExpr::Cancel
 								)
 							})
 							.enumerate()
-							.filter(|(_, x)| matches!(x, Statement::Live(_)))
+							.filter(|(_, x)| matches!(x, TopLevelExpr::Live(_)))
 							.map(|(i, _)| i)
 							.collect()
 					} else {
@@ -164,8 +161,9 @@ where
 						return Err(Error::LiveQueriesNotSupported.into());
 					}
 
-					let mut query = sql::Query::default();
-					query.0.0 = query_statements;
+					let query = LogicalPlan {
+						expressions: query,
+					};
 
 					let mut response = router
 						.execute_query(Command::Query {
@@ -184,7 +182,7 @@ where
 						// creating another public error variant for this internal error.
 						let res = match result {
 							Ok(id) => {
-								let CoreValue::Uuid(uuid) = id else {
+								let val::Value::Uuid(uuid) = id else {
 									bail!(Error::InternalError(
 										"successfull live query did not return a uuid".to_string(),
 									));
@@ -314,25 +312,25 @@ where
 					..
 				} => bindings,
 			};
-			let bindings = to_core_value(bindings)?;
+			let bindings = api::value::to_core_value(bindings)?;
 			match bindings {
-				CoreValue::Object(mut map) => current_bindings.append(&mut map.0),
-				CoreValue::Array(array) => {
-					if array.len() != 2 || !matches!(array[0], CoreValue::Strand(_)) {
-						let bindings = CoreValue::Array(array);
+				val::Value::Object(mut map) => current_bindings.append(&mut map.0),
+				val::Value::Array(array) => {
+					if array.len() != 2 || !matches!(array[0], val::Value::Strand(_)) {
+						let bindings = val::Value::Array(array);
 						let bindings = Value::from_inner(bindings);
 						return Err(Error::InvalidBindings(bindings).into());
 					}
 
 					let mut iter = array.into_iter();
-					let Some(CoreValue::Strand(key)) = iter.next() else {
+					let Some(val::Value::Strand(key)) = iter.next() else {
 						unreachable!()
 					};
 					let Some(value) = iter.next() else {
 						unreachable!()
 					};
 
-					current_bindings.insert(key.0, value);
+					current_bindings.insert(key.into_string(), value);
 				}
 				_ => {
 					let bindings = Value::from_inner(bindings);
@@ -345,7 +343,7 @@ where
 	}
 }
 
-pub(crate) type QueryResult = Result<CoreValue>;
+pub(crate) type QueryResult = Result<val::Value>;
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
@@ -738,7 +736,6 @@ mod tests {
 	use super::*;
 	use crate::value::to_value;
 	use serde::Deserialize;
-	use surrealdb_core::expr::Value as CoreValue;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {
@@ -820,7 +817,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), CoreValue::from(scalar));
+		assert_eq!(value.into_inner(), val::Value::from(scalar));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -843,7 +840,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), CoreValue::from(scalar));
+		assert_eq!(value.into_inner(), val::Value::from(scalar));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -888,7 +885,7 @@ mod tests {
 		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
-		assert_eq!(one.into_inner(), CoreValue::from(1));
+		assert_eq!(one.into_inner(), val::Value::from(1));
 	}
 
 	#[test]
@@ -903,7 +900,7 @@ mod tests {
 			..Response::new()
 		};
 		let title: Value = response.take("title").unwrap();
-		assert_eq!(title.into_inner(), CoreValue::from(summary.title.as_str()));
+		assert_eq!(title.into_inner(), val::Value::from(summary.title.as_str()));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(value.clone().into_inner())]),
@@ -952,7 +949,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take("title").unwrap();
-		assert_eq!(value.into_inner(), CoreValue::from(article.title));
+		assert_eq!(value.into_inner(), val::Value::from(article.title));
 	}
 
 	#[test]
@@ -983,24 +980,24 @@ mod tests {
 	#[test]
 	fn take_partial_records() {
 		let mut response = Response {
-			results: to_map(vec![Ok(vec![true, false].into())]),
+			results: to_map(vec![Ok(vec![val::Value::from(true), val::Value::from(false)].into())]),
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
 		assert_eq!(
 			value.into_inner(),
-			CoreValue::from(vec![CoreValue::from(true), CoreValue::from(false)])
+			val::Value::from(vec![val::Value::from(true), val::Value::from(false)])
 		);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(vec![true, false].into())]),
+			results: to_map(vec![Ok(vec![val::Value::from(true), val::Value::from(false)].into())]),
 			..Response::new()
 		};
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(vec![true, false].into())]),
+			results: to_map(vec![Ok(vec![val::Value::from(true), val::Value::from(false)].into())]),
 			..Response::new()
 		};
 
@@ -1016,7 +1013,10 @@ mod tests {
 		};
 
 		let records = map.swap_remove(&0).unwrap().1.unwrap();
-		assert_eq!(records, CoreValue::from(vec![CoreValue::from(true), CoreValue::from(false)]));
+		assert_eq!(
+			records,
+			val::Value::from(vec![val::Value::from(true), val::Value::from(false)])
+		);
 	}
 
 	#[test]
@@ -1080,6 +1080,6 @@ mod tests {
 		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
-		assert_eq!(value.into_inner(), CoreValue::from(3));
+		assert_eq!(value.into_inner(), val::Value::from(3));
 	}
 }

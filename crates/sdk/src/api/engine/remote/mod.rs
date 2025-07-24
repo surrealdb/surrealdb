@@ -115,7 +115,7 @@ use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::val;
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 const NANOS_PER_MILLI: i64 = 1_000_000;
@@ -182,7 +182,7 @@ pub(crate) struct Failure {
 #[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) enum Data {
-	Other(CoreValue),
+	Other(val::Value),
 	Query(Vec<dbs::QueryMethodResponse>),
 	Live(dbs::Notification),
 }
@@ -241,7 +241,7 @@ impl DbResponse {
 #[revisioned(revision = 1)]
 #[derive(Debug, Deserialize)]
 pub(crate) struct Response {
-	id: Option<CoreValue>,
+	id: Option<val::Value>,
 	pub(crate) result: ServerResult,
 }
 

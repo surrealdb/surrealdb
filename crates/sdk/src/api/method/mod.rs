@@ -3,6 +3,7 @@ use crate::api::opt::auth::{Credentials, Jwt};
 use crate::api::opt::{IntoEndpoint, auth};
 use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
 use crate::opt::{IntoExportDestination, WaitFor};
+use query::ValidQuery;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -10,8 +11,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
-use surrealdb_core::syn;
+use surrealdb_core::val;
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -323,7 +323,7 @@ where
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: to_core_value(value),
+			value: crate::api::value::to_core_value(value),
 		}
 	}
 
@@ -631,16 +631,15 @@ where
 	/// ```
 	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
 		let result = match query.as_str() {
-			Some(surql) => self.inner.router.extract().and_then(|router| {
-				let capabilities = &router.config.capabilities;
-				syn::parse_with_capabilities(surql, capabilities)
-					.map(opt::into_query::Sealed::into_query)
-			}),
-			None => Ok(query.into_query()),
+			Some(surql) => ValidQuery::Raw {
+				query: Cow::Owned(surql.to_owned()),
+				bindings: Default::default(),
+			},
+			None => query.into_query().0,
 		};
 		Query {
 			txn: None,
-			inner: result.map(|x| x.0),
+			inner: Ok(result),
 			client: Cow::Borrowed(self),
 		}
 	}
@@ -1404,10 +1403,10 @@ where
 	}
 }
 
-fn validate_data(data: &CoreValue, error_message: &str) -> crate::Result<()> {
+fn validate_data(data: &val::Value, error_message: &str) -> crate::Result<()> {
 	match data {
-		CoreValue::Object(_) => Ok(()),
-		CoreValue::Array(v) if v.iter().all(CoreValue::is_object) => Ok(()),
+		val::Value::Object(_) => Ok(()),
+		val::Value::Array(v) if v.iter().all(val::Value::is_object) => Ok(()),
 		_ => Err(crate::api::err::Error::InvalidParams(error_message.to_owned()).into()),
 	}
 }

@@ -1,15 +1,9 @@
+use surrealdb_core::val;
+
 use crate::api::Result;
 use crate::api::err::Error;
 use crate::{Object, RecordId, RecordIdKey, Value};
 use std::ops::{self, Bound};
-use surrealdb_core::expr::{
-	Edges as CoreEdges, RecordIdKeyLit as CoreId, RecordIdKeyRangeLit as CoreIdRange,
-	Table as CoreTable, Thing as CoreThing,
-};
-use surrealdb_core::sql::Table as CoreSqlTable;
-
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::expr::Value as CoreValue;
 
 /// A wrapper type to assert that you ment to use a string as a table name.
 ///
@@ -24,17 +18,9 @@ impl<T> Table<T>
 where
 	T: Into<String>,
 {
-	pub(crate) fn into_core(self) -> CoreTable {
-		let mut t = CoreTable::default();
-		t.0 = self.0.into();
-		t
-	}
-
-	#[allow(dead_code)]
-	pub(crate) fn into_core_sql(self) -> CoreSqlTable {
-		let mut t = CoreSqlTable::default();
-		t.0 = self.0.into();
-		t
+	pub(crate) fn into_core(self) -> val::Table {
+		//  TODO: Null byte validity
+		unsafe { val::Table::new_unchecked(self.0.into()) }
 	}
 
 	/// Add a range of keys to the table.
@@ -43,11 +29,11 @@ where
 		KeyRange: From<R>,
 	{
 		let range = KeyRange::from(range);
-		let res = CoreIdRange {
+		let res = val::RecordIdKeyRange {
 			start: range.start.map(RecordIdKey::into_inner),
 			end: range.end.map(RecordIdKey::into_inner),
 		};
-		let res = CoreThing::from((self.0.into(), res));
+		let res = val::RecordId::new(self.0.into(), Box::new(res));
 		QueryRange(res)
 	}
 }
@@ -55,14 +41,15 @@ where
 transparent_wrapper!(
 	/// A table range.
 	#[derive(Clone, PartialEq)]
-	pub struct QueryRange(CoreThing)
+	pub struct QueryRange(val::RecordId)
 );
 
-transparent_wrapper!(
-	/// A query edge
-	#[derive(Clone, PartialEq)]
-	pub struct Edge(CoreEdges)
-);
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum Direction {
+	Out,
+	In,
+	Both,
+}
 
 /// A database resource
 ///
@@ -78,8 +65,6 @@ pub enum Resource {
 	Object(Object),
 	/// An array
 	Array(Vec<Value>),
-	/// Edges
-	Edge(Edge),
 	/// A range of id's on a table.
 	Range(QueryRange),
 	/// Unspecified resource
@@ -94,27 +79,27 @@ impl Resource {
 			Resource::RecordId(_) => Err(Error::RangeOnRecordId.into()),
 			Resource::Object(_) => Err(Error::RangeOnObject.into()),
 			Resource::Array(_) => Err(Error::RangeOnArray.into()),
-			Resource::Edge(_) => Err(Error::RangeOnEdges.into()),
 			Resource::Range(_) => Err(Error::RangeOnRange.into()),
 			Resource::Unspecified => Err(Error::RangeOnUnspecified.into()),
 		}
 	}
 
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-	pub(crate) fn into_core_value(self) -> CoreValue {
+	pub(crate) fn into_core_value(self) -> val::Value {
 		match self {
 			Resource::Table(x) => Table(x).into_core().into(),
 			Resource::RecordId(x) => x.into_inner().into(),
 			Resource::Object(x) => x.into_inner().into(),
 			Resource::Array(x) => Value::array_to_core(x).into(),
-			Resource::Edge(x) => x.into_inner().into(),
 			Resource::Range(x) => x.into_inner().into(),
-			Resource::Unspecified => CoreValue::None,
+			Resource::Unspecified => val::Value::None,
 		}
 	}
 	pub fn is_single_recordid(&self) -> bool {
 		match self {
-			Resource::RecordId(rid) => !matches!(rid.into_inner_ref().id, CoreId::Range(_)),
+			Resource::RecordId(rid) => {
+				!matches!(rid.into_inner_ref().key, val::RecordIdKey::Range(_))
+			}
 			_ => false,
 		}
 	}
@@ -171,12 +156,6 @@ impl From<&String> for Resource {
 impl From<String> for Resource {
 	fn from(s: String) -> Self {
 		Resource::Table(s)
-	}
-}
-
-impl From<Edge> for Resource {
-	fn from(value: Edge) -> Self {
-		Resource::Edge(value)
 	}
 }
 
@@ -393,13 +372,6 @@ where
 
 impl<R> IntoResource<Vec<R>> for Vec<Value> {}
 impl<R> into_resource::Sealed<Vec<R>> for Vec<Value> {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for Edge {}
-impl<R> into_resource::Sealed<Vec<R>> for Edge {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
 	}

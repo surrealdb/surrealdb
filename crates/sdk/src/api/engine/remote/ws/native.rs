@@ -19,7 +19,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::val::Value as CoreValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -230,11 +230,7 @@ async fn router_handle_route(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", request);
-		let payload = if endpoint.config.ast_payload {
-			serialize(&request, true).unwrap()
-		} else {
-			serialize(&request.stringify_queries(), true).unwrap()
-		};
+		let payload = serialize(&request, true).unwrap();
 		Message::Binary(payload)
 	};
 
@@ -630,8 +626,7 @@ mod tests {
 	use rand::{Rng, thread_rng};
 	use std::io::Write;
 	use std::time::SystemTime;
-	use surrealdb_core::expr::{Array, Value};
-	use surrealdb_core::rpc::format::cbor::Cbor;
+	use surrealdb_core::{rpc, val};
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {
@@ -686,7 +681,7 @@ mod tests {
 			results.push((payload.len(), COMPRESSED_BINCODE_REF, duration, 1.0));
 		}
 		// Build the Value
-		let vector = Value::Array(Array::from(vector));
+		let vector = val::Value::Array(val::Array::from(vector));
 		//
 		const BINCODE: &str = "Bincode Vec<Value>";
 		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
@@ -758,9 +753,9 @@ mod tests {
 		{
 			// CBor
 			let (duration, payload) = timed(&|| {
-				let cbor: Cbor = vector.clone().try_into().unwrap();
+				let cbor = rpc::format::cbor::encode(vector.clone()).unwrap();
 				let mut res = Vec::new();
-				ciborium::into_writer(&cbor.0, &mut res).unwrap();
+				ciborium::into_writer(&cbor, &mut res).unwrap();
 				res
 			});
 			results.push((payload.len(), CBOR, duration, payload.len() as f32 / ref_payload));

@@ -11,7 +11,6 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
 use uuid::Uuid;
 
 /// A merge future
@@ -50,10 +49,10 @@ macro_rules! into_future {
 				upsert,
 				..
 			} = self;
-			let content = to_core_value(content);
+			let content = crate::api::value::to_core_value(content);
 			Box::pin(async move {
 				let content = match content? {
-					CoreValue::None | CoreValue::Null => None,
+					surrealdb_core::val::Value::None | surrealdb_core::val::Value::Null => None,
 					data => {
 						validate_data(
 							&data,

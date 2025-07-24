@@ -2,7 +2,7 @@ use super::transaction::WithTransaction;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
-use crate::api::{Connection, Result};
+use crate::api::{self, Connection, Result};
 use crate::method::OnceLockExt;
 use crate::{Surreal, Value};
 use serde::Serialize;
@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Value as CoreValue, to_value as to_core_value};
+use surrealdb_core::val;
 use uuid::Uuid;
 
 use super::{Content, validate_data};
@@ -100,7 +100,7 @@ where
 		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let content = to_core_value(data)?;
+			let content = api::value::to_core_value(data)?;
 
 			validate_data(
 				&content,
@@ -108,7 +108,7 @@ where
 			)?;
 
 			let data = match content {
-				CoreValue::None | CoreValue::Null => None,
+				val::Value::None | val::Value::Null => None,
 				content => Some(content),
 			};
 
@@ -131,7 +131,7 @@ where
 		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let content = to_core_value(data)?;
+			let content = api::value::to_core_value(data)?;
 
 			validate_data(
 				&content,
@@ -139,7 +139,7 @@ where
 			)?;
 
 			let data = match content {
-				CoreValue::None | CoreValue::Null => None,
+				val::Value::None | val::Value::Null => None,
 				content => Some(content),
 			};
 
