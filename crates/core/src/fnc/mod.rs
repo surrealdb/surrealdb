@@ -510,7 +510,7 @@ pub async fn asynchronous(
 	#[cfg(not(target_family = "wasm"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = R> + Send>> {
+	) -> impl FnOnce() -> std::pin::Pin<Box<dyn Future<Output = R> + Send>> {
 		|| Box::pin(crate::exe::spawn(function))
 	}
 
@@ -575,6 +575,7 @@ pub async fn asynchronous(
 		"record::refs" => record::refs((stk, ctx, opt, doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
+		"search::rrf" => search::rrf(ctx).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,

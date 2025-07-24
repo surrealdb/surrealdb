@@ -1,7 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::Value;
+use crate::err::Error;
+use crate::expr::{Array, Value};
 use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
@@ -60,4 +61,34 @@ pub async fn offsets(
 		return exe.offsets(ctx, thg, match_ref, partial).await;
 	}
 	Ok(Value::None)
+}
+
+pub async fn rrf(
+	_ctx: &Context,
+	(results, limit, rrf_constant): (Array, i64, Optional<i64>),
+) -> Result<Value> {
+	let limit = if limit < 1 {
+		anyhow::bail!(Error::InvalidArguments {
+			name: "search::rrf".to_string(),
+			message: "limit must be at least 1".to_string(),
+		});
+	} else {
+		limit as usize
+	};
+	let rrf_constant = if let Some(rrf_constant) = rrf_constant.0 {
+		if rrf_constant < 0 {
+			anyhow::bail!(Error::InvalidArguments {
+				name: "search::rrf".to_string(),
+				message: "RRF constant must be at least 0".to_string(),
+			});
+		}
+		rrf_constant as f64
+	} else {
+		60.0
+	};
+	if results.is_empty() {
+		return Ok(Value::Array(Array::new()));
+	}
+	// Eg of array: [[{ id: test:1 }, { id: test:3 }], [{ id: test:1, score: 0.5366538763046265f }]]
+	todo!("Implement the actual RRF (Reciprocal Rank Fusion) algorithm")
 }

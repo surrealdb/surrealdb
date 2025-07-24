@@ -50,7 +50,7 @@ DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST 
 LET $qvec = [0.12, 0.18, 0.27];
 
 -- Vector search: top 2 nearest neighbours
-LET $vs = SELECT id FROM test  WHERE embedding <|2|> $qvec;
+LET $vs = SELECT id FROM test WHERE embedding <|2,100|> $qvec;
 
 -- Full‑text search: top 2 lexical matches
 LET $ft = SELECT id, search::score(1) as score FROM test
