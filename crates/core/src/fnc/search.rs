@@ -9,7 +9,8 @@ use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
 use anyhow::Result;
 use reblessive::tree::Stk;
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::collections::{BinaryHeap, HashMap};
 
 use super::args::Optional;
 
@@ -65,6 +66,28 @@ pub async fn offsets(
 	Ok(Value::None)
 }
 
+struct RrfDoc(f64, Value, Vec<Object>);
+
+impl PartialEq for RrfDoc {
+	fn eq(&self, other: &Self) -> bool {
+		self.0 == other.0
+	}
+}
+
+impl Eq for RrfDoc {}
+
+impl PartialOrd for RrfDoc {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for RrfDoc {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.0.partial_cmp(&other.0).unwrap_or(std::cmp::Ordering::Equal)
+	}
+}
+
 pub async fn rrf(
 	_ctx: &Context,
 	(results, limit, rrf_constant): (Array, i64, Optional<i64>),
@@ -92,7 +115,8 @@ pub async fn rrf(
 		return Ok(Value::Array(Array::new()));
 	}
 
-	// Map to store the original documents objects and scores
+	// Map to store the original documents, objects and scores
+	#[expect(clippy::mutable_key_type)]
 	let mut documents: HashMap<Value, (f64, Vec<Object>)> = HashMap::new();
 
 	// Process each result list
@@ -108,13 +132,14 @@ pub async fn rrf(
 						let rrf_contribution = 1.0 / (rrf_constant + (rank + 1) as f64);
 
 						// Store the document (use the first occurrence or merge if needed)
-						match documents.get_mut(&id_value) {
+						match documents.entry(id_value) {
 							// Insert the first occurrence
-							None => {
-								documents.insert(id_value, (rrf_contribution, vec![obj]));
+							Entry::Vacant(entry) => {
+								entry.insert((rrf_contribution, vec![obj]));
 							}
 							// Or merge
-							Some((score, objects)) => {
+							Entry::Occupied(e) => {
+								let (score, objects) = e.into_mut();
 								// Add to RRF score
 								*score += rrf_contribution;
 								objects.push(obj);
@@ -127,20 +152,29 @@ pub async fn rrf(
 	}
 
 	// Convert to vector and sort by RRF score (descending)
-	let mut scored_docs: Vec<_> = documents.into_iter().collect();
-	scored_docs.sort_by(|a, b| b.1.0.partial_cmp(&a.1.0).unwrap_or(std::cmp::Ordering::Equal));
+	let mut scored_docs = BinaryHeap::with_capacity(limit);
+	for (id, (score, objects)) in documents {
+		if scored_docs.len() < limit {
+			scored_docs.push(RrfDoc(score, id, objects));
+		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek() {
+			if score > *min_score {
+				scored_docs.pop();
+				scored_docs.push(RrfDoc(score, id, objects));
+			}
+		}
+	}
 
 	// Take top `limit` results and create the final array
 	let mut result_array = Array::new();
-	for (id, (rrf_score, objects)) in scored_docs.into_iter().take(limit) {
+	while let Some(doc) = scored_docs.pop() {
 		// Merge the documents
 		let mut obj = Object::default();
-		for mut o in objects {
+		for mut o in doc.2 {
 			obj.append(&mut o.0);
 		}
 		// Add the ID and the RRF score
-		obj.insert("id".to_string(), id);
-		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(rrf_score)));
+		obj.insert("id".to_string(), doc.1);
+		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
 	}
 	// Return the result
