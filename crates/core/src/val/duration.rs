@@ -23,7 +23,6 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,
 )]
 #[serde(rename = "$surrealdb::private::sql::Duration")]
-#[non_exhaustive]
 pub struct Duration(pub time::Duration);
 
 impl Duration {

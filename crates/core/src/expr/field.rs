@@ -57,7 +57,7 @@ impl Fields {
 	}
 
 	/// Create a new `*` field projection
-	pub(crate) fn all() -> Self {
+	pub fn all() -> Self {
 		Fields::Select(vec![Field::All])
 	}
 
@@ -100,24 +100,31 @@ impl Fields {
 	}
 	/// Check if the fields are only about counting
 	pub(crate) fn is_count_all_only(&self) -> bool {
-		todo!()
-		/* Maybe factor out into call sites.
-		let mut is_count_only = false;
-		for field in &self.fields {
-			if let Field::Single {
-				expr: Value::Function(func),
+		fn is_count(f: &Field) -> bool {
+			let Field::Single {
+				expr,
 				..
-			} = field
-			{
-				if func.is_count_all() {
-					is_count_only = true;
-					continue;
-				}
+			} = f
+			else {
+				return false;
+			};
+
+			let Expr::FunctionCall(x) = expr else {
+				return false;
+			};
+			if !x.arguments.is_empty() {
+				return false;
 			}
-			return false;
+			let Function::Normal(name) = &x.receiver else {
+				return false;
+			};
+			name == "count"
 		}
-		is_count_only
-		*/
+
+		match self {
+			Fields::Value(field) => is_count(&**field),
+			Fields::Select(fields) => !fields.is_empty() && fields.iter().all(is_count),
+		}
 	}
 
 	/// Process this type returning a computed simple Value

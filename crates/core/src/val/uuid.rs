@@ -15,7 +15,6 @@ use super::Datetime;
 )]
 #[serde(rename = "$surrealdb::private::sql::Uuid")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Uuid(pub uuid::Uuid);
 
 impl From<uuid::Uuid> for Uuid {

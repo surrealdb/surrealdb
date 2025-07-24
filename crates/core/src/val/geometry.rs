@@ -19,7 +19,6 @@ use super::Object;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Geometry")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),

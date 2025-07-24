@@ -37,9 +37,17 @@ impl Parser<'_> {
 	pub async fn parse_value(&mut self, stk: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
 		match token.kind {
+			t!("NONE") => {
+				self.pop_peek();
+				Ok(Value::None)
+			}
 			t!("NULL") => {
 				self.pop_peek();
 				Ok(Value::Null)
+			}
+			TokenKind::NaN => {
+				self.pop_peek();
+				Ok(Value::Number(Number::Float(f64::NAN)))
 			}
 			t!("true") => {
 				self.pop_peek();
@@ -66,13 +74,17 @@ impl Parser<'_> {
 				}
 			}
 			t!("d\"") | t!("d'") => {
-				let datetime = self.lexer.lex_compound(token, compound::datetime)?;
-				Ok(Value::Datetime(val::Datetime(datetime.value)))
+				let datetime = self.next_token_value()?;
+				Ok(Value::Datetime(datetime))
 			}
 			t!("u\"") | t!("u'") => {
-				let uuid = self.lexer.lex_compound(token, compound::uuid)?;
-				Ok(Value::Uuid(val::Uuid(uuid.value)))
+				let uuid = self.next_token_value()?;
+				Ok(Value::Uuid(uuid))
 			}
+			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
+				Ok(Value::Bytes(self.next_token_value()?))
+			}
+
 			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
@@ -267,21 +279,20 @@ impl Parser<'_> {
 				}
 			}
 			TokenKind::Digits => {
-				if self.settings.flexible_record_id {
-					let next = self.peek_whitespace1();
-					if Self::kind_is_identifier(next.kind) {
-						let ident = self.parse_flexible_ident()?;
-						RecordIdKey::String(ident.into_string());
-					}
-				}
-
-				self.pop_peek();
-
-				let digits_str = self.lexer.span_str(peek.span);
-				if let Ok(number) = digits_str.parse::<i64>() {
-					RecordIdKey::Number(number)
+				if self.settings.flexible_record_id
+					&& Self::kind_is_identifier(self.peek_whitespace1().kind)
+				{
+					let ident = self.parse_flexible_ident()?;
+					RecordIdKey::String(ident.into_string())
 				} else {
-					RecordIdKey::String(digits_str.to_owned())
+					self.pop_peek();
+
+					let digits_str = self.lexer.span_str(peek.span);
+					if let Ok(number) = digits_str.parse::<i64>() {
+						RecordIdKey::Number(number)
+					} else {
+						RecordIdKey::String(digits_str.to_owned())
+					}
 				}
 			}
 			TokenKind::Glued(Glued::Duration) if self.settings.flexible_record_id => {
@@ -292,6 +303,14 @@ impl Parser<'_> {
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();
 				RecordIdKey::String(text)
+			}
+			_ => {
+				let ident = if self.settings.flexible_record_id {
+					self.parse_flexible_ident()?
+				} else {
+					self.next_token_value::<Ident>()?
+				};
+				RecordIdKey::String(ident.into_string())
 			}
 			_ => unexpected!(self, peek, "record-id key"),
 		};

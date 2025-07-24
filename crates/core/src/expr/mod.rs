@@ -108,9 +108,19 @@ pub use self::script::Script;
 pub use self::split::{Split, Splits};
 pub use self::start::Start;
 pub use self::statements::{
-	CreateStatement, DefineAnalyzerStatement, DefineStatement, IfelseStatement, InsertStatement,
-	KillStatement, LiveStatement, RelateStatement, SelectStatement, SetStatement, UpdateStatement,
-	UpsertStatement,
+	AccessGrant, AccessStatement, AlterStatement, AlterTableStatement, AnalyzeStatement,
+	BeginStatement, BreakStatement, CancelStatement, CommitStatement, ContinueStatement,
+	CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
+	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+	DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement, DefineParamStatement,
+	DefineParamStore, DefineStatement, DefineTableStatement, DefineUserStatement, DeleteStatement,
+	ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+	LiveStatement, OptionStatement, OutputStatement, RebuildStatement, RelateStatement,
+	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
+	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement,
+	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
+	RemoveUserStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
+	ThrowStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 pub use self::table_type::{Relation, TableType};
 pub use self::timeout::Timeout;

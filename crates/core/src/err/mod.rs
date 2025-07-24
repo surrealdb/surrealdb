@@ -1567,9 +1567,3 @@ impl serde::ser::Error for Error {
 		Self::Serialization(msg.to_string())
 	}
 }
-
-impl From<serde_content::Error> for Error {
-	fn from(error: serde_content::Error) -> Self {
-		Self::Serialization(error.to_string())
-	}
-}

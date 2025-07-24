@@ -73,7 +73,7 @@ impl From<Vec<Part>> for Idiom {
 
 impl Idiom {
 	/// Returns an idiom for a field of the given name.
-	pub(crate) fn field(field_name: Ident) -> Self {
+	pub fn field(field_name: Ident) -> Self {
 		Idiom(vec![Part::Field(field_name)])
 	}
 

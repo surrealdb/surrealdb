@@ -1,5 +1,4 @@
 use crate::err::Error;
-use crate::expr::Expr;
 use crate::expr::escape::EscapeKey;
 use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
@@ -12,14 +11,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Deref, DerefMut};
 
-use super::FlowResult;
-
 /// Invariant: Keys never contain NUL bytes.
+/// TODO: Null byte validity
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Object")]
+#[serde(rename = "$surrealdb::private::Object")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {

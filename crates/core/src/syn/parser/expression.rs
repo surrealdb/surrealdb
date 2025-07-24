@@ -77,17 +77,9 @@ impl Parser<'_> {
 			t!("&&") | t!("AND") => Some(BindingPower::And),
 
 			// Equality operators have same binding power.
-			t!("=")
-			| t!("IS")
-			| t!("==")
-			| t!("!=")
-			| t!("*=")
-			| t!("?=")
-			| t!("~")
-			| t!("!~")
-			| t!("*~")
-			| t!("?~")
-			| t!("@") => Some(BindingPower::Equality),
+			t!("=") | t!("IS") | t!("==") | t!("!=") | t!("*=") | t!("?=") | t!("@") => {
+				Some(BindingPower::Equality)
+			}
 
 			t!("<") => {
 				let peek = self.peek_whitespace1();
@@ -527,7 +519,6 @@ impl Parser<'_> {
 				PostfixOperator::Range
 			}
 			t!("(") => {
-				self.pop_peek();
 				let mut args = Vec::new();
 				loop {
 					if self.eat(t!(")")) {
@@ -545,8 +536,6 @@ impl Parser<'_> {
 				PostfixOperator::Call(args)
 			}
 			t!(".") => {
-				self.pop_peek();
-
 				let name = self.next_token_value::<Ident>()?;
 				expected!(self, t!("("));
 

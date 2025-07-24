@@ -1,18 +1,25 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr::statements::rebuild::RebuildStatement;
-use crate::expr::statements::{KillStatement, LiveStatement, OptionStatement, UseStatement};
-use crate::expr::{Expr, Value};
+use crate::expr::Expr;
+use crate::expr::fmt::Fmt;
+use crate::expr::statements::{
+	AccessStatement, KillStatement, LiveStatement, OptionStatement, UseStatement,
+};
 
-use reblessive::tree::Stk;
 use std::fmt::{self, Display, Formatter};
 
-use super::FlowResult;
-use super::statements::AccessStatement;
-
+#[derive(Clone, Debug)]
 pub struct LogicalPlan {
 	pub expressions: Vec<TopLevelExpr>,
+}
+
+impl Display for LogicalPlan {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		Display::fmt(
+			&Fmt::one_line_separated(
+				self.expressions.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};"))),
+			),
+			f,
+		)
+	}
 }
 
 impl LogicalPlan {
@@ -22,7 +29,7 @@ impl LogicalPlan {
 	}
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub enum TopLevelExpr {
 	Begin,
 	Cancel,

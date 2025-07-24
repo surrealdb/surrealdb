@@ -21,7 +21,6 @@ use std::sync::Arc;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
@@ -128,7 +127,7 @@ impl SelectStatement {
 		if self.only {
 			match res {
 				Value::Array(mut array) => {
-					ensure!(array.len() != 1, Error::SingleOnlyOutput);
+					ensure!(array.len() == 1, Error::SingleOnlyOutput);
 					return Ok(array.0.pop().unwrap());
 				}
 				x => return Ok(x),
