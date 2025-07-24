@@ -20,10 +20,10 @@ value = "none"
 value = "true"
 
 */
-table::exists("person");
+schema::table::exists("person");
 DEFINE TABLE person;
-table::exists("person");
+schema::table::exists("person");
 
-RETURN function() { return surrealdb.functions.table.exists("company"); };
+RETURN function() { return surrealdb.functions.schema.table.exists("company"); };
 DEFINE TABLE company;
-RETURN function() { return surrealdb.functions.table.exists("company"); };
+RETURN function() { return surrealdb.functions.schema.table.exists("company"); };
