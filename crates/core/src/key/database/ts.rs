@@ -1,6 +1,8 @@
 //! Stores database timestamps
+use crate::vs::VersionStamp;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -10,7 +12,7 @@ use serde::{Deserialize, Serialize};
 // The value is the versionstamp that corresponds to the timestamp.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ts<'a> {
+pub(crate) struct Ts<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -22,6 +24,10 @@ pub struct Ts<'a> {
 	pub ts: u64,
 }
 impl_key!(Ts<'a>);
+
+impl KVKey for Ts<'_> {
+	type ValueType = VersionStamp;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64) -> Ts<'a> {
 	Ts::new(ns, db, ts)

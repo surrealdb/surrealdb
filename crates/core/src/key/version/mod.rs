@@ -2,17 +2,22 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Version {
+pub(crate) struct Version {
 	__: u8,
 	_a: u8,
 }
 
 impl_key!(Version);
+
+impl KVKey for Version {
+	type ValueType = crate::kvs::version::Version;
+}
 
 pub fn new() -> Version {
 	Version::new()

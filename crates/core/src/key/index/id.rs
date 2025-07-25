@@ -34,14 +34,15 @@
 //! - **Cache Friendly**: Sequential numeric IDs improve cache locality
 //! - **Concurrent Safe**: Works with distributed sequence mechanism to prevent ID conflicts
 //! - **Scalable**: Efficient lookups scale with the number of indexed documents
+use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
+use crate::kvs::{KVKey, impl_key};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Id<'a> {
+pub(crate) struct Id<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -57,6 +58,10 @@ pub struct Id<'a> {
 	pub id: crate::expr::Id,
 }
 impl_key!(Id<'a>);
+
+impl KVKey for Id<'_> {
+	type ValueType = DocId;
+}
 
 impl Categorise for Id<'_> {
 	fn categorise(&self) -> Category {

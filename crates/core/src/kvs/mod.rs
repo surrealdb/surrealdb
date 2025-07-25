@@ -21,14 +21,14 @@ mod cf;
 mod clock;
 mod ds;
 mod key;
-mod live;
+pub(crate) mod live;
 mod node;
 mod scanner;
 mod stash;
 mod threadpool;
 mod tr;
 mod tx;
-mod version;
+pub(crate) mod version;
 
 mod fdb;
 mod indxdb;
@@ -40,7 +40,7 @@ mod tikv;
 pub(crate) mod cache;
 
 #[cfg(not(target_family = "wasm"))]
-mod index;
+pub(crate) mod index;
 pub(crate) mod savepoint;
 pub(crate) mod sequences;
 pub(crate) mod tasklease;
@@ -48,8 +48,8 @@ pub(crate) mod tasklease;
 mod tests;
 mod util;
 
-pub(crate) use key::impl_key;
-pub use key::{KeyDecode, KeyDecodeOwned, KeyEncode};
+pub(crate) use key::{impl_key, impl_kv_value_revisioned};
+pub use key::{KVKey, KVValue, KeyDecode, KeyDecodeOwned, KeyEncode};
 
 pub use ds::Datastore;
 pub use live::Live;

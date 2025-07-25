@@ -3,11 +3,12 @@ use crate::idx::ft::search::terms::TermId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Bu<'a> {
+pub(crate) struct Bu<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -23,6 +24,10 @@ pub struct Bu<'a> {
 	pub term_id: TermId,
 }
 impl_key!(Bu<'a>);
+
+impl KVKey for Bu<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl Categorise for Bu<'_> {
 	fn categorise(&self) -> Category {

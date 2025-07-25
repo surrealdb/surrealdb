@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct All {
+pub(crate) struct All {
 	__: u8,
 	_a: u8,
 	#[serde(with = "uuid::serde::compact")]

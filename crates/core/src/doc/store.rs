@@ -50,7 +50,7 @@ impl Document {
 			Statement::Insert(_) if self.is_iteration_initial() => {
 				match ctx
 					.tx()
-					.put(key, revision::to_vec(doc_without_id.as_ref())?, opt.version)
+					.put(&key, doc_without_id.as_ref(), opt.version)
 					.await
 				{
 					// The key already exists, so return an error
@@ -76,7 +76,7 @@ impl Document {
 			Statement::Upsert(_) if self.is_iteration_initial() => {
 				match ctx
 					.tx()
-					.put(key, revision::to_vec(doc_without_id.as_ref())?, opt.version)
+					.put(&key, doc_without_id.as_ref(), opt.version)
 					.await
 				{
 					// The key already exists, so return an error
@@ -102,7 +102,7 @@ impl Document {
 			Statement::Create(_) => {
 				match ctx
 					.tx()
-					.put(key, revision::to_vec(doc_without_id.as_ref())?, opt.version)
+					.put(&key, doc_without_id.as_ref(), opt.version)
 					.await
 				{
 					// The key already exists, so return an error
@@ -119,7 +119,7 @@ impl Document {
 				}
 			}
 			// Let's update the stored value for the specified key
-			_ => ctx.tx().set(key, revision::to_vec(doc_without_id.as_ref())?, opt.version).await,
+			_ => ctx.tx().set(&key, doc_without_id.as_ref(), opt.version).await,
 		}?;
 		// Update the cache
 		ctx.tx().set_record_cache(ns, db, &rid.tb, &rid.id, doc_without_id.as_arc())?;

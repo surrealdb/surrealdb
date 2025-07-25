@@ -1,12 +1,12 @@
 //! Stores the previous value of record for concurrent index building
-use crate::expr::Id;
-use crate::kvs::impl_key;
+use crate::{expr::Id, kvs::index::PrimaryAppending};
+use crate::kvs::{impl_key, KVKey};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ip<'a> {
+pub(crate) struct Ip<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -22,6 +22,10 @@ pub struct Ip<'a> {
 	pub id: Id,
 }
 impl_key!(Ip<'a>);
+
+impl KVKey for Ip<'_> {
+	type ValueType = PrimaryAppending;
+}
 
 impl<'a> Ip<'a> {
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]

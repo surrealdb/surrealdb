@@ -1,13 +1,15 @@
 //! Stores a DEFINE INDEX config definition
+use crate::expr::statements::define::DefineIndexStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ix<'a> {
+pub(crate) struct Ix<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -21,6 +23,10 @@ pub struct Ix<'a> {
 	pub ix: &'a str,
 }
 impl_key!(Ix<'a>);
+
+impl KVKey for Ix<'_> {
+	type ValueType = DefineIndexStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Ix<'a> {
 	Ix::new(ns, db, tb, ix)

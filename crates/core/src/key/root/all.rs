@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Kv {
+pub(crate) struct Kv {
 	__: u8,
 }
 impl_key!(Kv);

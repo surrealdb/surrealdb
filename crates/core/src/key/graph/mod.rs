@@ -4,6 +4,7 @@ use crate::expr::id::Id;
 use crate::expr::thing::Thing;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -106,7 +107,7 @@ impl<'a> PrefixFt<'a> {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Graph<'a> {
+pub(crate) struct Graph<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -121,6 +122,10 @@ pub struct Graph<'a> {
 	pub fk: Id,
 }
 impl_key!(Graph<'a>);
+
+impl KVKey for Graph<'_> {
+	type ValueType = ();
+}
 
 pub fn new<'a>(
 	ns: &'a str,

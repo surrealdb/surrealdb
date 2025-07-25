@@ -1,13 +1,15 @@
 //! Stores a DEFINE PARAM config definition
+use crate::expr::statements::define::DefineParamStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Pa<'a> {
+pub(crate) struct Pa<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -19,6 +21,10 @@ pub struct Pa<'a> {
 	pub pa: &'a str,
 }
 impl_key!(Pa<'a>);
+
+impl KVKey for Pa<'_> {
+	type ValueType = DefineParamStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, pa: &'a str) -> Pa<'a> {
 	Pa::new(ns, db, pa)

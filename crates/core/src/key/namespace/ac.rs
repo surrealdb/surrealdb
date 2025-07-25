@@ -1,13 +1,15 @@
 //! Stores a DEFINE ACCESS ON NAMESPACE configuration
+use crate::expr::statements::define::DefineAccessStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ac<'a> {
+pub(crate) struct Ac<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -17,6 +19,10 @@ pub struct Ac<'a> {
 	pub ac: &'a str,
 }
 impl_key!(Ac<'a>);
+
+impl KVKey for Ac<'_> {
+	type ValueType = DefineAccessStatement;
+}
 
 pub fn new<'a>(ns: &'a str, ac: &'a str) -> Ac<'a> {
 	Ac::new(ns, ac)

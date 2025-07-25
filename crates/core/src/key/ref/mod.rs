@@ -4,6 +4,7 @@ use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KeyEncode;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -110,7 +111,7 @@ impl<'a> PrefixFf<'a> {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ref<'a> {
+pub(crate) struct Ref<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -125,6 +126,10 @@ pub struct Ref<'a> {
 	pub fk: Id,
 }
 impl_key!(Ref<'a>);
+
+impl KVKey for Ref<'_> {
+	type ValueType = ();
+}
 
 pub fn new<'a>(
 	ns: &'a str,

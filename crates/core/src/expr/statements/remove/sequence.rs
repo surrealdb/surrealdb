@@ -43,13 +43,13 @@ impl RemoveSequenceStatement {
 			seq.sequence_removed(ns, db, &self.name);
 		}
 		// Delete any sequence records
-		let (beg, end) = Prefix::new_ba_range(ns, db, &sq.name)?;
-		txn.delr(beg..end).await?;
-		let (beg, end) = Prefix::new_st_range(ns, db, &sq.name)?;
-		txn.delr(beg..end).await?;
+		let ba_range = Prefix::new_ba_range(ns, db, &sq.name)?;
+		txn.delr(ba_range).await?;
+		let st_range = Prefix::new_st_range(ns, db, &sq.name)?;
+		txn.delr(st_range).await?;
 		// Delete the definition
 		let key = Sq::new(ns, db, &sq.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

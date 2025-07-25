@@ -1,8 +1,9 @@
 //! Stores a LIVE SELECT query definition on the cluster
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::{KeyEncode, KVKey, impl_key};
 use anyhow::Result;
+use crate::kvs::live::Live;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -13,7 +14,7 @@ use uuid::Uuid;
 /// The value is just the table of the live query as a Strand, which is the missing information from the key path
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Lq {
+pub(crate) struct Lq {
 	__: u8,
 	_a: u8,
 	#[serde(with = "uuid::serde::compact")]
@@ -25,6 +26,10 @@ pub struct Lq {
 	pub lq: Uuid,
 }
 impl_key!(Lq);
+
+impl KVKey for Lq {
+	type ValueType = Live;
+}
 
 pub fn new(nd: Uuid, lq: Uuid) -> Lq {
 	Lq::new(nd, lq)

@@ -446,11 +446,11 @@ mod tests {
 
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let ns_root = crate::key::root::ns::new(NS);
-		tx.put(&ns_root, revision::to_vec(&dns).unwrap(), None).await.unwrap();
+		tx.put(&ns_root, &dns, None).await.unwrap();
 		let db_root = crate::key::namespace::db::new(NS, DB);
-		tx.put(&db_root, revision::to_vec(&ddb).unwrap(), None).await.unwrap();
+		tx.put(&db_root, &ddb, None).await.unwrap();
 		let tb_root = crate::key::database::tb::new(NS, DB, TB);
-		tx.put(&tb_root, revision::to_vec(&dtb).unwrap(), None).await.unwrap();
+		tx.put(&tb_root, &dtb, None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds
 	}

@@ -1,7 +1,8 @@
 //! Stores a LIVE SELECT query definition on the table
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::{KeyEncode, KVKey, impl_key};
+use crate::expr::statements::LiveStatement;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -12,7 +13,7 @@ use uuid::Uuid;
 /// The value of the lv is the statement.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Lq<'a> {
+pub(crate) struct Lq<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -27,6 +28,10 @@ pub struct Lq<'a> {
 	pub lq: Uuid,
 }
 impl_key!(Lq<'a>);
+
+impl KVKey for Lq<'_> {
+	type ValueType = LiveStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid) -> Lq<'a> {
 	Lq::new(ns, db, tb, lq)

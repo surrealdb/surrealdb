@@ -1,12 +1,13 @@
 //! Stores the key prefix for all keys under a table
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Table<'a> {
+pub(crate) struct TableRoot<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -15,19 +16,23 @@ pub struct Table<'a> {
 	_c: u8,
 	pub tb: &'a str,
 }
-impl_key!(Table<'a>);
+impl_key!(TableRoot<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Table<'a> {
-	Table::new(ns, db, tb)
+impl KVKey for TableRoot<'_> {
+	type ValueType = Vec<u8>;
 }
 
-impl Categorise for Table<'_> {
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> TableRoot<'a> {
+	TableRoot::new(ns, db, tb)
+}
+
+impl Categorise for TableRoot<'_> {
 	fn categorise(&self) -> Category {
 		Category::TableRoot
 	}
 }
 
-impl<'a> Table<'a> {
+impl<'a> TableRoot<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -48,15 +53,15 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Table::new(
+		let val = TableRoot::new(
 			"testns",
 			"testdb",
 			"testtb",
 		);
-		let enc = Table::encode(&val).unwrap();
+		let enc = TableRoot::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0");
 
-		let dec = Table::decode(&enc).unwrap();
+		let dec = TableRoot::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

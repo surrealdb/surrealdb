@@ -15,14 +15,16 @@
 //! - Enabling proper ranking of search results based on term frequency and document length
 //! - Providing document-specific statistics for the full-text search engine
 use crate::idx::docids::DocId;
+use crate::idx::ft::DocLength;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Dl<'a> {
+pub(crate) struct Dl<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -38,6 +40,10 @@ pub struct Dl<'a> {
 	pub id: DocId,
 }
 impl_key!(Dl<'a>);
+
+impl KVKey for Dl<'_> {
+	type ValueType = DocLength;
+}
 
 impl Categorise for Dl<'_> {
 	fn categorise(&self) -> Category {

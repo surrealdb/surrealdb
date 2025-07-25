@@ -1,11 +1,12 @@
 //! Store appended records for concurrent index building
-use crate::kvs::impl_key;
+use crate::kvs::{impl_key, KVKey};
+use crate::kvs::index::Appending;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ia<'a> {
+pub(crate) struct Ia<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -21,6 +22,10 @@ pub struct Ia<'a> {
 	pub i: u32,
 }
 impl_key!(Ia<'a>);
+
+impl KVKey for Ia<'_> {
+	type ValueType = Appending;
+}
 
 impl<'a> Ia<'a> {
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]

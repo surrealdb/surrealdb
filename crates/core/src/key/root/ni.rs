@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ni {
+pub(crate) struct Ni {
 	__: u8,
 	_a: u8,
 	_b: u8,

@@ -9,6 +9,7 @@
 //! intervals defined by the `index_compaction_interval` configuration option.
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -23,7 +24,7 @@ use uuid::Uuid;
 /// removing unnecessary data.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ic<'a> {
+pub(crate) struct Ic<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -38,6 +39,10 @@ pub struct Ic<'a> {
 	pub uid: Uuid,
 }
 impl_key!(Ic<'a>);
+
+impl KVKey for Ic<'_> {
+	type ValueType = ();
+}
 
 impl Categorise for Ic<'_> {
 	fn categorise(&self) -> Category {

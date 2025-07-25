@@ -561,7 +561,7 @@ impl Datastore {
 		// Create the key where the version is stored
 		let key = crate::key::version::new();
 		// Check if a version is already set in storage
-		let val = match catch!(txn, txn.get(key.clone(), None).await) {
+		let val = match catch!(txn, txn.get(&key, None).await) {
 			// There is a version set in the storage
 			Some(v) => {
 				// Attempt to decode the current stored version
@@ -590,21 +590,19 @@ impl Datastore {
 				let rng = crate::key::version::proceeding();
 				let keys = catch!(txn, txn.keys(rng, 1, None).await);
 				// Check the storage if there are any other keys set
-				let val = if keys.is_empty() {
+				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
 					Version::latest()
 				} else {
 					// There were keys in storage, so this is an upgrade
 					Version::v1()
 				};
-				// Convert the version to binary
-				let bytes: Vec<u8> = val.into();
 				// Attempt to set the current version in storage
-				catch!(txn, txn.replace(key, bytes).await);
+				catch!(txn, txn.replace(&key, &version).await);
 				// We set the version, so commit the transaction
 				catch!(txn, txn.commit().await);
 				// Return the current version
-				val
+				version
 			}
 		};
 		// Everything ok

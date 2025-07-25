@@ -13,6 +13,7 @@ use dashmap::mapref::entry::Entry;
 use rand::{Rng, thread_rng};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -41,7 +42,7 @@ impl SequenceDomain {
 		Self::FullTextDocIds(ikb)
 	}
 
-	fn new_batch_range_keys(&self) -> Result<(Vec<u8>, Vec<u8>)> {
+	fn new_batch_range_keys(&self) -> Result<Range<Vec<u8>>> {
 		match self {
 			Self::UserName(ns, db, sq) => Prefix::new_ba_range(ns, db, sq),
 			Self::FullTextDocIds(ibk) => ibk.new_ib_range(),
@@ -51,14 +52,14 @@ impl SequenceDomain {
 	fn new_batch_key(&self, start: i64) -> Result<Vec<u8>> {
 		match &self {
 			Self::UserName(ns, db, sq) => Ba::new(ns, db, sq, start).encode(),
-			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start),
+			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode(),
 		}
 	}
 
 	fn new_state_key(&self, nid: Uuid) -> Result<Vec<u8>> {
 		match &self {
 			Self::UserName(ns, db, sq) => St::new(ns, db, sq, nid).encode(),
-			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid),
+			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode(),
 		}
 	}
 }
@@ -217,7 +218,7 @@ impl Sequence {
 		self.st.next += 1;
 		// write the state on the KV store
 		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.set(&self.state_key, revision::to_vec(&self.st)?, None).await?;
+		tx.set(&self.state_key, &revision::to_vec(&self.st)?, None).await?;
 		tx.commit().await?;
 		Ok(v)
 	}
@@ -270,8 +271,8 @@ impl Sequence {
 		batch: u32,
 	) -> Result<(i64, i64)> {
 		let tx = tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		let (beg, end) = seq.new_batch_range_keys()?;
-		let val = tx.getr(beg..end, None).await?;
+		let batch_range = seq.new_batch_range_keys()?;
+		let val = tx.getr(batch_range, None).await?;
 		let mut next_start = next;
 		// Scan every existing batches
 		for (key, val) in val.iter() {
@@ -297,7 +298,7 @@ impl Sequence {
 			owner: nid,
 		})?;
 		let batch_key = seq.new_batch_key(next_start)?;
-		tx.set(batch_key, bv, None).await?;
+		tx.set(&batch_key, &bv, None).await?;
 		tx.commit().await?;
 		Ok((next_start, next_to))
 	}

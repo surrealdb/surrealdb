@@ -1,14 +1,16 @@
 //! Stores a record document
 use crate::expr::Id;
+use crate::expr::Value;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Thing<'a> {
+pub(crate) struct Thing<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -20,6 +22,10 @@ pub struct Thing<'a> {
 	pub id: Id,
 }
 impl_key!(Thing<'a>);
+
+impl KVKey for Thing<'_> {
+	type ValueType = Value;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
 	Thing::new(ns, db, tb, id.to_owned())

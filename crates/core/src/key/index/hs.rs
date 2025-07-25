@@ -1,11 +1,11 @@
 //! Store state of an HNSW index
-use crate::kvs::impl_key;
+use crate::{idx::trees::hnsw::HnswState, kvs::{impl_key, KVKey}};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Hs<'a> {
+pub(crate) struct Hs<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -20,6 +20,10 @@ pub struct Hs<'a> {
 	_g: u8,
 }
 impl_key!(Hs<'a>);
+
+impl KVKey for Hs<'_> {
+	type ValueType = HnswState;
+}
 
 impl<'a> Hs<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {

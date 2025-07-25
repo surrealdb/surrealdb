@@ -1,11 +1,13 @@
 //! Stores Vector of an HNSW index
+use crate::idx::trees::vector::SerializedVector;
 use crate::idx::trees::hnsw::ElementId;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct He<'a> {
+pub(crate) struct He<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -21,6 +23,10 @@ pub struct He<'a> {
 	pub element_id: ElementId,
 }
 impl_key!(He<'a>);
+
+impl KVKey for He<'_> {
+	type ValueType = SerializedVector;
+}
 
 impl<'a> He<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, element_id: ElementId) -> Self {

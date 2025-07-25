@@ -1,14 +1,16 @@
 //! Stores the offsets
 use crate::idx::docids::DocId;
+use crate::idx::ft::offset::OffsetRecords;
 use crate::idx::ft::search::terms::TermId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Bo<'a> {
+pub(crate) struct Bo<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -25,6 +27,10 @@ pub struct Bo<'a> {
 	pub term_id: TermId,
 }
 impl_key!(Bo<'a>);
+
+impl KVKey for Bo<'_> {
+	type ValueType = OffsetRecords;
+}
 
 impl Categorise for Bo<'_> {
 	fn categorise(&self) -> Category {

@@ -41,7 +41,7 @@ impl RemoveModelStatement {
 		};
 		// Delete the definition
 		let key = crate::key::database::ml::new(ns, db, &ml.name, &ml.version);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Clear the cache
 		txn.clear();
 		// TODO Remove the model file from storage

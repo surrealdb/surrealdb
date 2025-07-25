@@ -16,17 +16,18 @@
 //! - Enabling efficient compaction of index data
 //! - Providing accurate document count information for the index
 
+use crate::idx::ft::fulltext::DocLengthAndCount;
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::{KeyEncode, KVKey, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Dc<'a> {
+pub(crate) struct Dc<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -46,6 +47,10 @@ pub struct Dc<'a> {
 	pub uid: Uuid,
 }
 impl_key!(Dc<'a>);
+
+impl KVKey for Dc<'_> {
+	type ValueType = DocLengthAndCount;
+}
 
 impl Categorise for Dc<'_> {
 	fn categorise(&self) -> Category {

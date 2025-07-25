@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Bf<'a> {
+pub(crate) struct Bf<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,

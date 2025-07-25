@@ -1,11 +1,12 @@
 //! Stores Things of an HNSW index
 use crate::expr::Id;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Hi<'a> {
+pub(crate) struct Hi<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -21,6 +22,10 @@ pub struct Hi<'a> {
 	pub id: Id,
 }
 impl_key!(Hi<'a>);
+
+impl KVKey for Hi<'_> {
+	type ValueType = u64;
+}
 
 impl<'a> Hi<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {

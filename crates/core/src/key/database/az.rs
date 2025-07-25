@@ -1,13 +1,15 @@
 //! Stores a DEFINE ANALYZER config definition
+use crate::expr::statements::define::DefineAnalyzerStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Az<'a> {
+pub(crate) struct Az<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -19,6 +21,10 @@ pub struct Az<'a> {
 	pub az: &'a str,
 }
 impl_key!(Az<'a>);
+
+impl KVKey for Az<'_> {
+	type ValueType = DefineAnalyzerStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, az: &'a str) -> Az<'a> {
 	Az::new(ns, db, az)

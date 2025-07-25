@@ -969,7 +969,7 @@ impl UniqueEqualThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B> {
 		if let Some(key) = self.key.take() {
-			if let Some(val) = tx.get(key, None).await? {
+			if let Some(val) = tx.get(&key, None).await? {
 				let rid: Thing = revision::from_slice(&val)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());
 				return Ok(B::from_one(record));
@@ -980,7 +980,7 @@ impl UniqueEqualThingIterator {
 
 	async fn next_count(&mut self, tx: &Transaction) -> Result<usize> {
 		if let Some(key) = self.key.take() {
-			if tx.exists(key, None).await? {
+			if tx.exists(&key, None).await? {
 				return Ok(1);
 			}
 		}
@@ -1279,7 +1279,7 @@ impl UniqueUnionThingIterator {
 			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
-			if let Some(val) = tx.get(key, None).await? {
+			if let Some(val) = tx.get(&key, None).await? {
 				count += 1;
 				let rid: Thing = revision::from_slice(&val)?;
 				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
@@ -1298,7 +1298,7 @@ impl UniqueUnionThingIterator {
 			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
-			if tx.exists(key, None).await? {
+			if tx.exists(&key, None).await? {
 				count += 1;
 				if count >= limit {
 					break;

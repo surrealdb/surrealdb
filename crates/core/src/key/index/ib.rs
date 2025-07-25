@@ -28,6 +28,8 @@
 //! - **Reduced Contention**: Batch-based allocation minimizes database contention
 //! - **Scalability**: Multiple nodes can index documents concurrently
 //! - **Consistency**: Ensures unique document IDs across the entire cluster
+use std::ops::Range;
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KeyEncode, impl_key};
 use serde::{Deserialize, Serialize};
@@ -80,10 +82,10 @@ impl<'a> Ib<'a> {
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
-	) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
+	) -> anyhow::Result<Range<Vec<u8>>> {
 		let beg = Self::new(ns, db, tb, ix, i64::MIN).encode()?;
 		let end = Self::new(ns, db, tb, ix, i64::MAX).encode()?;
-		Ok((beg, end))
+		Ok(beg..end)
 	}
 }
 
@@ -93,10 +95,10 @@ mod tests {
 
 	#[test]
 	fn ib_range() {
-		let (beg, end) = Ib::new_range("testns", "testdb", "testtb", "testix").unwrap();
-		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!ib\0\0\0\0\0\0\0\0");
+		let ib_range = Ib::new_range("testns", "testdb", "testtb", "testix").unwrap();
+		assert_eq!(ib_range.start, b"/*testns\0*testdb\0*testtb\0+testix\0!ib\0\0\0\0\0\0\0\0");
 		assert_eq!(
-			end,
+			ib_range.end,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!ib\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}

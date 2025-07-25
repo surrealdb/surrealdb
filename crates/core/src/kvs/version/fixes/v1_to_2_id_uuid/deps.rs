@@ -56,8 +56,8 @@ pub mod key {
 	use serde::{Deserialize, Serialize};
 
 	use crate::{
-		expr::{Dir, id::Id as NewId},
-		kvs::impl_key,
+		expr::{id::Id as NewId, Dir, Value},
+		kvs::{impl_key, KVKey},
 	};
 
 	use super::Id;
@@ -79,6 +79,10 @@ pub mod key {
 		pub fk: Id,
 	}
 	impl_key!(Graph<'a>);
+
+	impl KVKey for Graph<'_> {
+		type ValueType = ();
+	}
 
 	impl Graph<'_> {
 		/*
@@ -158,6 +162,10 @@ pub mod key {
 		pub id: Id,
 	}
 	impl_key!(Thing<'a>);
+
+	impl KVKey for Thing<'_> {
+		type ValueType = Value;
+	}
 
 	impl Thing<'_> {
 		/*

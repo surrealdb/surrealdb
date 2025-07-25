@@ -1,13 +1,15 @@
 //! Stores a DEFINE USER ON DATABASE config definition
+use crate::expr::statements::define::DefineUserStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Us<'a> {
+pub(crate) struct Us<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -19,6 +21,10 @@ pub struct Us<'a> {
 	pub user: &'a str,
 }
 impl_key!(Us<'a>);
+
+impl KVKey for Us<'_> {
+	type ValueType = DefineUserStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, user: &'a str) -> Us<'a> {
 	Us::new(ns, db, user)

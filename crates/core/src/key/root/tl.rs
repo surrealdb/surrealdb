@@ -1,13 +1,13 @@
 //! Stores a task lease to ensure only one node is running the task at a time
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
-use crate::kvs::tasklease::TaskLeaseType;
+use crate::kvs::{impl_key, KVKey};
+use crate::kvs::tasklease::{TaskLease, TaskLeaseType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Tl {
+pub(crate) struct Tl {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -15,6 +15,10 @@ pub struct Tl {
 	pub task: u16,
 }
 impl_key!(Tl);
+
+impl KVKey for Tl {
+	type ValueType = TaskLease;
+}
 
 impl Categorise for Tl {
 	fn categorise(&self) -> Category {

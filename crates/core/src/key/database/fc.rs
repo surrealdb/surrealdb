@@ -1,13 +1,15 @@
 //! Stores a DEFINE FUNCTION config definition
+use crate::expr::statements::define::DefineFunctionStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Fc<'a> {
+pub(crate) struct Fc<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -19,6 +21,10 @@ pub struct Fc<'a> {
 	pub fc: &'a str,
 }
 impl_key!(Fc<'a>);
+
+impl KVKey for Fc<'_> {
+	type ValueType = DefineFunctionStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, fc: &'a str) -> Fc<'a> {
 	Fc::new(ns, db, fc)

@@ -1,5 +1,6 @@
 use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
+use crate::kvs::KVValue;
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -26,15 +27,12 @@ impl From<Version> for u16 {
 	}
 }
 
-impl From<Version> for Vec<u8> {
-	fn from(v: Version) -> Self {
-		v.0.to_be_bytes().to_vec()
+impl KVValue for Version {
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
+		Ok(self.0.to_be_bytes().to_vec())
 	}
-}
 
-impl TryFrom<Vec<u8>> for Version {
-	type Error = Error;
-	fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
+	fn kv_decode_value(v: Vec<u8>) -> Result<Self> {
 		let bin = v.try_into().map_err(|_| Error::InvalidStorageVersion)?;
 		let val = u16::from_be_bytes(bin).into();
 		Ok(val)
@@ -97,9 +95,9 @@ impl Version {
 
 			// Obtain storage version key and value
 			let key = crate::key::version::new();
-			let val: Vec<u8> = Version::from(v + 1).into();
+			let version = Version::from(v + 1);
 			// Attempt to set the current version in storage
-			tx.replace(key, val).await?;
+			tx.replace(&key, &version).await?;
 
 			// Commit the transaction
 			tx.commit().await?;

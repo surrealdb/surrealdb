@@ -2,7 +2,7 @@ use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::offset::OffsetRecords;
 use crate::idx::ft::search::terms::TermId;
-use crate::kvs::{Transaction, Val};
+use crate::kvs::Transaction;
 use anyhow::Result;
 
 pub(super) struct Offsets {
@@ -23,9 +23,8 @@ impl Offsets {
 		term_id: TermId,
 		offsets: OffsetRecords,
 	) -> Result<()> {
-		let key = self.index_key_base.new_bo_key(doc_id, term_id)?;
-		let val: Val = offsets.try_into()?;
-		tx.set(key, val, None).await?;
+		let key = self.index_key_base.new_bo_key(doc_id, term_id);
+		tx.set(&key, &offsets, None).await?;
 		Ok(())
 	}
 
@@ -35,13 +34,8 @@ impl Offsets {
 		doc_id: DocId,
 		term_id: TermId,
 	) -> Result<Option<OffsetRecords>> {
-		let key = self.index_key_base.new_bo_key(doc_id, term_id)?;
-		if let Some(val) = tx.get(key, None).await? {
-			let offsets = val.try_into()?;
-			Ok(Some(offsets))
-		} else {
-			Ok(None)
-		}
+		let key = self.index_key_base.new_bo_key(doc_id, term_id);
+		tx.get(&key, None).await
 	}
 
 	pub(super) async fn remove_offsets(
@@ -50,7 +44,7 @@ impl Offsets {
 		doc_id: DocId,
 		term_id: TermId,
 	) -> Result<()> {
-		let key = self.index_key_base.new_bo_key(doc_id, term_id)?;
-		tx.del(key).await
+		let key = self.index_key_base.new_bo_key(doc_id, term_id);
+		tx.del(&key).await
 	}
 }

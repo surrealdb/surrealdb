@@ -2,16 +2,21 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct All<'a> {
+pub(crate) struct All<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
 }
 impl_key!(All<'a>);
+
+impl KVKey for All<'_> {
+	type ValueType = Vec<u8>;
+}
 
 pub fn new(ns: &str) -> All<'_> {
 	All::new(ns)

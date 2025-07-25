@@ -2,6 +2,7 @@ use crate::api::method::Method;
 use crate::api::path::Path;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::kvs::impl_kv_value_revisioned;
 use crate::expr::fmt::{Fmt, pretty_indent};
 use crate::expr::{Base, FlowResultExt as _, Object, Strand, Value};
 use crate::iam::{Action, ResourceKind};
@@ -75,7 +76,7 @@ impl DefineApiStatement {
 			comment: self.comment.clone(),
 			..Default::default()
 		};
-		txn.set(key, revision::to_vec(&ap)?, None).await?;
+		txn.set(&key, &ap, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good
@@ -146,6 +147,8 @@ pub struct ApiDefinition {
 	pub config: Option<ApiConfig>,
 	pub comment: Option<Strand>,
 }
+
+impl_kv_value_revisioned!(ApiDefinition);
 
 impl From<ApiDefinition> for DefineApiStatement {
 	fn from(value: ApiDefinition) -> Self {

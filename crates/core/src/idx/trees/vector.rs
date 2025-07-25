@@ -3,6 +3,7 @@ use crate::expr::index::{Distance, VectorType};
 use crate::expr::{Number, Value};
 use crate::fnc::util::math::ToFloat;
 use crate::idx::VersionedStore;
+use crate::kvs::KVValue;
 use ahash::AHasher;
 use ahash::HashSet;
 use anyhow::{Result, ensure};
@@ -41,6 +42,16 @@ pub enum SerializedVector {
 }
 
 impl VersionedStore for SerializedVector {}
+
+impl KVValue for SerializedVector {
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
+		VersionedStore::try_into(self)
+	}
+
+	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
+		VersionedStore::try_from(val)
+	}
+}
 
 impl From<&Vector> for SerializedVector {
 	fn from(value: &Vector) -> Self {

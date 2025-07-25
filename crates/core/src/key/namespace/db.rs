@@ -1,13 +1,15 @@
 //! Stores a DEFINE DATABASE config definition
+use crate::expr::statements::define::DefineDatabaseStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Db<'a> {
+pub(crate) struct Db<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -17,6 +19,10 @@ pub struct Db<'a> {
 	pub db: &'a str,
 }
 impl_key!(Db<'a>);
+
+impl KVKey for Db<'_> {
+	type ValueType = DefineDatabaseStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str) -> Db<'a> {
 	Db::new(ns, db)

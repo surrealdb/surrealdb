@@ -27,7 +27,7 @@ use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, TransactionType};
+use crate::kvs::{KVValue, Key, Transaction, TransactionType};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
@@ -65,9 +65,8 @@ impl TermIdSet {
 
 pub(crate) struct SearchIndex {
 	analyzer: Analyzer,
-	state_key: Key,
 	index_key_base: IndexKeyBase,
-	state: State,
+	state: SearchIndexState,
 	bm25: Option<Bm25Params>,
 	highlighting: bool,
 	doc_ids: Arc<RwLock<BTreeDocIds>>,
@@ -113,12 +112,22 @@ impl From<FtStatistics> for Value {
 
 #[revisioned(revision = 1)]
 #[derive(Default, Serialize, Deserialize)]
-struct State {
+pub(crate) struct SearchIndexState {
 	total_docs_lengths: u128,
 	doc_count: u64,
 }
 
-impl VersionedStore for State {}
+impl VersionedStore for SearchIndexState {}
+
+impl KVValue for SearchIndexState {
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		VersionedStore::try_into(self)
+	}
+
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+		VersionedStore::try_from(val)
+	}
+}
 
 impl SearchIndex {
 	pub(crate) async fn new(
@@ -144,12 +153,8 @@ impl SearchIndex {
 		p: &SearchParams,
 		tt: TransactionType,
 	) -> anyhow::Result<Self> {
-		let state_key: Key = index_key_base.new_bs_key()?;
-		let state: State = if let Some(val) = txn.get(state_key.clone(), None).await? {
-			VersionedStore::try_from(val)?
-		} else {
-			State::default()
-		};
+		let state_key = index_key_base.new_bs_key();
+		let state: SearchIndexState = txn.get(&state_key, None).await?.unwrap_or_default();
 		let doc_ids = Arc::new(RwLock::new(
 			BTreeDocIds::new(txn, tt, index_key_base.clone(), p.doc_ids_order, p.doc_ids_cache)
 				.await?,
@@ -187,7 +192,6 @@ impl SearchIndex {
 		let analyzer = Analyzer::new(ixs, az)?;
 		Ok(Self {
 			state,
-			state_key,
 			index_key_base,
 			bm25,
 			highlighting: p.hl,
@@ -217,7 +221,7 @@ impl SearchIndex {
 		let tx = ctx.tx();
 		// Extract and remove the doc_id (if any)
 		let mut doc_ids = self.doc_ids.write().await;
-		let doc_id = doc_ids.remove_doc(&tx, revision::to_vec(rid)?).await?;
+		let doc_id = doc_ids.remove_doc(&tx, rid).await?;
 		drop(doc_ids);
 		if let Some(doc_id) = doc_id {
 			self.state.doc_count -= 1;
@@ -231,10 +235,7 @@ impl SearchIndex {
 			}
 
 			// Get the term list
-			if let Some(term_list_vec) =
-				tx.get(self.index_key_base.new_bk_key(doc_id)?, None).await?
-			{
-				let term_list = RoaringTreemap::deserialize_from(&mut term_list_vec.as_slice())?;
+			if let Some(term_list) = tx.get(&self.index_key_base.new_bk_key(doc_id), None).await? {
 				// Remove the postings
 				let mut p = self.postings.write().await;
 				let mut t = self.terms.write().await;
@@ -273,7 +274,7 @@ impl SearchIndex {
 		// Resolve the doc_id
 		let resolved = {
 			let mut doc_ids = self.doc_ids.write().await;
-			doc_ids.resolve_doc_id(&tx, revision::to_vec(rid)?).await?
+			doc_ids.resolve_doc_id(&tx, rid).await?
 		};
 		let doc_id = resolved.doc_id();
 
@@ -299,12 +300,8 @@ impl SearchIndex {
 		}
 
 		// Retrieve the existing terms for this document (if any)
-		let term_ids_key = self.index_key_base.new_bk_key(doc_id)?;
-		let mut old_term_ids = if let Some(val) = tx.get(term_ids_key.clone(), None).await? {
-			Some(RoaringTreemap::deserialize_from(&mut val.as_slice())?)
-		} else {
-			None
-		};
+		let term_ids_key = self.index_key_base.new_bk_key(doc_id);
+		let mut old_term_ids = tx.get(&term_ids_key, None).await?;
 
 		// Set the terms postings and term docs
 		let mut terms_ids = RoaringTreemap::default();
@@ -350,9 +347,7 @@ impl SearchIndex {
 		}
 
 		// Stores the term list for this doc_id
-		let mut val = Vec::new();
-		terms_ids.serialize_into(&mut val)?;
-		tx.set(term_ids_key, val, None).await?;
+		tx.set(&term_ids_key, &terms_ids, None).await?;
 
 		// Update the index state
 		self.state.total_docs_lengths += doc_length as u128;
@@ -361,7 +356,7 @@ impl SearchIndex {
 		}
 
 		// Update the states
-		tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?, None).await?;
+		tx.set(&self.index_key_base.new_bs_key(), &self.state, None).await?;
 		Ok(())
 	}
 
@@ -646,8 +641,8 @@ impl MatchesHitsIterator for SearchHitsIterator {
 	async fn next(&mut self, tx: &Transaction) -> anyhow::Result<Option<(Thing, DocId)>> {
 		for doc_id in self.iter.by_ref() {
 			let doc_id_key = self.ikb.new_bi_key(doc_id);
-			if let Some(v) = tx.get(doc_id_key, None).await? {
-				return Ok(Some((revision::from_slice(&v)?, doc_id)));
+			if let Some(v) = tx.get(&doc_id_key, None).await? {
+				return Ok(Some((v, doc_id)));
 			}
 		}
 		Ok(None)

@@ -1,7 +1,10 @@
 //! Stores cluster membership information
+
+use crate::dbs::node::Node;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -9,7 +12,7 @@ use uuid::Uuid;
 // In the future, this could also include broadcast addresses and other information.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Nd {
+pub(crate) struct Nd {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -18,6 +21,10 @@ pub struct Nd {
 	pub nd: Uuid,
 }
 impl_key!(Nd);
+
+impl KVKey for Nd {
+	type ValueType = Node;
+}
 
 pub fn new(nd: Uuid) -> Nd {
 	Nd::new(nd)

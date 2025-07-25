@@ -30,8 +30,10 @@ pub mod vm;
 
 use crate::expr;
 use crate::expr::array::Array;
+use crate::expr::Thing;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -105,7 +107,7 @@ impl<'a> PrefixIds<'a> {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Index<'a> {
+pub(crate) struct Index<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -120,6 +122,10 @@ pub struct Index<'a> {
 	pub id: Option<Cow<'a, expr::Id>>,
 }
 impl_key!(Index<'a>);
+
+impl KVKey for Index<'_> {
+	type ValueType = Thing;
+}
 
 impl Categorise for Index<'_> {
 	fn categorise(&self) -> Category {

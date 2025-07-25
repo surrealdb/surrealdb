@@ -1,11 +1,12 @@
 //! Store and chunked layers of an HNSW index
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Hl<'a> {
+pub(crate) struct Hl<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -22,6 +23,10 @@ pub struct Hl<'a> {
 	pub chunk: u32,
 }
 impl_key!(Hl<'a>);
+
+impl KVKey for Hl<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl<'a> Hl<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, layer: u16, chunk: u32) -> Self {

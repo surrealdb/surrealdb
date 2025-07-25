@@ -5,6 +5,7 @@
 
 pub use std::{error, fmt, mem};
 
+use crate::kvs::KVValue;
 use revision::Revisioned;
 
 /// Versionstamp is a 10-byte array used to identify a specific version of a key.
@@ -20,6 +21,16 @@ use revision::Revisioned;
 /// 393216
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, PartialOrd)]
 pub struct VersionStamp([u8; 10]);
+
+impl KVValue for VersionStamp {
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(self.0.to_vec())
+	}
+
+	fn kv_decode_value(bytes: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::from_slice(&bytes)?)
+	}
+}
 
 impl serde::Serialize for VersionStamp {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

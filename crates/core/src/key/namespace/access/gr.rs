@@ -1,13 +1,15 @@
 //! Stores a grant associated with an access method
+use crate::expr::statements::AccessGrant;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Gr<'a> {
+pub(crate) struct Gr<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -19,6 +21,10 @@ pub struct Gr<'a> {
 	pub gr: &'a str,
 }
 impl_key!(Gr<'a>);
+
+impl KVKey for Gr<'_> {
+	type ValueType = AccessGrant;
+}
 
 pub fn new<'a>(ns: &'a str, ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ns, ac, gr)

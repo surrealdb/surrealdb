@@ -3,11 +3,13 @@ use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Bk<'a> {
+pub(crate) struct Bk<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -23,6 +25,10 @@ pub struct Bk<'a> {
 	pub doc_id: DocId,
 }
 impl_key!(Bk<'a>);
+
+impl KVKey for Bk<'_> {
+	type ValueType = RoaringTreemap;
+}
 
 impl Categorise for Bk<'_> {
 	fn categorise(&self) -> Category {

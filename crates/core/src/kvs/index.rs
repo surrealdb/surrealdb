@@ -12,7 +12,7 @@ use crate::idx::index::IndexOperation;
 use crate::key::thing;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::kvs::{impl_kv_value_revisioned, Key, Transaction, TransactionType, Val};
 use crate::mem::ALLOC;
 use anyhow::{Result, ensure};
 use dashmap::DashMap;
@@ -258,16 +258,20 @@ impl IndexBuilder {
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Debug)]
 #[non_exhaustive]
-struct Appending {
+pub(crate) struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
 	id: Id,
 }
 
+impl_kv_value_revisioned!(Appending);
+
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Debug)]
 #[non_exhaustive]
-struct PrimaryAppending(u32);
+pub(crate) struct PrimaryAppending(u32);
+
+impl_kv_value_revisioned!(PrimaryAppending);
 
 #[derive(Default)]
 struct QueueSequences {
@@ -375,12 +379,12 @@ impl Building {
 		let idx = queue.add_update();
 		// Store the appending
 		let ia = self.ikb.new_ia_key(idx);
-		tx.set(ia, revision::to_vec(&a)?, None).await?;
+		tx.set(&ia, &a, None).await?;
 		// Do we already have a primary appending?
 		let ip = self.ikb.new_ip_key(rid.id.clone());
-		if tx.get(ip.clone(), None).await?.is_none() {
+		if tx.get(&ip, None).await?.is_none() {
 			// If not, we set it
-			tx.set(ip, revision::to_vec(&PrimaryAppending(idx))?, None).await?;
+			tx.set(&ip, &PrimaryAppending(idx), None).await?;
 		}
 		drop(queue);
 		Ok(ConsumeResult::Enqueued)
@@ -405,7 +409,7 @@ impl Building {
 			let ctx = self.new_write_tx_ctx().await?;
 			let key = crate::key::index::all::new(ns, db, self.ikb.table(), self.ikb.index());
 			let tx = ctx.tx();
-			tx.delp(key).await?;
+			tx.delp(&key).await?;
 			tx.commit().await?;
 		}
 		// First iteration, we index every key
@@ -526,15 +530,13 @@ impl Building {
 
 			// Do we already have an appended value?
 			let ip = self.ikb.new_ip_key(rid.id.clone());
-			if let Some(v) = tx.get(ip, None).await? {
+			if let Some(pa) = tx.get(&ip, None).await? {
 				// Then we take the old value of the appending value as the initial indexing value
-				let pa: PrimaryAppending = revision::from_slice(&v)?;
 				let ia = self.ikb.new_ia_key(pa.0);
-				let v = tx
-					.get(ia, None)
+				let a = tx
+					.get(&ia, None)
 					.await?
 					.ok_or_else(|| Error::CorruptedIndex("Appending record is missing"))?;
-				let a: Appending = revision::from_slice(&v)?;
 				opt_values = a.old_values;
 			} else {
 				// Otherwise, we normally proceed to the indexing
@@ -581,9 +583,8 @@ impl Building {
 			}
 			self.is_beyond_threshold(Some(*count))?;
 			let ia = self.ikb.new_ia_key(i);
-			if let Some(v) = tx.get(ia.clone(), None).await? {
-				tx.del(ia).await?;
-				let a: Appending = revision::from_slice(&v)?;
+			if let Some(a) = tx.get(&ia, None).await? {
+				tx.del(&ia).await?;
 				let rid = Thing::from((self.ikb.table().to_string(), a.id));
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
@@ -591,7 +592,7 @@ impl Building {
 
 				// We can delete the ip record if any
 				let ip = self.ikb.new_ip_key(rid.id);
-				tx.del(ip).await?;
+				tx.del(&ip).await?;
 
 				*count += 1;
 				self.set_status(BuildingStatus::Indexing {

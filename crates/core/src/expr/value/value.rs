@@ -19,6 +19,7 @@ use crate::expr::{
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
+use crate::kvs::impl_kv_value_revisioned;
 
 use geo::Point;
 use reblessive::tree::Stk;
@@ -148,6 +149,8 @@ pub enum Value {
 	File(File),
 	// Add new variants here
 }
+
+impl_kv_value_revisioned!(Value);
 
 impl Value {
 	fn convert_old_range(

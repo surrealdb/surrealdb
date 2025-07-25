@@ -1,12 +1,14 @@
 //! Stores a DEFINE USER ON ROOT config definition
+use crate::expr::statements::define::DefineUserStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Us<'a> {
+pub(crate) struct Us<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -14,6 +16,10 @@ pub struct Us<'a> {
 	pub user: &'a str,
 }
 impl_key!(Us<'a>);
+
+impl KVKey for Us<'_> {
+	type ValueType = DefineUserStatement;
+}
 
 pub fn new(user: &str) -> Us<'_> {
 	Us::new(user)

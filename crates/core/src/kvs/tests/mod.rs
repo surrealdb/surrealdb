@@ -8,9 +8,27 @@
 ))]
 
 use super::Datastore;
-use crate::kvs::clock::SizedClock;
+use crate::kvs::{clock::SizedClock, KVKey};
 use std::{future::Future, sync::Arc};
 use uuid::Uuid;
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct MyKv<'a> {
+	pub val: &'a str,
+}
+
+impl KVKey for MyKv<'_> {
+	type ValueType = Vec<u8>;
+}
+
+impl<'a> MyKv<'a> {
+	fn new(val: &'a str) -> Self {
+		Self {
+			val,
+		}
+	}
+}
 
 macro_rules! include_tests {
 	($new_ds:ident => $($name:ident),* $(,)?) => {
@@ -157,7 +175,7 @@ mod fdb {
 		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-		tx.delp(vec![]).await.unwrap();
+		tx.delp(&vec![]).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		(ds, Kvs::Fdb)

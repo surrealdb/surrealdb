@@ -1,4 +1,4 @@
-pub(in crate::idx) mod docs;
+pub(crate) mod docs;
 mod elements;
 mod flavor;
 mod heuristic;
@@ -19,7 +19,7 @@ use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{KVValue, Transaction};
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
@@ -44,7 +44,7 @@ impl HnswSearch {
 
 #[revisioned(revision = 1)]
 #[derive(Default, Serialize, Deserialize)]
-pub(super) struct HnswState {
+pub(crate) struct HnswState {
 	enter_point: Option<ElementId>,
 	next_element_id: ElementId,
 	layer0: LayerState,
@@ -53,13 +53,22 @@ pub(super) struct HnswState {
 
 impl VersionedStore for HnswState {}
 
+impl KVValue for HnswState {
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
+		VersionedStore::try_into(self)
+	}
+
+	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
+		VersionedStore::try_from(val)
+	}
+}
+
 struct Hnsw<L0, L>
 where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
 	ikb: IndexKeyBase,
-	state_key: Key,
 	state: HnswState,
 	m: usize,
 	efc: usize,
@@ -80,9 +89,7 @@ where
 {
 	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Result<Self> {
 		let m0 = p.m0 as usize;
-		let state_key = ikb.new_hs_key()?;
 		Ok(Self {
-			state_key,
 			state: Default::default(),
 			m: p.m as usize,
 			efc: p.ef_construction as usize,
@@ -98,11 +105,7 @@ where
 
 	async fn check_state(&mut self, tx: &Transaction) -> Result<()> {
 		// Read the state
-		let st: HnswState = if let Some(val) = tx.get(self.state_key.clone(), None).await? {
-			VersionedStore::try_from(val)?
-		} else {
-			Default::default()
-		};
+		let st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
 		// Compare versions
 		if st.layer0.version != self.state.layer0.version {
 			self.layer0.load(tx, &st.layer0).await?;
@@ -272,8 +275,8 @@ where
 	}
 
 	async fn save_state(&self, tx: &Transaction) -> Result<()> {
-		let val: Val = VersionedStore::try_into(&self.state)?;
-		tx.set(self.state_key.clone(), val, None).await?;
+		let state_key = self.ikb.new_hs_key();
+		tx.set(&state_key, &self.state, None).await?;
 		Ok(())
 	}
 

@@ -1,13 +1,15 @@
 //! Stores a DEFINE MODEL config definition
+use crate::expr::statements::define::DefineModelStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ml<'a> {
+pub(crate) struct Ml<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -20,6 +22,10 @@ pub struct Ml<'a> {
 	pub vn: &'a str,
 }
 impl_key!(Ml<'a>);
+
+impl KVKey for Ml<'_> {
+	type ValueType = DefineModelStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, ml: &'a str, vn: &'a str) -> Ml<'a> {
 	Ml::new(ns, db, ml, vn)

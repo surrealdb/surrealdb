@@ -19,14 +19,14 @@
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::{KeyEncode, KVKey, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Tt<'a> {
+pub(crate) struct Tt<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -49,6 +49,10 @@ pub struct Tt<'a> {
 }
 
 impl_key!(Tt<'a>);
+
+impl KVKey for Tt<'_> {
+	type ValueType = String;
+}
 
 impl Categorise for Tt<'_> {
 	fn categorise(&self) -> Category {

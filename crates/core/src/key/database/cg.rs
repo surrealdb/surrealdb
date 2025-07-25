@@ -1,13 +1,15 @@
 //! Stores a DEFINE CONFIG definition
+use crate::expr::statements::define::DefineConfigStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Cg<'a> {
+pub(crate) struct Cg<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -19,6 +21,10 @@ pub struct Cg<'a> {
 	pub ty: &'a str,
 }
 impl_key!(Cg<'a>);
+
+impl KVKey for Cg<'_> {
+	type ValueType = DefineConfigStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, ty: &'a str) -> Cg<'a> {
 	Cg::new(ns, db, ty)

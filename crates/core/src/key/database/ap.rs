@@ -1,13 +1,15 @@
 //! Stores a DEFINE API definition
+use crate::expr::statements::define::ApiDefinition;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ap<'a> {
+pub(crate) struct Ap<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -19,6 +21,10 @@ pub struct Ap<'a> {
 	pub ap: &'a str,
 }
 impl_key!(Ap<'a>);
+
+impl KVKey for Ap<'_> {
+	type ValueType = ApiDefinition;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, ap: &'a str) -> Ap<'a> {
 	Ap::new(ns, db, ap)

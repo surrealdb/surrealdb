@@ -2,28 +2,33 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Access<'a> {
+pub(crate) struct AccessRoot<'a> {
 	__: u8,
 	_a: u8,
 	pub ac: &'a str,
 }
-impl_key!(Access<'a>);
+impl_key!(AccessRoot<'a>);
 
-pub fn new(ac: &str) -> Access {
-	Access::new(ac)
+impl KVKey for AccessRoot<'_> {
+	type ValueType = Vec<u8>;
 }
 
-impl Categorise for Access<'_> {
+pub fn new(ac: &str) -> AccessRoot {
+	AccessRoot::new(ac)
+}
+
+impl Categorise for AccessRoot<'_> {
 	fn categorise(&self) -> Category {
 		Category::AccessRoot
 	}
 }
 
-impl<'a> Access<'a> {
+impl<'a> AccessRoot<'a> {
 	pub fn new(ac: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -40,7 +45,7 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Access::new(
+		let val = AccessRoot::new(
 			"testac",
 		);
 		let enc = KeyEncode::encode(&val).unwrap();

@@ -62,16 +62,16 @@ impl Document {
 					let (ref o, ref i) = (Dir::Out, Dir::In);
 					// Purge the left pointer edge
 					let key = crate::key::graph::new(ns, db, &l.tb, &l.id, o, rid);
-					txn.del(key).await?;
+					txn.del(&key).await?;
 					// Purge the left inner edge
 					let key = crate::key::graph::new(ns, db, &rid.tb, &rid.id, i, l);
-					txn.del(key).await?;
+					txn.del(&key).await?;
 					// Purge the right inner edge
 					let key = crate::key::graph::new(ns, db, &rid.tb, &rid.id, o, r);
-					txn.del(key).await?;
+					txn.del(&key).await?;
 					// Purge the right pointer edge
 					let key = crate::key::graph::new(ns, db, &r.tb, &r.id, i, rid);
-					txn.del(key).await?;
+					txn.del(&key).await?;
 					// Release the transaction
 					drop(txn);
 				}

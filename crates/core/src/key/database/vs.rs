@@ -2,12 +2,14 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+use crate::vs::VersionStamp;
 use serde::{Deserialize, Serialize};
 
 // Vs stands for Database Versionstamp
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Vs<'a> {
+pub(crate) struct Vs<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -18,6 +20,10 @@ pub struct Vs<'a> {
 	_e: u8,
 }
 impl_key!(Vs<'a>);
+
+impl KVKey for Vs<'_> {
+	type ValueType = VersionStamp;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str) -> Vs<'a> {
 	Vs::new(ns, db)

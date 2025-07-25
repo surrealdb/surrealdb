@@ -3,7 +3,7 @@ use crate::expr::{Object, Value};
 use crate::idx::VersionedStore;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{KVValue, Key, Transaction, Val};
 #[cfg(debug_assertions)]
 use ahash::HashSet;
 use anyhow::{Result, bail};
@@ -55,6 +55,16 @@ impl VersionedStore for BState {
 				},
 			},
 		}
+	}
+}
+
+impl KVValue for BState {
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		VersionedStore::try_into(self)
+	}
+
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+		VersionedStore::try_from(val)
 	}
 }
 

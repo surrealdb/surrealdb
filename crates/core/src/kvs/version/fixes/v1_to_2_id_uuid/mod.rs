@@ -54,11 +54,11 @@ async fn migrate_tb_records(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) 
 		// Get a fixed id
 		let fixed = broken.fix().unwrap();
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let val = tx.get(broken.clone(), None).await?.unwrap();
+		let val = tx.get(&broken, None).await?.unwrap();
 		// Delete the old key
-		tx.del(broken.clone()).await?;
+		tx.del(&broken).await?;
 		// Set the fixed key
-		tx.set(fixed, val, None).await?;
+		tx.set(&fixed, &val, None).await?;
 	}
 
 	Ok(())
@@ -100,11 +100,11 @@ async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) ->
 		// Get a fixed id
 		let fixed = broken.fix().unwrap();
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let val = tx.get(broken.clone(), None).await?.unwrap();
+		tx.get(&broken, None).await?.unwrap();
 		// Delete the old key
-		tx.del(broken.clone()).await?;
+		tx.del(&broken).await?;
 		// Set the fixed key
-		tx.set(fixed, val, None).await?;
+		tx.set(&fixed, &(), None).await?;
 	}
 
 	Ok(())

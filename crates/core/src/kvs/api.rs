@@ -471,8 +471,6 @@ pub trait Transaction: requirements::TransactionRequirements {
 	async fn get_timestamp(&mut self, key: Key) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
-		// Calculate the version key
-		let key = key.encode()?;
 		// Calculate the version number
 		let ver = match self.get(key.clone(), None).await? {
 			Some(prev) => VersionStamp::from_slice(prev.as_slice())?

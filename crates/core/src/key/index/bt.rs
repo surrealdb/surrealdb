@@ -1,13 +1,16 @@
 //! Stores BTree nodes for terms
+use crate::idx::ft::search::terms::SearchTermsState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
+
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Bt<'a> {
+pub(crate) struct BtRoot<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -20,7 +23,59 @@ pub struct Bt<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub node_id: Option<NodeId>,
+}
+impl_key!(BtRoot<'a>);
+
+impl KVKey for BtRoot<'_> {
+	type ValueType = SearchTermsState;
+}
+
+impl Categorise for BtRoot<'_> {
+	fn categorise(&self) -> Category {
+		Category::IndexBTreeNodeTerms
+	}
+}
+
+impl<'a> BtRoot<'a> {
+	pub fn new(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		ix: &'a str,
+	) -> Self {
+		Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb,
+			_d: b'+',
+			ix,
+			_e: b'!',
+			_f: b'b',
+			_g: b't',
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[non_exhaustive]
+pub(crate) struct Bt<'a> {
+	__: u8,
+	_a: u8,
+	pub ns: &'a str,
+	_b: u8,
+	pub db: &'a str,
+	_c: u8,
+	pub tb: &'a str,
+	_d: u8,
+	pub ix: &'a str,
+	_e: u8,
+	_f: u8,
+	_g: u8,
+	pub node_id: NodeId,
 }
 impl_key!(Bt<'a>);
 
@@ -36,7 +91,7 @@ impl<'a> Bt<'a> {
 		db: &'a str,
 		tb: &'a str,
 		ix: &'a str,
-		node_id: Option<NodeId>,
+		node_id: NodeId,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -68,7 +123,7 @@ mod tests {
 			"testdb",
 			"testtb",
 			"testix",
-			Some(7)
+			7
 		);
 		let enc = Bt::encode(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bt\x01\0\0\0\0\0\0\0\x07");

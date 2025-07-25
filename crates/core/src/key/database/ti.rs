@@ -1,13 +1,14 @@
 //! Stores the next and available freed IDs for documents
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
 // Table ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ti {
+pub(crate) struct Ti {
 	__: u8,
 	_a: u8,
 	pub ns: u32,
@@ -18,6 +19,10 @@ pub struct Ti {
 	_e: u8,
 }
 impl_key!(Ti);
+
+impl KVKey for Ti {
+	type ValueType = Vec<u8>;
+}
 
 pub fn new(ns: u32, db: u32) -> Ti {
 	Ti::new(ns, db)

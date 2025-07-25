@@ -61,17 +61,17 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<()> {
 	for key in queue.iter() {
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
 		let tk: DefineTokenStatement =
-			revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
+			revision::from_slice(&tx.get(key, None).await?.unwrap())?;
 		// Convert into access
 		let ac: DefineAccessStatement = tk.into();
 
 		// Delete the old key
-		tx.del(key.to_owned()).await?;
+		tx.del(key).await?;
 
 		// Construct the new key
 		let key = crate::key::namespace::ac::new(ns, &ac.name.0);
 		// Set the fixed key
-		tx.set(key, revision::to_vec(&ac)?, None).await?;
+		tx.set(&key, &ac, None).await?;
 	}
 
 	Ok(())
@@ -106,17 +106,17 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 	for key in queue.iter() {
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
 		let tk: DefineTokenStatement =
-			revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
+			revision::from_slice(&tx.get(key, None).await?.unwrap())?;
 		// Convert into access
 		let ac: DefineAccessStatement = tk.into();
 
 		// Delete the old key
-		tx.del(key.to_owned()).await?;
+		tx.del(key).await?;
 
 		// Construct the new key
 		let key = crate::key::database::ac::new(ns, db, &ac.name.0);
 		// Set the fixed key
-		tx.set(key, revision::to_vec(&ac)?, None).await?;
+		tx.set(&key, &ac, None).await?;
 	}
 
 	Ok(())
@@ -158,19 +158,19 @@ async fn migrate_db_scope_key(
 ) -> Result<DefineAccessStatement> {
 	// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
 	let sc: DefineScopeStatement =
-		revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
+		revision::from_slice(&tx.get(&key, None).await?.unwrap())?;
 	// Convert into access
 	let ac: DefineAccessStatement = sc.into();
 
 	// Delete the old key
-	tx.del(key.clone()).await?;
+	tx.del(&key).await?;
 
 	// Extract the name
 	let name = ac.name.clone();
 	// Construct the new key
 	let key = crate::key::database::ac::new(ns, db, &name);
 	// Set the fixed key
-	tx.set(key, revision::to_vec(&ac)?, None).await?;
+	tx.set(&key, &ac, None).await?;
 
 	Ok(ac)
 }
@@ -230,10 +230,10 @@ async fn migrate_sc_tokens(
 	for key in queue.iter() {
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
 		let tk: DefineTokenStatement =
-			revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
+			revision::from_slice(&tx.get(key, None).await?.unwrap())?;
 
 		// Delete the old key
-		tx.del(key.to_owned()).await?;
+		tx.del(key).await?;
 
 		// Merge the access and token definitions
 		let mut merged = merge_ac_and_tk(ac.clone(), tk.clone());

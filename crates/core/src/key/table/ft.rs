@@ -1,13 +1,15 @@
 //! Stores a DEFINE TABLE AS config definition
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::expr::statements::define::DefineTableStatement;
+use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Ft<'a> {
+pub(crate) struct Ft<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -21,6 +23,10 @@ pub struct Ft<'a> {
 	pub ft: &'a str,
 }
 impl_key!(Ft<'a>);
+
+impl KVKey for Ft<'_> {
+	type ValueType = DefineTableStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ft: &'a str) -> Ft<'a> {
 	Ft::new(ns, db, tb, ft)

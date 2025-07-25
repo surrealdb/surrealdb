@@ -25,7 +25,7 @@ use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::store::IndexStores;
 use crate::key::index::tt::Tt;
-use crate::kvs::KeyDecode;
+use crate::kvs::{impl_kv_value_revisioned, KeyDecode};
 use crate::kvs::Transaction;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -41,22 +41,25 @@ use uuid::Uuid;
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
 /// Represents a term occurrence within a document
-struct TermDocument {
+pub(crate) struct TermDocument {
 	/// The frequency of the term in the document
 	f: TermFrequency,
 	/// The offsets of the term occurrences in the document
 	o: Vec<Offset>,
 }
 
+impl_kv_value_revisioned!(TermDocument);
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Default)]
 /// Tracks document length and count statistics for the index
-struct DocLengthAndCount {
+pub(crate) struct DocLengthAndCount {
 	/// The total length of all documents in the index
 	total_docs_length: i128,
 	/// The total number of documents in the index
 	doc_count: i64,
 }
+impl_kv_value_revisioned!(DocLengthAndCount);
 
 /// Represents the terms in a search query and their associated document sets
 pub(in crate::idx) struct QueryTerms {
@@ -177,8 +180,8 @@ impl FullTextIndex {
 					// Check if the term has already been deleted
 					if set.insert(s) {
 						// Delete the term
-						let key = self.ikb.new_td(s, Some(doc_id));
-						tx.del(key).await?;
+						let key = self.ikb.new_td(s, doc_id);
+						tx.del(&key).await?;
 						self.set_tt(&tx, s, doc_id, &nid, false).await?;
 					}
 				}
@@ -186,17 +189,16 @@ impl FullTextIndex {
 			{
 				let key = self.ikb.new_dl(doc_id);
 				// get the doc length
-				if let Some(v) = tx.get(key.clone(), None).await? {
+				if let Some(dl) = tx.get(&key, None).await? {
 					// Delete the doc length
-					tx.del(key).await?;
+					tx.del(&key).await?;
 					// Decrease the doc count and total doc length
-					let dl: DocLength = revision::from_slice(&v)?;
 					let dcl = DocLengthAndCount {
 						total_docs_length: -(dl as i128),
 						doc_count: -1,
 					};
 					let key = self.ikb.new_dc_with_id(doc_id, opt.id()?, Uuid::now_v7());
-					tx.put(key, revision::to_vec(&dcl)?, None).await?;
+					tx.put(&key, &dcl, None).await?;
 					*require_compaction = true;
 				}
 			}
@@ -240,7 +242,7 @@ impl FullTextIndex {
 		{
 			// Set the doc length
 			let key = self.ikb.new_dl(id.doc_id());
-			tx.set(key, revision::to_vec(&dl)?, None).await?;
+			tx.set(&key, &dl, None).await?;
 		}
 		{
 			// Increase the doc count and total doc length
@@ -249,7 +251,7 @@ impl FullTextIndex {
 				total_docs_length: dl as i128,
 				doc_count: 1,
 			};
-			tx.put(key, revision::to_vec(&dcl)?, None).await?;
+			tx.put(&key, &dcl, None).await?;
 			*require_compaction = true;
 		}
 		// We're done
@@ -258,12 +260,7 @@ impl FullTextIndex {
 
 	async fn get_doc_length(&self, tx: &Transaction, doc_id: DocId) -> Result<Option<DocLength>> {
 		let key = self.ikb.new_dl(doc_id);
-		if let Some(v) = tx.get(key, None).await? {
-			let dl: DocLength = revision::from_slice(&v)?;
-			Ok(Some(dl))
-		} else {
-			Ok(None)
-		}
+		tx.get(&key, None).await
 	}
 
 	async fn index_with_offsets(
@@ -276,10 +273,10 @@ impl FullTextIndex {
 		let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, o) in offsets {
-			let key = self.ikb.new_td(t, Some(id));
+			let key = self.ikb.new_td(t, id);
 			td.f = o.len() as TermFrequency;
 			td.o = o;
-			tx.set(key, revision::to_vec(&td)?, None).await?;
+			tx.set(&key, &td, None).await?;
 			self.set_tt(tx, t, id, nid, true).await?;
 		}
 		Ok(dl)
@@ -295,9 +292,9 @@ impl FullTextIndex {
 		let (dl, tf) = Analyzer::extract_frequencies(&tokens)?;
 		let mut td = TermDocument::default();
 		for (t, f) in tf {
-			let key = self.ikb.new_td(t, Some(id));
+			let key = self.ikb.new_td(t, id);
 			td.f = f;
-			tx.set(key, revision::to_vec(&td)?, None).await?;
+			tx.set(&key, &td, None).await?;
 			self.set_tt(tx, t, id, nid, true).await?;
 		}
 		Ok(dl)
@@ -312,7 +309,7 @@ impl FullTextIndex {
 		add: bool,
 	) -> Result<()> {
 		let key = self.ikb.new_tt(term, doc_id, *nid, Uuid::now_v7(), add);
-		tx.set(key, "", None).await
+		tx.set(&key, &String::new(), None).await
 	}
 
 	/// Extracts query terms from a search string
@@ -394,11 +391,8 @@ impl FullTextIndex {
 	) -> Result<RoaringTreemap> {
 		// Retrieve the current compacted document set for this term
 		// This is the consolidated bitmap of all documents containing this term
-		let td = self.ikb.new_td(term, None);
-		let mut docs = match tx.get(td, None).await? {
-			None => RoaringTreemap::default(), // No documents contain this term yet
-			Some(v) => revision::from_slice(&v)?,
-		};
+		let td = self.ikb.new_td_root(term);
+		let mut docs = tx.get(&td, None).await?.unwrap_or_default();
 
 		// Apply the delta changes to the document set
 		for (doc_id, delta) in deltas {
@@ -425,11 +419,12 @@ impl FullTextIndex {
 		deltas: &HashMap<DocId, i64>,
 	) -> Result<()> {
 		let docs = self.append_term_docs_delta(tx, term, deltas).await?;
-		let td = self.ikb.new_td(term, None);
+		let td = self.ikb.new_td_root(term);
 		if docs.is_empty() {
-			tx.del(td).await?;
+			tx.del(&td).await?;
 		} else {
-			tx.set(td, revision::to_vec(&docs)?, None).await?;
+			todo!("STU: Fix this, talk to Emmanuel")
+			// tx.set(td, &docs, None).await?;
 		}
 		Ok(())
 	}
@@ -584,7 +579,7 @@ impl FullTextIndex {
 		let mut has_logs = false;
 		let dlc = self.compute_doc_length_and_count(tx, Some(&mut has_logs)).await?;
 		let key = self.ikb.new_dc_compacted()?;
-		tx.set(key, revision::to_vec(&dlc)?, None).await?;
+		tx.set(&key, &revision::to_vec(&dlc)?, None).await?;
 		Ok(has_logs)
 	}
 
@@ -613,7 +608,7 @@ impl FullTextIndex {
 		nid: Uuid,
 	) -> Result<()> {
 		let ic = ikb.new_ic_key(nid);
-		tx.put(ic, "", None).await?;
+		tx.put(&ic, &(), None).await?;
 		Ok(())
 	}
 
@@ -651,13 +646,8 @@ impl FullTextIndex {
 		id: DocId,
 		term: &str,
 	) -> Result<Option<TermDocument>> {
-		let key = self.ikb.new_td(term, Some(id));
-		if let Some(v) = tx.get(key, None).await? {
-			let td: TermDocument = revision::from_slice(&v)?;
-			Ok(Some(td))
-		} else {
-			Ok(None)
-		}
+		let key = self.ikb.new_td(term, id);
+		tx.get(&key, None).await
 	}
 
 	pub(in crate::idx) async fn read_offsets(
