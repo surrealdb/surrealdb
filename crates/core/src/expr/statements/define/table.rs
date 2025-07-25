@@ -12,7 +12,7 @@ use crate::expr::{
 };
 use crate::expr::{Idiom, Kind, TableType};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::{impl_kv_value_revisioned, Transaction};
+use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;

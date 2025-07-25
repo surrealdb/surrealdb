@@ -3,10 +3,9 @@ use crate::idx::ft::search::terms::SearchTermsState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
 use crate::kvs::KVKey;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
-
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -37,12 +36,7 @@ impl Categorise for BtRoot<'_> {
 }
 
 impl<'a> BtRoot<'a> {
-	pub fn new(
-		ns: &'a str,
-		db: &'a str,
-		tb: &'a str,
-		ix: &'a str,
-	) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -86,13 +80,7 @@ impl Categorise for Bt<'_> {
 }
 
 impl<'a> Bt<'a> {
-	pub fn new(
-		ns: &'a str,
-		db: &'a str,
-		tb: &'a str,
-		ix: &'a str,
-		node_id: NodeId,
-	) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

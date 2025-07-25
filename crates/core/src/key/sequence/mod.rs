@@ -43,11 +43,7 @@ impl<'a> Prefix<'a> {
 		}
 	}
 
-	pub(crate) fn new_ba_range(
-		ns: &'a str,
-		db: &'a str,
-		sq: &'a str,
-	) -> Result<Range<Vec<u8>>> {
+	pub(crate) fn new_ba_range(ns: &'a str, db: &'a str, sq: &'a str) -> Result<Range<Vec<u8>>> {
 		let mut beg = Self::new(ns, db, sq, b'b', b'a').encode()?;
 		let mut end = Self::new(ns, db, sq, b'b', b'a').encode()?;
 		beg.extend_from_slice(&[0x00; 9]);
@@ -55,11 +51,7 @@ impl<'a> Prefix<'a> {
 		Ok(beg..end)
 	}
 
-	pub(crate) fn new_st_range(
-		ns: &'a str,
-		db: &'a str,
-		sq: &'a str,
-	) -> Result<Range<Vec<u8>>> {
+	pub(crate) fn new_st_range(ns: &'a str, db: &'a str, sq: &'a str) -> Result<Range<Vec<u8>>> {
 		let mut beg = Self::new(ns, db, sq, b's', b't').encode()?;
 		let mut end = Self::new(ns, db, sq, b's', b't').encode()?;
 		beg.extend_from_slice(&[0x00; 9]);
@@ -76,6 +68,9 @@ mod tests {
 	fn ba_range() {
 		let range = Prefix::new_ba_range("testns", "testdb", "testsq").unwrap();
 		assert_eq!(range.start, b"/*testns\0*testdb\0!sqtestsq\0!ba\0\0\0\0\0\0\0\0\0");
-		assert_eq!(range.end, b"/*testns\0*testdb\0!sqtestsq\0!ba\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+		assert_eq!(
+			range.end,
+			b"/*testns\0*testdb\0!sqtestsq\0!ba\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+		);
 	}
 }

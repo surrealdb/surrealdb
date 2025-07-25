@@ -18,8 +18,8 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
 use crate::kvs::KVKey;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

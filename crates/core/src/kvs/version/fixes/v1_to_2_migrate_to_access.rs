@@ -60,8 +60,7 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<()> {
 	// Migrate the tokens to accesses
 	for key in queue.iter() {
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let tk: DefineTokenStatement =
-			revision::from_slice(&tx.get(key, None).await?.unwrap())?;
+		let tk: DefineTokenStatement = revision::from_slice(&tx.get(key, None).await?.unwrap())?;
 		// Convert into access
 		let ac: DefineAccessStatement = tk.into();
 
@@ -105,8 +104,7 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 	// Migrate the tokens to accesses
 	for key in queue.iter() {
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let tk: DefineTokenStatement =
-			revision::from_slice(&tx.get(key, None).await?.unwrap())?;
+		let tk: DefineTokenStatement = revision::from_slice(&tx.get(key, None).await?.unwrap())?;
 		// Convert into access
 		let ac: DefineAccessStatement = tk.into();
 
@@ -157,8 +155,7 @@ async fn migrate_db_scope_key(
 	key: Vec<u8>,
 ) -> Result<DefineAccessStatement> {
 	// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-	let sc: DefineScopeStatement =
-		revision::from_slice(&tx.get(&key, None).await?.unwrap())?;
+	let sc: DefineScopeStatement = revision::from_slice(&tx.get(&key, None).await?.unwrap())?;
 	// Convert into access
 	let ac: DefineAccessStatement = sc.into();
 
@@ -229,8 +226,7 @@ async fn migrate_sc_tokens(
 	// Log example merged accesses
 	for key in queue.iter() {
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let tk: DefineTokenStatement =
-			revision::from_slice(&tx.get(key, None).await?.unwrap())?;
+		let tk: DefineTokenStatement = revision::from_slice(&tx.get(key, None).await?.unwrap())?;
 
 		// Delete the old key
 		tx.del(key).await?;

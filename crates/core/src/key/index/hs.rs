@@ -1,5 +1,8 @@
 //! Store state of an HNSW index
-use crate::{idx::trees::hnsw::HnswState, kvs::{impl_key, KVKey}};
+use crate::{
+	idx::trees::hnsw::HnswState,
+	kvs::{KVKey, impl_key},
+};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 

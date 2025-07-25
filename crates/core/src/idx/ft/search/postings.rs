@@ -1,10 +1,10 @@
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::TermFrequency;
 use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
-use crate::idx::IndexKeyBase;
 use crate::kvs::{KeyEncode, Transaction, TransactionType};
 use anyhow::Result;
 

@@ -85,7 +85,8 @@ impl BTreeDocIds {
 	) -> anyhow::Result<Resolved> {
 		let doc_key_bytes = doc_key.kv_encode_value()?;
 		{
-			if let Some(doc_id) = self.btree.search_mut(tx, &mut self.store, &doc_key_bytes).await? {
+			if let Some(doc_id) = self.btree.search_mut(tx, &mut self.store, &doc_key_bytes).await?
+			{
 				return Ok(Resolved::Existing(doc_id));
 			}
 		}
@@ -252,7 +253,7 @@ impl BTreeDocIdsState {
 #[cfg(test)]
 mod tests {
 	use crate::expr::Thing;
-use crate::idx::IndexKeyBase;
+	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::btdocids::{BTreeDocIds, Resolved};
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
@@ -273,7 +274,6 @@ use crate::idx::IndexKeyBase;
 	#[tokio::test]
 	async fn test_resolve_doc_id() {
 		let ds = Datastore::new("memory").await.unwrap();
-
 
 		let foo_thing = Thing::from(("Foo", ""));
 		let bar_thing = Thing::from(("Bar", ""));

@@ -5,7 +5,9 @@ use uuid::Uuid;
 use crate::{
 	dbs::node::Timestamp,
 	kvs::{
-		clock::{FakeClock, SizedClock}, LockType::*, TransactionType::*
+		LockType::*,
+		TransactionType::*,
+		clock::{FakeClock, SizedClock},
 	},
 };
 

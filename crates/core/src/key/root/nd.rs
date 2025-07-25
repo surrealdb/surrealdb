@@ -3,8 +3,8 @@
 use crate::dbs::node::Node;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
 use crate::kvs::KVKey;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

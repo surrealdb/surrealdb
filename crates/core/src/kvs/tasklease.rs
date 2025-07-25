@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::key::root::tl::Tl;
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{impl_kv_value_revisioned, LockType, TransactionType};
+use crate::kvs::{LockType, TransactionType, impl_kv_value_revisioned};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use rand::{Rng, thread_rng};

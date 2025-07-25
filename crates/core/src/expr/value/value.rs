@@ -17,9 +17,9 @@ use crate::expr::{
 	model::Model,
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
-use crate::kvs::impl_kv_value_revisioned;
 
 use geo::Point;
 use reblessive::tree::Stk;

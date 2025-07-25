@@ -1,9 +1,9 @@
 //! Stores a LIVE SELECT query definition on the cluster
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, KVKey, impl_key};
-use anyhow::Result;
 use crate::kvs::live::Live;
+use crate::kvs::{KVKey, KeyEncode, impl_key};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

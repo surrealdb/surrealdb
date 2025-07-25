@@ -19,7 +19,7 @@
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, KVKey, impl_key};
+use crate::kvs::{KVKey, KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

@@ -30,10 +30,10 @@ use crate::expr::statements::define::{ApiDefinition, DefineSequenceStatement};
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
-use crate::kvs::key::KVKey;
 use crate::kvs::Transactor;
 use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
+use crate::kvs::key::KVKey;
 use crate::kvs::scanner::Scanner;
 use anyhow::Result;
 use futures::lock::Mutex;
@@ -279,7 +279,12 @@ impl Transaction {
 
 	/// Update a key in the datastore if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn putc<K>(&self, key: &K, val: &K::ValueType, chk: Option<&K::ValueType>) -> Result<()>
+	pub async fn putc<K>(
+		&self,
+		key: &K,
+		val: &K::ValueType,
+		chk: Option<&K::ValueType>,
+	) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{

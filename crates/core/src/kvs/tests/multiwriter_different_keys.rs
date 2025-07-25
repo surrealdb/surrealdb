@@ -11,7 +11,6 @@ use crate::{
 	},
 };
 
-
 pub async fn multiwriter_different_keys(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("7f0153b0-79cf-4922-85ef-61e390970514").unwrap();

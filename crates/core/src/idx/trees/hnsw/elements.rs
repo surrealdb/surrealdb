@@ -1,7 +1,7 @@
 use crate::expr::index::Distance;
+use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use anyhow::Result;
 use dashmap::DashMap;

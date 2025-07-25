@@ -135,7 +135,11 @@ pub async fn putc(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	assert!(tx.putc(&"test", &"tre".as_bytes().to_vec(), Some(&"one".as_bytes().to_vec())).await.is_err());
+	assert!(
+		tx.putc(&"test", &"tre".as_bytes().to_vec(), Some(&"one".as_bytes().to_vec()))
+			.await
+			.is_err()
+	);
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();

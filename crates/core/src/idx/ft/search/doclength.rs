@@ -1,9 +1,9 @@
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore, Payload};
 use crate::idx::trees::store::TreeNodeProvider;
-use crate::idx::IndexKeyBase;
 use crate::kvs::{Transaction, TransactionType};
 use anyhow::Result;
 

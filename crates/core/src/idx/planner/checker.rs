@@ -230,9 +230,7 @@ impl MTreeCondChecker<'_> {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
 				let txn = self.ctx.tx();
-				let rid = doc_ids
-					.get_doc_key(&txn, doc_id)
-					.await?;
+				let rid = doc_ids.get_doc_key(&txn, doc_id).await?;
 				let ent =
 					CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
 						.await?;

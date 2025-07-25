@@ -1,6 +1,6 @@
 //! Stores MTree state and nodes
 use crate::idx::trees::{mtree::MState, store::NodeId};
-use crate::kvs::{impl_key, KVKey};
+use crate::kvs::{KVKey, impl_key};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -69,13 +69,7 @@ impl_key!(Vm<'a>);
 // }
 
 impl<'a> Vm<'a> {
-	pub fn new(
-		ns: &'a str,
-		db: &'a str,
-		tb: &'a str,
-		ix: &'a str,
-		node_id: NodeId,
-	) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

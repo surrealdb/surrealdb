@@ -1,7 +1,7 @@
 //! Stores a DEFINE TABLE AS config definition
+use crate::expr::statements::define::DefineTableStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;

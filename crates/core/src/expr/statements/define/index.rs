@@ -12,8 +12,8 @@ use crate::expr::{Base, Ident, Idioms, Index, Part, Strand, Value};
 #[cfg(target_family = "wasm")]
 use crate::expr::{Output, Values};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
 use crate::kvs::impl_kv_value_revisioned;
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

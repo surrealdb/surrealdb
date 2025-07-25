@@ -1,8 +1,8 @@
 //! Stores Things of an HNSW index
 use crate::idx::trees::hnsw::docs::ElementDocs;
 use crate::idx::trees::vector::SerializedVector;
-use crate::kvs::impl_key;
 use crate::kvs::KVKey;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::sync::Arc;

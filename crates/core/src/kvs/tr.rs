@@ -161,11 +161,9 @@ impl Transactor {
 		let vals = self.inner.getm(keys_encoded).await?;
 
 		vals.into_iter()
-			.map(|v| {
-				match v {
-					Some(v) => K::ValueType::kv_decode_value(v).map(Some),
-					None => Ok(None),
-				}
+			.map(|v| match v {
+				Some(v) => K::ValueType::kv_decode_value(v).map(Some),
+				None => Ok(None),
 			})
 			.collect()
 	}

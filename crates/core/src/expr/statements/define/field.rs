@@ -11,7 +11,7 @@ use crate::expr::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::expr::{Literal, Part};
 use crate::expr::{Relation, TableType};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::{impl_kv_value_revisioned, Transaction};
+use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use anyhow::{Result, bail, ensure};
 
 use revision::revisioned;

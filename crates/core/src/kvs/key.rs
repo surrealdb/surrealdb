@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use roaring::{RoaringBitmap, RoaringTreemap};
 use std::fmt::Debug;
 
-
 pub trait KVKey: serde::Serialize + Debug {
 	type ValueType: KVValue;
 

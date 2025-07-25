@@ -1,9 +1,9 @@
 //! Stores database timestamps
-use crate::vs::VersionStamp;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
 use crate::kvs::{KeyEncode, impl_key};
+use crate::vs::VersionStamp;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 

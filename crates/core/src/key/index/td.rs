@@ -14,12 +14,12 @@
 //! - Supporting term-based document retrieval
 //! - Enabling efficient text search operations
 
-use crate::idx::ft::fulltext::TermDocument;
 use crate::idx::docids::DocId;
+use crate::idx::ft::fulltext::TermDocument;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
 use crate::kvs::KVKey;
+use crate::kvs::impl_key;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 

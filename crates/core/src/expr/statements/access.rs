@@ -898,7 +898,8 @@ async fn compute_purge(
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
-					txn.del(&crate::key::database::access::gr::new(ns, db, &stmt.ac, &gr.id)).await?
+					txn.del(&crate::key::database::access::gr::new(ns, db, &stmt.ac, &gr.id))
+						.await?
 				}
 				_ => {
 					bail!(Error::Unimplemented(

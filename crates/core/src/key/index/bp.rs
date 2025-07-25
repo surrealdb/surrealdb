@@ -3,8 +3,8 @@ use crate::idx::trees::btree::BState;
 use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
 use crate::kvs::KVKey;
+use crate::kvs::impl_key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -36,12 +36,7 @@ impl KVKey for BpRoot<'_> {
 }
 
 impl<'a> BpRoot<'a> {
-	pub fn new(
-		ns: &'a str,
-		db: &'a str,
-		tb: &'a str,
-		ix: &'a str,
-	) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -58,7 +53,6 @@ impl<'a> BpRoot<'a> {
 		}
 	}
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -90,13 +84,7 @@ impl KVKey for Bp<'_> {
 }
 
 impl<'a> Bp<'a> {
-	pub fn new(
-		ns: &'a str,
-		db: &'a str,
-		tb: &'a str,
-		ix: &'a str,
-		node_id: NodeId,
-	) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

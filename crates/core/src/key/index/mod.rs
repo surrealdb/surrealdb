@@ -29,8 +29,8 @@ pub mod tt;
 pub mod vm;
 
 use crate::expr;
-use crate::expr::array::Array;
 use crate::expr::Thing;
+use crate::expr::array::Array;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;

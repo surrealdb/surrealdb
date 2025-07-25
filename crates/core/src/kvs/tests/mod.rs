@@ -8,7 +8,7 @@
 ))]
 
 use super::Datastore;
-use crate::kvs::{clock::SizedClock, KVKey};
+use crate::kvs::{KVKey, clock::SizedClock};
 use std::{future::Future, sync::Arc};
 use uuid::Uuid;
 

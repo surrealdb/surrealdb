@@ -1,6 +1,6 @@
 //! Store appended records for concurrent index building
-use crate::kvs::{impl_key, KVKey};
 use crate::kvs::index::Appending;
+use crate::kvs::{KVKey, impl_key};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 

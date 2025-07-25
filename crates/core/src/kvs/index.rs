@@ -12,7 +12,7 @@ use crate::idx::index::IndexOperation;
 use crate::key::thing;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{impl_kv_value_revisioned, Key, Transaction, TransactionType, Val};
+use crate::kvs::{Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
 use crate::mem::ALLOC;
 use anyhow::{Result, ensure};
 use dashmap::DashMap;
