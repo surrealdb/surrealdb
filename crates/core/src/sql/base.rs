@@ -1,5 +1,4 @@
 use crate::sql::Ident;
-use revision::revisioned;
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]

@@ -1,16 +1,14 @@
-use std::mem;
-
 use reblessive::Stk;
 
 use crate::sql::part::{DestructurePart, Recurse, RecurseInstruction};
 use crate::sql::{Dir, Expr, Field, Fields, Graph, Ident, Idiom, Literal, Param, Part};
-use crate::syn::error::{bail, syntax_error};
-use crate::syn::lexer::compound::{self, NumberKind, Numeric};
+use crate::syn::error::bail;
+use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::token::{Glued, Span, TokenKind, t};
 
 use super::basic::NumberToken;
-use super::mac::{expected, pop_glued, unexpected};
-use super::{GluedValue, ParseResult, Parser};
+use super::mac::{expected, unexpected};
+use super::{ParseResult, Parser};
 
 impl Parser<'_> {
 	pub(super) fn peek_continues_idiom(&mut self) -> bool {
@@ -552,7 +550,7 @@ impl Parser<'_> {
 							let next = self.next();
 							let number = self.lexer.lex_compound(next, compound::numeric)?;
 							let number = match number.value {
-								Numeric::Duration(x) => {
+								Numeric::Duration(_) => {
 									bail!("Unexpected token `duration` expected a number", @number.span );
 								}
 								Numeric::Integer(x) => Expr::Literal(Literal::Integer(x)),

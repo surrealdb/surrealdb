@@ -1,8 +1,6 @@
-use crate::expr::statements::info::InfoStructure;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::Deref;
 
 use super::Expr;
 

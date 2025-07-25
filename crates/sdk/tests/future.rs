@@ -1,11 +1,9 @@
-mod parse;
-use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb::expr::Value;
+use surrealdb_core::syn;
 
 #[tokio::test]
 async fn future_function_arguments() -> Result<()> {
@@ -23,7 +21,7 @@ async fn future_function_arguments() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				a: 'test@surrealdb.com',
@@ -33,7 +31,8 @@ async fn future_function_arguments() -> Result<()> {
 				y: 'b-test',
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -51,7 +50,7 @@ async fn future_disabled() -> Result<()> {
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("<future> { 123 }");
+	let val = syn::value("<future> { 123 }").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

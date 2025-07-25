@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Write};
 
 use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Ident, Part, Value};
+use crate::expr::{Ident, Value};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};

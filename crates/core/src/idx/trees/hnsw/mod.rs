@@ -429,7 +429,6 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::ctx::{Context, MutableContext};
-	use crate::expr::RecordIdKeyLit;
 	use crate::expr::index::{Distance, HnswParams, VectorType};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::docids::DocId;

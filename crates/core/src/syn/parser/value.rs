@@ -5,7 +5,7 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 
-use crate::sql::{self, Ident};
+use crate::sql::Ident;
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::mac::{expected, pop_glued};

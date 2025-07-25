@@ -5,6 +5,7 @@ use std::time::Duration;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use surrealdb::sql::RecordIdKeyLit;
+use surrealdb_core::val::RecordIdKey;
 
 mod routines;
 
@@ -12,7 +13,7 @@ static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Record {
-	field: RecordIdKeyLit,
+	field: RecordIdKey,
 }
 
 pub(super) async fn init(target: &str) {

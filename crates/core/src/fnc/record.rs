@@ -1,15 +1,11 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::expr::FlowResultExt as _;
 use crate::expr::paths::ID;
-use crate::expr::{FlowResultExt as _, Idiom, Kind, Part, kind::KindLiteral};
-use crate::val::{Array, RecordId, Value};
-use anyhow::{Result, ensure};
+use crate::val::{RecordId, Value};
+use anyhow::Result;
 use reblessive::tree::Stk;
-
-use super::args::Optional;
 
 pub async fn exists(
 	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),

@@ -10,6 +10,8 @@ mod http_integration {
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
 	use surrealdb::sql;
+	use surrealdb_core::sql::{Expr, Literal, RecordIdKeyLit, RecordIdLit};
+	use surrealdb_core::val::{Object, RecordId, Value};
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -1761,41 +1763,6 @@ mod http_integration {
 				.send()
 				.await?;
 			assert!(res.status().is_success(), "body: {}", res.text().await?);
-		}
-
-		{
-			let mut request = sql::Object::default();
-			request.insert("method".to_string(), "signup".into());
-
-			let stmt: sql::Statement = {
-				let mut tmp = sql::statements::CreateStatement::default();
-				let rid = sql::thing("foo:42").unwrap();
-				let mut tmp_values = sql::SqlValues::default();
-				tmp_values.0 = vec![rid.into()];
-				tmp.what = tmp_values;
-				sql::Statement::Create(tmp)
-			};
-
-			let mut obj = sql::Object::default();
-			obj.insert("email".to_string(), sql::SqlValue::Query(stmt.into()));
-			obj.insert("pass".to_string(), "foo".into());
-			request.insert(
-				"params".to_string(),
-				sql::SqlValue::Array(vec![sql::SqlValue::Object(obj)].into()),
-			);
-
-			let req: sql::SqlValue = sql::SqlValue::Object(request);
-
-			let req = sql::serde::serialize(&req).unwrap();
-
-			let res = client.post(rpc_url).body(req).send().await?;
-
-			let body = res.text().await?;
-
-			assert!(
-				body.contains("Found a non-computed value where they are not allowed"),
-				"{body:?}"
-			);
 		}
 
 		Ok(())

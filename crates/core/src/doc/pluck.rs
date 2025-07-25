@@ -2,7 +2,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
-use crate::expr::idiom::Idiom;
 use crate::expr::output::Output;
 use crate::expr::paths::META;
 use crate::expr::permission::Permission;

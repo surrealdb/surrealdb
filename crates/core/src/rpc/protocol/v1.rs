@@ -1,7 +1,4 @@
 use anyhow::{Result, ensure};
-#[cfg(not(target_family = "wasm"))]
-use async_graphql::BatchRequest;
-use futures::TryFutureExt;
 use std::mem;
 use std::sync::Arc;
 
@@ -520,11 +517,6 @@ pub trait RpcProtocolV1: RpcContext {
 		// Process the method arguments
 		let (what, data) =
 			extract_args::<(Value, Value)>(params.0).ok_or(RpcError::InvalidParams)?;
-		let only = match what {
-			Value::Strand(_) => true,
-			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
-			_ => false,
-		};
 
 		let what = match what {
 			Value::Null | Value::None => None,
@@ -1022,7 +1014,7 @@ pub trait RpcProtocolV1: RpcContext {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	async fn graphql(&self, params: Array) -> Result<Data, RpcError> {
+	async fn graphql(&self, _params: Array) -> Result<Data, RpcError> {
 		//use crate::gql;
 
 		// Check if the user is allowed to query

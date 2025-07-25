@@ -9,7 +9,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
 use crate::expr::statements::access::AccessGrantStore;
-use crate::expr::statements::{AccessGrant, DefineAccessStatement, access};
+use crate::expr::statements::{DefineAccessStatement, access};
 use crate::expr::{AccessType, access_type};
 use crate::iam::Auth;
 use crate::iam::issue::{config, expiration};
@@ -802,7 +802,6 @@ pub fn verify_grant_bearer(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::fnc::util::math::top::Top;
 	use crate::iam::Role;
 	use crate::sql::statements::define::user::PassType;
 	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};

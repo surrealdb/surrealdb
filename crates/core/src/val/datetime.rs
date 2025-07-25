@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::expr::escape::QuoteStr;
 use crate::syn;
 use crate::val::{Duration, Strand, TrySub};
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;

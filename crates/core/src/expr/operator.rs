@@ -250,7 +250,6 @@ impl fmt::Display for AssignOperator {
 /// neighbours.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub enum BindingPower {
-	Base,
 	Or,
 	And,
 	Equality,

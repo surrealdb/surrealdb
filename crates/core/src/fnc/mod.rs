@@ -585,8 +585,8 @@ pub async fn asynchronous(
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 		//
-		"value::diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-		"value::patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+		"value::diff" => value::diff.await,
+		"value::patch" => value::patch.await,
 	)
 }
 
@@ -737,8 +737,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -796,8 +796,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -863,8 +863,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 
@@ -930,8 +930,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -994,8 +994,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1060,8 +1060,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1138,8 +1138,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1251,8 +1251,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 			)
 		}
 		Value::Datetime(d) => {
@@ -1327,8 +1327,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1399,8 +1399,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1457,8 +1457,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)

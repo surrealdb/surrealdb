@@ -15,7 +15,8 @@ use serde::Serialize;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::iam::signin::signin;
-use surrealdb::sql::SqlValue;
+use surrealdb_core::syn;
+use surrealdb_core::val::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 #[derive(Serialize)]
@@ -63,9 +64,9 @@ async fn handler(
 	// Convert the HTTP body into text
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the provided data as JSON
-	match surrealdb::sql::json(data) {
+	match syn::json(data) {
 		// The provided value was an object
-		Ok(SqlValue::Object(vars)) => {
+		Ok(Value::Object(vars)) => {
 			match signin(kvs, &mut session, vars.into()).await {
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {
@@ -80,7 +81,9 @@ async fn handler(
 					// NOTE: Only the token is returned in a plain text response.
 					Some(Accept::TextPlain) => Ok(Output::Text(v.token)),
 					// Internal serialization
-					Some(Accept::Surrealdb) => Ok(Output::full(&Success::new(v.token, v.refresh))),
+					Some(Accept::Surrealdb) => {
+						Ok(Output::bincode(&Success::new(v.token, v.refresh)))
+					}
 					// Return nothing
 					None => Ok(Output::None),
 					// An incorrect content-type was requested

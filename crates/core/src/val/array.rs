@@ -1,20 +1,14 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::Expr;
 use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
-use crate::expr::{Expr, Literal};
 use crate::val::Value;
 use anyhow::{Result, ensure};
-use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::{Deref, DerefMut};
-
-use super::FlowResult;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]

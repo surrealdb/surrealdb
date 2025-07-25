@@ -2,8 +2,6 @@ use crate::sql::access::AccessDuration;
 use crate::sql::{AccessType, Base, Expr, Ident};
 use crate::val::Strand;
 
-use rand::Rng;
-use rand::distributions::Alphanumeric;
 use std::fmt::{self, Display};
 
 use super::DefineKind;

@@ -17,7 +17,6 @@ pub(crate) mod validator;
 mod version;
 mod version_client;
 
-use crate::cli::validator::parser::env_filter::{CustomEnvFilter, CustomEnvFilterParser};
 use crate::cli::version_client::VersionClient;
 #[cfg(debug_assertions)]
 use crate::cnf::DEBUG_BUILD_WARNING;
@@ -38,6 +37,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
+use validator::parser::tracing::{CustomFilter, CustomFilterParser};
 use version::VersionCommandArguments;
 
 const INFO: &str = "

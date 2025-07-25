@@ -77,7 +77,8 @@ impl<'a> KnnConditionRewriter<'a> {
 			| Expr::Alter(_)
 			| Expr::Info(_)
 			| Expr::Foreach(_)
-			| Expr::Let(_) => Some(v.clone()),
+			| Expr::Let(_)
+			| Expr::Sleep(_) => Some(v.clone()),
 
 			Expr::Block(_) => None,
 			Expr::FunctionCall(function_call) => {

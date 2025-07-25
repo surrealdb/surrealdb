@@ -16,11 +16,25 @@ use surrealdb_core::expr::{
 	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
 	RelateStatement, RemoveStatement, SelectStatement, TopLevelExpr, UpdateStatement, UseStatement,
 };
-use surrealdb_core::{expr, val};
+use surrealdb_core::sql::Ast;
+use surrealdb_core::val;
 
 pub struct Query(pub(crate) ValidQuery);
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery: into_query::Sealed {}
+
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
+impl IntoQuery for Ast {}
+impl into_query::Sealed for Ast {
+	fn into_query(self) -> Query {
+		Query(ValidQuery::Normal {
+			query: self.expressions.into_iter().map(From::from).collect(),
+			register_live_queries: true,
+			bindings: Default::default(),
+		})
+	}
+}
 
 #[diagnostic::do_not_recommend]
 #[doc(hidden)]

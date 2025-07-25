@@ -1,5 +1,4 @@
 use super::escape::EscapeKey;
-use crate::key::index::bt::Bt;
 use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::{Ident, Idiom};
 use crate::val::{Duration, Strand};

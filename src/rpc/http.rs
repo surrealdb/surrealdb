@@ -3,16 +3,16 @@ use std::sync::Arc;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{Data, RpcContext, RpcError, RpcProtocolV1, RpcProtocolV2};
-use surrealdb_core::sql::Array;
+use surrealdb_core::val::{Array, Strand, Value};
 use tokio::sync::Semaphore;
 
-use surrealdb_core::gql::{Pessimistic, SchemaCache};
+//use surrealdb_core::gql::{Pessimistic, SchemaCache};
 
 pub struct Http {
 	pub kvs: Arc<Datastore>,
 	pub lock: Arc<Semaphore>,
 	pub session: Arc<Session>,
-	pub gql_schema: SchemaCache<Pessimistic>,
+	//pub gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Http {
@@ -21,7 +21,7 @@ impl Http {
 			kvs: kvs.clone(),
 			lock: Arc::new(Semaphore::new(1)),
 			session: Arc::new(session),
-			gql_schema: SchemaCache::new(kvs.clone()),
+			//gql_schema: SchemaCache::new(kvs.clone()),
 		}
 	}
 }
@@ -45,7 +45,8 @@ impl RpcContext for Http {
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> Data {
-		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
+		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
+		Data::Other(value)
 	}
 
 	// ------------------------------
@@ -64,12 +65,14 @@ impl RpcContext for Http {
 	// GraphQL
 	// ------------------------------
 
-	/// GraphQL queries are enabled on HTTP
-	const GQL_SUPPORT: bool = true;
+	// GraphQL queries are enabled on HTTP
+	//const GQL_SUPPORT: bool = true;
 
+	/*
 	fn graphql_schema_cache(&self) -> &SchemaCache {
 		&self.gql_schema
 	}
+	*/
 }
 
 impl RpcProtocolV1 for Http {

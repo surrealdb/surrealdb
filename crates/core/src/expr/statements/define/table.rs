@@ -15,7 +15,7 @@ use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
-use revision::{Error as RevisionError, revisioned};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use std::sync::Arc;
@@ -155,10 +155,6 @@ impl DefineTableStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-
-	fn convert_cache_ts(&self, _revision: u16, _value: Uuid) -> Result<(), RevisionError> {
-		Ok(())
 	}
 }
 

@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::SelectStatement;
-use crate::sql::{Field, Fields, Idioms, Limit, Order, Split, Splits, Start};
+use crate::sql::{Fields, Idioms, Limit, Order, Split, Splits, Start};
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Span, t};

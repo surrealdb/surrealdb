@@ -1,4 +1,4 @@
-use crate::expr::{Expr, TopLevelExpr};
+use crate::expr::TopLevelExpr;
 use crate::val::{Object, Strand, Value};
 use anyhow::Result;
 use revision::{Revisioned, revisioned};

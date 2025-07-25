@@ -1,19 +1,14 @@
+use super::statements::info::InfoStructure;
+use super::{Idiom, Value};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
 use crate::expr::{Expr, Ident};
-use crate::val::array::Uniq as _;
-use crate::val::{Array, RecordId};
 use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-
-use super::statements::info::InfoStructure;
-use super::{Idiom, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -77,11 +72,13 @@ impl InfoStructure for ReferenceDeleteStrategy {
 pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);
 
 impl Refs {
+	// remove once reintroducing refences
+	#[allow(dead_code)]
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
+		_ctx: &Context,
+		_opt: &Options,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		bail!(Error::Unimplemented("Refs::compute not yet implemented".to_owned()))
 		/*

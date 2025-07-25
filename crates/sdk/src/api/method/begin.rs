@@ -3,7 +3,6 @@ use crate::api::{Connection, Result, Surreal};
 use std::future::IntoFuture;
 use std::ops::Deref;
 use surrealdb_core::expr::TopLevelExpr;
-use surrealdb_core::sql::statements::BeginStatement;
 
 /// A beginning of a transaction
 #[derive(Debug)]

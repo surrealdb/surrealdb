@@ -1,12 +1,12 @@
-mod parse;
-use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::{new_ds, with_enough_stack};
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::expr::Thing;
-use surrealdb::expr::Value;
+use surrealdb_core::{
+	strand, syn,
+	val::{Array, RecordId},
+};
 
 #[tokio::test]
 async fn field_definition_value_reference() -> Result<()> {
@@ -31,7 +31,7 @@ async fn field_definition_value_reference() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: product:one,
@@ -42,11 +42,12 @@ async fn field_definition_value_reference() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: contains:test,
@@ -54,11 +55,12 @@ async fn field_definition_value_reference() -> Result<()> {
 				out: product:two,
 			},
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: product:one,
@@ -69,28 +71,12 @@ async fn field_definition_value_reference() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"[
-			{
-				id: product:one,
-				subproducts: [
-					product:two,
-				],
-			},
-			{
-				id: product:two,
-				subproducts: [],
-			},
-		]",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: product:one,
@@ -103,7 +89,26 @@ async fn field_definition_value_reference() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-	);
+	)
+	.unwrap();
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = syn::value(
+		"[
+			{
+				id: product:one,
+				subproducts: [
+					product:two,
+				],
+			},
+			{
+				id: product:two,
+				subproducts: [],
+			},
+		]",
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -133,7 +138,7 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 		tmp.unwrap();
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = syn::value(
 			"[
 			{
 				id: product:one,
@@ -144,11 +149,12 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.unwrap();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = syn::value(
 			"[
 			{
 				id: contains:test,
@@ -156,11 +162,12 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				out: product:two,
 			},
 		]",
-		);
+		)
+		.unwrap();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = syn::value(
 			"[
 			{
 				id: product:one,
@@ -173,11 +180,12 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.unwrap();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = syn::value(
 			"[
 			{
 				id: product:one,
@@ -190,11 +198,12 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.unwrap();
 		assert_eq!(tmp, val);
 		//
 		let tmp = res.remove(0).result?;
-		let val = Value::parse(
+		let val = syn::value(
 			"[
 			{
 				id: product:one,
@@ -207,7 +216,8 @@ async fn field_definition_value_reference_with_future() -> Result<()> {
 				subproducts: [],
 			},
 		]",
-		);
+		)
+		.unwrap();
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -242,7 +252,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: user:one,
@@ -251,11 +261,12 @@ async fn field_definition_edge_permissions() -> Result<()> {
 				id: user:two,
 			},
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: business:one,
@@ -266,19 +277,25 @@ async fn field_definition_edge_permissions() -> Result<()> {
 				owner: user:two,
 			},
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let sql = "
 		RELATE business:one->contact:one->business:two;
 		RELATE business:two->contact:two->business:one;
 	";
-	let ses = Session::for_record("test", "test", "test", Thing::from(("user", "one")).into());
+	let ses = Session::for_record(
+		"test",
+		"test",
+		"test",
+		RecordId::new("user".to_owned(), strand!("one").to_owned()).into(),
+	);
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: contact:one,
@@ -286,11 +303,12 @@ async fn field_definition_edge_permissions() -> Result<()> {
 				out: business:two,
 			},
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[]");
+	let val = Array::new().into();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -317,25 +335,27 @@ async fn field_definition_readonly() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				birthdate: d'2023-12-13T21:27:55.632Z',
 				id: person:test
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				birthdate: d'2023-12-13T21:27:55.632Z',
 				id: person:test
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;

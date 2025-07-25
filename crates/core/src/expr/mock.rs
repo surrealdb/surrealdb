@@ -4,8 +4,6 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Mock";
-
 pub struct IntoIter {
 	model: Mock,
 	index: u64,
@@ -46,7 +44,6 @@ impl Iterator for IntoIter {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Mock")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Mock {
 	Count(String, u64),

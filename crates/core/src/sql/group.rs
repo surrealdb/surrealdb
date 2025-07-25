@@ -1,7 +1,6 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use std::fmt::{self, Display, Formatter};
-use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Groups(pub Vec<Group>);

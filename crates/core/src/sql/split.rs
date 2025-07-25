@@ -1,7 +1,5 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 

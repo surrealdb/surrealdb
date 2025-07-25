@@ -2,9 +2,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{ControlFlow, Expr, FlowResult, Permission};
-use crate::iam::Action;
-use crate::val::{Value, value};
+use crate::expr::{ControlFlow, FlowResult};
+use crate::val::Value;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -12,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[cfg(feature = "ml")]
-use crate::expr::Permission;
+use crate::expr::{Expr, Permission};
 #[cfg(feature = "ml")]
 use crate::iam::Action;
 #[cfg(feature = "ml")]
@@ -31,11 +30,8 @@ use surrealml::storage::surml_file::SurMlFile;
 #[cfg(feature = "ml")]
 const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Model";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Model")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Model {

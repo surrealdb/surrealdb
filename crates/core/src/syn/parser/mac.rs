@@ -73,27 +73,6 @@ macro_rules! expected_whitespace {
 	}};
 }
 
-#[cfg(test)]
-macro_rules! test_parse {
-	($func:ident$( ( $($e:expr_2021),* $(,)? ))? , $t:expr_2021) => {{
-		let mut parser = $crate::syn::parser::Parser::new($t.as_bytes());
-		let mut stack = reblessive::Stack::new();
-		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
-	}};
-}
-
-#[cfg(test)]
-macro_rules! test_parse_with_settings {
-	($func:ident$( ( $($e:expr_2021),* $(,)? ))? , $t:expr_2021, $s:expr_2021) => {{
-		let mut parser = $crate::syn::parser::Parser::new_with_settings(
-			$t.as_bytes(),
-			$s,
-		);
-		let mut stack = reblessive::Stack::new();
-		stack.enter(|ctx| parser.$func(ctx,$($($e),*)*)).finish()
-	}};
-}
-
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr_2021 => { $($t:tt)* }) => {{
 		if $this.settings.object_recursion_limit == 0 {
@@ -166,8 +145,3 @@ pub(crate) use {
 	enter_object_recursion, enter_query_recursion, expected, expected_whitespace, pop_glued,
 	unexpected,
 };
-
-#[cfg(test)]
-pub(crate) use test_parse;
-#[cfg(test)]
-pub(crate) use test_parse_with_settings;

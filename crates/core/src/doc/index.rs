@@ -16,7 +16,6 @@ use crate::kvs::TransactionType;
 use crate::val::{Array, RecordId, Value};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use tracing::span::Record;
 
 impl Document {
 	pub(super) async fn store_index_data(

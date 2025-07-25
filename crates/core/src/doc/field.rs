@@ -7,7 +7,6 @@ use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
 use crate::expr::permission::Permission;
-use crate::expr::reference::Refs;
 use crate::expr::statements::DefineFieldStatement;
 use crate::expr::statements::define::DefineDefault;
 use crate::expr::{FlowResultExt as _, Part};
@@ -204,30 +203,32 @@ impl Document {
 				// document, and check if the new
 				// field value is now different to
 				// the old field value in any way.
-				if fd.readonly && !self.is_new() && val.ne(&*old) {
-					// Check the data clause type
-					match stm.data() {
-						// If the field is NONE, we assume
-						// that the field was ommitted when
-						// using a CONTENT clause, and we
-						// revert the value to the old value.
-						Some(Data::ContentExpression(_)) if val.is_none() => {
-							self.current
-								.doc
-								.to_mut()
-								.set(stk, ctx, opt, &k, old.as_ref().clone())
-								.await?;
-							continue;
-						}
-						// If the field has been modified
-						// and the user didn't use a CONTENT
-						// clause, then this should not be
-						// allowed, and we throw an error.
-						_ => {
-							bail!(Error::FieldReadonly {
-								field: fd.name.clone(),
-								thing: rid.to_string(),
-							});
+				if fd.readonly && !self.is_new() {
+					if val.ne(&*old) {
+						// Check the data clause type
+						match stm.data() {
+							// If the field is NONE, we assume
+							// that the field was ommitted when
+							// using a CONTENT clause, and we
+							// revert the value to the old value.
+							Some(Data::ContentExpression(_)) if val.is_none() => {
+								self.current
+									.doc
+									.to_mut()
+									.set(stk, ctx, opt, &k, old.as_ref().clone())
+									.await?;
+								continue;
+							}
+							// If the field has been modified
+							// and the user didn't use a CONTENT
+							// clause, then this should not be
+							// allowed, and we throw an error.
+							_ => {
+								bail!(Error::FieldReadonly {
+									field: fd.name.clone(),
+									thing: rid.to_string(),
+								});
+							}
 						}
 					}
 					// If this field was not modified then
@@ -772,7 +773,8 @@ impl FieldEditContext<'_> {
 		}
 	}
 
-	/// Process any `TYPE reference` clause for the field definition
+	// Process any `TYPE reference` clause for the field definition
+	/*
 	async fn process_refs_type(&mut self) -> Result<Option<Refs>> {
 		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(None);
@@ -811,4 +813,5 @@ impl FieldEditContext<'_> {
 
 		Ok(Some(refs))
 	}
+	*/
 }

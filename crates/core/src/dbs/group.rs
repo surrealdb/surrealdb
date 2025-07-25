@@ -236,7 +236,7 @@ impl OptimisedAggregate {
 
 impl Aggregator {
 	fn prepare(&mut self, expr: &Expr) {
-		let (a, f) = match expr {
+		let (a, _) = match expr {
 			Expr::FunctionCall(f) => (OptimisedAggregate::from_function_call(f), Some(f)),
 			_ => {
 				// We set it only if we don't already have an array

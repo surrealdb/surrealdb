@@ -1,6 +1,7 @@
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use surrealdb::sql::RecordIdKeyLit;
+use surrealdb_core::val::RecordIdKey;
 use tokio::runtime::Runtime;
 use tokio::task::JoinSet;
 
@@ -15,7 +16,7 @@ impl Read {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", RecordIdKeyLit::rand().to_raw()),
+			table_name: format!("table_{}", RecordIdKey::rand().to_string()),
 		}
 	}
 }
@@ -33,7 +34,7 @@ impl super::Routine for Read {
 					let _: Option<Record> = client
 						.create((table_name, task_id as i64))
 						.content(Record {
-							field: RecordIdKeyLit::rand(),
+							field: RecordIdKey::rand(),
 						})
 						.await
 						.expect("[setup] create record failed")

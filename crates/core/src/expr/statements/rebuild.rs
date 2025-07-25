@@ -24,10 +24,6 @@ pub enum RebuildStatement {
 }
 
 impl RebuildStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn read_only(&self) -> bool {
-		false
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

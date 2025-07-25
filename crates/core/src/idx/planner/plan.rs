@@ -1,6 +1,6 @@
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::with::With;
-use crate::expr::{self, BinaryOperator, Expr, Idiom};
+use crate::expr::{BinaryOperator, Expr, Idiom};
 use crate::idx::ft::search::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,

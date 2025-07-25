@@ -160,7 +160,7 @@ impl Value {
 							let mut new_res = Vec::new();
 							// TODO: Look into why this is unused, don't just remove the unused
 							// var.
-							for (i, v) in v.0.iter().enumerate() {
+							for v in v.0.iter() {
 								let cur = v.clone().into();
 								if !stk
 									.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))

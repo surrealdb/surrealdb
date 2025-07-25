@@ -201,9 +201,10 @@ impl Default for WriteMutationSet {
 	}
 }
 
-/*
 #[cfg(test)]
 mod tests {
+	use crate::expr::Ident;
+
 	#[test]
 	fn serialization() {
 		use super::*;
@@ -214,24 +215,30 @@ mod tests {
 				"mytb".to_string(),
 				vec![
 					TableMutation::Set(
-						RecordId::from(("mytb".to_string(), "tobie".to_string())),
+						RecordId::new("mytb".to_string(), strand!("tobie").to_owned()),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
-								Value::from(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+								Value::from(RecordId::new(
+									"mytb".to_owned(),
+									strand!("tobie").to_owned(),
+								)),
 							),
 							("note", Value::from("surreal")),
 						]))),
 					),
-					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+					TableMutation::Del(RecordId::new(
+						"mytb".to_owned(),
+						strand!("tobie").to_owned(),
+					)),
 					TableMutation::Def(DefineTableStatement {
-						name: "mytb".into(),
+						name: Ident::new("mytb".to_owned()).unwrap(),
 						..DefineTableStatement::default()
 					}),
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json();
+		let v = cs.into_value().into_json_value().unwrap();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
@@ -249,51 +256,57 @@ mod tests {
 				"mytb".to_string(),
 				vec![
 					TableMutation::SetWithDiff(
-						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						RecordId::new("mytb".to_owned(), strand!("tobie").to_owned()),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
-								Value::from(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+								Value::from(RecordId::new(
+									"mytb".to_owned(),
+									strand!("tobie").to_owned(),
+								)),
 							),
 							("note", Value::from("surreal")),
 						]))),
 						vec![Operation::Add {
-							path: "/note".into(),
+							path: vec!["note".to_owned()],
 							value: Value::from("surreal"),
 						}],
 					),
 					TableMutation::SetWithDiff(
-						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						RecordId::new("mytb".to_owned(), strand!("tobie").to_owned()),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
-								Value::from(Thing::from((
-									"mytb".to_string(),
-									"tobie2".to_string(),
-								))),
+								Value::from(RecordId::new(
+									"mytb".to_owned(),
+									strand!("tobie2").to_owned(),
+								)),
 							),
 							("note", Value::from("surreal")),
 						]))),
 						vec![Operation::Remove {
-							path: "/temp".into(),
+							path: vec!["temp".to_owned()],
 						}],
 					),
-					TableMutation::Del(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+					TableMutation::Del(RecordId::new(
+						"mytb".to_owned(),
+						strand!("tobie").to_owned(),
+					)),
 					TableMutation::DelWithOriginal(
-						Thing::from(("mytb".to_string(), "tobie".to_string())),
+						RecordId::new("mytb".to_owned(), strand!("tobie").to_owned()),
 						Value::Object(Object::from(map! {
-								"id" => Value::from(Thing::from(("mytb".to_string(), "tobie".to_string()))),
+								"id" => Value::from(RecordId::new("mytb".to_owned(),strand!("tobie").to_owned())),
 								"note" => Value::from("surreal"),
 						})),
 					),
 					TableMutation::Def(DefineTableStatement {
-						name: "mytb".into(),
+						name: Ident::new("mytb".to_owned()).unwrap(),
 						..DefineTableStatement::default()
 					}),
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json();
+		let v = cs.into_value().into_json_value().unwrap();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
@@ -301,4 +314,3 @@ mod tests {
 		);
 	}
 }
-*/

@@ -1,5 +1,4 @@
 //! Stores a graph edge pointer
-use crate::expr::id::RecordIdKeyLit;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KeyEncode, impl_key};
 use crate::val::RecordIdKey;

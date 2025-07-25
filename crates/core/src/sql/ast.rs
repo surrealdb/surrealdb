@@ -3,7 +3,8 @@ use std::fmt;
 use crate::expr;
 use crate::sql::Expr;
 use crate::sql::statements::{
-	AccessStatement, KillStatement, LiveStatement, OptionStatement, RebuildStatement, UseStatement,
+	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
+	ShowStatement, UseStatement,
 };
 
 #[derive(Debug)]
@@ -45,6 +46,8 @@ pub enum TopLevelExpr {
 	Live(Box<LiveStatement>),
 	Option(OptionStatement),
 	Use(UseStatement),
+	Show(ShowStatement),
+	Analyze(AnalyzeStatement),
 	Expr(Expr),
 }
 
@@ -68,6 +71,12 @@ impl From<TopLevelExpr> for crate::expr::TopLevelExpr {
 			}
 			TopLevelExpr::Use(use_statement) => {
 				crate::expr::TopLevelExpr::Use(use_statement.into())
+			}
+			TopLevelExpr::Show(show_statement) => {
+				crate::expr::TopLevelExpr::Show(show_statement.into())
+			}
+			TopLevelExpr::Analyze(analyze_statement) => {
+				crate::expr::TopLevelExpr::Analyze(analyze_statement.into())
 			}
 			TopLevelExpr::Expr(expr) => crate::expr::TopLevelExpr::Expr(expr.into()),
 		}
@@ -95,6 +104,12 @@ impl From<crate::expr::TopLevelExpr> for TopLevelExpr {
 			crate::expr::TopLevelExpr::Use(use_statement) => {
 				TopLevelExpr::Use(use_statement.into())
 			}
+			crate::expr::TopLevelExpr::Show(show_statement) => {
+				TopLevelExpr::Show(show_statement.into())
+			}
+			crate::expr::TopLevelExpr::Analyze(analyze_statement) => {
+				TopLevelExpr::Analyze(analyze_statement.into())
+			}
 			crate::expr::TopLevelExpr::Expr(expr) => TopLevelExpr::Expr(expr.into()),
 		}
 	}
@@ -111,6 +126,8 @@ impl fmt::Display for TopLevelExpr {
 			TopLevelExpr::Live(s) => s.fmt(f),
 			TopLevelExpr::Option(s) => s.fmt(f),
 			TopLevelExpr::Use(s) => s.fmt(f),
+			TopLevelExpr::Show(s) => s.fmt(f),
+			TopLevelExpr::Analyze(s) => s.fmt(f),
 			TopLevelExpr::Expr(e) => e.fmt(f),
 		}
 	}

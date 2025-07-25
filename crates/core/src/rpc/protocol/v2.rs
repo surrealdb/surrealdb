@@ -454,7 +454,7 @@ pub trait RpcProtocolV2: RpcContext {
 		// Specify the query parameters
 		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.session(), var).await?;
+		let res = self.kvs().process(ast, &self.session(), var).await?;
 
 		let res = res.into_iter().next().unwrap();
 
@@ -683,8 +683,6 @@ pub trait RpcProtocolV2: RpcContext {
 			explain: None,
 		};
 		let ast = Ast::single_expr(Expr::Update(Box::new(sql)));
-		// Specify the query parameters
-		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
@@ -740,8 +738,6 @@ pub trait RpcProtocolV2: RpcContext {
 			uniq: opts.unique,
 			parallel: false,
 		}));
-		// Specify the query parameters
-		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(Ast::single_expr(expr), &self.session(), var).await?;
 		// Extract the first query result
@@ -790,8 +786,6 @@ pub trait RpcProtocolV2: RpcContext {
 			explain: None,
 		}));
 		let ast = Ast::single_expr(sql);
-		// Specify the query parameters
-		let var = Some(self.session().variables.clone());
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.session(), var).await?;
 		// Extract the first query result
@@ -913,7 +907,7 @@ pub trait RpcProtocolV2: RpcContext {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	async fn graphql(&self, params: Array) -> Result<Data, RpcError> {
+	async fn graphql(&self, _params: Array) -> Result<Data, RpcError> {
 		//use crate::gql;
 
 		// Check if the user is allowed to query

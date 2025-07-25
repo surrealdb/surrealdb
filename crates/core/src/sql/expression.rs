@@ -3,8 +3,8 @@ use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
 	IfelseStatement, InfoStatement, InsertStatement, OutputStatement, RebuildStatement,
-	RelateStatement, RemoveStatement, SelectStatement, SetStatement, UpdateStatement,
-	UpsertStatement,
+	RelateStatement, RemoveStatement, SelectStatement, SetStatement, SleepStatement,
+	UpdateStatement, UpsertStatement,
 };
 use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, FunctionCall, Ident, Idiom, Literal, Mock, Param,
@@ -60,6 +60,7 @@ pub enum Expr {
 	Info(Box<InfoStatement>),
 	Foreach(Box<ForeachStatement>),
 	Let(Box<SetStatement>),
+	Sleep(Box<SleepStatement>),
 }
 
 impl Expr {
@@ -151,6 +152,7 @@ impl fmt::Display for Expr {
 			Expr::Info(s) => write!(f, "{s}"),
 			Expr::Foreach(s) => write!(f, "{s}"),
 			Expr::Let(s) => write!(f, "{s}"),
+			Expr::Sleep(s) => write!(f, "{s}"),
 		}
 	}
 }
@@ -210,6 +212,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Info(s) => crate::expr::Expr::Info(Box::new((*s).into())),
 			Expr::Foreach(s) => crate::expr::Expr::Foreach(Box::new((*s).into())),
 			Expr::Let(s) => crate::expr::Expr::Let(Box::new((*s).into())),
+			Expr::Sleep(s) => crate::expr::Expr::Sleep(Box::new((*s).into())),
 		}
 	}
 }
@@ -269,6 +272,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Info(s) => Expr::Info(Box::new((*s).into())),
 			crate::expr::Expr::Foreach(s) => Expr::Foreach(Box::new((*s).into())),
 			crate::expr::Expr::Let(s) => Expr::Let(Box::new((*s).into())),
+			crate::expr::Expr::Sleep(s) => Expr::Sleep(Box::new((*s).into())),
 		}
 	}
 }

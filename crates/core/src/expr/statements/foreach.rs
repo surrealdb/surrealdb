@@ -79,7 +79,7 @@ impl ForeachStatement {
 			let key = self.param.clone().ident().into_string();
 			let mut ctx = MutableContext::unfreeze(ctx)?;
 			ctx.add_value(key, v.into());
-			let mut ctx = ctx.freeze();
+			let ctx = ctx.freeze();
 			// Loop over the code block statements
 			for v in self.block.iter() {
 				// Compute each block entry

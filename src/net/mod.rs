@@ -183,8 +183,8 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 		.merge(signup::router())
 		.merge(key::router())
 		.merge(ml::router())
-		.merge(api::router())
-		.merge(gql::router(ds.clone()));
+		.merge(api::router());
+	//.merge(gql::router(ds.clone()));
 
 	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 		warn!(

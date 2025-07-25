@@ -1,7 +1,5 @@
 use crate::val::Value;
 
-use super::error::RpcError;
-
 pub trait Extractor: Sized {
 	fn take<I>(iterator: &mut I) -> Option<Self>
 	where

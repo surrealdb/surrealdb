@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Operation;
-use crate::expr::idiom::Idiom;
 use crate::val::{Closure, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -18,25 +17,11 @@ pub async fn chain(
 	}
 }
 
-pub async fn diff(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(val1, val2): (Value, Value),
-) -> Result<Value> {
-	if let Some(opt) = opt {
-		Ok(Operation::operations_to_value(val1.diff(&val2)))
-	} else {
-		Ok(Value::None)
-	}
+pub async fn diff((val1, val2): (Value, Value)) -> Result<Value> {
+	Ok(Operation::operations_to_value(val1.diff(&val2)))
 }
 
-pub async fn patch(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
-	(mut val, diff): (Value, Value),
-) -> Result<Value> {
-	if let Some(opt) = opt {
-		val.patch(diff)?;
-		Ok(val)
-	} else {
-		Ok(Value::None)
-	}
+pub async fn patch((mut val, diff): (Value, Value)) -> Result<Value> {
+	val.patch(diff)?;
+	Ok(val)
 }

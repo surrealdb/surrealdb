@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Function, Ident, Idiom, Literal};
+use crate::expr::{Expr, Function, Idiom};
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Strand, Value};

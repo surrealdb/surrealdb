@@ -1,4 +1,3 @@
-use crate::ctx::MutableContext;
 use crate::dbs::Variables;
 use crate::iam::{Auth, Level, Role};
 use crate::val::{Strand, Value};

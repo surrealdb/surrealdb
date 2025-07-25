@@ -1,6 +1,7 @@
 use super::headers::Accept;
 use anyhow::Result;
 use axum::response::{IntoResponse, Response};
+use bincode::Options;
 use http::StatusCode;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
@@ -13,9 +14,16 @@ pub enum Output {
 	Text(String),
 	Json(Vec<u8>), // JSON
 	Cbor(Vec<u8>), // CBOR
-	Full(Vec<u8>), // Full type serialization
+	Bincode(Vec<u8>), // Full type serialization, don't know why this is called 'full'
+	               // serialization, this is just bincode. Should not be used.
 }
 impl Output {
+	// All these methods should not be used.
+	//
+	// They handle serialization differently then how serialization is handled in core.
+	// We need to force a single way to serialize values or end up with subtle bugs and format
+	// differences.
+	#[deprecated]
 	pub fn json<T>(val: &T) -> Output
 	where
 		T: Serialize,
@@ -26,6 +34,7 @@ impl Output {
 		}
 	}
 
+	#[deprecated]
 	pub fn cbor<T>(val: &T) -> Output
 	where
 		T: Serialize,
@@ -37,20 +46,21 @@ impl Output {
 		}
 	}
 
-	pub fn full<T>(val: &T) -> Output
+	#[deprecated]
+	pub fn bincode<T>(val: &T) -> Output
 	where
 		T: Serialize,
 	{
-		match surrealdb::sql::serde::serialize(val) {
-			Ok(v) => Output::Full(v),
+		let val = bincode::options()
+			.with_no_limit()
+			.with_little_endian()
+			.with_varint_encoding()
+			.serialize(val);
+		match val {
+			Ok(v) => Output::Bincode(v),
 			Err(_) => Output::Fail,
 		}
 	}
-}
-
-/// Convert and simplify the value into JSON
-pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json> {
-	Ok(expr::to_value(v)?.into())
 }
 
 impl IntoResponse for Output {
@@ -65,7 +75,7 @@ impl IntoResponse for Output {
 			Output::Cbor(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor))], v).into_response()
 			}
-			Output::Full(v) => {
+			Output::Bincode(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::Surrealdb))], v).into_response()
 			}
 			Output::None => StatusCode::OK.into_response(),

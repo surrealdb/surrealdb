@@ -1,5 +1,5 @@
 use crate::dbs::node::Timestamp;
-use crate::val::{self, Duration};
+use crate::val::Duration;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};

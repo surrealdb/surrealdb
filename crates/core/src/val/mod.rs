@@ -3,7 +3,7 @@
 use crate::err::Error;
 use crate::expr::fmt::Pretty;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, FlowResult, Ident, Kind};
+use crate::expr::{self, Ident, Kind};
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
@@ -355,7 +355,6 @@ impl Value {
 			// TODO: Dubious types
 			Self::Table(_) => "table",
 			//Self::Closure(_) => "closure",
-			Self::Range(_) => "range",
 		}
 	}
 

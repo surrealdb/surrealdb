@@ -13,7 +13,7 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::syn;
-use crate::val::{RecordId, Value};
+use crate::val::Value;
 use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;

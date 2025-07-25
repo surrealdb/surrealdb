@@ -1,5 +1,4 @@
 use crate::rpc::RpcError;
-use crate::rpc::request::Request;
 use crate::val::Value;
 
 pub fn encode(value: &Value) -> Result<Vec<u8>, RpcError> {

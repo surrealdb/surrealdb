@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use crate::cnf::TELEMETRY_NAMESPACE;
-use opentelemetry::metrics::{Histogram, Meter, MetricsError, UpDownCounter};
+use opentelemetry::metrics::{Counter, Histogram, Meter, MetricsError, UpDownCounter};
 use opentelemetry::{Context as TelemetryContext, KeyValue, global};
 use std::sync::LazyLock;
 

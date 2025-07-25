@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::sql::statements::InsertStatement;
-use crate::sql::{Data, Expr, Idiom};
+use crate::sql::{Data, Expr};
 use crate::syn::error::bail;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};

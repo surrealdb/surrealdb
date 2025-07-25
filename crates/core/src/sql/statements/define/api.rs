@@ -1,5 +1,4 @@
 use crate::api::method::Method;
-use crate::api::path::Path;
 use crate::sql::Expr;
 use crate::sql::fmt::{Fmt, pretty_indent};
 use crate::val::Strand;
@@ -93,7 +92,7 @@ pub struct ApiAction {
 impl Display for ApiAction {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
-		let indent = pretty_indent();
+		let _indent = pretty_indent();
 		write!(f, "{}", self.config)?;
 		write!(f, "THEN {}", self.action)?;
 		Ok(())

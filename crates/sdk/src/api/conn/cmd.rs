@@ -140,7 +140,7 @@ impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		use surrealdb_core::{
-			expr::{self, Data, Output, UpdateStatement, UpsertStatement},
+			expr::{Data, Output, UpdateStatement, UpsertStatement},
 			val::{self, Strand},
 		};
 

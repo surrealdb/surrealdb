@@ -16,7 +16,7 @@ use crate::val::Value;
 use anyhow::{Result, bail};
 use async_channel::Sender;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

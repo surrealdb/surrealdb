@@ -2,14 +2,12 @@ use crate::cnf::ID_CHARS;
 use crate::expr::escape::EscapeRid;
 use crate::expr::{self, Ident};
 use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
-use futures::StreamExt;
 use nanoid::nanoid;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
-use surrealkv::Record;
 use ulid::Ulid;
 
 #[revisioned(revision = 1)]

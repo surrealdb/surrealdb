@@ -181,6 +181,28 @@ impl Executor {
 					.await
 					.map_err(ControlFlow::Err)
 			}
+			TopLevelExpr::Show(s) => {
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+				s.compute(&self.ctx, &self.opt, None).await.map_err(ControlFlow::Err)
+			}
+			TopLevelExpr::Analyze(s) => {
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+				s.compute(&self.ctx, &self.opt).await.map_err(ControlFlow::Err)
+			}
 			TopLevelExpr::Access(s) => {
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {

@@ -1,4 +1,4 @@
-use crate::sql::{Ident, escape::EscapeIdent};
+use crate::sql::Ident;
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]

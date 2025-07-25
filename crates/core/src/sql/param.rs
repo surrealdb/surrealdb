@@ -1,9 +1,6 @@
 use crate::sql::{Ident, escape::EscapeIdent};
 use crate::val::Strand;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::ops::Deref;
-use std::{fmt, str};
+use std::fmt;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

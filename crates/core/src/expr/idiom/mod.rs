@@ -1,11 +1,11 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::{Fmt, fmt_separated_by};
+use crate::expr::fmt::Fmt;
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, META, OUT};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{FlowResult, FlowResultExt, Ident, Part, Value};
+use crate::expr::{FlowResult, Ident, Part, Value};
 use md5::{Digest, Md5};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -13,16 +13,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
-use std::str;
 
 pub mod recursion;
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -54,7 +50,6 @@ impl InfoStructure for Idioms {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Idiom")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idiom(pub Vec<Part>);
 
@@ -88,10 +83,7 @@ impl Idiom {
 		hasher.update(self.to_string().as_str());
 		format!("{:x}", hasher.finalize())
 	}
-	/// Convert this Idiom to a JSON Path string
-	pub(crate) fn to_path(&self) -> String {
-		format!("/{self}").replace(']', "").replace(&['.', '['][..], "/")
-	}
+
 	/// Simplifies this Idiom for use in object keys
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
@@ -122,12 +114,6 @@ impl Idiom {
 		matches!(v, Part::Graph(g) if g.alias.is_some())
 	}
 
-	/// Removes the last part of the idiom if it is a Part::All
-	pub(crate) fn remove_trailing_all(&mut self) {
-		while self.ends_with(&[Part::All]) {
-			self.0.pop();
-		}
-	}
 	/// Check if this Idiom starts with a specific path part
 	pub(crate) fn starts_with(&self, other: &[Part]) -> bool {
 		self.0.starts_with(other)

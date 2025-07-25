@@ -2,12 +2,22 @@ use revision::{Revisioned, revisioned};
 use serde::Serialize;
 use std::borrow::Cow;
 use surrealdb::rpc::RpcError;
-use surrealdb_core::expr::Value;
+use surrealdb_core::val::{self, Value};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Failure {
 	pub(crate) code: i64,
 	pub(crate) message: Cow<'static, str>,
+}
+
+impl Failure {
+	pub fn into_value(self) -> Value {
+		map! {
+			String::from("code") => Value::from(self.code),
+			String::from("message") => Value::from(self.message.to_string()),
+		}
+		.into()
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -55,16 +65,6 @@ impl From<RpcError> for Failure {
 			RpcError::Thrown(_) => Failure::custom(err.to_string()),
 			_ => Failure::custom(err.to_string()),
 		}
-	}
-}
-
-impl From<Failure> for Value {
-	fn from(err: Failure) -> Self {
-		map! {
-			String::from("code") => Value::from(err.code),
-			String::from("message") => Value::from(err.message.to_string()),
-		}
-		.into()
 	}
 }
 

@@ -1,11 +1,4 @@
-use reblessive::Stack;
-
-use super::lexer::Lexer;
-use super::parser::Parser;
-use super::{Parse, parse};
-use crate::err::Error;
-use crate::sql::{Ident, Idiom, Param, Script};
-use crate::syn::token::{TokenKind, t};
+use super::parse;
 
 #[test]
 fn test_error_in_lineterminator() {

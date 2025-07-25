@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Bound;
 
+use super::SleepStatement;
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
@@ -75,6 +77,7 @@ pub enum Expr {
 	Info(Box<InfoStatement>),
 	Foreach(Box<ForeachStatement>),
 	Let(Box<SetStatement>),
+	Sleep(Box<SleepStatement>),
 }
 
 impl Expr {
@@ -83,14 +86,15 @@ impl Expr {
 		match self {
 			Expr::Literal(_)
 			| Expr::Param(_)
-			| Expr::Idiom(_)
 			| Expr::Table(_)
 			| Expr::Mock(_)
 			| Expr::Constant(_)
 			| Expr::Break
 			| Expr::Continue
-			| Expr::Info(_) => true,
+			| Expr::Info(_)
+			| Expr::Sleep(_) => true,
 
+			Expr::Idiom(x) => x.read_only(),
 			Expr::Block(block) => block.read_only(),
 			Expr::Prefix {
 				expr,
@@ -172,7 +176,8 @@ impl Expr {
 			| Expr::Alter(_)
 			| Expr::Info(_)
 			| Expr::Foreach(_)
-			| Expr::Let(_) => false,
+			| Expr::Let(_)
+			| Expr::Sleep(_) => false,
 		}
 	}
 
@@ -281,6 +286,9 @@ impl Expr {
 				foreach_statement.compute(stk, ctx, &opt, doc).await
 			}
 			Expr::Let(set_statement) => set_statement.compute(stk, ctx, &opt, doc).await,
+			Expr::Sleep(sleep_statement) => {
+				sleep_statement.compute(ctx, &opt, doc).await.map_err(ControlFlow::Err)
+			}
 		}
 	}
 
@@ -618,6 +626,7 @@ impl fmt::Display for Expr {
 			Expr::Info(s) => write!(f, "{s}"),
 			Expr::Foreach(s) => write!(f, "{s}"),
 			Expr::Let(s) => write!(f, "{s}"),
+			Expr::Sleep(s) => write!(f, "{s}"),
 		}
 	}
 }

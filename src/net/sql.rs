@@ -5,7 +5,6 @@ use super::output::Output;
 use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
-use crate::net::output;
 use crate::net::params::Params;
 use anyhow::Context;
 use axum::extract::ws::{Message, WebSocket};
@@ -19,6 +18,7 @@ use futures::{SinkExt, StreamExt};
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb_core::dbs::Variables;
+use surrealdb_core::val::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
@@ -56,13 +56,15 @@ async fn post_handler(
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {
-				Ok(Output::json(&output::simplify(res).map_err(ResponseError)?))
+				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+				Ok(Output::json(&v))
 			}
 			Some(Accept::ApplicationCbor) => {
-				Ok(Output::cbor(&output::simplify(res).map_err(ResponseError)?))
+				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+				Ok(Output::cbor(&v))
 			}
 			// Internal serialization
-			Some(Accept::Surrealdb) => Ok(Output::full(&res)),
+			Some(Accept::Surrealdb) => Ok(Output::bincode(&res)),
 			// An incorrect content-type was requested
 			_ => Err(NetError::InvalidType.into()),
 		},

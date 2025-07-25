@@ -216,5 +216,4 @@ macro_rules! define_tests {
 		}
 	};
 }
-use crate::syn::Parse;
 pub(crate) use define_tests;

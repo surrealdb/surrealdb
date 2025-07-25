@@ -3,7 +3,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{FlowResultExt as _, Function};
 use crate::val::array::{
 	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Transpose, Union, Uniq,
 	Windows,

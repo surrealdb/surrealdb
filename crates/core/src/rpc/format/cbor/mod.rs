@@ -1,8 +1,6 @@
 mod convert;
 
-use crate::rpc::RpcError;
-use crate::rpc::request::Request;
-use crate::val::Value;
+use crate::{rpc::RpcError, val::Value};
 
 pub fn encode(v: Value) -> Result<Vec<u8>, RpcError> {
 	let encoding = convert::from_value(v);

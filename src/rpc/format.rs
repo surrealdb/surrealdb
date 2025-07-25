@@ -56,11 +56,11 @@ impl WsFormat for Format {
 	/// Process a WebSocket RPC request
 	fn req_ws(&self, msg: Message) -> Result<Request, Failure> {
 		let val = msg.into_data();
-		self.req(val).map_err(Into::into)
+		self.req(&val).map_err(Into::into)
 	}
 	/// Process a WebSocket RPC response
 	fn res_ws(&self, res: Response) -> Result<(usize, Message), Failure> {
-		let res = self.res(res).map_err(Failure::from)?;
+		let res = self.res(res.into_value()).map_err(Failure::from)?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be
 			// replaced with unsafe { String::from_utf8_unchecked(res) }
@@ -83,11 +83,11 @@ pub trait HttpFormat {
 impl HttpFormat for Format {
 	/// Process a HTTP RPC request
 	fn req_http(&self, body: Bytes) -> Result<Request, RpcError> {
-		self.req(body)
+		self.req(&body)
 	}
 	/// Process a HTTP RPC response
 	fn res_http(&self, res: Response) -> Result<AxumResponse, RpcError> {
-		let res = self.res(res)?;
+		let res = self.res(res.into_value())?;
 		if matches!(self, Format::Json) {
 			// If this has significant performance overhead it could be
 			// replaced with unsafe { String::from_utf8_unchecked(res) }

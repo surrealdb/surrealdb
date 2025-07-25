@@ -3,11 +3,7 @@ pub mod cbor;
 pub mod json;
 pub mod revision;
 
-use ::revision::Revisioned;
-use serde::Serialize;
-
-use super::RpcError;
-use super::request::Request;
+use super::{RpcError, request::Request};
 use crate::val::Value;
 
 pub const PROTOCOLS: [&str; 4] = [

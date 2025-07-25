@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::exe::try_join_all_buffered;
 use crate::expr::fmt::Fmt;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
@@ -13,7 +12,7 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::{Bound, Deref};
+use std::ops::Bound;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]

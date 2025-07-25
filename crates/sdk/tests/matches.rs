@@ -1,12 +1,10 @@
-mod parse;
-use parse::Parse;
 mod helpers;
 use crate::helpers::{Test, skip_ok};
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::expr::Value;
-use surrealdb::sql::SqlValue;
+use surrealdb_core::syn;
+use surrealdb_core::val::{Array, Value};
 
 #[tokio::test]
 async fn select_where_matches_using_index() -> Result<()> {
@@ -25,7 +23,7 @@ async fn select_where_matches_using_index() -> Result<()> {
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 					{
 						detail: {
@@ -45,17 +43,19 @@ async fn select_where_matches_using_index() -> Result<()> {
 						operation: 'Collector'
 					}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				id: blog:1,
 				title: '<em>Hello</em> World!'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -78,7 +78,7 @@ async fn select_where_matches_without_using_index_iterator() -> Result<()> {
 	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 				{
 					detail: {
@@ -106,17 +106,19 @@ async fn select_where_matches_without_using_index_iterator() -> Result<()> {
 					operation: 'Fetch'
 				},
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				id: blog:1,
 				title: 'Hello <em>World</em>!'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -144,7 +146,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 					{
 						detail: {
@@ -164,11 +166,12 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 						operation: 'Collector'
 					}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				id: blog:1,
@@ -179,7 +182,8 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 				]
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -216,31 +220,33 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
-		let val = SqlValue::parse(
+		let val = syn::value(
 			"[
 			{
 				id: blog:1,
 				content: '<em>Hello</em> World!'
 			}
 		]",
-		);
+		)
+		.unwrap();
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				id: blog:1,
 				content: '<em>He</em>llo World!'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
-		let val = SqlValue::parse(
+		let val = syn::value(
 			"[
 					{
 						content: {
@@ -254,12 +260,13 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 						id: blog:1
 					}
 				]",
-		);
+		)
+		.unwrap();
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 					{
 						content: {
@@ -273,7 +280,8 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 						id: blog:1
 					}
 				]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -301,31 +309,33 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 	//
 	for i in 0..3 {
 		let tmp = res.remove(0).result?;
-		let val = SqlValue::parse(
+		let val = syn::value(
 			"[
 			{
 				id: blog:1,
 				content: '<em>Hello</em> World!'
 			}
 		]",
-		);
+		)
+		.unwrap();
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				id: blog:1,
 				content: 'H<em>el</em>lo World!'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
-		let val = SqlValue::parse(
+		let val = syn::value(
 			"[
 					{
 						content: {
@@ -339,12 +349,13 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 						id: blog:1
 					}
 				]",
-		);
+		)
+		.unwrap();
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
 	}
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 					{
 						content: {
@@ -358,7 +369,8 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 						id: blog:1
 					}
 				]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -386,7 +398,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 					{
 						detail: {
@@ -406,11 +418,12 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 						operation: 'Collector'
 					}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				id: blog:1,
@@ -422,7 +435,8 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 				]
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -454,7 +468,7 @@ async fn select_where_matches_using_index_offsets() -> Result<()> {
 	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				id: blog:1,
@@ -467,7 +481,8 @@ async fn select_where_matches_using_index_offsets() -> Result<()> {
 				}
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -491,14 +506,15 @@ async fn select_where_matches_using_index_and_score() -> Result<()> {
 	skip_ok(res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				id: blog:3,
 				score: 0.9227996468544006
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -528,19 +544,20 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 	skip_ok(res, 7)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				id: blog:3,
 				score: 0.9227996468544006
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	// This result should be empty, as we are looking for non-existing terms (dummy1 and dummy2).
 	let tmp = res.remove(0).result?;
-	let val: Value = Value::parse("[]");
+	let val: Value = Array::new().into();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
@@ -578,7 +595,7 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 	skip_ok(res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val_docs = SqlValue::parse(
+	let val_docs = syn::value(
 		"[
 				{
 					id: page:1,
@@ -591,11 +608,12 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 					sc2: -1.6716052293777466f
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val_docs));
 
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 			{
 				detail: {
@@ -637,7 +655,8 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 				operation: 'Collector'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 
 	let tmp = res.remove(0).result?;
@@ -667,7 +686,7 @@ async fn select_where_matches_mixing_indexes() -> Result<()> {
 	skip_ok(res, 5)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 				{
 					detail: {
@@ -698,11 +717,12 @@ async fn select_where_matches_mixing_indexes() -> Result<()> {
 					operation: 'Collector'
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	//
 	let tmp = res.remove(0).result?;
-	let val = SqlValue::parse(
+	let val = syn::value(
 		"[
 				{
 					id: person:1,
@@ -710,7 +730,8 @@ async fn select_where_matches_mixing_indexes() -> Result<()> {
 					securityNumber: '123456'
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }

@@ -1,6 +1,7 @@
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use surrealdb::sql::RecordIdKeyLit;
+use surrealdb_core::val::RecordIdKey;
 use tokio::runtime::Runtime;
 use tokio::task::JoinSet;
 
@@ -15,7 +16,7 @@ impl Create {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", RecordIdKeyLit::rand().to_raw()),
+			table_name: format!("table_{}", RecordIdKey::rand().to_string()),
 		}
 	}
 }
@@ -26,7 +27,7 @@ impl super::Routine for Create {
 	fn run(&self, client: &'static Surreal<Any>, num_ops: usize) {
 		self.runtime.block_on(async {
 			let data = Record {
-				field: RecordIdKeyLit::rand(),
+				field: RecordIdKey::rand(),
 			};
 
 			client.query(format!("DEFINE TABLE {}", self.table_name)).await.unwrap();

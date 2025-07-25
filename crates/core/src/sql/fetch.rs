@@ -1,6 +1,5 @@
+use crate::sql::Expr;
 use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Idiom};
-use anyhow::Result;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 

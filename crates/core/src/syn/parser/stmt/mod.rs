@@ -10,8 +10,7 @@ use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
 	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
-	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
-	UseStatement,
+	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
 use crate::sql::{AssignOperator, Expr, Fields, Ident, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
@@ -581,17 +580,6 @@ impl Parser<'_> {
 		let duration = self.next_token_value()?;
 		Ok(SleepStatement {
 			duration,
-		})
-	}
-
-	/// Parsers a THROW statement
-	///
-	/// # Parser State
-	/// Expects `THROW` to already be consumed.
-	pub(super) async fn parse_throw_stmt(&mut self, ctx: &mut Stk) -> ParseResult<ThrowStatement> {
-		let error = self.parse_expr_inherit(ctx).await?;
-		Ok(ThrowStatement {
-			error,
 		})
 	}
 

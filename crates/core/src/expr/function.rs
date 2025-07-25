@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::Fmt;
-use crate::expr::operator::BindingPower;
 use crate::expr::{Expr, Ident, Idiom, Model, Permission, Script, Value};
 use crate::fnc;
 use crate::iam::Action;
@@ -15,23 +14,8 @@ use std::fmt;
 
 use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
-
-pub(crate) enum OptimisedAggregate {
-	None,
-	Count,
-	CountFunction,
-	MathMax,
-	MathMin,
-	MathSum,
-	MathMean,
-	TimeMax,
-	TimeMin,
-}
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Function")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Function {
 	Normal(String),

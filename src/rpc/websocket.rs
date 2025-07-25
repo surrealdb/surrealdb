@@ -21,12 +21,12 @@ use opentelemetry::trace::FutureExt;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::dbs::Session;
-use surrealdb::gql::{Pessimistic, SchemaCache};
+use surrealdb_core::val::{self, Array, Strand, Value};
+//use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb::kvs::Datastore;
 use surrealdb::mem::ALLOC;
 use surrealdb::rpc::format::Format;
 use surrealdb::rpc::{Data, Method, RpcContext};
-use surrealdb::sql::{Array, SqlValue};
 use surrealdb_core::rpc::{RpcProtocolV1, RpcProtocolV2};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
@@ -60,8 +60,8 @@ pub struct Websocket {
 	pub(crate) canceller: CancellationToken,
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: Sender<Message>,
-	/// The GraphQL schema cache stored in advance
-	pub(crate) gql_schema: SchemaCache<Pessimistic>,
+	// The GraphQL schema cache stored in advance
+	//pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Websocket {
@@ -88,7 +88,7 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
 			channel: sender.clone(),
-			gql_schema: SchemaCache::new(datastore.clone()),
+			//gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		});
 		// Add this WebSocket to the list
@@ -348,7 +348,7 @@ impl Websocket {
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
 					span.record(
 						"rpc.request_id",
-						req.id.clone().map(SqlValue::as_string).unwrap_or_default(),
+						req.id.clone().map(val::Value::as_raw_string).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(req.method.to_str()).with_size(len),
@@ -459,7 +459,8 @@ impl RpcContext for Websocket {
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> Data {
-		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
+		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
+		Data::Other(value)
 	}
 
 	// ------------------------------
@@ -504,10 +505,10 @@ impl RpcContext for Websocket {
 	// GraphQL
 	// ------------------------------
 
-	/// GraphQL queries are enabled on WebSockets
-	const GQL_SUPPORT: bool = true;
+	// GraphQL queries are enabled on WebSockets
+	//const GQL_SUPPORT: bool = true;
 
-	fn graphql_schema_cache(&self) -> &SchemaCache {
-		&self.gql_schema
-	}
+	//fn graphql_schema_cache(&self) -> &SchemaCache {
+	//&self.gql_schema
+	//}
 }

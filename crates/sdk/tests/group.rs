@@ -1,12 +1,10 @@
-mod parse;
-use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::{new_ds, skip_ok};
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::expr::Value;
-use surrealdb_core::expr::Thing;
+use surrealdb_core::val::{RecordId, Value};
+use surrealdb_core::{strand, syn};
 
 #[tokio::test]
 async fn select_aggregate() -> Result<()> {
@@ -30,7 +28,7 @@ async fn select_aggregate() -> Result<()> {
 	assert_eq!(res.len(), 12);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'GBP',
@@ -38,11 +36,12 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2020-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'GBP',
@@ -50,11 +49,12 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2020-02-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'GBP',
@@ -62,11 +62,12 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2020-03-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'GBP',
@@ -74,11 +75,12 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'GBP',
@@ -86,11 +88,12 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'EUR',
@@ -98,11 +101,12 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'USD',
@@ -110,11 +114,12 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'AUD',
@@ -122,11 +127,12 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2021-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'CHF',
@@ -134,11 +140,12 @@ async fn select_aggregate() -> Result<()> {
 				time: d'2023-01-01T08:00:00Z'
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				country: 'GBP',
@@ -195,11 +202,12 @@ async fn select_aggregate() -> Result<()> {
 				year: 2023
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 				{
 					count: 1,
@@ -244,11 +252,12 @@ async fn select_aggregate() -> Result<()> {
 					year: 2021
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 				{
 					detail: {
@@ -281,7 +290,8 @@ async fn select_aggregate() -> Result<()> {
 					operation: 'Collector'
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
@@ -304,7 +314,7 @@ async fn select_multi_aggregate() -> Result<()> {
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:1,
@@ -313,11 +323,12 @@ async fn select_multi_aggregate() -> Result<()> {
 				two: 2.4,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:2,
@@ -326,11 +337,12 @@ async fn select_multi_aggregate() -> Result<()> {
 				two: 3.9,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:3,
@@ -339,11 +351,12 @@ async fn select_multi_aggregate() -> Result<()> {
 				two: 9.7,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:4,
@@ -352,11 +365,12 @@ async fn select_multi_aggregate() -> Result<()> {
 				two: 3.0,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 				{
 					group: 1,
@@ -371,11 +385,12 @@ async fn select_multi_aggregate() -> Result<()> {
 					two: 12.7
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 				{
 					group: 1,
@@ -392,11 +407,12 @@ async fn select_multi_aggregate() -> Result<()> {
 					two: 12.7
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 				{
 					detail: {
@@ -429,7 +445,8 @@ async fn select_multi_aggregate() -> Result<()> {
 					operation: 'Collector'
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	Ok(())
 }
@@ -452,7 +469,7 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:1,
@@ -461,11 +478,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 2.4,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:2,
@@ -474,11 +492,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 3.9,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:3,
@@ -487,11 +506,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 9.7,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:4,
@@ -500,11 +520,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 3.0,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				group: 1,
@@ -517,11 +538,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 12,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				group: 1,
@@ -534,11 +556,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 13,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				group: 1,
@@ -551,11 +574,12 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 				two: 13,
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 				{
 					detail: {
@@ -582,7 +606,8 @@ async fn select_multi_aggregate_composed() -> Result<()> {
 					operation: 'Collector'
 				}
 			]",
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
@@ -605,7 +630,7 @@ async fn select_array_group_group_by() -> Result<()> {
 	skip_ok(res, 4)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		r#"[
                 {
                         "array::group": [
@@ -620,7 +645,8 @@ async fn select_array_group_group_by() -> Result<()> {
                         user: 2
                 }
         ]"#,
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
@@ -643,7 +669,7 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		r#"[
 				{
 					detail: {
@@ -664,17 +690,19 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 					operation: 'Collector'
 				}
 			]"#,
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		r#"[
 					{
 						count: 2
 					}
 				]"#,
-	);
+	)
+	.unwrap();
 	assert_eq!(format!("{tmp:#}"), format!("{val:#}"));
 	//
 	Ok(())
@@ -694,39 +722,42 @@ async fn select_aggregate_mean_update() -> Result<()> {
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:a,
 				a: 3
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("None");
+	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				id: test:a,
 				a: 2
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"[
 			{
 				avg: 2
 			}
 		]",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -837,7 +868,12 @@ async fn select_count_group_all_permissions(
 		";
 	let mut t = Test::new_ds_session(
 		t.ds,
-		Session::for_record("test", "test", "test", Thing::from(("table", "baz")).into()),
+		Session::for_record(
+			"test",
+			"test",
+			"test",
+			RecordId::new("table".to_owned(), strand!("baz").to_owned()).into(),
+		),
 		sql,
 	)
 	.await?;
@@ -1050,7 +1086,12 @@ async fn select_count_range_keys_only_permissions(
 		";
 	let mut t = Test::new_ds_session(
 		t.ds,
-		Session::for_record("test", "test", "test", Thing::from(("table", "me")).into()),
+		Session::for_record(
+			"test",
+			"test",
+			"test",
+			RecordId::new("table".to_owned(), strand!("me").to_owned()).into(),
+		),
 		sql,
 	)
 	.await?;

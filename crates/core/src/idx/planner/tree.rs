@@ -240,8 +240,7 @@ impl<'a> TreeBuilder<'a> {
 				| Literal::None
 				| Literal::Null
 				| Literal::Decimal(_)
-				| Literal::Float(_)
-				| Literal::Uuid(_),
+				| Literal::Float(_),
 			)
 			| Expr::Param(_)
 			| Expr::FunctionCall(_) => {
@@ -291,7 +290,8 @@ impl<'a> TreeBuilder<'a> {
 					.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None))
 					.await
 					.catch_return()?;
-				return stk.run(|stk| self.eval_value(stk, gr, &x)).await;
+				let v = v.into_literal();
+				return stk.run(|stk| self.eval_value(stk, gr, &v)).await;
 			}
 		}
 

@@ -3,9 +3,9 @@ use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
-use crate::expr::{Data, Expr, FlowResultExt as _, Output, RecordIdKeyLit, Timeout, Value};
+use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Datetime, RecordId, Strand, Table};
+use crate::val::{Datetime, RecordId, Table};
 use anyhow::{Result, bail, ensure};
 
 use reblessive::tree::Stk;
@@ -30,10 +30,6 @@ pub struct InsertStatement {
 }
 
 impl InsertStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn read_only(&self) -> bool {
-		false
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

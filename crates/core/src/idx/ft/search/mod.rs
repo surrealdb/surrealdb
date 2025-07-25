@@ -28,7 +28,7 @@ use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{Key, Transaction, TransactionType};
-use crate::val::{Array, Object, RecordId, Value};
+use crate::val::{Object, RecordId, Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
@@ -762,7 +762,7 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let ctx = ds.setup_ctx().unwrap().freeze();
-		let mut q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 		let Expr::Define(q) = q else {
 			panic!()
 		};
@@ -905,7 +905,7 @@ mod tests {
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 			let ctx = ds.setup_ctx().unwrap().freeze();
-			let mut q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+			let q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 			let Expr::Define(q) = q else {
 				panic!()
 			};
@@ -1046,7 +1046,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let ctx = ds.setup_ctx().unwrap().freeze();
 		let mut stack = reblessive::TreeStack::new();
-		let mut q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+		let q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 		let Expr::Define(q) = q else {
 			panic!()
 		};

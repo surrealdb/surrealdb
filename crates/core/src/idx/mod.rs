@@ -4,8 +4,6 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
-use crate::expr::RecordIdKeyLit;
-use crate::expr::statements::DefineIndexStatement;
 use crate::idx::docids::DocId;
 use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;

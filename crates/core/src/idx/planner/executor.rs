@@ -33,7 +33,7 @@ use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
-use crate::val::{Array, Number, Object, RecordId, Table, Value};
+use crate::val::{Array, Number, Object, RecordId, Value};
 use anyhow::{Result, ensure};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;

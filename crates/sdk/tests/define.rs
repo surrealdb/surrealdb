@@ -1,13 +1,5 @@
-mod parse;
-
-use parse::Parse;
-
 mod helpers;
 use helpers::*;
-use surrealdb_core::dbs::Variables;
-use surrealdb_core::expr::Value;
-use surrealdb_core::iam::Level;
-
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use surrealdb::Result;
@@ -16,6 +8,11 @@ use surrealdb::err::Error;
 use surrealdb::expr::{Idiom, Part};
 use surrealdb::iam::Role;
 use surrealdb::kvs::{LockType, TransactionType};
+use surrealdb_core::dbs::Variables;
+use surrealdb_core::expr::Ident;
+use surrealdb_core::iam::Level;
+use surrealdb_core::val::Value;
+use surrealdb_core::{strand, syn};
 use test_log::test;
 use tracing::info;
 
@@ -34,7 +31,7 @@ async fn define_statement_namespace() -> Result<()> {
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			accesses: {},
 			namespaces: { test: 'DEFINE NAMESPACE test' },
@@ -54,7 +51,8 @@ async fn define_statement_namespace() -> Result<()> {
 			},
 			users: {},
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -75,13 +73,14 @@ async fn define_statement_database() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			accesses: {},
 			databases: { test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -387,7 +386,7 @@ async fn define_statement_search_index() -> Result<()> {
 	}
 
 	let tmp = res.remove(0).result?;
-	let val = Value::parse(
+	let val = syn::value(
 		"{
 			events: {},
 			fields: {},
@@ -398,7 +397,8 @@ async fn define_statement_search_index() -> Result<()> {
 			DOC_IDS_CACHE 100 DOC_LENGTHS_CACHE 100 POSTINGS_CACHE 100 TERMS_CACHE 100 HIGHLIGHTS' },
 			lives: {},
 		}",
-	);
+	)
+	.unwrap();
 	assert_eq!(tmp, val);
 
 	let tmp = res.remove(0).result?;
@@ -444,7 +444,12 @@ async fn define_statement_user_root() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let define_str = tmp.pick(&["users".into(), "test".into()]).to_string();
+	let define_str = tmp
+		.pick(&[
+			Part::Field(Ident::from_strand(strand!("users").to_owned())),
+			Part::Field(Ident::from_strand(strand!("test").to_owned())),
+		])
+		.to_string();
 
 	assert!(
 		define_str
@@ -587,7 +592,7 @@ fn check_path<F>(val: &Value, path: &[&str], check: F)
 where
 	F: Fn(Value),
 {
-	let part: Vec<Part> = path.iter().map(|p| Part::from(*p)).collect();
+	let part: Vec<Part> = path.iter().map(|p| Part::field((*p).to_owned()).unwrap()).collect();
 	let res = val.walk(&part);
 	for (i, v) in res {
 		let mut idiom = Idiom::default();

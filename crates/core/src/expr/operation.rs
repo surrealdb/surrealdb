@@ -1,9 +1,6 @@
 use std::fmt;
 
-use crate::{
-	fnc::operate,
-	val::{Array, Object, Strand, Value},
-};
+use crate::val::{Array, Object, Strand, Value};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -119,7 +116,7 @@ impl Operation {
 					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("copy".to_owned()) }),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
-					"from".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"from".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(from.join(".")) }),
 				}
 			}
 			Operation::Move {
@@ -131,7 +128,7 @@ impl Operation {
 					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("map".to_owned()) }),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
-					"from".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"from".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(from.join(".")) }),
 				}
 			}
 			Operation::Test {

@@ -43,7 +43,7 @@ async fn post_handler(
 ) -> Result<impl IntoResponse, ResponseError> {
 	let fmt = content_type.deref();
 	let fmt: Format = fmt.into();
-	let val = fmt.parse_value(body)?;
+	let val = fmt.parse_value(&body)?;
 	let cfg = export::Config::from_value(&val.into()).map_err(ResponseError)?;
 	handle_inner(state, session, cfg).await
 }

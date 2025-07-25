@@ -42,7 +42,6 @@ impl Value {
 							}
 						}
 					}
-					_ => {}
 				},
 				// Current value at path is an array
 				Value::Array(v) => match p {

@@ -1,4 +1,3 @@
-use crate::expr::changefeed;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::{ChangeFeed, Ident, Kind, Permissions, TableType};
 use crate::val::Strand;

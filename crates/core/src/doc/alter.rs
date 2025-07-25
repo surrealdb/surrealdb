@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::paths::{EDGE, IN, OUT};
 use crate::expr::{AssignOperator, FlowResultExt};
-use crate::val::{RecordId, Strand, Value};
+use crate::val::{RecordId, Value};
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;

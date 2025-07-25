@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::str::FromStr;
-use surrealdb::expr::Value;
+use surrealdb_core::val::Value;
 
 use super::error::ResponseError;
 

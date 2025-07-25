@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
-
 use crate::dbs::Variables;
 use crate::expr::Expr;
+use crate::syn;
 use crate::val::Value as SurValue;
-use crate::{sql, syn};
 use js::class::Trace;
 use js::prelude::{Coerced, Opt};
 use js::{Array, Ctx, Exception, FromJs, JsLifetime, Result, Value};

@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::sql::statements::RelateStatement;
-use crate::sql::{Expr, Ident, Literal};
+use crate::sql::{Expr, Literal};
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;

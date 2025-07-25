@@ -874,7 +874,7 @@ mod tests {
 		async fn new() -> Self {
 			let ds = Arc::new(Datastore::new("memory").await.unwrap());
 			let ctx = ds.setup_ctx().unwrap().freeze();
-			let mut q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
+			let q = syn::expr("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 			let Expr::Define(q) = q else {
 				panic!()
 			};

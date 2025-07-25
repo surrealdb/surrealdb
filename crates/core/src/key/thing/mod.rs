@@ -1,5 +1,4 @@
 //! Stores a record document
-use crate::expr::RecordIdKeyLit;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KeyEncode, impl_key};
 use crate::val::RecordIdKey;

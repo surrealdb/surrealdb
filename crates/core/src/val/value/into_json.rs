@@ -70,8 +70,8 @@ impl Value {
 			// These Value types are un-computed values
 			// and are not used in query responses sent
 			// to the client.
-			Value::Table(table) => return None,
-			Value::Closure(closure) => return None,
+			Value::Table(_) => return None,
+			Value::Closure(_) => return None,
 		};
 		Some(res)
 	}

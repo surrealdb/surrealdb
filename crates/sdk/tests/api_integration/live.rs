@@ -21,7 +21,7 @@ use serde_json::json;
 use surrealdb::method::QueryStream;
 use surrealdb::opt::Resource;
 use surrealdb::{Action, Notification, RecordId, Value};
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::val;
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
@@ -210,7 +210,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 		// Create a record
 		let created_value =
 			match db.create(Resource::from((table, "job"))).await.unwrap().into_inner() {
-				CoreValue::Object(created_value) => created_value,
+				val::Value::Object(created_value) => created_value,
 				_ => panic!("Expected an object"),
 			};
 
@@ -224,7 +224,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 		// Delete the record
 		let thing = match created_value.get("id").unwrap() {
-			CoreValue::Thing(thing) => thing,
+			val::Value::Thing(thing) => thing,
 			_ => panic!("Expected a thing"),
 		};
 		db.query("DELETE $item").bind(("item", RecordId::from_inner(thing.clone()))).await.unwrap();
@@ -236,7 +236,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
 		let notification = match notification.data.into_inner() {
-			CoreValue::Object(notification) => notification,
+			val::Value::Object(notification) => notification,
 			_ => panic!("Expected an object"),
 		};
 		assert_eq!(notification, created_value);

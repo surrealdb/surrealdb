@@ -19,10 +19,11 @@ use serde::Deserialize;
 use std::str;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::expr::Value;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb_core::dbs::Variables;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_core::syn;
+use surrealdb_core::val::{Strand, Value};
 use tower_http::limit::RequestBodyLimitLayer;
 
 #[derive(Default, Deserialize, Debug, Clone)]
@@ -74,11 +75,17 @@ async fn execute_and_return(
 	match db.execute(sql, session, Some(vars)).await {
 		Ok(res) => match accept {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => Ok(Output::json(&output::simplify(res)?)),
-			Some(Accept::ApplicationCbor) => Ok(Output::cbor(&output::simplify(res)?)),
+			Some(Accept::ApplicationJson) => {
+				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+				Ok(Output::json(&v))
+			}
+			Some(Accept::ApplicationCbor) => {
+				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+				Ok(Output::cbor(&v))
+			}
 			// Internal serialization
 			// TODO: remove format in 2.0.0
-			Some(Accept::Surrealdb) => Ok(Output::full(&res)),
+			Some(Accept::Surrealdb) => Ok(Output::bincode(&res)),
 			// An incorrect content-type was requested
 			_ => Err(anyhow::Error::new(NetError::InvalidType)),
 		},
@@ -126,7 +133,7 @@ async fn select_all(
 		String::from("table") => Value::from(table),
 		String::from("start") => Value::from(query.start.unwrap_or(0)),
 		String::from("limit") => Value::from(query.limit.unwrap_or(100)),
-		String::from("fields") => Value::from(query.fields.unwrap_or_default()),
+		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(|x| unsafe{ Strand::new_unchecked(x) }).map(Value::from).collect(),
 	});
 	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
 }
@@ -148,7 +155,7 @@ async fn create_all(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the request body as JSON
-	match surrealdb::sql::value(data) {
+	match syn::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "CREATE type::table($table) CONTENT $data";
@@ -184,7 +191,7 @@ async fn update_all(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the request body as JSON
-	match surrealdb::sql::value(data) {
+	match syn::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPDATE type::table($table) CONTENT $data";
@@ -219,7 +226,7 @@ async fn modify_all(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the request body as JSON
-	match surrealdb::sql::value(data) {
+	match syn::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPDATE type::table($table) MERGE $data";
@@ -284,7 +291,7 @@ async fn select_one(
 		_ => "SELECT type::fields($fields) FROM type::thing($table, $id)",
 	};
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match syn::json(&id) {
 		Ok(id) => id.into(),
 		Err(_) => id.into(),
 	};
@@ -292,7 +299,7 @@ async fn select_one(
 	let vars = Variables::from(map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => rid,
-		String::from("fields") => Value::from(query.fields.unwrap_or_default()),
+		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(|x| unsafe{ Strand::new_unchecked(x) }).map(Value::from).collect::<Value>(),
 	});
 	// Execute the query and return the result
 	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
@@ -315,12 +322,12 @@ async fn create_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match syn::json(&id) {
 		Ok(id) => id.into(),
 		Err(_) => id.into(),
 	};
 	// Parse the request body as JSON
-	match surrealdb::sql::value(data) {
+	match syn::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "CREATE type::thing($table, $id) CONTENT $data";
@@ -357,12 +364,12 @@ async fn update_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match syn::json(&id) {
 		Ok(id) => id.into(),
 		Err(_) => id.into(),
 	};
 	// Parse the request body as JSON
-	match surrealdb::sql::value(data) {
+	match syn::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPSERT type::thing($table, $id) CONTENT $data";
@@ -399,12 +406,12 @@ async fn modify_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match syn::json(&id) {
 		Ok(id) => id.into(),
 		Err(_) => id.into(),
 	};
 	// Parse the request body as JSON
-	match surrealdb::sql::value(data) {
+	match syn::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPSERT type::thing($table, $id) MERGE $data";
@@ -439,7 +446,7 @@ async fn delete_one(
 	// Specify the request statement
 	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match syn::json(&id) {
 		Ok(id) => id.into(),
 		Err(_) => id.into(),
 	};

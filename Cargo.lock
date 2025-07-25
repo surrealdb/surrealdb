@@ -5642,6 +5642,7 @@ dependencies = [
  "axum-extra",
  "axum-server",
  "base64 0.21.7",
+ "bincode",
  "bytes",
  "chrono",
  "ciborium",

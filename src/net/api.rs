@@ -14,8 +14,6 @@ use axum::{Extension, Router};
 use http::header::CONTENT_TYPE;
 use surrealdb::dbs::Session;
 use surrealdb::dbs::capabilities::{ExperimentalTarget, RouteTarget};
-use surrealdb::expr::Value;
-use surrealdb::expr::statements::FindApi;
 use surrealdb::kvs::{LockType, TransactionType};
 use surrealdb::rpc::format::{Format, cbor, json, revision};
 use surrealdb_core::api::body::ApiBody;
@@ -23,6 +21,8 @@ use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::invocation::ApiInvocation;
 use surrealdb_core::api::method::Method as ApiMethod;
 use surrealdb_core::api::response::ResponseInstruction;
+use surrealdb_core::expr::statements::define::ApiDefinition;
+use surrealdb_core::val::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
@@ -76,10 +76,12 @@ async fn handler(
 			.await
 			.map_err(ResponseError)?,
 	);
+
+	//FIXME: This is bad, the rpc layer should not manually access the kv store.
 	let apis = tx.all_db_apis(&ns, &db).await.map_err(ResponseError)?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-	let res = match apis.as_ref().find_api(segments, method) {
+	let res = match ApiDefinition::find_definition(apis.as_ref(), segments, method) {
 		Some((api, params)) => {
 			let invocation = ApiInvocation {
 				params,
@@ -124,7 +126,7 @@ async fn handler(
 						res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
 							|_| ApiError::Unreachable("Expected a valid format".into()),
 						)?);
-						v.0.into_bytes()
+						v.into_string().into_bytes()
 					}
 					Value::Bytes(v) => {
 						res.headers.entry(CONTENT_TYPE).or_insert(
@@ -137,7 +139,7 @@ async fn handler(
 					v => {
 						return Err(ApiError::InvalidApiResponse(format!(
 							"Expected bytes or string, found {}",
-							v.kindof()
+							v.kind_of()
 						))
 						.into());
 					}

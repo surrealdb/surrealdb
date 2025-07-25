@@ -7,7 +7,7 @@ use crate::err::Error;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Idiom, Idioms, Index, Part};
+use crate::expr::{Base, Ident, Idiom, Index, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Strand, Value};
 use anyhow::{Result, bail};
@@ -55,7 +55,7 @@ impl DefineIndexStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if let Ok(define_index_statement) = txn.get_tb_index(ns, db, &self.what, &self.name).await {
+		if txn.get_tb_index(ns, db, &self.what, &self.name).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {

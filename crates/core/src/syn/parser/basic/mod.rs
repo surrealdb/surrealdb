@@ -1,6 +1,5 @@
 use std::mem;
 
-use num_traits::Num;
 use rust_decimal::Decimal;
 
 use crate::sql::language::Language;

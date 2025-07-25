@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Explain, Expr, FlowResultExt as _, Output, Timeout, With, fmt::Fmt};
+use crate::expr::{Cond, Explain, Expr, Output, Timeout, With, fmt::Fmt};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 use anyhow::{Result, ensure};
@@ -27,10 +27,6 @@ pub struct DeleteStatement {
 }
 
 impl DeleteStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn read_only(&self) -> bool {
-		false
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

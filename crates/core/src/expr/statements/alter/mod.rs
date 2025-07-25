@@ -25,7 +25,7 @@ pub enum AlterKind<T> {
 	Drop,
 }
 
-impl<T> Revisioned for AlterKind<T> {
+impl<T: Revisioned> Revisioned for AlterKind<T> {
 	fn revision() -> u16 {
 		1
 	}
@@ -34,8 +34,18 @@ impl<T> Revisioned for AlterKind<T> {
 		&self,
 		w: &mut W,
 	) -> std::result::Result<(), revision::Error> {
-		// TODO: implement this
-		todo!()
+		Self::revision().serialize_revisioned(w)?;
+		match self {
+			AlterKind::None => 0u32.serialize_revisioned(w)?,
+			AlterKind::Set(x) => {
+				1u32.serialize_revisioned(w)?;
+				x.serialize_revisioned(w)?;
+			}
+			AlterKind::Drop => {
+				2u32.serialize_revisioned(w)?;
+			}
+		}
+		Ok(())
 	}
 
 	fn deserialize_revisioned<R: std::io::Read>(
@@ -44,7 +54,20 @@ impl<T> Revisioned for AlterKind<T> {
 	where
 		Self: Sized,
 	{
-		todo!()
+		match u16::deserialize_revisioned(r)? {
+			1 => {
+				let variant = u32::deserialize_revisioned(r)?;
+				match variant {
+					0 => Ok(AlterKind::None),
+					1 => Ok(AlterKind::Set(Revisioned::deserialize_revisioned(r)?)),
+					2 => Ok(AlterKind::Drop),
+					x => Err(revision::Error::Deserialize(format!(
+						"Unknown variant `{x}` for AlterKind"
+					))),
+				}
+			}
+			x => Err(revision::Error::Deserialize(format!("Unknown revision `{x}` for AlterKind"))),
+		}
 	}
 }
 
@@ -58,10 +81,6 @@ pub enum AlterStatement {
 }
 
 impl AlterStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

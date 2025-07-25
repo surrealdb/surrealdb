@@ -1,7 +1,8 @@
 use crate::expr::Expr;
 use crate::expr::fmt::Fmt;
 use crate::expr::statements::{
-	AccessStatement, KillStatement, LiveStatement, OptionStatement, UseStatement,
+	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
+	ShowStatement, UseStatement,
 };
 
 use std::fmt::{self, Display, Formatter};
@@ -23,10 +24,10 @@ impl Display for LogicalPlan {
 }
 
 impl LogicalPlan {
-	/// Check if we require a writeable transaction
-	pub(crate) fn read_only(&self) -> bool {
-		self.expressions.iter().all(|x| x.read_only())
-	}
+	// Check if we require a writeable transaction
+	//pub(crate) fn read_only(&self) -> bool {
+	//self.expressions.iter().all(|x| x.read_only())
+	//}
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -39,6 +40,8 @@ pub enum TopLevelExpr {
 	Live(Box<LiveStatement>),
 	Option(OptionStatement),
 	Use(UseStatement),
+	Show(ShowStatement),
+	Analyze(AnalyzeStatement),
 	Expr(Expr),
 }
 
@@ -49,7 +52,9 @@ impl TopLevelExpr {
 			TopLevelExpr::Begin
 			| TopLevelExpr::Cancel
 			| TopLevelExpr::Commit
-			| TopLevelExpr::Use(_) => true,
+			| TopLevelExpr::Use(_)
+			| TopLevelExpr::Show(_)
+			| TopLevelExpr::Analyze(_) => true,
 			TopLevelExpr::Kill(_)
 			| TopLevelExpr::Live(_)
 			| TopLevelExpr::Option(_)
@@ -70,6 +75,8 @@ impl Display for TopLevelExpr {
 			TopLevelExpr::Live(s) => s.fmt(f),
 			TopLevelExpr::Option(s) => s.fmt(f),
 			TopLevelExpr::Use(s) => s.fmt(f),
+			TopLevelExpr::Show(s) => s.fmt(f),
+			TopLevelExpr::Analyze(s) => s.fmt(f),
 			TopLevelExpr::Expr(e) => e.fmt(f),
 		}
 	}

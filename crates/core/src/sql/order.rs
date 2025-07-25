@@ -1,5 +1,5 @@
+use crate::sql::Idiom;
 use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Idiom};
 use std::fmt;
 use std::ops::Deref;
 

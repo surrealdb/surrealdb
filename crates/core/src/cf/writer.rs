@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
-use crate::expr::Idiom;
 use crate::expr::statements::DefineTableStatement;
 use crate::kvs::{Key, KeyEncode};
 use crate::val::RecordId;
@@ -151,7 +150,6 @@ mod tests {
 
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::expr::changefeed::ChangeFeed;
-	use crate::expr::id::RecordIdKeyLit;
 	use crate::expr::statements::show::ShowSince;
 	use crate::expr::statements::{
 		DefineDatabaseStatement, DefineNamespaceStatement, DefineTableStatement,

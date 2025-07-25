@@ -14,7 +14,6 @@ use semver::Version;
 use std::ops::Bound;
 use std::sync::LazyLock;
 use surrealdb_core::expr::TopLevelExpr;
-use surrealdb_core::sql::statements::{BeginStatement, CommitStatement};
 use types::{USER, User};
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);

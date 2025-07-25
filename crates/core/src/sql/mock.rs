@@ -1,5 +1,4 @@
 use crate::sql::escape::EscapeIdent;
-use crate::val::{RecordId, RecordIdKey};
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]

@@ -10,7 +10,6 @@ use crate::kvs::TransactionType::*;
 use crate::val::{RecordId, Value};
 use anyhow::Result;
 use reblessive;
-use surrealkv::Record;
 
 // Execute the AUTHENTICATE clause for a record access method
 pub async fn authenticate_record(

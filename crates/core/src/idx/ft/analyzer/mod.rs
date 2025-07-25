@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{Expr, FlowResultExt as _, Function, FunctionCall};
+use crate::expr::{FlowResultExt as _, Function};
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::offset::Offset;

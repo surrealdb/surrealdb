@@ -620,8 +620,7 @@ pub(super) mod tests {
 	use crate::idx::docids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::syn::{self, Parse};
-	use crate::val::Array as SqlArray;
+	use crate::syn::{self};
 	use crate::val::{Number, Value};
 	#[cfg(debug_assertions)]
 	use ahash::HashMap;

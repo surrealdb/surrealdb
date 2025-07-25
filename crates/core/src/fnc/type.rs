@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

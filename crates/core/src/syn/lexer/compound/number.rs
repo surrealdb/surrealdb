@@ -5,7 +5,6 @@ use crate::val::DecimalExt;
 use crate::val::duration::{
 	SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
 };
-use num_traits::Num;
 use rust_decimal::Decimal;
 use std::borrow::Cow;
 use std::num::{ParseFloatError, ParseIntError};

@@ -262,7 +262,7 @@ pub mod is {
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
 	use crate::syn;
-	use crate::val::{Datetime, RecordId, Value};
+	use crate::val::{Datetime, Value};
 	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;
 	use regex::Regex;
@@ -552,7 +552,7 @@ pub mod semver {
 
 #[cfg(test)]
 mod tests {
-	use super::{contains, matches, replace, slice};
+	use super::{matches, replace, slice};
 	use crate::fnc::args::{Cast, Optional};
 	use crate::val::Value;
 

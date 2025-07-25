@@ -1,14 +1,12 @@
 use crate::dbs::node::Node;
 use crate::expr::statements::access::AccessGrantStore;
 use crate::expr::statements::define::config::ConfigStore;
-use crate::expr::statements::define::{
-	ApiDefinition, BucketDefinition, DefineConfigStatement, DefineSequenceStatement,
-};
+use crate::expr::statements::define::{ApiDefinition, BucketDefinition, DefineSequenceStatement};
 use crate::expr::statements::{
-	AccessGrant, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineParamStore,
-	DefineTableStatement, DefineUserStatement, LiveStatement,
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
+	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineNamespaceStatement, DefineParamStore, DefineTableStatement, DefineUserStatement,
+	LiveStatement,
 };
 use crate::val::Value;
 use anyhow::Result;

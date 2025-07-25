@@ -2,19 +2,16 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{TryAdd, TrySub, Value};
 use anyhow::{Result, bail, ensure};
-use num_traits::CheckedAdd;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::iter::{Peekable, Sum};
-use std::str::{Chars, FromStr};
+use std::iter::Sum;
+use std::str::FromStr;
 use std::{fmt, ops};
 
 #[revisioned(revision = 1)]
 #[derive(
 	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,
 )]
-#[serde(rename = "$surrealdb::private::sql::Bytesize")]
-#[non_exhaustive]
 pub struct Bytesize(pub u64);
 
 const KIB: u64 = 1024;

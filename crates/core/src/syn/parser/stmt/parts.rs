@@ -175,7 +175,7 @@ impl Parser<'_> {
 		idiom: &Idiom,
 		idiom_span: Span,
 	) -> ParseResult<()> {
-		let mut found = None;
+		let mut found = false;
 		match fields {
 			Fields::Value(field) => {
 				let Field::Single {
@@ -188,19 +188,19 @@ impl Parser<'_> {
 
 				if let Some(alias) = alias {
 					if idiom == alias {
-						found = Some(&**field);
+						found = true;
 					}
 				}
 
 				match expr {
 					Expr::Idiom(x) => {
 						if idiom == x {
-							found = Some(&**field);
+							found = true;
 						}
 					}
 					v => {
 						if *idiom == v.to_idiom() {
-							found = Some(&**field);
+							found = true;
 						}
 					}
 				}
@@ -217,7 +217,7 @@ impl Parser<'_> {
 
 					if let Some(alias) = alias {
 						if idiom == alias {
-							found = Some(field);
+							found = true;
 							break;
 						}
 					}
@@ -225,13 +225,13 @@ impl Parser<'_> {
 					match expr {
 						Expr::Idiom(x) => {
 							if idiom == x {
-								found = Some(field);
+								found = true;
 								break;
 							}
 						}
 						v => {
 							if *idiom == v.to_idiom() {
-								found = Some(field);
+								found = true;
 								break;
 							}
 						}
@@ -240,7 +240,7 @@ impl Parser<'_> {
 			}
 		}
 
-		let Some(found) = found else {
+		if found {
 			match kind {
 				MissingKind::Split => {
 					bail!(
@@ -265,7 +265,6 @@ impl Parser<'_> {
 				}
 			};
 		};
-
 		Ok(())
 	}
 

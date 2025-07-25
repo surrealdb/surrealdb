@@ -22,12 +22,12 @@ pub struct Closure {
 }
 
 impl PartialOrd for Closure {
-	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+	fn partial_cmp(&self, _: &Self) -> Option<std::cmp::Ordering> {
 		Some(Ordering::Equal)
 	}
 }
 impl Ord for Closure {
-	fn cmp(&self, other: &Self) -> Ordering {
+	fn cmp(&self, _: &Self) -> Ordering {
 		Ordering::Equal
 	}
 }

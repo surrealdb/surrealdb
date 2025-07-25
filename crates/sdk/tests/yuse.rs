@@ -1,10 +1,8 @@
-mod parse;
-use parse::Parse;
 mod helpers;
 use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
-use surrealdb::expr::Value;
+use surrealdb_core::syn;
 
 #[tokio::test]
 async fn use_statement_set_ns() -> Result<()> {
@@ -19,14 +17,14 @@ async fn use_statement_set_ns() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['test', 'test', 'test', 'test']");
+	let val = syn::value("['test', 'test', 'test', 'test']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['my_ns', 'my_ns', 'test', 'test']");
+	let val = syn::value("['my_ns', 'my_ns', 'test', 'test']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -45,14 +43,14 @@ async fn use_statement_set_db() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['test', 'test', 'test', 'test']");
+	let val = syn::value("['test', 'test', 'test', 'test']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['test', 'test', 'my_db', 'my_db']");
+	let val = syn::value("['test', 'test', 'my_db', 'my_db']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -71,14 +69,14 @@ async fn use_statement_set_both() -> Result<()> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['test', 'test', 'test', 'test']");
+	let val = syn::value("['test', 'test', 'test', 'test']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['my_ns', 'my_ns', 'my_db', 'my_db']");
+	let val = syn::value("['my_ns', 'my_ns', 'my_db', 'my_db']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	Ok(())

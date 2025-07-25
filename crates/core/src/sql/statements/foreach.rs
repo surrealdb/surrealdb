@@ -1,5 +1,4 @@
 use crate::sql::{Block, Expr, Param};
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Eq, PartialEq)]

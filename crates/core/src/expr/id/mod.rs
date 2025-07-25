@@ -3,9 +3,9 @@ use super::fmt::Fmt;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::Expr;
 use crate::expr::escape::EscapeRid;
 use crate::expr::literal::ObjectEntry;
-use crate::expr::{Expr, FlowResult};
 use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
 
 use anyhow::Result;

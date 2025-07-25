@@ -13,11 +13,8 @@ use std::ops::Deref;
 
 use super::FlowResult;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Block")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Block(pub Vec<Expr>);
 

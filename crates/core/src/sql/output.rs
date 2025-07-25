@@ -1,6 +1,4 @@
 use crate::sql::field::Fields;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, PartialEq, Eq)]

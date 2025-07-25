@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::val::{Object, Value};
-use surrealdb_protocol::proto::v1 as proto;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[repr(transparent)]
