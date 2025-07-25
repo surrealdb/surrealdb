@@ -250,6 +250,65 @@ enum LinearNorm {
 	MinMax,
 	ZScore,
 }
+
+/// Implements weighted linear combination to fuse multiple ranked result lists.
+///
+/// Linear combination is a method for combining results from different search algorithms (e.g., vector search
+/// and full-text search) by computing a unified score based on weighted linear combination of normalized scores.
+/// The algorithm first normalizes scores from each result list using either MinMax or Z-score normalization,
+/// then computes a weighted sum: `weight₁ × norm_score₁ + weight₂ × norm_score₂ + ...`
+///
+/// # Parameters
+///
+/// * `ctx` - The execution context for cancellation checking and transaction management
+/// * `results` - An array of result lists, where each list contains documents with an "id" field
+/// * `weights` - An array of numeric weights corresponding to each result list (must have same length as results)
+/// * `limit` - Maximum number of documents to return (must be ≥ 1)
+/// * `norm` - Normalization method: "minmax" for MinMax normalization or "zscore" for Z-score normalization
+///
+/// # Returns
+///
+/// Returns a `Value::Array` containing the top `limit` documents sorted by linear score in descending
+/// order. Each document includes:
+/// - All original fields from the input documents (merged if the same document appears in multiple lists)
+/// - `id`: The document identifier
+/// - `linear_score`: The computed weighted linear combination score as a float
+///
+/// # Errors
+///
+/// * `Error::InvalidArguments` - If:
+///   - `limit` < 1
+///   - `results` and `weights` arrays have different lengths
+///   - Any weight is not a numeric value
+///   - `norm` is not "minmax" or "zscore"
+/// * Context cancellation errors if the operation is cancelled during processing
+///
+/// # Score Extraction
+///
+/// The function automatically extracts scores from documents using the following priority:
+/// 1. `distance` field - converted using `1.0 / (1.0 + distance)` (lower distance = higher score)
+/// 2. `ft_score` field - used directly (full-text search scores)
+/// 3. `score` field - used directly (generic scores)
+/// 4. Rank-based fallback - `1.0 / (1.0 + rank)` if no score field is found
+///
+/// # Normalization Methods
+///
+/// * **MinMax**: Scales scores to [0,1] range using `(score - min) / (max - min)`
+/// * **Z-score**: Standardizes scores using `(score - mean) / std_dev`
+///
+/// # Example
+///
+/// ```surql
+/// -- Combine vector search and full-text search results with different weights
+/// LET $vector_results = SELECT id, distance FROM docs WHERE embedding <|5|> $query_vector;
+/// LET $text_results = SELECT id, ft_score FROM docs WHERE text @@ 'search terms';
+///
+/// -- Use MinMax normalization with 2:1 weighting favoring vector search
+/// RETURN search::linear([$vector_results, $text_results], [2.0, 1.0], 10, 'minmax');
+///
+/// -- Use Z-score normalization with equal weighting
+/// RETURN search::linear([$vector_results, $text_results], [1.0, 1.0], 10, 'zscore');
+/// ```
 pub async fn linear(
 	ctx: &Context,
 	(results, weights, limit, norm): (Array, Array, i64, String),
