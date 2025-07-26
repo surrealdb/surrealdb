@@ -348,6 +348,10 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The `EXPIRE` keyword is only supported in in-memory mode.
+	#[error("The `EXPIRE` keyword supported on in-memory mode only")]
+	ExpireNotSupported,
+
 	/// The requested function does not exist
 	#[error("The function 'fn::{name}' does not exist")]
 	FcNotFound {

@@ -1,4 +1,4 @@
-use crate::sql::{Data, Output, SqlValues, Timeout, Version};
+use crate::sql::{Data, Expire, Output, SqlValues, Timeout, Version};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,8 @@ pub struct CreateStatement {
 	pub output: Option<Output>,
 	// The timeout for the statement
 	pub timeout: Option<Timeout>,
+	/// Duration after which created records automatically expire and are removed.
+	pub expire: Option<Expire>,
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
@@ -46,6 +48,9 @@ impl fmt::Display for CreateStatement {
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
 		}
+		if let Some(ref v) = self.expire {
+			write!(f, " {v}")?
+		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?
 		}
@@ -61,6 +66,7 @@ impl From<CreateStatement> for crate::expr::statements::CreateStatement {
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.map(Into::into),
+			expire: v.expire.map(Into::into),
 			parallel: v.parallel,
 			version: v.version.map(Into::into),
 		}
@@ -75,6 +81,7 @@ impl From<crate::expr::statements::CreateStatement> for CreateStatement {
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.map(Into::into),
+			expire: v.expire.map(Into::into),
 			parallel: v.parallel,
 			version: v.version.map(Into::into),
 		}

@@ -23,6 +23,7 @@ use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::Ic;
 use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::cache::ex::{ExpireCache, ExpireItem, Record};
 use crate::kvs::clock::SizedClock;
 #[expect(unused_imports)]
 use crate::kvs::clock::SystemClock;
@@ -37,11 +38,12 @@ use crate::syn::parser::{ParserSettings, StatementStream};
 #[allow(unused_imports)]
 use anyhow::bail;
 use anyhow::{Result, ensure};
-use async_channel::{Receiver, Sender};
+use async_channel::{Receiver, RecvError, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use futures::{Future, Stream};
 use reblessive::TreeStack;
+use std::collections::HashSet;
 use std::fmt;
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -51,10 +53,9 @@ use std::task::{Poll, ready};
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use std::time::{SystemTime, UNIX_EPOCH};
-#[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
-use tracing::instrument;
-use tracing::trace;
+use tokio::time::Instant;
+use tracing::{info, instrument, trace};
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
@@ -102,6 +103,15 @@ pub struct Datastore {
 	buckets: Arc<BucketConnections>,
 	// The sequences
 	sequences: Sequences,
+	// The expiring cache.
+	expire_cache: Arc<RwLock<ExpireCache>>,
+	// The expiring record sender.
+	expire_sender: Sender<ExpireItem>,
+	// The expiring record receiver.
+	expire_receiver: Receiver<ExpireItem>,
+	// Whether storage engine is memory.
+	// FIXME: remove once `EXPIRE` keyword support all engines.
+	in_memory: bool,
 }
 
 #[derive(Clone)]
@@ -387,6 +397,9 @@ impl Datastore {
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}?;
+
+		let (expire_tx, expire_rx) = async_channel::unbounded();
+
 		// Set the properties on the datastore
 		flavor.map(|flavor| {
 			let tf = TransactionFactory::new(clock, flavor);
@@ -409,6 +422,10 @@ impl Datastore {
 				cache: Arc::new(DatastoreCache::new()),
 				buckets: Arc::new(DashMap::new()),
 				sequences: Sequences::new(tf),
+				expire_cache: Arc::new(RwLock::new(ExpireCache::new())),
+				expire_sender: expire_tx,
+				expire_receiver: expire_rx,
+				in_memory: path == "memory",
 			}
 		})
 	}
@@ -435,6 +452,10 @@ impl Datastore {
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(self.transaction_factory.clone()),
 			transaction_factory: self.transaction_factory,
+			expire_cache: self.expire_cache,
+			expire_sender: self.expire_sender,
+			expire_receiver: self.expire_receiver,
+			in_memory: self.in_memory,
 		}
 	}
 
@@ -1416,6 +1437,8 @@ impl Datastore {
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
+			self.expire_sender.clone(),
+			self.in_memory,
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
@@ -1435,6 +1458,39 @@ impl Datastore {
 		} else {
 			Ok(())
 		}
+	}
+
+	/// Receives the next expiring record from the background expiration channel
+	pub async fn recv_expire(&self) -> Result<ExpireItem, RecvError> {
+		self.expire_receiver.recv().await
+	}
+
+	/// Inserts a record into the expiration cache
+	pub async fn insert_expire(&self, item: ExpireItem) {
+		self.expire_cache.write().await.insert(item).await;
+	}
+
+	/// Retrieves the earliest expiration time and its associated records
+	pub async fn earlier_expire_keys(&self) -> Option<(Instant, HashSet<Record>)> {
+		self.expire_cache.read().await.earlier_keys().await
+	}
+
+	/// Removes the earliest expired records from the cache
+	pub async fn remove_earlier_expire(&self) {
+		self.expire_cache.write().await.remove_earlier().await
+	}
+
+	/// Deletes the specified expired records from the datastore
+	pub async fn delete_expire_records(&self, keys: HashSet<Record>) -> Result<()> {
+		let txn = self.transaction(Write, Optimistic).await?;
+
+		for record in keys.iter() {
+			txn.del_record(&record.ns, &record.db, &record.tb, &record.id).await?;
+		}
+
+		txn.commit().await?;
+
+		Ok(())
 	}
 }
 

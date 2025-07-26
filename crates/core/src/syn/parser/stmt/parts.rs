@@ -7,8 +7,8 @@ use crate::sql::{Explain, Fetch, With};
 use crate::syn::error::bail;
 use crate::{
 	sql::{
-		Base, Cond, Data, Duration, Fetchs, Field, Fields, Group, Groups, Ident, Idiom, Output,
-		Permission, Permissions, SqlValue, Tables, Timeout, View,
+		Base, Cond, Data, Duration, Expire, Fetchs, Field, Fields, Group, Groups, Ident, Idiom,
+		Output, Permission, Permissions, SqlValue, Tables, Timeout, View,
 		changefeed::ChangeFeed,
 		index::{Distance, VectorType},
 	},
@@ -115,6 +115,15 @@ impl Parser<'_> {
 		}
 		let duration = self.next_token_value()?;
 		Ok(Some(Timeout(duration)))
+	}
+
+	/// Parses a record expire if the next token is `EXPIRE`.
+	pub fn try_parse_expire(&mut self) -> ParseResult<Option<Expire>> {
+		if !self.eat(t!("EXPIRE")) {
+			return Ok(None);
+		}
+		let duration = self.next_token_value()?;
+		Ok(Some(Expire(duration)))
 	}
 
 	pub async fn try_parse_fetch(&mut self, ctx: &mut Stk) -> ParseResult<Option<Fetchs>> {
