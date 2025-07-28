@@ -12,24 +12,6 @@ use crate::kvs::{KVKey, clock::SizedClock};
 use std::{future::Future, sync::Arc};
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
-pub struct MyKv<'a> {
-	pub val: &'a str,
-}
-
-impl KVKey for MyKv<'_> {
-	type ValueType = Vec<u8>;
-}
-
-impl<'a> MyKv<'a> {
-	fn new(val: &'a str) -> Self {
-		Self {
-			val,
-		}
-	}
-}
-
 macro_rules! include_tests {
 	($new_ds:ident => $($name:ident),* $(,)?) => {
 		$(

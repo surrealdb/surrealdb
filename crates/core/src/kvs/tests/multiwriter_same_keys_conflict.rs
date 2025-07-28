@@ -1,6 +1,6 @@
 #![cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv",))]
 
-use super::{CreateDs, MyKv};
+use super::CreateDs;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -20,34 +20,33 @@ pub async fn multiwriter_same_keys_conflict(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Insert an initial key
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let key = MyKv::new("test");
-	tx.set(&key, &"some text".as_bytes().to_vec(), None).await.unwrap();
+	tx.set(&"test", &"some text".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx1.set(&key, &"other text 1".as_bytes().to_vec(), None).await.unwrap();
+	tx1.set(&"test", &"other text 1".as_bytes().to_vec(), None).await.unwrap();
 	// Create a writeable transaction
 	let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx2.set(&key, &"other text 2".as_bytes().to_vec(), None).await.unwrap();
+	tx2.set(&"test", &"other text 2".as_bytes().to_vec(), None).await.unwrap();
 	// Create a writeable transaction
 	let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx3.set(&key, &"other text 3".as_bytes().to_vec(), None).await.unwrap();
+	tx3.set(&"test", &"other text 3".as_bytes().to_vec(), None).await.unwrap();
 	// Cancel both writeable transactions
 	tx1.commit().await.unwrap();
 	tx2.commit().await.unwrap_err();
 	tx3.commit().await.unwrap_err();
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.get(&key, None).await.unwrap().unwrap();
+	let val = tx.get(&"test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"other text 1");
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set(&key, &"original text".as_bytes().to_vec(), None).await.unwrap();
+	tx.set(&"test", &"original text".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Check that the key was updated ok
 	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
-	let val = tx.get(&key, None).await.unwrap().unwrap();
+	let val = tx.get(&"test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"original text");
 	tx.cancel().await.unwrap();
 }
