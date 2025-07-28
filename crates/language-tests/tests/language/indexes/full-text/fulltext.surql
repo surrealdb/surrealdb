@@ -20,7 +20,7 @@ value = "None"
 value = "{ events: {  }, fields: {  }, indexes: { i: 'DEFINE INDEX i ON b FIELDS t FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'i', operator: '@1@', value: 'Hello' }, table: 'b' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'i', operator: '@1,AND@', value: 'Hello' }, table: 'b' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ score: 0.5108256340026855f, title: '{Hello} World!' }]"
