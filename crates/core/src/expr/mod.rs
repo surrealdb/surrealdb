@@ -132,6 +132,7 @@ pub use self::number::DecimalExt;
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::operation::Operation;
+pub use self::operator::BooleanOperation;
 pub use self::operator::Operator;
 pub use self::order::{OldOrder, OldOrders, Order, OrderList, Ordering};
 pub use self::output::Output;

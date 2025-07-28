@@ -31,7 +31,7 @@ async fn select_where_matches_using_index() -> Result<()> {
 						detail: {
 							plan: {
 								index: 'blog_title',
-								operator: '@1@',
+								operator: '@1,AND@',
 								value: 'Hello'
 							},
 							table: 'blog',
@@ -150,7 +150,7 @@ async fn select_where_matches_using_index_and_arrays(parallel: bool) -> Result<(
 						detail: {
 							plan: {
 								index: 'blog_content',
-								operator: '@1@',
+								operator: '@1,AND@',
 								value: 'Hello Bãr'
 							},
 							table: 'blog',
@@ -392,7 +392,7 @@ async fn select_where_matches_using_index_and_objects(parallel: bool) -> Result<
 						detail: {
 							plan: {
 								index: 'blog_content',
-								operator: '@1@',
+								operator: '@1,AND@',
 								value: 'Hello Bãr'
 							},
 							table: 'blog',
@@ -612,7 +612,7 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 				detail: {
 					plan: {
 						index: 'page_title',
-						operator: '@1@',
+						operator: '@1,AND@',
 						value: 'dog'
 					},
 					table: 'page'
@@ -623,7 +623,7 @@ async fn select_where_matches_without_complex_query() -> Result<()> {
 				detail: {
 					plan: {
 						index: 'page_content',
-						operator: '@2@',
+						operator: '@2,AND@',
 						value: 'dog'
 					},
 					table: 'page'
@@ -673,7 +673,7 @@ async fn select_where_matches_mixing_indexes() -> Result<()> {
 					detail: {
 						plan: {
 							index: 'idxPersonName',
-							operator: '@@',
+							operator: '@AND@',
 							value: 'Tobie'
 						},
 						table: 'person'
