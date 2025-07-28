@@ -1,4 +1,4 @@
-use crate::kvs::{Key, Val};
+use crate::kvs::{Key, Val, impl_kv_value_revisioned};
 use anyhow::Result;
 use revision::revisioned;
 use roaring::RoaringBitmap;
@@ -21,6 +21,8 @@ pub struct U32 {
 	next_id: Id,
 	updated: bool,
 }
+
+impl_kv_value_revisioned!(U32);
 
 impl U32 {
 	pub(crate) async fn new(state_key: Key, v: Option<Val>) -> Result<Self> {

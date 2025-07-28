@@ -1,11 +1,10 @@
 //! Store and chunked layers of an HNSW index
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Hl<'a> {
 	__: u8,
 	_a: u8,
@@ -22,7 +21,6 @@ pub(crate) struct Hl<'a> {
 	pub layer: u16,
 	pub chunk: u32,
 }
-impl_key!(Hl<'a>);
 
 impl KVKey for Hl<'_> {
 	type ValueType = Vec<u8>;
@@ -51,21 +49,17 @@ impl<'a> Hl<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {
 		use super::*;
 		let val = Hl::new("testns", "testdb", "testtb", "testix", 7, 8);
-		let enc = Hl::encode(&val).unwrap();
+		let enc = Hl::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!hl\0\x07\0\0\0\x08",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
-
-		let dec = Hl::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

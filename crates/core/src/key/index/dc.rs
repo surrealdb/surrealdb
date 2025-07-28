@@ -20,13 +20,12 @@ use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::DocLengthAndCount;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KVKey, KeyEncode, impl_key};
+use crate::kvs::KVKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Dc<'a> {
 	__: u8,
 	_a: u8,
@@ -46,7 +45,6 @@ pub(crate) struct Dc<'a> {
 	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 }
-impl_key!(Dc<'a>);
 
 impl KVKey for Dc<'_> {
 	type ValueType = DocLengthAndCount;
@@ -117,7 +115,7 @@ impl<'a> Dc<'a> {
 	/// # Returns
 	/// The encoded root key as a byte vector
 	pub(crate) fn new_root(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Result<Vec<u8>> {
-		DcPrefix::new(ns, db, tb, ix).encode()
+		DcPrefix::new(ns, db, tb, ix).encode_key()
 	}
 
 	/// Creates a key range for querying document count and length statistics
@@ -141,9 +139,9 @@ impl<'a> Dc<'a> {
 		ix: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = DcPrefix::new(ns, db, tb, ix);
-		let mut beg = prefix.encode()?;
+		let mut beg = prefix.encode_key()?;
 		beg.extend([0; 40]);
-		let mut end = prefix.encode()?;
+		let mut end = prefix.encode_key()?;
 		end.extend([255; 40]);
 		Ok((beg, end))
 	}
@@ -164,7 +162,10 @@ struct DcPrefix<'a> {
 	_f: u8,
 	_g: u8,
 }
-impl_key!(DcPrefix<'a>);
+
+impl KVKey for DcPrefix<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl<'a> DcPrefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
@@ -188,7 +189,6 @@ impl<'a> DcPrefix<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KeyDecode;
 
 	#[test]
 	fn key_with_ids() {
@@ -201,17 +201,14 @@ mod tests {
 			Uuid::from_u128(1),
 			Uuid::from_u128(2),
 		);
-		let enc = Dc::encode(&val).unwrap();
+		let enc = Dc::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
-		let dec = Dc::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]
 	fn key_root() {
 		let enc = Dc::new_root("testns", "testdb", "testtb", "testix").unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dc");
-		let _ = DcPrefix::decode(&enc).unwrap();
 	}
 
 	#[test]

@@ -13,7 +13,7 @@ use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::bc::Bc;
 use crate::key::index::bd::{Bd, BdRoot};
 use crate::key::index::bf::Bf;
-use crate::key::index::bi::{Bi, Ii};
+use crate::key::index::bi::Bi;
 use crate::key::index::bk::Bk;
 use crate::key::index::bl::{Bl, BlRoot};
 use crate::key::index::bo::Bo;
@@ -28,6 +28,7 @@ use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::id::Id as IdKey;
+use crate::key::index::ii::Ii;
 use crate::key::index::vm::{Vm, VmRoot};
 
 use crate::key::index::dc::Dc;

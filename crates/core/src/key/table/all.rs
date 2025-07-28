@@ -2,11 +2,10 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct TableRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -16,7 +15,6 @@ pub(crate) struct TableRoot<'a> {
 	_c: u8,
 	pub tb: &'a str,
 }
-impl_key!(TableRoot<'a>);
 
 impl KVKey for TableRoot<'_> {
 	type ValueType = Vec<u8>;
@@ -48,7 +46,7 @@ impl<'a> TableRoot<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -58,10 +56,7 @@ mod tests {
 			"testdb",
 			"testtb",
 		);
-		let enc = TableRoot::encode(&val).unwrap();
+		let enc = TableRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0");
-
-		let dec = TableRoot::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

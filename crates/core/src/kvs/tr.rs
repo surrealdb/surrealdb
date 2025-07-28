@@ -1,5 +1,4 @@
 use super::Key;
-use super::KeyEncode;
 use super::Val;
 use super::Version;
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
@@ -15,7 +14,6 @@ use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::expr;
 use crate::expr::thing::Thing;
 use crate::kvs::KVValue;
-use crate::kvs::KeyDecode as _;
 use crate::kvs::key::KVKey;
 use crate::kvs::stash::Stash;
 use crate::vs::VersionStamp;
@@ -521,21 +519,21 @@ impl Transactor {
 	}
 
 	/// Insert or update a key in the datastore.
-	pub async fn set_versionstamp<K, V>(
+	pub async fn set_versionstamp<K>(
 		&mut self,
 		ts_key: K,
 		prefix: K,
 		suffix: K,
-		val: V,
+		val: K::ValueType,
 	) -> Result<()>
 	where
 		K: KVKey + Debug,
-		V: Into<Val> + Debug,
 	{
 		let ts_key = ts_key.encode_key()?;
 		let prefix = prefix.encode_key()?;
 		let suffix = suffix.encode_key()?;
-		self.inner.set_versionstamp(ts_key, prefix, suffix, val.into()).await
+		let value = val.kv_encode_value()?;
+		self.inner.set_versionstamp(ts_key, prefix, suffix, value).await
 	}
 
 	pub(crate) fn new_save_point(&mut self) {
@@ -598,7 +596,7 @@ impl Transactor {
 
 	/// Gets the next namespace id
 	pub(crate) async fn get_next_ns_id(&mut self) -> Result<u32> {
-		let key = crate::key::root::ni::Ni::default().encode_owned()?;
+		let key = crate::key::root::ni::Ni::default().encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
@@ -609,7 +607,7 @@ impl Transactor {
 
 	/// Gets the next database id for the given namespace
 	pub(crate) async fn get_next_db_id(&mut self, ns: u32) -> Result<u32> {
-		let key = crate::key::namespace::di::new(ns).encode_owned()?;
+		let key = crate::key::namespace::di::new(ns).encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
@@ -620,7 +618,7 @@ impl Transactor {
 
 	/// Gets the next table id for the given namespace and database
 	pub(crate) async fn get_next_tb_id(&mut self, ns: u32, db: u32) -> Result<u32> {
-		let key = crate::key::database::ti::new(ns, db).encode_owned()?;
+		let key = crate::key::database::ti::new(ns, db).encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
@@ -632,7 +630,7 @@ impl Transactor {
 	/// Removes the given namespace from the sequence.
 	#[expect(unused)]
 	pub(crate) async fn remove_ns_id(&mut self, ns: u32) -> Result<()> {
-		let key = crate::key::root::ni::Ni::default().encode_owned()?;
+		let key = crate::key::root::ni::Ni::default().encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		seq.remove_id(ns);
 		self.stash.set(key, seq.clone());
@@ -644,7 +642,7 @@ impl Transactor {
 	/// Removes the given database from the sequence.
 	#[expect(unused)]
 	pub(crate) async fn remove_db_id(&mut self, ns: u32, db: u32) -> Result<()> {
-		let key = crate::key::namespace::di::new(ns).encode_owned()?;
+		let key = crate::key::namespace::di::new(ns).encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		seq.remove_id(db);
 		self.stash.set(key, seq.clone());
@@ -656,7 +654,7 @@ impl Transactor {
 	/// Removes the given table from the sequence.
 	#[expect(unused)]
 	pub(crate) async fn remove_tb_id(&mut self, ns: u32, db: u32, tb: u32) -> Result<()> {
-		let key = crate::key::database::ti::new(ns, db).encode_owned()?;
+		let key = crate::key::database::ti::new(ns, db).encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		seq.remove_id(tb);
 		self.stash.set(key, seq.clone());
@@ -713,7 +711,7 @@ impl Transactor {
 		// Ensure there are no keys after the ts_key
 		// Otherwise we can go back in time!
 		let mut ts_key = crate::key::database::ts::new(ns, db, ts);
-		let begin = ts_key.encode()?;
+		let begin = ts_key.encode_key()?;
 		let end = crate::key::database::ts::suffix(ns, db)?;
 		let ts_pairs: Vec<(Vec<u8>, Vec<u8>)> = self.getr(begin..end, None).await?;
 		let latest_ts_pair = ts_pairs.last();
@@ -726,7 +724,7 @@ impl Transactor {
 				db,
 				k.sprint()
 			);
-			let k = crate::key::database::ts::Ts::decode(k)?;
+			let k = crate::key::database::ts::Ts::decode_key(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
 				warn!("ts {ts} is less than the latest ts {latest_ts}");
@@ -744,8 +742,8 @@ impl Transactor {
 		db: &str,
 	) -> Result<Option<VersionStamp>> {
 		let start = crate::key::database::ts::prefix(ns, db)?;
-		let ts_key = crate::key::database::ts::new(ns, db, ts + 1).encode_owned()?;
-		let end = ts_key.encode_owned()?;
+		let ts_key = crate::key::database::ts::new(ns, db, ts + 1).encode_key()?;
+		let end = ts_key.encode_key()?;
 		let ts = if self.inner.supports_reverse_scan() {
 			self.scanr(start..end, 1, None).await?.pop().map(|x| x.1)
 		} else {

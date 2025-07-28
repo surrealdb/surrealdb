@@ -21,7 +21,6 @@ pub(in crate::idx) struct HnswDocs {
 
 #[revisioned(revision = 1)]
 #[derive(Default, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct HnswDocsState {
 	available: RoaringTreemap,
 	next_doc_id: DocId,
@@ -107,10 +106,12 @@ impl HnswDocs {
 }
 
 impl KVValue for HnswDocsState {
+	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		VersionedStore::try_into(self)
 	}
 
+	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		VersionedStore::try_from(val)
 	}
@@ -118,7 +119,6 @@ impl KVValue for HnswDocsState {
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct ElementDocs {
 	e_id: ElementId,
 	docs: Ids64,

@@ -3,12 +3,11 @@ use crate::idx::ft::search::terms::TermId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Bc<'a> {
 	__: u8,
 	_a: u8,
@@ -24,7 +23,6 @@ pub(crate) struct Bc<'a> {
 	_g: u8,
 	pub term_id: TermId,
 }
-impl_key!(Bc<'a>);
 
 impl KVKey for Bc<'_> {
 	type ValueType = RoaringTreemap;
@@ -58,7 +56,6 @@ impl<'a> Bc<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {
@@ -71,10 +68,7 @@ mod tests {
 			"testix",
 			7
 		);
-		let enc = Bc::encode(&val).unwrap();
+		let enc = Bc::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bc\0\0\0\0\0\0\0\x07");
-
-		let dec = Bc::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

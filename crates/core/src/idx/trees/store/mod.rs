@@ -17,7 +17,7 @@ use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
-use crate::kvs::{Key, KeyEncode, Transaction, TransactionType, Val};
+use crate::kvs::{KVKey, Key, Transaction, TransactionType, Val};
 use anyhow::Result;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
@@ -135,11 +135,11 @@ pub enum TreeNodeProvider {
 impl TreeNodeProvider {
 	pub fn get_key(&self, node_id: NodeId) -> Result<Key> {
 		match self {
-			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(node_id).encode(),
-			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(node_id).encode(),
-			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(node_id).encode(),
-			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(node_id).encode(),
-			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(node_id).encode(),
+			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(node_id).encode_key(),
+			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(node_id).encode_key(),
+			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(node_id).encode_key(),
+			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(node_id).encode_key(),
+			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(node_id).encode_key(),
 			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
 		}
 	}

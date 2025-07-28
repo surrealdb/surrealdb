@@ -4,6 +4,7 @@ use crate::expr::object::Object;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::thing::Thing;
 use crate::expr::value::Value;
+use crate::kvs::impl_kv_value_revisioned;
 use crate::vs::VersionStamp;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,8 @@ impl From<DefineTableStatement> for Value {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct TableMutations(pub String, pub Vec<TableMutation>);
+
+impl_kv_value_revisioned!(TableMutations);
 
 impl TableMutations {
 	pub fn new(tb: String) -> Self {

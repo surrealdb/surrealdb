@@ -4,14 +4,13 @@ use crate::dbs::node::Node;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // Represents cluster information.
 // In the future, this could also include broadcast addresses and other information.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Nd {
 	__: u8,
 	_a: u8,
@@ -20,7 +19,6 @@ pub(crate) struct Nd {
 	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 }
-impl_key!(Nd);
 
 impl KVKey for Nd {
 	type ValueType = Node;
@@ -62,14 +60,13 @@ impl Nd {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
 		let val = Nd::new(Uuid::default());
-		let enc = val.encode().unwrap();
-		let dec = Nd::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = val.encode_key().unwrap();
+		assert_eq!(&enc, b"/!nd\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
 	}
 
 	#[test]

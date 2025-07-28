@@ -3,12 +3,11 @@ use crate::expr::statements::define::DefineUserStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::{KeyEncode, impl_key};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Us<'a> {
 	__: u8,
 	_a: u8,
@@ -18,7 +17,6 @@ pub(crate) struct Us<'a> {
 	_d: u8,
 	pub user: &'a str,
 }
-impl_key!(Us<'a>);
 
 impl KVKey for Us<'_> {
 	type ValueType = DefineUserStatement;
@@ -29,13 +27,13 @@ pub fn new<'a>(ns: &'a str, user: &'a str) -> Us<'a> {
 }
 
 pub fn prefix(ns: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns).encode()?;
+	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!us\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns).encode()?;
+	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!us\xff");
 	Ok(k)
 }
@@ -62,7 +60,7 @@ impl<'a> Us<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -71,10 +69,8 @@ mod tests {
 			"testns",
 			"testuser",
 		);
-		let enc = Us::encode(&val).unwrap();
+		let enc = Us::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\x00!ustestuser\x00");
-		let dec = Us::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

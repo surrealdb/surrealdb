@@ -1,4 +1,3 @@
-use super::KeyDecode;
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -257,7 +256,6 @@ impl IndexBuilder {
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Debug)]
-#[non_exhaustive]
 pub(crate) struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
@@ -268,7 +266,6 @@ impl_kv_value_revisioned!(Appending);
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Debug)]
-#[non_exhaustive]
 pub(crate) struct PrimaryAppending(u32);
 
 impl_kv_value_revisioned!(PrimaryAppending);
@@ -521,7 +518,7 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let key = thing::Thing::decode(&k)?;
+			let key = thing::Thing::decode_key(&k)?;
 			// Parse the value
 			let val: Value = revision::from_slice(&v)?;
 			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();

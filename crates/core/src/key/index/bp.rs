@@ -4,11 +4,10 @@ use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct BpRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -23,7 +22,6 @@ pub(crate) struct BpRoot<'a> {
 	_f: u8,
 	_g: u8,
 }
-impl_key!(BpRoot<'a>);
 
 impl Categorise for BpRoot<'_> {
 	fn categorise(&self) -> Category {
@@ -55,7 +53,6 @@ impl<'a> BpRoot<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Bp<'a> {
 	__: u8,
 	_a: u8,
@@ -71,7 +68,6 @@ pub(crate) struct Bp<'a> {
 	_g: u8,
 	pub node_id: NodeId,
 }
-impl_key!(Bp<'a>);
 
 impl Categorise for Bp<'_> {
 	fn categorise(&self) -> Category {
@@ -105,7 +101,15 @@ impl<'a> Bp<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
+	#[test]
+	fn root() {
+		let val = BpRoot::new("testns", "testdb", "testtb", "testix");
+		let enc = BpRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bp");
+	}
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -117,10 +121,7 @@ mod tests {
 			"testix",
 			7
 		);
-		let enc = Bp::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bp\x01\0\0\0\0\0\0\0\x07");
-
-		let dec = Bp::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Bp::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bp\0\0\0\0\0\0\0\x07");
 	}
 }

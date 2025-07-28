@@ -1,30 +1,54 @@
+//! Key and value traits for the key-value store.
+
 use anyhow::{Context, Result};
 use roaring::{RoaringBitmap, RoaringTreemap};
 use std::fmt::Debug;
 
-pub trait KVKey: serde::Serialize + Debug {
+/// KVKey is a trait that defines a key for the key-value store.
+pub trait KVKey: serde::Serialize + Debug + Sized {
+	/// The associated value type for this key.
 	type ValueType: KVValue;
 
+	/// Encodes the key into a byte vector.
 	#[inline]
-	fn encode_key(&self) -> ::std::result::Result<Vec<u8>, ::anyhow::Error> {
+	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
 		Ok(storekey::serialize(self)?)
 	}
 }
 
 impl KVKey for Vec<u8> {
 	type ValueType = Vec<u8>;
+
+	#[inline]
+	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(self.clone())
+	}
 }
 
 impl KVKey for String {
 	type ValueType = Vec<u8>;
+
+	#[inline]
+	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(self.as_bytes().to_vec())
+	}
 }
 
 impl KVKey for &str {
 	type ValueType = Vec<u8>;
+
+	#[inline]
+	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(self.as_bytes().to_vec())
+	}
 }
 
+/// KVValue is a trait that defines a value for the key-value store.
 pub trait KVValue {
+	/// Encodes the value into a byte vector.
 	fn kv_encode_value(&self) -> Result<Vec<u8>>;
+
+	/// Decodes the value from a byte vector.
 	fn kv_decode_value(bytes: Vec<u8>) -> Result<Self>
 	where
 		Self: Sized;
@@ -33,10 +57,12 @@ pub trait KVValue {
 macro_rules! impl_kv_value_revisioned {
 	($name:ident) => {
 		impl crate::kvs::KVValue for $name {
+			#[inline]
 			fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 				Ok(revision::to_vec(self)?)
 			}
 
+			#[inline]
 			fn kv_decode_value(bytes: Vec<u8>) -> anyhow::Result<Self> {
 				Ok(revision::from_slice(&bytes)?)
 			}
@@ -46,30 +72,36 @@ macro_rules! impl_kv_value_revisioned {
 pub(crate) use impl_kv_value_revisioned;
 
 impl KVValue for Vec<u8> {
+	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		Ok(self.clone())
 	}
 
+	#[inline]
 	fn kv_decode_value(bytes: Vec<u8>) -> Result<Self> {
 		Ok(bytes)
 	}
 }
 
 impl KVValue for String {
+	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		Ok(self.as_bytes().to_vec())
 	}
 
+	#[inline]
 	fn kv_decode_value(bytes: Vec<u8>) -> Result<Self> {
 		String::from_utf8(bytes).context("String bytes must be valid utf8")
 	}
 }
 
 impl KVValue for u64 {
+	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		Ok(self.to_be_bytes().to_vec())
 	}
 
+	#[inline]
 	fn kv_decode_value(bytes: Vec<u8>) -> Result<Self> {
 		if bytes.len() != 8 {
 			return Err(anyhow::anyhow!("u64 bytes must be 8 bytes"));
@@ -114,156 +146,29 @@ impl KVValue for RoaringTreemap {
 	}
 }
 
-/// A trait for types which can be encoded as a kv-store key.
-pub trait KeyEncode {
-	fn encode(&self) -> Result<Vec<u8>> {
-		let mut buf = Vec::new();
-		self.encode_into(&mut buf)?;
-		Ok(buf)
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use rstest::rstest;
+
+	#[rstest]
+	#[case::str("test", b"test".to_vec())]
+	#[case::string(String::from("test"), b"test".to_vec())]
+	#[case::vec(vec![1, 2, 3], vec![1, 2, 3])]
+	fn test_kv_key_primitives(#[case] key: impl KVKey, #[case] expected: Vec<u8>) {
+		let encoded = key.encode_key().unwrap();
+		assert_eq!(encoded, expected);
 	}
 
-	fn encode_owned(self) -> Result<Vec<u8>>
-	where
-		Self: Sized,
-	{
-		self.encode()
-	}
-
-	/// Push the bytes this key would encode into the buffer.
-	///
-	/// Implementation can make no assumption about the contents of the buffer.
-	/// The buffer should not be cleared and if there are bytes present in the buffer they should
-	/// also be present when this function returns.
-	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<()>;
-}
-
-/// A trait for types which can be decoded from a kv-store key bytes.
-pub trait KeyDecode<'a> {
-	fn decode(bytes: &'a [u8]) -> Result<Self>
-	where
-		Self: Sized;
-}
-
-pub trait KeyDecodeOwned: for<'a> KeyDecode<'a> {
-	/// Decode the key from an owned vector.
-	///
-	/// A lot of kv query methods return vectors for keys, which some key types might be able to
-	/// use to more effeciently decode the data.
-	///
-	/// The default implementation just calls decode
-	fn decode_from_vec(bytes: Vec<u8>) -> Result<Self>
-	where
-		Self: Sized,
-	{
-		Self::decode(&bytes)
+	#[rstest]
+	#[case::u64(123_u64, vec![0, 0, 0, 0, 0, 0, 0, 123])]
+	#[case::unit((), Vec::new())]
+	#[case::vec(vec![1, 2, 3], vec![1, 2, 3])]
+	#[case::string(String::from("test"), b"test".to_vec())]
+	#[case::roaring_bitmap(RoaringBitmap::new(), vec![58, 48, 0, 0, 0, 0, 0, 0])]
+	#[case::roaring_treemap(RoaringTreemap::new(), vec![0, 0, 0, 0, 0, 0, 0, 0])]
+	fn test_kv_value_primitives(#[case] value: impl KVValue, #[case] expected: Vec<u8>) {
+		let encoded = value.kv_encode_value().unwrap();
+		assert_eq!(encoded, expected);
 	}
 }
-
-impl KeyEncode for Vec<u8> {
-	fn encode(&self) -> Result<Vec<u8>> {
-		Ok(self.clone())
-	}
-
-	fn encode_owned(self) -> Result<Vec<u8>> {
-		Ok(self)
-	}
-
-	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<()> {
-		buffer.extend_from_slice(self);
-		Ok(())
-	}
-}
-
-impl<K: KeyEncode> KeyEncode for &K {
-	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<()> {
-		(*self).encode_into(buffer)
-	}
-}
-
-impl KeyEncode for &str {
-	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<()> {
-		buffer.extend_from_slice(self.as_bytes());
-		Ok(())
-	}
-}
-
-impl KeyEncode for &[u8] {
-	fn encode_into(&self, buffer: &mut Vec<u8>) -> Result<()> {
-		buffer.extend_from_slice(self);
-		Ok(())
-	}
-}
-
-impl KeyDecode<'_> for Vec<u8> {
-	fn decode(bytes: &[u8]) -> Result<Self>
-	where
-		Self: Sized,
-	{
-		Ok(bytes.to_vec())
-	}
-}
-
-impl KeyDecodeOwned for Vec<u8> {
-	fn decode_from_vec(bytes: Vec<u8>) -> Result<Self> {
-		Ok(bytes)
-	}
-}
-
-impl<'a> KeyDecode<'a> for () {
-	fn decode(_: &'a [u8]) -> Result<Self>
-	where
-		Self: Sized,
-	{
-		Ok(())
-	}
-}
-
-impl KeyDecodeOwned for () {
-	fn decode_from_vec(_: Vec<u8>) -> Result<Self>
-	where
-		Self: Sized,
-	{
-		Ok(())
-	}
-}
-
-/// Implements KeyEncode and KeyDecode uusing storekey and deserialize and serialize
-/// implementations.
-macro_rules! impl_key {
-	($name:ident$(<$l:lifetime>)?) => {
-		impl$(<$l>)? crate::kvs::KeyEncode for $name $(<$l>)?{
-			fn encode(&self) -> ::std::result::Result<Vec<u8>, ::anyhow::Error> {
-				Ok(storekey::serialize(self)?)
-			}
-
-			fn encode_into(&self, buffer: &mut Vec<u8>) -> ::std::result::Result<(), ::anyhow::Error> {
-				Ok(storekey::serialize_into(buffer, self)?)
-			}
-		}
-
-		impl_key!(@decode $name $(,$l)?);
-	};
-
-	(@decode $name:ident, $l:lifetime) => {
-		impl<$l> crate::kvs::KeyDecode<$l> for $name<$l>{
-			fn decode(bytes: &$l[u8]) -> ::std::result::Result<Self, ::anyhow::Error> {
-				Ok(storekey::deserialize(bytes)?)
-			}
-		}
-	};
-
-	(@decode $name:ident) => {
-		impl<'a> crate::kvs::KeyDecode<'a> for $name{
-			fn decode(bytes: &'a[u8]) -> ::std::result::Result<Self, ::anyhow::Error> {
-				Ok(storekey::deserialize(bytes)?)
-			}
-		}
-
-		impl crate::kvs::KeyDecodeOwned for $name {
-			fn decode_from_vec(bytes: Vec<u8>) -> ::std::result::Result<Self, ::anyhow::Error> {
-				Ok(storekey::deserialize(bytes.as_slice())?)
-			}
-		}
-	};
-}
-pub(crate) use impl_key;

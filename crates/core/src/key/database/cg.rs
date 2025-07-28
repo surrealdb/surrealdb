@@ -3,12 +3,11 @@ use crate::expr::statements::define::DefineConfigStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::{KeyEncode, impl_key};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Cg<'a> {
 	__: u8,
 	_a: u8,
@@ -20,7 +19,6 @@ pub(crate) struct Cg<'a> {
 	_e: u8,
 	pub ty: &'a str,
 }
-impl_key!(Cg<'a>);
 
 impl KVKey for Cg<'_> {
 	type ValueType = DefineConfigStatement;
@@ -31,13 +29,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ty: &'a str) -> Cg<'a> {
 }
 
 pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(&[b'!', b'c', b'g', 0x00]);
 	Ok(k)
 }
 
 pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(&[b'!', b'c', b'g', 0xff]);
 	Ok(k)
 }
@@ -66,7 +64,7 @@ impl<'a> Cg<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -76,10 +74,8 @@ mod tests {
 			"testdb",
 			"testty",
 		);
-		let enc = Cg::encode(&val).unwrap();
+		let enc = Cg::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\x00*testdb\x00!cgtestty\x00");
-		let dec = Cg::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

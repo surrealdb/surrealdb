@@ -179,10 +179,12 @@ impl VersionedStore for BTreeDocIdsState {
 }
 
 impl KVValue for BTreeDocIdsState {
+	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		VersionedStore::try_into(self)
 	}
 
+	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),

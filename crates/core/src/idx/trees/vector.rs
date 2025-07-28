@@ -44,10 +44,12 @@ pub enum SerializedVector {
 impl VersionedStore for SerializedVector {}
 
 impl KVValue for SerializedVector {
+	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		VersionedStore::try_into(self)
 	}
 
+	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		VersionedStore::try_from(val)
 	}

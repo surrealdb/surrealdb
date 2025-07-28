@@ -5,7 +5,7 @@ use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
-use crate::kvs::{KeyEncode, Transaction, TransactionType};
+use crate::kvs::{KVKey, Transaction, TransactionType};
 use anyhow::Result;
 
 pub(super) struct Postings {
@@ -51,7 +51,7 @@ impl Postings {
 		doc_id: DocId,
 		term_freq: TermFrequency,
 	) -> Result<()> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode()?;
+		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key()?;
 		self.btree.insert(tx, &mut self.store, key, term_freq).await
 	}
 
@@ -61,7 +61,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode()?;
+		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key()?;
 		self.btree.search(tx, &self.store, &key).await
 	}
 
@@ -71,7 +71,7 @@ impl Postings {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<Option<TermFrequency>> {
-		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode()?;
+		let key = self.index_key_base.new_bf_key(term_id, doc_id).encode_key()?;
 		self.btree.delete(tx, &mut self.store, key).await
 	}
 

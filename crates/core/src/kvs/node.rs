@@ -3,7 +3,6 @@ use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::expr::statements::LiveStatement;
 use crate::kvs::Datastore;
-use crate::kvs::KeyDecode as _;
 use crate::kvs::Live;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
@@ -175,7 +174,7 @@ impl Datastore {
 						// Decode the data for this live query
 						let val: Live = revision::from_slice(v)?;
 						// Get the key for this node live query
-						let nlq = catch!(txn, crate::key::node::lq::Lq::decode(k));
+						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k.clone()));
 						// Check that the node for this query is archived
 						if archived.contains(&nlq.nd) {
 							// Get the key for this table live query
@@ -271,7 +270,7 @@ impl Datastore {
 							// Check that the node for this query is archived
 							if archived.contains(&stm.node) {
 								// Get the key for this node live query
-								let tlq = catch!(txn, crate::key::table::lq::Lq::decode(k));
+								let tlq = catch!(txn, crate::key::table::lq::Lq::decode_key(k));
 								// Get the key for this table live query
 								let nlq = crate::key::node::lq::new(nid, lid);
 								// Delete the node live query

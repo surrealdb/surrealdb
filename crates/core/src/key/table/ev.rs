@@ -3,12 +3,11 @@ use crate::expr::statements::define::DefineEventStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::{KeyEncode, impl_key};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Ev<'a> {
 	__: u8,
 	_a: u8,
@@ -22,7 +21,6 @@ pub(crate) struct Ev<'a> {
 	_f: u8,
 	pub ev: &'a str,
 }
-impl_key!(Ev<'a>);
 
 impl KVKey for Ev<'_> {
 	type ValueType = DefineEventStatement;
@@ -33,13 +31,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ev: &'a str) -> Ev<'a> {
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ev\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ev\xff");
 	Ok(k)
 }
@@ -70,7 +68,7 @@ impl<'a> Ev<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -81,11 +79,8 @@ mod tests {
 			"testtb",
 			"testev",
 		);
-		let enc = Ev::encode(&val).unwrap();
+		let enc = Ev::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\x00*testdb\x00*testtb\x00!evtestev\x00");
-
-		let dec = Ev::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

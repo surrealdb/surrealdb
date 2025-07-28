@@ -1,18 +1,22 @@
 //! Stores namespace ID generator state
+use crate::idg::u32::U32;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Ni {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
 }
-impl_key!(Ni);
+
+impl KVKey for Ni {
+	type ValueType = U32;
+}
 
 impl Default for Ni {
 	fn default() -> Self {
@@ -39,13 +43,12 @@ impl Ni {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
 		let val = Ni::new();
-		let enc = Ni::encode(&val).unwrap();
-		let dec = Ni::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Ni::encode_key(&val).unwrap();
+		assert_eq!(&enc, b"/!ni");
 	}
 }

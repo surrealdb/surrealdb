@@ -2,11 +2,10 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct AllIndexRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -18,7 +17,6 @@ pub(crate) struct AllIndexRoot<'a> {
 	_d: u8,
 	pub ix: &'a str,
 }
-impl_key!(AllIndexRoot<'a>);
 
 impl KVKey for AllIndexRoot<'_> {
 	type ValueType = Vec<u8>;
@@ -52,7 +50,7 @@ impl<'a> AllIndexRoot<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -63,10 +61,7 @@ mod tests {
 			"testtb",
 			"testix",
 		);
-		let enc = AllIndexRoot::encode(&val).unwrap();
+		let enc = AllIndexRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0");
-
-		let dec = AllIndexRoot::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

@@ -24,7 +24,7 @@ use crate::expr::statements::UpdateStatement;
 use crate::expr::value::{Value, Values};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
-use crate::kvs::KeyDecode;
+
 use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
@@ -104,7 +104,7 @@ impl Document {
 					yield_now!();
 					// Decode the key
 					let key = res?;
-					let r#ref = Ref::decode(&key)?;
+					let r#ref = Ref::decode_key(&key)?;
 					// Obtain the remote field definition
 					let fd = txn.get_tb_field(ns, db, r#ref.ft, r#ref.ff).await?;
 					// Check if there is a reference defined on the field

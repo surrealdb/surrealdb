@@ -23,10 +23,12 @@ use revision::Revisioned;
 pub struct VersionStamp([u8; 10]);
 
 impl KVValue for VersionStamp {
+	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		Ok(self.0.to_vec())
 	}
 
+	#[inline]
 	fn kv_decode_value(bytes: Vec<u8>) -> anyhow::Result<Self> {
 		Ok(Self::from_slice(&bytes)?)
 	}

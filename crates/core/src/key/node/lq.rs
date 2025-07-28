@@ -1,8 +1,8 @@
 //! Stores a LIVE SELECT query definition on the cluster
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::live::Live;
-use crate::kvs::{KVKey, KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -13,7 +13,6 @@ use uuid::Uuid;
 ///
 /// The value is just the table of the live query as a Strand, which is the missing information from the key path
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Lq {
 	__: u8,
 	_a: u8,
@@ -25,7 +24,6 @@ pub(crate) struct Lq {
 	#[serde(with = "uuid::serde::compact")]
 	pub lq: Uuid,
 }
-impl_key!(Lq);
 
 impl KVKey for Lq {
 	type ValueType = Live;
@@ -36,13 +34,13 @@ pub fn new(nd: Uuid, lq: Uuid) -> Lq {
 }
 
 pub fn prefix(nd: Uuid) -> Result<Vec<u8>> {
-	let mut k = super::all::new(nd).encode()?;
+	let mut k = super::all::new(nd).encode_key()?;
 	k.extend_from_slice(b"!lq\x00");
 	Ok(k)
 }
 
 pub fn suffix(nd: Uuid) -> Result<Vec<u8>> {
-	let mut k = super::all::new(nd).encode()?;
+	let mut k = super::all::new(nd).encode_key()?;
 	k.extend_from_slice(b"!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	Ok(k)
 }
@@ -65,11 +63,14 @@ impl Lq {
 			lq,
 		}
 	}
+
+	pub fn decode_key(k: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(storekey::deserialize(k.as_slice())?)
+	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
 
 	#[test]
 	fn key() {
@@ -79,14 +80,12 @@ mod tests {
 		#[rustfmt::skip]
 		let lq = Uuid::from_bytes([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20]);
 		let val = Lq::new(nd, lq);
-		let enc = Lq::encode(&val).unwrap();
+		let enc = Lq::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/$\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\
 			!lq\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20"
 		);
-		let dec = Lq::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

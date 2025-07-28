@@ -3,12 +3,11 @@ use crate::expr::statements::define::ApiDefinition;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::{KeyEncode, impl_key};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Ap<'a> {
 	__: u8,
 	_a: u8,
@@ -20,7 +19,6 @@ pub(crate) struct Ap<'a> {
 	_e: u8,
 	pub ap: &'a str,
 }
-impl_key!(Ap<'a>);
 
 impl KVKey for Ap<'_> {
 	type ValueType = ApiDefinition;
@@ -31,13 +29,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ap: &'a str) -> Ap<'a> {
 }
 
 pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!ap\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!ap\xff");
 	Ok(k)
 }
@@ -66,7 +64,6 @@ impl<'a> Ap<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
 
 	#[test]
 	fn key() {
@@ -77,10 +74,8 @@ mod tests {
             "db",
             "test",
         );
-		let enc = Ap::encode(&val).unwrap();
+		let enc = Ap::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*ns\0*db\0!aptest\0");
-		let dec = Ap::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

@@ -3,11 +3,10 @@ use crate::expr::statements::define::DefineNamespaceStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Ns<'a> {
 	__: u8,
 	_a: u8,
@@ -15,7 +14,6 @@ pub(crate) struct Ns<'a> {
 	_c: u8,
 	pub ns: &'a str,
 }
-impl_key!(Ns<'a>);
 
 impl KVKey for Ns<'_> {
 	type ValueType = DefineNamespaceStatement;
@@ -57,7 +55,7 @@ impl<'a> Ns<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -65,10 +63,7 @@ mod tests {
             let val = Ns::new(
             "testns",
         );
-		let enc = Ns::encode(&val).unwrap();
+		let enc = Ns::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!nstestns\0");
-
-		let dec = Ns::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

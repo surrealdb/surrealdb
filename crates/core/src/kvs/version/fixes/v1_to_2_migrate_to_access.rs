@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::kvs::KVKey;
 use crate::{
 	expr::{
 		AccessType, Ident,
@@ -9,7 +10,7 @@ use crate::{
 			define::{DefineScopeStatement, DefineTokenStatement},
 		},
 	},
-	kvs::{KeyEncode as _, Transaction},
+	kvs::Transaction,
 };
 use anyhow::Result;
 
@@ -34,9 +35,9 @@ pub async fn v1_to_2_migrate_to_access(tx: Arc<Transaction>) -> Result<()> {
 
 async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<()> {
 	// Find all tokens on the namespace level
-	let mut beg = crate::key::namespace::all::new(ns).encode()?;
+	let mut beg = crate::key::namespace::all::new(ns).encode_key()?;
 	beg.extend_from_slice(&[b'!', b't', b'k', 0x00]);
-	let mut end = crate::key::namespace::all::new(ns).encode()?;
+	let mut end = crate::key::namespace::all::new(ns).encode_key()?;
 	end.extend_from_slice(&[b'!', b't', b'k', 0xff]);
 
 	// queue of tokens to migrate
@@ -78,9 +79,9 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<()> {
 
 async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<()> {
 	// Find all tokens on the namespace level
-	let mut beg = crate::key::database::all::new(ns, db).encode()?;
+	let mut beg = crate::key::database::all::new(ns, db).encode_key()?;
 	beg.extend_from_slice(&[b'!', b't', b'k', 0x00]);
-	let mut end = crate::key::database::all::new(ns, db).encode()?;
+	let mut end = crate::key::database::all::new(ns, db).encode_key()?;
 	end.extend_from_slice(&[b'!', b't', b'k', 0xff]);
 
 	// queue of tokens to migrate
@@ -122,9 +123,9 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 
 async fn collect_db_scope_keys(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<Vec<Vec<u8>>> {
 	// Find all tokens on the namespace level
-	let mut beg = crate::key::database::all::new(ns, db).encode()?;
+	let mut beg = crate::key::database::all::new(ns, db).encode_key()?;
 	beg.extend_from_slice(&[b'!', b's', b'c', 0x00]);
-	let mut end = crate::key::database::all::new(ns, db).encode()?;
+	let mut end = crate::key::database::all::new(ns, db).encode_key()?;
 	end.extend_from_slice(&[b'!', b's', b'c', 0xff]);
 
 	// queue of tokens to migrate
@@ -183,11 +184,11 @@ async fn migrate_sc_tokens(
 	// 0xb1 = ±
 	// Inserting the string manually does not add a null byte at the end of the string.
 	// Hence, in the third `extend_from_slice`, we add the null byte manually, followed by the token key prefix
-	let mut beg = crate::key::database::all::new(ns, db).encode()?;
+	let mut beg = crate::key::database::all::new(ns, db).encode_key()?;
 	beg.extend_from_slice(&[0xb1]);
 	beg.extend_from_slice(name.as_bytes());
 	beg.extend_from_slice(&[0x00, b'!', b't', b'k', 0x00]);
-	let mut end = crate::key::database::all::new(ns, db).encode()?;
+	let mut end = crate::key::database::all::new(ns, db).encode_key()?;
 	end.extend_from_slice(&[0xb1]);
 	end.extend_from_slice(name.as_bytes());
 	end.extend_from_slice(&[0x00, b'!', b't', b'k', 0xff]);

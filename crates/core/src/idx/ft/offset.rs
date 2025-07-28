@@ -31,6 +31,7 @@ impl Offset {
 pub(crate) struct OffsetRecords(pub(super) Vec<Offset>);
 
 impl KVValue for OffsetRecords {
+	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		let n_offsets = self.0.len();
 		// We build a unique vector with every values (start and offset).
@@ -53,6 +54,7 @@ impl KVValue for OffsetRecords {
 		Ok(bincode::serialize(&decompressed)?)
 	}
 
+	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		if val.is_empty() {
 			return Ok(Self(Vec::new()));

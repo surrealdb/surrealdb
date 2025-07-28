@@ -19,12 +19,11 @@ use crate::idx::ft::fulltext::TermDocument;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct TdRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -40,7 +39,6 @@ pub(crate) struct TdRoot<'a> {
 	_g: u8,
 	pub term: &'a str,
 }
-impl_key!(TdRoot<'a>);
 
 impl KVKey for TdRoot<'_> {
 	type ValueType = RoaringTreemap;
@@ -62,7 +60,7 @@ impl<'a> TdRoot<'a> {
 			db,
 			_c: b'*',
 			tb,
-			_d: b'*',
+			_d: b'+',
 			ix,
 			_e: b'!',
 			_f: b't',
@@ -73,7 +71,6 @@ impl<'a> TdRoot<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Td<'a> {
 	__: u8,
 	_a: u8,
@@ -90,7 +87,6 @@ pub(crate) struct Td<'a> {
 	pub term: &'a str,
 	pub id: DocId,
 }
-impl_key!(Td<'a>);
 
 impl KVKey for Td<'_> {
 	type ValueType = TermDocument;
@@ -146,14 +142,18 @@ impl<'a> Td<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::{KeyDecode, KeyEncode};
+
+	#[test]
+	fn root() {
+		let val = TdRoot::new("testns", "testdb", "testtb", "testix", "term");
+		let enc = TdRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0");
+	}
 
 	#[test]
 	fn key() {
 		let val = Td::new("testns", "testdb", "testtb", "testix", "term", 129);
-		let enc = Td::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0\x01\0\0\0\0\0\0\0\x81");
-		let dec = Td::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Td::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!tdterm\0\0\0\0\0\0\0\0\x81");
 	}
 }

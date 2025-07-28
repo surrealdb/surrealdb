@@ -4,7 +4,7 @@
 //! distributed sequence mechanism that enables concurrent document ID generation across multiple nodes.
 //!
 //! ## Key Structure
-//! ```
+//! ```no_compile
 //! /*{namespace}*{database}*{table}+{index}!ib{start}
 //! ```
 //!
@@ -31,7 +31,9 @@
 use std::ops::Range;
 
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
+use crate::kvs::sequences::BatchValue;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -50,7 +52,10 @@ pub(crate) struct Ib<'a> {
 	_g: u8,
 	pub start: i64,
 }
-impl_key!(Ib<'a>);
+
+impl KVKey for Ib<'_> {
+	type ValueType = BatchValue;
+}
 
 impl Categorise for Ib<'_> {
 	fn categorise(&self) -> Category {
@@ -83,8 +88,8 @@ impl<'a> Ib<'a> {
 		tb: &'a str,
 		ix: &'a str,
 	) -> anyhow::Result<Range<Vec<u8>>> {
-		let beg = Self::new(ns, db, tb, ix, i64::MIN).encode()?;
-		let end = Self::new(ns, db, tb, ix, i64::MAX).encode()?;
+		let beg = Self::new(ns, db, tb, ix, i64::MIN).encode_key()?;
+		let end = Self::new(ns, db, tb, ix, i64::MAX).encode_key()?;
 		Ok(beg..end)
 	}
 }

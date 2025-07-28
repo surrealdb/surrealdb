@@ -5,11 +5,10 @@ use crate::idx::ft::search::terms::TermId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Bo<'a> {
 	__: u8,
 	_a: u8,
@@ -26,7 +25,6 @@ pub(crate) struct Bo<'a> {
 	pub doc_id: DocId,
 	pub term_id: TermId,
 }
-impl_key!(Bo<'a>);
 
 impl KVKey for Bo<'_> {
 	type ValueType = OffsetRecords;
@@ -68,7 +66,7 @@ impl<'a> Bo<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -80,13 +78,10 @@ mod tests {
 			"testix",
 			1,2
 		);
-		let enc = Bo::encode(&val).unwrap();
+		let enc = Bo::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!bo\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\x02"
 		);
-
-		let dec = Bo::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

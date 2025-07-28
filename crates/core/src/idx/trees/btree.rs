@@ -59,10 +59,12 @@ impl VersionedStore for BState {
 }
 
 impl KVValue for BState {
+	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		VersionedStore::try_into(self)
 	}
 
+	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
 		VersionedStore::try_from(val)
 	}

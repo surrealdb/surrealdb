@@ -2,11 +2,10 @@
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct He<'a> {
 	__: u8,
 	_a: u8,
@@ -22,7 +21,6 @@ pub(crate) struct He<'a> {
 	_g: u8,
 	pub element_id: ElementId,
 }
-impl_key!(He<'a>);
 
 impl KVKey for He<'_> {
 	type ValueType = SerializedVector;
@@ -50,7 +48,6 @@ impl<'a> He<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {
@@ -63,10 +60,7 @@ mod tests {
 			"testix",
 			7
 		);
-		let enc = He::encode(&val).unwrap();
+		let enc = He::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!he\0\0\0\0\0\0\0\x07");
-
-		let dec = He::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

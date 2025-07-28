@@ -21,7 +21,6 @@ pub(crate) enum TaskLeaseType {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
 pub(crate) struct TaskLease {
 	owner: Uuid,
 	expiration: DateTime<Utc>,

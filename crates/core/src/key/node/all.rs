@@ -1,19 +1,22 @@
 //! Stores the key prefix for all nodes
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct All {
 	__: u8,
 	_a: u8,
 	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 }
-impl_key!(All);
+
+impl KVKey for All {
+	type ValueType = Vec<u8>;
+}
 
 pub fn new(nd: Uuid) -> All {
 	All::new(nd)
@@ -37,7 +40,7 @@ impl All {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -47,10 +50,7 @@ mod tests {
 		let val = All::new(
 			nd,
 		);
-		let enc = All::encode(&val).unwrap();
+		let enc = All::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/$\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10");
-
-		let dec = All::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

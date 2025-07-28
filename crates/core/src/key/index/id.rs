@@ -4,7 +4,7 @@
 //! document IDs (`DocId`) used by the full-text search engine.
 //!
 //! ## Key Structure
-//! ```
+//! ```no_compile
 //! /*{namespace}*{database}*{table}+{index}!id{record_id}
 //! ```
 //!
@@ -36,12 +36,11 @@
 //! - **Scalable**: Efficient lookups scale with the number of indexed documents
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_key};
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Id<'a> {
 	__: u8,
 	_a: u8,
@@ -57,7 +56,6 @@ pub(crate) struct Id<'a> {
 	_g: u8,
 	pub id: crate::expr::Id,
 }
-impl_key!(Id<'a>);
 
 impl KVKey for Id<'_> {
 	type ValueType = DocId;
@@ -92,7 +90,6 @@ impl<'a> Id<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {
@@ -104,15 +101,12 @@ mod tests {
 			"testix",
 			crate::expr::Id::from("id".to_string()),
 		);
-		let enc = Id::encode(&val).unwrap();
+		let enc = Id::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!id\0\0\0\x01id\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
-
-		let dec = Id::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

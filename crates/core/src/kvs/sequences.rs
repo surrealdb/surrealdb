@@ -6,7 +6,7 @@ use crate::key::sequence::Prefix;
 use crate::key::sequence::ba::Ba;
 use crate::key::sequence::st::St;
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{KeyEncode, LockType, Transaction, TransactionType};
+use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_revisioned};
 use anyhow::Result;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
@@ -51,33 +51,33 @@ impl SequenceDomain {
 
 	fn new_batch_key(&self, start: i64) -> Result<Vec<u8>> {
 		match &self {
-			Self::UserName(ns, db, sq) => Ba::new(ns, db, sq, start).encode(),
-			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode(),
+			Self::UserName(ns, db, sq) => Ba::new(ns, db, sq, start).encode_key(),
+			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode_key(),
 		}
 	}
 
 	fn new_state_key(&self, nid: Uuid) -> Result<Vec<u8>> {
 		match &self {
-			Self::UserName(ns, db, sq) => St::new(ns, db, sq, nid).encode(),
-			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode(),
+			Self::UserName(ns, db, sq) => St::new(ns, db, sq, nid).encode_key(),
+			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode_key(),
 		}
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
-struct BatchValue {
+pub(crate) struct BatchValue {
 	to: i64,
 	owner: Uuid,
 }
+impl_kv_value_revisioned!(BatchValue);
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
-struct SequenceState {
+pub(crate) struct SequenceState {
 	next: i64,
 }
+impl_kv_value_revisioned!(SequenceState);
 
 impl Sequences {
 	pub(super) fn new(tf: TransactionFactory) -> Self {

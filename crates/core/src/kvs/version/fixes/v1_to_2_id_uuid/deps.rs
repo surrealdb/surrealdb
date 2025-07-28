@@ -57,7 +57,7 @@ pub mod key {
 
 	use crate::{
 		expr::{Dir, Value, id::Id as NewId},
-		kvs::{KVKey, impl_key},
+		kvs::KVKey,
 	};
 
 	use super::Id;
@@ -78,39 +78,15 @@ pub mod key {
 		pub ft: &'a str,
 		pub fk: Id,
 	}
-	impl_key!(Graph<'a>);
 
 	impl KVKey for Graph<'_> {
 		type ValueType = ();
 	}
 
 	impl Graph<'_> {
-		/*
-		pub fn new(
-			ns: &'a str,
-			db: &'a str,
-			tb: &'a str,
-			id: Id,
-			eg: Dir,
-			ft: &'a str,
-			fk: &'a Id,
-		) -> Self {
-			Self {
-				__: b'/',
-				_a: b'*',
-				ns,
-				_b: b'*',
-				db,
-				_c: b'*',
-				tb,
-				_d: b'~',
-				id,
-				eg,
-				ft,
-				fk: fk.to_owned(),
-			}
+		pub fn decode_key(k: &[u8]) -> anyhow::Result<Graph<'_>> {
+			Ok(storekey::deserialize(k)?)
 		}
-		*/
 
 		pub fn fix(&self) -> Option<crate::key::graph::Graph> {
 			let fixed = match (self.id.fix(), self.fk.fix()) {
@@ -161,28 +137,15 @@ pub mod key {
 		_d: u8,
 		pub id: Id,
 	}
-	impl_key!(Thing<'a>);
 
 	impl KVKey for Thing<'_> {
 		type ValueType = Value;
 	}
 
 	impl Thing<'_> {
-		/*
-		pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
-			Self {
-				__: b'/',
-				_a: b'*',
-				ns,
-				_b: b'*',
-				db,
-				_c: b'*',
-				tb,
-				_d: b'*',
-				id,
-			}
+		pub fn decode_key(k: &[u8]) -> anyhow::Result<Thing<'_>> {
+			Ok(storekey::deserialize(k)?)
 		}
-		*/
 
 		pub fn fix(&self) -> Option<crate::key::thing::Thing> {
 			self.id.fix().map(|id| crate::key::thing::new(self.ns, self.db, self.tb, &id))

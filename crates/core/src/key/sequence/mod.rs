@@ -4,9 +4,10 @@ pub mod st;
 
 use std::ops::Range;
 
-use crate::kvs::{KeyEncode, impl_key};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Prefix<'a> {
@@ -23,7 +24,10 @@ pub(crate) struct Prefix<'a> {
 	_g: u8,
 	_h: u8,
 }
-impl_key!(Prefix<'a>);
+
+impl KVKey for Prefix<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl<'a> Prefix<'a> {
 	fn new(ns: &'a str, db: &'a str, sq: &'a str, g: u8, h: u8) -> Self {
@@ -44,16 +48,16 @@ impl<'a> Prefix<'a> {
 	}
 
 	pub(crate) fn new_ba_range(ns: &'a str, db: &'a str, sq: &'a str) -> Result<Range<Vec<u8>>> {
-		let mut beg = Self::new(ns, db, sq, b'b', b'a').encode()?;
-		let mut end = Self::new(ns, db, sq, b'b', b'a').encode()?;
+		let mut beg = Self::new(ns, db, sq, b'b', b'a').encode_key()?;
+		let mut end = Self::new(ns, db, sq, b'b', b'a').encode_key()?;
 		beg.extend_from_slice(&[0x00; 9]);
 		end.extend_from_slice(&[0xFF; 9]);
 		Ok(beg..end)
 	}
 
 	pub(crate) fn new_st_range(ns: &'a str, db: &'a str, sq: &'a str) -> Result<Range<Vec<u8>>> {
-		let mut beg = Self::new(ns, db, sq, b's', b't').encode()?;
-		let mut end = Self::new(ns, db, sq, b's', b't').encode()?;
+		let mut beg = Self::new(ns, db, sq, b's', b't').encode_key()?;
+		let mut end = Self::new(ns, db, sq, b's', b't').encode_key()?;
 		beg.extend_from_slice(&[0x00; 9]);
 		end.extend_from_slice(&[0xFF; 9]);
 		Ok(beg..end)

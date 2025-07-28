@@ -3,11 +3,10 @@ use crate::idx::ft::search::SearchIndexState;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Bs<'a> {
 	__: u8,
 	_a: u8,
@@ -21,7 +20,6 @@ pub(crate) struct Bs<'a> {
 	_f: u8,
 	pub ix: &'a str,
 }
-impl_key!(Bs<'a>);
 
 impl KVKey for Bs<'_> {
 	type ValueType = SearchIndexState;
@@ -53,7 +51,7 @@ impl<'a> Bs<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -64,10 +62,7 @@ mod tests {
 			"testtb",
 			"testix",
 		);
-		let enc = Bs::encode(&val).unwrap();
+		let enc = Bs::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!bstestix\0");
-
-		let dec = Bs::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

@@ -19,13 +19,12 @@
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KVKey, KeyEncode, impl_key};
+use crate::kvs::KVKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Tt<'a> {
 	__: u8,
 	_a: u8,
@@ -47,8 +46,6 @@ pub(crate) struct Tt<'a> {
 	pub uid: Uuid,
 	pub add: bool,
 }
-
-impl_key!(Tt<'a>);
 
 impl KVKey for Tt<'_> {
 	type ValueType = String;
@@ -133,9 +130,9 @@ impl<'a> Tt<'a> {
 		term: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = TtTermPrefix::new(ns, db, tb, ix, term);
-		let mut beg = prefix.encode()?;
+		let mut beg = prefix.encode_key()?;
 		beg.extend([0; 41]);
-		let mut end = prefix.encode()?;
+		let mut end = prefix.encode_key()?;
 		end.extend([255; 41]);
 		Ok((beg, end))
 	}
@@ -162,11 +159,15 @@ impl<'a> Tt<'a> {
 		ix: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = TtTermsPrefix::new(ns, db, tb, ix);
-		let mut beg = prefix.encode()?;
+		let mut beg = prefix.encode_key()?;
 		beg.push(0);
-		let mut end = prefix.encode()?;
+		let mut end = prefix.encode_key()?;
 		end.push(255);
 		Ok((beg, end))
+	}
+
+	pub fn decode_key(k: &[u8]) -> Result<Tt<'_>> {
+		Ok(storekey::deserialize(k)?)
 	}
 }
 
@@ -186,7 +187,10 @@ struct TtTermPrefix<'a> {
 	_g: u8,
 	pub term: &'a str,
 }
-impl_key!(TtTermPrefix<'a>);
+
+impl KVKey for TtTermPrefix<'_> {
+	type ValueType = String;
+}
 
 impl<'a> TtTermPrefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
@@ -223,7 +227,10 @@ struct TtTermsPrefix<'a> {
 	_f: u8,
 	_g: u8,
 }
-impl_key!(TtTermsPrefix<'a>);
+
+impl KVKey for TtTermsPrefix<'_> {
+	type ValueType = String;
+}
 
 impl<'a> TtTermsPrefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
@@ -247,7 +254,6 @@ impl<'a> TtTermsPrefix<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KeyDecode;
 
 	#[test]
 	fn key() {
@@ -262,10 +268,8 @@ mod tests {
 			Uuid::from_u128(2),
 			true,
 		);
-		let enc = Tt::encode(&val).unwrap();
+		let enc = Tt::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x01");
-		let dec = Tt::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

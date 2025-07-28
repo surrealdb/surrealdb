@@ -28,10 +28,12 @@ impl From<Version> for u16 {
 }
 
 impl KVValue for Version {
+	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		Ok(self.0.to_be_bytes().to_vec())
 	}
 
+	#[inline]
 	fn kv_decode_value(v: Vec<u8>) -> Result<Self> {
 		let bin = v.try_into().map_err(|_| Error::InvalidStorageVersion)?;
 		let val = u16::from_be_bytes(bin).into();

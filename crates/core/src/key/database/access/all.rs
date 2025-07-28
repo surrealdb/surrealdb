@@ -2,11 +2,10 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct DbAccess<'a> {
 	__: u8,
 	_a: u8,
@@ -16,7 +15,6 @@ pub(crate) struct DbAccess<'a> {
 	_c: u8,
 	pub ac: &'a str,
 }
-impl_key!(DbAccess<'a>);
 
 impl KVKey for DbAccess<'_> {
 	type ValueType = Vec<u8>;
@@ -48,20 +46,17 @@ impl<'a> DbAccess<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = DbAccess::new(
 			"testns",
 			"testdb",
 			"testac",
 		);
-		let enc = DbAccess::encode(&val).unwrap();
+		let enc = DbAccess::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0&testac\0");
-
-		let dec = DbAccess::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

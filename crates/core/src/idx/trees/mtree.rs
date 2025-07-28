@@ -184,7 +184,6 @@ impl MTreeIndex {
 
 // https://en.wikipedia.org/wiki/M-tree
 // https://arxiv.org/pdf/1004.4216.pdf
-#[non_exhaustive]
 struct MTree {
 	state: MState,
 	distance: Distance,
@@ -1468,10 +1467,12 @@ impl ObjectProperties {
 impl VersionedStore for MState {}
 
 impl KVValue for MState {
+	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		VersionedStore::try_into(self)
 	}
 
+	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		VersionedStore::try_from(val)
 	}

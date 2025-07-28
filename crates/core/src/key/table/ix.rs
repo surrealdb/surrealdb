@@ -3,12 +3,11 @@ use crate::expr::statements::define::DefineIndexStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::{KeyEncode, impl_key};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Ix<'a> {
 	__: u8,
 	_a: u8,
@@ -22,7 +21,6 @@ pub(crate) struct Ix<'a> {
 	_f: u8,
 	pub ix: &'a str,
 }
-impl_key!(Ix<'a>);
 
 impl KVKey for Ix<'_> {
 	type ValueType = DefineIndexStatement;
@@ -33,13 +31,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Ix<'a> {
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ix\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!ix\xff");
 	Ok(k)
 }
@@ -70,7 +68,7 @@ impl<'a> Ix<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -81,10 +79,7 @@ mod tests {
 			"testtb",
 			"testix",
 		);
-		let enc = Ix::encode(&val).unwrap();
+		let enc = Ix::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!ixtestix\0");
-
-		let dec = Ix::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

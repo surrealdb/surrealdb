@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::expr::index::HnswParams;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::index::HnswIndex;
-use crate::kvs::{Key, KeyEncode};
+use crate::kvs::{KVKey, Key};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -27,7 +27,7 @@ impl HnswIndexes {
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let key = ikb.new_vm_root_key().encode()?;
+		let key = ikb.new_vm_root_key().encode_key()?;
 		let h = self.0.read().await.get(&key).cloned();
 		if let Some(h) = h {
 			return Ok(h);
@@ -47,7 +47,7 @@ impl HnswIndexes {
 	}
 
 	pub(super) async fn remove(&self, ikb: &IndexKeyBase) -> Result<()> {
-		let key = ikb.new_vm_root_key().encode()?;
+		let key = ikb.new_vm_root_key().encode_key()?;
 		self.0.write().await.remove(&key);
 		Ok(())
 	}

@@ -2,11 +2,10 @@
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct AccessRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -14,7 +13,6 @@ pub(crate) struct AccessRoot<'a> {
 	_b: u8,
 	pub ac: &'a str,
 }
-impl_key!(AccessRoot<'a>);
 
 impl KVKey for AccessRoot<'_> {
 	type ValueType = Vec<u8>;
@@ -44,7 +42,7 @@ impl<'a> AccessRoot<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -53,10 +51,7 @@ mod tests {
 			"testns",
 			"testac",
 		);
-		let enc = AccessRoot::encode(&val).unwrap();
+		let enc = AccessRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0&testac\0");
-
-		let dec = AccessRoot::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

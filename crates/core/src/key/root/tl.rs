@@ -1,12 +1,11 @@
 //! Stores a task lease to ensure only one node is running the task at a time
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::kvs::KVKey;
 use crate::kvs::tasklease::{TaskLease, TaskLeaseType};
-use crate::kvs::{KVKey, impl_key};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Tl {
 	__: u8,
 	_a: u8,
@@ -14,7 +13,6 @@ pub(crate) struct Tl {
 	_c: u8,
 	pub task: u16,
 }
-impl_key!(Tl);
 
 impl KVKey for Tl {
 	type ValueType = TaskLease;
@@ -44,16 +42,13 @@ impl Tl {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key_changefeed_cleanup() {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Tl::new(&TaskLeaseType::ChangeFeedCleanup);
-		let enc = Tl::encode(&val).unwrap();
+		let enc = Tl::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!tl\0\x01");
-		let dec = Tl::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

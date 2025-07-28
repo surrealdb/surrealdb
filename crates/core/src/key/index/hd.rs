@@ -3,11 +3,10 @@ use crate::expr::Id;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct HdRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -22,7 +21,6 @@ pub(crate) struct HdRoot<'a> {
 	_f: u8,
 	_g: u8,
 }
-impl_key!(HdRoot<'a>);
 
 impl KVKey for HdRoot<'_> {
 	type ValueType = HnswDocsState;
@@ -48,7 +46,6 @@ impl<'a> HdRoot<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Hd<'a> {
 	__: u8,
 	_a: u8,
@@ -64,7 +61,6 @@ pub(crate) struct Hd<'a> {
 	_g: u8,
 	pub doc_id: DocId,
 }
-impl_key!(Hd<'a>);
 
 impl KVKey for Hd<'_> {
 	type ValueType = Id;
@@ -92,8 +88,15 @@ impl<'a> Hd<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
-	use crate::kvs::{KeyDecode, KeyEncode};
+	#[test]
+	fn root() {
+		let val = HdRoot::new("testns", "testdb", "testtb", "testix");
+		let enc = HdRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd");
+	}
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -105,10 +108,7 @@ mod tests {
 			"testix",
 			7
 		);
-		let enc = Hd::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd\x01\0\0\0\0\0\0\0\x07");
-
-		let dec = Hd::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Hd::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!hd\0\0\0\0\0\0\0\x07");
 	}
 }

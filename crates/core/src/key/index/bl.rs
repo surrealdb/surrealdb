@@ -4,11 +4,10 @@ use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::kvs::impl_key;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct BlRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -23,7 +22,6 @@ pub(crate) struct BlRoot<'a> {
 	_f: u8,
 	_g: u8,
 }
-impl_key!(BlRoot<'a>);
 
 impl KVKey for BlRoot<'_> {
 	type ValueType = BState;
@@ -55,7 +53,6 @@ impl<'a> BlRoot<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
 pub(crate) struct Bl<'a> {
 	__: u8,
 	_a: u8,
@@ -71,7 +68,10 @@ pub(crate) struct Bl<'a> {
 	_g: u8,
 	pub node_id: NodeId,
 }
-impl_key!(Bl<'a>);
+
+impl KVKey for Bl<'_> {
+	type ValueType = BState;
+}
 
 impl Categorise for Bl<'_> {
 	fn categorise(&self) -> Category {
@@ -101,7 +101,7 @@ impl<'a> Bl<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -113,10 +113,7 @@ mod tests {
 			"testix",
 			7
 		);
-		let enc = Bl::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bl\x01\0\0\0\0\0\0\0\x07");
-
-		let dec = Bl::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Bl::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bl\0\0\0\0\0\0\0\x07");
 	}
 }

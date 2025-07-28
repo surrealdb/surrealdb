@@ -8,8 +8,9 @@ use crate::idx::ft::search::SearchHitsIterator;
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
+use crate::kvs::KVKey;
+use crate::kvs::Transaction;
 use crate::kvs::{Key, Val};
-use crate::kvs::{KeyEncode, Transaction};
 use anyhow::Result;
 use radix_trie::Trie;
 use rust_decimal::Decimal;
@@ -960,7 +961,7 @@ impl UniqueEqualThingIterator {
 		ix: &DefineIndexStatement,
 		a: &Array,
 	) -> Result<Self> {
-		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode()?;
+		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode_key()?;
 		Ok(Self {
 			irf,
 			key: Some(key),
@@ -1054,7 +1055,7 @@ impl UniqueRangeThingIterator {
 		if from.value == Value::None {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.clone()), None).encode()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.clone()), None).encode_key()
 	}
 
 	fn compute_end(
@@ -1068,7 +1069,7 @@ impl UniqueRangeThingIterator {
 		if to.value == Value::None {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.clone()), None).encode()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.clone()), None).encode_key()
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1257,7 +1258,7 @@ impl UniqueUnionThingIterator {
 		let mut keys = VecDeque::with_capacity(vals.len());
 		let (ns, db) = opt.ns_db()?;
 		for a in vals {
-			let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode()?;
+			let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode_key()?;
 			keys.push_back(key);
 		}
 		Ok(Self {

@@ -1,7 +1,7 @@
+use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
-use super::{KeyDecode, export};
 use crate::buc::BucketConnections;
 use crate::cf;
 use crate::ctx::MutableContext;
@@ -823,7 +823,7 @@ impl Datastore {
 			for (k, _) in txn.getr(range.clone(), None).await? {
 				count += 1;
 				lh.try_maintain_lease().await?;
-				let ic = Ic::decode(&k)?;
+				let ic = Ic::decode_key(&k)?;
 				// If the index has already been compacted, we can ignore the task
 				if let Some(p) = &previous {
 					if p.match_ic(&ic) {
