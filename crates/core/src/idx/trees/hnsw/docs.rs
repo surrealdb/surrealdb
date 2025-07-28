@@ -1,13 +1,13 @@
 use crate::expr::{Id, Thing};
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
-use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{KVValue, Transaction};
 use anyhow::Result;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -25,8 +25,6 @@ pub(crate) struct HnswDocsState {
 	available: RoaringTreemap,
 	next_doc_id: DocId,
 }
-
-impl VersionedStore for HnswDocsState {}
 
 impl HnswDocs {
 	pub(in crate::idx) async fn new(
@@ -107,13 +105,15 @@ impl HnswDocs {
 
 impl KVValue for HnswDocsState {
 	#[inline]
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		VersionedStore::try_into(self)
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
 	}
 
 	#[inline]
-	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
-		VersionedStore::try_from(val)
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
@@ -124,15 +124,17 @@ pub(crate) struct ElementDocs {
 	docs: Ids64,
 }
 
-impl VersionedStore for ElementDocs {}
-
 impl KVValue for ElementDocs {
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		VersionedStore::try_into(self)
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
 	}
 
-	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
-		VersionedStore::try_from(val)
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 

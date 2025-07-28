@@ -64,10 +64,10 @@ impl<'a> Fc<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Fc::new(
 			"testns",

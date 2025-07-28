@@ -60,10 +60,10 @@ impl<'a> Sq<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
             let val = Sq::new(
             "ns",

@@ -64,10 +64,10 @@ impl<'a> Ap<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
             let val = Ap::new(
             "ns",

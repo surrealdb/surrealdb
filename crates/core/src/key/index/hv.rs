@@ -56,10 +56,10 @@ impl<'a> Hv<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Hv::new(
 			"testns",
 			"testdb",

@@ -49,10 +49,10 @@ impl<'a> Hl<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Hl::new("testns", "testdb", "testtb", "testix", 7, 8);
 		let enc = Hl::encode_key(&val).unwrap();
 		assert_eq!(

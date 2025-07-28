@@ -60,10 +60,10 @@ impl<'a> Ac<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ac::new(
 			"testns",

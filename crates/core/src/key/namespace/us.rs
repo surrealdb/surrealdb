@@ -60,10 +60,10 @@ impl<'a> Us<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Us::new(
 			"testns",

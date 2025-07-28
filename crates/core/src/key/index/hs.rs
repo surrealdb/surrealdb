@@ -44,10 +44,10 @@ impl<'a> Hs<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Hs::new("testns", "testdb", "testtb", "testix");
 		let enc = Hs::encode_key(&val).unwrap();
 		assert_eq!(

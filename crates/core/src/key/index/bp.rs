@@ -112,7 +112,6 @@ mod tests {
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bp::new(
 			"testns",

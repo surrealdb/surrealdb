@@ -90,10 +90,10 @@ impl<'a> Id<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Id::new(
 			"testns",
 			"testdb",

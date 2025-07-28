@@ -47,10 +47,10 @@ impl Default for Version {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Version::new();
 		let enc = Version::encode_key(&val).unwrap();

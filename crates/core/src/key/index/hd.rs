@@ -99,7 +99,6 @@ mod tests {
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Hd::new(
 			"testns",

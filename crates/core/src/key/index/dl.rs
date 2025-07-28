@@ -83,10 +83,10 @@ impl<'a> Dl<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Dl::new("testns", "testdb", "testtb", "testix", 16);
 		let enc = Dl::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!dl\0\0\0\0\0\0\0\x10");

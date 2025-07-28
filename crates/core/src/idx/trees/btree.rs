@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::expr::{Object, Value};
-use crate::idx::VersionedStore;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
 use crate::kvs::{KVValue, Key, Transaction, Val};
@@ -40,8 +39,16 @@ pub struct BState {
 	generation: StoreGeneration,
 }
 
-impl VersionedStore for BState {
-	fn try_from(val: Val) -> Result<Self> {
+impl KVValue for BState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -55,18 +62,6 @@ impl VersionedStore for BState {
 				},
 			},
 		}
-	}
-}
-
-impl KVValue for BState {
-	#[inline]
-	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
-		VersionedStore::try_into(self)
-	}
-
-	#[inline]
-	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		VersionedStore::try_from(val)
 	}
 }
 
@@ -1015,7 +1010,7 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::VersionedStore;
+	use super::*;
 	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::trees::btree::{
 		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
@@ -1034,8 +1029,8 @@ mod tests {
 	#[test]
 	fn test_btree_state_serde() {
 		let s = BState::new(3);
-		let val = VersionedStore::try_into(&s).unwrap();
-		let s: BState = VersionedStore::try_from(val).unwrap();
+		let val = s.kv_encode_value().unwrap();
+		let s: BState = BState::kv_decode_value(val).unwrap();
 		assert_eq!(s.minimum_degree, 3);
 		assert_eq!(s.root, None);
 		assert_eq!(s.next_node_id, 0);

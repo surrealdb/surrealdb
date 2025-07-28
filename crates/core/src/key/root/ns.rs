@@ -55,10 +55,10 @@ impl<'a> Ns<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
             let val = Ns::new(
             "testns",

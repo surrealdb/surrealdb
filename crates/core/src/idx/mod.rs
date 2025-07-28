@@ -4,7 +4,7 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
-use crate::expr::{Id, Thing};
+use crate::expr::Id;
 use crate::idx::docids::DocId;
 use crate::idx::ft::search::terms::TermId;
 use crate::idx::trees::hnsw::ElementId;
@@ -40,11 +40,8 @@ use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
 use crate::key::root::ic::Ic;
-use crate::kvs::{Key, Val};
+use crate::kvs::Key;
 use anyhow::Result;
-use revision::Revisioned;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -263,21 +260,3 @@ impl IndexKeyBase {
 		&self.0.ix
 	}
 }
-
-/// This trait provides `Revision` based default implementations for serialization/deserialization
-trait VersionedStore
-where
-	Self: Sized + Serialize + DeserializeOwned + Revisioned,
-{
-	fn try_into(&self) -> Result<Val> {
-		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
-		Ok(val)
-	}
-
-	fn try_from(val: Val) -> Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
-	}
-}
-
-impl VersionedStore for Thing {}

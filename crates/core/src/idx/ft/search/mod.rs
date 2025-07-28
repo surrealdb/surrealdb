@@ -10,6 +10,7 @@ use crate::dbs::Options;
 use crate::expr::index::SearchParams;
 use crate::expr::statements::DefineAnalyzerStatement;
 use crate::expr::{Idiom, Object, Scoring, Thing, Value};
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::ft::analyzer::Analyzer;
@@ -26,9 +27,9 @@ use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::store::IndexStores;
-use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{KVValue, Key, Transaction, TransactionType};
 use reblessive::tree::Stk;
+use revision::Revisioned;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
@@ -115,17 +116,17 @@ pub(crate) struct SearchIndexState {
 	doc_count: u64,
 }
 
-impl VersionedStore for SearchIndexState {}
-
 impl KVValue for SearchIndexState {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
-		VersionedStore::try_into(self)
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		VersionedStore::try_from(val)
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 

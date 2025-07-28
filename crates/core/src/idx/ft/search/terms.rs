@@ -1,9 +1,9 @@
 use crate::err::Error;
+use crate::idx::IndexKeyBase;
 use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{KVValue, Transaction, TransactionType, Val};
+use crate::kvs::{KVValue, Transaction, TransactionType};
 use anyhow::Result;
 use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
@@ -130,18 +130,6 @@ pub(crate) struct SearchTermsState {
 	next_term_id: TermId,
 }
 
-impl KVValue for SearchTermsState {
-	#[inline]
-	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
-		VersionedStore::try_into(self)
-	}
-
-	#[inline]
-	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		VersionedStore::try_from(val)
-	}
-}
-
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
 struct State1 {
@@ -150,8 +138,6 @@ struct State1 {
 	next_term_id: TermId,
 }
 
-impl VersionedStore for State1 {}
-
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
 struct State1skip {
@@ -159,8 +145,6 @@ struct State1skip {
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 }
-
-impl VersionedStore for State1skip {}
 
 impl From<State1> for SearchTermsState {
 	fn from(state: State1) -> Self {
@@ -192,8 +176,16 @@ impl SearchTermsState {
 	}
 }
 
-impl VersionedStore for SearchTermsState {
-	fn try_from(val: Val) -> Result<Self> {
+impl KVValue for SearchTermsState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -212,9 +204,10 @@ impl VersionedStore for SearchTermsState {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::TermFrequency;
 	use crate::idx::ft::search::terms::{SearchTerms, SearchTermsState};
-	use crate::idx::{IndexKeyBase, VersionedStore};
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, LockType::*, Transaction, TransactionType};
 	use rand::{Rng, thread_rng};
@@ -224,8 +217,8 @@ mod tests {
 	#[test]
 	fn test_state_serde() {
 		let s = SearchTermsState::new(3);
-		let val = VersionedStore::try_into(&s).unwrap();
-		let s: SearchTermsState = VersionedStore::try_from(val).unwrap();
+		let val = s.kv_encode_value().unwrap();
+		let s: SearchTermsState = SearchTermsState::kv_decode_value(val).unwrap();
 		assert_eq!(s.btree.generation(), 0);
 		assert_eq!(s.next_term_id, 0);
 	}

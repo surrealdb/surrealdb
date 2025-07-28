@@ -15,15 +15,15 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use anyhow::Result;
 
 use crate::expr::index::HnswParams;
+use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{KVValue, Transaction};
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
 struct HnswSearch {
@@ -51,17 +51,17 @@ pub(crate) struct HnswState {
 	layers: Vec<LayerState>,
 }
 
-impl VersionedStore for HnswState {}
-
 impl KVValue for HnswState {
 	#[inline]
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		VersionedStore::try_into(self)
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
 	}
 
 	#[inline]
-	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
-		VersionedStore::try_from(val)
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 

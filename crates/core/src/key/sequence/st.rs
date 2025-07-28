@@ -57,10 +57,10 @@ impl<'a> St<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = St::new(
 			"testns",
 			"testdb",

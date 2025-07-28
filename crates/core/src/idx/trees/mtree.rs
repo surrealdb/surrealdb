@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use ahash::{HashMap, HashMapExt, HashSet};
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
@@ -16,6 +16,7 @@ use crate::err::Error;
 
 use crate::expr::index::{Distance, MTreeParams, VectorType};
 use crate::expr::{Number, Object, Thing, Value};
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::planner::checker::MTreeConditionChecker;
@@ -24,7 +25,6 @@ use crate::idx::trees::btree::BStatistics;
 use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, PriorityNode};
 use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider, TreeStore};
 use crate::idx::trees::vector::{SharedVector, Vector};
-use crate::idx::{IndexKeyBase, VersionedStore};
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val};
 
 #[non_exhaustive]
@@ -1464,17 +1464,17 @@ impl ObjectProperties {
 	}
 }
 
-impl VersionedStore for MState {}
-
 impl KVValue for MState {
 	#[inline]
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		VersionedStore::try_into(self)
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
-		VersionedStore::try_from(val)
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 

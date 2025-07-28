@@ -211,10 +211,11 @@ impl Default for WriteMutationSet {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+	use std::collections::HashMap;
+
 	#[test]
 	fn serialization() {
-		use super::*;
-		use std::collections::HashMap;
 		let cs = ChangeSet(
 			VersionStamp::from_u64(1),
 			DatabaseMutation(vec![TableMutations(
@@ -248,8 +249,6 @@ mod tests {
 
 	#[test]
 	fn serialization_rev2() {
-		use super::*;
-		use std::collections::HashMap;
 		let cs = ChangeSet(
 			VersionStamp::from_u64(1),
 			DatabaseMutation(vec![TableMutations(

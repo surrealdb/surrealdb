@@ -82,6 +82,7 @@ impl<'a> Ic<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::key::root::ic::Ic;
 
 	#[test]
@@ -91,7 +92,6 @@ mod tests {
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ic::new("testns", "testdb", "testtb", "testix", Uuid::from_u128(1), Uuid::from_u128(2));
 		let enc = Ic::encode_key(&val).unwrap();

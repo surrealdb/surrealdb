@@ -1,11 +1,11 @@
 use crate::err::Error;
 use crate::expr::Thing;
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, Resolved};
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val};
+use crate::kvs::{KVValue, Key, Transaction, TransactionType};
 use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -160,28 +160,12 @@ pub struct BTreeDocIdsState {
 	next_doc_id: DocId,
 }
 
-impl VersionedStore for BTreeDocIdsState {
-	fn try_from(val: Val) -> anyhow::Result<Self> {
-		match Self::deserialize_revisioned(&mut val.as_slice()) {
-			Ok(r) => Ok(r),
-			// If it fails here, there is the chance it was an old version of BState
-			// that included the #[serde[skip]] updated parameter
-			Err(e) => match State1skip::deserialize_revisioned(&mut val.as_slice()) {
-				Ok(b_old) => Ok(b_old.into()),
-				Err(_) => match State1::deserialize_revisioned(&mut val.as_slice()) {
-					Ok(b_old) => Ok(b_old.into()),
-					// Otherwise we return the initial error
-					Err(_) => Err(anyhow::Error::new(Error::Revision(e))),
-				},
-			},
-		}
-	}
-}
-
 impl KVValue for BTreeDocIdsState {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
-		VersionedStore::try_into(self)
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
 	}
 
 	#[inline]
@@ -220,8 +204,6 @@ impl From<State1> for BTreeDocIdsState {
 	}
 }
 
-impl VersionedStore for State1 {}
-
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
 struct State1skip {
@@ -239,8 +221,6 @@ impl From<State1skip> for BTreeDocIdsState {
 		}
 	}
 }
-
-impl VersionedStore for State1skip {}
 
 impl BTreeDocIdsState {
 	fn new(default_btree_order: u32) -> Self {

@@ -48,10 +48,10 @@ impl<'a> Ip<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Ip::new("testns", "testdb", "testtb", "testix", Id::from("id".to_string()));
 		let enc = Ip::encode_key(&val).unwrap();
 		assert_eq!(

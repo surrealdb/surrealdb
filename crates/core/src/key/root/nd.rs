@@ -60,10 +60,10 @@ impl Nd {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Nd::new(Uuid::default());
 		let enc = val.encode_key().unwrap();
 		assert_eq!(&enc, b"/!nd\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");

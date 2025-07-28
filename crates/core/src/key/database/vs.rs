@@ -50,10 +50,10 @@ impl<'a> Vs<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Vs::new(
 			"test",

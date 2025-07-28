@@ -195,7 +195,7 @@ impl Iterator for VersionStampIter {
 
 #[cfg(test)]
 mod test {
-	use super::VersionStamp;
+	use super::*;
 
 	#[test]
 	pub fn generate_one_vs() {
@@ -238,7 +238,6 @@ mod test {
 
 	#[test]
 	fn try_to_u64_be() {
-		use super::*;
 		// Overflow
 		let v = VersionStamp::from_bytes([255, 255, 255, 255, 255, 255, 255, 255, 0, 1]);
 		let res = v.try_into_u64();
@@ -251,7 +250,6 @@ mod test {
 
 	#[test]
 	fn try_u128_to_versionstamp() {
-		use super::*;
 		// Overflow
 		let v = u128::MAX;
 		let res = VersionStamp::try_from_u128(v);

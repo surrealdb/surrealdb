@@ -48,10 +48,10 @@ impl<'a> Ia<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Ia::new("testns", "testdb", "testtb", "testix", 1);
 		let enc = Ia::encode_key(&val).unwrap();
 		assert_eq!(

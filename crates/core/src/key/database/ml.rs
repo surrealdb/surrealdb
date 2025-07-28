@@ -66,10 +66,10 @@ impl<'a> Ml<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ml::new(
 			"testns",

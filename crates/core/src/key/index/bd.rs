@@ -101,9 +101,17 @@ impl<'a> Bd<'a> {
 #[cfg(test)]
 mod tests {
 
+	use super::*;
+
+	#[test]
+	fn root() {
+		let val = BdRoot::new("testns", "testdb", "testtb", "testix");
+		let enc = BdRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bd");
+	}
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bd::new(
 			"testns",

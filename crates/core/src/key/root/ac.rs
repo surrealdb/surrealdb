@@ -55,10 +55,10 @@ impl<'a> Ac<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ac::new("testac");
 		let enc = Ac::encode_key(&val).unwrap();

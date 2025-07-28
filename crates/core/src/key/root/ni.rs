@@ -43,10 +43,10 @@ impl Ni {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Ni::new();
 		let enc = Ni::encode_key(&val).unwrap();
 		assert_eq!(&enc, b"/!ni");

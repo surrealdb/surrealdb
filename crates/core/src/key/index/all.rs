@@ -51,9 +51,17 @@ impl<'a> AllIndexRoot<'a> {
 #[cfg(test)]
 mod tests {
 
+	use super::*;
+
+	#[test]
+	fn root() {
+		let val = AllIndexRoot::new("testns", "testdb", "testtb", "testix");
+		let enc = AllIndexRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0");
+	}
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = AllIndexRoot::new(
 			"testns",

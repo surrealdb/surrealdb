@@ -9,24 +9,6 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::str;
 
-/// NsDbCfRoot is the root key for the change feed of a namespace and database.
-/// This is used for prefix scans to return change feeds.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct NsDbCfRoot<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: &'a str,
-	_b: u8,
-	pub db: &'a str,
-	_d: u8,
-	// vs is the versionstamp of the change feed entry that is encoded in big-endian.
-	pub vs: VersionStamp,
-}
-
-impl KVKey for NsDbCfRoot<'_> {
-	type ValueType = TableMutations;
-}
-
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Cf<'a> {
@@ -120,13 +102,12 @@ impl<'a> Cf<'a> {
 
 #[cfg(test)]
 mod tests {
-
+	use super::*;
 	use crate::vs::*;
 	use std::ascii::escape_default;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Cf::new(
 			"test",

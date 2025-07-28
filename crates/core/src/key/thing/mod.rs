@@ -70,11 +70,11 @@ impl<'a> Thing<'a> {
 #[cfg(test)]
 mod tests {
 
+	use super::*;
 	use crate::syn;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Thing::new(
 			"testns",
@@ -87,7 +87,6 @@ mod tests {
 	}
 	#[test]
 	fn key_complex() {
-		use super::*;
 		//
 		let id1 = "foo:['test']";
 		let thing = syn::thing(id1).expect("Failed to parse the ID");

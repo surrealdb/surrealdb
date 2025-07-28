@@ -68,10 +68,10 @@ impl<'a> Gr<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Gr::new(
 			"testns",

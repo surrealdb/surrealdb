@@ -47,10 +47,10 @@ impl<'a> Hi<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Hi::new("testns", "testdb", "testtb", "testix", Id::String("testid".to_string()));
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(

@@ -38,10 +38,10 @@ impl<'a> All<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = All::new(
 			"testns",

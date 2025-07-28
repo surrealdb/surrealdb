@@ -42,10 +42,10 @@ impl Tl {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key_changefeed_cleanup() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Tl::new(&TaskLeaseType::ChangeFeedCleanup);
 		let enc = Tl::encode_key(&val).unwrap();

@@ -38,10 +38,10 @@ impl<'a> AccessRoot<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = AccessRoot::new(
 			"testac",

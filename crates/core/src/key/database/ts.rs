@@ -73,10 +73,10 @@ impl<'a> Ts<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ts::new(
 			"test",

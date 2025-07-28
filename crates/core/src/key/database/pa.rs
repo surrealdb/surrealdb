@@ -64,10 +64,10 @@ impl<'a> Pa<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Pa::new(
 			"testns",
