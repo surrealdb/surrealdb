@@ -2,10 +2,10 @@
 
 use std::ops::Bound;
 
-use reblessive::Stk;
-
 use super::mac::{expected_whitespace, unexpected};
+use crate::idx::ft::MatchRef;
 use crate::sql::operator::BindingPower;
+use crate::sql::operator::BooleanOperation;
 use crate::sql::{
 	Cast, Expression, Function, Number, Operator, Part, Range, SqlValue, value::TryNeg,
 };
@@ -15,6 +15,7 @@ use crate::syn::{
 	parser::{ParseResult, Parser, mac::expected},
 	token::{TokenKind, t},
 };
+use reblessive::Stk;
 
 impl Parser<'_> {
 	/// Parsers a generic value.
@@ -64,7 +65,7 @@ impl Parser<'_> {
 
 	/// Returns the binding power of an infix operator.
 	///
-	/// Binding power is the opposite of precendence: a higher binding power means that a token is
+	/// Binding power is the opposite of precedence: a higher binding power means that a token is
 	/// more like to operate directly on it's neighbours. Example `*` has a higher binding power
 	/// than `-` resulting in 1 - 2 * 3 being parsed as 1 - (2 * 3).
 	///
@@ -269,6 +270,38 @@ impl Parser<'_> {
 		}
 	}
 
+	pub(super) fn parse_match(&mut self, token: Token) -> ParseResult<Operator> {
+		if self.eat(t!("@")) {
+			return Ok(Operator::Matches(None, None));
+		}
+		let match_ref = self.parse_match_ref()?;
+		let boolean_operator = if match_ref.is_none() || self.eat(t!(",")) {
+			self.parse_match_boolean_operator()?
+		} else {
+			None
+		};
+		self.expect_closing_delimiter(t!("@"), token.span)?;
+		Ok(Operator::Matches(match_ref, boolean_operator))
+	}
+
+	fn parse_match_ref(&mut self) -> ParseResult<Option<MatchRef>> {
+		if matches!(self.peek().kind, TokenKind::Digits | TokenKind::Glued(token::Glued::Number)) {
+			Ok(Some(self.next_token_value()?))
+		} else {
+			Ok(None)
+		}
+	}
+
+	fn parse_match_boolean_operator(&mut self) -> ParseResult<Option<BooleanOperation>> {
+		if self.eat(t!("AND")) {
+			Ok(Some(BooleanOperation::And))
+		} else if self.eat(t!("OR")) {
+			Ok(Some(BooleanOperation::Or))
+		} else {
+			Ok(None)
+		}
+	}
+
 	pub(super) fn parse_knn(&mut self, token: Token) -> ParseResult<Operator> {
 		let amount = self.next_token_value()?;
 		let op = if self.eat(t!(",")) {
@@ -347,16 +380,7 @@ impl Parser<'_> {
 				bail!("Invalid operator '{}'",token.kind,
 					@token.span => "The like operators have been removed. Please use the similarity functions, like string::similarity::smithwaterman, instead.")
 			}
-			t!("@") => {
-				let reference = (!self.eat(t!("@")))
-					.then(|| {
-						let number = self.next_token_value()?;
-						expected!(self, t!("@"));
-						Ok(number)
-					})
-					.transpose()?;
-				Operator::Matches(reference)
-			}
+			t!("@") => self.parse_match(token)?,
 			t!("<=") => Operator::LessThanOrEqual,
 			t!("<") => Operator::LessThan,
 			t!(">=") => Operator::MoreThanOrEqual,

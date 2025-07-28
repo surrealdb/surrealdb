@@ -8,3 +8,5 @@ pub(crate) type Position = u32;
 pub(crate) type DocLength = u64;
 pub(crate) type TermFrequency = u64;
 pub(crate) type Score = f32;
+
+pub(crate) type MatchRef = u8;

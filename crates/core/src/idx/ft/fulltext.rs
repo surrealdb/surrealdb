@@ -11,7 +11,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::index::FullTextParams;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::{Idiom, Scoring, Thing, Value};
+use crate::expr::{BooleanOperation, Idiom, Scoring, Thing, Value};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::docids::seqdocids::SeqDocIds;
@@ -34,7 +34,6 @@ use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::ops::BitAnd;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -486,37 +485,81 @@ impl FullTextIndex {
 	pub(in crate::idx) fn new_hits_iterator(
 		&self,
 		qt: &QueryTerms,
-	) -> Result<Option<FullTextHitsIterator>> {
-		// This will hold the intersection of document sets for all terms
-		let mut hits: Option<RoaringTreemap> = None;
-
-		// Process each term's document set
-		for opt_docs in qt.docs.iter() {
-			if let Some(docs) = opt_docs {
-				if let Some(h) = hits {
-					// Perform intersection with previous results (AND operation)
-					// This ensures we only keep documents that contain ALL terms
-					hits = Some(h.bitand(docs));
-				} else {
-					// First term's document set becomes our initial result set
-					hits = Some(docs.clone());
-				}
-			} else {
-				// If any term has no matching documents, the intersection will be empty
-				// We can return early as no documents will match all terms
-				return Ok(None);
-			}
-		}
+		bo: BooleanOperation,
+	) -> Option<FullTextHitsIterator> {
+		// Execute the operation depending on the operator
+		let hits = match bo {
+			BooleanOperation::And => Self::intersection_operation(&qt.docs),
+			BooleanOperation::Or => Self::union_operation(&qt.docs),
+		};
 
 		// Create and return an iterator if we have matching documents
 		if let Some(hits) = hits {
 			if !hits.is_empty() {
-				return Ok(Some(FullTextHitsIterator::new(self.ikb.clone(), hits)));
+				return Some(FullTextHitsIterator::new(self.ikb.clone(), hits));
 			}
 		}
 
-		// No documents match all terms
-		Ok(None)
+		// No documents match the terms
+		None
+	}
+
+	fn intersection_operation(docs: &[Option<RoaringTreemap>]) -> Option<RoaringTreemap> {
+		// Early return for empty input
+		if docs.is_empty() {
+			return None;
+		}
+
+		// Collect only the "Some" variants
+		let mut valid_docs: Vec<&RoaringTreemap> = docs.iter().flatten().collect();
+
+		// If any term has no documents, the intersection is empty
+		if docs.len() != valid_docs.len() {
+			return None;
+		}
+
+		// Sort by cardinality - intersecting with smaller sets first is more efficient
+		valid_docs.sort_by_key(|bitmap| bitmap.len());
+
+		// Convert docs to an iterator
+		let mut iter = valid_docs.into_iter();
+
+		// Start with the smallest set (clone only once)
+		if let Some(mut result) = iter.next().cloned() {
+			// Intersect with remaining sets in order of increasing size
+			for d in iter {
+				// Early termination any terms docs is empty
+				if d.is_empty() {
+					return None;
+				}
+				result &= d;
+				// Check if the result becomes empty
+				if result.is_empty() {
+					return None;
+				}
+			}
+			// Return the result
+			Some(result)
+		} else {
+			None
+		}
+	}
+
+	fn union_operation(docs: &[Option<RoaringTreemap>]) -> Option<RoaringTreemap> {
+		// Convert docs to an iterator
+		let mut docs = docs.iter().flatten();
+
+		// Start with the first set
+		if let Some(mut result) = docs.next().cloned() {
+			// Union with remaining sets
+			for d in docs {
+				result |= d;
+			}
+			// Return the result
+			Some(result)
+		} else {
+			None
+		}
 	}
 
 	pub(in crate::idx) async fn get_doc_id(
