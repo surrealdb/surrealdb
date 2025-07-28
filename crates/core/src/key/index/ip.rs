@@ -26,7 +26,6 @@ impl KVKey for Ip<'_> {
 }
 
 impl<'a> Ip<'a> {
-	#[cfg_attr(target_family = "wasm", allow(dead_code))]
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {
 		Self {
 			__: b'/',

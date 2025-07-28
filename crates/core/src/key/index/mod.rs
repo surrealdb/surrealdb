@@ -19,10 +19,12 @@ pub mod hi;
 pub mod hl;
 pub mod hs;
 pub mod hv;
+#[cfg(not(target_family = "wasm"))]
 pub mod ia;
 pub mod ib;
 pub mod id;
 pub mod ii;
+#[cfg(not(target_family = "wasm"))]
 pub mod ip;
 pub mod is;
 pub mod td;
