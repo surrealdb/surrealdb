@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 mod fixes;
 
-#[derive(Copy, Debug, Clone)]
+#[derive(Copy, Debug, Clone, PartialEq)]
 pub struct Version(u16);
 
 impl From<u16> for Version {
@@ -106,5 +106,19 @@ impl Version {
 		}
 
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_version_encode_decode() {
+		let version = Version::v2();
+		let encoded = version.kv_encode_value().unwrap();
+		assert_eq!(encoded, vec![0, 2]);
+		let decoded = Version::kv_decode_value(encoded).unwrap();
+		assert_eq!(decoded, version);
 	}
 }
