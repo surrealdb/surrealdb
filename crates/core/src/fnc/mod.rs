@@ -1581,7 +1581,6 @@ mod tests {
 
 	use crate::dbs::Capabilities;
 	use crate::sql::Expr;
-	use crate::val::Strand;
 	use crate::{dbs::capabilities::ExperimentalTarget, sql::Function};
 
 	#[tokio::test]
@@ -1648,9 +1647,11 @@ mod tests {
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
-				if tmp == Value::Strand(Strand::new("object".to_owned()).unwrap()) {
+				if tmp == Value::Strand(crate::val::Strand::new("object".to_owned()).unwrap()) {
 					// Assume this function is superseded by a module of the same name.
-				} else if tmp != Value::Strand(Strand::new("function".to_owned()).unwrap()) {
+				} else if tmp
+					!= Value::Strand(crate::val::Strand::new("function".to_owned()).unwrap())
+				{
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			}
