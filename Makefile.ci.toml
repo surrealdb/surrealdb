@@ -216,6 +216,7 @@ args = [
     "--features",
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
+    "--no-fail-fast",
     "--",
     "--skip",
     "api_integration",
