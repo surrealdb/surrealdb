@@ -221,7 +221,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("SCHEMAFULL") => TokenKind::Keyword(Keyword::Schemafull),
 	UniCase::ascii("SCHEMAFUL") => TokenKind::Keyword(Keyword::Schemafull),
 	UniCase::ascii("SCHEMALESS") => TokenKind::Keyword(Keyword::Schemaless),
-	UniCase::ascii("SCOPE") => TokenKind::Keyword(Keyword::Scope),
 	UniCase::ascii("SC") => TokenKind::Keyword(Keyword::Scope),
 	UniCase::ascii("SEARCH") => TokenKind::Keyword(Keyword::Search),
 	UniCase::ascii("SELECT") => TokenKind::Keyword(Keyword::Select),
