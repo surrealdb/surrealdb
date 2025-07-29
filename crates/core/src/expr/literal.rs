@@ -1,6 +1,8 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::escape::EscapeKey;
+use crate::expr::fmt::{Pretty, is_pretty, pretty_indent};
 use crate::expr::{Expr, FlowResult, RecordIdLit, fmt::Fmt};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex,
@@ -11,7 +13,7 @@ use revision::revisioned;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::hash::{Hash, Hasher};
 
 /// A literal value, should be computed to get an actual value.
@@ -204,8 +206,41 @@ impl fmt::Display for Literal {
 			Literal::Bytes(bytes) => bytes.fmt(f),
 			Literal::Regex(regex) => regex.fmt(f),
 			Literal::RecordId(record_id_lit) => record_id_lit.fmt(f),
-			Literal::Array(exprs) => write!(f, "[{}]", Fmt::comma_separated(exprs.iter())),
-			Literal::Object(items) => write!(f, "{{{}}}", Fmt::comma_separated(items.iter())),
+			Literal::Array(exprs) => {
+				let mut f = Pretty::from(f);
+				f.write_char('[')?;
+				if !exprs.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(exprs.as_slice()))?;
+					drop(indent);
+				}
+				f.write_char(']')
+			}
+			Literal::Object(items) => {
+				let mut f = Pretty::from(f);
+				if is_pretty() {
+					f.write_char('{')?;
+				} else {
+					f.write_str("{ ")?;
+				}
+				if !items.is_empty() {
+					let indent = pretty_indent();
+					write!(
+						f,
+						"{}",
+						Fmt::pretty_comma_separated(items.iter().map(|args| Fmt::new(
+							args,
+							|entry, f| write!(f, "{}: {}", EscapeKey(&entry.key), entry.value)
+						)),)
+					)?;
+					drop(indent);
+				}
+				if is_pretty() {
+					f.write_char('}')
+				} else {
+					f.write_str(" }")
+				}
+			}
 			Literal::Duration(duration) => duration.fmt(f),
 			Literal::Datetime(datetime) => datetime.fmt(f),
 			Literal::Uuid(uuid) => uuid.fmt(f),

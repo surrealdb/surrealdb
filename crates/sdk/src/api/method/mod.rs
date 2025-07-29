@@ -3,7 +3,6 @@ use crate::api::opt::auth::{Credentials, Jwt};
 use crate::api::opt::{IntoEndpoint, auth};
 use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
 use crate::opt::{IntoExportDestination, WaitFor};
-use query::ValidQuery;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;

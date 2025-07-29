@@ -324,7 +324,7 @@ impl fmt::Display for RecordIdKey {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Thing")]
+#[serde(rename = "$surrealdb::private::RecordId")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordId {
 	pub table: String,

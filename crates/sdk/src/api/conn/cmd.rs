@@ -704,7 +704,7 @@ impl Revisioned for RouterRequest {
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 			// the Value version
-			2u16.serialize_revisioned(w)?;
+			1u16.serialize_revisioned(w)?;
 
 			// the Value::Number variant
 			3u16.serialize_revisioned(w)?;
@@ -723,7 +723,7 @@ impl Revisioned for RouterRequest {
 			.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 		// the Value version
-		2u16.serialize_revisioned(w)?;
+		1u16.serialize_revisioned(w)?;
 
 		// the Value::Strand variant
 		4u16.serialize_revisioned(w)?;
@@ -749,7 +749,7 @@ impl Revisioned for RouterRequest {
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 			// the Value version
-			2u16.serialize_revisioned(w)?;
+			1u16.serialize_revisioned(w)?;
 
 			// the Value::Uuid variant
 			7u16.serialize_revisioned(w)?;

@@ -1086,22 +1086,6 @@ impl Datastore {
 	}
 
 	/// Execute a pre-parsed SQL query
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::sql::parse;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::owner();
-	///     let ast = parse("USE NS test DB test; SELECT * FROM person;")?;
-	///     let res = ds.process(ast, &ses, None).await?;
-	///     Ok(())
-	/// }
-	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn process(
 		&self,
@@ -1148,23 +1132,6 @@ impl Datastore {
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::expr::Future;
-	/// use surrealdb_core::expr::Value;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::owner();
-	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.compute(val, &ses, None).await?;
-	///     Ok(())
-	/// }
-	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn compute(
 		&self,
@@ -1237,23 +1204,6 @@ impl Datastore {
 	/// whether authentication is enabled, or guest access is disabled.
 	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use surrealdb_core::expr::Future;
-	/// use surrealdb_core::expr::Value;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?;
-	///     let ses = Session::owner();
-	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
-	///     let res = ds.evaluate(&val, &ses, None).await?;
-	///     Ok(())
-	/// }
-	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn evaluate(
 		&self,

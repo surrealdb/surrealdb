@@ -86,9 +86,9 @@ mod tests {
 	#[test]
 	fn check_type() {
 		let query = syn::expr("LET $param = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param = 5;");
+		assert_eq!(format!("{}", query), "LET $param = 5");
 
 		let query = syn::expr("LET $param: number = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param: number = 5;");
+		assert_eq!(format!("{}", query), "LET $param: number = 5");
 	}
 }

@@ -120,7 +120,7 @@ mod tests {
 			..Default::default()
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(15, enc.len());
+		assert_eq!(18, enc.len());
 	}
 
 	#[test]
@@ -141,6 +141,6 @@ mod tests {
 			..Default::default()
 		});
 		let enc: Vec<u8> = revision::to_vec(&stm).unwrap();
-		assert_eq!(30, enc.len());
+		assert_eq!(37, enc.len());
 	}
 }
