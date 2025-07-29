@@ -482,20 +482,20 @@ impl Iterator {
 	/// Determines whether START/LIMIT clauses can be optimized at the storage level.
 	///
 	/// This method enables a critical performance optimization where START and LIMIT clauses
-	/// can be applied directly at the storage/iterator level (using `start_skip` and 
+	/// can be applied directly at the storage/iterator level (using `start_skip` and
 	/// `cancel_on_limit`) rather than after all query processing is complete.
 	///
 	/// ## The Optimization
-	/// 
+	///
 	/// When this method returns `true`, the query engine can:
 	/// - Skip records at the storage level before any processing (`start_skip`)
 	/// - Cancel iteration early when the limit is reached (`cancel_on_limit`)
-	/// 
+	///
 	/// This provides significant performance benefits for queries with large result sets,
 	/// as it avoids unnecessary processing of records that would be filtered out anyway.
 	///
 	/// ## Safety Conditions
-	/// 
+	///
 	/// The optimization is only safe when the order of records at the storage level
 	/// matches the order of records in the final result set. This method returns `false`
 	/// when any of the following conditions would change the record order or filtering:
@@ -511,7 +511,7 @@ impl Iterator {
 	/// ### WHERE clauses
 	/// Filtering operations change which records appear in the final result set.
 	/// START should skip records from the filtered set, not from the raw storage.
-	/// 
+	///
 	/// Example problem:
 	/// ```sql
 	/// -- Given: t:1(f=true), t:2(f=true), t:3(f=false), t:4(f=false)
@@ -527,13 +527,13 @@ impl Iterator {
 	/// - The index sort order matches the ORDER BY clause
 	///
 	/// ## Performance Impact
-	/// 
+	///
 	/// - **When enabled**: Significant performance improvement for large result sets
 	/// - **When disabled**: Slight performance cost as all records must be processed
 	///   before START/LIMIT is applied
 	///
 	/// ## Returns
-	/// 
+	///
 	/// - `true`: Safe to apply START/LIMIT optimization at storage level
 	/// - `false`: Must apply START/LIMIT after all query processing is complete
 	fn check_set_start_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
@@ -549,9 +549,22 @@ impl Iterator {
 			return false;
 		}
 
-		// WHERE clauses filter records, so START should skip from the filtered set,
-		// not from the raw storage. Storage-level skipping would skip the wrong records.
-		if stm.cond().is_some() {
+		// Check for WHERE clause
+		if let Some(cond) = stm.cond() {
+			// WHERE clauses filter records, so START should skip from the filtered set,
+			// not from the raw storage. However, if there's exactly one index iterator
+			// and the index is handling both the WHERE condition and ORDER BY clause,
+			// then the optimization is safe because the index iterator is already
+			// doing the appropriate filtering and ordering.
+			if let Some(Iterable::Index(t, irf, _)) = self.entries.first() {
+				if let Some(qp) = ctx.get_query_planner() {
+					if let Some(exe) = qp.get_query_executor(t) {
+						if exe.is_iterator_condition(*irf, cond) {
+							return true;
+						}
+					}
+				}
+			}
 			return false;
 		}
 
