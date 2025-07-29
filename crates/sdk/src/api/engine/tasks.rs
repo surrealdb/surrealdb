@@ -7,6 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use surrealdb_core::{kvs::Datastore, options::EngineOptions};
+use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
 
 #[cfg(not(target_family = "wasm"))]
@@ -48,7 +49,8 @@ pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpti
 	let task3 = spawn_task_node_membership_cleanup(dbs.clone(), canceller.clone(), opts);
 	let task4 = spawn_task_changefeed_cleanup(dbs.clone(), canceller.clone(), opts);
 	let task5 = spawn_task_index_compaction(dbs.clone(), canceller.clone(), opts);
-	Tasks(vec![task1, task2, task3, task4, task5])
+	let task6 = spawn_task_key_eviction(dbs.clone(), canceller.clone());
+	Tasks(vec![task1, task2, task3, task4, task5, task6])
 }
 
 fn spawn_task_node_membership_refresh(
@@ -167,6 +169,59 @@ fn spawn_task_changefeed_cleanup(
 				Some(_) = ticker.next() => {
 					if let Err(e) = dbs.changefeed_process(&gc_interval).await {
 						error!("Error running changefeed garbage collection: {e}");
+					}
+				}
+			}
+		}
+		trace!("Background task exited: Running changefeed garbage collection");
+	}))
+}
+
+fn spawn_task_key_eviction(dbs: Arc<Datastore>, canceller: CancellationToken) -> Task {
+	// Spawn a future
+	Box::pin(spawn(async move {
+		let sleep = sleep_until(Instant::now() + Duration::from_secs(1800));
+		tokio::pin!(sleep);
+		// Loop continuously until the task is cancelled
+		loop {
+			tokio::select! {
+				biased;
+				// Check if this has shutdown
+				_ = canceller.cancelled() => break,
+				// Wake up when the sleep duration expires to process expired keys
+				() = &mut sleep => {
+					loop {
+						match dbs.earlier_expire_keys().await {
+							Some((t, keys)) if t <= Instant::now() => {
+								// Delete expired records from datastore
+								if let Err(e) = dbs.delete_expire_records(keys).await {
+									error!("Error processing and cleaning expire records: {e}");
+								}
+								// Remove corresponding entries from expiration cache
+								dbs.remove_earlier_expire().await;
+							}
+							Some((t, _)) => {
+								// Sleep until the next expiration time
+								sleep.as_mut().reset(t);
+								break;
+							}
+							None => {
+								// Sleep until the next expiration time
+								sleep.as_mut().reset(Instant::now() + Duration::from_secs(1800));
+								break;
+							}
+						}
+					}
+				}
+				// Handle a newly received expiration item
+				Ok(expire_item) = dbs.recv_expire() => {
+					dbs.insert_expire(expire_item).await;
+					if let Some((t, _)) = dbs.earlier_expire_keys().await {
+						// Reset the sleep timer based on the new earliest expiration
+						sleep.as_mut().reset(t);
+					} else {
+						// No expiration keys remain; reset sleep to default idle interval
+						sleep.as_mut().reset(Instant::now() + Duration::from_secs(1800));
 					}
 				}
 			}

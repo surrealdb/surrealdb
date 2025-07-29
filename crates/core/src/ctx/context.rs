@@ -11,10 +11,11 @@ use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::cache::ex::ExpireItem;
 use crate::kvs::sequences::Sequences;
 use crate::mem::ALLOC;
 use anyhow::{Result, bail};
-use async_channel::Sender;
+use async_channel::{SendError, Sender};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -76,6 +77,11 @@ pub struct MutableContext {
 	isolated: bool,
 	// A map of bucket connections
 	buckets: Option<Arc<BucketConnections>>,
+	// The expiring record sender.
+	expiring_sender: Option<Sender<ExpireItem>>,
+	// Whether storage engine is memory.
+	// FIXME: remove once `EXPIRE` keyword support all engines.
+	in_memory: bool,
 }
 
 impl Default for MutableContext {
@@ -127,6 +133,8 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: None,
+			expiring_sender: None,
+			in_memory: false,
 		}
 	}
 
@@ -153,6 +161,8 @@ impl MutableContext {
 			isolated: false,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			expiring_sender: parent.expiring_sender.clone(),
+			in_memory: parent.in_memory,
 		}
 	}
 
@@ -181,6 +191,8 @@ impl MutableContext {
 			isolated: true,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			expiring_sender: parent.expiring_sender.clone(),
+			in_memory: parent.in_memory,
 		}
 	}
 
@@ -209,6 +221,8 @@ impl MutableContext {
 			isolated: false,
 			parent: None,
 			buckets: from.buckets.clone(),
+			expiring_sender: from.expiring_sender.clone(),
+			in_memory: from.in_memory,
 		}
 	}
 
@@ -224,6 +238,8 @@ impl MutableContext {
 		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: Arc<BucketConnections>,
+		expiring_sender: Sender<ExpireItem>,
+		in_memory: bool,
 	) -> Result<MutableContext> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -246,6 +262,8 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: Some(buckets),
+			expiring_sender: Some(expiring_sender),
+			in_memory,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -651,6 +669,18 @@ impl MutableContext {
 		} else {
 			bail!(Error::BucketUnavailable(bu.into()))
 		}
+	}
+
+	pub async fn send_expiring(&self, item: ExpireItem) -> Result<(), SendError<ExpireItem>> {
+		if let Some(sender) = &self.expiring_sender {
+			sender.send(item).await
+		} else {
+			Ok(())
+		}
+	}
+
+	pub fn is_in_memory(&self) -> bool {
+		self.in_memory
 	}
 }
 

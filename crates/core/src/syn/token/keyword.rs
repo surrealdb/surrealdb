@@ -87,6 +87,7 @@ keyword! {
 	Enforced => "ENFORCED",
 	Exclude => "EXCLUDE",
 	Exists => "EXISTS",
+	Expire => "EXPIRE",
 	Expired => "EXPIRED",
 	Explain => "EXPLAIN",
 	Expunge => "EXPUNGE",

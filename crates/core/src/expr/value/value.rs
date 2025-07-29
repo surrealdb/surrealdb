@@ -17,6 +17,7 @@ use crate::expr::{
 	model::Model,
 };
 use crate::expr::{Closure, ControlFlow, FlowResult, Ident, Kind};
+use crate::kvs::cache::ex::Record;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 
@@ -150,6 +151,34 @@ pub enum Value {
 }
 
 impl Value {
+	pub fn expire_records(&self, ns: String, db: String) -> Vec<Record> {
+		let mut records = Vec::new();
+		match self {
+			Value::Thing(thing) => records.push(Record {
+				ns,
+				db,
+				tb: thing.tb.clone(),
+				id: thing.id.clone(),
+			}),
+			Value::Object(object) if object.rid().is_some() => {
+				let thing = object.rid().unwrap();
+				records.push(Record {
+					ns,
+					db,
+					tb: thing.tb.clone(),
+					id: thing.id,
+				});
+			}
+			Value::Array(values) => {
+				for value in values.iter() {
+					records.extend(value.expire_records(ns.clone(), db.clone()).into_iter());
+				}
+			}
+			_ => {}
+		}
+		records
+	}
+
 	fn convert_old_range(
 		fields: OldValueRangeFields,
 		_revision: u16,

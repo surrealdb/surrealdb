@@ -2,8 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Data, FlowResultExt as _, Output, Timeout, Value, Values, Version};
+use crate::expr::{Data, Expire, FlowResultExt as _, Output, Timeout, Value, Values, Version};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
+use crate::kvs::cache::ex::ExpireItem;
 use anyhow::{Result, ensure};
 
 use reblessive::tree::Stk;
@@ -27,6 +28,8 @@ pub struct CreateStatement {
 	pub output: Option<Output>,
 	// The timeout for the statement
 	pub timeout: Option<Timeout>,
+	/// Duration after which created records automatically expire and are removed.
+	pub expire: Option<Expire>,
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
@@ -49,6 +52,8 @@ impl CreateStatement {
 	) -> Result<Value> {
 		// Valid options?
 		opt.valid_for_db()?;
+		// Expiration is only supported when running in in-memory mode
+		ensure!(self.expire.is_none() || ctx.is_in_memory(), Error::ExpireNotSupported);
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Assign the statement
@@ -91,6 +96,17 @@ impl CreateStatement {
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+		// Handle expire
+		if let Some(expiry) = &self.expire {
+			let records = res.expire_records(opt.ns()?.to_string(), opt.db()?.to_string());
+			for record in records.into_iter() {
+				ctx.send_expiring(ExpireItem {
+					time: expiry.expiring_time(),
+					record,
+				})
+				.await?;
+			}
+		}
 		// Output the results
 		match res {
 			// This is a single record result
@@ -123,6 +139,9 @@ impl fmt::Display for CreateStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {
+			write!(f, " {v}")?
+		}
+		if let Some(ref v) = self.expire {
 			write!(f, " {v}")?
 		}
 		if self.parallel {
