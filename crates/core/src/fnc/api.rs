@@ -51,7 +51,7 @@ pub async fn invoke(
 	let apis = ctx.tx().all_db_apis(ns, db).await?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-	if let Some((api, params)) = ApiDefinition::find_definition(&*apis, segments, method) {
+	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, method) {
 		let invocation = ApiInvocation {
 			params,
 			method,

@@ -49,10 +49,9 @@ impl SetStatement {
 			})));
 		}
 
-		let result =
-			stk.run(|stk| self.what.compute(stk, &ctx.as_ref().unwrap(), opt, doc)).await?;
-		let result = match self.kind {
-			Some(ref kind) => result
+		let result = stk.run(|stk| self.what.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?;
+		let result = match &self.kind {
+			Some(kind) => result
 				.coerce_to_kind(kind)
 				.map_err(|e| Error::SetCoerce {
 					name: self.name.to_string(),

@@ -63,7 +63,7 @@ impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
 			config: v.config.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }
@@ -76,7 +76,7 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
 			config: v.config.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }

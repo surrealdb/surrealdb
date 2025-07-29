@@ -596,10 +596,10 @@ impl Parser<'_> {
 			}
 		}
 		let receiver = Function::Normal(name);
-		return Ok(FunctionCall {
+		Ok(FunctionCall {
 			receiver,
 			arguments: args,
-		});
+		})
 	}
 }
 

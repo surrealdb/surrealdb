@@ -152,7 +152,7 @@ impl Parser<'_> {
 			t!("..") => match self.peek_whitespace1().kind {
 				t!("=") => None,
 				x if Self::kind_starts_expression(x) => {
-					return None;
+					None
 				}
 				_ => Some(BindingPower::Range),
 			},

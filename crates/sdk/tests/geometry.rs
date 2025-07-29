@@ -23,7 +23,7 @@ async fn geometry_point() -> Result<()> {
 					"type": "Point",
 					"coordinates": [-0.118092, 51.509865]
 				},
-				"id": r"city:london"
+				"id": city:london
 			}
 		]"#,
 	)
@@ -38,7 +38,7 @@ async fn geometry_point() -> Result<()> {
 					"type": "Point",
 					"coordinates": [-0.118092, 51.509865]
 				},
-				"id": r"city:london"
+				"id": city:london
 			}
 		]"#,
 	)
@@ -90,7 +90,7 @@ async fn geometry_polygon() -> Result<()> {
 						]
 					]
 				},
-				"id": r"city:london"
+				"id": city:london
 			}
 		]"#,
 	)
@@ -113,7 +113,7 @@ async fn geometry_polygon() -> Result<()> {
 						]
 					]
 				},
-				"id": r"city:london"
+				"id": city:london
 			}
 		]"#,
 	)
@@ -136,7 +136,7 @@ async fn geometry_polygon() -> Result<()> {
 						]
 					]
 				},
-				"id": r"city:london"
+				"id": city:london
 			}
 		]"#,
 	)
@@ -181,7 +181,7 @@ async fn geometry_multipoint() -> Result<()> {
 						[-0.118092, 51.509865]
 					]
 				},
-				"id": r"city:london"
+				"id": city:london
 			}
 		]"#,
 	)
@@ -199,7 +199,7 @@ async fn geometry_multipoint() -> Result<()> {
 						[-0.118092, 51.509865]
 					]
 				},
-				"id": r"city:london"
+				"id": city:london
 			}
 		]"#,
 	)
@@ -217,7 +217,7 @@ async fn geometry_multipoint() -> Result<()> {
 						[-0.118092, 51.509865]
 					]
 				},
-				"id": r"city:london"
+				"id": city:london
 			}
 		]"#,
 	)
@@ -266,7 +266,7 @@ async fn geometry_multipolygon() -> Result<()> {
 						]
 					]
 				},
-				"id": r"university:oxford"
+				"id": university:oxford
 			}
 		]"#,
 	)
@@ -288,7 +288,7 @@ async fn geometry_multipolygon() -> Result<()> {
 						]
 					]
 				},
-				"id": r"university:oxford"
+				"id": university:oxford
 			}
 		]"#,
 	)
@@ -310,7 +310,7 @@ async fn geometry_multipolygon() -> Result<()> {
 						]
 					]
 				},
-				"id": r"university:oxford"
+				"id": university:oxford
 			}
 		]"#,
 	)

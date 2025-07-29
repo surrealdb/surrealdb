@@ -84,7 +84,7 @@ impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatem
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }
@@ -98,7 +98,7 @@ impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatem
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }

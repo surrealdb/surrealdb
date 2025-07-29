@@ -52,7 +52,7 @@ impl From<RecordIdKeyLit> for crate::expr::RecordIdKeyLit {
 		match value {
 			RecordIdKeyLit::Number(x) => crate::expr::RecordIdKeyLit::Number(x),
 			RecordIdKeyLit::String(x) => crate::expr::RecordIdKeyLit::String(x),
-			RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(x.into()),
+			RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(x),
 			RecordIdKeyLit::Array(x) => {
 				crate::expr::RecordIdKeyLit::Array(x.into_iter().map(From::from).collect())
 			}

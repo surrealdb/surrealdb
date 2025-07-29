@@ -8,12 +8,12 @@ impl Value {
 			// There is a floating point number for the id field
 			Value::Number(id) if id.is_float() => Ok(RecordId {
 				table: tb.into_string(),
-				key: RecordIdKey::Number(id.as_int().into()),
+				key: RecordIdKey::Number(id.as_int()),
 			}),
 			// There is an integer number for the id field
 			Value::Number(id) if id.is_int() => Ok(RecordId {
 				table: tb.into_string(),
-				key: RecordIdKey::Number(id.as_int().into()),
+				key: RecordIdKey::Number(id.as_int()),
 			}),
 			// There is a string for the id field
 			Value::Strand(id) if !id.is_empty() => Ok(RecordId {

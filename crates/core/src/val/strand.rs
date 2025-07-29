@@ -16,6 +16,9 @@ use std::str;
 pub struct StrandRef(str);
 
 impl StrandRef {
+	/// # Safety
+	///
+	/// string must not have a null byte in it
 	pub const unsafe fn new_unchecked(s: &str) -> &StrandRef {
 		unsafe {
 			// This is safe as StrandRef has the same representation as str.
@@ -56,7 +59,7 @@ fn remove_null_bytes(s: String) -> String {
 /// A string that doesn't contain NUL bytes.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Strand")]
+#[serde(rename = "$surrealdb::private::Strand")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Strand(#[serde(with = "no_nul_bytes")] String);
 

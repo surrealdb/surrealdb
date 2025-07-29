@@ -57,7 +57,7 @@ impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionSt
 			name: v.name.into(),
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			permissions: v.permissions.into(),
 			returns: v.returns.map(Into::into),
 		}
@@ -71,7 +71,7 @@ impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionSt
 			name: v.name.into(),
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			permissions: v.permissions.into(),
 			returns: v.returns.map(Into::into),
 		}

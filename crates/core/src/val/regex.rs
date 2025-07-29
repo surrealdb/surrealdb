@@ -11,7 +11,7 @@ use std::str;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-pub(crate) const REGEX_TOKEN: &str = "$surrealdb::private::sql::Regex";
+pub(crate) const REGEX_TOKEN: &str = "$surrealdb::private::Regex";
 
 #[revisioned(revision = 1)]
 #[derive(Clone)]

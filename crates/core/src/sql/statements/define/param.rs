@@ -44,7 +44,7 @@ impl From<DefineParamStatement> for crate::expr::statements::DefineParamStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			value: v.value.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			permissions: v.permissions.into(),
 		}
 	}
@@ -56,7 +56,7 @@ impl From<crate::expr::statements::DefineParamStatement> for DefineParamStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			value: v.value.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			permissions: v.permissions.into(),
 		}
 	}

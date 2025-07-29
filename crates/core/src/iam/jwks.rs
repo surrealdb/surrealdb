@@ -370,7 +370,7 @@ mod tests {
 	use crate::dbs::capabilities::{Capabilities, NetTarget, Targets};
 	use rand::Rng;
 	use rand::distributions::Alphanumeric;
-	use wiremock::matchers::{method, path};
+	use wiremock::matchers::{header, method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 
 	// Use unique path to prevent accidental cache reuse

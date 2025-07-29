@@ -104,7 +104,7 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			table_type: v.table_type.into(),
 			cache_fields_ts: Uuid::nil(),
 			cache_events_ts: Uuid::nil(),
@@ -125,7 +125,7 @@ impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatemen
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			table_type: v.table_type.into(),
 		}
 	}

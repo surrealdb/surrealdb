@@ -160,7 +160,7 @@ impl Claims {
 						continue;
 					}
 				};
-				out.insert(claim.clone(), claim_value.into());
+				out.insert(claim.clone(), claim_value);
 			}
 		}
 		// Return value

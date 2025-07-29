@@ -14,7 +14,7 @@ use super::value::CoerceErrorExt;
 /// Can be any kind of values, "a"..1 is allowed.
 #[revisioned(revision = 1)]
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Range")]
+#[serde(rename = "$surrealdb::private::Range")]
 pub struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,
@@ -250,6 +250,7 @@ impl TypedRange<i64> {
 		}
 	}
 
+	#[allow(clippy::len_without_is_empty)]
 	pub fn len(&self) -> usize {
 		let end = match self.end {
 			Bound::Unbounded => i64::MAX,

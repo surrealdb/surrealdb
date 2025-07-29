@@ -364,7 +364,7 @@ impl Websocket {
 							// Don't start processing if we are gracefully shutting down
 							if shutdown.is_cancelled() {
 								// Process the response
-								failure(req.id.map(Into::into), Failure::custom(SERVER_SHUTTING_DOWN))
+								failure(req.id, Failure::custom(SERVER_SHUTTING_DOWN))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -372,7 +372,7 @@ impl Websocket {
 							// Check to see whether we have available memory
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
-								failure(req.id.map(Into::into), Failure::custom(SERVER_OVERLOADED))
+								failure(req.id, Failure::custom(SERVER_OVERLOADED))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -381,7 +381,7 @@ impl Websocket {
 							else {
 								// Process the message
 								Self::process_message(rpc.clone(), req.version, req.txn, req.method, req.params).await
-									.into_response(req.id.map(Into::into))
+									.into_response(req.id)
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;

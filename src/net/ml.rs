@@ -31,11 +31,12 @@ mod implementation {
 	use http::StatusCode;
 	use surrealdb_core::dbs::Session;
 	use surrealdb_core::dbs::capabilities::RouteTarget;
+	use surrealdb_core::expr::statements::{DefineModelStatement, DefineStatement};
+	use surrealdb_core::expr::{Expr, Ident, LogicalPlan, TopLevelExpr};
 	use surrealdb_core::iam::check::check_ns_db;
 	use surrealdb_core::iam::{Action, ResourceKind};
 	use surrealdb_core::kvs::{LockType, TransactionType};
 	use surrealdb_core::ml::storage::surml_file::SurMlFile;
-	use surrealdb_core::sql::statements::{DefineModelStatement, DefineStatement};
 
 	use crate::net::AppState;
 	use crate::net::error::{Error as NetError, ResponseError};
@@ -88,14 +89,21 @@ mod implementation {
 		// Insert the file data in to the store
 		surrealdb::obs::put(&path, data).await.map_err(ResponseError)?;
 		// Insert the model in to the database
-		let mut model = DefineModelStatement::default();
-		model.name = file.header.name.to_string().into();
-		model.version = file.header.version.to_string();
-		model.comment = Some(file.header.description.to_string().into());
-		model.hash = hash;
-		db.process(DefineStatement::Model(model).into(), &session, None)
-			.await
-			.map_err(ResponseError)?;
+		let model = DefineModelStatement {
+			name: Ident::new(file.header.name.to_string()).unwrap(),
+			version: file.header.version.to_string(),
+			comment: Some(file.header.description.to_string().into()),
+			hash,
+			..Default::default()
+		};
+
+		let q = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Model(
+				model,
+			))))],
+		};
+
+		db.process_plan(q, &session, None).await.map_err(ResponseError)?;
 		//
 		Ok(Output::None)
 	}

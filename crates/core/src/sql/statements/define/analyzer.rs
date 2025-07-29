@@ -53,7 +53,7 @@ impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerSt
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }
@@ -66,7 +66,7 @@ impl From<crate::expr::statements::DefineAnalyzerStatement> for DefineAnalyzerSt
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }

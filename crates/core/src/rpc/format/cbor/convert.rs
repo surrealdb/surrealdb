@@ -576,7 +576,7 @@ fn to_record_id_key(val: CborValue) -> Result<RecordIdKey, &'static str> {
 		}
 		CborValue::Tag(TAG_STRING_UUID, v) => match *v {
 			CborValue::Text(v) => match val::Uuid::try_from(v) {
-				Ok(v) => Ok(RecordIdKey::Uuid(v.into())),
+				Ok(v) => Ok(RecordIdKey::Uuid(v)),
 				_ => Err("Expected a valid UUID value"),
 			},
 			_ => Err("Expected a CBOR text data type"),

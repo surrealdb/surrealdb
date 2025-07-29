@@ -45,7 +45,7 @@ async fn decode_response(res: Response) -> Result<Value> {
 					let val = syn::json(&txt)
 						.context("Failed to parse JSON response")
 						.map_err(|e| Error::Http(e.to_string()))?;
-					Ok(val.into())
+					Ok(val)
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
 					let bytes = res.bytes().await.map_err(Error::from)?;

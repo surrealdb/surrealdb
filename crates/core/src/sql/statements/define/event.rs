@@ -47,7 +47,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			target_table: v.what.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }
@@ -60,7 +60,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			what: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }

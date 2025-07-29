@@ -85,6 +85,7 @@ impl Display for DefineUserStatement {
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement {
 	fn from(v: DefineUserStatement) -> Self {
 		let hash = match v.pass_type {
@@ -125,11 +126,11 @@ impl From<crate::expr::statements::DefineUserStatement> for DefineUserStatement 
 			kind: v.kind.into(),
 			name: v.name.into(),
 			base: v.base.into(),
-			pass_type: PassType::Hash(v.hash).into(),
+			pass_type: PassType::Hash(v.hash),
 			roles: v.roles.into_iter().map(Into::into).collect(),
 			token_duration: v.duration.token,
 			session_duration: v.duration.session,
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }

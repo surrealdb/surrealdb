@@ -117,8 +117,8 @@ impl From<Literal> for crate::expr::Literal {
 				crate::expr::Literal::RecordId(record_id_lit.into())
 			}
 			Literal::Datetime(datetime) => crate::expr::Literal::Datetime(datetime),
-			Literal::Uuid(uuid) => crate::expr::Literal::Uuid(uuid.into()),
-			Literal::Regex(regex) => crate::expr::Literal::Regex(regex.into()),
+			Literal::Uuid(uuid) => crate::expr::Literal::Uuid(uuid),
+			Literal::Regex(regex) => crate::expr::Literal::Regex(regex),
 			Literal::Array(exprs) => {
 				crate::expr::Literal::Array(exprs.into_iter().map(From::from).collect())
 			}
@@ -181,9 +181,7 @@ fn collect_geometry(map: &[ObjectEntry]) -> Option<Geometry> {
 		return None;
 	}
 
-	let Some(ty_idx) = map.iter().position(|x| x.key == "type") else {
-		return None;
-	};
+	let ty_idx = map.iter().position(|x| x.key == "type")?;
 
 	let other = 1 ^ ty_idx;
 

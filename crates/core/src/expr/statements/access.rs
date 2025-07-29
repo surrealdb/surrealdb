@@ -1011,7 +1011,7 @@ impl Display for AccessStatement {
 				write!(f, " GRANT")?;
 				match &stmt.subject {
 					Subject::User(x) => write!(f, " FOR USER {}", x.into_raw_string())?,
-					Subject::Record(x) => write!(f, " FOR RECORD {}", x.to_string())?,
+					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
 				}
 				Ok(())
 			}

@@ -132,7 +132,7 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			assert: v.assert.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			reference: v.reference.map(Into::into),
 		}
 	}
@@ -151,7 +151,7 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			assert: v.assert.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			reference: v.reference.map(Into::into),
 		}
 	}

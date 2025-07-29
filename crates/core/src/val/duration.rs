@@ -22,7 +22,7 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 #[derive(
 	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,
 )]
-#[serde(rename = "$surrealdb::private::sql::Duration")]
+#[serde(rename = "$surrealdb::private::Duration")]
 pub struct Duration(pub time::Duration);
 
 impl Duration {
@@ -72,7 +72,7 @@ impl TryFrom<&str> for Duration {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match syn::duration(v) {
-			Ok(v) => Ok(v.into()),
+			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
 	}

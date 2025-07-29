@@ -331,7 +331,7 @@ async fn script_value_function_inline_values() -> Result<()> {
 			if(await surrealdb.value(`"some string"`) !== "some string"){
 				throw new Error(2)
 			}
-			if(await surrealdb.value(`<future>{ math::floor(13.746189) }`) !== 13){
+			if(await surrealdb.value(`math::floor(13.746189)`) !== 13){
 				throw new Error(3)
 			}
 		}

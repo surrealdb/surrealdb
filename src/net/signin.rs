@@ -67,7 +67,7 @@ async fn handler(
 	match syn::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match signin(kvs, &mut session, vars.into()).await {
+			match signin(kvs, &mut session, vars).await {
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization

@@ -34,7 +34,7 @@ impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespace
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }
@@ -45,7 +45,7 @@ impl From<crate::expr::statements::DefineNamespaceStatement> for DefineNamespace
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }

@@ -15,7 +15,7 @@ impl Read {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", RecordIdKey::rand().to_string()),
+			table_name: format!("table_{}", RecordIdKey::rand()),
 		}
 	}
 }

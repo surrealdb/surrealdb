@@ -90,7 +90,7 @@ impl Session {
 		let token = self.tk.clone().unwrap_or(Value::None);
 		let session = Value::from(map! {
 			"ac".to_string() => access.clone(),
-			"exp".to_string() => self.exp.map(|x| Value::from(x)).unwrap_or(Value::None),
+			"exp".to_string() => self.exp.map(Value::from).unwrap_or(Value::None),
 			"db".to_string() => self.db.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
 			"id".to_string() => self.id.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),
 			"ip".to_string() => self.ip.clone().map(|x| Strand::new(x).unwrap().into()).unwrap_or(Value::None),

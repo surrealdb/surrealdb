@@ -154,6 +154,7 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare(
 		&mut self,
 		stk: &mut Stk,
@@ -377,6 +378,7 @@ impl Iterator {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn prepare_computed(
 		&mut self,
 		stk: &mut Stk,
@@ -405,6 +407,7 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare_array(
 		&mut self,
 		stk: &mut Stk,

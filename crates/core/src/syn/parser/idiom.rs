@@ -690,7 +690,6 @@ impl Parser<'_> {
 					order,
 					limit,
 					start,
-					..Default::default()
 				})
 			}
 			x if Self::kind_is_identifier(x) => {

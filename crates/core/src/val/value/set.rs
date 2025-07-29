@@ -191,7 +191,7 @@ impl Value {
 					let Value::Array(arr) = place else {
 						return Ok(());
 					};
-					if let Some(_) = iter.as_slice().first().and_then(|x| x.as_old_index()) {
+					if iter.as_slice().first().and_then(|x| x.as_old_index()).is_some() {
 						let mut a = Vec::new();
 						let mut p = Vec::new();
 						// Store the elements and positions to update

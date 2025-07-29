@@ -320,12 +320,9 @@ impl DefineFieldStatement {
 						Kind::Record(_) => true,
 						_ => false,
 					},
-					Kind::Literal(lit) => match lit {
-						KindLiteral::Array(kinds) => {
-							kinds.iter().all(|k| matches!(k, Kind::Record(_)))
-						}
-						_ => false,
-					},
+					Kind::Literal(KindLiteral::Array(kinds)) => {
+						kinds.iter().all(|k| matches!(k, Kind::Record(_)))
+					}
 					Kind::Record(_) => true,
 					_ => false,
 				};

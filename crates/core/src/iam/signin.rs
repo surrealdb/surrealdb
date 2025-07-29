@@ -4150,7 +4150,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			};
 
 			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(ast.into(), &sess, None).await.unwrap();
+			ds.process(ast, &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				ns: level.ns.map(String::from),

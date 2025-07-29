@@ -21,12 +21,12 @@ impl fmt::Display for Timeout {
 
 impl From<Timeout> for crate::expr::Timeout {
 	fn from(v: Timeout) -> Self {
-		Self(v.0.into())
+		Self(v.0)
 	}
 }
 
 impl From<crate::expr::Timeout> for Timeout {
 	fn from(v: crate::expr::Timeout) -> Self {
-		Self(v.0.into())
+		Self(v.0)
 	}
 }

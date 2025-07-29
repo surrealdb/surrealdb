@@ -1619,19 +1619,13 @@ mod tests {
 				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
 			);
 
-			if let Ok(expr) = res {
-				match expr {
-					Expr::FunctionCall(call) => match call.receiver {
-						Function::Normal(parsed_name) => {
-							if parsed_name != name {
-								problems
-									.push(format!("function `{name}` parsed as `{parsed_name}`"));
-							}
+			if let Ok(Expr::FunctionCall(call)) = res {
+				match call.receiver {
+					Function::Normal(parsed_name) => {
+						if parsed_name != name {
+							problems.push(format!("function `{name}` parsed as `{parsed_name}`"));
 						}
-						_ => {
-							problems.push(format!("couldn't parse {name} function"));
-						}
-					},
+					}
 					_ => {
 						problems.push(format!("couldn't parse {name} function"));
 					}

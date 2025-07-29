@@ -509,7 +509,6 @@ impl fmt::Display for Recurse {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?
@@ -527,6 +526,7 @@ pub enum RecurseInstruction {
 	},
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn walk_paths(
 	stk: &mut Stk,
 	ctx: &Context,

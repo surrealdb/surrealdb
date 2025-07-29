@@ -188,7 +188,7 @@ impl From<HnswParams> for crate::expr::index::HnswParams {
 			m: v.m,
 			m0: v.m0,
 			ef_construction: v.ef_construction,
-			ml: v.ml.into(),
+			ml: v.ml,
 			extend_candidates: v.extend_candidates,
 			keep_pruned_connections: v.keep_pruned_connections,
 		}
@@ -204,7 +204,7 @@ impl From<crate::expr::index::HnswParams> for HnswParams {
 			m: v.m,
 			m0: v.m0,
 			ef_construction: v.ef_construction,
-			ml: v.ml.into(),
+			ml: v.ml,
 			extend_candidates: v.extend_candidates,
 			keep_pruned_connections: v.keep_pruned_connections,
 		}
@@ -249,7 +249,7 @@ impl From<Distance> for crate::expr::index::Distance {
 			Distance::Hamming => crate::expr::index::Distance::Hamming,
 			Distance::Jaccard => crate::expr::index::Distance::Jaccard,
 			Distance::Manhattan => crate::expr::index::Distance::Manhattan,
-			Distance::Minkowski(n) => crate::expr::index::Distance::Minkowski(n.into()),
+			Distance::Minkowski(n) => crate::expr::index::Distance::Minkowski(n),
 			Distance::Pearson => crate::expr::index::Distance::Pearson,
 		}
 	}
@@ -264,7 +264,7 @@ impl From<crate::expr::index::Distance> for Distance {
 			crate::expr::index::Distance::Hamming => Self::Hamming,
 			crate::expr::index::Distance::Jaccard => Self::Jaccard,
 			crate::expr::index::Distance::Manhattan => Self::Manhattan,
-			crate::expr::index::Distance::Minkowski(n) => Self::Minkowski(n.into()),
+			crate::expr::index::Distance::Minkowski(n) => Self::Minkowski(n),
 			crate::expr::index::Distance::Pearson => Self::Pearson,
 		}
 	}

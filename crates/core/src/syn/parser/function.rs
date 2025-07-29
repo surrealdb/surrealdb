@@ -19,7 +19,7 @@ impl Parser<'_> {
 		let mut name = self.next_token_value::<Ident>()?.into_string();
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&*self.next_token_value::<Ident>()?)
+			name.push_str(&self.next_token_value::<Ident>()?)
 		}
 		expected!(self, t!("(")).span;
 		let args = self.parse_function_args(ctx).await?;
@@ -57,7 +57,7 @@ impl Parser<'_> {
 		let mut name = self.next_token_value::<Ident>()?.into_string();
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&*self.next_token_value::<Ident>()?)
+			name.push_str(&self.next_token_value::<Ident>()?)
 		}
 		let start = expected!(self, t!("<")).span;
 

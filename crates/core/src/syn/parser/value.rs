@@ -17,20 +17,20 @@ use crate::val::{
 };
 
 trait ValueParseFunc {
-	async fn parse<'a>(parser: &mut Parser<'a>, ctx: &mut Stk) -> ParseResult<Value>;
+	async fn parse(parser: &mut Parser<'_>, ctx: &mut Stk) -> ParseResult<Value>;
 }
 
 struct SurrealQL;
-struct JSON;
+struct Json;
 
 impl ValueParseFunc for SurrealQL {
-	async fn parse<'a>(parser: &mut Parser<'a>, ctx: &mut Stk) -> ParseResult<Value> {
+	async fn parse(parser: &mut Parser<'_>, ctx: &mut Stk) -> ParseResult<Value> {
 		parser.parse_value(ctx).await
 	}
 }
 
-impl ValueParseFunc for JSON {
-	async fn parse<'a>(parser: &mut Parser<'a>, ctx: &mut Stk) -> ParseResult<Value> {
+impl ValueParseFunc for Json {
+	async fn parse(parser: &mut Parser<'_>, ctx: &mut Stk) -> ParseResult<Value> {
 		parser.parse_json(ctx).await
 	}
 }
@@ -73,7 +73,7 @@ impl Parser<'_> {
 				if self.settings.legacy_strands {
 					self.reparse_json_legacy_strand(stk, strand).await?
 				} else {
-					Value::Strand(strand.into())
+					Value::Strand(strand)
 				}
 			}
 			t!("d\"") | t!("d'") => {
@@ -87,7 +87,7 @@ impl Parser<'_> {
 			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
 				Value::Bytes(self.next_token_value()?)
 			}
-
+			//TODO: Implement record id for value parsing
 			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
@@ -170,7 +170,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
-					Numeric::Duration(x) => Value::Duration(Duration(x).into()),
+					Numeric::Duration(x) => Value::Duration(Duration(x)),
 					Numeric::Integer(x) => Value::Number(Number::Int(x)),
 					Numeric::Float(x) => Value::Number(Number::Float(x)),
 					Numeric::Decimal(x) => Value::Number(Number::Decimal(x)),
@@ -247,25 +247,25 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_value_object::<JSON>(ctx, token.span).await.map(Value::Object)
+				self.parse_value_object::<Json>(ctx, token.span).await.map(Value::Object)
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_value_array::<JSON>(ctx, token.span).await.map(Value::Array)
+				self.parse_value_array::<Json>(ctx, token.span).await.map(Value::Array)
 			}
 			t!("\"") | t!("'") => {
 				let strand: Strand = self.next_token_value()?;
 				if self.settings.legacy_strands {
 					self.reparse_json_legacy_strand(ctx, strand).await
 				} else {
-					Ok(Value::Strand(strand.into()))
+					Ok(Value::Strand(strand))
 				}
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
-					Numeric::Duration(x) => Ok(Value::Duration(Duration(x).into())),
+					Numeric::Duration(x) => Ok(Value::Duration(Duration(x))),
 					Numeric::Integer(x) => Ok(Value::Number(Number::Int(x))),
 					Numeric::Float(x) => Ok(Value::Number(Number::Float(x))),
 					Numeric::Decimal(x) => Ok(Value::Number(Number::Decimal(x))),
@@ -273,13 +273,13 @@ impl Parser<'_> {
 			}
 			TokenKind::Glued(Glued::Strand) => {
 				let glued = pop_glued!(self, Strand);
-				Ok(Value::Strand(glued.into()))
+				Ok(Value::Strand(glued))
 			}
 			TokenKind::Glued(Glued::Duration) => {
 				let glued = pop_glued!(self, Duration);
-				Ok(Value::Duration(glued.into()))
+				Ok(Value::Duration(glued))
 			}
-			_ => self.parse_value_record_id_inner::<JSON>(ctx).await.map(Value::Thing),
+			_ => self.parse_value_record_id_inner::<Json>(ctx).await.map(Value::Thing),
 		}
 	}
 
@@ -289,7 +289,7 @@ impl Parser<'_> {
 		strand: Strand,
 	) -> ParseResult<Value> {
 		//TODO: Fix record id and others
-		Ok(Value::Strand(strand.into()))
+		Ok(Value::Strand(strand))
 	}
 
 	async fn parse_value_object<VP>(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Object>
@@ -344,7 +344,7 @@ impl Parser<'_> {
 		expected!(self, t!(":"));
 		let peek = self.peek();
 		let key = match peek.kind {
-			t!("u'") | t!("u\"") => RecordIdKey::Uuid(self.next_token_value::<val::Uuid>()?.into()),
+			t!("u'") | t!("u\"") => RecordIdKey::Uuid(self.next_token_value::<val::Uuid>()?),
 			t!("{") => {
 				let peek = self.pop_peek();
 				RecordIdKey::Object(self.parse_value_object::<VP>(ctx, peek.span).await?)

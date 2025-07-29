@@ -56,7 +56,6 @@ impl Format {
 
 	/// Process a request using the specified format
 	pub fn parse_value(&self, val: &[u8]) -> Result<Value, RpcError> {
-		let val = val.into();
 		match self {
 			Self::Json => json::decode(val),
 			Self::Cbor => cbor::decode(val),

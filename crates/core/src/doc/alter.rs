@@ -143,37 +143,20 @@ impl Document {
 	/// function also ensures that standard default
 	/// fields are set and reset before and after the
 	/// document data is modified.
-	pub(super) async fn process_merge_data(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		_stm: &Statement<'_>,
-	) -> Result<()> {
+	pub(super) async fn process_merge_data(&mut self) -> Result<()> {
 		// Get the record id
 		let rid = self.id()?;
 		// Set default field values
 		self.current.doc.to_mut().def(&rid);
 		// Process the permitted documents
-		if self.reduced(stk, ctx, opt, Current).await? {
-			// This is an INSERT statement
-			if let Workable::Insert(v) = &self.extras {
-				self.current.doc.to_mut().merge(Value::clone(v))?;
-			}
-			// This is an INSERT RELATION statement
-			if let Workable::Relate(_, _, Some(v)) = &self.extras {
-				self.current.doc.to_mut().merge(Value::clone(v))?;
-			}
-		} else {
-			// This is an INSERT statement
-			if let Workable::Insert(v) = &self.extras {
-				self.current.doc.to_mut().merge(Value::clone(v))?;
-			}
-			// This is an INSERT RELATION statement
-			if let Workable::Relate(_, _, Some(v)) = &self.extras {
-				self.current.doc.to_mut().merge(Value::clone(v))?;
-			}
-		};
+		// This is an INSERT statement
+		if let Workable::Insert(v) = &self.extras {
+			self.current.doc.to_mut().merge(Value::clone(v))?;
+		}
+		// This is an INSERT RELATION statement
+		if let Workable::Relate(_, _, Some(v)) = &self.extras {
+			self.current.doc.to_mut().merge(Value::clone(v))?;
+		}
 		// Set default field values
 		self.current.doc.to_mut().def(&rid);
 		// Carry on

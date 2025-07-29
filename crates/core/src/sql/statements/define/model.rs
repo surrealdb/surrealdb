@@ -45,7 +45,7 @@ impl From<DefineModelStatement> for crate::expr::statements::DefineModelStatemen
 			hash: v.hash,
 			name: v.name.into(),
 			version: v.version,
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			permissions: v.permissions.into(),
 		}
 	}
@@ -58,7 +58,7 @@ impl From<crate::expr::statements::DefineModelStatement> for DefineModelStatemen
 			hash: v.hash,
 			name: v.name.into(),
 			version: v.version,
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			permissions: v.permissions.into(),
 		}
 	}

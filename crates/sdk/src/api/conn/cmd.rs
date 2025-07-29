@@ -161,9 +161,7 @@ impl Command {
 				RouterRequest {
 					id,
 					method: "use",
-					params: Some(
-						vec![CoreValue::from(namespace), CoreValue::from(database)].into(),
-					),
+					params: Some(vec![namespace, database].into()),
 					transaction: None,
 				}
 			}
@@ -674,7 +672,7 @@ impl Serialize for RouterRequest {
 
 impl Revisioned for RouterRequest {
 	fn revision() -> u16 {
-		2
+		1
 	}
 
 	fn serialize_revisioned<W: std::io::Write>(
@@ -682,7 +680,7 @@ impl Revisioned for RouterRequest {
 		w: &mut W,
 	) -> std::result::Result<(), revision::Error> {
 		// version
-		Revisioned::serialize_revisioned(&2u32, w)?;
+		Revisioned::serialize_revisioned(&1u32, w)?;
 		// object variant
 		Revisioned::serialize_revisioned(&9u32, w)?;
 		// object wrapper version

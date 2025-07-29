@@ -364,7 +364,7 @@ impl Display for KindLiteral {
 impl From<KindLiteral> for crate::expr::kind::KindLiteral {
 	fn from(v: KindLiteral) -> Self {
 		match v {
-			KindLiteral::String(s) => crate::expr::kind::KindLiteral::String(s.into()),
+			KindLiteral::String(s) => crate::expr::kind::KindLiteral::String(s),
 			KindLiteral::Integer(i) => crate::expr::kind::KindLiteral::Integer(i),
 			KindLiteral::Float(f) => crate::expr::kind::KindLiteral::Float(f),
 			KindLiteral::Decimal(d) => crate::expr::kind::KindLiteral::Decimal(d),
@@ -383,11 +383,11 @@ impl From<KindLiteral> for crate::expr::kind::KindLiteral {
 impl From<crate::expr::kind::KindLiteral> for KindLiteral {
 	fn from(v: crate::expr::kind::KindLiteral) -> Self {
 		match v {
-			crate::expr::kind::KindLiteral::String(s) => Self::String(s.into()),
+			crate::expr::kind::KindLiteral::String(s) => Self::String(s),
 			crate::expr::kind::KindLiteral::Integer(i) => Self::Integer(i),
 			crate::expr::kind::KindLiteral::Float(f) => Self::Float(f),
 			crate::expr::kind::KindLiteral::Decimal(d) => Self::Decimal(d),
-			crate::expr::kind::KindLiteral::Duration(d) => Self::Duration(d.into()),
+			crate::expr::kind::KindLiteral::Duration(d) => Self::Duration(d),
 			crate::expr::kind::KindLiteral::Array(a) => {
 				Self::Array(a.into_iter().map(Into::into).collect())
 			}

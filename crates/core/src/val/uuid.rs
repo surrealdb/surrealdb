@@ -13,7 +13,7 @@ use super::Datetime;
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash,
 )]
-#[serde(rename = "$surrealdb::private::sql::Uuid")]
+#[serde(rename = "$surrealdb::private::Uuid")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Uuid(pub uuid::Uuid);
 

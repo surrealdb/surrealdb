@@ -13,7 +13,7 @@ use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Closure")]
+#[serde(rename = "$surrealdb::private::Closure")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Closure {
 	pub args: Vec<(Ident, Kind)>,
@@ -22,8 +22,8 @@ pub struct Closure {
 }
 
 impl PartialOrd for Closure {
-	fn partial_cmp(&self, _: &Self) -> Option<std::cmp::Ordering> {
-		Some(Ordering::Equal)
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
 	}
 }
 impl Ord for Closure {

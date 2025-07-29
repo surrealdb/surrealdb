@@ -79,7 +79,7 @@ impl Fields {
 	/// Get all fields which are not an `*` projection
 	pub fn iter_fields(&self) -> FieldsIter {
 		match self {
-			Fields::Value(field) => FieldsIter::Single(Some(&field)),
+			Fields::Value(field) => FieldsIter::Single(Some(field)),
 			Fields::Select(fields) => FieldsIter::Multiple(fields.iter()),
 		}
 	}
@@ -117,7 +117,7 @@ impl Fields {
 		}
 
 		match self {
-			Fields::Value(field) => is_count(&**field),
+			Fields::Value(field) => is_count(field),
 			Fields::Select(fields) => !fields.is_empty() && fields.iter().all(is_count),
 		}
 	}
@@ -205,7 +205,7 @@ impl Fields {
 									}
 									// This is the end of the expression
 									None => {
-										out.set(stk, ctx, opt, alias.as_ref().unwrap_or(&v), x)
+										out.set(stk, ctx, opt, alias.as_ref().unwrap_or(v), x)
 											.await?
 									}
 								}

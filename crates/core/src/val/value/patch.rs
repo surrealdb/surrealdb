@@ -238,8 +238,7 @@ mod tests {
 		let ops = syn::value(
 			"[{ op: 'remove', path: '/test/something' }, { op: 'test', path: '/temp', value: true }]",
 		)
-		.unwrap()
-		.into();
+		.unwrap();
 		let res = syn::value("{ test: { other: 'test' }, temp: true }").unwrap();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
@@ -311,8 +310,7 @@ mod tests {
 		let ops = syn::value(
 			"[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 123 }]",
 		)
-		.unwrap()
-		.into();
+		.unwrap();
 		let res = syn::value("{ test: { something: 123 }, temp: true }").unwrap();
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);

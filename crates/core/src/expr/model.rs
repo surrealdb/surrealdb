@@ -11,11 +11,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[cfg(feature = "ml")]
-use crate::expr::{Expr, Permission};
+use crate::expr::Permission;
 #[cfg(feature = "ml")]
 use crate::iam::Action;
-#[cfg(feature = "ml")]
-use futures::future::try_join_all;
 #[cfg(feature = "ml")]
 use std::collections::HashMap;
 #[cfg(feature = "ml")]
@@ -33,7 +31,6 @@ const ARGUMENTS: &str = "The model expects 1 argument. The argument can be eithe
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Model {
 	pub name: String,
 	pub version: String,
@@ -53,10 +50,9 @@ impl Model {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-		args: Vec<Expr>,
+		mut args: Vec<Value>,
 	) -> FlowResult<Value> {
-		use crate::expr::FlowResultExt;
-		use crate::val::CoerceError;
+		use crate::val::{CoerceError, Number};
 
 		// Get the full name of this model
 		let name = format!("ml::{}", self.name);
@@ -103,7 +99,7 @@ impl Model {
 		}
 
 		// Take the first and only specified argument
-		let argument = args.pop();
+		let argument = args.pop().unwrap();
 		match argument {
 			// Perform bufferered compute
 			Value::Object(v) => {
@@ -135,7 +131,7 @@ impl Model {
 				.unwrap()
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
-				Ok(outcome.into())
+				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 			}
 			// Perform raw compute
 			Value::Number(v) => {
@@ -167,7 +163,7 @@ impl Model {
 				.unwrap()
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
-				Ok(outcome.into())
+				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 			}
 			// Perform raw compute
 			Value::Array(v) => {
@@ -201,7 +197,7 @@ impl Model {
 				.unwrap()
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
-				Ok(outcome.into())
+				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 			}
 			//
 			_ => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {

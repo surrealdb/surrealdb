@@ -51,7 +51,7 @@ impl From<DefineBucketStatement> for crate::expr::statements::define::DefineBuck
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }
@@ -64,7 +64,7 @@ impl From<crate::expr::statements::define::DefineBucketStatement> for DefineBuck
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 		}
 	}
 }

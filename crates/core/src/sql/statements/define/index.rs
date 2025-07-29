@@ -53,7 +53,7 @@ impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatemen
 			what: v.what.into(),
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			concurrently: v.concurrently,
 		}
 	}
@@ -67,7 +67,7 @@ impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatemen
 			what: v.what.into(),
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			concurrently: v.concurrently,
 		}
 	}

@@ -14,7 +14,7 @@ use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
-#[serde(rename = "$surrealdb::private::sql::Number")]
+#[serde(rename = "$surrealdb::private::Number")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Number {
 	Int(i64),

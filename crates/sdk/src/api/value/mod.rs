@@ -192,9 +192,7 @@ impl TryFrom<RecordIdKey> for Uuid {
 impl From<Vec<Value>> for RecordIdKey {
 	fn from(value: Vec<Value>) -> Self {
 		let res = Value::array_to_core(value);
-		let mut array = val::Array::default();
-		array.0 = res;
-		Self(val::RecordIdKey::Array(array))
+		Self(val::RecordIdKey::Array(val::Array(res)))
 	}
 }
 
@@ -290,7 +288,7 @@ impl FromStr for RecordId {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self> {
-		syn::thing(s).map(|thing| RecordId::from_inner(thing))
+		syn::thing(s).map(RecordId::from_inner)
 	}
 }
 

@@ -41,7 +41,7 @@ impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseSt
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			changefeed: v.changefeed.map(Into::into),
 		}
 	}
@@ -53,7 +53,7 @@ impl From<crate::expr::statements::DefineDatabaseStatement> for DefineDatabaseSt
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment,
 			changefeed: v.changefeed.map(Into::into),
 		}
 	}

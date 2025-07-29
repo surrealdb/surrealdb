@@ -17,7 +17,7 @@ use super::Object;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "$surrealdb::private::sql::Geometry")]
+#[serde(rename = "$surrealdb::private::Geometry")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Geometry {
 	Point(Point<f64>),

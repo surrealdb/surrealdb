@@ -120,37 +120,43 @@ impl Executor {
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
+
 				// Run the statement
 				let res = self
 					.stack
 					.enter(|stk| stm.what.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
 					.await;
+
 				// Check if we dump the slow log
 				self.check_slow_log(start, &stm);
-				match res {
-					Ok(val) => {
-						if stm.is_protected_set() {
-							return Err(ControlFlow::from(anyhow::Error::new(
-								Error::InvalidParam {
-									name: stm.name.clone().into_string(),
-								},
-							)));
-						}
-						// Set the parameter
-						Arc::get_mut(&mut self.ctx)
-							.ok_or_else(|| {
-								Error::unreachable(
-									"Tried to unfreeze a Context with multiple references",
-								)
-							})
-							.map_err(anyhow::Error::new)?
-							.add_value(stm.name.into_string(), val.into());
-						// Finalise transaction, returning nothing unless it couldn't commit
-						Ok(Value::None)
-					}
-					Err(err) => Err(err),
+
+				let res = res?;
+				let result = match &stm.kind {
+					Some(kind) => res
+						.coerce_to_kind(kind)
+						.map_err(|e| Error::SetCoerce {
+							name: stm.name.to_string(),
+							error: Box::new(e),
+						})
+						.map_err(anyhow::Error::new)?,
+					None => res,
+				};
+
+				if stm.is_protected_set() {
+					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
+						name: stm.name.clone().into_string(),
+					})));
 				}
+				// Set the parameter
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						Error::unreachable("Tried to unfreeze a Context with multiple references")
+					})
+					.map_err(anyhow::Error::new)?
+					.add_value(stm.name.into_string(), result.into());
+				// Finalise transaction, returning nothing unless it couldn't commit
+				Ok(Value::None)
 			}
 			TopLevelExpr::Begin => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(

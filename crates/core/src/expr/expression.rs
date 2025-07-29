@@ -343,9 +343,9 @@ impl Expr {
 			}
 			Expr::Let(_) => {
 				//TODO: This error needs to be improved or it needs to be rejected in the parser.
-				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
+				Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
 					"Set statement outside of block",
-				))));
+				))))
 			}
 			Expr::Sleep(sleep_statement) => {
 				sleep_statement.compute(ctx, &opt, doc).await.map_err(ControlFlow::Err)

@@ -692,7 +692,7 @@ pub(super) mod tests {
 			let Ok(Value::Array(array)) = syn::value(&line) else {
 				panic!()
 			};
-			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array.into()))?.into();
+			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array))?.into();
 			res.push((i as DocId, vec));
 		}
 		Ok(res)

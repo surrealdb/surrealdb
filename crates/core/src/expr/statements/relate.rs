@@ -144,7 +144,7 @@ impl RelateStatement {
 				{
 					// The relation has a specific record id
 					Value::Thing(id) => {
-						i.ingest(Iterable::Relatable(f.clone(), id.to_owned(), t.clone(), None))
+						i.ingest(Iterable::Relatable(f.clone(), id.clone(), t.clone(), None))
 					}
 					// The relation does not have a specific record id
 					Value::Table(tb) => match self.data {

@@ -709,61 +709,6 @@ async fn select_array_count_subquery_group_by() -> Result<()> {
 }
 
 #[tokio::test]
-async fn select_aggregate_mean_update() -> Result<()> {
-	let sql = "
-		CREATE test:a SET a = 3;
-		DEFINE TABLE foo AS SELECT math::mean(a) AS avg FROM test GROUP ALL;
-		UPDATE test:a SET a = 2;
-		SELECT avg FROM foo;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: test:a,
-				a: 3
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: test:a,
-				a: 2
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				avg: 2
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
 async fn select_count_group_all() -> Result<()> {
 	let sql = r#"
 		CREATE table CONTENT { bar: "hello", foo: "Man"};

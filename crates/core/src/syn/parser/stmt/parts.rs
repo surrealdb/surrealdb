@@ -168,9 +168,9 @@ impl Parser<'_> {
 	}
 
 	/// Move this out of the parser.
-	pub(crate) fn check_idiom<'a>(
+	pub(crate) fn check_idiom(
 		kind: MissingKind,
-		fields: &'a Fields,
+		fields: &Fields,
 		field_span: Span,
 		idiom: &Idiom,
 		idiom_span: Span,

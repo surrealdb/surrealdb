@@ -438,7 +438,7 @@ impl Document {
 							Ok(tb) => Ok(tb),
 						}?;
 						cache.insert(key, cache::ds::Entry::Any(val.clone()));
-						return Ok(val);
+						Ok(val)
 					}
 				}
 			}

@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 fn clean_none(v: &mut Value) -> bool {
 	match v {
-		Value::None => return false,
+		Value::None => false,
 		Value::Object(o) => {
 			o.retain(|_, v| clean_none(v));
 			true
@@ -631,9 +631,7 @@ impl FieldEditContext<'_> {
 					// then this field could not be
 					// updated, meanint that this
 					// change will be reverted.
-					if res.is_truthy() {
-						val
-					} else if val == *self.old {
+					if res.is_truthy() || val == *self.old {
 						val
 					} else {
 						self.old.as_ref().clone()

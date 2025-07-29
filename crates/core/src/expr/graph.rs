@@ -151,15 +151,15 @@ impl ComputedGraphSubject {
 	) -> (Result<Vec<u8>>, Result<Vec<u8>>) {
 		match self {
 			Self::Table(t) => (
-				crate::key::graph::ftprefix(ns, db, tb, id, dir, &t),
-				crate::key::graph::ftsuffix(ns, db, tb, id, dir, &t),
+				crate::key::graph::ftprefix(ns, db, tb, id, dir, t),
+				crate::key::graph::ftsuffix(ns, db, tb, id, dir, t),
 			),
 			Self::Range {
 				table,
 				range,
 			} => {
 				let beg = match &range.start {
-					Bound::Unbounded => crate::key::graph::ftprefix(ns, db, tb, id, dir, &table),
+					Bound::Unbounded => crate::key::graph::ftprefix(ns, db, tb, id, dir, table),
 					Bound::Included(v) => crate::key::graph::new(
 						ns,
 						db,
@@ -191,7 +191,7 @@ impl ComputedGraphSubject {
 				};
 				// Prepare the range end key
 				let end = match &range.end {
-					Bound::Unbounded => crate::key::graph::ftsuffix(ns, db, tb, id, dir, &*table),
+					Bound::Unbounded => crate::key::graph::ftsuffix(ns, db, tb, id, dir, table),
 					Bound::Excluded(v) => crate::key::graph::new(
 						ns,
 						db,

@@ -39,7 +39,7 @@ impl Value {
 			Value::Uuid(uuid) => {
 				// This buffer is the exact size needed to be able to encode the uuid.
 				let mut buffer = [0u8; uuid::fmt::Hyphenated::LENGTH];
-				let string = uuid.0.hyphenated().encode_lower(&mut buffer).to_string();
+				let string = (*uuid.0.hyphenated().encode_lower(&mut buffer)).to_string();
 				JsonValue::String(string)
 			}
 			Value::Array(array) => JsonValue::Array(
@@ -426,7 +426,7 @@ mod tests {
 
 		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");
 		let deserialized_sql_value = crate::syn::value_legacy_strand(&json_str).unwrap();
-		let deserialized: Value = deserialized_sql_value.into();
+		let deserialized: Value = deserialized_sql_value;
 		assert_eq!(deserialized, expected_deserialized);
 	}
 }

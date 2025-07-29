@@ -1271,7 +1271,7 @@ impl Parser<'_> {
 					while self.eat(t!("::")) {
 						let value = self.next_token_value::<Ident>()?;
 						ident.push_str("::");
-						ident.push_str(&*value);
+						ident.push_str(&value);
 					}
 					res.function = Some(ident);
 				}

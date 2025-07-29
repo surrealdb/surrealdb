@@ -647,7 +647,7 @@ impl Cast for RecordId {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Thing(x) => Ok(x),
-			Value::Strand(x) => match syn::thing(&*x) {
+			Value::Strand(x) => match syn::thing(&x) {
 				Ok(x) => Ok(x),
 				Err(_) => Err(CastError::InvalidKind {
 					from: Value::Strand(x),

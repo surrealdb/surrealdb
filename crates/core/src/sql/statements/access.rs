@@ -142,7 +142,7 @@ impl From<AccessStatementPurge> for crate::expr::statements::access::AccessState
 			base: v.base.map(Into::into),
 			expired: v.expired,
 			revoked: v.revoked,
-			grace: v.grace.into(),
+			grace: v.grace,
 		}
 	}
 }
@@ -154,7 +154,7 @@ impl From<crate::expr::statements::access::AccessStatementPurge> for AccessState
 			base: v.base.map(Into::into),
 			expired: v.expired,
 			revoked: v.revoked,
-			grace: v.grace.into(),
+			grace: v.grace,
 		}
 	}
 }

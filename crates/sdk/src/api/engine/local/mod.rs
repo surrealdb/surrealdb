@@ -199,10 +199,10 @@ use crate::api::conn::MlExportConfig;
 use futures::StreamExt;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
+	expr::statements::{DefineModelStatement, DefineStatement},
 	iam::{Action, ResourceKind, check::check_ns_db},
 	kvs::{LockType, TransactionType},
 	ml::storage::surml_file::SurMlFile,
-	sql::statements::{DefineModelStatement, DefineStatement},
 };
 
 use super::resource_to_exprs;
@@ -627,7 +627,7 @@ async fn router(
 				.map(|x| unsafe { Strand::new_unchecked(x) })
 				.map(From::from)
 				.unwrap_or(val::Value::None);
-			Ok(DbResponse::Other(response.into()))
+			Ok(DbResponse::Other(response))
 		}
 		Command::Signin {
 			credentials,
@@ -1213,14 +1213,21 @@ async fn router(
 			// Insert the file data in to the store
 			crate::obs::put(&hash, data).await?;
 			// Insert the model in to the database
-			let mut model = DefineModelStatement::default();
-			model.name = file.header.name.to_string().into();
-			model.version = file.header.version.to_string();
-			model.comment = Some(file.header.description.to_string().into());
-			model.hash = hash;
-			let query = DefineStatement::Model(model).into();
-			let responses =
-				kvs.process(query, &*session.read().await, Some(vars.read().await.clone())).await?;
+			let model = DefineModelStatement {
+				name: Ident::new(file.header.name.to_string()).unwrap(),
+				version: file.header.version.to_string(),
+				comment: Some(file.header.description.to_string().into()),
+				hash,
+				..Default::default()
+			};
+			// TODO: Null byte validity
+			let q = DefineStatement::Model(model);
+			let q = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(q)))],
+			};
+			let responses = kvs
+				.process_plan(q, &*session.read().await, Some(vars.read().await.clone()))
+				.await?;
 
 			for response in responses {
 				response.result?;
@@ -1277,14 +1284,11 @@ async fn router(
 				Some(name) => Function::Custom(name.to_owned()),
 				None => match name.strip_prefix("ml::") {
 					#[cfg(feature = "ml")]
-					Some(name) => {
-						let mut tmp = Model::default();
-						name.clone_into(&mut tmp.name);
-						tmp.args = args.0;
-						tmp.version = _version
-							.ok_or(Error::Query("ML functions must have a version".to_string()))?;
-						tmp.into()
-					}
+					Some(name) => Function::Model(Model {
+						name: name.to_owned(),
+						version: _version
+							.ok_or(Error::Query("ML functions must have a version".to_string()))?,
+					}),
 					#[cfg(not(feature = "ml"))]
 					Some(_) => {
 						return Err(Error::Query(format!(

@@ -70,7 +70,7 @@ impl Value {
 				_ => match p {
 					Part::Field(_) => Value::None._walk(path.next(), prev.push(p.clone())),
 					x => {
-						if let Some(_) = x.as_old_index() {
+						if x.as_old_index().is_some() {
 							Value::None._walk(path.next(), prev.push(p.clone()))
 						} else {
 							vec![]

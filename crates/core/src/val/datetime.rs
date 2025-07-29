@@ -14,7 +14,7 @@ use std::{ops, str};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Datetime")]
+#[serde(rename = "$surrealdb::private::Datetime")]
 pub struct Datetime(pub DateTime<Utc>);
 
 impl Datetime {
@@ -65,7 +65,7 @@ impl TryFrom<&str> for Datetime {
 	type Error = ();
 	fn try_from(v: &str) -> Result<Self, Self::Error> {
 		match syn::datetime(v) {
-			Ok(v) => Ok(v.into()),
+			Ok(v) => Ok(v),
 			_ => Err(()),
 		}
 	}

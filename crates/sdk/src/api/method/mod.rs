@@ -630,16 +630,10 @@ where
 	/// # }
 	/// ```
 	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
-		let result = match query.as_str() {
-			Some(surql) => ValidQuery::Raw {
-				query: Cow::Owned(surql.to_owned()),
-				bindings: Default::default(),
-			},
-			None => query.into_query().0,
-		};
+		let result = query.into_query(self).0;
 		Query {
 			txn: None,
-			inner: Ok(result),
+			inner: result,
 			client: Cow::Borrowed(self),
 		}
 	}

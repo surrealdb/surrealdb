@@ -146,16 +146,15 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signup, mutating the session
-		let out: Result<Value> =
-			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
-				.await
-				// TODO: Null byte validity
-				.map(|v| {
-					v.token
-						.clone()
-						.map(|x| Value::Strand(Strand::new(x).unwrap()))
-						.unwrap_or(Value::None)
-				});
+		let out: Result<Value> = crate::iam::signup::signup(self.kvs(), &mut session, params)
+			.await
+			// TODO: Null byte validity
+			.map(|v| {
+				v.token
+					.clone()
+					.map(|x| Value::Strand(Strand::new(x).unwrap()))
+					.unwrap_or(Value::None)
+			});
 
 		// Store the updated session
 		self.set_session(Arc::new(session));
@@ -179,11 +178,10 @@ pub trait RpcProtocolV1: RpcContext {
 		// Clone the current session
 		let mut session = self.session().clone().as_ref().clone();
 		// Attempt signin, mutating the session
-		let out: Result<Value> =
-			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
-				.await
-				// TODO: Null byte validity
-				.map(|v| Strand::new(v.token.clone()).unwrap().into());
+		let out: Result<Value> = crate::iam::signin::signin(self.kvs(), &mut session, params)
+			.await
+			// TODO: Null byte validity
+			.map(|v| Strand::new(v.token.clone()).unwrap().into());
 		// Store the updated session
 		self.set_session(Arc::new(session));
 		// Drop the mutex guard
@@ -435,7 +433,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let sql = SelectStatement {
 			only,
 			expr: Fields::all(),
-			what: vec![what].into(),
+			what: vec![what],
 			with: None,
 			cond: None,
 			omit: None,
@@ -934,7 +932,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Specify the query variables
 		let vars = match vars {
 			Some(Value::Object(v)) => {
-				let v: Object = v.into();
+				let v: Object = v;
 				Some(self.session().variables.merged(v))
 			}
 			None | Some(Value::None | Value::Null) => Some(self.session().variables.clone()),
@@ -977,10 +975,10 @@ pub trait RpcProtocolV1: RpcContext {
 			_ => return Err(RpcError::InvalidParams),
 		};
 
-		let name = if name.starts_with("fn::") {
-			Function::Custom(name[4..].to_owned())
-		} else if name.starts_with("ml::") {
-			let name = name[4..].to_owned();
+		let name = if let Some(rest) = name.strip_prefix("fn::") {
+			Function::Custom(rest.to_owned())
+		} else if let Some(rest) = name.strip_prefix("ml::") {
+			let name = rest.to_owned();
 			Function::Model(Model {
 				name,
 				version: version.ok_or(RpcError::InvalidParams)?,
@@ -1026,7 +1024,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 
 		// TODO(3.0.0): Reimplement GraphQL.
-		return Err(RpcError::from(anyhow::Error::new(Error::Unimplemented("graphql".to_owned()))));
+		Err(RpcError::from(anyhow::Error::new(Error::Unimplemented("graphql".to_owned()))))
 
 		/*
 		if !Self::GQL_SUPPORT {
