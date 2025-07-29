@@ -154,7 +154,7 @@ impl BTreeDocIds {
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
-pub struct BTreeDocIdsState {
+pub(crate) struct BTreeDocIdsState {
 	btree: BState,
 	available_ids: Option<RoaringTreemap>,
 	next_doc_id: DocId,

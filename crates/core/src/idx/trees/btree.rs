@@ -1010,20 +1010,18 @@ where
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::trees::btree::{
-		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
+	use std::{cmp::Ordering, collections::BTreeMap, sync::Arc};
+
+	use crate::{
+		idx::trees::{
+			bkeys::{FstKeys, TrieKeys},
+			store::TreeNodeProvider,
+		},
+		kvs::{Datastore, LockType, TransactionType},
 	};
-	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
-	use crate::kvs::{Datastore, Key, LockType::*, Transaction, TransactionType};
-	use anyhow::Result;
-	use rand::prelude::SliceRandom;
-	use rand::thread_rng;
-	use std::cmp::Ordering;
-	use std::collections::{BTreeMap, VecDeque};
-	use std::fmt::Debug;
-	use std::sync::Arc;
+
+	use super::*;
+	use rand::{seq::SliceRandom, thread_rng};
 	use test_log::test;
 
 	#[test]
@@ -1101,7 +1099,7 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, LockType::Optimistic).await.unwrap();
 		let st = tx
 			.index_caches()
 			.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
@@ -1119,7 +1117,7 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, LockType::Optimistic).await.unwrap();
 		let st = tx
 			.index_caches()
 			.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)

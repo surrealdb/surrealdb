@@ -1409,7 +1409,7 @@ impl From<MtStatistics> for Value {
 #[revisioned(revision = 2)]
 #[derive(Clone, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct MState {
+pub(crate) struct MState {
 	capacity: u16,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
