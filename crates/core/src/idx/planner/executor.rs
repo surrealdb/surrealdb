@@ -5,16 +5,18 @@ use crate::err::Error;
 use crate::expr::index::{Distance, Index};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{
-	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
+	Array, BooleanOperation, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table,
+	Thing, Value,
 };
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
+use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::ft::search::scorer::BM25Scorer;
 use crate::idx::ft::search::termdocs::SearchTermsDocs;
 use crate::idx::ft::search::terms::SearchTerms;
-use crate::idx::ft::search::{MatchRef, SearchIndex, TermIdList, TermIdSet};
+use crate::idx::ft::search::{SearchIndex, TermIdList, TermIdSet};
 use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
@@ -35,7 +37,7 @@ use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -175,7 +177,7 @@ impl InnerQueryExecutor {
 						}
 					};
 					if let Some(e) = search_entry {
-						if let Matches(_, Some(mr)) = e.0.index_option.op() {
+						if let Matches(_, Some(mr), _) = e.0.index_option.op() {
 							let mr_entry = PerMatchRefEntry::Search(e.clone());
 							ensure!(
 								mr_entries.insert(*mr, mr_entry).is_none(),
@@ -214,7 +216,7 @@ impl InnerQueryExecutor {
 						}
 					};
 					if let Some(e) = fulltext_entry {
-						if let Matches(_, Some(mr)) = e.0.io.op() {
+						if let Matches(_, Some(mr), _) = e.0.io.op() {
 							let mr_entry = PerMatchRefEntry::FullText(e.clone());
 							ensure!(
 								mr_entries.insert(*mr, mr_entry).is_none(),
@@ -996,7 +998,7 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _) = io.op() {
+			if let Matches(_, _, _) = io.op() {
 				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(io.ix_ref()) {
 					if let Some(PerExpressionEntry::Search(se)) = self.0.exp_entries.get(exp) {
 						let hits = si.new_hits_iterator(&se.0.terms_docs)?;
@@ -1015,11 +1017,11 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _) = io.op() {
+			if let Matches(_, _, bo) = io.op() {
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
 				{
 					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
-						let hits = fti.new_hits_iterator(&fte.0.qt)?;
+						let hits = fti.new_hits_iterator(&fte.0.qt, bo.clone());
 						let it = MatchesThingIterator::new(ir, hits);
 						return Ok(Some(ThingIterator::FullTextMatches(it)));
 					}
@@ -1351,7 +1353,12 @@ impl SearchEntry {
 		si: &SearchIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _) = io.op() {
+		if let Matches(qs, _, bo) = io.op() {
+			if !matches!(bo, BooleanOperation::And) {
+				bail!(Error::Unimplemented(
+					"SEARCH indexes only support AND operations".to_string()
+				))
+			}
 			let (terms_list, terms_set, terms_docs) =
 				si.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let terms_docs = Arc::new(terms_docs);
@@ -1387,7 +1394,7 @@ impl FullTextEntry {
 		fti: &FullTextIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _) = io.op() {
+		if let Matches(qs, _, _) = io.op() {
 			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let scorer = fti.new_scorer(ctx).await?;
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
