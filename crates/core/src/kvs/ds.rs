@@ -573,26 +573,11 @@ impl Datastore {
 		// Check if a version is already set in storage
 		let val = match catch!(txn, txn.get(&key, None).await) {
 			// There is a version set in the storage
-			Some(v) => {
-				// Attempt to decode the current stored version
-				let val = TryInto::<Version>::try_into(v);
-				// Check for errors, and cancel the transaction
-				match val {
-					// There was en error getting the version
-					Err(err) => {
-						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel().await);
-						// Return the error
-						bail!(err);
-					}
-					// We could decode the version correctly
-					Ok(val) => {
-						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel().await);
-						// Return the current version
-						val
-					}
-				}
+			Some(val) => {
+				// We didn't write anything, so just rollback
+				catch!(txn, txn.cancel().await);
+				// Return the current version
+				val
 			}
 			// There is no version set in the storage
 			None => {
