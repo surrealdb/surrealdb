@@ -46,7 +46,7 @@ pub trait RpcContext {
 	// GraphQL
 	// ------------------------------
 
-	/// GraphQL queries are disabled by default
+	// GraphQL queries are disabled by default
 	//#[cfg(not(target_family = "wasm"))]
 	//const GQL_SUPPORT: bool = false;
 

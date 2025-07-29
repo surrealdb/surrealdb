@@ -337,8 +337,8 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	/// Get the correct reference type if needed.
 	/*
+	/// Get the correct reference type if needed.
 	pub(crate) async fn get_reference_kind(
 		&self,
 		ctx: &Context,

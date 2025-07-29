@@ -311,12 +311,10 @@ impl Fields {
 
 										if let Some(alias) = alias {
 											out.set(stk, ctx, opt, alias, res).await?;
+										} else if self.is_single() {
+											out = res
 										} else {
-											if self.is_single() {
-												out = res
-											} else {
-												out.set(stk, ctx, opt, &idiom.0, res).await?;
-											}
+											out.set(stk, ctx, opt, &idiom.0, res).await?;
 										}
 									}
 									_ => {

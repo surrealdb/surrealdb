@@ -173,57 +173,55 @@ impl Value {
 							}
 							v.0 = new_res;
 							Ok(())
-						} else {
-							if let Some(Part::Value(_)) = path.get(1) {
-								//TODO: Figure out if the behavior here is different with this
-								//special case then without. I think this can be simplified.
-								let mut true_values = Vec::new();
-								let mut true_indecies = Vec::new();
-								// Store the elements and positions to update
-								for (i, o) in v.iter_mut().enumerate() {
-									let cur = o.clone().into();
-									if stk
-										.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
-										.await
-										.catch_return()?
-										.is_truthy()
-									{
-										true_values.push(o.clone());
-										true_indecies.push(i);
-									}
+						} else if let Some(Part::Value(_)) = path.get(1) {
+							//TODO: Figure out if the behavior here is different with this
+							//special case then without. I think this can be simplified.
+							let mut true_values = Vec::new();
+							let mut true_indecies = Vec::new();
+							// Store the elements and positions to update
+							for (i, o) in v.iter_mut().enumerate() {
+								let cur = o.clone().into();
+								if stk
+									.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
+									.await
+									.catch_return()?
+									.is_truthy()
+								{
+									true_values.push(o.clone());
+									true_indecies.push(i);
 								}
-								// Convert the matched elements array to a value
-								let mut a = Value::from(true_values);
-								// Set the new value on the matches elements
-								stk.run(|stk| a.del(stk, ctx, opt, path.next())).await?;
-								// Push the new values into the original array
-								for (i, p) in true_indecies.into_iter().enumerate().rev() {
-									match a.pick(&[Part::Value(Expr::Literal(Literal::Integer(
-										// This technically can overflow but it is very unlikely.
-										i as i64,
-									)))]) {
-										Value::None => {
-											v.remove(i);
-										}
-										x => v[p] = x,
-									}
-								}
-								Ok(())
-							} else {
-								let path = path.next();
-								for v in v.iter_mut() {
-									let cur = v.clone().into();
-									if stk
-										.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
-										.await
-										.catch_return()?
-										.is_truthy()
-									{
-										stk.run(|stk| v.del(stk, ctx, opt, path)).await?;
-									}
-								}
-								Ok(())
 							}
+							// Convert the matched elements array to a value
+							let mut a = Value::from(true_values);
+							// Set the new value on the matches elements
+							stk.run(|stk| a.del(stk, ctx, opt, path.next())).await?;
+							// Push the new values into the original array
+							for (i, p) in true_indecies.into_iter().enumerate().rev() {
+								match a.pick(&[Part::Value(Expr::Literal(Literal::Integer(
+									// This technically can overflow but it is very unlikely.
+									i as i64,
+								)))]) {
+									Value::None => {
+										v.remove(i);
+									}
+									x => v[p] = x,
+								}
+							}
+							Ok(())
+						} else {
+							let path = path.next();
+							for v in v.iter_mut() {
+								let cur = v.clone().into();
+								if stk
+									.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
+									.await
+									.catch_return()?
+									.is_truthy()
+								{
+									stk.run(|stk| v.del(stk, ctx, opt, path)).await?;
+								}
+							}
+							Ok(())
 						}
 					}
 					Part::Value(x) => {
