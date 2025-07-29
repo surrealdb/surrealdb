@@ -85,6 +85,8 @@ pub struct Datastore {
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
 	query_timeout: Option<Duration>,
+	/// The duration threshold determining when a query should be logged
+	slow_log_threshold: Option<Duration>,
 	/// The maximum duration timeout for running multiple statements in a transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
@@ -402,6 +404,7 @@ impl Datastore {
 				strict: false,
 				auth_enabled: false,
 				query_timeout: None,
+				slow_log_threshold: None,
 				transaction_timeout: None,
 				notification_channel: None,
 				capabilities: Arc::new(Capabilities::default()),
@@ -427,6 +430,7 @@ impl Datastore {
 			strict: self.strict,
 			auth_enabled: self.auth_enabled,
 			query_timeout: self.query_timeout,
+			slow_log_threshold: self.slow_log_threshold,
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
@@ -465,6 +469,12 @@ impl Datastore {
 	/// Set a global query timeout for this Datastore
 	pub fn with_query_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.query_timeout = duration;
+		self
+	}
+
+	/// Set a global slow log threshold
+	pub fn with_slow_log_threshold(mut self, duration: Option<Duration>) -> Self {
+		self.slow_log_threshold = duration;
 		self
 	}
 
@@ -1409,6 +1419,7 @@ impl Datastore {
 	pub fn setup_ctx(&self) -> Result<MutableContext> {
 		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
+			self.slow_log_threshold,
 			self.capabilities.clone(),
 			self.index_stores.clone(),
 			#[cfg(not(target_family = "wasm"))]

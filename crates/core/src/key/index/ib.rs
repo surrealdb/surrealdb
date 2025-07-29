@@ -4,7 +4,7 @@
 //! distributed sequence mechanism that enables concurrent document ID generation across multiple nodes.
 //!
 //! ## Key Structure
-//! ```
+//! ```no_compile
 //! /*{namespace}*{database}*{table}+{index}!ib{start}
 //! ```
 //!

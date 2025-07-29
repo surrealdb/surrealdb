@@ -39,8 +39,6 @@ use std::ops::BitAnd;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub(crate) type MatchRef = u8;
-
 pub(in crate::idx) type TermIdList = Vec<Option<(TermId, TermLen)>>;
 
 pub(in crate::idx) struct TermIdSet {

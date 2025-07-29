@@ -3,13 +3,13 @@
 use reblessive::Stk;
 
 use super::mac::unexpected;
-use crate::sql::operator::{BindingPower, NearestNeighbor};
+use crate::sql::operator::{BindingPower, BooleanOperator, MatchesOperator, NearestNeighbor};
 use crate::sql::{BinaryOperator, Expr, Ident, Literal, Part, PostfixOperator, PrefixOperator};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
-use crate::syn::token::{self, Token, TokenKind, t};
+use crate::syn::token::{self, Glued, Token, TokenKind, t};
 use crate::val;
 
 impl Parser<'_> {
@@ -48,7 +48,7 @@ impl Parser<'_> {
 
 	/// Returns the binding power of an infix operator.
 	///
-	/// Binding power is the opposite of precendence: a higher binding power means that a token is
+	/// Binding power is the opposite of precedence: a higher binding power means that a token is
 	/// more like to operate directly on it's neighbours. Example `*` has a higher binding power
 	/// than `-` resulting in 1 - 2 * 3 being parsed as 1 - (2 * 3).
 	///
@@ -373,14 +373,8 @@ impl Parser<'_> {
 			t!("?=") => BinaryOperator::AnyEqual,
 			t!("=") => BinaryOperator::Equal,
 			t!("@") => {
-				let reference = (!self.eat(t!("@")))
-					.then(|| {
-						let number = self.next_token_value()?;
-						expected!(self, t!("@"));
-						Ok(number)
-					})
-					.transpose()?;
-				BinaryOperator::Matches(reference)
+				let op = self.parse_matches()?;
+				BinaryOperator::Matches(op)
 			}
 			t!("<=") => BinaryOperator::LessThanEqual,
 			t!("<") => BinaryOperator::LessThan,
@@ -485,6 +479,55 @@ impl Parser<'_> {
 			op: operator,
 			right: Box::new(rhs),
 		})
+	}
+
+	fn parse_matches(&mut self) -> ParseResult<MatchesOperator> {
+		let peek = self.peek();
+		match peek.kind {
+			TokenKind::Digits | TokenKind::Glued(Glued::Number) => {
+				let number = self.next_token_value()?;
+				let op = if self.eat(t!(",")) {
+					let peek = self.next();
+					let op = match peek.kind {
+						t!("AND") => BooleanOperator::And,
+						t!("OR") => BooleanOperator::Or,
+						_ => unexpected!(self, peek, "either `AND` or `OR`"),
+					};
+					Some(op)
+				} else {
+					None
+				};
+				expected!(self, t!("@"));
+				Ok(MatchesOperator {
+					operator: op,
+					rf: Some(number),
+				})
+			}
+			t!("AND") => {
+				self.pop_peek();
+				expected!(self, t!("@"));
+				Ok(MatchesOperator {
+					operator: Some(BooleanOperator::And),
+					rf: None,
+				})
+			}
+			t!("OR") => {
+				self.pop_peek();
+				expected!(self, t!("@"));
+				Ok(MatchesOperator {
+					operator: Some(BooleanOperator::And),
+					rf: None,
+				})
+			}
+			t!("@") => {
+				self.pop_peek();
+				Ok(MatchesOperator {
+					operator: None,
+					rf: None,
+				})
+			}
+			_ => unexpected!(self, peek, "a match reference, operator or `@`"),
+		}
 	}
 
 	async fn parse_postfix(

@@ -1,7 +1,6 @@
-use crate::expr::operator::NearestNeighbor;
+use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Expr, Idiom};
-use crate::idx::ft::search::MatchRef;
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node,
 };
@@ -329,7 +328,7 @@ pub(super) enum IndexOperator {
 	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
 	RangePart(BinaryOperator, Arc<Value>),
-	Matches(String, Option<MatchRef>),
+	Matches(String, MatchesOperator),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
 	/// false = ascending, true = descending
@@ -405,8 +404,8 @@ impl IndexOption {
 				let joins = Value::from(joins);
 				e.insert("joins", joins);
 			}
-			IndexOperator::Matches(qs, a) => {
-				e.insert("operator", Value::from(BinaryOperator::Matches(*a).to_string()));
+			IndexOperator::Matches(qs, op) => {
+				e.insert("operator", Value::from(BinaryOperator::Matches(op.clone()).to_string()));
 				e.insert("value", Value::from(qs.to_owned()));
 			}
 			IndexOperator::RangePart(op, v) => {

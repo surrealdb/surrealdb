@@ -44,6 +44,10 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_IMPORT_FILE", long = "import-file")]
 	#[arg(value_parser = super::cli::validator::file_exists)]
 	import_file: Option<PathBuf>,
+	#[arg(help = "The minimum execution time in milliseconds to trigger slow query logging")]
+	#[arg(env = "SURREAL_SLOW_QUERY_LOG_THRESHOLD", long = "slow-log-threshold")]
+	#[arg(value_parser = super::cli::validator::duration)]
+	slow_log_threshold: Option<Duration>,
 }
 
 #[derive(Args, Debug)]
@@ -502,6 +506,7 @@ pub async fn init(
 		capabilities,
 		temporary_directory,
 		import_file,
+		slow_log_threshold,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
 	// Get local copy of options
@@ -528,6 +533,9 @@ pub async fn init(
 			"You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied."
 		);
 	}
+	if let Some(v) = slow_log_threshold {
+		debug!("Slow log threshold is {v:?}");
+	}
 	// Convert the capabilities
 	let capabilities = capabilities.into();
 	// Log the specified server capabilities
@@ -541,8 +549,9 @@ pub async fn init(
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(!unauthenticated)
 		.with_temporary_directory(temporary_directory)
-		.with_capabilities(capabilities);
-	// Ensure the storage version is up-to-date to prevent corruption
+		.with_capabilities(capabilities)
+		.with_slow_log_threshold(slow_log_threshold);
+	// Ensure the storage version is up to date to prevent corruption
 	dbs.check_version().await?;
 	// Import file at start, if provided
 	if let Some(file) = import_file {

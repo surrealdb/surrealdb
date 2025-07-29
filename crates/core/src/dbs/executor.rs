@@ -15,12 +15,13 @@ use crate::{err, expr};
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt, stream};
 use reblessive::TreeStack;
+use std::fmt::Display;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tracing::instrument;
+use tracing::{instrument, warn};
 use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
@@ -46,9 +47,7 @@ impl Executor {
 
 	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<()> {
 		let ctx_ref = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
-			err::Error::unreachable(format_args!(
-				"Tried to unfreeze a Context with multiple references"
-			))
+			Error::unreachable(format_args!("Tried to unfreeze a Context with multiple references"))
 		})?;
 
 		if let Some(ns) = stmt.ns {
@@ -84,11 +83,21 @@ impl Executor {
 		Ok(())
 	}
 
+	fn check_slow_log(&self, start: &Instant, stm: &impl Display) {
+		if let Some(threshold) = self.ctx.slow_log_threshold() {
+			let elapsed = start.elapsed();
+			if elapsed > threshold {
+				warn!("Slow query detected - time: {elapsed:#?} - query: {stm}")
+			}
+		}
+	}
+
 	/// Executes a statement which needs a transaction with the supplied transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_plan_in_transaction(
 		&mut self,
 		txn: Arc<Transaction>,
+		start: &Instant,
 		plan: TopLevelExpr,
 	) -> FlowResult<Value> {
 		let res = match plan {
@@ -107,19 +116,19 @@ impl Executor {
 				// Avoid moving in and out of the context via Arc::get_mut
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
+						Error::unreachable("Tried to unfreeze a Context with multiple references")
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Run the statement
-				match self
+				let res = self
 					.stack
 					.enter(|stk| stm.what.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
-					.await
-				{
+					.await;
+				// Check if we dump the slow log
+				self.check_slow_log(start, &stm);
+				match res {
 					Ok(val) => {
 						if stm.is_protected_set() {
 							return Err(ControlFlow::from(anyhow::Error::new(
@@ -131,7 +140,7 @@ impl Executor {
 						// Set the parameter
 						Arc::get_mut(&mut self.ctx)
 							.ok_or_else(|| {
-								err::Error::unreachable(
+								Error::unreachable(
 									"Tried to unfreeze a Context with multiple references",
 								)
 							})
@@ -226,35 +235,36 @@ impl Executor {
 				// The transaction began successfully
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
+						Error::unreachable("Tried to unfreeze a Context with multiple references")
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Process the statement
-				self.stack.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None)).finish().await
+				let res = self
+					.stack
+					.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None))
+					.finish()
+					.await;
+				self.check_slow_log(start, &e);
+				res
 			}
 		};
 
 		// Catch cancellation during running.
 		match self.ctx.done(true)? {
-			None => {}
-			Some(Reason::Timedout) => {
-				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout)));
-			}
+			None => res,
+			Some(Reason::Timedout) => Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout))),
 			Some(Reason::Canceled) => {
-				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryCancelled)));
+				Err(ControlFlow::from(anyhow::anyhow!(Error::QueryCancelled)))
 			}
 		}
-
-		res
 	}
 
 	/// Execute a query not wrapped in a transaction block.
 	async fn execute_bare_statement(
 		&mut self,
 		kvs: &Datastore,
+		start: &Instant,
 		stmt: TopLevelExpr,
 	) -> Result<Value> {
 		// Don't even try to run if the query should already be finished.
@@ -275,12 +285,17 @@ impl Executor {
 				//let planner = SqlToLogical::new();
 				//let plan = planner.statement_to_logical(stmt)?;
 
-				self.execute_plan_impl(kvs, stmt).await
+				self.execute_plan_impl(kvs, start, stmt).await
 			}
 		}
 	}
 
-	async fn execute_plan_impl(&mut self, kvs: &Datastore, plan: TopLevelExpr) -> Result<Value> {
+	async fn execute_plan_impl(
+		&mut self,
+		kvs: &Datastore,
+		start: &Instant,
+		plan: TopLevelExpr,
+	) -> Result<Value> {
 		let transaction_type = if plan.read_only() {
 			TransactionType::Read
 		} else {
@@ -293,7 +308,7 @@ impl Executor {
 			recv
 		});
 
-		match self.execute_plan_in_transaction(txn.clone(), plan).await {
+		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
 				let mut lock = txn.lock().await;
 
@@ -555,7 +570,8 @@ impl Executor {
 					//let planner = SqlToLogical::new();
 					//let plan = planner.statement_to_logical(stmt)?;
 
-					let r = match self.execute_plan_in_transaction(txn.clone(), plan).await {
+					let r = match self.execute_plan_in_transaction(txn.clone(), &before, plan).await
+					{
 						Ok(x) => Ok(x),
 						Err(ControlFlow::Return(value)) => {
 							skip_remaining = true;
@@ -732,7 +748,7 @@ impl Executor {
 					let query_type: QueryType = QueryType::for_toplevel_expr(&stmt);
 
 					let now = Instant::now();
-					let result = this.execute_bare_statement(kvs, stmt).await;
+					let result = this.execute_bare_statement(kvs, &now, stmt).await;
 					if !skip_success_results || result.is_err() {
 						this.results.push(Response {
 							time: now.elapsed(),

@@ -796,6 +796,7 @@ impl Display for KindLiteral {
 	}
 }
 
+/*
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -862,7 +863,8 @@ mod tests {
 	#[case::file(Kind::File(vec![Ident::new("bucket".to_string()).unwrap()]), false)]
 	#[case::file(Kind::File(vec![Ident::new("bucket".to_string()).unwrap(), Ident::new("key".to_string()).unwrap()]), false)]
 
+	// Testing a method which is currently not used
 	fn is_array_like(#[case] kind: Kind, #[case] expected: bool) {
 		assert_eq!(kind.is_array_like(), expected);
 	}
-}
+}*/

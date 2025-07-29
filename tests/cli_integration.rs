@@ -1921,6 +1921,35 @@ mod cli_integration {
 			assert_eq!(output.matches("foo:").count(), 1);
 		}
 	}
+
+	#[tokio::test]
+	async fn test_slow_query_logging() {
+		// Start the server
+		let (addr, mut server) = common::start_server(StartServerArguments {
+			auth: false,
+			args: "--slow-log-threshold=1s".to_owned(),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+
+		// Connect the client
+		let cmd = format!(
+			"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+			throwaway = Ulid::new()
+		);
+
+		// Start a slow query
+		let query = "SLEEP 1200ms;\n";
+		let _ = common::run(&cmd).input(query).output().unwrap();
+
+		// Extract the stderr
+		let stderr = server.finish().unwrap().stderr();
+
+		// Check the log is present
+		assert!(stderr.contains("Slow query detected - time: "));
+		assert!(stderr.contains("s - query: SLEEP 1s200ms"));
+	}
 }
 
 fn remove_debug_info(output: String) -> String {

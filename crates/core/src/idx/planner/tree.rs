@@ -1,11 +1,10 @@
 use crate::dbs::Options;
+use crate::expr::FlowResultExt as _;
 use crate::expr::index::Index;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
-use crate::expr::{
-	BinaryOperator, Cond, Expr, FlowResultExt as _, Ident, Idiom, Kind, Literal, Order, Part, With,
-};
+use crate::expr::{BinaryOperator, Cond, Expr, Ident, Idiom, Kind, Literal, Order, Part, With};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
@@ -511,7 +510,7 @@ impl<'a> TreeBuilder<'a> {
 	fn eval_matches_operator(op: &BinaryOperator, n: &Node) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
 			if let BinaryOperator::Matches(mr) = op {
-				return Some(IndexOperator::Matches(v.to_raw_string(), *mr));
+				return Some(IndexOperator::Matches(v.to_raw_string(), mr.clone()));
 			}
 		}
 		None

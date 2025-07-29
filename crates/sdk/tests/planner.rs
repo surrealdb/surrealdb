@@ -321,7 +321,7 @@ const THREE_MULTI_INDEX_EXPLAIN: &str = "[
 					detail: {
 						plan: {
 							index: 'ft_company',
-							operator: '@@',
+							operator: '@AND@',
 							value: 'surrealdb'
 						},
 						table: 'person',
@@ -353,7 +353,7 @@ const SINGLE_INDEX_FT_EXPLAIN: &str = "[
 					detail: {
 						plan: {
 							index: 'ft_company',
-							operator: '@@',
+							operator: '@AND@',
 							value: 'surrealdb'
 						},
 						table: 'person',
@@ -2050,7 +2050,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 							joins: [
 								{
 									index: 't_name_search_idx',
-									operator: '@@',
+									operator: '@AND@',
 									value: 'world'
 								}
 							],

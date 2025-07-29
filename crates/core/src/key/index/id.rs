@@ -4,7 +4,7 @@
 //! document IDs (`DocId`) used by the full-text search engine.
 //!
 //! ## Key Structure
-//! ```
+//! ```no_compile
 //! /*{namespace}*{database}*{table}+{index}!id{record_id}
 //! ```
 //!

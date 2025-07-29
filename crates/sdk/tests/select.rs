@@ -761,7 +761,7 @@ async fn select_where_and_with_fulltext_index() -> Result<()> {
 					detail: {
 						plan: {
 							index: 'ft_name',
-							operator: '@@',
+							operator: '@AND@',
 							value: 'Jaime'
 						},
 						table: 'person',

@@ -1,7 +1,7 @@
 use crate::expr::fmt::Fmt;
 use crate::expr::index::Distance;
 use crate::expr::{Expr, Ident, Kind};
-use crate::idx::ft::search::MatchRef;
+use crate::idx::ft::MatchRef;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -144,9 +144,51 @@ pub enum BinaryOperator {
 	RangeSkipInclusive,
 
 	// `@@`
-	Matches(Option<MatchRef>),
+	Matches(MatchesOperator),
 	// `<|k,..|>`
 	NearestNeighbor(Box<NearestNeighbor>),
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct MatchesOperator {
+	pub rf: Option<MatchRef>,
+	pub operator: Option<BooleanOperator>,
+}
+
+impl fmt::Display for MatchesOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if let Some(r) = self.rf {
+			if let Some(ref o) = self.operator {
+				write!(f, "@{r},{o}@")
+			} else {
+				write!(f, "@{r}@")
+			}
+		} else if let Some(ref o) = self.operator {
+			write!(f, "@{o}@")
+		} else {
+			f.write_str("@@")
+		}
+	}
+}
+
+/// Boolean operation executed by the full-text index
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum BooleanOperator {
+	And,
+	Or,
+}
+
+impl fmt::Display for BooleanOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::And => f.write_str("AND"),
+			Self::Or => f.write_str("OR"),
+		}
+	}
 }
 
 #[revisioned(revision = 1)]
@@ -211,13 +253,7 @@ impl fmt::Display for BinaryOperator {
 			Self::NoneInside => write!(f, "NONEINSIDE"),
 			Self::Outside => write!(f, "OUTSIDE"),
 			Self::Intersects => write!(f, "INTERSECTS"),
-			Self::Matches(reference) => {
-				if let Some(r) = reference {
-					write!(f, "@{r}@")
-				} else {
-					f.write_str("@@")
-				}
-			}
+			Self::Matches(x) => x.fmt(f),
 			Self::Range => write!(f, ".."),
 			Self::RangeInclusive => write!(f, "..="),
 			Self::RangeSkip => write!(f, ">.."),

@@ -188,9 +188,85 @@ pub enum BinaryOperator {
 	RangeSkipInclusive,
 
 	// `@@`
-	Matches(Option<u8>),
+	Matches(MatchesOperator),
 	// `<|k,..|>`
 	NearestNeighbor(Box<NearestNeighbor>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct MatchesOperator {
+	pub rf: Option<u8>,
+	pub operator: Option<BooleanOperator>,
+}
+
+impl fmt::Display for MatchesOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if let Some(r) = self.rf {
+			if let Some(ref o) = self.operator {
+				write!(f, "@{r},{o}@")
+			} else {
+				write!(f, "@{r}@")
+			}
+		} else if let Some(ref o) = self.operator {
+			write!(f, "@{o}@")
+		} else {
+			f.write_str("@@")
+		}
+	}
+}
+
+impl From<MatchesOperator> for crate::expr::operator::MatchesOperator {
+	fn from(value: MatchesOperator) -> Self {
+		crate::expr::operator::MatchesOperator {
+			rf: value.rf,
+			operator: value.operator.map(From::from),
+		}
+	}
+}
+
+impl From<crate::expr::operator::MatchesOperator> for MatchesOperator {
+	fn from(value: crate::expr::operator::MatchesOperator) -> Self {
+		MatchesOperator {
+			rf: value.rf,
+			operator: value.operator.map(From::from),
+		}
+	}
+}
+
+/// Boolean operation executed by the full-text index
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum BooleanOperator {
+	And,
+	Or,
+}
+
+impl From<BooleanOperator> for crate::expr::operator::BooleanOperator {
+	fn from(value: BooleanOperator) -> Self {
+		match value {
+			BooleanOperator::And => crate::expr::operator::BooleanOperator::And,
+			BooleanOperator::Or => crate::expr::operator::BooleanOperator::Or,
+		}
+	}
+}
+
+impl From<crate::expr::operator::BooleanOperator> for BooleanOperator {
+	fn from(value: crate::expr::operator::BooleanOperator) -> Self {
+		match value {
+			crate::expr::operator::BooleanOperator::And => BooleanOperator::And,
+			crate::expr::operator::BooleanOperator::Or => BooleanOperator::Or,
+		}
+	}
+}
+
+impl fmt::Display for BooleanOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::And => f.write_str("AND"),
+			Self::Or => f.write_str("OR"),
+		}
+	}
 }
 
 impl From<BinaryOperator> for crate::expr::BinaryOperator {
@@ -354,13 +430,7 @@ impl fmt::Display for BinaryOperator {
 			Self::NoneInside => write!(f, "NONEINSIDE"),
 			Self::Outside => write!(f, "OUTSIDE"),
 			Self::Intersects => write!(f, "INTERSECTS"),
-			Self::Matches(reference) => {
-				if let Some(r) = reference {
-					write!(f, "@{r}@")
-				} else {
-					f.write_str("@@")
-				}
-			}
+			Self::Matches(m) => m.fmt(f),
 			Self::Range => write!(f, ".."),
 			Self::RangeInclusive => write!(f, "..="),
 			Self::RangeSkip => write!(f, ">.."),
