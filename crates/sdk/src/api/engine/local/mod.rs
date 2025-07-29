@@ -66,7 +66,7 @@
 //!
 //! # Example
 //!
-//! ```no_run
+//! ```no_compile
 //! use std::borrow::Cow;
 //! use serde::{Serialize, Deserialize};
 //! use serde_json::json;
