@@ -1,3 +1,6 @@
+// Temporary allow deprecated until the 3.0
+#![allow(deprecated)]
+
 //! # Surrealdb Core
 //!
 //! This crate is the internal core library of SurrealDB.

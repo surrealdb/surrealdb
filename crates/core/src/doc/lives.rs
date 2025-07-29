@@ -60,9 +60,7 @@ impl Document {
 				.id
 				.clone()
 				.ok_or_else(|| {
-					Error::Unreachable(
-						"Processing live query for record without a Record ID".to_owned(),
-					)
+					Error::unreachable("Processing live query for record without a Record ID")
 				})
 				.map_err(anyhow::Error::new)?;
 			// Get the current and initial docs
@@ -137,11 +135,10 @@ impl Document {
 				// Prepare a DELETE notification
 				if opt.id()? == lv.node.0 {
 					// Ensure futures are run
-					let lqopt: &Options = &lqopt.new_with_futures(true);
 					// Output the full document before any changes were applied
 					let mut result = (*doc.doc.as_ref()).clone();
 					// Remove metadata fields on output
-					result.del(stk, &lqctx, lqopt, &*META).await?;
+					result.del(stk, &lqctx, &lqopt, &*META).await?;
 					(Action::Delete, result)
 				} else {
 					// TODO: Send to message broker

@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::fmt::Fmt;
-use crate::expr::paths::ID;
 use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -14,7 +13,6 @@ use super::FlowResultExt as _;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Data {
 	EmptyExpression,
 	SetExpression(Vec<Assignment>),
@@ -50,58 +48,64 @@ impl Default for Data {
 }
 
 impl Data {
+	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY BEING USED.
+	///
+	/// See [`Data::pick`] for why it is broken.
+	///
 	/// Fetch the 'id' field if one has been specified
-	pub(crate) async fn rid(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Option<Value>> {
-		self.pick(stk, ctx, opt, &*ID).await
+	pub(crate) async fn rid(&self, stk: &mut Stk, ctx: &Context, opt: &Options) -> Result<Value> {
+		self.pick(stk, ctx, opt, "id").await
 	}
+
+	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY BEING USED.
+	///
 	/// Fetch a field path value if one is specified
+	///
+	/// This function computes the expression it has again. This is a mistake. I causes issues with
+	/// subqueries where queries are executed twice if they are in a field picked by this method.
+	///
+	/// Take `CREATE foo SET id = (CREATE bar:1)`. This query will complain about bar:1 being
+	/// created twice, because it is. the subquery create is being computed twice. This issue
+	/// cannot be fixed without a proper and major restructuring of the executor.
 	pub(crate) async fn pick(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		path: &[Part],
-	) -> Result<Option<Value>> {
+		path: &str,
+	) -> Result<Value> {
 		match self {
 			Self::MergeExpression(v) | Self::ReplaceExpression(v) | Self::ContentExpression(v) => {
 				match v {
-					Expr::Param(_) | Expr::Literal(Literal::Object(_)) => {
-						let v = stk
+					Expr::Param(_) => {
+						Ok(stk
 							.run(|stk| v.compute(stk, ctx, opt, None))
 							.await
 							.catch_return()?
-							.pick(path);
-						if v.is_null() {
-							Ok(None)
+							// Bad unwrap but this function should be removed anyway and it works with
+							// the current calls.
+							.pick(&[Part::field(path.to_owned()).unwrap()]))
+					}
+					Expr::Literal(Literal::Object(x)) => {
+						// Find the field manually, done to replicate previous behavior.
+						if let Some(x) = x.iter().find(|x| x.key == path) {
+							stk.run(|stk| x.value.compute(stk, ctx, opt, None)).await.catch_return()
 						} else {
-							Ok(Some(v))
+							Ok(Value::None)
 						}
 					}
-					_ => Ok(None),
+					_ => Ok(Value::None),
 				}
 			}
 			Self::SetExpression(v) => match v.iter().find(|f| f.place.is_field(path)) {
 				Some(ass) => {
-					let v = stk
-						.run(|stk| ass.value.compute(stk, ctx, opt, None))
-						.await
-						.catch_return()?;
-					if v.is_null() {
-						Ok(None)
-					} else {
-						Ok(Some(v))
-					}
+					stk.run(|stk| ass.value.compute(stk, ctx, opt, None)).await.catch_return()
 				}
 				// This SET expression does not have this field
-				_ => Ok(None),
+				_ => Ok(Value::None),
 			},
 			// Return nothing
-			_ => Ok(None),
+			_ => Ok(Value::None),
 		}
 	}
 }

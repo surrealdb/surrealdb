@@ -5,7 +5,6 @@ pub(crate) mod access_type;
 pub(crate) mod algorithm;
 pub(crate) mod base;
 pub(crate) mod block;
-pub(crate) mod change_feed_include;
 pub(crate) mod changefeed;
 pub(crate) mod closure;
 pub(crate) mod cond;

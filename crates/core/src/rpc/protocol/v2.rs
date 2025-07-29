@@ -730,8 +730,8 @@ pub trait RpcProtocolV2: RpcContext {
 		let expr = Expr::Relate(Box::new(RelateStatement {
 			only: opts.only,
 			from: from.into_literal().into(),
-			kind: value_to_table(kind),
-			with: with.into_literal().into(),
+			through: value_to_table(kind),
+			to: with.into_literal().into(),
 			data: opts.data_expr(),
 			output: opts.output,
 			timeout: opts.timeout,

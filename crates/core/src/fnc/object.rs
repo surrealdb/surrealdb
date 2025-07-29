@@ -91,7 +91,6 @@ pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 			object.remove(target.as_str());
 		}
 		Value::Array(targets) => {
-			let mut remove_targets = Vec::with_capacity(targets.len());
 			for target in targets {
 				let Value::Strand(s) = target else {
 					bail!(Error::InvalidArguments {
@@ -101,10 +100,7 @@ pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 						),
 					});
 				};
-				remove_targets.push(s.to_string());
-			}
-			for target in remove_targets {
-				object.remove(&target);
+				object.remove(s.as_str());
 			}
 		}
 		other => {

@@ -9,9 +9,6 @@ mod http_integration {
 	use reqwest::Client;
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
-	use surrealdb::sql;
-	use surrealdb_core::sql::{Expr, Literal, RecordIdKeyLit, RecordIdLit};
-	use surrealdb_core::val::{Object, RecordId, Value};
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -1730,8 +1727,6 @@ mod http_integration {
 	#[test(tokio::test)]
 	async fn signup_mal() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let rpc_url = &format!("http://{addr}/rpc");
-
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 

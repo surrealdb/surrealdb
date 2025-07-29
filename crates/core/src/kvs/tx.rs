@@ -21,7 +21,7 @@ use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::{Transactor, cache};
 use crate::val::{RecordId, RecordIdKey, Value};
-use anyhow::Result;
+use anyhow::{Result, bail};
 use futures::lock::{Mutex, MutexGuard};
 use futures::stream::Stream;
 use std::fmt::Debug;
@@ -1883,7 +1883,7 @@ impl Transaction {
 		let qey = cache::tx::Lookup::Tb(ns, db, tb);
 		match self.cache.get(&qey) {
 			// The entry is in the cache
-			Some(val) => val,
+			Some(val) => val.try_into_type(),
 			// The entry is not in the cache
 			None => {
 				// Try to fetch the value from the datastore
@@ -1903,16 +1903,16 @@ impl Transaction {
 						}
 						// Next, dynamically define the table
 						let val = DefineTableStatement {
-							name: unsafe { Ident::new_unchecked(ns.to_owned()) },
+							name: unsafe { Ident::new_unchecked(tb.to_owned()) },
 							permissions: Permissions::none(),
 							..Default::default()
 						};
 						let val = {
 							self.put(&key, revision::to_vec(&val)?, None).await?;
-							cache::tx::Entry::Any(Arc::new(val))
+							Arc::new(val)
 						};
-						self.cache.insert(qey, val.clone());
-						val
+						self.cache.insert(qey, cache::tx::Entry::Any(val.clone()));
+						Ok(val)
 					}
 					// Check to see that the hierarchy exists
 					Err(Error::TbNotFound {
@@ -1920,23 +1920,23 @@ impl Transaction {
 					}) if strict => {
 						self.get_ns(ns).await?;
 						self.get_db(ns, db).await?;
-						Err(Error::TbNotFound {
+						bail!(Error::TbNotFound {
 							name,
-						})?
+						})
 					}
 					// Store the fetched value in the cache
 					Ok(val) => {
 						let val: DefineTableStatement = revision::from_slice(&val)?;
-						let val = cache::tx::Entry::Any(Arc::new(val));
-						self.cache.insert(qey, val.clone());
-						val
+						let val = Arc::new(val);
+
+						self.cache.insert(qey, cache::tx::Entry::Any(val.clone()));
+						Ok(val)
 					}
 					// Throw any received errors
 					Err(err) => Err(err)?,
 				}
 			}
 		}
-		.try_into_type()
 	}
 
 	pub(crate) fn index_caches(&self) -> &IndexTreeCaches {

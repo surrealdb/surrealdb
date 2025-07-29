@@ -726,41 +726,6 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn get_future_embedded_field() {
-		let (ctx, opt) = mock().await;
-		let idi: Idiom = syn::idiom("test.something[WHERE age > 35]").unwrap().into();
-		let val: Value =
-			syn::value("{ test: <future> { { something: [{ age: 34 }, { age: 36 }] } } }").unwrap();
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
-		assert_eq!(
-			res,
-			Value::from(vec![Value::from(map! {
-				"age".to_string() => Value::from(36),
-			})])
-		);
-	}
-
-	#[tokio::test]
-	async fn get_future_embedded_field_with_reference() {
-		let (ctx, opt) = mock().await;
-		let doc: Value =
-			syn::value("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }").unwrap();
-		let idi: Idiom = syn::idiom("test.something[WHERE age > 35]").unwrap().into();
-		let val: Value = syn::value("{ test: <future> { { something: something } } }").unwrap();
-		let cur = doc.into();
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res =
-			stack.enter(|stk| val.get(stk, &ctx, &opt, Some(&cur), &idi)).finish().await.unwrap();
-		assert_eq!(
-			res,
-			Value::from(vec![Value::from(map! {
-				"age".to_string() => Value::from(36),
-			})])
-		);
-	}
-
-	#[tokio::test]
 	async fn get_object_with_thing_based_key() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test[city:london]").unwrap().into();

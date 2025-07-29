@@ -116,11 +116,18 @@ impl Executor {
 				// Run the statement
 				match self
 					.stack
-					.enter(|stk| stm.compute(stk, &self.ctx, &self.opt, None))
+					.enter(|stk| stm.what.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
 					.await
 				{
 					Ok(val) => {
+						if stm.is_protected_set() {
+							return Err(ControlFlow::from(anyhow::Error::new(
+								Error::InvalidParam {
+									name: stm.name.clone().into_string(),
+								},
+							)));
+						}
 						// Set the parameter
 						Arc::get_mut(&mut self.ctx)
 							.ok_or_else(|| {

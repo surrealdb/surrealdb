@@ -14,12 +14,14 @@ use std::fmt;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RelateStatement {
 	pub only: bool,
-	pub kind: Expr,
+	/// The expression resulting in the table through which we create a relation
+	pub through: Expr,
+	/// The expression the relation is from
 	pub from: Expr,
-	pub with: Expr,
+	/// The expression the relation targets.
+	pub to: Expr,
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,
@@ -40,8 +42,6 @@ impl RelateStatement {
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
-		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false);
 		// Check if there is a timeout
 		let ctx = match self.timeout.as_ref() {
 			Some(timeout) => {
@@ -94,9 +94,9 @@ impl RelateStatement {
 			out
 		};
 		// Loop over the with targets
-		let with = {
+		let to = {
 			let mut out = Vec::new();
-			match stk.run(|stk| self.with.compute(stk, &ctx, opt, doc)).await.catch_return()? {
+			match stk.run(|stk| self.to.compute(stk, &ctx, opt, doc)).await.catch_return()? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -136,27 +136,31 @@ impl RelateStatement {
 		};
 		//
 		for f in from.iter() {
-			for w in with.iter() {
-				let f = f.clone();
-				let w = w.clone();
-				match stk.run(|stk| self.kind.compute(stk, &ctx, opt, doc)).await.catch_return()? {
+			for t in to.iter() {
+				match stk
+					.run(|stk| self.through.compute(stk, &ctx, opt, doc))
+					.await
+					.catch_return()?
+				{
 					// The relation has a specific record id
-					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w, None)),
+					Value::Thing(id) => {
+						i.ingest(Iterable::Relatable(f.clone(), id.to_owned(), t.clone(), None))
+					}
 					// The relation does not have a specific record id
 					Value::Table(tb) => match self.data {
 						// There is a data clause so check for a record id
 						Some(ref data) => {
 							let id = match data.rid(stk, &ctx, opt).await? {
-								Some(id) => id.generate(tb.into_strand(), false)?,
-								None => RecordId::random_for_table(tb.into_string()),
+								Value::None => RecordId::random_for_table(tb.into_string()),
+								id => id.generate(tb.into_strand(), false)?,
 							};
-							i.ingest(Iterable::Relatable(f, id, w, None))
+							i.ingest(Iterable::Relatable(f.clone(), id, t.clone(), None))
 						}
 						// There is no data clause so create a record id
 						None => i.ingest(Iterable::Relatable(
-							f,
+							f.clone(),
 							RecordId::random_for_table(tb.into_string()),
-							w,
+							t.clone(),
 							None,
 						)),
 					},
@@ -169,6 +173,10 @@ impl RelateStatement {
 				};
 			}
 		}
+
+		// HACK: This is a fix to avoid having fields in data 'computed' twice resulting in queries
+		// running twice. This should be fixed after a thorough restructuring of the executor.
+
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Process the statement
@@ -196,7 +204,7 @@ impl fmt::Display for RelateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {} -> {} -> {}", self.from, self.kind, self.with)?;
+		write!(f, " {} -> {} -> {}", self.from, self.through, self.to)?;
 		if self.uniq {
 			f.write_str(" UNIQUE")?
 		}

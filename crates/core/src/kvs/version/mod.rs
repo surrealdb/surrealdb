@@ -75,6 +75,7 @@ impl Version {
 			// Create a new transaction
 			let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Pessimistic).await?);
 
+			/*
 			// Easy shortcut to apply a fix
 			macro_rules! apply_fix {
 				($name:ident) => {{
@@ -88,6 +89,7 @@ impl Version {
 					};
 				}};
 			}
+			*/
 
 			// Apply fixes based on the current version
 			if v == 1 {

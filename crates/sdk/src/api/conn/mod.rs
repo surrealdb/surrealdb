@@ -38,6 +38,7 @@ pub(crate) struct Route {
 #[derive(Debug)]
 pub struct Router {
 	pub(crate) sender: Sender<Route>,
+	#[allow(dead_code)]
 	pub(crate) config: Config,
 	pub(crate) last_id: AtomicI64,
 	pub(crate) features: HashSet<ExtraFeatures>,

@@ -153,8 +153,8 @@ pub enum RecordIdKey {
 	//issues.
 	String(String),
 	Uuid(Uuid),
-	Object(Object),
 	Array(Array),
+	Object(Object),
 	Range(Box<RecordIdKeyRange>),
 }
 impl RecordIdKey {

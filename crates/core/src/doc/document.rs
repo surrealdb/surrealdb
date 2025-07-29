@@ -419,7 +419,7 @@ impl Document {
 				let key = cache::ds::Lookup::Tb(ns, db, &id.table);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_type(),
 					None => {
 						let val = match txn.get_tb(ns, db, &id.table).await {
 							Err(e) => {
@@ -437,12 +437,10 @@ impl Document {
 							// The table exists
 							Ok(tb) => Ok(tb),
 						}?;
-						let val = cache::ds::Entry::Any(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Any(val.clone()));
+						return Ok(val);
 					}
 				}
-				.try_into_type()
 			}
 			// No cache is present on the context
 			_ => {

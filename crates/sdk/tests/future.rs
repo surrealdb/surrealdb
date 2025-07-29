@@ -3,58 +3,6 @@ use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
-use surrealdb_core::syn;
-
-#[tokio::test]
-async fn future_function_arguments() -> Result<()> {
-	let sql = "
-		UPSERT future:test SET
-			a = 'test@surrealdb.com',
-			b = <future> { 'test@surrealdb.com' },
-			x = 'a-' + parse::email::user(a),
-			y = 'b-' + parse::email::user(b)
-		;
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				a: 'test@surrealdb.com',
-				b: 'test@surrealdb.com',
-				id: future:test,
-				x: 'a-test',
-				y: 'b-test',
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn future_disabled() -> Result<()> {
-	let sql = "
-	    OPTION FUTURES = false;
-		<future> { 123 };
-	";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value("<future> { 123 }").unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
 
 #[tokio::test]
 #[ignore]
@@ -73,7 +21,7 @@ async fn concurrency() -> Result<()> {
 		format!(
 			"SELECT foo FROM [[{}]] TIMEOUT {TIMEOUT}ms;",
 			(0..count)
-				.map(|i| format!("<future>{{[sleep({millis}ms), {{foo: {i}}}]}}"))
+				.map(|i| format!("{{[sleep({millis}ms), {{foo: {i}}}]}}"))
 				.collect::<Vec<_>>()
 				.join(", ")
 		)

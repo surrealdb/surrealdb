@@ -44,7 +44,6 @@ impl UpdateStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
 		// Get a query planner

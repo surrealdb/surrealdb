@@ -19,7 +19,6 @@ use super::FlowResultExt as _;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Fetchs(pub Vec<Fetch>);
 
 impl Deref for Fetchs {
@@ -52,7 +51,6 @@ impl InfoStructure for Fetchs {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Fetch(pub Expr);
 
 impl Fetch {
@@ -70,7 +68,17 @@ impl Fetch {
 			}
 			Expr::Param(param) => {
 				let v = param.compute(stk, ctx, opt, None).await?;
-				idioms.push(syn::idiom(v.coerce_to::<Strand>()?.as_str())?.into());
+				idioms.push(
+					syn::idiom(
+						v.clone()
+							.coerce_to::<Strand>()
+							.map_err(|_| Error::InvalidFetch {
+								value: v.into_literal(),
+							})?
+							.as_str(),
+					)?
+					.into(),
+				);
 				Ok(())
 			}
 			Expr::FunctionCall(f) => {

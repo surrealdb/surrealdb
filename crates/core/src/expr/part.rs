@@ -405,7 +405,6 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum DestructurePart {
 	All(Ident),
 	Field(Ident),

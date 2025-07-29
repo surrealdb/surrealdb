@@ -53,8 +53,7 @@ impl InsertStatement {
 			),
 			_ => None,
 		};
-		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_version(version);
+		let opt = &opt.clone().with_version(version);
 		// Check if there is a timeout
 		let ctx = match self.timeout.as_ref() {
 			Some(timeout) => {
@@ -78,6 +77,7 @@ impl InsertStatement {
 				}
 			}
 		};
+
 		// Parse the data expression
 		match &self.data {
 			// Check if this is a traditional statement

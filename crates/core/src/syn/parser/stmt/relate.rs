@@ -9,7 +9,7 @@ use crate::syn::token::t;
 impl Parser<'_> {
 	pub async fn parse_relate_stmt(&mut self, stk: &mut Stk) -> ParseResult<RelateStatement> {
 		let only = self.eat(t!("ONLY"));
-		let (kind, from, with) = stk.run(|stk| self.parse_relation(stk)).await?;
+		let (from, through, to) = stk.run(|stk| self.parse_relation(stk)).await?;
 		let uniq = self.eat(t!("UNIQUE"));
 
 		let data = self.try_parse_data(stk).await?;
@@ -18,9 +18,9 @@ impl Parser<'_> {
 		let parallel = self.eat(t!("PARALLEL"));
 		Ok(RelateStatement {
 			only,
-			kind,
+			through,
 			from,
-			with,
+			to,
 			uniq,
 			data,
 			output,
@@ -40,7 +40,7 @@ impl Parser<'_> {
 			}
 			_ => unexpected!(self, next, "a relation arrow"),
 		};
-		let kind = self.parse_relate_kind(stk).await?;
+		let through = self.parse_relate_kind(stk).await?;
 		if is_o {
 			expected!(self, t!("->"));
 		} else {
@@ -49,9 +49,9 @@ impl Parser<'_> {
 		};
 		let second = self.parse_relate_expr(stk).await?;
 		if is_o {
-			Ok((kind, first, second))
+			Ok((first, through, second))
 		} else {
-			Ok((kind, second, first))
+			Ok((second, through, first))
 		}
 	}
 
@@ -60,7 +60,8 @@ impl Parser<'_> {
 			t!("$param") => self.next_token_value().map(Expr::Param),
 			t!("(") => {
 				let span = self.pop_peek().span;
-				let res = self.parse_inner_subquery(ctx, Some(span)).await?;
+				let res = ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+				self.expect_closing_delimiter(t!(")"), span)?;
 				Ok(res)
 			}
 			_ => self.parse_thing_or_table(ctx).await,
@@ -68,14 +69,6 @@ impl Parser<'_> {
 	}
 
 	pub async fn parse_relate_expr(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
-		let old = self.table_as_field;
-		self.table_as_field = true;
-		let r = self.parse_relate_expr_inner(ctx).await;
-		self.table_as_field = old;
-		r
-	}
-
-	async fn parse_relate_expr_inner(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
@@ -93,14 +86,12 @@ impl Parser<'_> {
 			| t!("ALTER")
 			| t!("REMOVE")
 			| t!("REBUILD")
-			| t!("INFO") => self.parse_inner_subquery(ctx, None).await,
-			t!("IF") => {
-				self.pop_peek();
-				ctx.run(|ctx| self.parse_if_stmt(ctx)).await.map(|x| Expr::If(Box::new(x)))
-			}
+			| t!("INFO")
+			| t!("IF") => self.parse_expr_field(ctx).await,
 			t!("(") => {
-				let span = self.pop_peek().span;
-				let res = self.parse_inner_subquery(ctx, Some(span)).await?;
+				let open = self.pop_peek().span;
+				let res = self.parse_expr_field(ctx).await?;
+				self.expect_closing_delimiter(t!(")"), open)?;
 				Ok(res)
 			}
 			_ => self.parse_record_id(ctx).await.map(|x| Expr::Literal(Literal::RecordId(x))),

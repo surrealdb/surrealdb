@@ -9,7 +9,7 @@ use surrealdb::Response;
 use surrealdb::error::{Api as ApiError, Db as DbError};
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
 use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
-use surrealdb::{RecordId, RecordIdKey, Value};
+use surrealdb::{RecordId, Value};
 use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::{syn, val};
 use ulid::Ulid;

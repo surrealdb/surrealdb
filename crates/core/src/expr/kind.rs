@@ -130,11 +130,6 @@ impl Kind {
 		false
 	}
 
-	/// Returns true if this type is a set or array.
-	pub(crate) fn is_array_like(&self) -> bool {
-		matches!(self, Kind::Array(_, _) | Kind::Set(_, _) | Kind::Literal(KindLiteral::Array(_)))
-	}
-
 	// Return the kind of the contained value.
 	//
 	// For example: for `array<number>` or `set<number>` this returns `number`.

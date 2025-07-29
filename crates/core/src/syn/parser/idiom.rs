@@ -153,12 +153,6 @@ impl Parser<'_> {
 					res.push(Part::Flatten);
 				}
 				t!(".") => {
-					// Filter out method calls
-					// TODO: Handle this better once the AST is restructured.
-					if Self::kind_is_identifier(self.peek1().kind) && self.peek2().kind == t!("(") {
-						break;
-					}
-
 					self.pop_peek();
 					res.push(self.parse_dot_part(ctx).await?)
 				}
@@ -281,7 +275,7 @@ impl Parser<'_> {
 			let part = match self.peek_kind() {
 				t!(":") => {
 					self.pop_peek();
-					let idiom = match self.parse_expr_inherit(ctx).await? {
+					let idiom = match self.parse_expr_field(ctx).await? {
 						Expr::Idiom(x) => x,
 						v => Idiom(vec![Part::Start(v)]),
 					};
@@ -606,9 +600,9 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects to be at the start of a what list.
 	pub(super) async fn parse_what_list(&mut self, ctx: &mut Stk) -> ParseResult<Vec<Expr>> {
-		let mut res = vec![self.parse_expr_inherit(ctx).await?];
+		let mut res = vec![ctx.run(|ctx| self.parse_expr_table(ctx)).await?];
 		while self.eat(t!(",")) {
-			res.push(self.parse_expr_inherit(ctx).await?)
+			res.push(ctx.run(|ctx| self.parse_expr_table(ctx)).await?)
 		}
 		Ok(res)
 	}

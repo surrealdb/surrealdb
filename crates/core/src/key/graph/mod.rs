@@ -212,6 +212,7 @@ impl<'a> Graph<'a> {
 		}
 	}
 
+	#[allow(dead_code)]
 	pub fn new_from_id(
 		ns: &'a str,
 		db: &'a str,

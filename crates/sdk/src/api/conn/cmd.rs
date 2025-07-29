@@ -259,7 +259,7 @@ impl Command {
 				let table = match what {
 					Some(w) => {
 						// TODO: Null byte validity
-						let mut table = unsafe { CoreTable::new_unchecked(w) };
+						let table = unsafe { CoreTable::new_unchecked(w) };
 						CoreValue::from(table)
 					}
 					None => CoreValue::None,
@@ -282,7 +282,7 @@ impl Command {
 				let table = match what {
 					Some(w) => {
 						// TODO: Null byte validity
-						let mut table = unsafe { CoreTable::new_unchecked(w) };
+						let table = unsafe { CoreTable::new_unchecked(w) };
 						CoreValue::from(table)
 					}
 					None => CoreValue::None,

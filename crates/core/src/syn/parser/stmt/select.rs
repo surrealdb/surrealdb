@@ -10,6 +10,7 @@ use crate::syn::token::{Span, t};
 use super::parts::MissingKind;
 
 impl Parser<'_> {
+	/// expects `select` to be eaten.
 	pub(crate) async fn parse_select_stmt(
 		&mut self,
 		stk: &mut Stk,
@@ -49,7 +50,7 @@ impl Parser<'_> {
 		};
 		let fetch = self.try_parse_fetch(stk).await?;
 		let version = if self.eat(t!("VERSION")) {
-			Some(self.parse_expr_field(stk).await?)
+			Some(stk.run(|stk| self.parse_expr_field(stk)).await?)
 		} else {
 			None
 		};

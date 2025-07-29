@@ -1482,8 +1482,7 @@ mod test {
 			.with_live(false)
 			.with_strict(false)
 			.with_auth_enabled(false)
-			.with_max_computation_depth(u32::MAX)
-			.with_futures(true);
+			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
 		let mut ctx = MutableContext::default();

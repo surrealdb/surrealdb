@@ -44,7 +44,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 		crate::expr::statements::DefineEventStatement {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			what: v.what.into(),
+			target_table: v.what.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.map(Into::into),
@@ -57,7 +57,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 		DefineEventStatement {
 			kind: v.kind.into(),
 			name: v.name.into(),
-			what: v.what.into(),
+			what: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.map(Into::into),

@@ -169,7 +169,6 @@ pub struct Parser<'a> {
 	token_buffer: TokenBuffer<4>,
 	glued_value: GluedValue,
 	pub(crate) table_as_field: bool,
-	pub(crate) enclose_subquery: bool,
 	settings: ParserSettings,
 }
 
@@ -187,7 +186,6 @@ impl<'a> Parser<'a> {
 			token_buffer: TokenBuffer::new(),
 			glued_value: GluedValue::None,
 			table_as_field: true,
-			enclose_subquery: false,
 			settings,
 		}
 	}
@@ -307,6 +305,10 @@ impl<'a> Parser<'a> {
 
 	pub fn peek_whitespace1(&mut self) -> Token {
 		self.peek_whitespace_token_at(1)
+	}
+
+	pub fn peek_whitespace2(&mut self) -> Token {
+		self.peek_whitespace_token_at(2)
 	}
 
 	/// Returns the span of the next token if it was already peeked, otherwise returns the token of

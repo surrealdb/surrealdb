@@ -12,8 +12,6 @@ use std::ops::Deref;
 use std::str::FromStr;
 use std::{ops, str};
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Datetime")]

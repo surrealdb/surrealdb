@@ -24,7 +24,7 @@ use super::DefineKind;
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
-	pub what: Ident,
+	pub target_table: Ident,
 	pub when: Expr,
 	pub then: Vec<Expr>,
 	pub comment: Option<Strand>,
@@ -45,7 +45,7 @@ impl DefineEventStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_tb_event(ns, db, &self.what, &self.name).await.is_ok() {
+		if txn.get_tb_event(ns, db, &self.target_table, &self.name).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -59,10 +59,10 @@ impl DefineEventStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::table::ev::new(ns, db, &self.what, &self.name);
+		let key = crate::key::table::ev::new(ns, db, &self.target_table, &self.name);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
+		txn.get_or_add_tb(ns, db, &self.target_table, opt.strict).await?;
 		txn.set(
 			key,
 			revision::to_vec(&DefineEventStatement {
@@ -73,8 +73,8 @@ impl DefineEventStatement {
 		)
 		.await?;
 		// Refresh the table cache
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
+		let key = crate::key::database::tb::new(ns, db, &self.target_table);
+		let tb = txn.get_tb(ns, db, &self.target_table).await?;
 		txn.set(
 			key,
 			revision::to_vec(&DefineTableStatement {
@@ -86,7 +86,7 @@ impl DefineEventStatement {
 		.await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(ns, db, &self.target_table);
 		}
 		// Clear the cache
 		txn.clear_cache();
@@ -107,7 +107,7 @@ impl Display for DefineEventStatement {
 			f,
 			" {} ON {} WHEN {} THEN {}",
 			self.name,
-			self.what,
+			self.target_table,
 			self.when,
 			Fmt::comma_separated(self.then.iter())
 		)?;
@@ -122,7 +122,7 @@ impl InfoStructure for DefineEventStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
-			"what".to_string() => self.what.structure(),
+			"what".to_string() => self.target_table.structure(),
 			"when".to_string() => self.when.structure(),
 			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),

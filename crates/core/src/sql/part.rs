@@ -136,21 +136,6 @@ impl fmt::Display for Part {
 
 // ------------------------------
 
-pub trait Next<'a> {
-	fn next(&'a self) -> &'a [Part];
-}
-
-impl<'a> Next<'a> for &'a [Part] {
-	fn next(&'a self) -> &'a [Part] {
-		match self.len() {
-			0 => &[],
-			_ => &self[1..],
-		}
-	}
-}
-
-// ------------------------------
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DestructurePart {

@@ -3,7 +3,7 @@ mod convert;
 use crate::{rpc::RpcError, val::Value};
 
 pub fn encode(v: Value) -> Result<Vec<u8>, RpcError> {
-	let encoding = convert::from_value(v);
+	let encoding = convert::from_value(v)?;
 	let mut res = Vec::new();
 	//TODO: Check if this can ever panic.
 	ciborium::into_writer(&encoding, &mut res).unwrap();

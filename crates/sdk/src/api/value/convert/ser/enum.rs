@@ -71,6 +71,7 @@ mod test {
 	}
 
 	// These strings and the ones in the above implementation must be kept in sync.
+	#[test]
 	fn serde_enum_names_are_correct() {
 		assert_eq!("$surrealdb::private::Number", val_to_serde_name(val::Number::Int(0)));
 		assert_eq!(

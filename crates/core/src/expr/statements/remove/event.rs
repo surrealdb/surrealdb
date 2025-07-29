@@ -42,7 +42,7 @@ impl RemoveEventStatement {
 			}
 		};
 		// Delete the definition
-		let key = crate::key::table::ev::new(ns, db, &ev.what, &ev.name);
+		let key = crate::key::table::ev::new(ns, db, &ev.target_table, &ev.name);
 		txn.del(key).await?;
 		// Refresh the table cache for events
 		let key = crate::key::database::tb::new(ns, db, &self.what);

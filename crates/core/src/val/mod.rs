@@ -75,12 +75,12 @@ pub enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	Table(Table),
 	Thing(RecordId),
+	Table(Table),
 	File(File),
-	Range(Box<Range>),
 	#[serde(skip)]
 	Regex(Regex),
+	Range(Box<Range>),
 	#[serde(skip)]
 	Closure(Box<Closure>),
 }

@@ -140,6 +140,8 @@ pub enum BinaryOperator {
 	And,
 	/// `??`
 	NullCoalescing,
+	// Might be usefull to remove.
+	TenaryCondition,
 
 	/// `<`
 	LessThan,
@@ -208,6 +210,7 @@ impl From<BinaryOperator> for crate::expr::BinaryOperator {
 			BinaryOperator::Or => crate::expr::BinaryOperator::Or,
 			BinaryOperator::And => crate::expr::BinaryOperator::And,
 			BinaryOperator::NullCoalescing => crate::expr::BinaryOperator::NullCoalescing,
+			BinaryOperator::TenaryCondition => crate::expr::BinaryOperator::TenaryCondition,
 			BinaryOperator::LessThan => crate::expr::BinaryOperator::LessThan,
 			BinaryOperator::LessThanEqual => crate::expr::BinaryOperator::LessThanEqual,
 			BinaryOperator::MoreThan => crate::expr::BinaryOperator::MoreThan,
@@ -253,6 +256,7 @@ impl From<crate::expr::BinaryOperator> for BinaryOperator {
 			crate::expr::BinaryOperator::Or => BinaryOperator::Or,
 			crate::expr::BinaryOperator::And => BinaryOperator::And,
 			crate::expr::BinaryOperator::NullCoalescing => BinaryOperator::NullCoalescing,
+			crate::expr::BinaryOperator::TenaryCondition => BinaryOperator::TenaryCondition,
 			crate::expr::BinaryOperator::LessThan => BinaryOperator::LessThan,
 			crate::expr::BinaryOperator::LessThanEqual => BinaryOperator::LessThanEqual,
 			crate::expr::BinaryOperator::MoreThan => BinaryOperator::MoreThan,
@@ -322,6 +326,7 @@ impl fmt::Display for BinaryOperator {
 			Self::Or => write!(f, "OR"),
 			Self::And => write!(f, "AND"),
 			Self::NullCoalescing => write!(f, "??"),
+			Self::TenaryCondition => write!(f, "?:"),
 			Self::Add => write!(f, "+"),
 			Self::Subtract => write!(f, "-"),
 			Self::Multiply => write!(f, "*"),
@@ -430,9 +435,9 @@ pub enum BindingPower {
 	AddSub,
 	MulDiv,
 	Power,
-	Range,
 	Nullish,
 	Prefix,
+	Range,
 	Call,
 	Prime,
 }
@@ -484,7 +489,9 @@ impl BindingPower {
 
 			BinaryOperator::Power => BindingPower::Power,
 
-			BinaryOperator::NullCoalescing => BindingPower::Nullish,
+			BinaryOperator::NullCoalescing | BinaryOperator::TenaryCondition => {
+				BindingPower::Nullish
+			}
 
 			BinaryOperator::Range
 			| BinaryOperator::RangeInclusive

@@ -1,6 +1,6 @@
 mod helpers;
 use crate::helpers::Test;
-use helpers::{new_ds, with_enough_stack};
+use helpers::new_ds;
 use surrealdb::Result;
 use surrealdb::dbs::Session;
 use surrealdb_core::{
@@ -112,116 +112,6 @@ async fn field_definition_value_reference() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	Ok(())
-}
-
-#[tokio::test]
-async fn field_definition_value_reference_with_future() -> Result<()> {
-	with_enough_stack(async {
-		let sql = "
-		DEFINE TABLE product;
-		DEFINE FIELD subproducts ON product VALUE <future> { ->contains->product };
-		CREATE product:one, product:two;
-		RELATE product:one->contains:test->product:two;
-		SELECT * FROM product;
-		UPDATE product;
-		SELECT * FROM product;
-	";
-		let dbs = new_ds().await?;
-		let ses = Session::owner().with_ns("test").with_db("test");
-		let res = &mut dbs.execute(sql, &ses, None).await?;
-		assert_eq!(res.len(), 7);
-		//
-		let tmp = res.remove(0).result;
-		tmp.unwrap();
-		//
-		let tmp = res.remove(0).result;
-		tmp.unwrap();
-		//
-		let tmp = res.remove(0).result?;
-		let val = syn::value(
-			"[
-			{
-				id: product:one,
-				subproducts: [],
-			},
-			{
-				id: product:two,
-				subproducts: [],
-			},
-		]",
-		)
-		.unwrap();
-		assert_eq!(tmp, val);
-		//
-		let tmp = res.remove(0).result?;
-		let val = syn::value(
-			"[
-			{
-				id: contains:test,
-				in: product:one,
-				out: product:two,
-			},
-		]",
-		)
-		.unwrap();
-		assert_eq!(tmp, val);
-		//
-		let tmp = res.remove(0).result?;
-		let val = syn::value(
-			"[
-			{
-				id: product:one,
-				subproducts: [
-					product:two,
-				],
-			},
-			{
-				id: product:two,
-				subproducts: [],
-			},
-		]",
-		)
-		.unwrap();
-		assert_eq!(tmp, val);
-		//
-		let tmp = res.remove(0).result?;
-		let val = syn::value(
-			"[
-			{
-				id: product:one,
-				subproducts: [
-					product:two,
-				],
-			},
-			{
-				id: product:two,
-				subproducts: [],
-			},
-		]",
-		)
-		.unwrap();
-		assert_eq!(tmp, val);
-		//
-		let tmp = res.remove(0).result?;
-		let val = syn::value(
-			"[
-			{
-				id: product:one,
-				subproducts: [
-					product:two,
-				],
-			},
-			{
-				id: product:two,
-				subproducts: [],
-			},
-		]",
-		)
-		.unwrap();
-		assert_eq!(tmp, val);
-		//
-		Ok(())
-	})
 }
 
 #[tokio::test]

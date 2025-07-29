@@ -1,5 +1,6 @@
 use reblessive::Stk;
 
+use super::basic::NumberToken;
 use super::mac::pop_glued;
 use super::{ParseResult, Parser};
 use crate::sql::{
@@ -23,7 +24,11 @@ impl Parser<'_> {
 			}
 			TokenKind::Glued(Glued::Number) => {
 				let v = self.next_token_value()?;
-				Ok(Expr::Literal(Literal::Duration(v)))
+				match v {
+					NumberToken::Float(f) => Ok(Expr::Literal(Literal::Float(f))),
+					NumberToken::Integer(i) => Ok(Expr::Literal(Literal::Integer(i))),
+					NumberToken::Decimal(d) => Ok(Expr::Literal(Literal::Decimal(d))),
+				}
 			}
 			_ => {
 				self.pop_peek();
@@ -40,14 +45,14 @@ impl Parser<'_> {
 	}
 
 	/// Parse an expressions
-	pub(super) async fn parse_prime_expr(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
+	pub(super) async fn parse_prime_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		let token = self.peek();
 		let value = match token.kind {
 			t!("@") => {
 				self.pop_peek();
 				let mut res = vec![Part::Doc];
 				if !self.peek_continues_idiom() {
-					res.push(self.parse_dot_part(ctx).await?);
+					res.push(self.parse_dot_part(stk).await?);
 				}
 
 				Expr::Idiom(Idiom(res))
@@ -73,11 +78,11 @@ impl Parser<'_> {
 				let peek = self.peek_whitespace();
 				if peek.kind == t!("-") {
 					self.pop_peek();
-					let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
+					let graph = stk.run(|ctx| self.parse_graph(ctx, Dir::In)).await?;
 					Expr::Idiom(Idiom(vec![Part::Graph(graph)]))
 				} else if peek.kind == t!("->") {
 					self.pop_peek();
-					let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
+					let graph = stk.run(|ctx| self.parse_graph(ctx, Dir::Both)).await?;
 					Expr::Idiom(Idiom(vec![Part::Graph(graph)]))
 				} else {
 					unexpected!(self, token, "expected either a `<-` or a future")
@@ -85,12 +90,12 @@ impl Parser<'_> {
 			}
 			t!("r\"") => {
 				self.pop_peek();
-				let record_id = self.parse_record_string(ctx, true).await?;
+				let record_id = self.parse_record_string(stk, true).await?;
 				Expr::Literal(Literal::RecordId(record_id))
 			}
 			t!("r'") => {
 				self.pop_peek();
-				let record_id = self.parse_record_string(ctx, false).await?;
+				let record_id = self.parse_record_string(stk, false).await?;
 				Expr::Literal(Literal::RecordId(record_id))
 			}
 			t!("d\"") | t!("d'") | TokenKind::Glued(Glued::Datetime) => {
@@ -116,7 +121,7 @@ impl Parser<'_> {
 			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
 				let s = self.next_token_value::<Strand>()?;
 				if self.settings.legacy_strands {
-					Expr::Literal(self.reparse_legacy_strand(ctx, s).await)
+					Expr::Literal(self.reparse_legacy_strand(stk, s).await)
 				} else {
 					Expr::Literal(Literal::Strand(s))
 				}
@@ -132,75 +137,190 @@ impl Parser<'_> {
 			t!("$param") => Expr::Param(self.next_token_value()?),
 			t!("FUNCTION") => {
 				self.pop_peek();
-				let script = self.parse_script(ctx).await?;
+				let script = self.parse_script(stk).await?;
 				Expr::FunctionCall(Box::new(script))
 			}
 			t!("->") => {
 				self.pop_peek();
-				let graph = ctx.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
+				let graph = stk.run(|ctx| self.parse_graph(ctx, Dir::Out)).await?;
 				Expr::Idiom(Idiom(vec![Part::Graph(graph)]))
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_array(ctx, token.span).await.map(|a| Expr::Literal(Literal::Array(a)))?
+				self.parse_array(stk, token.span).await.map(|a| Expr::Literal(Literal::Array(a)))?
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_object_like(ctx, token.span).await?
+				self.parse_object_like(stk, token.span).await?
 			}
 			t!("|") => {
 				self.pop_peek();
-				self.parse_closure_or_mock(ctx, token.span).await?
+				self.parse_closure_or_mock(stk, token.span).await?
 			}
 			t!("||") => {
 				self.pop_peek();
-				ctx.run(|ctx| self.parse_closure_after_args(ctx, Vec::new())).await?
-			}
-			t!("IF") => {
-				enter_query_recursion!(this = self => {
-					this.pop_peek();
-					let stmt = ctx.run(|ctx| this.parse_if_stmt(ctx)).await?;
-					Expr::If(Box::new(stmt))
-				})
+				stk.run(|ctx| self.parse_closure_after_args(ctx, Vec::new())).await?
 			}
 			t!("(") => {
 				self.pop_peek();
-				self.parse_covered_expr_or_coordinate(ctx, token.span).await?
+				self.parse_covered_expr_or_coordinate(stk, token.span).await?
 			}
 			t!("/") => {
 				let regex = self.next_token_value()?;
 				Expr::Literal(Literal::Regex(regex))
 			}
-			t!("RETURN")
-			| t!("SELECT")
-			| t!("CREATE")
-			| t!("INSERT")
-			| t!("UPSERT")
-			| t!("UPDATE")
-			| t!("DELETE")
-			| t!("RELATE")
-			| t!("DEFINE")
-			| t!("REMOVE")
-			| t!("REBUILD")
-			| t!("INFO") => self.parse_inner_subquery(ctx, None).await?,
 			t!("fn") => {
 				self.pop_peek();
-				self.parse_custom_function(ctx).await.map(|x| Expr::FunctionCall(Box::new(x)))?
+				self.parse_custom_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}
 			t!("ml") => {
 				self.pop_peek();
-				self.parse_model(ctx).await.map(|x| Expr::FunctionCall(Box::new(x)))?
+				self.parse_model(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
+			}
+			t!("IF") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = stk.run(|ctx| this.parse_if_stmt(ctx)).await?;
+					Expr::If(Box::new(stmt))
+				})
+			}
+			t!("SELECT") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_select_stmt(stk).await?;
+					Expr::Select(Box::new(stmt))
+				})
+			}
+			t!("CREATE") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_create_stmt(stk).await?;
+					Expr::Create(Box::new(stmt))
+				})
+			}
+			t!("UPDATE") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_update_stmt(stk).await?;
+					Expr::Update(Box::new(stmt))
+				})
+			}
+			t!("UPSERT") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_upsert_stmt(stk).await?;
+					Expr::Upsert(Box::new(stmt))
+				})
+			}
+			t!("DELETE") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_delete_stmt(stk).await?;
+					Expr::Delete(Box::new(stmt))
+				})
+			}
+			t!("RELATE") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_relate_stmt(stk).await?;
+					Expr::Relate(Box::new(stmt))
+				})
+			}
+			t!("INSERT") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_insert_stmt(stk).await?;
+					Expr::Insert(Box::new(stmt))
+				})
+			}
+			t!("DEFINE") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_define_stmt(stk).await?;
+					Expr::Define(Box::new(stmt))
+				})
+			}
+			t!("REMOVE") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_remove_stmt(stk).await?;
+					Expr::Remove(Box::new(stmt))
+				})
+			}
+			t!("REBUILD") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_rebuild_stmt()?;
+					Expr::Rebuild(Box::new(stmt))
+				})
+			}
+			t!("ALTER") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_alter_stmt(stk).await?;
+					Expr::Alter(Box::new(stmt))
+				})
+			}
+			t!("INFO") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_info_stmt(stk).await?;
+					Expr::Info(Box::new(stmt))
+				})
+			}
+			t!("FOR") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_for_stmt(stk).await?;
+					Expr::Foreach(Box::new(stmt))
+				})
+			}
+			t!("LET") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_let_stmt(stk).await?;
+					Expr::Let(Box::new(stmt))
+				})
+			}
+			t!("SLEEP") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_sleep_stmt()?;
+					Expr::Sleep(Box::new(stmt))
+				})
+			}
+			t!("RETURN") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let stmt = this.parse_return_stmt(stk).await?;
+					Expr::Return(Box::new(stmt))
+				})
+			}
+			t!("THROW") => {
+				enter_query_recursion!(this = self => {
+					this.pop_peek();
+					let expr = stk.run(|stk| this.parse_expr_inherit(stk)).await?;
+					Expr::Throw(Box::new(expr))
+				})
+			}
+			t!("CONTINUE") => {
+				self.pop_peek();
+				Expr::Continue
+			}
+			t!("BREAK") => {
+				self.pop_peek();
+				Expr::Break
 			}
 			x if Self::kind_is_identifier(x) => {
 				let peek = self.peek1();
 				match peek.kind {
 					t!("::") | t!("(") => {
 						self.pop_peek();
-						self.parse_builtin(ctx, token.span).await?
+						self.parse_builtin(stk, token.span).await?
 					}
 					t!(":") => {
 						let str = self.next_token_value::<Ident>()?;
-						self.parse_record_id_or_range(ctx, str)
+						self.parse_record_id_or_range(stk, str)
 							.await
 							.map(|x| Expr::Literal(Literal::RecordId(x)))?
 					}
@@ -221,111 +341,13 @@ impl Parser<'_> {
 		// Parse the rest of the idiom if it is being continued.
 		if self.peek_continues_idiom() {
 			match value {
-				Expr::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(ctx, x).await,
-				Expr::Table(x) => self.parse_remaining_value_idiom(ctx, vec![Part::Field(x)]).await,
-				x => self.parse_remaining_value_idiom(ctx, vec![Part::Start(x)]).await,
+				Expr::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(stk, x).await,
+				Expr::Table(x) => self.parse_remaining_value_idiom(stk, vec![Part::Field(x)]).await,
+				x => self.parse_remaining_value_idiom(stk, vec![Part::Start(x)]).await,
 			}
 		} else {
 			Ok(value)
 		}
-	}
-
-	pub(super) async fn parse_inner_subquery(
-		&mut self,
-		ctx: &mut Stk,
-		start: Option<Span>,
-	) -> ParseResult<Expr> {
-		enter_query_recursion!(this = self => {
-			this.parse_inner_subquery_inner(ctx,start).await
-		})
-	}
-
-	async fn parse_inner_subquery_inner(
-		&mut self,
-		ctx: &mut Stk,
-		start: Option<Span>,
-	) -> ParseResult<Expr> {
-		let peek = self.peek();
-		let res = match peek.kind {
-			t!("RETURN") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_return_stmt(ctx)).await?;
-				Expr::Return(Box::new(stmt))
-			}
-			t!("SELECT") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_select_stmt(ctx)).await?;
-				Expr::Select(Box::new(stmt))
-			}
-			t!("CREATE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_create_stmt(ctx)).await?;
-				Expr::Create(Box::new(stmt))
-			}
-			t!("INSERT") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_insert_stmt(ctx)).await?;
-				Expr::Insert(Box::new(stmt))
-			}
-			t!("UPSERT") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_upsert_stmt(ctx)).await?;
-				Expr::Upsert(Box::new(stmt))
-			}
-			t!("UPDATE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_update_stmt(ctx)).await?;
-				Expr::Update(Box::new(stmt))
-			}
-			t!("DELETE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_delete_stmt(ctx)).await?;
-				Expr::Delete(Box::new(stmt))
-			}
-			t!("RELATE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_relate_stmt(ctx)).await?;
-				Expr::Relate(Box::new(stmt))
-			}
-			t!("DEFINE") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_define_stmt(ctx)).await?;
-				Expr::Define(Box::new(stmt))
-			}
-			t!("REMOVE") => {
-				self.pop_peek();
-				let stmt = self.parse_remove_stmt(ctx).await?;
-				Expr::Remove(Box::new(stmt))
-			}
-			t!("REBUILD") => {
-				self.pop_peek();
-				let stmt = self.parse_rebuild_stmt()?;
-				Expr::Rebuild(Box::new(stmt))
-			}
-			t!("INFO") => {
-				self.pop_peek();
-				let stmt = ctx.run(|ctx| self.parse_info_stmt(ctx)).await?;
-				Expr::Info(Box::new(stmt))
-			}
-			_ => ctx.run(|ctx| self.parse_expr_inherit(ctx)).await?,
-		};
-		if let Some(start) = start {
-			let token = self.peek();
-			if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
-				if let Expr::Idiom(Idiom(ref idiom)) = res {
-					if idiom.len() == 1 {
-						// we parsed a single idiom and the next token was a dissallowed statement so
-						// it is likely that the used meant to use an invalid statement.
-						bail!("Unexpected token `{}` expected `)`",peek.kind,
-							@token.span,
-							@peek.span => "This is a reserved keyword here and can't be an identifier");
-					}
-				}
-			}
-
-			self.expect_closing_delimiter(t!(")"), start)?;
-		}
-		Ok(res)
 	}
 
 	/// Parses an array production
@@ -437,17 +459,7 @@ impl Parser<'_> {
 		})))
 	}
 
-	pub(super) async fn parse_covered_expr_or_coordinate(
-		&mut self,
-		ctx: &mut Stk,
-		start: Span,
-	) -> ParseResult<Expr> {
-		enter_query_recursion!(this = self => {
-			this.parse_inner_subquery_or_coordinate_inner(ctx,start).await
-		})
-	}
-
-	async fn parse_inner_subquery_or_coordinate_inner(
+	async fn parse_covered_expr_or_coordinate(
 		&mut self,
 		ctx: &mut Stk,
 		start: Span,

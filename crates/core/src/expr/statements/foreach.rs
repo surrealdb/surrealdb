@@ -79,11 +79,14 @@ impl ForeachStatement {
 			let key = self.param.clone().ident().into_string();
 			let mut ctx = MutableContext::unfreeze(ctx)?;
 			ctx.add_value(key, v.into());
-			let ctx = ctx.freeze();
+			let mut ctx = Some(ctx.freeze());
 			// Loop over the code block statements
 			for v in self.block.iter() {
 				// Compute each block entry
-				let res = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await;
+				let res = match v {
+					Expr::Let(x) => x.compute(stk, &mut ctx, opt, doc).await,
+					v => stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await,
+				};
 				// Catch any special errors
 				match res {
 					Err(ControlFlow::Continue) => break,

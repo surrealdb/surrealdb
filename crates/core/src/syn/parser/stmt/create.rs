@@ -7,14 +7,14 @@ use crate::syn::token::t;
 impl Parser<'_> {
 	pub(crate) async fn parse_create_stmt(
 		&mut self,
-		ctx: &mut Stk,
+		stk: &mut Stk,
 	) -> ParseResult<CreateStatement> {
 		let only = self.eat(t!("ONLY"));
-		let what = self.parse_what_list(ctx).await?;
-		let data = self.try_parse_data(ctx).await?;
-		let output = self.try_parse_output(ctx).await?;
+		let what = self.parse_what_list(stk).await?;
+		let data = self.try_parse_data(stk).await?;
+		let output = self.try_parse_output(stk).await?;
 		let version = if self.eat(t!("VERSION")) {
-			Some(self.parse_expr_field(ctx).await?)
+			Some(stk.run(|stk| self.parse_expr_field(stk)).await?)
 		} else {
 			None
 		};

@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 const TARGET: &str = "surrealdb::core::dbs";
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum Iterable {
 	/// Any [Value] which does not exist in storage. This
 	/// could be the result of a query, an arbitrary
@@ -64,6 +64,9 @@ pub(crate) enum Iterable {
 	/// This is used in RELATE statements. The optional value
 	/// is used in INSERT RELATION statements, where each value
 	/// passed in to the iterable is unique for each record.
+	///
+	/// The first field is the rid from which we create, the second is the rid which is the
+	/// relation itself and the third is the target of the relation
 	Relatable(RecordId, RecordId, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
@@ -166,6 +169,7 @@ impl Iterator {
 			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
 			Expr::Table(v) => self.prepare_table(stk, planner, stm_ctx, v.clone()).await?,
 			Expr::Idiom(x) => {
+				// TODO: This needs to be structured better.
 				// match against what previously would be an edge.
 				if x.len() != 2 {
 					return Ok(());
@@ -175,7 +179,7 @@ impl Iterator {
 					return Ok(());
 				};
 
-				let Part::Graph(ref graph) = x[0] else {
+				let Part::Graph(ref graph) = x[1] else {
 					return Ok(());
 				};
 
@@ -207,21 +211,7 @@ impl Iterator {
 			Expr::Literal(Literal::Array(array)) => {
 				self.prepare_array(stk, ctx, opt, doc, planner, stm_ctx, array).await?
 			}
-			x => {
-				let v = stk.run(|stk| x.compute(stk, ctx, opt, doc)).await.catch_return()?;
-				match v {
-					Value::Thing(x) => self.prepare_thing(planner, stm_ctx, x).await?,
-					Value::Object(x) if !stm_ctx.stm.is_select() => {
-						self.prepare_object(stm_ctx.stm, x)?
-					}
-					v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
-					v => {
-						bail!(Error::InvalidStatementTarget {
-							value: v.to_string(),
-						})
-					}
-				}
-			}
+			x => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, x).await?,
 		};
 		// All ingested ok
 		Ok(())
@@ -244,12 +234,10 @@ impl Iterator {
 		if ctx.stm.is_deferable() {
 			self.ingest(Iterable::Yield(table))
 		} else {
-			if !ctx.stm.is_guaranteed() {
-				planner.add_iterables(stk, ctx, table, p, self).await?
-			} else {
+			if ctx.stm.is_guaranteed() {
 				self.guaranteed = Some(Iterable::Yield(table.clone()));
-				planner.add_iterables(stk, ctx, table, p, self).await?;
 			}
+			planner.add_iterables(stk, ctx, table, p, self).await?;
 		}
 		// All ingested ok
 		Ok(())
@@ -389,7 +377,7 @@ impl Iterator {
 		Ok(())
 	}
 
-	async fn perpare_computed(
+	async fn prepare_computed(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -405,6 +393,7 @@ impl Iterator {
 				self.prepare_object(stm_ctx.stm, o)?;
 			}
 			Value::Thing(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				bail!(Error::InvalidStatementTarget {
@@ -436,19 +425,19 @@ impl Iterator {
 					// match against what previously would be an edge.
 					if x.len() != 2 {
 						return self
-							.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;
 					}
 
 					let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
 						return self
-							.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;
 					};
 
 					let Part::Graph(ref graph) = x[0] else {
 						return self
-							.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
 							.await;
 					};
 
@@ -477,9 +466,9 @@ impl Iterator {
 						return self.prepare_edges(stm_ctx.stm, from, graph.dir.clone(), what);
 					}
 
-					self.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?
+					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?
 				}
-				v => self.perpare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?,
+				v => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?,
 			}
 		}
 		// All ingested ok
@@ -513,6 +502,7 @@ impl Iterator {
 			self.start,
 			self.limit,
 		)?;
+
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or without FULL
 		let mut plan = Plan::new(ctx, stm, &self.entries, &self.results);
 		// Check if we actually need to process and iterate over the results

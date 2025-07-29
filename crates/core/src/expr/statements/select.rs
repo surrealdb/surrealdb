@@ -100,7 +100,7 @@ impl SelectStatement {
 			),
 			_ => None,
 		};
-		let opt = Arc::new(opt.new_with_futures(false).with_version(version));
+		let opt = Arc::new(opt.clone().with_version(version));
 		// Extract the limits
 		i.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit
@@ -127,14 +127,18 @@ impl SelectStatement {
 		if self.only {
 			match res {
 				Value::Array(mut array) => {
-					ensure!(array.len() == 1, Error::SingleOnlyOutput);
-					return Ok(array.0.pop().unwrap());
+					if array.is_empty() {
+						Ok(Value::None)
+					} else {
+						ensure!(array.len() == 1, Error::SingleOnlyOutput);
+						Ok(array.0.pop().unwrap())
+					}
 				}
-				x => return Ok(x),
+				x => Ok(x),
 			}
+		} else {
+			Ok(res)
 		}
-
-		Ok(res)
 	}
 }
 

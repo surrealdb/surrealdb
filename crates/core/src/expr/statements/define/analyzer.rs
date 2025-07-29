@@ -44,7 +44,7 @@ impl DefineAnalyzerStatement {
 		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
-					if opt.import {
+					if !opt.import {
 						bail!(Error::AzAlreadyExists {
 							name: self.name.to_string(),
 						});

@@ -2,8 +2,6 @@ use crate::sql::fmt::Fmt;
 use crate::sql::{Expr, Ident, Idiom, Model, Script};
 use std::fmt;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Function {

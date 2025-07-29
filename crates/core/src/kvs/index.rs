@@ -408,6 +408,7 @@ impl Building {
 			tx.delp(key).await?;
 			tx.commit().await?;
 		}
+
 		// First iteration, we index every key
 		let beg = thing::prefix(ns, db, self.ikb.table())?;
 		let end = thing::suffix(ns, db, self.ikb.table())?;

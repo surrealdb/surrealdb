@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::ops::Bound;
 
 use reblessive::Stk;
 
@@ -11,7 +12,9 @@ use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::mac::{expected, pop_glued};
 use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
-use crate::val::{self, Array, Duration, Number, Object, RecordId, RecordIdKey, Strand, Value};
+use crate::val::{
+	self, Array, Duration, Number, Object, Range, RecordId, RecordIdKey, Strand, Value,
+};
 
 trait ValueParseFunc {
 	async fn parse<'a>(parser: &mut Parser<'a>, ctx: &mut Stk) -> ParseResult<Value>;
@@ -36,53 +39,53 @@ impl Parser<'_> {
 	/// Parse a complete value which cannot contain non-literal expressions.
 	pub async fn parse_value(&mut self, stk: &mut Stk) -> ParseResult<Value> {
 		let token = self.peek();
-		match token.kind {
+		let res = match token.kind {
 			t!("NONE") => {
 				self.pop_peek();
-				Ok(Value::None)
+				Value::None
 			}
 			t!("NULL") => {
 				self.pop_peek();
-				Ok(Value::Null)
+				Value::Null
 			}
 			TokenKind::NaN => {
 				self.pop_peek();
-				Ok(Value::Number(Number::Float(f64::NAN)))
+				Value::Number(Number::Float(f64::NAN))
 			}
 			t!("true") => {
 				self.pop_peek();
-				Ok(Value::Bool(true))
+				Value::Bool(true)
 			}
 			t!("false") => {
 				self.pop_peek();
-				Ok(Value::Bool(false))
+				Value::Bool(false)
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_value_object::<SurrealQL>(stk, token.span).await.map(Value::Object)
+				self.parse_value_object::<SurrealQL>(stk, token.span).await.map(Value::Object)?
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_value_array::<SurrealQL>(stk, token.span).await.map(Value::Array)
+				self.parse_value_array::<SurrealQL>(stk, token.span).await.map(Value::Array)?
 			}
 			t!("\"") | t!("'") => {
 				let strand: Strand = self.next_token_value()?;
 				if self.settings.legacy_strands {
-					self.reparse_json_legacy_strand(stk, strand).await
+					self.reparse_json_legacy_strand(stk, strand).await?
 				} else {
-					Ok(Value::Strand(strand.into()))
+					Value::Strand(strand.into())
 				}
 			}
 			t!("d\"") | t!("d'") => {
 				let datetime = self.next_token_value()?;
-				Ok(Value::Datetime(datetime))
+				Value::Datetime(datetime)
 			}
 			t!("u\"") | t!("u'") => {
 				let uuid = self.next_token_value()?;
-				Ok(Value::Uuid(uuid))
+				Value::Uuid(uuid)
 			}
 			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
-				Ok(Value::Bytes(self.next_token_value()?))
+				Value::Bytes(self.next_token_value()?)
 			}
 
 			t!("f\"") | t!("f'") => {
@@ -91,19 +94,139 @@ impl Parser<'_> {
 				}
 
 				let file = self.next_token_value::<val::File>()?;
-				Ok(Value::File(file))
+				Value::File(file)
+			}
+			t!("/") => {
+				let regex = self.next_token_value()?;
+				Value::Regex(regex)
+			}
+			t!("(") => {
+				let open = self.pop_peek().span;
+				let peek = self.peek();
+				match peek.kind {
+					t!("+") | t!("-") | TokenKind::Digits => {
+						let before = peek.span;
+						let number = self.next_token_value::<Numeric>()?;
+						let number_span = before.covers(self.last_span());
+						if self.peek().kind == t!(",") {
+							let x = match number {
+								Numeric::Duration(_) | Numeric::Decimal(_) => {
+									bail!("Unexpected token, expected a non-decimal, non-NaN, number",
+										@number_span => "Coordinate numbers can't be NaN or a decimal");
+								}
+								Numeric::Float(x) if x.is_nan() => {
+									bail!("Unexpected token, expected a non-decimal, non-NaN, number",
+										@number_span => "Coordinate numbers can't be NaN or a decimal");
+								}
+								Numeric::Float(x) => x,
+								Numeric::Integer(x) => x as f64,
+							};
+
+							self.pop_peek();
+
+							let y = self.next_token_value::<f64>()?;
+							self.expect_closing_delimiter(t!(")"), open)?;
+							Value::Geometry(crate::val::Geometry::Point(geo::Point::new(x, y)))
+						} else {
+							self.expect_closing_delimiter(t!(")"), open)?;
+
+							match number {
+								Numeric::Float(x) => Value::Number(Number::Float(x)),
+								Numeric::Integer(x) => Value::Number(Number::Int(x)),
+								Numeric::Decimal(x) => Value::Number(Number::Decimal(x)),
+								Numeric::Duration(duration) => Value::Duration(Duration(duration)),
+							}
+						}
+					}
+					_ => {
+						let res = stk.run(|stk| self.parse_value(stk)).await?;
+						self.expect_closing_delimiter(t!(")"), open)?;
+						res
+					}
+				}
+			}
+			t!("..") => {
+				let peek = self.peek_whitespace().kind;
+				if peek == t!("=") {
+					let v = stk.run(|stk| self.parse_value(stk)).await?;
+					Value::Range(Box::new(Range {
+						start: Bound::Unbounded,
+						end: Bound::Included(v),
+					}))
+				} else if Self::kind_starts_expression(peek) {
+					let v = stk.run(|stk| self.parse_value(stk)).await?;
+					Value::Range(Box::new(Range {
+						start: Bound::Unbounded,
+						end: Bound::Excluded(v),
+					}))
+				} else {
+					Value::Range(Box::new(Range {
+						start: Bound::Unbounded,
+						end: Bound::Unbounded,
+					}))
+				}
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
-					Numeric::Duration(x) => Ok(Value::Duration(Duration(x).into())),
-					Numeric::Integer(x) => Ok(Value::Number(Number::Int(x))),
-					Numeric::Float(x) => Ok(Value::Number(Number::Float(x))),
-					Numeric::Decimal(x) => Ok(Value::Number(Number::Decimal(x))),
+					Numeric::Duration(x) => Value::Duration(Duration(x).into()),
+					Numeric::Integer(x) => Value::Number(Number::Int(x)),
+					Numeric::Float(x) => Value::Number(Number::Float(x)),
+					Numeric::Decimal(x) => Value::Number(Number::Decimal(x)),
 				}
 			}
-			_ => self.parse_value_record_id_inner::<SurrealQL>(stk).await.map(Value::Thing),
+			_ => self.parse_value_record_id_inner::<SurrealQL>(stk).await.map(Value::Thing)?,
+		};
+
+		match self.peek_whitespace().kind {
+			t!(">") => {
+				self.pop_peek();
+				expected!(self, t!(".."));
+				let peek = self.peek_whitespace().kind;
+				if peek == t!("=") {
+					let v = stk.run(|stk| self.parse_value(stk)).await?;
+					Ok(Value::Range(Box::new(Range {
+						start: Bound::Excluded(res),
+						end: Bound::Included(v),
+					})))
+				} else if Self::kind_starts_expression(peek) {
+					let v = stk.run(|stk| self.parse_value(stk)).await?;
+					Ok(Value::Range(Box::new(Range {
+						start: Bound::Excluded(res),
+						end: Bound::Excluded(v),
+					})))
+				} else {
+					Ok(Value::Range(Box::new(Range {
+						start: Bound::Excluded(res),
+						end: Bound::Unbounded,
+					})))
+				}
+			}
+			t!("..") => {
+				self.pop_peek();
+
+				let peek = self.peek_whitespace().kind;
+				if peek == t!("=") {
+					let v = stk.run(|stk| self.parse_value(stk)).await?;
+					Ok(Value::Range(Box::new(Range {
+						start: Bound::Included(res),
+						end: Bound::Included(v),
+					})))
+				} else if Self::kind_starts_expression(peek) {
+					let v = stk.run(|stk| self.parse_value(stk)).await?;
+					Ok(Value::Range(Box::new(Range {
+						start: Bound::Included(res),
+						end: Bound::Excluded(v),
+					})))
+				} else {
+					Ok(Value::Range(Box::new(Range {
+						start: Bound::Included(res),
+						end: Bound::Unbounded,
+					})))
+				}
+			}
+			_ => Ok(res),
 		}
 	}
 
@@ -312,7 +435,6 @@ impl Parser<'_> {
 				};
 				RecordIdKey::String(ident.into_string())
 			}
-			_ => unexpected!(self, peek, "record-id key"),
 		};
 
 		Ok(RecordId {

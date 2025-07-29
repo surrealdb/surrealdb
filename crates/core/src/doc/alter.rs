@@ -32,11 +32,11 @@ impl Document {
 				let id = match stm.data() {
 					// There is a data clause so fetch a record id
 					Some(data) => match data.rid(stk, ctx, opt).await? {
+						Value::None => RecordId::random_for_table(tb.clone().into_string()),
 						// Generate a new id from the id field
 						// TODO: Handle null byte
-						Some(id) => id.generate(tb.clone().into_strand(), false)?,
+						id => id.generate(tb.clone().into_strand(), false)?,
 						// Generate a new random table id
-						None => RecordId::random_for_table(tb.clone().into_string()),
 					},
 					// There is no data clause so create a record id
 					None => RecordId::random_for_table(tb.clone().into_string()),

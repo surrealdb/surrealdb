@@ -42,9 +42,10 @@ impl Document {
 			let after = self.current.doc.as_arc();
 			let before = self.initial.doc.as_arc();
 			// Depending on type of event, how do we populate the document
-			let doc = match stm.is_delete() {
-				true => &mut self.initial,
-				false => &mut self.current,
+			let doc = if stm.is_delete() {
+				&mut self.initial
+			} else {
+				&mut self.current
 			};
 			// Configure the context
 			let mut ctx = MutableContext::new(ctx);
@@ -60,7 +61,7 @@ impl Document {
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					stk.run(|stk| v.compute(stk, &ctx, opt, Some(doc))).await.catch_return()?;
+					stk.run(|stk| v.compute(stk, &ctx, opt, Some(&*doc))).await.catch_return()?;
 				}
 			}
 		}

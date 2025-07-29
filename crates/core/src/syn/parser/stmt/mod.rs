@@ -106,6 +106,18 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_use_stmt().map(TopLevelExpr::Use)
 			}
+			t!("ACCESS") => {
+				self.pop_peek();
+				self.parse_access(stk).await.map(|x| TopLevelExpr::Access(Box::new(x)))
+			}
+			t!("ANALYZE") => {
+				self.pop_peek();
+				self.parse_analyze().map(TopLevelExpr::Analyze)
+			}
+			t!("SHOW") => {
+				self.pop_peek();
+				self.parse_show_stmt().map(TopLevelExpr::Show)
+			}
 			_ => self.parse_expr_table(stk).await.map(TopLevelExpr::Expr),
 		}
 	}
@@ -351,7 +363,7 @@ impl Parser<'_> {
 			}
 			t!("DATABASE") => {
 				let version = if self.eat(t!("VERSION")) {
-					Some(self.parse_expr_inherit(stk).await?)
+					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
 				} else {
 					None
 				};
@@ -361,7 +373,7 @@ impl Parser<'_> {
 			t!("TABLE") => {
 				let ident = self.next_token_value()?;
 				let version = if self.eat(t!("VERSION")) {
-					Some(self.parse_expr_inherit(stk).await?)
+					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
 				} else {
 					None
 				};
@@ -509,15 +521,15 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `LET` to already be consumed.
-	pub(super) async fn parse_let_stmt(&mut self, ctx: &mut Stk) -> ParseResult<SetStatement> {
+	pub(super) async fn parse_let_stmt(&mut self, stk: &mut Stk) -> ParseResult<SetStatement> {
 		let name = self.next_token_value::<Param>()?.ident();
 		let kind = if self.eat(t!(":")) {
-			Some(self.parse_inner_kind(ctx).await?)
+			Some(self.parse_inner_kind(stk).await?)
 		} else {
 			None
 		};
 		expected!(self, t!("="));
-		let what = self.parse_expr_inherit(ctx).await?;
+		let what = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
 		Ok(SetStatement {
 			name,
 			what,

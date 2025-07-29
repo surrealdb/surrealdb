@@ -29,7 +29,7 @@ use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
-use crate::val::Strand;
+use crate::val::{Duration, Strand};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -210,6 +210,8 @@ impl Parser<'_> {
 			base,
 			// Safety: "Viewer" does not contain a null byte
 			roles: vec![unsafe { Ident::new_unchecked("Viewer".to_owned()) }], // New users get the viewer role by default
+			// TODO: Move out of the parser
+			token_duration: Some(Duration::from_secs(3600)), // defaults to 1 hour.
 			..DefineUserStatement::default()
 		};
 
@@ -286,6 +288,8 @@ impl Parser<'_> {
 							}
 							_ => unexpected!(self, token, "`TOKEN` or `SESSION`"),
 						}
+
+						self.eat(t!(","));
 
 						if !self.eat(t!("FOR")) {
 							break;

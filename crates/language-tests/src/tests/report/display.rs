@@ -353,7 +353,7 @@ impl TestReport {
 									f.indent(|f| writeln!(f, "- Any value"))?;
 								}
 								writeln!(f, "= Got:")?;
-								f.indent(|f| writeln!(f, "- Value: {got}"))
+								f.indent(|f| writeln!(f, "- Error: {got}"))
 							})
 						}
 					}

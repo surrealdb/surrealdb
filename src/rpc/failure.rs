@@ -2,7 +2,7 @@ use revision::{Revisioned, revisioned};
 use serde::Serialize;
 use std::borrow::Cow;
 use surrealdb::rpc::RpcError;
-use surrealdb_core::val::{self, Value};
+use surrealdb_core::val::Value;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Failure {
@@ -89,10 +89,12 @@ impl Failure {
 		message: Cow::Borrowed("Invalid params"),
 	};
 
+	/*
 	pub const INTERNAL_ERROR: Failure = Failure {
 		code: -32603,
 		message: Cow::Borrowed("Internal error"),
 	};
+	*/
 
 	pub fn custom<S>(message: S) -> Failure
 	where

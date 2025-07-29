@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Permission;
-use crate::expr::escape::EscapeIdent;
+use crate::expr::escape::EscapeKwFreeIdent;
 use crate::expr::ident::Ident;
 use crate::iam::Action;
 use crate::val::{Strand, Value};
@@ -143,6 +143,6 @@ impl Param {
 
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", EscapeIdent(&self.0))
+		write!(f, "${}", EscapeKwFreeIdent(&self.0))
 	}
 }

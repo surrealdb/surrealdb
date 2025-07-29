@@ -8,8 +8,7 @@ use std::any::Any;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Clone)]
-#[non_exhaustive]
+#[derive(Clone, Debug)]
 pub(crate) enum Entry {
 	/// A cached entry of any type
 	Any(Arc<dyn Any + Send + Sync>),

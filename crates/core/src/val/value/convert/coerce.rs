@@ -621,7 +621,7 @@ impl Value {
 		let this = match self {
 			// Records are allowed if correct type
 			Value::Thing(v) => {
-				if val.is_empty() || val.iter().all(|x| **x == v.table) {
+				if val.is_empty() || val.iter().any(|x| **x == v.table) {
 					return Ok(v);
 				} else {
 					Value::Thing(v)

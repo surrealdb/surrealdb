@@ -9,7 +9,7 @@ use crate::opt::auth::Root;
 use async_channel::{Receiver, Sender};
 use futures::StreamExt;
 use futures::stream::poll_fn;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::task::Poll;

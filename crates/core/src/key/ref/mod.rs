@@ -50,7 +50,10 @@ struct PrefixFt<'a> {
 }
 impl_key!(PrefixFt<'a>);
 
+// Code here is used in references which is temporarly disabled
+#[allow(dead_code)]
 impl<'a> PrefixFt<'a> {
+	#[allow(dead_code)]
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &RecordIdKey, ft: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -83,7 +86,10 @@ struct PrefixFf<'a> {
 }
 impl_key!(PrefixFf<'a>);
 
+// Code here is used in references which is temporarly removed
+#[allow(dead_code)]
 impl<'a> PrefixFf<'a> {
+	#[allow(dead_code)]
 	fn new(
 		ns: &'a str,
 		db: &'a str,
@@ -155,18 +161,21 @@ pub fn suffix(ns: &str, db: &str, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>>
 	Ok(k)
 }
 
+#[allow(dead_code)]
 pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
+#[allow(dead_code)]
 pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &RecordIdKey, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
+#[allow(dead_code)]
 pub fn ffprefix(
 	ns: &str,
 	db: &str,
@@ -180,6 +189,7 @@ pub fn ffprefix(
 	Ok(k)
 }
 
+#[allow(dead_code)]
 pub fn ffsuffix(
 	ns: &str,
 	db: &str,

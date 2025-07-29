@@ -4,7 +4,6 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-use surrealdb::sql::RecordIdKeyLit;
 use surrealdb_core::val::RecordIdKey;
 
 mod routines;

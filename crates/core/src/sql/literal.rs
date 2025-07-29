@@ -3,6 +3,8 @@ use std::fmt;
 use crate::sql::fmt::Fmt;
 use crate::sql::{Closure, Expr, RecordIdLit};
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Strand, Uuid};
+//use async_graphql::dynamic::Object;
+use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
 
 #[derive(Clone, Debug)]
@@ -120,9 +122,7 @@ impl From<Literal> for crate::expr::Literal {
 			Literal::Array(exprs) => {
 				crate::expr::Literal::Array(exprs.into_iter().map(From::from).collect())
 			}
-			Literal::Object(items) => {
-				crate::expr::Literal::Object(items.into_iter().map(From::from).collect())
-			}
+			Literal::Object(items) => convert_geometry(items),
 			Literal::Geometry(geometry) => crate::expr::Literal::Geometry(geometry),
 			Literal::File(file) => crate::expr::Literal::File(file),
 			Literal::Bytes(bytes) => crate::expr::Literal::Bytes(bytes),
@@ -161,6 +161,165 @@ impl From<crate::expr::Literal> for Literal {
 			crate::expr::Literal::Closure(closure) => Literal::Closure(Box::new((*closure).into())),
 		}
 	}
+}
+
+/// A hack to convert objects to geometries like they previously would.
+/// If it fails to convert to geometry it just returns an object like previous behaviour>
+///
+/// The behaviour around geometries needs to be improved but until then this is her to ensure they
+/// still work like they previously would.
+fn convert_geometry(map: Vec<ObjectEntry>) -> crate::expr::Literal {
+	if let Some(geom) = collect_geometry(&map) {
+		crate::expr::Literal::Geometry(geom)
+	} else {
+		crate::expr::Literal::Object(map.into_iter().map(From::from).collect())
+	}
+}
+
+fn collect_geometry(map: &[ObjectEntry]) -> Option<Geometry> {
+	if map.len() != 2 {
+		return None;
+	}
+
+	let Some(ty_idx) = map.iter().position(|x| x.key == "type") else {
+		return None;
+	};
+
+	let other = 1 ^ ty_idx;
+
+	let Expr::Literal(Literal::Strand(ty)) = &map[ty_idx].value else {
+		return None;
+	};
+
+	match ty.as_str() {
+		"Point" => {
+			let other = &map[other];
+			if other.key != "coordinates" {
+				return None;
+			}
+			let geom = collect_point(&other.value)?;
+			Some(Geometry::Point(geom))
+		}
+		"LineString" => {
+			let other = &map[other];
+			if other.key != "coordinates" {
+				return None;
+			}
+
+			let geom = collect_array(&other.value, collect_point)?;
+
+			Some(Geometry::Line(LineString::from(geom)))
+		}
+		"Polygon" => {
+			let other = &map[other];
+			if other.key != "coordinates" {
+				return None;
+			}
+			let geom = collect_polygon(&other.value)?;
+
+			Some(Geometry::Polygon(geom))
+		}
+		"MultiPoint" => {
+			let other = &map[other];
+			if other.key != "coordinates" {
+				return None;
+			}
+
+			let geom = collect_array(&other.value, collect_point)?;
+
+			Some(Geometry::MultiPoint(MultiPoint::new(geom)))
+		}
+		"MultiLineString" => {
+			let other = &map[other];
+			if other.key != "coordinates" {
+				return None;
+			}
+
+			let geom = collect_array(&other.value, |x| {
+				collect_array(x, collect_point).map(LineString::from)
+			})?;
+
+			Some(Geometry::MultiLine(MultiLineString::new(geom)))
+		}
+		"MultiPolygon" => {
+			let other = &map[other];
+			if other.key != "coordinates" {
+				return None;
+			}
+
+			let geom = collect_array(&other.value, collect_polygon)?;
+
+			Some(Geometry::MultiPolygon(MultiPolygon::new(geom)))
+		}
+		"GeometryCollection" => {
+			let other = &map[other];
+			if other.key != "geometries" {
+				return None;
+			}
+
+			let geom = collect_array(&other.value, |x| {
+				let Expr::Literal(Literal::Object(x)) = x else {
+					return None;
+				};
+				collect_geometry(x)
+			})?;
+
+			Some(Geometry::Collection(geom))
+		}
+		_ => None,
+	}
+}
+
+fn collect_polygon(expr: &Expr) -> Option<Polygon<f64>> {
+	let Expr::Literal(Literal::Array(x)) = expr else {
+		return None;
+	};
+
+	if x.is_empty() {
+		return None;
+	}
+
+	let first = LineString::from(collect_array(&x[0], collect_point)?);
+	let mut res = Vec::new();
+	for x in &x[1..] {
+		res.push(LineString::from(collect_array(x, collect_point)?))
+	}
+
+	Some(Polygon::new(first, res))
+}
+
+fn collect_point(expr: &Expr) -> Option<Point<f64>> {
+	let Expr::Literal(Literal::Array(array)) = expr else {
+		return None;
+	};
+
+	if array.len() != 2 {
+		return None;
+	};
+
+	let x = collect_number(&array[0])?;
+	let y = collect_number(&array[1])?;
+
+	Some(Point::new(x, y))
+}
+
+fn collect_number(expr: &Expr) -> Option<f64> {
+	let Expr::Literal(l) = expr else {
+		return None;
+	};
+	match l {
+		Literal::Integer(x) => Some(*x as f64),
+		Literal::Float(f) => Some(*f),
+		Literal::Decimal(_) => None,
+		_ => None,
+	}
+}
+
+fn collect_array<R, F: Fn(&Expr) -> Option<R>>(expr: &Expr, f: F) -> Option<Vec<R>> {
+	let Expr::Literal(Literal::Array(x)) = expr else {
+		return None;
+	};
+	x.iter().map(f).collect()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

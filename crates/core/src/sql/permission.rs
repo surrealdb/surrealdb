@@ -2,7 +2,6 @@ use crate::sql::Expr;
 use crate::sql::fmt::{is_pretty, pretty_indent};
 
 use std::fmt::{self, Display, Formatter, Write};
-use std::str;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -123,31 +122,6 @@ impl From<crate::expr::Permissions> for Permissions {
 			update: v.update.into(),
 			delete: v.delete.into(),
 		}
-	}
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum PermissionKind {
-	Select,
-	Create,
-	Update,
-	Delete,
-}
-
-impl PermissionKind {
-	fn as_str(&self) -> &str {
-		match self {
-			PermissionKind::Select => "select",
-			PermissionKind::Create => "create",
-			PermissionKind::Update => "update",
-			PermissionKind::Delete => "delete",
-		}
-	}
-}
-
-impl Display for PermissionKind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		f.write_str(self.as_str())
 	}
 }
 

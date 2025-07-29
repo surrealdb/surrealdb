@@ -848,8 +848,8 @@ pub trait RpcProtocolV1: RpcContext {
 		let expr = Expr::Relate(Box::new(RelateStatement {
 			only,
 			from: from.into_literal().into(),
-			kind: value_to_table(kind),
-			with: with.into_literal().into(),
+			through: value_to_table(kind),
+			to: with.into_literal().into(),
 			data,
 			output: Some(Output::After),
 			uniq: false,

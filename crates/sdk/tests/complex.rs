@@ -8,6 +8,7 @@ use surrealdb::err::Error;
 use surrealdb_core::syn;
 use surrealdb_core::val::Value;
 
+/* Removed because of <future> removal, should be reintroduced after COMPUTED is added.
 #[test]
 fn self_referential_field() -> Result<()> {
 	// Ensure a good stack size for tests
@@ -122,6 +123,7 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
 		Ok(())
 	})
 }
+*/
 
 #[test]
 fn ok_graph_traversal_depth() -> Result<()> {

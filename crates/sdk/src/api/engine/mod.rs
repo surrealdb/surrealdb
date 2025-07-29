@@ -29,8 +29,6 @@ use wasmtimer::std::Instant;
 #[cfg(target_family = "wasm")]
 use wasmtimer::tokio::Interval;
 
-use crate::Value;
-
 use super::opt::Resource;
 
 // used in http and all local engines.

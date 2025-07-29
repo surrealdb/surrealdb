@@ -64,12 +64,6 @@ impl DefineFieldStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Validate reference options
 		self.validate_reference_options(ctx)?;
-		// Correct reference type
-		let kind = if let Some(kind) = self.get_reference_kind(ctx, opt).await? {
-			Some(kind)
-		} else {
-			self.field_kind.clone()
-		};
 
 		// Get the NS and DB
 		let (ns, db) = opt.ns_db()?;
@@ -108,7 +102,6 @@ impl DefineFieldStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				//
 				kind: DefineKind::Default,
-				field_kind: kind,
 				..self.clone()
 			})?,
 			None,
@@ -345,6 +338,7 @@ impl DefineFieldStatement {
 	}
 
 	/// Get the correct reference type if needed.
+	/*
 	pub(crate) async fn get_reference_kind(
 		&self,
 		ctx: &Context,
@@ -384,7 +378,7 @@ impl DefineFieldStatement {
 		}
 
 		Ok(None)
-	}
+	}*/
 
 	pub(crate) async fn disallow_mismatched_types(
 		&self,
@@ -433,8 +427,8 @@ impl Display for DefineFieldStatement {
 		}
 		match self.default {
 			DefineDefault::None => {}
-			DefineDefault::Always(ref expr) => writeln!(f, " DEFAULT ALWAYS {expr}")?,
-			DefineDefault::Set(ref expr) => writeln!(f, " DEFAULT {expr}")?,
+			DefineDefault::Always(ref expr) => write!(f, " DEFAULT ALWAYS {expr}")?,
+			DefineDefault::Set(ref expr) => write!(f, " DEFAULT {expr}")?,
 		}
 		if self.readonly {
 			write!(f, " READONLY")?
@@ -475,7 +469,7 @@ impl InfoStructure for DefineFieldStatement {
 			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),
 			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
-			"default_always".to_string(), if matches!(&self.default, DefineDefault::Always(_) | DefineDefault::Set(_)) => Value::Bool(matches!(self.default,DefineDefault::Set(_))), // Only reported if DEFAULT is also enabled for this field
+			"default_always".to_string(), if matches!(&self.default, DefineDefault::Always(_) | DefineDefault::Set(_)) => Value::Bool(matches!(self.default,DefineDefault::Always(_))), // Only reported if DEFAULT is also enabled for this field
 			"default".to_string(), if let DefineDefault::Always(v) | DefineDefault::Set(v) = self.default => v.structure(),
 			"reference".to_string(), if let Some(v) = self.reference => v.structure(),
 			"readonly".to_string() => self.readonly.into(),

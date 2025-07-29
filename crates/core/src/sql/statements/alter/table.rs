@@ -1,7 +1,6 @@
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::{ChangeFeed, Ident, Kind, Permissions, TableType};
 use crate::val::Strand;
-use anyhow::Result;
 
 use std::fmt::{self, Display, Write};
 
@@ -17,16 +16,6 @@ pub struct AlterTableStatement {
 	pub changefeed: AlterKind<ChangeFeed>,
 	pub comment: AlterKind<Strand>,
 	pub kind: Option<TableType>,
-}
-
-impl AlterTableStatement {
-	fn convert_drop(
-		&mut self,
-		_revision: u16,
-		_value: Option<bool>,
-	) -> Result<(), revision::Error> {
-		Ok(())
-	}
 }
 
 impl Display for AlterTableStatement {

@@ -58,8 +58,6 @@ impl Model {
 		use crate::expr::FlowResultExt;
 		use crate::val::CoerceError;
 
-		// Ensure futures are run
-		let opt = &opt.new_with_futures(true);
 		// Get the full name of this model
 		let name = format!("ml::{}", self.name);
 		// Check this function is allowed

@@ -102,8 +102,16 @@ impl Idiom {
 		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0], &META[0]].contains(&&self.0[0])
 	}
 	/// Check if this Idiom is an specific field
-	pub(crate) fn is_field(&self, other: &[Part]) -> bool {
-		self.as_ref().eq(other)
+	pub(crate) fn is_field(&self, other: &str) -> bool {
+		if self.len() != 1 {
+			return false;
+		}
+
+		let Part::Field(ref x) = self.0[0] else {
+			return false;
+		};
+
+		x.as_str() == other
 	}
 	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {

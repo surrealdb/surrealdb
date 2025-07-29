@@ -4,9 +4,7 @@ use reblessive::Stk;
 
 use super::mac::unexpected;
 use crate::sql::operator::{BindingPower, NearestNeighbor};
-use crate::sql::{
-	AssignOperator, BinaryOperator, Expr, Ident, Literal, Part, PostfixOperator, PrefixOperator,
-};
+use crate::sql::{BinaryOperator, Expr, Ident, Literal, Part, PostfixOperator, PrefixOperator};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;
@@ -46,18 +44,6 @@ impl Parser<'_> {
 	/// Inherits how loose identifiers are parsed from it's caller.
 	pub(super) async fn parse_expr_inherit(&mut self, ctx: &mut Stk) -> ParseResult<Expr> {
 		self.pratt_parse_expr(ctx, BindingPower::Base).await
-	}
-
-	/// Parse a assigner operator.
-	pub(super) fn parse_assign_operator(&mut self) -> ParseResult<AssignOperator> {
-		let token = self.next();
-		match token.kind {
-			t!("=") => Ok(AssignOperator::Assign),
-			t!("+=") => Ok(AssignOperator::Add),
-			t!("-=") => Ok(AssignOperator::Subtract),
-			t!("+?=") => Ok(AssignOperator::Extend),
-			_ => unexpected!(self, token, "an assign operator"),
-		}
 	}
 
 	/// Returns the binding power of an infix operator.
@@ -151,21 +137,26 @@ impl Parser<'_> {
 
 	fn postfix_binding_power(&mut self, token: TokenKind) -> Option<BindingPower> {
 		match token {
-			t!(">") if self.peek_whitespace1().kind == t!("..") => Some(BindingPower::Range),
-			t!("..") => Some(BindingPower::Range),
-			t!("(") => Some(BindingPower::Call),
-			t!(".") => {
-				// match method call.
-				if !Self::kind_is_keyword_like(self.peek1().kind) {
+			t!(">") => {
+				if self.peek_whitespace1().kind != t!("..") {
 					return None;
 				}
 
-				let t!("(") = self.peek2().kind else {
+				let peek2 = self.peek_whitespace2().kind;
+				if peek2 == t!("=") || Self::kind_starts_expression(peek2) {
 					return None;
-				};
+				}
 
-				Some(BindingPower::Call)
+				Some(BindingPower::Range)
 			}
+			t!("..") => match self.peek_whitespace1().kind {
+				t!("=") => None,
+				x if Self::kind_starts_expression(x) => {
+					return None;
+				}
+				_ => Some(BindingPower::Range),
+			},
+			t!("(") => Some(BindingPower::Call),
 			_ => None,
 		}
 	}
@@ -374,6 +365,7 @@ impl Parser<'_> {
 			// TODO: change operator name?
 			t!("||") | t!("OR") => BinaryOperator::Or,
 			t!("&&") | t!("AND") => BinaryOperator::And,
+			t!("?:") => BinaryOperator::TenaryCondition,
 			t!("??") => BinaryOperator::NullCoalescing,
 			t!("==") => BinaryOperator::ExactEqual,
 			t!("!=") => BinaryOperator::NotEqual,

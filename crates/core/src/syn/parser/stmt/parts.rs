@@ -240,7 +240,7 @@ impl Parser<'_> {
 			}
 		}
 
-		if found {
+		if !found {
 			match kind {
 				MissingKind::Split => {
 					bail!(
@@ -413,7 +413,9 @@ impl Parser<'_> {
 		match next.kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
-			t!("WHERE") => Ok(Permission::Specific(self.parse_expr_field(stk).await?)),
+			t!("WHERE") => {
+				Ok(Permission::Specific(stk.run(|stk| self.parse_expr_field(stk)).await?))
+			}
 			_ => unexpected!(self, next, "'NONE', 'FULL', or 'WHERE'"),
 		}
 	}

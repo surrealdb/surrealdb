@@ -29,10 +29,6 @@ pub struct UpsertStatement {
 }
 
 impl UpsertStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn read_only(&self) -> bool {
-		false
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -45,10 +41,9 @@ impl UpsertStatement {
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
+
 		// Assign the statement
 		let stm = Statement::from(self);
-		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
 		// Get a query planner

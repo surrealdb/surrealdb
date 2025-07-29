@@ -7,6 +7,8 @@
 //! can be used in distributed mode by connecting to a distributed [TiKV](https://tikv.org)
 //! key-value store.
 
+// Temporary allow deprecated until the 3.0
+#![allow(deprecated)]
 #![deny(clippy::mem_forget)]
 
 #[macro_use]

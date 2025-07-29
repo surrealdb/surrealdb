@@ -32,8 +32,6 @@ impl OutputStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		// Ensure futures are processed
-		let opt = &opt.new_with_futures(true);
 		// Process the output value
 		let mut value = stk.run(|stk| self.what.compute(stk, ctx, opt, doc)).await?;
 		// Fetch any

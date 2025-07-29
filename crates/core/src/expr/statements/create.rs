@@ -46,11 +46,12 @@ impl CreateStatement {
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut i = Iterator::new();
+
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Propagate the version to the underlying datastore
-		let version = match &self.version {
-			Some(v) => Some(
+		let version = match self.version {
+			Some(ref v) => Some(
 				stk.run(|stk| v.compute(stk, ctx, opt, doc))
 					.await
 					.catch_return()?
@@ -59,8 +60,7 @@ impl CreateStatement {
 			),
 			_ => None,
 		};
-		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false).with_version(version);
+		let opt = &opt.clone().with_version(version);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(ctx)?;
 		// Get a query planner

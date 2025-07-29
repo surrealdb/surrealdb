@@ -24,8 +24,6 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
-		// Ensure futures are run
-		let opt = &opt.new_with_futures(true);
 		// Check if we can view the output
 		self.check_permissions_view(stk, ctx, opt, stm).await?;
 		// Process the desired output

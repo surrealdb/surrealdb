@@ -14,7 +14,7 @@ use surrealdb::iam::{Auth, Level, Role};
 use surrealdb::kvs::Datastore;
 use surrealdb_core::dbs::Response;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Number, Value, value};
+use surrealdb_core::val::{Number, Value};
 
 pub async fn new_ds() -> Result<Datastore> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())

@@ -147,9 +147,6 @@ impl Fields {
 		doc: &CursorDoc,
 		group: bool,
 	) -> Result<Value> {
-		// Ensure futures are run
-		let opt = &opt.new_with_futures(true);
-
 		// Process the desired output
 
 		// TODO: This makes it so that with selection `SELECT 1 as foo,*,bar` if `foo` is in the
@@ -312,14 +309,14 @@ impl Fields {
 											.await
 											.catch_return()?;
 
-										if self.is_single() {
-											out = res
+										if let Some(alias) = alias {
+											out.set(stk, ctx, opt, alias, res).await?;
 										} else {
-											// TODO: Alias is ignored here, figure out the right
-											// behaviour. Maybe make an alias result in sub fields?
-											// `select type::field("foo") as bar` resulting in `{
-											// bar: { foo: value }}`?
-											out.set(stk, ctx, opt, &idiom.0, res).await?;
+											if self.is_single() {
+												out = res
+											} else {
+												out.set(stk, ctx, opt, &idiom.0, res).await?;
+											}
 										}
 									}
 									_ => {

@@ -40,11 +40,14 @@ impl Block {
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
 		// Duplicate context
-		let ctx = MutableContext::new(ctx).freeze();
+		let mut ctx = Some(MutableContext::new(ctx).freeze());
 		// Loop over the statements
 		let mut res = Value::None;
 		for v in self.iter() {
-			res = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await?;
+			match v {
+				Expr::Let(x) => res = x.compute(stk, &mut ctx, opt, doc).await?,
+				v => res = stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?,
+			}
 		}
 		// Return nothing
 		Ok(res)

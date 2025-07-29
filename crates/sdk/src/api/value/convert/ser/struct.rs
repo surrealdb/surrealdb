@@ -97,6 +97,7 @@ mod test {
 	}
 
 	// These strings and the ones in the above implementation must be kept in sync.
+	#[test]
 	fn serde_struct_names_are_correct() {
 		assert_eq!("$surrealdb::private::Strand", val_to_serde_name(val::Strand::default()));
 		assert_eq!("$surrealdb::private::Range", val_to_serde_name(val::Range::unbounded()));

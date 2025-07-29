@@ -223,7 +223,6 @@ impl DbResponse {
 								(stats, Err(Error::Query(response.result.as_raw_string()).into())),
 							);
 						}
-						_ => unreachable!(),
 					}
 				}
 

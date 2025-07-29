@@ -40,7 +40,7 @@ impl Parser<'_> {
 		let output = self.try_parse_output(ctx).await?;
 
 		let version = if self.eat(t!("VERSION")) {
-			Some(self.parse_expr_field(ctx).await?)
+			Some(ctx.run(|ctx| self.parse_expr_field(ctx)).await?)
 		} else {
 			None
 		};
@@ -67,39 +67,16 @@ impl Parser<'_> {
 			return Ok(Data::SingleExpression(value));
 		}
 
-		// might still be a subquery `(select foo from ...`
 		self.pop_peek();
-		let before = self.peek().span;
-		let backup = self.table_as_field;
-		self.table_as_field = true;
-		let subquery = self.parse_inner_subquery(ctx, None).await?;
-		self.table_as_field = backup;
-		let subquery_span = before.covers(self.last_span());
+		// might still be a subquery `(select foo from ...`
+		let subquery = ctx.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut idioms = Vec::new();
-		let select_span = if !self.eat(t!(",")) {
-			// not a comma so it might be a single (a) VALUES (b) or a subquery
-			self.expect_closing_delimiter(t!(")"), token.span)?;
-			let select_span = token.span.covers(self.last_span());
-
-			if !self.eat(t!("VALUES")) {
-				// found a subquery
-				return Ok(Data::SingleExpression(subquery));
-			}
-
+		let select_span = if self.eat(t!(",")) {
 			// found an values expression, so subquery must be an idiom
 			let Expr::Idiom(idiom) = subquery else {
 				bail!("Invalid value, expected an idiom in INSERT VALUES statement.",
-					@subquery_span => "Here only idioms are allowed")
-			};
-
-			idioms.push(idiom);
-			select_span
-		} else {
-			// found an values expression, so subquery must be an idiom
-			let Expr::Idiom(idiom) = subquery else {
-				bail!("Invalid value, expected an idiom in INSERT VALUES statement.",
-					@subquery_span => "Here only idioms are allowed")
+					@token.span.covers(self.last_span()) => "Only idioms are allowed here")
 			};
 
 			idioms.push(idiom);
@@ -117,6 +94,24 @@ impl Parser<'_> {
 			expected!(self, t!("VALUES"));
 
 			token.span.covers(self.last_span())
+		} else {
+			// not a comma so it might be a single (a) VALUES (b) or a subquery
+			self.expect_closing_delimiter(t!(")"), token.span)?;
+			let select_span = token.span.covers(self.last_span());
+
+			if !self.eat(t!("VALUES")) {
+				// found a subquery
+				return Ok(Data::SingleExpression(subquery));
+			}
+
+			// found an values expression, so subquery must be an idiom
+			let Expr::Idiom(idiom) = subquery else {
+				bail!("Invalid value, expected an idiom in INSERT VALUES statement.",
+					@select_span => "Only idioms are allowed here")
+			};
+
+			idioms.push(idiom);
+			select_span
 		};
 
 		let mut insertions = Vec::new();
@@ -124,7 +119,7 @@ impl Parser<'_> {
 			let mut values = Vec::new();
 			let start = expected!(self, t!("(")).span;
 			loop {
-				values.push(self.parse_expr_field(ctx).await?);
+				values.push(ctx.run(|ctx| self.parse_expr_field(ctx)).await?);
 
 				if !self.eat(t!(",")) {
 					break;

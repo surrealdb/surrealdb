@@ -38,7 +38,7 @@ macro_rules! assert_delta {
 #[tokio::test]
 async fn error_on_invalid_function() -> Result<()> {
 	let dbs = new_ds().await?;
-	let mut query = sql::Ast {
+	let query = sql::Ast {
 		expressions: vec![sql::TopLevelExpr::Expr(Expr::FunctionCall(Box::new(FunctionCall {
 			receiver: sql::Function::Normal("this is an invalid function name".to_string()),
 			arguments: Vec::new(),

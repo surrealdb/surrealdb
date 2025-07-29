@@ -43,6 +43,7 @@ impl fmt::Display for PrefixOperator {
 pub enum PostfixOperator {
 	Range,
 	RangeSkip,
+	/// Not used as of yet but will be once the idiom is properly restructured.
 	MethodCall(Ident, Vec<Expr>),
 	Call(Vec<Expr>),
 }
@@ -95,6 +96,8 @@ pub enum BinaryOperator {
 	And,
 	/// `??`
 	NullCoalescing,
+	/// `?:`
+	TenaryCondition,
 
 	/// `<`
 	LessThan,
@@ -180,6 +183,7 @@ impl fmt::Display for BinaryOperator {
 			Self::Or => write!(f, "OR"),
 			Self::And => write!(f, "AND"),
 			Self::NullCoalescing => write!(f, "??"),
+			Self::TenaryCondition => write!(f, "?:"),
 			Self::Add => write!(f, "+"),
 			Self::Subtract => write!(f, "-"),
 			Self::Multiply => write!(f, "*"),
@@ -311,7 +315,9 @@ impl BindingPower {
 
 			BinaryOperator::Power => BindingPower::Power,
 
-			BinaryOperator::NullCoalescing => BindingPower::Nullish,
+			BinaryOperator::NullCoalescing | BinaryOperator::TenaryCondition => {
+				BindingPower::Nullish
+			}
 
 			BinaryOperator::Range
 			| BinaryOperator::RangeInclusive

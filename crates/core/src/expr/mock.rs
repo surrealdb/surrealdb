@@ -6,37 +6,33 @@ use std::fmt;
 
 pub struct IntoIter {
 	model: Mock,
-	index: u64,
 }
 
 impl Iterator for IntoIter {
 	type Item = RecordId;
 	fn next(&mut self) -> Option<RecordId> {
-		match &self.model {
-			Mock::Count(tb, c) => {
-				if self.index < *c {
-					self.index += 1;
+		match self.model {
+			Mock::Count(ref tb, ref mut c) => {
+				if *c == 0 {
+					None
+				} else {
+					*c -= 1;
 					Some(RecordId {
 						table: tb.to_string(),
 						key: RecordIdKey::rand(),
 					})
-				} else {
-					None
 				}
 			}
-			Mock::Range(tb, b, e) => {
-				if self.index == 0 {
-					self.index = *b - 1;
+			Mock::Range(ref tb, ref mut b, e) => {
+				if *b >= e {
+					return None;
 				}
-				if self.index < *e {
-					self.index += 1;
-					Some(RecordId {
-						table: tb.to_string(),
-						key: RecordIdKey::from(self.index as i64),
-					})
-				} else {
-					None
-				}
+				let idx = *b;
+				*b += 1;
+				Some(RecordId {
+					table: tb.to_string(),
+					key: RecordIdKey::from(idx as i64),
+				})
 			}
 		}
 	}
@@ -57,7 +53,6 @@ impl IntoIterator for Mock {
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {
 			model: self,
-			index: 0,
 		}
 	}
 }

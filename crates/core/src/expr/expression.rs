@@ -1,4 +1,4 @@
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -66,13 +66,13 @@ pub enum Expr {
 	Select(Box<SelectStatement>),
 	Create(Box<CreateStatement>),
 	Update(Box<UpdateStatement>),
+	Upsert(Box<UpsertStatement>),
 	Delete(Box<DeleteStatement>),
 	Relate(Box<RelateStatement>),
 	Insert(Box<InsertStatement>),
 	Define(Box<DefineStatement>),
 	Remove(Box<RemoveStatement>),
 	Rebuild(Box<RebuildStatement>),
-	Upsert(Box<UpsertStatement>),
 	Alter(Box<AlterStatement>),
 	Info(Box<InfoStatement>),
 	Foreach(Box<ForeachStatement>),
@@ -116,7 +116,7 @@ impl Expr {
 			Expr::Select(s) => s.read_only(),
 			Expr::Let(s) => s.read_only(),
 			Expr::Foreach(s) => s.read_only(),
-			Expr::Closure(s) => s.read_only(),
+			Expr::Closure(_) => true,
 			Expr::Create(_)
 			| Expr::Update(_)
 			| Expr::Delete(_)
@@ -130,10 +130,7 @@ impl Expr {
 		}
 	}
 
-	/// Checks whether all expression parts are static values
-	///
-	/// `static value` doesn't seem to have a good definition, it seems to be whether a value can
-	/// be computed without touching the KV but it is not entirely consistant there.
+	/// Checks if a expression is 'pure' i.e. does not rely on the environment.
 	pub(crate) fn is_static(&self) -> bool {
 		match self {
 			Expr::Literal(literal) => literal.is_static(),
@@ -151,12 +148,18 @@ impl Expr {
 				right,
 				..
 			} => left.is_static() && right.is_static(),
+			Expr::FunctionCall(x) => {
+				// This is not correct as functions like http::get are not 'pure' but this is
+				// replicating previous behavior.
+				//
+				// TODO: Fix this discrepency and weird static/non-static behavior.
+				x.arguments.iter().all(|x| x.is_static())
+			}
 			Expr::Param(_)
 			| Expr::Idiom(_)
 			| Expr::Table(_)
 			| Expr::Mock(_)
 			| Expr::Block(_)
-			| Expr::FunctionCall(_)
 			| Expr::Closure(_)
 			| Expr::Break
 			| Expr::Continue
@@ -194,6 +197,23 @@ impl Expr {
 			},
 			x => Idiom::field(Ident::new(x.to_string()).unwrap()),
 		}
+	}
+
+	/// Updates the `"parent"` doc field for statements with a meaning full document.
+	async fn update_parent_doc<F, R>(ctx: &Context, doc: Option<&CursorDoc>, f: F) -> R
+	where
+		F: AsyncFnOnce(&Context, Option<&CursorDoc>) -> R,
+	{
+		let mut ctx_store = None;
+		let ctx = if let Some(doc) = doc {
+			let mut new_ctx = MutableContext::new(ctx);
+			new_ctx.add_value("parent", doc.doc.as_ref().clone().into());
+			ctx_store.insert(new_ctx.freeze())
+		} else {
+			ctx
+		};
+
+		f(ctx, doc).await
 	}
 
 	/// Process this type returning a computed simple Value
@@ -247,45 +267,86 @@ impl Expr {
 			}
 			Expr::IfElse(ifelse_statement) => ifelse_statement.compute(stk, ctx, &opt, doc).await,
 			Expr::Select(select_statement) => {
-				select_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					select_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Create(create_statement) => {
-				create_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					create_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Update(update_statement) => {
-				update_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					update_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Delete(delete_statement) => {
-				delete_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					delete_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Relate(relate_statement) => {
-				relate_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					relate_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Insert(insert_statement) => {
-				insert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					insert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Define(define_statement) => {
-				define_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					define_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Remove(remove_statement) => {
-				remove_statement.compute(ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					remove_statement.compute(ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Rebuild(rebuild_statement) => {
-				rebuild_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					rebuild_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Upsert(upsert_statement) => {
-				upsert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					upsert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Alter(alter_statement) => {
-				alter_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					alter_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Info(info_statement) => {
-				info_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
+					info_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
+				})
+				.await
 			}
 			Expr::Foreach(foreach_statement) => {
 				foreach_statement.compute(stk, ctx, &opt, doc).await
 			}
-			Expr::Let(set_statement) => set_statement.compute(stk, ctx, &opt, doc).await,
+			Expr::Let(_) => {
+				//TODO: This error needs to be improved or it needs to be rejected in the parser.
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
+					"Set statement outside of block",
+				))));
+			}
 			Expr::Sleep(sleep_statement) => {
 				sleep_statement.compute(ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
@@ -433,7 +494,7 @@ impl Expr {
 				&left,
 				&stk.run(|stk| right.compute(stk, ctx, opt, doc)).await?,
 			),
-			BinaryOperator::Or => {
+			BinaryOperator::Or | BinaryOperator::TenaryCondition => {
 				if left.is_truthy() {
 					return Ok(left);
 				}
@@ -609,7 +670,7 @@ impl fmt::Display for Expr {
 			Expr::Closure(closure) => write!(f, "{closure}"),
 			Expr::Break => write!(f, "BREAK"),
 			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => write!(f, "RETURN {x}"),
+			Expr::Return(x) => write!(f, "{x}"),
 			Expr::Throw(expr) => write!(f, "THROW {expr}"),
 			Expr::IfElse(s) => write!(f, "{s}"),
 			Expr::Select(s) => write!(f, "{s}"),

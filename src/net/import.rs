@@ -3,7 +3,7 @@ use super::error::ResponseError;
 use super::headers::Accept;
 use crate::cnf::HTTP_MAX_IMPORT_BODY_SIZE;
 use crate::net::error::Error as NetError;
-use crate::net::output::{self, Output};
+use crate::net::output::Output;
 use axum::extract::{DefaultBodyLimit, Request};
 use axum::response::IntoResponse;
 use axum::routing::post;

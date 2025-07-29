@@ -5,7 +5,6 @@ use super::output::Output;
 use crate::cnf::HTTP_MAX_KEY_BODY_SIZE;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
-use crate::net::output;
 use crate::net::params::Params;
 use anyhow::Context as _;
 use axum::extract::{DefaultBodyLimit, Path};

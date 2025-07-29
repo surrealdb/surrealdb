@@ -149,10 +149,10 @@ use crate::api::conn::{Command, DbResponse, RequestData};
 use crate::api::err::Error;
 use crate::api::{Connect, Response as QueryResponse, Surreal};
 use crate::method::Stats;
-use crate::opt::{IntoEndpoint, Table};
+use crate::opt::IntoEndpoint;
 use async_channel::Sender;
 use indexmap::IndexMap;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem;
 use std::sync::Arc;
@@ -162,9 +162,9 @@ use surrealdb_core::expr::{
 	CreateStatement, Data, Expr, Fields, Function, Ident, InsertStatement, KillStatement, Literal,
 	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
+use surrealdb_core::iam;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::val::{self, Strand};
-use surrealdb_core::{iam, sql};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -1236,7 +1236,6 @@ async fn router(
 			key,
 			value,
 		} => {
-			let mut tmp_vars = vars.read().await.clone();
 			// Need to compute because certain keys might not be allowed to be set and those should
 			// be rejected by an error.
 			match value {

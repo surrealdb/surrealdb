@@ -206,18 +206,23 @@ impl Function {
 				// Get the number of function arguments
 				let max_args_len = val.args.len();
 				// Track the number of required arguments
-				let mut min_args_len = 0;
 				// Check for any final optional arguments
-				val.args.iter().rev().for_each(|(_, kind)| match kind {
-					Kind::Option(_) if min_args_len == 0 => {}
-					Kind::Any if min_args_len == 0 => {}
-					_ => min_args_len += 1,
-				});
+				let min_args_len =
+					val.args.iter().rev().map(|x| &x.1).fold(0, |acc, kind| match kind {
+						Kind::Option(_) | Kind::Any => {
+							if acc == 0 {
+								0
+							} else {
+								acc + 1
+							}
+						}
+						_ => acc + 1,
+					});
 				// Check the necessary arguments are passed
 				//TODO(planner): Move this check out of the call.
-				if (min_args_len..=max_args_len).contains(&args.len()) {
+				if !(min_args_len..=max_args_len).contains(&args.len()) {
 					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
-						name: format!("fn::{}", val.name),
+						name: format!("fn::{}", val.name.as_str()),
 						message: match (min_args_len, max_args_len) {
 							(1, 1) => String::from("The function expects 1 argument."),
 							(r, t) if r == t => format!("The function expects {r} arguments."),
@@ -322,8 +327,6 @@ impl FunctionCall {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		// Ensure futures are run
-		let opt = &opt.new_with_futures(true);
 		// Compute the function arguments
 		let args = stk
 			.scope(|scope| {

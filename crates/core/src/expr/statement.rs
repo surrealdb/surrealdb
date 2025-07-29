@@ -189,7 +189,6 @@ impl LogicalPlan {
 			Self::Upsert(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Value(v) => {
 				// Ensure futures are processed
-				let opt = &opt.new_with_futures(true);
 				// Process the output value
 				return v.compute(stk, ctx, opt, doc).await;
 			}
