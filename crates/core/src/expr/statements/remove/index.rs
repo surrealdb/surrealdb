@@ -49,19 +49,19 @@ impl RemoveIndexStatement {
 
 		// Delete the definition
 		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Remove the index data
 		let key = crate::key::index::all::new(ns, db, &self.what, &self.name);
-		txn.delp(key).await?;
+		txn.delp(&key).await?;
 		// Refresh the table cache for indexes
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&DefineTableStatement {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

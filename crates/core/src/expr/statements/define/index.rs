@@ -12,6 +12,7 @@ use crate::expr::{Base, Ident, Idioms, Index, Part, Strand, Value};
 #[cfg(target_family = "wasm")]
 use crate::expr::{Output, Values};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -38,6 +39,8 @@ pub struct DefineIndexStatement {
 	#[revision(start = 4)]
 	pub concurrently: bool,
 }
+
+impl_kv_value_revisioned!(DefineIndexStatement);
 
 impl DefineIndexStatement {
 	/// Process this type returning a computed simple Value
@@ -97,14 +100,14 @@ impl DefineIndexStatement {
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineIndexStatement {
+			&key,
+			&DefineIndexStatement {
 				// Don't persist the `IF NOT EXISTS`, `OVERWRITE` and `CONCURRENTLY` clause to schema
 				if_not_exists: false,
 				overwrite: false,
 				concurrently: false,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
@@ -112,11 +115,11 @@ impl DefineIndexStatement {
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&DefineTableStatement {
 				cache_indexes_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

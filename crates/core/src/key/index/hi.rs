@@ -1,11 +1,11 @@
 //! Stores Things of an HNSW index
 use crate::expr::Id;
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Hi<'a> {
+pub(crate) struct Hi<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -20,7 +20,10 @@ pub struct Hi<'a> {
 	_g: u8,
 	pub id: Id,
 }
-impl_key!(Hi<'a>);
+
+impl KVKey for Hi<'_> {
+	type ValueType = u64;
+}
 
 impl<'a> Hi<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: Id) -> Self {
@@ -44,21 +47,17 @@ impl<'a> Hi<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Hi::new("testns", "testdb", "testtb", "testix", Id::String("testid".to_string()));
-		let enc = Hi::encode(&val).unwrap();
+		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!hi\0\0\0\x01testid\0",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
-
-		let dec = Hi::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

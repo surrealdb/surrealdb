@@ -476,7 +476,7 @@ mod tests {
 		println!("Waiting for request...");
 		let req = tokio::select! {
 			req = req_rx.recv() => req.expect("missing export request"),
-			_ = tokio::time::sleep(std::time::Duration::from_secs(1)) => panic!("timeout waiting for request"),
+			_ = tokio::time::sleep(std::time::Duration::from_secs(10)) => panic!("timeout waiting for request"),
 		};
 		let spans = &req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans;
 

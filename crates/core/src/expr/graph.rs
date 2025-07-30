@@ -12,7 +12,7 @@ use crate::expr::order::{OldOrders, Order, OrderList, Ordering};
 use crate::expr::split::Splits;
 use crate::expr::start::Start;
 use crate::expr::table::Tables;
-use crate::kvs::KeyEncode;
+use crate::kvs::KVKey;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -244,7 +244,7 @@ impl GraphSubject {
 							id: v.to_owned(),
 						},
 					)
-					.encode(),
+					.encode_key(),
 					Bound::Excluded(v) => crate::key::graph::new(
 						ns,
 						db,
@@ -256,7 +256,7 @@ impl GraphSubject {
 							id: v.to_owned(),
 						},
 					)
-					.encode()
+					.encode_key()
 					.map(|mut v| {
 						v.push(0x00);
 						v
@@ -276,7 +276,7 @@ impl GraphSubject {
 							id: v.to_owned(),
 						},
 					)
-					.encode(),
+					.encode_key(),
 					Bound::Included(v) => crate::key::graph::new(
 						ns,
 						db,
@@ -288,7 +288,7 @@ impl GraphSubject {
 							id: v.to_owned(),
 						},
 					)
-					.encode()
+					.encode_key()
 					.map(|mut v| {
 						v.push(0x00);
 						v

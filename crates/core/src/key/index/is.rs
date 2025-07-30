@@ -21,7 +21,8 @@
 //! - `ix`: Index identifier
 //! - `nid`: Node UUID (16 bytes, compact serialized)
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+use crate::kvs::sequences::SequenceState;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -42,7 +43,10 @@ pub(crate) struct Is<'a> {
 	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
 }
-impl_key!(Is<'a>);
+
+impl KVKey for Is<'_> {
+	type ValueType = SequenceState;
+}
 
 impl Categorise for Is<'_> {
 	fn categorise(&self) -> Category {
@@ -72,10 +76,10 @@ impl<'a> Is<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Is::new(
 			"testns",
 			"testdb",
@@ -83,10 +87,7 @@ mod tests {
 			"testix",
 			Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
 		);
-		let enc = Is::encode(&val).unwrap();
+		let enc = Is::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!is\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f");
-
-		let dec = Is::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }
