@@ -13,58 +13,6 @@ fn check_nul(s: &str) -> Result<(), Error> {
 	}
 }
 
-fn try_object_to_geom(object: &Object) -> Option<Geometry> {
-	if object.len() != 2 {
-		return None;
-	}
-
-	let Some(Value::Strand(key)) = object.get("type") else {
-		return None;
-	};
-
-	match key.as_str() {
-		"Point" => {
-			object.get("coordinates").and_then(Geometry::array_to_point).map(Geometry::Point)
-		}
-		"LineString" => {
-			object.get("coordinates").and_then(Geometry::array_to_line).map(Geometry::Line)
-		}
-		"Polygon" => {
-			object.get("coordinates").and_then(Geometry::array_to_polygon).map(Geometry::Polygon)
-		}
-		"MultiPoint" => object
-			.get("coordinates")
-			.and_then(Geometry::array_to_multipoint)
-			.map(Geometry::MultiPoint),
-		"MultiLineString" => object
-			.get("coordinates")
-			.and_then(Geometry::array_to_multiline)
-			.map(Geometry::MultiLine),
-		"MultiPolygon" => object
-			.get("coordinates")
-			.and_then(Geometry::array_to_multipolygon)
-			.map(Geometry::MultiPolygon),
-		"GeometryCollection" => {
-			let Some(Value::Array(x)) = object.get("geometries") else {
-				return None;
-			};
-
-			let mut res = Vec::with_capacity(x.len());
-
-			for x in x.iter() {
-				let Value::Geometry(x) = x else {
-					return None;
-				};
-				res.push(x.clone());
-			}
-
-			Some(Geometry::Collection(res))
-		}
-
-		_ => None,
-	}
-}
-
 impl<'js> FromJs<'js> for Value {
 	fn from_js(ctx: &Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
 		match val.type_of() {
@@ -185,7 +133,7 @@ impl<'js> FromJs<'js> for Value {
 					x.insert(k, v);
 				}
 
-				if let Some(x) = try_object_to_geom(&x) {
+				if let Some(x) = Geometry::try_from_object(&x) {
 					return Ok(x.into());
 				}
 

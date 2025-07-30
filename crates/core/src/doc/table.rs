@@ -104,7 +104,9 @@ impl Document {
 		// Loop through all foreign table statements
 		for ft in fts.iter() {
 			// Get the table definition
-			let tb = ft.view.as_ref().unwrap();
+			let Some(tb) = ft.view.as_ref() else {
+				fail!("Table stored as view table did not have a view");
+			};
 			// Check if there is a GROUP BY clause
 			match &tb.group {
 				// There is a GROUP BY clause specified
@@ -168,7 +170,7 @@ impl Document {
 						}
 						// No WHERE clause is specified
 						None => {
-							if !targeted_force && act != Action::Create {
+							if !targeted_force && (act == Action::Delete || act == Action::Update) {
 								// Delete the old value in the table
 								let fdc = FieldDataContext {
 									ft,
@@ -187,7 +189,7 @@ impl Document {
 								};
 								self.data(stk, ctx, opt, fdc).await?;
 							}
-							if act != Action::Delete {
+							if act == Action::Create || act == Action::Update {
 								// Update the new value in the table
 								let fdc = FieldDataContext {
 									ft,
@@ -395,138 +397,149 @@ impl Document {
 				if idiom.is_id() {
 					continue;
 				}
-				// Process the field projection
-				match expr {
-					Expr::FunctionCall(f) if f.receiver.is_rolling() => match &f.receiver {
-						Function::Normal(x) if x == "count" => {
-							let val =
-								f.compute(stk, ctx, opt, Some(fdc.doc)).await.catch_return()?;
-							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
+
+				if let Expr::FunctionCall(f) = expr {
+					if let Function::Normal(name) = &f.receiver {
+						match name.as_str() {
+							"count" => {
+								let val = expr
+									.compute(stk, ctx, opt, Some(fdc.doc))
+									.await
+									.catch_return()?;
+								self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
+								continue;
+							}
+							"time::min" => {
+								let val = stk
+									.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
+									.await
+									.catch_return()?;
+								let val = match val {
+									val @ Value::Datetime(_) => val,
+									val => {
+										bail!(Error::InvalidAggregation {
+											name: name.to_string(),
+											table: fdc.ft.name.into_raw_string(),
+											message: format!(
+												"This function expects a datetime but found {val}"
+											),
+										})
+									}
+								};
+								self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
+								continue;
+							}
+							"time::max" => {
+								let val = stk
+									.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
+									.await
+									.catch_return()?;
+								let val = match val {
+									val @ Value::Datetime(_) => val,
+									val => {
+										bail!(Error::InvalidAggregation {
+											name: name.to_string(),
+											table: fdc.ft.name.into_raw_string(),
+											message: format!(
+												"This function expects a datetime but found {val}"
+											),
+										})
+									}
+								};
+								self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
+								continue;
+							}
+							"math::sum" => {
+								let val = stk
+									.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
+									.await
+									.catch_return()?;
+								let val = match val {
+									val @ Value::Number(_) => val,
+									val => {
+										bail!(Error::InvalidAggregation {
+											name: name.to_string(),
+											table: fdc.ft.name.into_raw_string(),
+											message: format!(
+												"This function expects a number but found {val}"
+											),
+										})
+									}
+								};
+								self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
+								continue;
+							}
+
+							"math::min" => {
+								let val = stk
+									.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
+									.await
+									.catch_return()?;
+								let val = match val {
+									val @ Value::Number(_) => val,
+									val => {
+										bail!(Error::InvalidAggregation {
+											name: name.to_string(),
+											table: fdc.ft.name.into_raw_string(),
+											message: format!(
+												"This function expects a number but found {val}"
+											),
+										})
+									}
+								};
+								self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
+								continue;
+							}
+							"math::max" => {
+								let val = stk
+									.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
+									.await
+									.catch_return()?;
+								let val = match val {
+									val @ Value::Number(_) => val,
+									val => {
+										bail!(Error::InvalidAggregation {
+											name: name.to_string(),
+											table: fdc.ft.name.into_raw_string(),
+											message: format!(
+												"This function expects a number but found {val}"
+											),
+										})
+									}
+								};
+								self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
+								continue;
+							}
+							"math::mean" => {
+								let val = stk
+									.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
+									.await
+									.catch_return()?;
+								let val = match val {
+									val @ Value::Number(_) => val.coerce_to::<Decimal>()?.into(),
+									val => {
+										bail!(Error::InvalidAggregation {
+											name: name.to_string(),
+											table: fdc.ft.name.into_raw_string(),
+											message: format!(
+												"This function expects a number but found {val}"
+											),
+										})
+									}
+								};
+								self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
+								continue;
+							}
+							_ => {}
 						}
-						Function::Normal(name) if name == "time::min" => {
-							let val = stk
-								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
-								.await
-								.catch_return()?;
-							let val = match val {
-								val @ Value::Datetime(_) => val,
-								val => {
-									bail!(Error::InvalidAggregation {
-										name: name.to_string(),
-										table: fdc.ft.name.into_raw_string(),
-										message: format!(
-											"This function expects a datetime but found {val}"
-										),
-									})
-								}
-							};
-							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
-						}
-						Function::Normal(name) if name == "time::max" => {
-							let val = stk
-								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
-								.await
-								.catch_return()?;
-							let val = match val {
-								val @ Value::Datetime(_) => val,
-								val => {
-									bail!(Error::InvalidAggregation {
-										name: name.to_string(),
-										table: fdc.ft.name.into_raw_string(),
-										message: format!(
-											"This function expects a datetime but found {val}"
-										),
-									})
-								}
-							};
-							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
-						}
-						Function::Normal(name) if name == "math::sum" => {
-							let val = stk
-								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
-								.await
-								.catch_return()?;
-							let val = match val {
-								val @ Value::Number(_) => val,
-								val => {
-									bail!(Error::InvalidAggregation {
-										name: name.to_string(),
-										table: fdc.ft.name.into_raw_string(),
-										message: format!(
-											"This function expects a number but found {val}"
-										),
-									})
-								}
-							};
-							self.chg(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
-						}
-						Function::Normal(name) if name == "math::min" => {
-							let val = stk
-								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
-								.await
-								.catch_return()?;
-							let val = match val {
-								val @ Value::Number(_) => val,
-								val => {
-									bail!(Error::InvalidAggregation {
-										name: name.to_string(),
-										table: fdc.ft.name.into_raw_string(),
-										message: format!(
-											"This function expects a number but found {val}"
-										),
-									})
-								}
-							};
-							self.min(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
-						}
-						Function::Normal(name) if name == "math::max" => {
-							let val = stk
-								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
-								.await
-								.catch_return()?;
-							let val = match val {
-								val @ Value::Number(_) => val,
-								val => {
-									bail!(Error::InvalidAggregation {
-										name: name.to_string(),
-										table: fdc.ft.name.into_raw_string(),
-										message: format!(
-											"This function expects a number but found {val}"
-										),
-									})
-								}
-							};
-							self.max(&mut set_ops, &mut del_ops, fdc, field, idiom, val)?;
-						}
-						Function::Normal(name) if name == "math::mean" => {
-							let val = stk
-								.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
-								.await
-								.catch_return()?;
-							let val = match val {
-								val @ Value::Number(_) => val.coerce_to::<Decimal>()?.into(),
-								val => {
-									bail!(Error::InvalidAggregation {
-										name: name.to_string(),
-										table: fdc.ft.name.into_raw_string(),
-										message: format!(
-											"This function expects a number but found {val}"
-										),
-									})
-								}
-							};
-							self.mean(&mut set_ops, &mut del_ops, &fdc.act, idiom, val)?;
-						}
-						f => fail!("Unexpected function {f:?} encountered"),
-					},
-					_ => {
-						let val = stk
-							.run(|stk| expr.compute(stk, ctx, opt, Some(fdc.doc)))
-							.await
-							.catch_return()?;
-						self.set(&mut set_ops, idiom, val)?;
 					}
 				}
+
+				let val = stk
+					.run(|stk| expr.compute(stk, ctx, opt, Some(fdc.doc)))
+					.await
+					.catch_return()?;
+				self.set(&mut set_ops, idiom, val)?;
 			}
 		}
 		Ok((set_ops, del_ops))
@@ -572,7 +585,7 @@ impl Document {
 					Expr::Binary {
 						left: Box::new(Expr::Idiom(key)),
 						op: BinaryOperator::Equal,
-						right: Box::new(Expr::Literal(Literal::Integer(1))),
+						right: Box::new(Expr::Literal(Literal::Integer(0))),
 					},
 				);
 			}

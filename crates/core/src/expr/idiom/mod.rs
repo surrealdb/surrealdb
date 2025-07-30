@@ -144,10 +144,14 @@ impl Idiom {
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Start(v)) => {
-				stk.run(|stk| v.compute(stk, ctx, opt, doc))
+				let res = stk
+					.run(|stk| v.compute(stk, ctx, opt, doc))
 					.await?
 					.get(stk, ctx, opt, doc, self.as_ref().next())
-					.await
+					.await;
+				dbg!(self);
+				dbg!(&res);
+				res
 			}
 			// Otherwise use the current document
 			_ => match doc {

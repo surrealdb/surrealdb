@@ -954,7 +954,7 @@ async fn permissions_checks_remove_event() {
 	let check_results = [
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec![
-			"{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
+			"{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
 		],
 	];
 

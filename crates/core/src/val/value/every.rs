@@ -65,7 +65,8 @@ impl Value {
 				match behavior {
 					// Let's log all individual array items
 					ArrayBehaviour::Full => {
-						for (i, v) in v.iter().enumerate() {
+						// For some reason this is in reverse order.
+						for (i, v) in v.iter().enumerate().rev() {
 							accum.push(Part::Value(Expr::Literal(Literal::Integer(i as i64))));
 							v._every(steps, behavior, accum, build);
 							accum.pop();
@@ -186,6 +187,13 @@ mod tests {
 		let val = syn::value(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
 		).unwrap();
+
+		let val =
+			val.every(Some(&Idiom::from(syn::idiom("test").unwrap())), true, ArrayBehaviour::Full);
+		for v in val.iter() {
+			println!("{}", v);
+		}
+
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test").unwrap().into(),
 			syn::idiom("test.something").unwrap().into(),
@@ -200,10 +208,7 @@ mod tests {
 			syn::idiom("test.something[0].tags[1]").unwrap().into(),
 			syn::idiom("test.something[0].tags[0]").unwrap().into(),
 		];
-		assert_eq!(
-			res,
-			val.every(Some(&Idiom::from(syn::idiom("test").unwrap())), true, ArrayBehaviour::Full)
-		);
+		assert_eq!(res, val,);
 	}
 
 	#[test]

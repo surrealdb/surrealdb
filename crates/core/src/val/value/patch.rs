@@ -7,6 +7,7 @@ use anyhow::{Result, ensure};
 
 impl Value {
 	pub(crate) fn patch(&mut self, ops: Value) -> Result<()> {
+		let mut this = self.clone();
 		// Create a new object for testing and patching
 		// Loop over the patch operations and apply them
 		for operation in Operation::value_to_operations(ops)
@@ -17,47 +18,58 @@ impl Value {
 			match operation {
 				// Add a value
 				Operation::Add {
-					mut path,
+					path,
 					value,
 				} => {
 					// Split the last path part from the path
-					if let Some(last) = path.pop() {
-						let path = path
-							.into_iter()
-							.map(|x| Part::Field(Ident::new(x).unwrap()))
-							.collect::<Vec<_>>();
-
+					if let Some((last, left)) = path.split_last() {
 						if let Ok(x) = last.parse::<usize>() {
+							let path = left
+								.iter()
+								.map(|x| Part::Field(Ident::new(x.clone()).unwrap()))
+								.collect::<Vec<_>>();
+
 							// TODO: Fix behavior on overload.
-							match self.pick(&path) {
+							match this.pick(&path) {
 								Value::Array(mut v) => {
 									if v.len() > x {
 										v.insert(x, value);
-										self.put(&path, Value::Array(v));
+										this.put(&path, Value::Array(v));
 									} else {
 										v.push(value);
-										self.put(&path, Value::Array(v));
+										this.put(&path, Value::Array(v));
 									}
 								}
-								_ => self.put(&path, value),
+								_ => this.put(&path, value),
 							}
-						} else if last == "-" {
-							match self.pick(&path) {
+							continue;
+						}
+
+						if last == "-" {
+							let path = left
+								.iter()
+								.map(|x| Part::Field(Ident::new(x.clone()).unwrap()))
+								.collect::<Vec<_>>();
+
+							// TODO: Fix behavior on overload.
+							match this.pick(&path) {
 								Value::Array(mut v) => {
 									v.push(value);
-									self.put(&path, Value::Array(v));
+									this.put(&path, Value::Array(v));
 								}
-								_ => self.put(&path, value),
+								_ => this.put(&path, value),
 							}
-						} else {
-							match self.pick(&path) {
-								Value::Array(_) => self.inc(&path, value),
-								_ => self.put(&path, value),
-							}
+							continue;
 						}
-					} else {
-						// no path
-						*self = value
+					}
+
+					let path = path
+						.into_iter()
+						.map(|x| Part::Field(Ident::new(x).unwrap()))
+						.collect::<Vec<_>>();
+					match this.pick(&path) {
+						Value::Array(_) => this.inc(&path, value),
+						_ => this.put(&path, value),
 					}
 				}
 				// Remove a value at the specified path
@@ -68,7 +80,7 @@ impl Value {
 						.into_iter()
 						.map(|x| Part::Field(Ident::new(x).unwrap()))
 						.collect::<Vec<_>>();
-					self.cut(&path)
+					this.cut(&path);
 				}
 				// Replace a value at the specified path
 				Operation::Replace {
@@ -79,7 +91,7 @@ impl Value {
 						.into_iter()
 						.map(|x| Part::Field(Ident::new(x).unwrap()))
 						.collect::<Vec<_>>();
-					self.put(&path, value)
+					this.put(&path, value)
 				}
 				// Modify a string at the specified path
 				Operation::Change {
@@ -91,7 +103,7 @@ impl Value {
 						.map(|x| Part::Field(Ident::new(x).unwrap()))
 						.collect::<Vec<_>>();
 					if let Value::Strand(p) = value {
-						if let Value::Strand(v) = self.pick(&path) {
+						if let Value::Strand(v) = this.pick(&path) {
 							let dmp = dmp::new();
 							let pch = dmp.patch_from_text(p.into_string()).map_err(|e| {
 								Error::InvalidPatch(PatchError {
@@ -104,7 +116,7 @@ impl Value {
 								})
 							})?;
 							let txt = txt.into_iter().collect::<String>();
-							self.put(&path, Value::from(txt));
+							this.put(&path, Value::from(txt));
 						}
 					}
 				}
@@ -123,8 +135,8 @@ impl Value {
 						.map(|x| Part::Field(Ident::new(x).unwrap()))
 						.collect::<Vec<_>>();
 
-					let val = self.pick(&from);
-					self.put(&path, val);
+					let val = this.pick(&from);
+					this.put(&path, val);
 				}
 				// Move a value from one field to another
 				Operation::Move {
@@ -140,9 +152,9 @@ impl Value {
 						.map(|x| Part::Field(Ident::new(x).unwrap()))
 						.collect::<Vec<_>>();
 
-					let val = self.pick(&from);
-					self.put(&path, val);
-					self.cut(&from);
+					let val = this.pick(&from);
+					this.put(&path, val);
+					this.cut(&from);
 				}
 				// Test whether a value matches another value
 				Operation::Test {
@@ -153,7 +165,7 @@ impl Value {
 						.into_iter()
 						.map(|x| Part::Field(Ident::new(x).unwrap()))
 						.collect::<Vec<_>>();
-					let val = self.pick(&path);
+					let val = this.pick(&path);
 					ensure!(
 						value == val,
 						Error::PatchTest {
@@ -164,6 +176,7 @@ impl Value {
 				}
 			}
 		}
+		*self = this;
 		// Everything ok
 		Ok(())
 	}

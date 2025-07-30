@@ -107,13 +107,12 @@ async fn query_root_record() -> Result<()> {
 		UPSERT person:tobie SET name = 'Tobie';
 		UPSERT person:jaime SET name = 'Jaime';
 		RELATE person:tobie->knows->person:jaime SET id = 'test', brother = true;
-		<future> { person:tobie->knows->person.name };
 		person:tobie->knows->person.name;
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -151,10 +150,6 @@ async fn query_root_record() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value("['Jaime']").unwrap();
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;

@@ -1,7 +1,8 @@
-use std::fmt;
+use std::fmt::{self, Display};
 
 use crate::expr;
 use crate::sql::Expr;
+use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::statements::{
 	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
 	ShowStatement, UseStatement,
@@ -18,6 +19,19 @@ impl Ast {
 		Ast {
 			expressions: vec![TopLevelExpr::Expr(expr)],
 		}
+	}
+}
+
+impl Display for Ast {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use std::fmt::Write;
+		write!(
+			Pretty::from(f),
+			"{}",
+			&Fmt::one_line_separated(
+				self.expressions.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};"))),
+			),
+		)
 	}
 }
 

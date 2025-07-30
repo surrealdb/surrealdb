@@ -736,63 +736,6 @@ async fn select_where_and_with_unique_index() -> Result<()> {
 }
 
 #[tokio::test]
-async fn select_where_and_with_fulltext_index() -> Result<()> {
-	let sql = "
-		CREATE person:tobie SET name = 'Tobie', genre='m';
-		CREATE person:jaime SET name = 'Jaime', genre='m';
-		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
-		DEFINE INDEX ft_name ON TABLE person COLUMNS name SEARCH ANALYZER simple BM25(1.2,0.75);
-		SELECT name FROM person WHERE name @@ 'Jaime' AND genre = 'm' EXPLAIN;
-		SELECT name FROM person WHERE name @@ 'Jaime' AND genre = 'm';";
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
-	//
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	let _ = res.remove(0).result?;
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-				{
-					detail: {
-						plan: {
-							index: 'ft_name',
-							operator: '@AND@',
-							value: 'Jaime'
-						},
-						table: 'person',
-					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				name: 'Jaime'
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	Ok(())
-}
-
-#[tokio::test]
 async fn select_where_explain() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie';

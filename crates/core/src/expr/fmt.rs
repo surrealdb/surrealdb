@@ -282,19 +282,17 @@ mod tests {
 
 	#[test]
 	fn pretty_query() {
-		let mut query = parse("SELECT * FROM {foo: [1, 2, 3]};").unwrap();
-		let stmt = query.expressions.pop().unwrap();
-		assert_eq!(format!("{stmt}"), "SELECT * FROM { foo: [1, 2, 3] };");
+		let query = parse("SELECT * FROM {foo: [1, 2, 3]};").unwrap();
+		assert_eq!(format!("{query}"), "SELECT * FROM { foo: [1, 2, 3] };");
 		assert_eq!(
-			format!("{:#}", stmt),
+			format!("{:#}", query),
 			"SELECT * FROM {\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n};"
 		);
 	}
 
 	#[test]
 	fn pretty_define_query() {
-		let mut query = parse("DEFINE TABLE test SCHEMAFULL PERMISSIONS FOR create, update, delete NONE FOR select WHERE public = true;").unwrap();
-		let query = query.expressions.pop().unwrap();
+		let query = parse("DEFINE TABLE test SCHEMAFULL PERMISSIONS FOR create, update, delete NONE FOR select WHERE public = true;").unwrap();
 		assert_eq!(
 			format!("{}", query),
 			"DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS FOR select WHERE public = true, FOR create, update, delete NONE;"

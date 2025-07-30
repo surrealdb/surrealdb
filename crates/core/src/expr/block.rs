@@ -59,7 +59,7 @@ impl Display for Block {
 		let mut f = Pretty::from(f);
 		match (self.len(), self.first()) {
 			(0, _) => f.write_str("{}"),
-			(1, Some(Expr::Literal(v))) => {
+			(1, Some(v)) => {
 				write!(f, "{{ {v} }}")
 			}
 			(l, _) => {

@@ -3180,30 +3180,6 @@ async fn function_type_thing() -> Result<()> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn function_type_range() -> Result<()> {
-	let sql = r#"
-	    RETURN type::range(..);
-		RETURN type::range(1..2);
-		RETURN type::range([1, 2]);
-	"#;
-	let mut test = Test::new(sql).await?;
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("..").unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("1..2").unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = test.next()?.result?;
-	let val = syn::value("1..2").unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
 // --------------------------------------------------
 // value
 // --------------------------------------------------

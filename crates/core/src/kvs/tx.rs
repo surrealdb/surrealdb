@@ -590,13 +590,13 @@ impl Transaction {
 
 	/// Retrieve all database definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn all_db(&self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>> {
-		let qey = cache::tx::Lookup::Dbs(ns);
+	pub async fn all_db(&self, db: &str) -> Result<Arc<[DefineDatabaseStatement]>> {
+		let qey = cache::tx::Lookup::Dbs(db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dbs(),
 			None => {
-				let beg = crate::key::namespace::db::prefix(ns)?;
-				let end = crate::key::namespace::db::suffix(ns)?;
+				let beg = crate::key::namespace::db::prefix(db)?;
+				let end = crate::key::namespace::db::suffix(db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
 				let entry = cache::tx::Entry::Dbs(val.clone());
@@ -1836,7 +1836,7 @@ impl Transaction {
 						}
 						// Next, dynamically define the database
 						let val = DefineDatabaseStatement {
-							name: unsafe { Ident::new_unchecked(ns.to_owned()) },
+							name: unsafe { Ident::new_unchecked(db.to_owned()) },
 							..Default::default()
 						};
 						let val = {

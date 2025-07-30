@@ -23,7 +23,7 @@ impl From<PrefixOperator> for crate::expr::PrefixOperator {
 		match value {
 			PrefixOperator::Not => crate::expr::PrefixOperator::Not,
 			PrefixOperator::Positive => crate::expr::PrefixOperator::Positive,
-			PrefixOperator::Negate => crate::expr::PrefixOperator::Negative,
+			PrefixOperator::Negate => crate::expr::PrefixOperator::Negate,
 			PrefixOperator::Range => crate::expr::PrefixOperator::Range,
 			PrefixOperator::RangeInclusive => crate::expr::PrefixOperator::RangeInclusive,
 			PrefixOperator::Cast(k) => crate::expr::PrefixOperator::Cast(k.into()),
@@ -36,7 +36,7 @@ impl From<crate::expr::PrefixOperator> for PrefixOperator {
 		match value {
 			crate::expr::PrefixOperator::Not => PrefixOperator::Not,
 			crate::expr::PrefixOperator::Positive => PrefixOperator::Positive,
-			crate::expr::PrefixOperator::Negative => PrefixOperator::Negate,
+			crate::expr::PrefixOperator::Negate => PrefixOperator::Negate,
 			crate::expr::PrefixOperator::Range => PrefixOperator::Range,
 			crate::expr::PrefixOperator::RangeInclusive => PrefixOperator::RangeInclusive,
 			crate::expr::PrefixOperator::Cast(k) => PrefixOperator::Cast(k.into()),
@@ -52,7 +52,7 @@ impl fmt::Display for PrefixOperator {
 			Self::Negate => write!(f, "-"),
 			Self::Range => write!(f, ".."),
 			Self::RangeInclusive => write!(f, "..="),
-			Self::Cast(kind) => write!(f, "<{kind}>"),
+			Self::Cast(kind) => write!(f, "<{kind}> "),
 		}
 	}
 }
@@ -220,7 +220,10 @@ impl From<MatchesOperator> for crate::expr::operator::MatchesOperator {
 	fn from(value: MatchesOperator) -> Self {
 		crate::expr::operator::MatchesOperator {
 			rf: value.rf,
-			operator: value.operator.map(From::from),
+			operator: value
+				.operator
+				.map(From::from)
+				.unwrap_or(crate::expr::operator::BooleanOperator::And),
 		}
 	}
 }
@@ -229,7 +232,7 @@ impl From<crate::expr::operator::MatchesOperator> for MatchesOperator {
 	fn from(value: crate::expr::operator::MatchesOperator) -> Self {
 		MatchesOperator {
 			rf: value.rf,
-			operator: value.operator.map(From::from),
+			operator: Some(value.operator.into()),
 		}
 	}
 }
@@ -574,6 +577,16 @@ impl BindingPower {
 		match op {
 			PostfixOperator::Range | PostfixOperator::RangeSkip => BindingPower::Range,
 			PostfixOperator::MethodCall(..) | PostfixOperator::Call(..) => BindingPower::Call,
+		}
+	}
+
+	pub fn for_prefix_operator(op: &PrefixOperator) -> Self {
+		match op {
+			PrefixOperator::Range | PrefixOperator::RangeInclusive => BindingPower::Range,
+			PrefixOperator::Not
+			| PrefixOperator::Positive
+			| PrefixOperator::Negate
+			| PrefixOperator::Cast(_) => BindingPower::Prefix,
 		}
 	}
 

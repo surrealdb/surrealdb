@@ -1,5 +1,5 @@
 use crate::expr::idiom::Idiom;
-use crate::expr::part::{Next, Part};
+use crate::expr::part::Part;
 use crate::val::Value;
 
 impl Value {
@@ -17,10 +17,8 @@ impl Value {
 	}
 
 	fn _each(&self, path: &[Part], accum: &mut Vec<Part>, build: &mut Vec<Idiom>) {
-		let Some(first) = path.first() else {
-			if !accum.is_empty() {
-				build.push(Idiom(accum.clone()))
-			}
+		let Some((first, rest)) = path.split_first() else {
+			build.push(Idiom(accum.clone()));
 			return;
 		};
 
@@ -32,7 +30,7 @@ impl Value {
 					if let Some(v) = v.get(&**f) {
 						// TODO: Null byte validity
 						accum.push(Part::Field(f.clone()));
-						v._each(path.next(), accum, build);
+						v._each(rest, accum, build);
 						accum.pop();
 					}
 				}
@@ -40,7 +38,7 @@ impl Value {
 					for (k, v) in v.iter() {
 						// TODO: Null byte validity
 						accum.push(Part::field(k.clone()).unwrap());
-						v._each(path.next(), accum, build);
+						v._each(rest, accum, build);
 						accum.pop();
 					}
 				}
@@ -51,7 +49,7 @@ impl Value {
 				Part::All => {
 					for (idx, v) in v.iter().enumerate() {
 						accum.push(Part::index_int(idx as i64));
-						v._each(path.next(), accum, build);
+						v._each(rest, accum, build);
 						accum.pop();
 					}
 				}
@@ -60,7 +58,7 @@ impl Value {
 						// NOTE: We previously did not add an index into the resulting path here.
 						// That seemed like an bug but it might not be.
 						accum.push(Part::index_int(0));
-						v[0]._each(path.next(), accum, build);
+						v[0]._each(rest, accum, build);
 						accum.pop();
 					}
 				}
@@ -70,7 +68,7 @@ impl Value {
 						// NOTE: We previously did not add an index into the resulting path here.
 						// That seemed like an bug but it might not be.
 						accum.push(Part::index_int(len as i64 - 1));
-						v[len]._each(path.next(), accum, build);
+						v[len]._each(rest, accum, build);
 						accum.pop();
 					}
 				}
@@ -80,13 +78,13 @@ impl Value {
 							// NOTE: We previously did not add an index into the resulting path here.
 							// That seemed like an bug but it might not be.
 							accum.push(x.clone());
-							v._each(path.next(), accum, build);
+							v._each(rest, accum, build);
 							accum.pop();
 						}
 					} else {
 						for (idx, v) in v.iter().enumerate() {
 							accum.push(Part::index_int(idx as i64));
-							v._each(path.next(), accum, build);
+							v._each(rest, accum, build);
 							accum.pop();
 						}
 					}

@@ -88,8 +88,9 @@ impl Claims {
 		// Add aud field if set
 		if let Some(aud) = self.aud {
 			match aud {
-				Audience::Single(v) => out
-					.insert("aud".to_string(), vec![Value::Strand(Strand::new(v).unwrap())].into()),
+				Audience::Single(v) => {
+					out.insert("aud".to_string(), Value::Strand(Strand::new(v).unwrap()))
+				}
 				Audience::Multiple(v) => out.insert(
 					"aud".to_string(),
 					v.into_iter()

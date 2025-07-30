@@ -1609,10 +1609,10 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let res = crate::syn::expr_with_capabilities(
-				&format!("{}()", name),
+			let res = dbg!(crate::syn::expr_with_capabilities(
+				dbg!(&format!("{}()", name)),
 				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
-			);
+			));
 
 			if let Ok(Expr::FunctionCall(call)) = res {
 				match call.receiver {

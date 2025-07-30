@@ -83,20 +83,6 @@ impl Function {
 	}
 	*/
 
-	/// Check if this function is a rolling function
-	pub fn is_rolling(&self) -> bool {
-		match self {
-			Self::Normal(f) if f == "count" => true,
-			Self::Normal(f) if f == "math::max" => true,
-			Self::Normal(f) if f == "math::mean" => true,
-			Self::Normal(f) if f == "math::min" => true,
-			Self::Normal(f) if f == "math::sum" => true,
-			Self::Normal(f) if f == "time::max" => true,
-			Self::Normal(f) if f == "time::min" => true,
-			_ => false,
-		}
-	}
-
 	/// Check if this function is a grouping function
 	pub fn is_aggregate(&self) -> bool {
 		match self {

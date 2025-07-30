@@ -282,7 +282,7 @@ impl Parser<'_> {
 					Expr::Let(Box::new(stmt))
 				})
 			}
-			t!("SLEEP") => {
+			t!("SLEEP") if self.peek1().kind != t!("(") => {
 				enter_query_recursion!(this = self => {
 					this.pop_peek();
 					let stmt = this.parse_sleep_stmt()?;

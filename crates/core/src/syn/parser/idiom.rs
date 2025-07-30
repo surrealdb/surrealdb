@@ -349,7 +349,7 @@ impl Parser<'_> {
 						if kind.eq_ignore_ascii_case("inclusive") {
 							inclusive = true
 						} else {
-							bail!("Unexpected option `{}` expected inclusive",kind, @self.last_span());
+							bail!("Unexpected option `{}` expected `inclusive`",kind, @self.last_span());
 						}
 					} else {
 						break;
@@ -366,7 +366,7 @@ impl Parser<'_> {
 						if kind.eq_ignore_ascii_case("inclusive") {
 							inclusive = true
 						} else {
-							bail!("Unexpected option `{}` expected inclusive",kind, @self.last_span());
+							bail!("Unexpected option `{}` expected `inclusive`",kind, @self.last_span());
 						}
 					} else {
 						break;
@@ -394,7 +394,7 @@ impl Parser<'_> {
 						if kind.eq_ignore_ascii_case("inclusive") {
 							inclusive = true
 						} else {
-							bail!("Unexpected option `{}` expected inclusive",kind, @self.last_span());
+							bail!("Unexpected option `{}` expected `inclusive`",kind, @self.last_span());
 						}
 					} else {
 						break;

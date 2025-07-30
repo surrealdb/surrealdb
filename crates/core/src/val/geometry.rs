@@ -174,8 +174,60 @@ impl Geometry {
 		obj.into()
 	}
 
+	pub fn try_from_object(object: &Object) -> Option<Geometry> {
+		if object.len() != 2 {
+			return None;
+		}
+
+		let Some(Value::Strand(key)) = object.get("type") else {
+			return None;
+		};
+
+		match key.as_str() {
+			"Point" => {
+				object.get("coordinates").and_then(Geometry::array_to_point).map(Geometry::Point)
+			}
+			"LineString" => {
+				object.get("coordinates").and_then(Geometry::array_to_line).map(Geometry::Line)
+			}
+			"Polygon" => object
+				.get("coordinates")
+				.and_then(Geometry::array_to_polygon)
+				.map(Geometry::Polygon),
+			"MultiPoint" => object
+				.get("coordinates")
+				.and_then(Geometry::array_to_multipoint)
+				.map(Geometry::MultiPoint),
+			"MultiLineString" => object
+				.get("coordinates")
+				.and_then(Geometry::array_to_multiline)
+				.map(Geometry::MultiLine),
+			"MultiPolygon" => object
+				.get("coordinates")
+				.and_then(Geometry::array_to_multipolygon)
+				.map(Geometry::MultiPolygon),
+			"GeometryCollection" => {
+				let Some(Value::Array(x)) = object.get("geometries") else {
+					return None;
+				};
+
+				let mut res = Vec::with_capacity(x.len());
+
+				for x in x.iter() {
+					let Value::Geometry(x) = x else {
+						return None;
+					};
+					res.push(x.clone());
+				}
+
+				Some(Geometry::Collection(res))
+			}
+
+			_ => None,
+		}
+	}
+
 	/// Converts a surreal value to a MultiPolygon if the array matches to a MultiPolygon.
-	#[allow(dead_code)]
 	pub(crate) fn array_to_multipolygon(v: &Value) -> Option<MultiPolygon<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -188,7 +240,6 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a MultiLine if the array matches to a MultiLine.
-	#[allow(dead_code)]
 	pub(crate) fn array_to_multiline(v: &Value) -> Option<MultiLineString<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -201,7 +252,6 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a MultiPoint if the array matches to a MultiPoint.
-	#[allow(dead_code)]
 	pub(crate) fn array_to_multipoint(v: &Value) -> Option<MultiPoint<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -214,7 +264,6 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a Polygon if the array matches to a Polygon.
-	#[allow(dead_code)]
 	pub(crate) fn array_to_polygon(v: &Value) -> Option<Polygon<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -231,7 +280,6 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a LineString if the array matches to a LineString.
-	#[allow(dead_code)]
 	pub(crate) fn array_to_line(v: &Value) -> Option<LineString<f64>> {
 		let mut res = Vec::new();
 		let Value::Array(v) = v else {
@@ -244,7 +292,6 @@ impl Geometry {
 	}
 
 	/// Converts a surreal value to a Point if the array matches to a point.
-	#[allow(dead_code)]
 	pub(crate) fn array_to_point(v: &Value) -> Option<Point<f64>> {
 		let Value::Array(v) = v else {
 			return None;

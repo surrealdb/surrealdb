@@ -22,9 +22,9 @@ impl Display for Block {
 		let mut f = Pretty::from(f);
 		match (self.0.len(), self.0.first()) {
 			(0, _) => f.write_str("{}"),
-			/*(1, Some(Entry::Value(v))) => {
+			(1, Some(v)) => {
 				write!(f, "{{ {v} }}")
-			}*/
+			}
 			(l, _) => {
 				f.write_char('{')?;
 				if l > 1 {

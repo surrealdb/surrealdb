@@ -13,7 +13,7 @@ use crate::syn::parser::mac::{expected, pop_glued};
 use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::{
-	self, Array, Duration, Number, Object, Range, RecordId, RecordIdKey, Strand, Value,
+	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Strand, Value,
 };
 
 trait ValueParseFunc {
@@ -62,7 +62,22 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_value_object::<SurrealQL>(stk, token.span).await.map(Value::Object)?
+				let object = self.parse_value_object::<SurrealQL>(stk, token.span).await?;
+				//HACK: This is an annoying hack to have geometries work.
+				//
+				// Geometries look exactly like objects and are a strict subsect of objects.
+				// However in code they are distinct and in surrealql the have different behavior.
+				//
+				// Geom functions don't work with objects and vice-versa.
+				//
+				// The previous parse automatically converted an object to geometry if it found an
+				// matching object. Now it no longer does that and relies on the 'planning' stage
+				// to convert it. But here we still need to do it in the parser.
+				if let Some(geom) = Geometry::try_from_object(&object) {
+					Value::Geometry(geom)
+				} else {
+					Value::Object(object)
+				}
 			}
 			t!("[") => {
 				self.pop_peek();
@@ -71,7 +86,7 @@ impl Parser<'_> {
 			t!("\"") | t!("'") => {
 				let strand: Strand = self.next_token_value()?;
 				if self.settings.legacy_strands {
-					self.reparse_json_legacy_strand(stk, strand).await?
+					self.reparse_json_legacy_strand(stk, strand).await
 				} else {
 					Value::Strand(strand)
 				}
@@ -146,6 +161,7 @@ impl Parser<'_> {
 				}
 			}
 			t!("..") => {
+				self.pop_peek();
 				let peek = self.peek_whitespace().kind;
 				if peek == t!("=") {
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
@@ -256,7 +272,7 @@ impl Parser<'_> {
 			t!("\"") | t!("'") => {
 				let strand: Strand = self.next_token_value()?;
 				if self.settings.legacy_strands {
-					self.reparse_json_legacy_strand(ctx, strand).await
+					Ok(self.reparse_json_legacy_strand(ctx, strand).await)
 				} else {
 					Ok(Value::Strand(strand))
 				}
@@ -283,13 +299,20 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn reparse_json_legacy_strand(
-		&mut self,
-		_stk: &mut Stk,
-		strand: Strand,
-	) -> ParseResult<Value> {
+	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: Strand) -> Value {
+		if let Ok(x) = Parser::new(strand.as_bytes()).parse_value_record_id(stk).await {
+			return Value::Thing(x);
+		}
+		if let Ok(x) = Parser::new(strand.as_bytes()).next_token_value() {
+			return Value::Datetime(x);
+		}
+		// TODO: Fix this, uuid's don't actually work since it expects a 'u"'
+		if let Ok(x) = Parser::new(strand.as_bytes()).next_token_value() {
+			return Value::Uuid(x);
+		}
+
 		//TODO: Fix record id and others
-		Ok(Value::Strand(strand))
+		Value::Strand(strand)
 	}
 
 	async fn parse_value_object<VP>(&mut self, ctx: &mut Stk, start: Span) -> ParseResult<Object>

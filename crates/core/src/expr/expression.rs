@@ -366,7 +366,7 @@ impl Expr {
 		match op {
 			PrefixOperator::Not => fnc::operate::not(res).map_err(ControlFlow::Err),
 			PrefixOperator::Positive => Ok(res),
-			PrefixOperator::Negative => fnc::operate::neg(res).map_err(ControlFlow::Err),
+			PrefixOperator::Negate => fnc::operate::neg(res).map_err(ControlFlow::Err),
 			PrefixOperator::Range => Ok(Value::Range(Box::new(Range {
 				start: Bound::Unbounded,
 				end: Bound::Excluded(res),
@@ -507,7 +507,7 @@ impl Expr {
 				return stk.run(|stk| right.compute(stk, ctx, opt, doc)).await;
 			}
 			BinaryOperator::NullCoalescing => {
-				if !left.is_null() {
+				if !left.is_nullish() {
 					return Ok(left);
 				}
 				return stk.run(|stk| right.compute(stk, ctx, opt, doc)).await;
@@ -631,7 +631,9 @@ impl fmt::Display for Expr {
 				op,
 				expr,
 			} => {
-				if BindingPower::for_expr(expr) < BindingPower::Prefix {
+				let expr_bp = BindingPower::for_expr(expr);
+				let op_bp = BindingPower::for_prefix_operator(op);
+				if expr_bp < op_bp || expr_bp == op_bp && matches!(expr_bp, BindingPower::Range) {
 					write!(f, "{op}({expr})")
 				} else {
 					write!(f, "{op}{expr}")
@@ -641,7 +643,9 @@ impl fmt::Display for Expr {
 				expr,
 				op,
 			} => {
-				if BindingPower::for_expr(expr) < BindingPower::for_postfix_operator(op) {
+				let expr_bp = BindingPower::for_expr(expr);
+				let op_bp = BindingPower::for_postfix_operator(op);
+				if expr_bp < op_bp || expr_bp == op_bp && matches!(expr_bp, BindingPower::Range) {
 					write!(f, "({expr}){op}")
 				} else {
 					write!(f, "{expr}{op}")
@@ -653,14 +657,34 @@ impl fmt::Display for Expr {
 				right,
 			} => {
 				let op_bp = BindingPower::for_binary_operator(op);
-				if BindingPower::for_expr(left) < op_bp {
+				let left_bp = BindingPower::for_expr(left);
+				let right_bp = BindingPower::for_expr(right);
+
+				if left_bp < op_bp
+					|| left_bp == right_bp
+						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
+				{
 					write!(f, "({left})")?;
 				} else {
 					write!(f, "{left}")?;
 				}
-				write!(f, " {op} ")?;
 
-				if BindingPower::for_expr(right) < op_bp {
+				if matches!(
+					op,
+					BinaryOperator::Range
+						| BinaryOperator::RangeSkip
+						| BinaryOperator::RangeInclusive
+						| BinaryOperator::RangeSkipInclusive
+				) {
+					write!(f, "{op}")?;
+				} else {
+					write!(f, " {op} ")?;
+				}
+
+				if right_bp < op_bp
+					|| left_bp == right_bp
+						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
+				{
 					write!(f, "({right})")
 				} else {
 					write!(f, "{right}")

@@ -63,9 +63,8 @@ impl Value {
 				for n in min_len..a.len() {
 					let mut path = path.clone();
 					path.push(n.to_string());
-					ops.push(Operation::Add {
+					ops.push(Operation::Remove {
 						path,
-						value: b[n].clone(),
 					})
 				}
 			}

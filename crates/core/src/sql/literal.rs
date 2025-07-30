@@ -66,15 +66,16 @@ impl Eq for Literal {}
 
 impl fmt::Display for Literal {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let mut f = Pretty::from(f);
 		match self {
-			Literal::None => "NONE".fmt(f),
-			Literal::Null => "NULL".fmt(f),
-			Literal::UnboundedRange => "..".fmt(f),
+			Literal::None => write!(f, "NONE"),
+			Literal::Null => write!(f, "NULL"),
+			Literal::UnboundedRange => write!(f, ".."),
 			Literal::Bool(x) => {
 				if *x {
-					"true".fmt(f)
+					write!(f, "true")
 				} else {
-					"false".fmt(f)
+					write!(f, "false")
 				}
 			}
 			Literal::Float(float) => {
@@ -84,14 +85,13 @@ impl fmt::Display for Literal {
 					write!(f, "{float}")
 				}
 			}
-			Literal::Integer(x) => x.fmt(f),
+			Literal::Integer(x) => write!(f, "{x}"),
 			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::Strand(strand) => strand.fmt(f),
-			Literal::Bytes(bytes) => bytes.fmt(f),
-			Literal::Regex(regex) => regex.fmt(f),
-			Literal::RecordId(record_id_lit) => record_id_lit.fmt(f),
+			Literal::Strand(strand) => write!(f, "{strand}"),
+			Literal::Bytes(bytes) => write!(f, "{bytes}"),
+			Literal::Regex(regex) => write!(f, "{regex}"),
+			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),
 			Literal::Array(exprs) => {
-				let mut f = Pretty::from(f);
 				f.write_char('[')?;
 				if !exprs.is_empty() {
 					let indent = pretty_indent();
@@ -101,7 +101,6 @@ impl fmt::Display for Literal {
 				f.write_char(']')
 			}
 			Literal::Object(items) => {
-				let mut f = Pretty::from(f);
 				if is_pretty() {
 					f.write_char('{')?;
 				} else {
@@ -125,12 +124,12 @@ impl fmt::Display for Literal {
 					f.write_str(" }")
 				}
 			}
-			Literal::Duration(duration) => duration.fmt(f),
-			Literal::Datetime(datetime) => datetime.fmt(f),
-			Literal::Uuid(uuid) => uuid.fmt(f),
-			Literal::Geometry(geometry) => geometry.fmt(f),
-			Literal::File(file) => file.fmt(f),
-			Literal::Closure(closure) => closure.fmt(f),
+			Literal::Duration(duration) => write!(f, "{duration}"),
+			Literal::Datetime(datetime) => write!(f, "{datetime}"),
+			Literal::Uuid(uuid) => write!(f, "{uuid}"),
+			Literal::Geometry(geometry) => write!(f, "{geometry}"),
+			Literal::File(file) => write!(f, "{file}"),
+			Literal::Closure(closure) => write!(f, "{closure}"),
 		}
 	}
 }

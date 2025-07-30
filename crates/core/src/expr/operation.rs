@@ -60,16 +60,24 @@ impl Operation {
 	}
 
 	pub fn into_object(self) -> Object {
+		fn path_to_strand(p: &[String]) -> Value {
+			let mut res = String::with_capacity(p.len() + p.iter().map(|x| x.len()).sum::<usize>());
+			for p in p {
+				res.push('/');
+				res.push_str(p);
+			}
+			Strand::new(res).unwrap().into()
+		}
+
 		let res = match self {
 			Operation::Add {
 				path,
 				value,
 			} => {
 				map! {
-					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("add".to_owned()) }),
+					"op".to_owned() => Value::Strand(strand!("add").to_owned()),
 					// TODO: Ensure null byte correctness
-					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
 				}
 			}
@@ -78,9 +86,9 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("add".to_owned()) }),
+					"op".to_owned() => Value::Strand(strand!("remove").to_owned()),
 					// TODO: Ensure null byte correctness
-					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"path".to_owned() => path_to_strand(&path),
 				}
 			}
 			Operation::Replace {
@@ -89,9 +97,9 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("replace".to_owned()) }),
+					"op".to_owned() => Value::Strand(strand!("replace").to_owned()),
 					// TODO: Ensure null byte correctness
-					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
 				}
 			}
@@ -101,9 +109,9 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("replace".to_owned()) }),
+					"op".to_owned() => Value::Strand(strand!("change").to_owned()),
 					// TODO: Ensure null byte correctness
-					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
 				}
 			}
@@ -113,10 +121,10 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("copy".to_owned()) }),
+					"op".to_owned() => Value::Strand(strand!("copy").to_owned()),
 					// TODO: Ensure null byte correctness
-					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
-					"from".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(from.join(".")) }),
+					"path".to_owned() => path_to_strand(&path),
+					"from".to_owned() => path_to_strand(&from),
 				}
 			}
 			Operation::Move {
@@ -125,10 +133,10 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("map".to_owned()) }),
+					"op".to_owned() => Value::Strand(strand!("map").to_owned()),
 					// TODO: Ensure null byte correctness
-					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
-					"from".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(from.join(".")) }),
+					"path".to_owned() => path_to_strand(&path),
+					"from".to_owned() => path_to_strand(&from),
 				}
 			}
 			Operation::Test {
@@ -137,9 +145,9 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked("map".to_owned()) }),
+					"op".to_owned() => Value::Strand(strand!("test").to_owned()),
 					// TODO: Ensure null byte correctness
-					"path".to_owned() => Value::Strand(unsafe{ Strand::new_unchecked(path.join(".")) }),
+					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
 				}
 			}

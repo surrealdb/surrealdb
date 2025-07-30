@@ -131,13 +131,14 @@ fn line_into_json_value(line_string: LineString) -> JsonValue {
 }
 
 fn polygon_into_json_value(polygon: Polygon) -> JsonValue {
-	polygon
-		.exterior()
-		.points()
-		.map(point_into_json_value)
-		.chain(polygon.exterior().points().map(point_into_json_value))
-		.collect::<Vec<_>>()
-		.into()
+	let mut coords =
+		vec![polygon.exterior().points().map(point_into_json_value).collect::<Vec<_>>()];
+
+	for int in polygon.interiors() {
+		let int = int.points().map(point_into_json_value).collect::<Vec<_>>();
+		coords.push(int);
+	}
+	coords.into()
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ pub enum PrefixOperator {
 	/// `+`
 	Positive,
 	/// `-`
-	Negative,
+	Negate,
 	/// `..`
 	Range,
 	/// `..=`
@@ -29,10 +29,10 @@ impl fmt::Display for PrefixOperator {
 		match self {
 			Self::Not => write!(f, "!"),
 			Self::Positive => write!(f, "+"),
-			Self::Negative => write!(f, "-"),
+			Self::Negate => write!(f, "-"),
 			Self::Range => write!(f, ".."),
 			Self::RangeInclusive => write!(f, "..="),
-			Self::Cast(kind) => write!(f, "<{kind}>"),
+			Self::Cast(kind) => write!(f, "<{kind}> "),
 		}
 	}
 }
@@ -154,19 +154,19 @@ pub enum BinaryOperator {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct MatchesOperator {
 	pub rf: Option<MatchRef>,
-	pub operator: Option<BooleanOperator>,
+	pub operator: BooleanOperator,
 }
 
 impl fmt::Display for MatchesOperator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if let Some(r) = self.rf {
-			if let Some(ref o) = self.operator {
-				write!(f, "@{r},{o}@")
+			if self.operator != BooleanOperator::And {
+				write!(f, "@{r},{}@", self.operator)
 			} else {
 				write!(f, "@{r}@")
 			}
-		} else if let Some(ref o) = self.operator {
-			write!(f, "@{o}@")
+		} else if self.operator != BooleanOperator::And {
+			write!(f, "@{}@", self.operator)
 		} else {
 			f.write_str("@@")
 		}
@@ -369,6 +369,15 @@ impl BindingPower {
 		}
 	}
 
+	pub fn for_prefix_operator(op: &PrefixOperator) -> Self {
+		match op {
+			PrefixOperator::Range | PrefixOperator::RangeInclusive => BindingPower::Range,
+			PrefixOperator::Not
+			| PrefixOperator::Positive
+			| PrefixOperator::Negate
+			| PrefixOperator::Cast(_) => BindingPower::Prefix,
+		}
+	}
 	/// Returns the binding power for this expression. This is generally `BindingPower::Prime` as
 	/// most value variants are prime expressions, however some like Value::Expression and
 	/// Value::Range have a different binding power.

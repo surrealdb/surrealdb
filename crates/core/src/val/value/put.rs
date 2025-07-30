@@ -13,14 +13,16 @@ impl Value {
 						let entry = v.entry(g.to_raw()).or_insert_with(Value::empty_object);
 						if !entry.is_nullish() {
 							entry.put(path.next(), val);
+						} else {
+							let mut obj = Value::empty_object();
+							obj.put(path.next(), val);
+							v.insert(g.to_raw(), obj);
 						}
 					}
 					Part::Field(f) => {
 						let entry =
 							v.entry(f.into_raw_string()).or_insert_with(Value::empty_object);
-						if !entry.is_nullish() {
-							entry.put(path.next(), val);
-						}
+						entry.put(path.next(), val);
 					}
 					Part::All => {
 						let path = path.next();
@@ -30,9 +32,7 @@ impl Value {
 						if let Some(idx) = x.as_old_index() {
 							let entry =
 								v.entry(idx.to_string()).or_insert_with(Value::empty_object);
-							if !entry.is_nullish() {
-								entry.put(path.next(), val);
-							}
+							entry.put(path.next(), val);
 						}
 					}
 				},

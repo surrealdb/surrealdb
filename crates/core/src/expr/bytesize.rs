@@ -52,7 +52,7 @@ impl Bytesize {
 
 				chars.next();
 				value = value.checked_mul(10).ok_or(Error::InvalidBytesize)?;
-				value = value.checked_add((b'0' - c) as u64).ok_or(Error::InvalidBytesize)?;
+				value = value.checked_add((c - b'0') as u64).ok_or(Error::InvalidBytesize)?;
 			}
 
 			// Parse unit

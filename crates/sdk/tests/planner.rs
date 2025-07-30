@@ -321,7 +321,7 @@ const THREE_MULTI_INDEX_EXPLAIN: &str = "[
 					detail: {
 						plan: {
 							index: 'ft_company',
-							operator: '@AND@',
+							operator: '@@',
 							value: 'surrealdb'
 						},
 						table: 'person',
@@ -353,7 +353,7 @@ const SINGLE_INDEX_FT_EXPLAIN: &str = "[
 					detail: {
 						plan: {
 							index: 'ft_company',
-							operator: '@AND@',
+							operator: '@@',
 							value: 'surrealdb'
 						},
 						table: 'person',

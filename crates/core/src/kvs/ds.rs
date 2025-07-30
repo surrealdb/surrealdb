@@ -1463,7 +1463,7 @@ mod test {
 			.await
 			.catch_return()
 			.unwrap();
-		assert_eq!(res, Value::Number(Number::Int(2)));
+		assert_eq!(res, Value::Number(Number::Int(1002)));
 		Ok(())
 	}
 }

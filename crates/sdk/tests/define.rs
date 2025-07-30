@@ -274,7 +274,7 @@ async fn define_statement_analyzer() -> Result<()> {
 			buckets: {},
 			configs: {},
 			functions: {
-				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, ''); } PERMISSIONS FULL"
+				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, '') } PERMISSIONS FULL"
 			},
 			models: {},
 			params: {},
@@ -330,7 +330,7 @@ async fn define_statement_search_index() -> Result<()> {
 	check_path(&tmp, &["doc_ids", "keys_count"], |v| assert_eq!(v, Value::from(2)));
 	check_path(&tmp, &["doc_ids", "max_depth"], |v| assert_eq!(v, Value::from(1)));
 	check_path(&tmp, &["doc_ids", "nodes_count"], |v| assert_eq!(v, Value::from(1)));
-	// TODO(emmanuall) My (Mees) changes caused some changes in these numbers but I didn't have
+	// TODO(emmanuel) My (Mees) changes caused some changes in these numbers but I didn't have
 	// time to figure out what was going on so if you could have a look after the PR merges it
 	// would be appreaciated.
 	check_path(&tmp, &["doc_ids", "total_size"], |v| assert_eq!(v, Value::from(63)));
@@ -633,7 +633,7 @@ async fn permissions_checks_define_function() {
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
 		vec![
-			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello'; } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
+			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",
 		],
 		vec![
 			"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }",

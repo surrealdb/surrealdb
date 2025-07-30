@@ -151,9 +151,7 @@ impl Parser<'_> {
 			}
 			t!("..") => match self.peek_whitespace1().kind {
 				t!("=") => None,
-				x if Self::kind_starts_expression(x) => {
-					None
-				}
+				x if Self::kind_starts_expression(x) => None,
 				_ => Some(BindingPower::Range),
 			},
 			t!("(") => Some(BindingPower::Call),
@@ -247,6 +245,7 @@ impl Parser<'_> {
 				PrefixOperator::Cast(kind)
 			}
 			t!("..") => {
+				self.pop_peek();
 				if self.peek_whitespace().kind == t!("=") {
 					self.pop_peek();
 					PrefixOperator::RangeInclusive
@@ -515,7 +514,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				expected!(self, t!("@"));
 				Ok(MatchesOperator {
-					operator: Some(BooleanOperator::And),
+					operator: Some(BooleanOperator::Or),
 					rf: None,
 				})
 			}
@@ -614,7 +613,7 @@ impl Parser<'_> {
 			let token = self.peek();
 
 			if let Some(bp) = self.postfix_binding_power(token.kind) {
-				if bp <= min_bp {
+				if bp < min_bp {
 					break;
 				}
 
@@ -633,7 +632,7 @@ impl Parser<'_> {
 				break;
 			};
 
-			if bp <= min_bp {
+			if bp < min_bp {
 				break;
 			}
 

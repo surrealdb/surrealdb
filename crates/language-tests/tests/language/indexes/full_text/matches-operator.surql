@@ -1,6 +1,6 @@
 /**
 [test]
-wip = true # Made wip because the value PR broke it but I don't have time to figure out how to fix this
+#wip = true # Made wip because the value PR broke it but I don't have time to figure out how to fix this
 
 [[test.results]]
 value = "[{ id: b:1, t: 'Hello World' }]"

@@ -1033,7 +1033,7 @@ impl QueryExecutor {
 			if let Matches(
 				_,
 				MatchesOperator {
-					operator: Some(bo),
+					operator,
 					..
 				},
 			) = io.op()
@@ -1041,7 +1041,7 @@ impl QueryExecutor {
 				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
 				{
 					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
-						let hits = fti.new_hits_iterator(&fte.0.qt, bo.clone());
+						let hits = fti.new_hits_iterator(&fte.0.qt, operator.clone());
 						let it = MatchesThingIterator::new(ir, hits);
 						return Ok(Some(ThingIterator::FullTextMatches(it)));
 					}
@@ -1375,12 +1375,12 @@ impl SearchEntry {
 		if let Matches(
 			qs,
 			MatchesOperator {
-				operator: Some(bo),
+				operator,
 				..
 			},
 		) = io.op()
 		{
-			if !matches!(bo, BooleanOperator::And) {
+			if !matches!(operator, BooleanOperator::And) {
 				bail!(Error::Unimplemented(
 					"SEARCH indexes only support AND operations".to_string()
 				))

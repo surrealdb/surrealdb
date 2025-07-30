@@ -43,14 +43,14 @@ impl From<crate::expr::statements::SetStatement> for SetStatement {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn::expr;
+	use crate::syn;
 
 	#[test]
 	fn check_type() {
-		let query = expr("LET $param = 5").unwrap();
+		let query = syn::parse("LET $param = 5").unwrap();
 		assert_eq!(format!("{}", query), "LET $param = 5;");
 
-		let query = expr("LET $param: number = 5").unwrap();
+		let query = syn::parse("LET $param: number = 5").unwrap();
 		assert_eq!(format!("{}", query), "LET $param: number = 5;");
 	}
 }
