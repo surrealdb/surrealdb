@@ -8,6 +8,12 @@ mod fixes;
 #[derive(Copy, Debug, Clone)]
 pub struct Version(u16);
 
+impl Version {
+	pub fn to_bytes(&self) -> Vec<u8> {
+		self.0.to_be_bytes().to_vec()
+	}
+}
+
 impl From<u16> for Version {
 	fn from(version: u16) -> Self {
 		Version(version)
@@ -23,12 +29,6 @@ impl From<Option<u16>> for Version {
 impl From<Version> for u16 {
 	fn from(v: Version) -> Self {
 		v.0
-	}
-}
-
-impl From<Version> for Vec<u8> {
-	fn from(v: Version) -> Self {
-		v.0.to_be_bytes().to_vec()
 	}
 }
 
@@ -97,7 +97,7 @@ impl Version {
 
 			// Obtain storage version key and value
 			let key = crate::key::version::new();
-			let val: Vec<u8> = Version::from(v + 1).into();
+			let val: Vec<u8> = Version::from(v + 1).to_bytes();
 			// Attempt to set the current version in storage
 			tx.replace(key, val).await?;
 
@@ -107,4 +107,10 @@ impl Version {
 
 		Ok(())
 	}
+}
+
+
+pub trait KVPair {
+	type Key;
+	type Value;
 }

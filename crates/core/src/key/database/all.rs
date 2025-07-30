@@ -1,4 +1,6 @@
 //! Stores the key prefix for all keys under a database
+
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::impl_key;
@@ -6,27 +8,27 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct All<'a> {
+pub struct All {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 }
-impl_key!(All<'a>);
+impl_key!(All);
 
-pub fn new<'a>(ns: &'a str, db: &'a str) -> All<'a> {
+pub fn new(ns: NamespaceId, db: DatabaseId) -> All {
 	All::new(ns, db)
 }
 
-impl Categorise for All<'_> {
+impl Categorise for All {
 	fn categorise(&self) -> Category {
 		Category::DatabaseRoot
 	}
 }
 
-impl<'a> All<'a> {
-	pub fn new(ns: &'a str, db: &'a str) -> Self {
+impl All {
+	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
 		Self {
 			__: b'/', // /
 			_a: b'*', // *
@@ -39,17 +41,18 @@ impl<'a> All<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::kvs::{KeyDecode, KeyEncode};
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = All::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 		);
 		let enc = All::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0");
+		assert_eq!(enc, b"/*1\0*2\0");
 
 		let dec = All::decode(&enc).unwrap();
 		assert_eq!(val, dec);

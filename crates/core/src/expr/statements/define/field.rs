@@ -1,3 +1,5 @@
+use crate::catalog::{DatabaseId, NamespaceId, TableKind};
+use crate::catalog::Relation;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -9,7 +11,6 @@ use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::expr::{Literal, Part};
-use crate::expr::{Relation, TableType};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use anyhow::{Result, bail, ensure};
@@ -129,7 +130,7 @@ impl DefineFieldStatement {
 			// Get the table definition that this field belongs to
 			let tb = txn.get_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.kind {
+			if let TableKind::Relation(ref relation) = tb.kind {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.kind.as_ref() {
 					// The `in` field must be a record type
@@ -142,7 +143,7 @@ impl DefineFieldStatement {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
 							cache_fields_ts: Uuid::now_v7(),
-							kind: TableType::Relation(Relation {
+							kind: TableKind::Relation(Relation {
 								from: self.kind.clone(),
 								..relation.to_owned()
 							}),
@@ -164,7 +165,7 @@ impl DefineFieldStatement {
 			// Get the table definition that this field belongs to
 			let tb = txn.get_tb(ns, db, &self.what).await?;
 			// The table is marked as TYPE RELATION
-			if let TableType::Relation(ref relation) = tb.kind {
+			if let TableKind::Relation(ref relation) = tb.kind {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.kind.as_ref() {
 					// The `out` field must be a record type
@@ -177,7 +178,7 @@ impl DefineFieldStatement {
 						let key = crate::key::database::tb::new(ns, db, &self.what);
 						let val = DefineTableStatement {
 							cache_fields_ts: Uuid::now_v7(),
-							kind: TableType::Relation(Relation {
+							kind: TableKind::Relation(Relation {
 								to: self.kind.clone(),
 								..relation.to_owned()
 							}),
@@ -202,8 +203,8 @@ impl DefineFieldStatement {
 
 	pub(crate) async fn process_recursive_definitions(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		txn: Arc<Transaction>,
 	) -> Result<()> {
 		// Find all existing field definitions
@@ -378,8 +379,8 @@ impl DefineFieldStatement {
 	pub(crate) async fn disallow_mismatched_types(
 		&self,
 		ctx: &Context,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<()> {
 		let fds = ctx.tx().all_tb_fields(ns, db, &self.what, None).await?;
 

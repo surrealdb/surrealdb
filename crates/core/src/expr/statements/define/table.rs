@@ -1,4 +1,5 @@
 use super::DefineFieldStatement;
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableKind};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
@@ -10,7 +11,7 @@ use crate::expr::{
 	Base, Ident, Output, Permissions, Strand, Value, Values, View, changefeed::ChangeFeed,
 	statements::UpdateStatement,
 };
-use crate::expr::{Idiom, Kind, TableType};
+use crate::expr::{Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use anyhow::{Result, bail};
@@ -39,7 +40,7 @@ pub struct DefineTableStatement {
 	#[revision(start = 2)]
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
-	pub kind: TableType,
+	pub kind: TableKind,
 	/// Should we overwrite the field definition if it already exists
 	#[revision(start = 4)]
 	pub overwrite: bool,
@@ -177,25 +178,25 @@ impl DefineTableStatement {
 impl DefineTableStatement {
 	/// Checks if this is a TYPE RELATION table
 	pub fn is_relation(&self) -> bool {
-		matches!(self.kind, TableType::Relation(_))
+		matches!(self.kind, TableKind::Relation(_))
 	}
 	/// Checks if this table allows graph edges / relations
 	pub fn allows_relation(&self) -> bool {
-		matches!(self.kind, TableType::Relation(_) | TableType::Any)
+		matches!(self.kind, TableKind::Relation(_) | TableKind::Any)
 	}
 	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
-		matches!(self.kind, TableType::Normal | TableType::Any)
+		matches!(self.kind, TableKind::Normal | TableKind::Any)
 	}
 	/// Used to add relational fields to existing table records
 	pub async fn add_in_out_fields(
 		txn: &Transaction,
-		ns: &str,
-		db: &str,
-		tb: &mut DefineTableStatement,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &mut TableDefinition,
 	) -> Result<()> {
 		// Add table relational fields
-		if let TableType::Relation(rel) = &tb.kind {
+		if let TableKind::Relation(rel) = &tb.kind {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
@@ -247,10 +248,10 @@ impl Display for DefineTableStatement {
 		write!(f, " {}", self.name)?;
 		write!(f, " TYPE")?;
 		match &self.kind {
-			TableType::Normal => {
+			TableKind::Normal => {
 				f.write_str(" NORMAL")?;
 			}
-			TableType::Relation(rel) => {
+			TableKind::Relation(rel) => {
 				f.write_str(" RELATION")?;
 				if let Some(Kind::Record(kind)) = &rel.from {
 					write!(
@@ -270,7 +271,7 @@ impl Display for DefineTableStatement {
 					write!(f, " ENFORCED")?;
 				}
 			}
-			TableType::Any => {
+			TableKind::Any => {
 				f.write_str(" ANY")?;
 			}
 		}

@@ -1,3 +1,5 @@
+use crate::catalog::TableKind;
+use crate::expr::Kind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -5,7 +7,6 @@ use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed, Ident, Permissions, Strand, Value};
-use crate::expr::{Kind, TableType};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
@@ -24,11 +25,11 @@ pub struct AlterTableStatement {
 	pub if_exists: bool,
 	#[revision(end = 2, convert_fn = "convert_drop")]
 	pub _drop: Option<bool>,
-	pub full: Option<bool>,
+	pub schemafull: Option<bool>,
 	pub permissions: Option<Permissions>,
 	pub changefeed: Option<Option<ChangeFeed>>,
-	pub comment: Option<Option<Strand>>,
-	pub kind: Option<TableType>,
+	pub comment: Option<Option<String>>,
+	pub kind: Option<TableKind>,
 }
 
 impl AlterTableStatement {
@@ -50,7 +51,7 @@ impl AlterTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 
@@ -67,8 +68,8 @@ impl AlterTableStatement {
 		};
 		// Process the statement
 		let key = crate::key::database::tb::new(ns, db, &self.name);
-		if let Some(full) = &self.full {
-			dt.full = *full;
+		if let Some(schemafull) = &self.schemafull {
+			dt.schemafull = *schemafull;
 		}
 		if let Some(permissions) = &self.permissions {
 			dt.permissions = permissions.clone();
@@ -84,13 +85,14 @@ impl AlterTableStatement {
 		}
 
 		// Add table relational fields
-		if matches!(self.kind, Some(TableType::Relation(_))) {
+		if matches!(self.kind, Some(TableKind::Relation(_))) {
 			DefineTableStatement::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		}
 		// Set the table definition
 		txn.set(key, revision::to_vec(&dt)?, None).await?;
 		// Record definition change
 		if self.changefeed.is_some() && dt.changefeed.is_some() {
+			let (ns, db) = ctx.get_ns_db_ids(opt)?;
 			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
 		}
 		// Clear the cache
@@ -110,10 +112,10 @@ impl Display for AlterTableStatement {
 		if let Some(kind) = &self.kind {
 			write!(f, " TYPE")?;
 			match &kind {
-				TableType::Normal => {
+				TableKind::Normal => {
 					f.write_str(" NORMAL")?;
 				}
-				TableType::Relation(rel) => {
+				TableKind::Relation(rel) => {
 					f.write_str(" RELATION")?;
 					if let Some(Kind::Record(kind)) = &rel.from {
 						write!(
@@ -130,12 +132,12 @@ impl Display for AlterTableStatement {
 						)?;
 					}
 				}
-				TableType::Any => {
+				TableKind::Any => {
 					f.write_str(" ANY")?;
 				}
 			}
 		}
-		if let Some(full) = self.full {
+		if let Some(full) = self.schemafull {
 			f.write_str(if full {
 				" SCHEMAFULL"
 			} else {

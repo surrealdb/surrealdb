@@ -27,7 +27,7 @@ impl AlterSequenceStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the sequence definition

@@ -1,4 +1,5 @@
 //! Stores the term list for doc_ids
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -10,9 +11,9 @@ use serde::{Deserialize, Serialize};
 pub struct Bk<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -31,7 +32,7 @@ impl Categorise for Bk<'_> {
 }
 
 impl<'a> Bk<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -52,20 +53,20 @@ impl<'a> Bk<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bk::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			7
 		);
 		let enc = Bk::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bk\0\0\0\0\0\0\0\x07");
+		assert_eq!(enc, b"/*1\0*2\0*testtb\0+testix\0!bk\0\0\0\0\0\0\0\x07");
 
 		let dec = Bk::decode(&enc).unwrap();
 		assert_eq!(val, dec);

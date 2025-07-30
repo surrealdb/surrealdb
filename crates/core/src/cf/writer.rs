@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::expr::Idiom;
@@ -30,8 +31,8 @@ pub struct Buffer {
 #[derive(Hash, Eq, PartialEq, Debug)]
 #[non_exhaustive]
 pub struct ChangeKey {
-	pub ns: String,
-	pub db: String,
+	pub ns: NamespaceId,
+	pub db: DatabaseId,
 	pub tb: String,
 }
 
@@ -42,7 +43,7 @@ impl Buffer {
 		}
 	}
 
-	pub fn push(&mut self, ns: String, db: String, tb: String, m: TableMutation) {
+	pub fn push(&mut self, ns: NamespaceId, db: DatabaseId, tb: String, m: TableMutation) {
 		let tb2 = tb.clone();
 		let ms = self
 			.b
@@ -67,8 +68,8 @@ impl Writer {
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn record_cf_change(
 		&mut self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &str,
 		id: Thing,
 		previous: CursorValue,
@@ -77,8 +78,8 @@ impl Writer {
 	) {
 		if current.as_ref().is_some() {
 			self.buf.push(
-				ns.to_string(),
-				db.to_string(),
+				ns,
+				db,
 				tb.to_string(),
 				match store_difference {
 					true => {
@@ -101,8 +102,8 @@ impl Writer {
 			);
 		} else {
 			self.buf.push(
-				ns.to_string(),
-				db.to_string(),
+				ns,
+				db,
 				tb.to_string(),
 				match store_difference {
 					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
@@ -112,10 +113,10 @@ impl Writer {
 		}
 	}
 
-	pub(crate) fn define_table(&mut self, ns: &str, db: &str, tb: &str, dt: &DefineTableStatement) {
+	pub(crate) fn define_table(&mut self, ns: NamespaceId, db: DatabaseId, tb: &str, dt: &TableDefinition) {
 		self.buf.push(
-			ns.to_string(),
-			db.to_string(),
+			ns,
+			db,
 			tb.to_string(),
 			TableMutation::Def(dt.to_owned()),
 		)
@@ -150,6 +151,7 @@ impl Writer {
 mod tests {
 	use std::time::Duration;
 
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::expr::Datetime;
 	use crate::expr::changefeed::ChangeFeed;
@@ -165,6 +167,8 @@ mod tests {
 
 	const DONT_STORE_PREVIOUS: bool = false;
 
+	const NS_ID: NamespaceId = NamespaceId(1);
+	const DB_ID: DatabaseId = DatabaseId(2);
 	const NS: &str = "myns";
 	const DB: &str = "mydb";
 	const TB: &str = "mytb";
@@ -382,8 +386,8 @@ mod tests {
 	async fn change_feed_vs(tx: Transaction, vs: &VersionStamp) -> Vec<ChangeSet> {
 		let r = crate::cf::read(
 			&tx,
-			NS,
-			DB,
+			NS_ID,
+			DB_ID,
 			Some(TB),
 			ShowSince::Versionstamp(vs.into_u64_lossy()),
 			Some(10),
@@ -421,7 +425,7 @@ mod tests {
 			..Default::default()
 		};
 		let ddb = DefineDatabaseStatement {
-			name: crate::expr::Ident(DB.to_string()),
+			name: DB.to_string(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_diff,
@@ -445,11 +449,11 @@ mod tests {
 		//
 
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let ns_root = crate::key::root::ns::new(NS);
+		let ns_root = crate::key::root::ns::new(NS_ID);
 		tx.put(&ns_root, revision::to_vec(&dns).unwrap(), None).await.unwrap();
-		let db_root = crate::key::namespace::db::new(NS, DB);
+		let db_root = crate::key::namespace::db::new(NS_ID, DB_ID);
 		tx.put(&db_root, revision::to_vec(&ddb).unwrap(), None).await.unwrap();
-		let tb_root = crate::key::database::tb::new(NS, DB, TB);
+		let tb_root = crate::key::database::tb::new(NS_ID, DB_ID, TB);
 		tx.put(&tb_root, revision::to_vec(&dtb).unwrap(), None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds

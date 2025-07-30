@@ -42,7 +42,7 @@ impl DefineApiStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = (opt.ns()?, opt.db()?);
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		// Check if the definition exists
 		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
 			if self.if_not_exists {
@@ -64,8 +64,6 @@ impl DefineApiStatement {
 			.parse()?;
 		let name = path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
 		let ap = ApiDefinition {
 			// Don't persist the `IF NOT EXISTS` clause to schema
 			path,

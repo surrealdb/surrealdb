@@ -1,3 +1,4 @@
+use crate::catalog::{DatabaseId, NamespaceId};
 use super::key::Key;
 use quick_cache::Equivalent;
 use uuid::Uuid;
@@ -5,21 +6,21 @@ use uuid::Uuid;
 #[derive(Hash, Eq, PartialEq)]
 pub(crate) enum Lookup<'a> {
 	/// A cache key for a database
-	Db(&'a str, &'a str),
+	Db(NamespaceId, DatabaseId),
 	/// A cache key for a table
-	Tb(&'a str, &'a str, &'a str),
+	Tb(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for events (on a table)
-	Evs(&'a str, &'a str, &'a str, Uuid),
+	Evs(NamespaceId, DatabaseId, &'a str, Uuid),
 	/// A cache key for fields (on a table)
-	Fds(&'a str, &'a str, &'a str, Uuid),
+	Fds(NamespaceId, DatabaseId, &'a str, Uuid),
 	/// A cache key for views (on a table)
-	Fts(&'a str, &'a str, &'a str, Uuid),
+	Fts(NamespaceId, DatabaseId, &'a str, Uuid),
 	/// A cache key for indexes (on a table)
-	Ixs(&'a str, &'a str, &'a str, Uuid),
+	Ixs(NamespaceId, DatabaseId, &'a str, Uuid),
 	/// A cache key for live queries (on a table)
-	Lvs(&'a str, &'a str, &'a str, Uuid),
+	Lvs(NamespaceId, DatabaseId, &'a str, Uuid),
 	/// A cache key for live queries version (on a table)
-	Lvv(&'a str, &'a str, &'a str),
+	Lvv(NamespaceId, DatabaseId, &'a str),
 }
 
 impl Equivalent<Key> for Lookup<'_> {

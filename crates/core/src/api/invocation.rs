@@ -84,7 +84,8 @@ impl ApiInvocation {
 			};
 
 		let mut configs: Vec<&ApiConfig> = Vec::new();
-		let global = ctx.tx().get_db_optional_config(opt.ns()?, opt.db()?, "api").await?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let global = ctx.tx().get_db_optional_config(ns, db, "api").await?;
 		configs.extend(global.as_ref().map(|v| v.inner.try_into_api()).transpose()?);
 		configs.extend(api.config.as_ref());
 		configs.extend(action_config);

@@ -88,7 +88,7 @@ impl Document {
 			return Err(IgnoreError::Ignore);
 		}
 
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		let val = ctx.tx().get_record(ns, db, &retry.tb, &retry.id, opt.version).await?;
 
 		self.modify_for_update_retry(retry, val);

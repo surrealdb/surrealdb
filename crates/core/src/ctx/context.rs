@@ -1,9 +1,10 @@
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
+use crate::catalog::{DatabaseId, NamespaceId, TableId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-use crate::dbs::{Capabilities, Notification, Session, Variables};
+use crate::dbs::{Capabilities, Notification, Options, Session, Variables};
 use crate::err::Error;
 use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
@@ -69,7 +70,7 @@ pub struct MutableContext {
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 	// An optional transaction
-	transaction: Option<Arc<Transaction>>,
+	transaction: Arc<Transaction>,
 	// Does not read from parent `values`.
 	isolated: bool,
 	// A map of bucket connections
@@ -256,6 +257,33 @@ impl MutableContext {
 			fail!("Tried to unfreeze a Context with multiple references")
 		};
 		Ok(x)
+	}
+
+	pub(crate) fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
+		let ns = opt.ns()?;
+		self.tx().get_ns_id(ns)
+	}
+
+	pub(crate) fn get_db_id(&self, ns: &str, db: &str) -> Result<DatabaseId> {
+		// self.tx().get_db_id(ns, db)
+		todo!("STU: GO DO THIS")
+	}
+
+	pub(crate) fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
+		let (ns, db) = opt.ns_db()?;
+		let ns_id = self.get_ns_id(ns)?;
+		let db_id = self.get_db_id(ns, db)?;
+		Ok((ns_id, db_id))
+	}
+
+	pub(crate) fn get_tb_id(&self, ns: &str, db: &str, tb: &str) -> Result<TableId> {
+		// self.tx().get_tb_id(ns, db, tb)
+		todo!("STU: GO DO THIS")
+	}
+
+	pub(crate) fn get_ns_db_tb_ids(&self, ns: &str, db: &str, tb: &str) -> Result<(NamespaceId, DatabaseId, TableId)> {
+		// self.tx().get_ns_db_tb_ids(ns, db, tb)
+		todo!("STU: GO DO THIS")
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -602,8 +630,8 @@ impl MutableContext {
 	/// Obtain the connection for a bucket
 	pub(crate) async fn get_bucket_store(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Do we have a buckets context?

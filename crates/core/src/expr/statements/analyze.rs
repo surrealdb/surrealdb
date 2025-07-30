@@ -39,7 +39,7 @@ impl AnalyzeStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Index, &Base::Db)?;
 				// Read the index
-				let (ns, db) = opt.ns_db()?;
+				let (ns, db) = ctx.get_ns_db_ids(opt)?;
 				let ix = ctx.tx().get_tb_index(ns, db, tb, idx).await?;
 				let ikb = IndexKeyBase::new(ns, db, &ix)?;
 				// Index operation dispatching

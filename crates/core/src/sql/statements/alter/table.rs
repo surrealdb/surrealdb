@@ -107,7 +107,7 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 		crate::expr::statements::alter::AlterTableStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			full: v.full,
+			schemafull: v.full,
 			permissions: v.permissions.map(Into::into),
 			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
 			comment: v.comment.map(|opt| opt.map(Into::into)),
@@ -121,7 +121,7 @@ impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableSta
 		AlterTableStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			full: v.full,
+			full: v.schemafull,
 			permissions: v.permissions.map(Into::into),
 			changefeed: v.changefeed.map(|opt| opt.map(Into::into)),
 			comment: v.comment.map(|opt| opt.map(Into::into)),

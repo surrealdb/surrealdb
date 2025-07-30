@@ -105,7 +105,8 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				if txn.get_ns_access(opt.ns()?, &self.name).await.is_ok() {
+				let ns  = ctx.get_ns_id(opt)?;
+				if txn.get_ns_access(ns, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
@@ -138,22 +139,21 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				let (ns, db) = opt.ns_db()?;
+				let (ns, db) = ctx.get_ns_db_ids(opt)?;
 				if txn.get_db_access(ns, db, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
 					} else if !self.overwrite && !opt.import {
+						let (ns, db) = opt.ns_db()?;
 						bail!(Error::AccessDbAlreadyExists {
 							ac: self.name.to_string(),
-							ns: ns.into(),
-							db: db.into(),
+							ns: ns.to_string(),
+							db: db.to_string(),
 						});
 					}
 				}
 				// Process the statement
 				let key = crate::key::database::ac::new(ns, db, &self.name);
-				txn.get_or_add_ns(ns, opt.strict).await?;
-				txn.get_or_add_db(ns, db, opt.strict).await?;
 				txn.set(
 					key,
 					revision::to_vec(&DefineAccessStatement {

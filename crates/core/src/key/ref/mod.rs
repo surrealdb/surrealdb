@@ -1,4 +1,5 @@
 //! Stores a graph edge pointer
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::id::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -11,9 +12,9 @@ use serde::{Deserialize, Serialize};
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -22,7 +23,7 @@ struct Prefix<'a> {
 impl_key!(Prefix<'a>);
 
 impl<'a> Prefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &Id) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -41,9 +42,9 @@ impl<'a> Prefix<'a> {
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -53,7 +54,7 @@ struct PrefixFt<'a> {
 impl_key!(PrefixFt<'a>);
 
 impl<'a> PrefixFt<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, ft: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &Id, ft: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -73,9 +74,9 @@ impl<'a> PrefixFt<'a> {
 struct PrefixFf<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -86,7 +87,7 @@ struct PrefixFf<'a> {
 impl_key!(PrefixFf<'a>);
 
 impl<'a> PrefixFf<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, ft: &'a str, ff: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &Id, ft: &'a str, ff: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -113,9 +114,9 @@ impl<'a> PrefixFf<'a> {
 pub struct Ref<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -127,8 +128,8 @@ pub struct Ref<'a> {
 impl_key!(Ref<'a>);
 
 pub fn new<'a>(
-	ns: &'a str,
-	db: &'a str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: &'a str,
 	id: &Id,
 	ft: &'a str,
@@ -138,37 +139,37 @@ pub fn new<'a>(
 	Ref::new(ns, db, tb, id.to_owned(), ft, ff, fk.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_owned()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_owned()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
+pub fn ftprefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
+pub fn ftsuffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ffprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
+pub fn ffprefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ffsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
+pub fn ffsuffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
 	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -182,8 +183,8 @@ impl Categorise for Ref<'_> {
 
 impl<'a> Ref<'a> {
 	pub fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		id: Id,
 		ft: &'a str,
@@ -216,8 +217,8 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Ref::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(1),
 			"testtb",
 			"testid".into(),
 			"othertb",

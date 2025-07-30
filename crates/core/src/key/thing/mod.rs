@@ -1,4 +1,6 @@
 //! Stores a record document
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::expr::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -11,9 +13,9 @@ use serde::{Deserialize, Serialize};
 pub struct Thing<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -21,17 +23,17 @@ pub struct Thing<'a> {
 }
 impl_key!(Thing<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &Id) -> Thing<'a> {
 	Thing::new(ns, db, tb, id.to_owned())
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"*\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode()?;
 	k.extend_from_slice(b"*\xff");
 	Ok(k)
@@ -44,7 +46,7 @@ impl Categorise for Thing<'_> {
 }
 
 impl<'a> Thing<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: Id) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -61,6 +63,7 @@ impl<'a> Thing<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::kvs::KeyDecode;
 	use crate::syn;
 
@@ -69,13 +72,13 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Thing::new(
-			"testns",
-			"testdb",
+			NamespaceI(1),
+			DatabaseId(2),
 			"testtb",
 			"testid".into(),
 		);
 		let enc = Thing::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x01testid\0");
+		assert_eq!(enc, b"/*1\0*2\0*testtb\0*\0\0\0\x01testid\0");
 
 		let dec = Thing::decode(&enc).unwrap();
 		assert_eq!(val, dec);

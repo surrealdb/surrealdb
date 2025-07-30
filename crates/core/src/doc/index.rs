@@ -388,7 +388,7 @@ impl<'a> IndexOperation<'a> {
 		ctx: &Context,
 		p: &SearchParams,
 	) -> Result<()> {
-		let (ns, db) = self.opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(self.opt)?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 
 		let mut ft = FtIndex::new(ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
@@ -403,7 +403,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
-		let (ns, db) = self.opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(self.opt)?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data

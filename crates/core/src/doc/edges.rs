@@ -1,3 +1,4 @@
+use crate::catalog::{TableKind, Relation};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
@@ -5,8 +6,6 @@ use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::expr::Dir;
-use crate::expr::Relation;
-use crate::expr::TableType;
 use crate::expr::paths::EDGE;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
@@ -29,7 +28,7 @@ impl Document {
 		// Store the record edges
 		if let Workable::Relate(l, r, _) = &self.extras {
 			// Get the namespace / database
-			let (ns, db) = opt.ns_db()?;
+			let (ns, db) = ctx.get_ns_db_ids(opt)?;
 			// Get the record id
 			let rid = self.id()?;
 			// Get the transaction
@@ -39,7 +38,7 @@ impl Document {
 			// For enforced relations, ensure that the edges exist
 			if matches!(
 				tb.kind,
-				TableType::Relation(Relation {
+				TableKind::Relation(Relation {
 					enforced: true,
 					..
 				})

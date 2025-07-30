@@ -1,3 +1,4 @@
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::expr::statements::show::ShowSince;
@@ -18,8 +19,8 @@ use anyhow::{Result, bail};
 // The second call would start from the last versionstamp + 1 of the first call.
 pub async fn read(
 	tx: &Transaction,
-	ns: &str,
-	db: &str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: Option<&str>,
 	start: ShowSince,
 	limit: Option<u32>,

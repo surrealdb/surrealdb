@@ -12,6 +12,10 @@
 ///
 /// crate::key::node::all                /${nd}
 /// crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}
+/// 
+/// crate::key::catalog::ns              /ns/{ns_name} -> NamespaceDefinition
+/// crate::key::catalog::db              /ns/{ns_name}/db/{db_name} -> DatabaseDefinition
+/// crate::key::catalog::tb              /ns/{ns_name}/db/{db_name}/tb/{tb_name} -> TableDefinition
 ///
 /// crate::key::root::access::all        /&{ac}
 /// crate::key::root::access::gr         /&{ac}!gr{gr}
@@ -19,7 +23,7 @@
 /// crate::key::namespace::all           /*{ns}
 /// crate::key::namespace::ac            /*{ns}!ac{ac}
 /// crate::key::namespace::db            /*{ns}!db{db}
-/// crate::key::namespace::di            /+{ns id}!di
+/// crate::key::namespace::di            /+{ns}!di
 /// crate::key::namespace::lg            /*{ns}!lg{lg}
 /// crate::key::namespace::us            /*{ns}!us{us}
 ///
@@ -35,7 +39,7 @@
 /// crate::key::database::pa             /*{ns}*{db}!pa{pa}
 /// crate::key::database::sq             /*{ns}*{db}!sq{sq}
 /// crate::key::database::tb             /*{ns}*{db}!tb{tb}
-/// crate::key::database::ti             /+{ns id}*{db id}!ti
+/// crate::key::database::ti             /+{ns}*{db}!ti
 /// crate::key::database::ts             /*{ns}*{db}!ts{ts}
 /// crate::key::database::us             /*{ns}*{db}!us{us}
 /// crate::key::database::vs             /*{ns}*{db}!vs
@@ -75,6 +79,7 @@
 /// crate::key::sequence::st             /*{ns}*{db}*{tb}*{sq}!st{id}
 /// crate::key::sequence::ba             /*{ns}*{db}*{tb}*{sq}!ba{start}
 ///
+pub(crate) mod catalog;
 pub(crate) mod category;
 pub(crate) mod change;
 pub(crate) mod database;

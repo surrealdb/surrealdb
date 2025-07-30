@@ -1,4 +1,6 @@
 //! Stores change feeds
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::{KeyEncode, impl_key};
@@ -13,9 +15,9 @@ use std::str;
 pub struct Cf<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_d: u8,
 	// vs is the versionstamp of the change feed entry that is encoded in big-endian.
 	pub vs: VersionStamp,
@@ -25,11 +27,11 @@ pub struct Cf<'a> {
 impl_key!(Cf<'a>);
 
 #[expect(unused)]
-pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ts: u64, tb: &'a str) -> Cf<'a> {
 	Cf::new(ns, db, VersionStamp::from_u64(ts), tb)
 }
 
-pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn versionstamped_key_prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
 	Ok(k)
@@ -46,7 +48,7 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
-pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>> {
+pub fn prefix_ts(ns: NamespaceId, db: DatabaseId, vs: VersionStamp) -> Result<Vec<u8>> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
 	k.extend_from_slice(&vs.as_bytes());
@@ -55,14 +57,14 @@ pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>> {
 
 /// Returns the prefix for the whole database change feeds
 #[expect(unused)]
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"#");
 	Ok(k)
 }
 
 /// Returns the suffix for the whole database change feeds
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = crate::key::database::all::new(ns, db).encode()?;
 	k.extend_from_slice(&[b'#', 0xff]);
 	Ok(k)
@@ -75,7 +77,7 @@ impl Categorise for Cf<'_> {
 }
 
 impl<'a> Cf<'a> {
-	pub fn new(ns: &'a str, db: &'a str, vs: VersionStamp, tb: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp, tb: &'a str) -> Self {
 		Cf {
 			__: b'/',
 			_a: b'*',
@@ -101,8 +103,8 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Cf::new(
-			"test",
-			"test",
+			NamespaceId(1),
+			DatabaseId(2),
 			VersionStamp::try_from_u128(12345).unwrap(),
 			"test",
 		);

@@ -72,7 +72,7 @@ pub async fn refs(
 
 async fn correct_refs_field(ctx: &Context, opt: &Options, ft: &Table, ff: Idiom) -> Result<Idiom> {
 	// Obtain the field definition
-	let (ns, db) = opt.ns_db()?;
+	let (ns, db) = ctx.get_ns_db_ids(opt)?;
 	let fd = match ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await {
 		Ok(fd) => fd,
 		Err(e) => {

@@ -1,4 +1,5 @@
 //! Stores BTree nodes for doc lengths
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::trees::store::NodeId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
@@ -10,9 +11,9 @@ use serde::{Deserialize, Serialize};
 pub struct Bl<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -32,8 +33,8 @@ impl Categorise for Bl<'_> {
 
 impl<'a> Bl<'a> {
 	pub fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		node_id: Option<NodeId>,
@@ -58,20 +59,20 @@ impl<'a> Bl<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bl::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			Some(7)
 		);
 		let enc = Bl::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bl\x01\0\0\0\0\0\0\0\x07");
+		assert_eq!(enc, b"/*1\0*2\0*testtb\0+testix\0!bl\x01\0\0\0\0\0\0\0\x07");
 
 		let dec = Bl::decode(&enc).unwrap();
 		assert_eq!(val, dec);

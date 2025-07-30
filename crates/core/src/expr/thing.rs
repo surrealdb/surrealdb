@@ -141,7 +141,7 @@ impl Thing {
 		ft: Option<&Table>,
 		ff: Option<&Idiom>,
 	) -> Result<Vec<Thing>> {
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 
 		let (prefix, suffix) = match (ft, ff) {
 			(Some(ft), Some(ff)) => {

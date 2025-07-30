@@ -53,7 +53,7 @@ impl DefineConfigStatement {
 			ConfigInner::Api(_) => "api",
 		};
 		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		if txn.get_db_config(ns, db, cg).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
@@ -65,8 +65,6 @@ impl DefineConfigStatement {
 		}
 		// Process the statement
 		let key = crate::key::database::cg::new(ns, db, cg);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.replace(key, revision::to_vec(self)?).await?;
 		// Clear the cache
 		txn.clear();

@@ -52,10 +52,14 @@ impl DefineIndexStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
 		let (ns, db) = opt.ns_db()?;
+		
 		// Fetch the transaction
 		let txn = ctx.tx();
+		let ns = txn.get_or_add_ns(ns, opt.strict).await?;
+		let db = txn.get_or_add_db(ns.id, db, opt.strict).await?;
+
 		// Check if the definition exists
-		if txn.get_tb_index(ns, db, &self.what, &self.name).await.is_ok() {
+		if txn.get_tb_index(ns.id, db.database_id, &self.what, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);
 			} else if !self.overwrite && !opt.import {
@@ -72,7 +76,7 @@ impl DefineIndexStatement {
 			ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await?;
 		}
 		// Does the table exist?
-		match txn.get_tb(ns, db, &self.what).await {
+		match txn.get_tb(ns.id, db.database_id, &self.what).await {
 			Ok(tb) => {
 				// Are we SchemaFull?
 				if tb.full {
@@ -81,7 +85,7 @@ impl DefineIndexStatement {
 						let Some(Part::Field(first)) = idiom.0.first() else {
 							continue;
 						};
-						txn.get_tb_field(ns, db, &self.what, &first.to_string()).await?;
+						txn.get_tb_field(ns.id, db.database_id, &self.what, &first.to_string()).await?;
 					}
 				}
 			}
@@ -92,10 +96,8 @@ impl DefineIndexStatement {
 			}
 		}
 		// Process the statement
+		let tb = txn.get_or_add_tb(ns.id, db.database_id, &self.what, opt.strict).await?;
 		let key = crate::key::table::ix::new(ns, db, &self.what, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
 			key,
 			revision::to_vec(&DefineIndexStatement {

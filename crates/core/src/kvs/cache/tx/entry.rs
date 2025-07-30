@@ -1,3 +1,4 @@
+use crate::catalog::NamespaceDefinition;
 use crate::dbs::node::Node;
 use crate::expr::Value;
 use crate::expr::statements::AccessGrant;
@@ -9,7 +10,6 @@ use crate::expr::statements::DefineFieldStatement;
 use crate::expr::statements::DefineFunctionStatement;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::statements::DefineModelStatement;
-use crate::expr::statements::DefineNamespaceStatement;
 use crate::expr::statements::DefineParamStatement;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::DefineUserStatement;
@@ -35,8 +35,8 @@ pub(crate) enum Entry {
 	Ras(Arc<[DefineAccessStatement]>),
 	/// A slice of AccessGrant specified at the root.
 	Rag(Arc<[AccessGrant]>),
-	/// A slice of DefineNamespaceStatement specified on a namespace.
-	Nss(Arc<[DefineNamespaceStatement]>),
+	/// A slice of NamespaceDefinition specified on a namespace.
+	Nss(Arc<[NamespaceDefinition]>),
 	/// A slice of DefineUserStatement specified on a namespace.
 	Nus(Arc<[DefineUserStatement]>),
 	/// A slice of DefineAccessStatement specified on a namespace.
@@ -127,9 +127,9 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Rag"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`DefineNamespaceStatement`].
+	/// Converts this cache entry into a slice of [`NamespaceDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Nss`].
-	pub(crate) fn try_into_nss(self) -> Result<Arc<[DefineNamespaceStatement]>> {
+	pub(crate) fn try_into_nss(self) -> Result<Arc<[NamespaceDefinition]>> {
 		match self {
 			Entry::Nss(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Nss"),

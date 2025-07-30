@@ -1,4 +1,5 @@
 //! Stores the offsets
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::key::category::Categorise;
@@ -11,9 +12,9 @@ use serde::{Deserialize, Serialize};
 pub struct Bo<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -34,8 +35,8 @@ impl Categorise for Bo<'_> {
 
 impl<'a> Bo<'a> {
 	pub fn new(
-		ns: &'a str,
-		db: &'a str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
 		ix: &'a str,
 		doc_id: DocId,
@@ -62,14 +63,14 @@ impl<'a> Bo<'a> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::kvs::{KeyDecode, KeyEncode};
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bo::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 			"testix",
 			1,2
@@ -77,7 +78,7 @@ mod tests {
 		let enc = Bo::encode(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!bo\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\x02"
+			b"/*1\0*2\0*testtb\0+testix\0!bo\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\x02"
 		);
 
 		let dec = Bo::decode(&enc).unwrap();

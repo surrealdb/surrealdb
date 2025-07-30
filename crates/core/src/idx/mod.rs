@@ -4,6 +4,7 @@ pub(crate) mod index;
 pub mod planner;
 pub mod trees;
 
+use crate::catalog::{NamespaceId, DatabaseId};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Id, Thing};
 use crate::idx::docids::DocId;
@@ -44,18 +45,18 @@ pub struct IndexKeyBase {
 
 #[derive(Debug, Default)]
 struct Inner {
-	ns: String,
-	db: String,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: String,
 	ix: String,
 }
 
 impl IndexKeyBase {
-	pub(crate) fn new(ns: &str, db: &str, ix: &DefineIndexStatement) -> Result<Self> {
+	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement) -> Result<Self> {
 		Ok(Self {
 			inner: Arc::new(Inner {
-				ns: ns.to_string(),
-				db: db.to_string(),
+				ns,
+				db,
 				tb: ix.what.to_raw(),
 				ix: ix.name.to_raw(),
 			}),
@@ -64,10 +65,10 @@ impl IndexKeyBase {
 
 	fn new_bc_key(&self, term_id: TermId) -> Result<Key> {
 		Bc::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
+			self.inner.ns,
+			self.inner.db,
+			&self.inner.tb,
+			&self.inner.ix,
 			term_id,
 		)
 		.encode()
@@ -75,8 +76,8 @@ impl IndexKeyBase {
 
 	fn new_bd_key(&self, node_id: Option<NodeId>) -> Result<Key> {
 		Bd::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
+			self.inner.ns,
+			self.inner.db,
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			node_id,
@@ -86,8 +87,8 @@ impl IndexKeyBase {
 
 	fn new_bi_key(&self, doc_id: DocId) -> Result<Key> {
 		Bi::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
+			self.inner.ns,
+			self.inner.db,
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			doc_id,
@@ -97,10 +98,10 @@ impl IndexKeyBase {
 
 	fn new_bk_key(&self, doc_id: DocId) -> Result<Key> {
 		Bk::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
-			self.inner.tb.as_str(),
-			self.inner.ix.as_str(),
+			self.inner.ns,
+			self.inner.db,
+			&self.inner.tb.as_str(),
+			&self.inner.ix.as_str(),
 			doc_id,
 		)
 		.encode()
@@ -108,8 +109,8 @@ impl IndexKeyBase {
 
 	fn new_bl_key(&self, node_id: Option<NodeId>) -> Result<Key> {
 		Bl::new(
-			self.inner.ns.as_str(),
-			self.inner.db.as_str(),
+			self.inner.ns,
+			self.inner.db,
 			self.inner.tb.as_str(),
 			self.inner.ix.as_str(),
 			node_id,

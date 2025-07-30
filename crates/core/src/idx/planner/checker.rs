@@ -184,7 +184,7 @@ impl CheckerCacheEntry {
 		if let Some(rid) = rid {
 			let rid = Arc::new(rid);
 			let txn = ctx.tx();
-			let val = Iterable::fetch_thing(&txn, opt, &rid).await?;
+			let val = Iterable::fetch_thing(&txn, ctx, opt, &rid).await?;
 			if !val.is_none_or_null() {
 				let (value, truthy) = {
 					let mut cursor_doc = CursorDoc {

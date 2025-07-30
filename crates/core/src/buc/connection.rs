@@ -1,6 +1,5 @@
 use crate::{
-	cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED},
-	err::Error,
+	catalog::{DatabaseId, NamespaceId}, cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED}, err::Error
 };
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -12,16 +11,16 @@ pub(crate) type BucketConnections = DashMap<BucketConnectionKey, Arc<dyn ObjectS
 
 #[derive(Hash, PartialEq, Eq)]
 pub(crate) struct BucketConnectionKey {
-	ns: String,
-	db: String,
+	ns: NamespaceId,
+	db: DatabaseId,
 	bu: String,
 }
 
 impl BucketConnectionKey {
-	pub fn new(ns: impl Into<String>, db: impl Into<String>, bu: impl Into<String>) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, bu: &str) -> Self {
 		Self {
-			ns: ns.into(),
-			db: db.into(),
+			ns,
+			db,
 			bu: bu.into(),
 		}
 	}
@@ -31,8 +30,8 @@ impl BucketConnectionKey {
 /// If no global bucket is configured, the NoGlobalBucket error will be returned
 /// The key in the global bucket will be: `{ns}/{db}/{bu}`
 pub(crate) async fn connect_global(
-	ns: &str,
-	db: &str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	bu: &str,
 ) -> Result<Arc<dyn ObjectStore>, Error> {
 	// Obtain the URL for the global bucket

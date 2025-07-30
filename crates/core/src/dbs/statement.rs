@@ -1,3 +1,4 @@
+use crate::catalog::TableDefinition;
 use crate::ctx::{Context, MutableContext};
 use crate::err::Error;
 use crate::expr::cond::Cond;
@@ -389,10 +390,10 @@ impl Statement<'_> {
 	}
 
 	/// Returns a reference to the appropriate `Permission` field within the
-	/// `DefineTableStatement` structure based on the type of the statement.
+	/// `TableDefinition` structure based on the type of the statement.
 	pub(crate) fn permissions<'b>(
 		&self,
-		table: &'b DefineTableStatement,
+		table: &'b TableDefinition,
 		doc_is_new: bool,
 	) -> &'b Permission {
 		if self.is_delete() {

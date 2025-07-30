@@ -1,4 +1,5 @@
 //! Stores a DEFINE TABLE config definition
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::{KeyEncode, impl_key};
@@ -10,9 +11,9 @@ use serde::{Deserialize, Serialize};
 pub struct Tb<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
@@ -20,17 +21,17 @@ pub struct Tb<'a> {
 }
 impl_key!(Tb<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Tb<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Tb<'a> {
 	Tb::new(ns, db, tb)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!tb\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode()?;
 	k.extend_from_slice(b"!tb\xff");
 	Ok(k)
@@ -43,7 +44,7 @@ impl Categorise for Tb<'_> {
 }
 
 impl<'a> Tb<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -66,12 +67,12 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Tb::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
 		);
 		let enc = Tb::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0!tbtesttb\0");
+		assert_eq!(enc, b"/*1\0*2\0!tbtesttb\0");
 
 		let dec = Tb::decode(&enc).unwrap();
 		assert_eq!(val, dec);
