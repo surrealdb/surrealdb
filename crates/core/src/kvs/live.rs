@@ -1,3 +1,4 @@
+use crate::kvs::impl_kv_value_revisioned;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -16,3 +17,4 @@ pub struct Live {
 	/// The table in which this LIVE query exists
 	pub tb: String,
 }
+impl_kv_value_revisioned!(Live);

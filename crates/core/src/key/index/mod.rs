@@ -11,21 +11,33 @@ pub mod bp;
 pub mod bs;
 pub mod bt;
 pub mod bu;
+pub mod dc;
+pub mod dl;
 pub mod hd;
 pub mod he;
 pub mod hi;
 pub mod hl;
 pub mod hs;
 pub mod hv;
+#[cfg(not(target_family = "wasm"))]
 pub mod ia;
+pub mod ib;
+pub mod id;
+pub mod ii;
+#[cfg(not(target_family = "wasm"))]
 pub mod ip;
+pub mod is;
+pub mod td;
+pub mod tt;
 pub mod vm;
 
+use crate::expr;
+use crate::expr::Thing;
 use crate::expr::array::Array;
-use crate::expr::id::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -43,7 +55,10 @@ struct Prefix<'a> {
 	pub ix: &'a str,
 	_e: u8,
 }
-impl_key!(Prefix<'a>);
+
+impl KVKey for Prefix<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl<'a> Prefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
@@ -76,7 +91,10 @@ struct PrefixIds<'a> {
 	_e: u8,
 	pub fd: Cow<'a, Array>,
 }
-impl_key!(PrefixIds<'a>);
+
+impl KVKey for PrefixIds<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl<'a> PrefixIds<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, fd: &'a Array) -> Self {
@@ -97,8 +115,7 @@ impl<'a> PrefixIds<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Index<'a> {
+pub(crate) struct Index<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -110,9 +127,12 @@ pub struct Index<'a> {
 	pub ix: &'a str,
 	_e: u8,
 	pub fd: Cow<'a, Array>,
-	pub id: Option<Cow<'a, Id>>,
+	pub id: Option<Cow<'a, expr::Id>>,
 }
-impl_key!(Index<'a>);
+
+impl KVKey for Index<'_> {
+	type ValueType = Thing;
+}
 
 impl Categorise for Index<'_> {
 	fn categorise(&self) -> Category {
@@ -127,7 +147,7 @@ impl<'a> Index<'a> {
 		tb: &'a str,
 		ix: &'a str,
 		fd: &'a Array,
-		id: Option<&'a Id>,
+		id: Option<&'a expr::Id>,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -146,7 +166,7 @@ impl<'a> Index<'a> {
 	}
 
 	fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>> {
-		Prefix::new(ns, db, tb, ix).encode()
+		Prefix::new(ns, db, tb, ix).encode_key()
 	}
 
 	pub fn prefix_beg(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>> {
@@ -162,7 +182,7 @@ impl<'a> Index<'a> {
 	}
 
 	fn prefix_ids(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
-		PrefixIds::new(ns, db, tb, ix, fd).encode()
+		PrefixIds::new(ns, db, tb, ix, fd).encode_key()
 	}
 
 	pub fn prefix_ids_beg(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
@@ -205,7 +225,6 @@ impl<'a> Index<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {
@@ -213,21 +232,18 @@ mod tests {
 		let fd = vec!["testfd1", "testfd2"].into();
 		let id = "testid".into();
 		let val = Index::new("testns", "testdb", "testtb", "testix", &fd, Some(&id));
-		let enc = Index::encode(&val).unwrap();
+		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\x01\0\0\0\x01testid\0"
 		);
-
-		let dec = Index::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]
 	fn key_none() {
 		let fd = vec!["testfd1", "testfd2"].into();
 		let val = Index::new("testns", "testdb", "testtb", "testix", &fd, None);
-		let enc = Index::encode(&val).unwrap();
+		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\0\0\0\x04testfd2\0\x01\0"

@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -24,6 +25,8 @@ pub struct DefineNamespaceStatement {
 	#[revision(start = 3)]
 	pub overwrite: bool,
 }
+
+impl_kv_value_revisioned!(DefineNamespaceStatement);
 
 impl DefineNamespaceStatement {
 	/// Process this type returning a computed simple Value
@@ -50,8 +53,8 @@ impl DefineNamespaceStatement {
 		// Process the statement
 		let key = crate::key::root::ns::new(&self.name);
 		txn.set(
-			key,
-			revision::to_vec(&DefineNamespaceStatement {
+			&key,
+			&DefineNamespaceStatement {
 				id: match self.id {
 					Some(id) => Some(id),
 					None => Some(txn.lock().await.get_next_ns_id().await?),
@@ -60,7 +63,7 @@ impl DefineNamespaceStatement {
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

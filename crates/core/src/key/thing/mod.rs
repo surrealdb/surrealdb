@@ -1,40 +1,42 @@
 //! Stores a record document
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
 use crate::expr::Id;
+use crate::expr::Value;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Thing<'a> {
+pub(crate) struct Thing<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: NamespaceId,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: DatabaseId,
+	pub db: &'a str,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
 	pub id: Id,
 }
-impl_key!(Thing<'a>);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &Id) -> Thing<'a> {
+impl KVKey for Thing<'_> {
+	type ValueType = Value;
+}
+
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
 	Thing::new(ns, db, tb, id.to_owned())
 }
 
-pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::table::all::new(ns, db, tb).encode()?;
+pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+	let mut k = crate::key::table::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"*\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::table::all::new(ns, db, tb).encode()?;
+pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+	let mut k = crate::key::table::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"*\xff");
 	Ok(k)
 }
@@ -46,7 +48,7 @@ impl Categorise for Thing<'_> {
 }
 
 impl<'a> Thing<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: Id) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -59,53 +61,48 @@ impl<'a> Thing<'a> {
 			id,
 		}
 	}
+
+	pub fn decode_key(k: &[u8]) -> Result<Thing<'_>> {
+		Ok(storekey::deserialize(k)?)
+	}
 }
 
 #[cfg(test)]
 mod tests {
+
 	use super::*;
-	use crate::kvs::KeyDecode;
 	use crate::syn;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Thing::new(
-			NamespaceI(1),
-			DatabaseId(2),
+			"testns",
+			"testdb",
 			"testtb",
 			"testid".into(),
 		);
-		let enc = Thing::encode(&val).unwrap();
-		assert_eq!(enc, b"/*1\0*2\0*testtb\0*\0\0\0\x01testid\0");
-
-		let dec = Thing::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Thing::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x01testid\0");
 	}
 	#[test]
 	fn key_complex() {
-		use super::*;
 		//
 		let id1 = "foo:['test']";
 		let thing = syn::thing(id1).expect("Failed to parse the ID");
 		let id1 = thing.id.into();
 		let val = Thing::new("testns", "testdb", "testtb", id1);
-		let enc = Thing::encode(&val).unwrap();
+		let enc = Thing::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x03\0\0\0\x04test\0\x01");
 
-		let dec = Thing::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 		println!("---");
 		let id2 = "foo:[u'f8e238f2-e734-47b8-9a16-476b291bd78a']";
 		let thing = syn::thing(id2).expect("Failed to parse the ID");
 		let id2 = thing.id.into();
 		let val = Thing::new("testns", "testdb", "testtb", id2);
-		let enc = Thing::encode(&val).unwrap();
+		let enc = Thing::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0*\0\0\0\x03\0\0\0\x07\0\0\0\0\0\0\0\x10\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x01");
 
-		let dec = Thing::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 		println!("---");
 	}
 }

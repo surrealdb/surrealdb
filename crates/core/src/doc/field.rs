@@ -15,7 +15,6 @@ use crate::expr::value::every::ArrayBehaviour;
 use crate::expr::value::{CoerceError, Value};
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
-use crate::kvs::KeyEncode as _;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use std::sync::Arc;
@@ -34,7 +33,7 @@ impl Document {
 		// Get the table
 		let tb = self.tb(ctx, opt).await?;
 		// This table is schemafull
-		if tb.schemafull {
+		if tb.full {
 			// Prune unspecified fields from the document that are not defined via `DefineFieldStatement`s.
 
 			// Create a vector to store the keys
@@ -82,7 +81,7 @@ impl Document {
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.clone(),
+								table: tb.name.to_raw(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -97,7 +96,7 @@ impl Document {
 							!opt.strict,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.clone(),
+								table: tb.name.to_raw(),
 								field: current_doc_field_idiom.to_owned(),
 							}
 						);
@@ -706,26 +705,25 @@ impl FieldEditContext<'_> {
 				RefAction::Ignore => Ok(()),
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
-					let (ns, db) = self.ctx.get_ns_db_ids(self.opt)?;
+					let (ns, db) = self.opt.ns_db()?;
+					let name = self.def.name.to_string();
 					let key = crate::key::r#ref::new(
 						ns,
 						db,
 						&thing.tb,
 						&thing.id,
 						&self.rid.tb,
-						&self.def.name.to_string(),
+						&name,
 						&self.rid.id,
-					)
-					.encode_owned()
-					.unwrap();
+					);
 
-					self.ctx.tx().set(key, vec![], None).await?;
+					self.ctx.tx().set(&key, &(), None).await?;
 
 					Ok(())
 				}
 				// Delete the reference, if it exists
 				RefAction::Delete(things, ff) => {
-					let (ns, db) = self.ctx.get_ns_db_ids(self.opt)?;
+					let (ns, db) = self.opt.ns_db()?;
 					for thing in things {
 						let key = crate::key::r#ref::new(
 							ns,
@@ -735,11 +733,9 @@ impl FieldEditContext<'_> {
 							&self.rid.tb,
 							&ff,
 							&self.rid.id,
-						)
-						.encode_owned()
-						.unwrap();
+						);
 
-						self.ctx.tx().del(key).await?;
+						self.ctx.tx().del(&key).await?;
 					}
 
 					Ok(())

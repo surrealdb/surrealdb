@@ -1,38 +1,41 @@
 //! Stores a DEFINE TABLE config definition
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::expr::statements::DefineTableStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Tb<'a> {
+pub(crate) struct Tb<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: NamespaceId,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: DatabaseId,
+	pub db: &'a str,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 	pub tb: &'a str,
 }
-impl_key!(Tb<'a>);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Tb<'a> {
+impl KVKey for Tb<'_> {
+	type ValueType = DefineTableStatement;
+}
+
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Tb<'a> {
 	Tb::new(ns, db, tb)
 }
 
-pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!tb\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!tb\xff");
 	Ok(k)
 }
@@ -44,7 +47,7 @@ impl Categorise for Tb<'_> {
 }
 
 impl<'a> Tb<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -61,20 +64,17 @@ impl<'a> Tb<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Tb::new(
-			NamespaceId(1),
-			DatabaseId(2),
+			"testns",
+			"testdb",
 			"testtb",
 		);
-		let enc = Tb::encode(&val).unwrap();
-		assert_eq!(enc, b"/*1\0*2\0!tbtesttb\0");
-
-		let dec = Tb::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Tb::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0!tbtesttb\0");
 	}
 }

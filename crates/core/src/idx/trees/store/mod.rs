@@ -17,7 +17,7 @@ use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
-use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::kvs::{KVKey, Key, Transaction, TransactionType, Val};
 use anyhow::Result;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
@@ -135,11 +135,11 @@ pub enum TreeNodeProvider {
 impl TreeNodeProvider {
 	pub fn get_key(&self, node_id: NodeId) -> Result<Key> {
 		match self {
-			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(Some(node_id)),
-			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(Some(node_id)),
-			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(Some(node_id)),
-			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(Some(node_id)),
-			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(Some(node_id)),
+			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(node_id).encode_key(),
+			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(node_id).encode_key(),
+			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(node_id).encode_key(),
+			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(node_id).encode_key(),
+			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(node_id).encode_key(),
 			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
 		}
 	}
@@ -149,7 +149,7 @@ impl TreeNodeProvider {
 		N: TreeNode + Clone,
 	{
 		let key = self.get_key(id)?;
-		if let Some(val) = tx.get(key.clone(), None).await? {
+		if let Some(val) = tx.get(&key, None).await? {
 			let size = val.len() as u32;
 			let node = N::try_from_val(val)?;
 			Ok(StoredNode::new(node, id, key, size))
@@ -164,7 +164,7 @@ impl TreeNodeProvider {
 	{
 		let val = node.n.try_into_val()?;
 		node.size = val.len() as u32;
-		tx.set(node.key.clone(), val, None).await?;
+		tx.set(&node.key, &val, None).await?;
 		Ok(())
 	}
 }
@@ -239,7 +239,7 @@ impl IndexStores {
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
 		let (ns, db) = opt.ns_db()?;
-		let ikb = IndexKeyBase::new(ns, db, ix)?;
+		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
 
@@ -310,7 +310,7 @@ impl IndexStores {
 
 	async fn remove_index(&self, ns: &str, db: &str, ix: &DefineIndexStatement) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
-			let ikb = IndexKeyBase::new(ns, db, ix)?;
+			let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 			self.remove_hnsw_index(ikb).await?;
 		}
 		Ok(())

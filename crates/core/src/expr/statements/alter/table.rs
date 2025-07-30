@@ -89,7 +89,7 @@ impl AlterTableStatement {
 			DefineTableStatement::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		}
 		// Set the table definition
-		txn.set(key, revision::to_vec(&dt)?, None).await?;
+		txn.set(&key, &dt, None).await?;
 		// Record definition change
 		if self.changefeed.is_some() && dt.changefeed.is_some() {
 			let (ns, db) = ctx.get_ns_db_ids(opt)?;

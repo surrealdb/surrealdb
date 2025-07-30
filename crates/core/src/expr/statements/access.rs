@@ -8,6 +8,7 @@ use crate::expr::{
 	Thing, Uuid, Value,
 };
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail, ensure};
 use md5::Digest;
 use rand::Rng;
@@ -97,6 +98,7 @@ pub struct AccessGrant {
 	pub subject: Subject,             // Subject of the grant.
 	pub grant: Grant,                 // Grant data.
 }
+impl_kv_value_revisioned!(AccessGrant);
 
 impl AccessGrant {
 	/// Returns a version of the statement where potential secrets are redacted.
@@ -381,7 +383,9 @@ pub async fn create_grant(
 					gr_store.grant = Grant::Bearer(grant.hashed());
 					let (ns, db) = ctx.get_ns_db_ids(opt)?;
 					let key = crate::key::database::access::gr::new(ns, db, &gr.ac, &gr.id);
-					txn.put(key, revision::to_vec(&gr_store)?, None).await
+					txn.get_or_add_ns(ns, opt.strict).await?;
+					txn.get_or_add_db(ns, db, opt.strict).await?;
+					txn.put(&key, &gr_store, None).await
 				}
 				_ => bail!(Error::AccessLevelMismatch),
 			};
@@ -475,17 +479,19 @@ pub async fn create_grant(
 			let res = match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
-					txn.put(key, revision::to_vec(&gr_store)?, None).await
+					txn.put(&key, &gr_store, None).await
 				}
 				Base::Ns => {
-					let ns = ctx.get_ns_id(opt)?;
-					let key = crate::key::namespace::access::gr::new(ns, &gr.ac, &gr.id);
-					txn.put(key, revision::to_vec(&gr_store)?, None).await
+					let key = crate::key::namespace::access::gr::new(opt.ns()?, &gr.ac, &gr.id);
+					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					txn.put(&key, &gr_store, None).await
 				}
 				Base::Db => {
 					let (ns, db) = ctx.get_ns_db_ids(opt)?;
 					let key = crate::key::database::access::gr::new(ns, db, &gr.ac, &gr.id);
-					txn.put(key, revision::to_vec(&gr_store)?, None).await
+					txn.get_or_add_ns(ns, opt.strict).await?;
+					txn.get_or_add_db(ns, db, opt.strict).await?;
+					txn.put(&key, &gr_store, None).await
 				}
 				_ => bail!(Error::Unimplemented(
 					"Managing access methods outside of root, namespace and database levels"
@@ -704,17 +710,19 @@ pub async fn revoke_grant(
 			match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&stmt.ac, gr);
-					txn.set(key, revision::to_vec(&revoke)?, None).await?;
+					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Ns => {
-					let ns = ctx.get_ns_id(opt)?;
-					let key = crate::key::namespace::access::gr::new(ns, &stmt.ac, gr);
-					txn.set(key, revision::to_vec(&revoke)?, None).await?;
+					let key = crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, gr);
+					txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Db => {
 					let (ns, db) = ctx.get_ns_db_ids(opt)?;
 					let key = crate::key::database::access::gr::new(ns, db, &stmt.ac, gr);
-					txn.set(key, revision::to_vec(&revoke)?, None).await?;
+					txn.get_or_add_ns(ns, opt.strict).await?;
+					txn.get_or_add_db(ns, db, opt.strict).await?;
+					txn.set(&key, &revoke, None).await?;
 				}
 				_ => {
 					bail!(Error::Unimplemented(
@@ -790,17 +798,20 @@ pub async fn revoke_grant(
 				match base {
 					Base::Root => {
 						let key = crate::key::root::access::gr::new(&stmt.ac, &gr.id);
-						txn.set(key, revision::to_vec(&gr)?, None).await?;
+						txn.set(&key, &gr, None).await?;
 					}
 					Base::Ns => {
-						let ns = ctx.get_ns_id(opt)?;
-						let key = crate::key::namespace::access::gr::new(ns, &stmt.ac, &gr.id);
-						txn.set(key, revision::to_vec(&gr)?, None).await?;
+						let key =
+							crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, &gr.id);
+						txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						txn.set(&key, &gr, None).await?;
 					}
 					Base::Db => {
 						let (ns, db) = ctx.get_ns_db_ids(opt)?;
 						let key = crate::key::database::access::gr::new(ns, db, &stmt.ac, &gr.id);
-						txn.set(key, revision::to_vec(&gr)?, None).await?;
+						txn.get_or_add_ns(ns, opt.strict).await?;
+						txn.get_or_add_db(ns, db, opt.strict).await?;
+						txn.set(&key, &gr, None).await?;
 					}
 					_ => bail!(Error::Unimplemented(
 						"Managing access methods outside of root, namespace and database levels"
@@ -911,14 +922,15 @@ async fn compute_purge(
 		// If it should, delete the grant and append the redacted version to the result.
 		if purge_expired || purge_revoked {
 			match base {
-				Base::Root => txn.del(crate::key::root::access::gr::new(&stmt.ac, &gr.id)).await?,
+				Base::Root => txn.del(&crate::key::root::access::gr::new(&stmt.ac, &gr.id)).await?,
 				Base::Ns => {
-					let ns = ctx.get_ns_id(opt)?;
-					txn.del(crate::key::namespace::access::gr::new(ns, &stmt.ac, &gr.id)).await?
+					txn.del(&crate::key::namespace::access::gr::new(opt.ns()?, &stmt.ac, &gr.id))
+						.await?
 				}
 				Base::Db => {
-					let (ns, db) = ctx.get_ns_db_ids(opt)?;
-					txn.del(crate::key::database::access::gr::new(ns, db, &stmt.ac, &gr.id)).await?
+					let (ns, db) = opt.ns_db()?;
+					txn.del(&crate::key::database::access::gr::new(ns, db, &stmt.ac, &gr.id))
+						.await?
 				}
 				_ => {
 					bail!(Error::Unimplemented(

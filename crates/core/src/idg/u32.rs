@@ -1,5 +1,6 @@
-use crate::kvs::{Key, Val};
+use crate::kvs::{Key, Val, impl_kv_value_revisioned};
 use anyhow::Result;
+use revision::revisioned;
 use roaring::RoaringBitmap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ pub(crate) type Id = u32;
 // It can reuse freed ids by keeping track of them in a roaring bitmap.
 // This doesn't do any variable-length encoding, so it's not as space efficient as it could be.
 // It is used to generate ids for any SurrealDB objects that need aliases (e.g. namespaces, databases, tables, indexes, etc.)
+#[revisioned(revision = 1)]
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct U32 {
@@ -19,6 +21,8 @@ pub struct U32 {
 	next_id: Id,
 	updated: bool,
 }
+
+impl_kv_value_revisioned!(U32);
 
 impl U32 {
 	pub(crate) async fn new(state_key: Key, v: Option<Val>) -> Result<Self> {
@@ -116,15 +120,15 @@ mod tests {
 
 	async fn get_ids(ds: &Datastore) -> (Transaction, U32) {
 		let txn = ds.transaction(Write, Optimistic).await.unwrap();
-		let key = "foo";
-		let v = txn.get(key, None).await.unwrap();
-		let d = U32::new(key.into(), v).await.unwrap();
+		let key = "foo".as_bytes().to_vec();
+		let v = txn.get(&key, None).await.unwrap();
+		let d = U32::new(key, v).await.unwrap();
 		(txn, d)
 	}
 
 	async fn finish(txn: Transaction, mut d: U32) -> Result<()> {
 		if let Some((key, val)) = d.finish() {
-			txn.set(key, val, None).await?;
+			txn.set(&key, &val, None).await?;
 		}
 		txn.commit().await
 	}

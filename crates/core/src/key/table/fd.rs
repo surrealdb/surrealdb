@@ -1,19 +1,19 @@
 //! Stores a DEFINE FIELD config definition
-use crate::catalog::{NamespaceId, DatabaseId};
+use crate::expr::statements::DefineFieldStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Fd<'a> {
+pub(crate) struct Fd<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: NamespaceId,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: DatabaseId,
+	pub db: &'a str,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -21,20 +21,23 @@ pub struct Fd<'a> {
 	_f: u8,
 	pub fd: &'a str,
 }
-impl_key!(Fd<'a>);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, fd: &'a str) -> Fd<'a> {
+impl KVKey for Fd<'_> {
+	type ValueType = DefineFieldStatement;
+}
+
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, fd: &'a str) -> Fd<'a> {
 	Fd::new(ns, db, tb, fd)
 }
 
-pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!fd\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!fd\xff");
 	Ok(k)
 }
@@ -46,7 +49,7 @@ impl Categorise for Fd<'_> {
 }
 
 impl<'a> Fd<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, fd: &'a str) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, fd: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -65,22 +68,19 @@ impl<'a> Fd<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Fd::new(
-			NamespaceId(1),
-			DatabaseId(2),
+			"testns",
+			"testdb",
 			"testtb",
 			"testfd",
 		);
-		let enc = Fd::encode(&val).unwrap();
-		assert_eq!(enc, b"/*1\x00*2\x00*3\x00!fdtestfd\x00");
-
-		let dec = Fd::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Fd::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\x00*testdb\x00*testtb\x00!fdtestfd\x00");
 	}
 
 	#[test]

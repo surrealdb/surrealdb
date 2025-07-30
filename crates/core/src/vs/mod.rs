@@ -5,6 +5,7 @@
 
 pub use std::{error, fmt, mem};
 
+use crate::kvs::KVValue;
 use revision::Revisioned;
 
 /// Versionstamp is a 10-byte array used to identify a specific version of a key.
@@ -20,6 +21,18 @@ use revision::Revisioned;
 /// 393216
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, PartialOrd)]
 pub struct VersionStamp([u8; 10]);
+
+impl KVValue for VersionStamp {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(self.0.to_vec())
+	}
+
+	#[inline]
+	fn kv_decode_value(bytes: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::from_slice(&bytes)?)
+	}
+}
 
 impl serde::Serialize for VersionStamp {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -182,7 +195,7 @@ impl Iterator for VersionStampIter {
 
 #[cfg(test)]
 mod test {
-	use super::VersionStamp;
+	use super::*;
 
 	#[test]
 	pub fn generate_one_vs() {
@@ -225,7 +238,6 @@ mod test {
 
 	#[test]
 	fn try_to_u64_be() {
-		use super::*;
 		// Overflow
 		let v = VersionStamp::from_bytes([255, 255, 255, 255, 255, 255, 255, 255, 0, 1]);
 		let res = v.try_into_u64();
@@ -238,7 +250,6 @@ mod test {
 
 	#[test]
 	fn try_u128_to_versionstamp() {
-		use super::*;
 		// Overflow
 		let v = u128::MAX;
 		let res = VersionStamp::try_from_u128(v);

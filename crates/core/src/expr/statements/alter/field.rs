@@ -1,4 +1,3 @@
-use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -48,7 +47,7 @@ impl AlterFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = opt.ns_db()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the table definition
@@ -113,16 +112,16 @@ impl AlterFieldStatement {
 
 		// Set the table definition
 		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
-		txn.set(key, revision::to_vec(&df)?, None).await?;
+		txn.set(&key, &df, None).await?;
 		// Refresh the table cache
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
-			key,
-			revision::to_vec(&TableDefinition {
+			&key,
+			&DefineTableStatement {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

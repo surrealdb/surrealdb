@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::expr::Idiom;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::thing::Thing;
-use crate::kvs::{Key, KeyEncode};
+use crate::kvs::{KVKey, Key};
 use anyhow::Result;
 
 // PreparedWrite is a tuple of (versionstamp key, key prefix, key suffix, serialized table mutations).
@@ -31,8 +30,8 @@ pub struct Buffer {
 #[derive(Hash, Eq, PartialEq, Debug)]
 #[non_exhaustive]
 pub struct ChangeKey {
-	pub ns: NamespaceId,
-	pub db: DatabaseId,
+	pub ns: String,
+	pub db: String,
 	pub tb: String,
 }
 
@@ -43,7 +42,7 @@ impl Buffer {
 		}
 	}
 
-	pub fn push(&mut self, ns: NamespaceId, db: DatabaseId, tb: String, m: TableMutation) {
+	pub fn push(&mut self, ns: String, db: String, tb: String, m: TableMutation) {
 		let tb2 = tb.clone();
 		let ms = self
 			.b
@@ -68,8 +67,8 @@ impl Writer {
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn record_cf_change(
 		&mut self,
-		ns: NamespaceId,
-		db: DatabaseId,
+		ns: &str,
+		db: &str,
 		tb: &str,
 		id: Thing,
 		previous: CursorValue,
@@ -78,8 +77,8 @@ impl Writer {
 	) {
 		if current.as_ref().is_some() {
 			self.buf.push(
-				ns,
-				db,
+				ns.to_string(),
+				db.to_string(),
 				tb.to_string(),
 				match store_difference {
 					true => {
@@ -102,8 +101,8 @@ impl Writer {
 			);
 		} else {
 			self.buf.push(
-				ns,
-				db,
+				ns.to_string(),
+				db.to_string(),
 				tb.to_string(),
 				match store_difference {
 					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
@@ -113,10 +112,10 @@ impl Writer {
 		}
 	}
 
-	pub(crate) fn define_table(&mut self, ns: NamespaceId, db: DatabaseId, tb: &str, dt: &TableDefinition) {
+	pub(crate) fn define_table(&mut self, ns: &str, db: &str, tb: &str, dt: &DefineTableStatement) {
 		self.buf.push(
-			ns,
-			db,
+			ns.to_string(),
+			db.to_string(),
 			tb.to_string(),
 			TableMutation::Def(dt.to_owned()),
 		)
@@ -136,7 +135,7 @@ impl Writer {
 			mutations,
 		) in self.buf.b.iter()
 		{
-			let ts_key: Key = crate::key::database::vs::new(ns, db).encode()?;
+			let ts_key: Key = crate::key::database::vs::new(ns, db).encode_key()?;
 			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db)?;
 			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
 			let value = revision::to_vec(mutations)?;
@@ -151,7 +150,6 @@ impl Writer {
 mod tests {
 	use std::time::Duration;
 
-	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::expr::Datetime;
 	use crate::expr::changefeed::ChangeFeed;
@@ -167,8 +165,6 @@ mod tests {
 
 	const DONT_STORE_PREVIOUS: bool = false;
 
-	const NS_ID: NamespaceId = NamespaceId(1);
-	const DB_ID: DatabaseId = DatabaseId(2);
 	const NS: &str = "myns";
 	const DB: &str = "mydb";
 	const TB: &str = "mytb";
@@ -386,8 +382,8 @@ mod tests {
 	async fn change_feed_vs(tx: Transaction, vs: &VersionStamp) -> Vec<ChangeSet> {
 		let r = crate::cf::read(
 			&tx,
-			NS_ID,
-			DB_ID,
+			NS,
+			DB,
 			Some(TB),
 			ShowSince::Versionstamp(vs.into_u64_lossy()),
 			Some(10),
@@ -425,7 +421,7 @@ mod tests {
 			..Default::default()
 		};
 		let ddb = DefineDatabaseStatement {
-			name: DB.to_string(),
+			name: crate::expr::Ident(DB.to_string()),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_diff,
@@ -449,12 +445,12 @@ mod tests {
 		//
 
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let ns_root = crate::key::root::ns::new(NS_ID);
-		tx.put(&ns_root, revision::to_vec(&dns).unwrap(), None).await.unwrap();
-		let db_root = crate::key::namespace::db::new(NS_ID, DB_ID);
-		tx.put(&db_root, revision::to_vec(&ddb).unwrap(), None).await.unwrap();
-		let tb_root = crate::key::database::tb::new(NS_ID, DB_ID, TB);
-		tx.put(&tb_root, revision::to_vec(&dtb).unwrap(), None).await.unwrap();
+		let ns_root = crate::key::root::ns::new(NS);
+		tx.put(&ns_root, &dns, None).await.unwrap();
+		let db_root = crate::key::namespace::db::new(NS, DB);
+		tx.put(&db_root, &ddb, None).await.unwrap();
+		let tb_root = crate::key::database::tb::new(NS, DB, TB);
+		tx.put(&tb_root, &dtb, None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds
 	}

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::kvs::KVKey;
 use crate::{
 	expr::{
 		AccessType, Ident,
@@ -9,7 +10,7 @@ use crate::{
 			define::{DefineScopeStatement, DefineTokenStatement},
 		},
 	},
-	kvs::{KeyEncode as _, Transaction},
+	kvs::Transaction,
 };
 use anyhow::Result;
 
@@ -34,9 +35,9 @@ pub async fn v1_to_2_migrate_to_access(tx: Arc<Transaction>) -> Result<()> {
 
 async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<()> {
 	// Find all tokens on the namespace level
-	let mut beg = crate::key::namespace::all::new(ns).encode()?;
+	let mut beg = crate::key::namespace::all::new(ns).encode_key()?;
 	beg.extend_from_slice(&[b'!', b't', b'k', 0x00]);
-	let mut end = crate::key::namespace::all::new(ns).encode()?;
+	let mut end = crate::key::namespace::all::new(ns).encode_key()?;
 	end.extend_from_slice(&[b'!', b't', b'k', 0xff]);
 
 	// queue of tokens to migrate
@@ -60,18 +61,17 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<()> {
 	// Migrate the tokens to accesses
 	for key in queue.iter() {
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let tk: DefineTokenStatement =
-			revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
+		let tk: DefineTokenStatement = revision::from_slice(&tx.get(key, None).await?.unwrap())?;
 		// Convert into access
 		let ac: DefineAccessStatement = tk.into();
 
 		// Delete the old key
-		tx.del(key.to_owned()).await?;
+		tx.del(key).await?;
 
 		// Construct the new key
 		let key = crate::key::namespace::ac::new(ns, &ac.name.0);
 		// Set the fixed key
-		tx.set(key, revision::to_vec(&ac)?, None).await?;
+		tx.set(&key, &ac, None).await?;
 	}
 
 	Ok(())
@@ -79,9 +79,9 @@ async fn migrate_ns_tokens(tx: Arc<Transaction>, ns: &str) -> Result<()> {
 
 async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<()> {
 	// Find all tokens on the namespace level
-	let mut beg = crate::key::database::all::new(ns, db).encode()?;
+	let mut beg = crate::key::database::all::new(ns, db).encode_key()?;
 	beg.extend_from_slice(&[b'!', b't', b'k', 0x00]);
-	let mut end = crate::key::database::all::new(ns, db).encode()?;
+	let mut end = crate::key::database::all::new(ns, db).encode_key()?;
 	end.extend_from_slice(&[b'!', b't', b'k', 0xff]);
 
 	// queue of tokens to migrate
@@ -105,18 +105,17 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 	// Migrate the tokens to accesses
 	for key in queue.iter() {
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let tk: DefineTokenStatement =
-			revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
+		let tk: DefineTokenStatement = revision::from_slice(&tx.get(key, None).await?.unwrap())?;
 		// Convert into access
 		let ac: DefineAccessStatement = tk.into();
 
 		// Delete the old key
-		tx.del(key.to_owned()).await?;
+		tx.del(key).await?;
 
 		// Construct the new key
 		let key = crate::key::database::ac::new(ns, db, &ac.name.0);
 		// Set the fixed key
-		tx.set(key, revision::to_vec(&ac)?, None).await?;
+		tx.set(&key, &ac, None).await?;
 	}
 
 	Ok(())
@@ -124,9 +123,9 @@ async fn migrate_db_tokens(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<(
 
 async fn collect_db_scope_keys(tx: Arc<Transaction>, ns: &str, db: &str) -> Result<Vec<Vec<u8>>> {
 	// Find all tokens on the namespace level
-	let mut beg = crate::key::database::all::new(ns, db).encode()?;
+	let mut beg = crate::key::database::all::new(ns, db).encode_key()?;
 	beg.extend_from_slice(&[b'!', b's', b'c', 0x00]);
-	let mut end = crate::key::database::all::new(ns, db).encode()?;
+	let mut end = crate::key::database::all::new(ns, db).encode_key()?;
 	end.extend_from_slice(&[b'!', b's', b'c', 0xff]);
 
 	// queue of tokens to migrate
@@ -157,20 +156,19 @@ async fn migrate_db_scope_key(
 	key: Vec<u8>,
 ) -> Result<DefineAccessStatement> {
 	// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-	let sc: DefineScopeStatement =
-		revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
+	let sc: DefineScopeStatement = revision::from_slice(&tx.get(&key, None).await?.unwrap())?;
 	// Convert into access
 	let ac: DefineAccessStatement = sc.into();
 
 	// Delete the old key
-	tx.del(key.clone()).await?;
+	tx.del(&key).await?;
 
 	// Extract the name
 	let name = ac.name.clone();
 	// Construct the new key
 	let key = crate::key::database::ac::new(ns, db, &name);
 	// Set the fixed key
-	tx.set(key, revision::to_vec(&ac)?, None).await?;
+	tx.set(&key, &ac, None).await?;
 
 	Ok(ac)
 }
@@ -186,11 +184,11 @@ async fn migrate_sc_tokens(
 	// 0xb1 = ±
 	// Inserting the string manually does not add a null byte at the end of the string.
 	// Hence, in the third `extend_from_slice`, we add the null byte manually, followed by the token key prefix
-	let mut beg = crate::key::database::all::new(ns, db).encode()?;
+	let mut beg = crate::key::database::all::new(ns, db).encode_key()?;
 	beg.extend_from_slice(&[0xb1]);
 	beg.extend_from_slice(name.as_bytes());
 	beg.extend_from_slice(&[0x00, b'!', b't', b'k', 0x00]);
-	let mut end = crate::key::database::all::new(ns, db).encode()?;
+	let mut end = crate::key::database::all::new(ns, db).encode_key()?;
 	end.extend_from_slice(&[0xb1]);
 	end.extend_from_slice(name.as_bytes());
 	end.extend_from_slice(&[0x00, b'!', b't', b'k', 0xff]);
@@ -229,11 +227,10 @@ async fn migrate_sc_tokens(
 	// Log example merged accesses
 	for key in queue.iter() {
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let tk: DefineTokenStatement =
-			revision::from_slice(&tx.get(key.clone(), None).await?.unwrap())?;
+		let tk: DefineTokenStatement = revision::from_slice(&tx.get(key, None).await?.unwrap())?;
 
 		// Delete the old key
-		tx.del(key.to_owned()).await?;
+		tx.del(key).await?;
 
 		// Merge the access and token definitions
 		let mut merged = merge_ac_and_tk(ac.clone(), tk.clone());

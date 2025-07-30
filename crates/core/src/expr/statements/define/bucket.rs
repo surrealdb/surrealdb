@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, FlowResultExt, Ident, Permission, Strand, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::{ctx::Context, expr::statements::info::InfoStructure};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -80,7 +81,7 @@ impl DefineBucketStatement {
 			comment: self.comment.clone(),
 			..Default::default()
 		};
-		txn.set(key, revision::to_vec(&ap)?, None).await?;
+		txn.set(&key, &ap, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good
@@ -142,6 +143,7 @@ pub struct BucketDefinition {
 	pub readonly: bool,
 	pub comment: Option<Strand>,
 }
+impl_kv_value_revisioned!(BucketDefinition);
 
 impl From<BucketDefinition> for DefineBucketStatement {
 	fn from(value: BucketDefinition) -> Self {

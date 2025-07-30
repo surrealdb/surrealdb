@@ -1,4 +1,3 @@
-use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -6,6 +5,7 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value, changefeed::ChangeFeed};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -18,7 +18,7 @@ use std::fmt::{self, Display};
 #[non_exhaustive]
 pub struct DefineDatabaseStatement {
 	pub id: Option<u32>,
-	pub name: String,
+	pub name: Ident,
 	pub comment: Option<Strand>,
 	pub changefeed: Option<ChangeFeed>,
 	#[revision(start = 2)]
@@ -26,6 +26,8 @@ pub struct DefineDatabaseStatement {
 	#[revision(start = 3)]
 	pub overwrite: bool,
 }
+
+impl_kv_value_revisioned!(DefineDatabaseStatement);
 
 impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
@@ -41,40 +43,32 @@ impl DefineDatabaseStatement {
 		let ns = opt.ns()?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
-
 		// Check if the definition exists
-		let database_id = match txn.get_db(ns, &self.name).await {
-			Ok(Some(db)) => {
-				if self.if_not_exists {
-					return Ok(Value::None);
-				}
-
-				if !(self.overwrite || opt.import) {
-					bail!(Error::DbAlreadyExists {
-						name: self.name.to_string(),
-					});
-				}
-
-				db.database_id
-			},
-			Ok(None) => {
-				txn.lock().await.get_next_db_id(nsv.id).await?
-			},
-			Err(err) => return Err(err),
-		};
-
+		if txn.get_db(ns, &self.name).await.is_ok() {
+			if self.if_not_exists {
+				return Ok(Value::None);
+			} else if !self.overwrite && !opt.import {
+				bail!(Error::DbAlreadyExists {
+					name: self.name.to_string(),
+				});
+			}
+		}
 		// Process the statement
-
-		let key = crate::key::namespace::db::new(nsv.id, database_id);
+		let key = crate::key::namespace::db::new(ns, &self.name);
+		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DatabaseDefinition {
-				database_id,
-				name: self.name.clone(),
-				comment: self.comment.clone().map(|s| s.to_raw()),
-				changefeed: self.changefeed.clone(),
-			})?,
+			&key,
+			&DefineDatabaseStatement {
+				id: match (self.id, nsv.id) {
+					(Some(id), _) => Some(id),
+					(None, Some(nsv_id)) => Some(txn.lock().await.get_next_db_id(nsv_id).await?),
+					(None, None) => None,
+				},
+				// Don't persist the `IF NOT EXISTS` clause to schema
+				if_not_exists: false,
+				overwrite: false,
+				..self.clone()
+			},
 			None,
 		)
 		.await?;

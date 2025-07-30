@@ -5,16 +5,18 @@ use crate::err::Error;
 use crate::expr::index::{Distance, Index};
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{
-	Array, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table, Thing, Value,
+	Array, BooleanOperation, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table,
+	Thing, Value,
 };
 use crate::idx::IndexKeyBase;
-use crate::idx::docids::DocIds;
-use crate::idx::ft::analyzer::{Analyzer, TermsList, TermsSet};
+use crate::idx::docids::btdocids::BTreeDocIds;
+use crate::idx::ft::MatchRef;
+use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
-use crate::idx::ft::scorer::BM25Scorer;
-use crate::idx::ft::termdocs::TermsDocs;
-use crate::idx::ft::terms::Terms;
-use crate::idx::ft::{FtIndex, MatchRef};
+use crate::idx::ft::search::scorer::BM25Scorer;
+use crate::idx::ft::search::termdocs::SearchTermsDocs;
+use crate::idx::ft::search::terms::SearchTerms;
+use crate::idx::ft::search::{SearchIndex, TermIdList, TermIdSet};
 use crate::idx::planner::IterationStage;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
@@ -35,7 +37,7 @@ use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::kvs::TransactionType;
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use num_traits::{FromPrimitive, ToPrimitive};
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
@@ -71,15 +73,33 @@ pub(super) type KnnExpressions = HashSet<Arc<Expression>>;
 #[derive(Clone)]
 pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
 
+enum PerIndexReferenceIndex {
+	Search(SearchIndex),
+	FullText(FullTextIndex),
+	MTree(MTreeIndex),
+	Hnsw(SharedHnswIndex),
+}
+
+enum PerExpressionEntry {
+	Search(SearchEntry),
+	FullText(FullTextEntry),
+	MTree(MtEntry),
+	Hnsw(HnswEntry),
+	KnnBruteForce(KnnBruteForceEntry),
+}
+
+enum PerMatchRefEntry {
+	Search(SearchEntry),
+	FullText(FullTextEntry),
+}
+
 pub(super) struct InnerQueryExecutor {
 	table: String,
-	ft_map: HashMap<IndexReference, FtIndex>,
-	mr_entries: HashMap<MatchRef, FtEntry>,
-	exp_entries: HashMap<Arc<Expression>, FtEntry>,
+	ir_map: HashMap<IndexReference, PerIndexReferenceIndex>,
+	mr_entries: HashMap<MatchRef, PerMatchRefEntry>,
+	exp_entries: HashMap<Arc<Expression>, PerExpressionEntry>,
 	it_entries: Vec<IteratorEntry>,
-	mt_entries: HashMap<Arc<Expression>, MtEntry>,
-	hnsw_entries: HashMap<Arc<Expression>, HnswEntry>,
-	knn_bruteforce_entries: HashMap<Arc<Expression>, KnnBruteForceEntry>,
+	knn_bruteforce_len: usize,
 }
 
 impl From<InnerQueryExecutor> for QueryExecutor {
@@ -107,8 +127,8 @@ impl IteratorEntry {
 		}
 	}
 }
+
 impl InnerQueryExecutor {
-	#[expect(clippy::too_many_arguments)]
 	#[expect(clippy::mutable_key_type)]
 	pub(super) async fn new(
 		stk: &mut Stk,
@@ -116,18 +136,12 @@ impl InnerQueryExecutor {
 		opt: &Options,
 		table: &Table,
 		ios: Vec<(Arc<Expression>, IndexOption)>,
-		knns: KnnExpressions,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
 	) -> Result<Self> {
 		let mut mr_entries = HashMap::default();
 		let mut exp_entries = HashMap::default();
-		let mut ft_map = HashMap::default();
-		let mut mt_map: HashMap<IndexReference, MTreeIndex> = HashMap::default();
-		let mut mt_entries = HashMap::default();
-		let mut hnsw_map: HashMap<IndexReference, SharedHnswIndex> = HashMap::default();
-		let mut hnsw_entries = HashMap::default();
-		let mut knn_bruteforce_entries = HashMap::with_capacity(knns.len());
+		let mut ir_map = HashMap::default();
 		let knn_condition = knn_condition.map(Arc::new);
 
 		// Create all the instances of index entries.
@@ -136,12 +150,19 @@ impl InnerQueryExecutor {
 			let ixr = io.ix_ref();
 			match &ixr.index {
 				Index::Search(p) => {
-					let ft_entry = match ft_map.entry(ixr.clone()) {
-						Entry::Occupied(e) => FtEntry::new(stk, ctx, opt, e.get(), io).await?,
+					let search_entry: Option<SearchEntry> = match ir_map.entry(ixr.clone()) {
+						Entry::Occupied(e) => {
+							if let PerIndexReferenceIndex::Search(si) = e.get() {
+								SearchEntry::new(stk, ctx, opt, si, io).await?
+							} else {
+								None
+							}
+						}
 						Entry::Vacant(e) => {
 							let (ns, db) = opt.ns_db()?;
-							let ikb = IndexKeyBase::new(ns, db, e.key())?;
-							let ft = FtIndex::new(
+							let ix: &DefineIndexStatement = e.key();
+							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+							let si = SearchIndex::new(
 								ctx,
 								opt,
 								p.az.as_str(),
@@ -150,105 +171,169 @@ impl InnerQueryExecutor {
 								TransactionType::Read,
 							)
 							.await?;
-							let fte = FtEntry::new(stk, ctx, opt, &ft, io).await?;
-							e.insert(ft);
+							let fte = SearchEntry::new(stk, ctx, opt, &si, io).await?;
+							e.insert(PerIndexReferenceIndex::Search(si));
 							fte
 						}
 					};
-					if let Some(e) = ft_entry {
-						if let Matches(_, Some(mr)) = e.0.index_option.op() {
+					if let Some(e) = search_entry {
+						if let Matches(_, Some(mr), _) = e.0.index_option.op() {
+							let mr_entry = PerMatchRefEntry::Search(e.clone());
 							ensure!(
-								mr_entries.insert(*mr, e.clone()).is_none(),
+								mr_entries.insert(*mr, mr_entry).is_none(),
 								Error::DuplicatedMatchRef {
 									mr: *mr,
 								}
 							);
 						}
-						exp_entries.insert(exp, e);
+						exp_entries.insert(exp, PerExpressionEntry::Search(e));
+					}
+				}
+				Index::FullText(p) => {
+					let fulltext_entry: Option<FullTextEntry> = match ir_map.entry(ixr.clone()) {
+						Entry::Occupied(e) => {
+							if let PerIndexReferenceIndex::FullText(fti) = e.get() {
+								FullTextEntry::new(stk, ctx, opt, fti, io).await?
+							} else {
+								None
+							}
+						}
+						Entry::Vacant(e) => {
+							let (ns, db) = opt.ns_db()?;
+							let ix: &DefineIndexStatement = e.key();
+							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+							let ft = FullTextIndex::new(
+								opt.id()?,
+								ctx.get_index_stores(),
+								&ctx.tx(),
+								ikb,
+								p,
+							)
+							.await?;
+							let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
+							e.insert(PerIndexReferenceIndex::FullText(ft));
+							fte
+						}
+					};
+					if let Some(e) = fulltext_entry {
+						if let Matches(_, Some(mr), _) = e.0.io.op() {
+							let mr_entry = PerMatchRefEntry::FullText(e.clone());
+							ensure!(
+								mr_entries.insert(*mr, mr_entry).is_none(),
+								Error::DuplicatedMatchRef {
+									mr: *mr,
+								}
+							);
+						}
+						exp_entries.insert(exp, PerExpressionEntry::FullText(e));
 					}
 				}
 				Index::MTree(p) => {
 					if let IndexOperator::Knn(a, k) = io.op() {
-						let entry = match mt_map.entry(ixr.clone()) {
+						let mte = match ir_map.entry(ixr.clone()) {
 							Entry::Occupied(e) => {
-								MtEntry::new(stk, ctx, opt, e.get(), a, *k, knn_condition.clone())
-									.await?
+								if let PerIndexReferenceIndex::MTree(mti) = e.get() {
+									Some(
+										MtEntry::new(
+											stk,
+											ctx,
+											opt,
+											mti,
+											a,
+											*k,
+											knn_condition.clone(),
+										)
+										.await?,
+									)
+								} else {
+									None
+								}
 							}
 							Entry::Vacant(e) => {
 								let (ns, db) = opt.ns_db()?;
-								let ikb = IndexKeyBase::new(ns, db, e.key())?;
+								let ix: &DefineIndexStatement = e.key();
+								let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 								let tx = ctx.tx();
-								let mt =
+								let mti =
 									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
 								drop(tx);
 								let entry =
-									MtEntry::new(stk, ctx, opt, &mt, a, *k, knn_condition.clone())
+									MtEntry::new(stk, ctx, opt, &mti, a, *k, knn_condition.clone())
 										.await?;
-								e.insert(mt);
-								entry
+								e.insert(PerIndexReferenceIndex::MTree(mti));
+								Some(entry)
 							}
 						};
-						mt_entries.insert(exp, entry);
+						if let Some(mte) = mte {
+							exp_entries.insert(exp, PerExpressionEntry::MTree(mte));
+						}
 					}
 				}
 				Index::Hnsw(p) => {
 					if let IndexOperator::Ann(a, k, ef) = io.op() {
-						let entry = match hnsw_map.entry(ixr.clone()) {
+						let he = match ir_map.entry(ixr.clone()) {
 							Entry::Occupied(e) => {
-								HnswEntry::new(
-									stk,
-									ctx,
-									opt,
-									e.get().clone(),
-									a,
-									*k,
-									*ef,
-									knn_condition.clone(),
-								)
-								.await?
+								if let PerIndexReferenceIndex::Hnsw(hi) = e.get() {
+									Some(
+										HnswEntry::new(
+											stk,
+											ctx,
+											opt,
+											hi.clone(),
+											a,
+											*k,
+											*ef,
+											knn_condition.clone(),
+										)
+										.await?,
+									)
+								} else {
+									None
+								}
 							}
 							Entry::Vacant(e) => {
-								let hnsw =
+								let hi =
 									ctx.get_index_stores().get_index_hnsw(ctx, opt, ixr, p).await?;
 								// Ensure the local HNSW index is up to date with the KVS
-								hnsw.write().await.check_state(&ctx.tx()).await?;
+								hi.write().await.check_state(&ctx.tx()).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
 									stk,
 									ctx,
 									opt,
-									hnsw.clone(),
+									hi.clone(),
 									a,
 									*k,
 									*ef,
 									knn_condition.clone(),
 								)
 								.await?;
-								e.insert(hnsw);
-								entry
+								e.insert(PerIndexReferenceIndex::Hnsw(hi));
+								Some(entry)
 							}
 						};
-						hnsw_entries.insert(exp, entry);
+						if let Some(he) = he {
+							exp_entries.insert(exp, PerExpressionEntry::Hnsw(he));
+						}
 					}
 				}
 				_ => {}
 			}
 		}
 
+		let knn_bruteforce_len = kbtes.len();
 		for (exp, knn) in kbtes {
-			knn_bruteforce_entries
-				.insert(exp, (KnnPriorityList::new(knn.k as usize), knn.id, knn.obj, knn.d));
+			let ke = (KnnPriorityList::new(knn.k as usize), knn.id, knn.obj, knn.d);
+			exp_entries.insert(exp, PerExpressionEntry::KnnBruteForce(ke));
 		}
 
 		Ok(Self {
 			table: table.0.clone(),
-			ft_map,
+			ir_map,
 			mr_entries,
 			exp_entries,
 			it_entries: Vec::new(),
-			mt_entries,
-			hnsw_entries,
-			knn_bruteforce_entries,
+			knn_bruteforce_len,
 		})
 	}
 
@@ -275,7 +360,9 @@ impl QueryExecutor {
 			}
 			Ok(Value::Bool(false))
 		} else {
-			if let Some((p, id, val, dist)) = self.0.knn_bruteforce_entries.get(exp) {
+			if let Some(PerExpressionEntry::KnnBruteForce((p, id, val, dist))) =
+				self.0.exp_entries.get(exp)
+			{
 				let v = id.compute(stk, ctx, opt, doc).await.catch_return()?;
 				if let Ok(v) = v.coerce_to() {
 					if let Ok(dist) = dist.compute(&v, val.as_ref()) {
@@ -289,9 +376,11 @@ impl QueryExecutor {
 	}
 
 	pub(super) async fn build_bruteforce_knn_result(&self) -> KnnBruteForceResult {
-		let mut result = KnnBruteForceResult::with_capacity(self.0.knn_bruteforce_entries.len());
-		for (e, (p, _, _, _)) in &self.0.knn_bruteforce_entries {
-			result.insert(e.clone(), p.build().await);
+		let mut result = KnnBruteForceResult::with_capacity(self.0.knn_bruteforce_len);
+		for (exp, entry) in self.0.exp_entries.iter() {
+			if let PerExpressionEntry::KnnBruteForce((p, _, _, _)) = entry {
+				result.insert(exp.clone(), p.build().await);
+			}
 		}
 		result
 	}
@@ -301,7 +390,7 @@ impl QueryExecutor {
 	}
 
 	pub(crate) fn has_bruteforce_knn(&self) -> bool {
-		!self.0.knn_bruteforce_entries.is_empty()
+		self.0.knn_bruteforce_len != 0
 	}
 
 	/// Returns `true` if the expression is matching the current iterator.
@@ -359,6 +448,9 @@ impl QueryExecutor {
 			Index::Search {
 				..
 			} => self.new_search_index_iterator(irf, io.clone()).await,
+			Index::FullText {
+				..
+			} => self.new_fulltext_index_iterator(irf, io.clone()).await,
 			Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(irf)),
 			Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(irf)),
 		}
@@ -906,12 +998,32 @@ impl QueryExecutor {
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(_, _) = io.op() {
-				if let Some(fti) = self.0.ft_map.get(io.ix_ref()) {
-					if let Some(fte) = self.0.exp_entries.get(exp) {
-						let it =
-							MatchesThingIterator::new(ir, fti, fte.0.terms_docs.clone()).await?;
-						return Ok(Some(ThingIterator::Matches(it)));
+			if let Matches(_, _, _) = io.op() {
+				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(io.ix_ref()) {
+					if let Some(PerExpressionEntry::Search(se)) = self.0.exp_entries.get(exp) {
+						let hits = si.new_hits_iterator(&se.0.terms_docs)?;
+						let it = MatchesThingIterator::new(ir, hits);
+						return Ok(Some(ThingIterator::SearchMatches(it)));
+					}
+				}
+			}
+		}
+		Ok(None)
+	}
+
+	async fn new_fulltext_index_iterator(
+		&self,
+		ir: IteratorRef,
+		io: IndexOption,
+	) -> Result<Option<ThingIterator>> {
+		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
+			if let Matches(_, _, bo) = io.op() {
+				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
+				{
+					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
+						let hits = fti.new_hits_iterator(&fte.0.qt, bo.clone());
+						let it = MatchesThingIterator::new(ir, hits);
+						return Ok(Some(ThingIterator::FullTextMatches(it)));
 					}
 				}
 			}
@@ -921,7 +1033,7 @@ impl QueryExecutor {
 
 	fn new_mtree_index_knn_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Some(mte) = self.0.mt_entries.get(exp) {
+			if let Some(PerExpressionEntry::MTree(mte)) = self.0.exp_entries.get(exp) {
 				let it = KnnIterator::new(ir, mte.res.clone());
 				return Some(ThingIterator::Knn(it));
 			}
@@ -931,7 +1043,7 @@ impl QueryExecutor {
 
 	fn new_hnsw_index_ann_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Some(he) = self.0.hnsw_entries.get(exp) {
+			if let Some(PerExpressionEntry::Hnsw(he)) = self.0.exp_entries.get(exp) {
 				let it = KnnIterator::new(ir, he.res.clone());
 				return Some(ThingIterator::Knn(it));
 			}
@@ -965,34 +1077,51 @@ impl QueryExecutor {
 		l: Value,
 		r: Value,
 	) -> Result<bool> {
-		if let Some(ft) = self.0.exp_entries.get(exp) {
-			let ix = ft.0.index_option.ix_ref();
-			if self.0.table.eq(&ix.what.0) {
-				return self.matches_with_doc_id(ctx, thg, ft).await;
+		match self.0.exp_entries.get(exp) {
+			Some(PerExpressionEntry::Search(se)) => {
+				let ix = se.0.index_option.ix_ref();
+				if self.0.table.eq(&ix.what.0) {
+					return self.search_matches_with_doc_id(ctx, thg, se).await;
+				}
+				if let Some(PerIndexReferenceIndex::Search(si)) = self.0.ir_map.get(ix) {
+					return self.search_matches_with_value(stk, ctx, opt, si, se, l, r).await;
+				}
 			}
-			return self.matches_with_value(stk, ctx, opt, ft, l, r).await;
+			Some(PerExpressionEntry::FullText(fte)) => {
+				let ix = fte.0.io.ix_ref();
+				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(ix) {
+					if self.0.table.eq(&ix.what.0) {
+						return self.fulltext_matches_with_doc_id(ctx, thg, fti, fte).await;
+					}
+					return self.fulltext_matches_with_value(stk, ctx, opt, fti, fte, l, r).await;
+				}
+			}
+			_ => {}
 		}
-
 		// If no previous case were successful, we end up with a user error
 		Err(anyhow::Error::new(Error::NoIndexFoundForMatch {
 			exp: exp.to_string(),
 		}))
 	}
 
-	async fn matches_with_doc_id(&self, ctx: &Context, thg: &Thing, ft: &FtEntry) -> Result<bool> {
-		// TODO ask emmanual
+	async fn search_matches_with_doc_id(
+		&self,
+		ctx: &Context,
+		thg: &Thing,
+		se: &SearchEntry,
+	) -> Result<bool> {
+		// TODO ask Emmanuel
+		// If there is no terms, it can't be a match
+		if se.0.terms_docs.is_empty() {
+			return Ok(false);
+		}
 		let doc_key = revision::to_vec(thg)?;
 		let tx = ctx.tx();
-		let di = ft.0.doc_ids.read().await;
+		let di = se.0.doc_ids.read().await;
 		let doc_id = di.get_doc_id(&tx, doc_key).await?;
 		drop(di);
 		if let Some(doc_id) = doc_id {
-			let term_goals = ft.0.terms_docs.len();
-			// If there is no terms, it can't be a match
-			if term_goals == 0 {
-				return Ok(false);
-			}
-			for opt_td in ft.0.terms_docs.iter() {
+			for opt_td in se.0.terms_docs.iter() {
 				if let Some((_, docs)) = opt_td {
 					if !docs.contains(doc_id) {
 						return Ok(false);
@@ -1007,48 +1136,91 @@ impl QueryExecutor {
 		Ok(false)
 	}
 
-	async fn matches_with_value(
+	async fn fulltext_matches_with_doc_id(
+		&self,
+		ctx: &Context,
+		thg: &Thing,
+		fti: &FullTextIndex,
+		fte: &FullTextEntry,
+	) -> Result<bool> {
+		if fte.0.qt.is_empty() {
+			return Ok(false);
+		}
+		let tx = ctx.tx();
+		if let Some(doc_id) = fti.get_doc_id(&tx, thg).await? {
+			if fte.0.qt.contains_doc(doc_id) {
+				return Ok(true);
+			}
+		}
+		Ok(false)
+	}
+
+	#[allow(clippy::too_many_arguments)]
+	async fn search_matches_with_value(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ft: &FtEntry,
+		si: &SearchIndex,
+		se: &SearchEntry,
 		l: Value,
 		r: Value,
 	) -> Result<bool> {
 		// If the query terms contains terms that are unknown in the index
 		// of if there are no terms in the query
 		// we are sure that it does not match any document
-		if !ft.0.query_terms_set.is_matchable() {
+		if !se.0.query_terms_set.is_matchable() {
 			return Ok(false);
 		}
-		let v = match ft.0.index_option.id_pos() {
+		let v = match se.0.index_option.id_pos() {
 			IdiomPosition::Left => r,
 			IdiomPosition::Right => l,
 			IdiomPosition::None => return Ok(false),
 		};
-		let terms = ft.0.terms.read().await;
+		let terms = se.0.terms.read().await;
 		// Extract the terms set from the record
-		let t = ft.0.analyzer.extract_indexing_terms(stk, ctx, opt, &terms, v).await?;
+		let t = si.extract_indexing_terms(stk, ctx, opt, v).await?;
 		drop(terms);
-		Ok(ft.0.query_terms_set.is_subset(&t))
+		Ok(se.0.query_terms_set.is_subset(&t))
 	}
 
-	fn get_ft_entry(&self, match_ref: &Value) -> Option<&FtEntry> {
+	#[allow(clippy::too_many_arguments)]
+	async fn fulltext_matches_with_value(
+		&self,
+		_stk: &mut Stk,
+		_ctx: &Context,
+		_opt: &Options,
+		_fti: &FullTextIndex,
+		_fte: &FullTextEntry,
+		_l: Value,
+		_r: Value,
+	) -> Result<bool> {
+		todo!()
+	}
+
+	fn get_match_ref_entry(&self, match_ref: &Value) -> Option<&PerMatchRefEntry> {
 		if let Some(mr) = Self::get_match_ref(match_ref) {
-			self.0.mr_entries.get(&mr)
+			return self.0.mr_entries.get(&mr);
+		}
+		None
+	}
+
+	fn get_search_index(&self, se: &SearchEntry) -> Option<&SearchIndex> {
+		if let Some(PerIndexReferenceIndex::Search(si)) =
+			self.0.ir_map.get(se.0.index_option.ix_ref())
+		{
+			Some(si)
 		} else {
 			None
 		}
 	}
 
-	fn get_ft_entry_and_index(&self, match_ref: &Value) -> Option<(&FtEntry, &FtIndex)> {
-		if let Some(e) = self.get_ft_entry(match_ref) {
-			if let Some(ft) = self.0.ft_map.get(e.0.index_option.ix_ref()) {
-				return Some((e, ft));
-			}
+	fn get_fulltext_index(&self, fe: &FullTextEntry) -> Option<&FullTextIndex> {
+		if let Some(PerIndexReferenceIndex::FullText(si)) = self.0.ir_map.get(fe.0.io.ix_ref()) {
+			Some(si)
+		} else {
+			None
 		}
-		None
 	}
 
 	pub(crate) async fn highlight(
@@ -1058,12 +1230,27 @@ impl QueryExecutor {
 		hlp: HighlightParams,
 		doc: &Value,
 	) -> Result<Value> {
-		if let Some((e, ft)) = self.get_ft_entry_and_index(hlp.match_ref()) {
-			if let Some(id) = e.0.index_option.id_ref() {
-				let tx = ctx.tx();
-				let res = ft.highlight(&tx, thg, &e.0.query_terms_list, hlp, id, doc).await;
-				return res;
+		match self.get_match_ref_entry(hlp.match_ref()) {
+			Some(PerMatchRefEntry::Search(se)) => {
+				if let Some(si) = self.get_search_index(se) {
+					if let Some(id) = se.0.index_option.id_ref() {
+						let tx = ctx.tx();
+						let res =
+							si.highlight(&tx, thg, &se.0.query_terms_list, hlp, id, doc).await;
+						return res;
+					}
+				}
 			}
+			Some(PerMatchRefEntry::FullText(fte)) => {
+				if let Some(fti) = self.get_fulltext_index(fte) {
+					if let Some(id) = fte.0.io.id_ref() {
+						let tx = ctx.tx();
+						let res = fti.highlight(&tx, thg, &fte.0.qt, hlp, id, doc).await;
+						return res;
+					}
+				}
+			}
+			_ => {}
 		}
 		Ok(Value::None)
 	}
@@ -1075,10 +1262,23 @@ impl QueryExecutor {
 		match_ref: Value,
 		partial: bool,
 	) -> Result<Value> {
-		if let Some((e, ft)) = self.get_ft_entry_and_index(&match_ref) {
-			let tx = ctx.tx();
-			let res = ft.extract_offsets(&tx, thg, &e.0.query_terms_list, partial).await;
-			return res;
+		if let Some(mre) = self.get_match_ref_entry(&match_ref) {
+			match mre {
+				PerMatchRefEntry::Search(se) => {
+					if let Some(si) = self.get_search_index(se) {
+						let tx = ctx.tx();
+						let res = si.read_offsets(&tx, thg, &se.0.query_terms_list, partial).await;
+						return res;
+					}
+				}
+				PerMatchRefEntry::FullText(fte) => {
+					if let Some(fti) = self.get_fulltext_index(fte) {
+						let tx = ctx.tx();
+						let res = fti.read_offsets(&tx, thg, &fte.0.qt, partial).await;
+						return res;
+					}
+				}
+			}
 		}
 		Ok(Value::None)
 	}
@@ -1090,24 +1290,40 @@ impl QueryExecutor {
 		rid: &Thing,
 		ir: Option<&Arc<IteratorRecord>>,
 	) -> Result<Value> {
-		if let Some(e) = self.get_ft_entry(match_ref) {
-			if let Some(scorer) = &e.0.scorer {
-				let tx = ctx.tx();
-				let mut doc_id = if let Some(ir) = ir {
-					ir.doc_id()
-				} else {
-					None
-				};
-				if doc_id.is_none() {
-					let key = revision::to_vec(rid)?;
-					let di = e.0.doc_ids.read().await;
-					doc_id = di.get_doc_id(&tx, key).await?;
-					drop(di);
+		if let Some(mre) = self.get_match_ref_entry(match_ref) {
+			let mut doc_id = if let Some(ir) = ir {
+				ir.doc_id()
+			} else {
+				None
+			};
+			match mre {
+				PerMatchRefEntry::Search(se) => {
+					if let Some(scorer) = &se.0.scorer {
+						let tx = ctx.tx();
+						if doc_id.is_none() {
+							let key = revision::to_vec(rid)?;
+							let di = se.0.doc_ids.read().await;
+							doc_id = di.get_doc_id(&tx, key).await?;
+							drop(di);
+						}
+						if let Some(doc_id) = doc_id {
+							let score = scorer.score(&tx, doc_id).await?;
+							return Ok(Value::from(score));
+						}
+					}
 				}
-				if let Some(doc_id) = doc_id {
-					let score = scorer.score(&tx, doc_id).await?;
-					if let Some(score) = score {
-						return Ok(Value::from(score));
+				PerMatchRefEntry::FullText(fte) => {
+					if let Some(scorer) = &fte.0.scorer {
+						if let Some(fti) = self.get_fulltext_index(fte) {
+							let tx = ctx.tx();
+							if doc_id.is_none() {
+								doc_id = fti.get_doc_id(&tx, rid).await?;
+							}
+							if let Some(doc_id) = doc_id {
+								let score = scorer.score(fti, &tx, &fte.0.qt, doc_id).await?;
+								return Ok(Value::from(score));
+							}
+						}
 					}
 				}
 			}
@@ -1117,42 +1333,74 @@ impl QueryExecutor {
 }
 
 #[derive(Clone)]
-struct FtEntry(Arc<Inner>);
+struct SearchEntry(Arc<InnerSearchEntry>);
 
-struct Inner {
+struct InnerSearchEntry {
 	index_option: IndexOption,
-	doc_ids: Arc<RwLock<DocIds>>,
-	analyzer: Analyzer,
-	query_terms_set: TermsSet,
-	query_terms_list: TermsList,
-	terms: Arc<RwLock<Terms>>,
-	terms_docs: TermsDocs,
+	doc_ids: Arc<RwLock<BTreeDocIds>>,
+	terms: Arc<RwLock<SearchTerms>>,
+	query_terms_set: TermIdSet,
+	query_terms_list: TermIdList,
+	terms_docs: Arc<SearchTermsDocs>,
 	scorer: Option<BM25Scorer>,
 }
 
-impl FtEntry {
+impl SearchEntry {
 	async fn new(
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		ft: &FtIndex,
+		si: &SearchIndex,
 		io: IndexOption,
 	) -> Result<Option<Self>> {
-		if let Matches(qs, _) = io.op() {
-			let (terms_list, terms_set) =
-				ft.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
-			let tx = ctx.tx();
-			let terms_docs = Arc::new(ft.get_terms_docs(&tx, &terms_list).await?);
-			drop(tx);
-			Ok(Some(Self(Arc::new(Inner {
+		if let Matches(qs, _, bo) = io.op() {
+			if !matches!(bo, BooleanOperation::And) {
+				bail!(Error::Unimplemented(
+					"SEARCH indexes only support AND operations".to_string()
+				))
+			}
+			let (terms_list, terms_set, terms_docs) =
+				si.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
+			let terms_docs = Arc::new(terms_docs);
+			Ok(Some(Self(Arc::new(InnerSearchEntry {
 				index_option: io,
-				doc_ids: ft.doc_ids(),
-				analyzer: ft.analyzer(),
+				doc_ids: si.doc_ids(),
 				query_terms_set: terms_set,
 				query_terms_list: terms_list,
-				scorer: ft.new_scorer(terms_docs.clone())?,
-				terms: ft.terms(),
+				scorer: si.new_scorer(terms_docs.clone())?,
+				terms: si.terms(),
 				terms_docs,
+			}))))
+		} else {
+			Ok(None)
+		}
+	}
+}
+
+#[derive(Clone)]
+struct FullTextEntry(Arc<InnerFullTextEntry>);
+
+struct InnerFullTextEntry {
+	io: IndexOption,
+	qt: QueryTerms,
+	scorer: Option<Scorer>,
+}
+
+impl FullTextEntry {
+	async fn new(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		fti: &FullTextIndex,
+		io: IndexOption,
+	) -> Result<Option<Self>> {
+		if let Matches(qs, _, _) = io.op() {
+			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
+			let scorer = fti.new_scorer(ctx).await?;
+			Ok(Some(Self(Arc::new(InnerFullTextEntry {
+				io,
+				qt,
+				scorer,
 			}))))
 		} else {
 			Ok(None)

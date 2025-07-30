@@ -67,9 +67,18 @@
 /// crate::key::index::bs                /*{ns}*{db}*{tb}+{ix}!bs
 /// crate::key::index::bt                /*{ns}*{db}*{tb}+{ix}!bt{id}
 /// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
+/// crate::key::index::dl                /*{ns}*{db}*{tb}+{ix}!dl{id}
+/// crate::key::index::tf                /*{ns}*{db}*{tb}+{ix}!tf{term}{id}
 /// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 ///
-/// crate::key::change                   /*{ns}*{db}#{ts}
+/// crate::key::change::vs_key_prefix    /*{ns}*{db}#
+/// crate::key::change::vs_key_suffix                *{tb}\00
+/// crate::key::change::prefix           /*{ns}*{db}#
+/// crate::key::change::prefix_ts        /*{ns}*{db}#{ts}
+/// crate::key::change::suffix           /*{ns}*{db}#\ff
+/// crate::key::change::cf               /*{ns}*{db}#{ts}*{tb}
+/// crate::key::change::vs               /*{ns}*{db}#{ts}/*{ns}/*/{db}!vs*{tb}\0
+/// crate::key::change::suffix_vs        /*{ns}*{db}#{ts}/*{ns}/*/{db}!vs
 ///
 /// crate::key::thing                    /*{ns}*{db}*{tb}*{id}
 ///

@@ -1,19 +1,20 @@
 //! Stores doc keys for doc_ids
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::idx::trees::store::NodeId;
+use crate::expr::Thing;
+use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 
+/// Id inverted. DocId -> Thing
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Bi<'a> {
+pub(crate) struct Bi<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: NamespaceId,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: DatabaseId,
+	pub db: &'a str,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -21,9 +22,12 @@ pub struct Bi<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub node_id: NodeId,
+	pub id: DocId,
 }
-impl_key!(Bi<'a>);
+
+impl KVKey for Bi<'_> {
+	type ValueType = Thing;
+}
 
 impl Categorise for Bi<'_> {
 	fn categorise(&self) -> Category {
@@ -32,7 +36,7 @@ impl Categorise for Bi<'_> {
 }
 
 impl<'a> Bi<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, node_id: NodeId) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: DocId) -> Self {
 		Bi {
 			__: b'/',
 			_a: b'*',
@@ -46,7 +50,7 @@ impl<'a> Bi<'a> {
 			_e: b'!',
 			_f: b'b',
 			_g: b'i',
-			node_id,
+			id,
 		}
 	}
 }
@@ -54,22 +58,18 @@ impl<'a> Bi<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
 		let val = Bi::new(
-			NamespaceId(1),
-			DatabaseId(2),
+			"testns",
+			"testdb",
 			"testtb",
 			"testix",
 			7
 		);
-		let enc = Bi::encode(&val).unwrap();
+		let enc = Bi::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bi\0\0\0\0\0\0\0\x07");
-
-		let dec = Bi::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

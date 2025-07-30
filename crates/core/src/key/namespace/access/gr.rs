@@ -1,17 +1,17 @@
 //! Stores a grant associated with an access method
-use crate::catalog::NamespaceId;
+use crate::expr::statements::AccessGrant;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Gr<'a> {
+pub(crate) struct Gr<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: NamespaceId,
+	pub ns: &'a str,
 	_b: u8,
 	pub ac: &'a str,
 	_c: u8,
@@ -19,20 +19,23 @@ pub struct Gr<'a> {
 	_e: u8,
 	pub gr: &'a str,
 }
-impl_key!(Gr<'a>);
 
-pub fn new<'a>(ns: NamespaceId, ac: &'a str, gr: &'a str) -> Gr<'a> {
+impl KVKey for Gr<'_> {
+	type ValueType = AccessGrant;
+}
+
+pub fn new<'a>(ns: &'a str, ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ns, ac, gr)
 }
 
-pub fn prefix(ns: NamespaceId, ac: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, ac).encode()?;
+pub fn prefix(ns: &str, ac: &str) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, ac).encode_key()?;
 	k.extend_from_slice(b"!gr\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: NamespaceId, ac: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, ac).encode()?;
+pub fn suffix(ns: &str, ac: &str) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, ac).encode_key()?;
 	k.extend_from_slice(b"!gr\xff");
 	Ok(k)
 }
@@ -44,7 +47,7 @@ impl Categorise for Gr<'_> {
 }
 
 impl<'a> Gr<'a> {
-	pub fn new(ns: NamespaceId, ac: &'a str, gr: &'a str) -> Self {
+	pub fn new(ns: &'a str, ac: &'a str, gr: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -62,32 +65,28 @@ impl<'a> Gr<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KeyDecode;
 
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
 		let val = Gr::new(
-			NamespaceId(1),
+			"testns",
 			"testac",
 			"testgr",
 		);
-		let enc = Gr::encode(&val).unwrap();
-		assert_eq!(enc, b"/*1\0&testac\0!grtestgr\0");
-
-		let dec = Gr::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Gr::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0&testac\0!grtestgr\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix(NamespaceId(1), "testac").unwrap();
-		assert_eq!(val, b"/*1\0&testac\0!gr\0");
+		let val = super::prefix("testns", "testac").unwrap();
+		assert_eq!(val, b"/*testns\0&testac\0!gr\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix(NamespaceId(1), "testac").unwrap();
-		assert_eq!(val, b"/*1\0&testac\0!gr\xff");
+		let val = super::suffix("testns", "testac").unwrap();
+		assert_eq!(val, b"/*testns\0&testac\0!gr\xff");
 	}
 }

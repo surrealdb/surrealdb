@@ -1,18 +1,13 @@
 use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
+use crate::kvs::KVValue;
 use anyhow::Result;
 use std::sync::Arc;
 
 mod fixes;
 
-#[derive(Copy, Debug, Clone)]
+#[derive(Copy, Debug, Clone, PartialEq)]
 pub struct Version(u16);
-
-impl Version {
-	pub fn to_bytes(&self) -> Vec<u8> {
-		self.0.to_be_bytes().to_vec()
-	}
-}
 
 impl From<u16> for Version {
 	fn from(version: u16) -> Self {
@@ -32,9 +27,14 @@ impl From<Version> for u16 {
 	}
 }
 
-impl TryFrom<Vec<u8>> for Version {
-	type Error = Error;
-	fn try_from(v: Vec<u8>) -> Result<Self, Self::Error> {
+impl KVValue for Version {
+	#[inline]
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
+		Ok(self.0.to_be_bytes().to_vec())
+	}
+
+	#[inline]
+	fn kv_decode_value(v: Vec<u8>) -> Result<Self> {
 		let bin = v.try_into().map_err(|_| Error::InvalidStorageVersion)?;
 		let val = u16::from_be_bytes(bin).into();
 		Ok(val)
@@ -97,9 +97,9 @@ impl Version {
 
 			// Obtain storage version key and value
 			let key = crate::key::version::new();
-			let val: Vec<u8> = Version::from(v + 1).to_bytes();
+			let version = Version::from(v + 1);
 			// Attempt to set the current version in storage
-			tx.replace(key, val).await?;
+			tx.replace(&key, &version).await?;
 
 			// Commit the transaction
 			tx.commit().await?;
@@ -109,8 +109,16 @@ impl Version {
 	}
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
 
-pub trait KVPair {
-	type Key;
-	type Value;
+	#[test]
+	fn test_version_encode_decode() {
+		let version = Version::v2();
+		let encoded = version.kv_encode_value().unwrap();
+		assert_eq!(encoded, vec![0, 2]);
+		let decoded = Version::kv_decode_value(encoded).unwrap();
+		assert_eq!(decoded, version);
+	}
 }

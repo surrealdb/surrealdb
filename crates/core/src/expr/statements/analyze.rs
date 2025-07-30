@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::ident::Ident;
@@ -8,7 +7,7 @@ use crate::expr::index::Index;
 use crate::expr::value::Value;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::FtIndex;
+use crate::idx::ft::search::SearchIndex;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::kvs::TransactionType;
 use anyhow::{Result, bail};
@@ -28,12 +27,7 @@ pub enum AnalyzeStatement {
 
 impl AnalyzeStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		match self {
 			AnalyzeStatement::Idx(tb, idx) => {
 				// Allowed to run?
@@ -41,13 +35,19 @@ impl AnalyzeStatement {
 				// Read the index
 				let (ns, db) = ctx.get_ns_db_ids(opt)?;
 				let ix = ctx.tx().get_tb_index(ns, db, tb, idx).await?;
-				let ikb = IndexKeyBase::new(ns, db, &ix)?;
+				let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 				// Index operation dispatching
 				let value: Value = match &ix.index {
 					Index::Search(p) => {
-						let ft =
-							FtIndex::new(ctx, opt, p.az.as_str(), ikb, p, TransactionType::Read)
-								.await?;
+						let ft = SearchIndex::new(
+							ctx,
+							opt,
+							p.az.as_str(),
+							ikb,
+							p,
+							TransactionType::Read,
+						)
+						.await?;
 						ft.statistics(ctx).await?.into()
 					}
 					Index::MTree(p) => {

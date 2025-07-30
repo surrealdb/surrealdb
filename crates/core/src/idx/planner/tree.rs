@@ -1,5 +1,4 @@
 use crate::dbs::Options;
-use crate::expr::FlowResultExt as _;
 use crate::expr::index::Index;
 use crate::expr::statements::{DefineFieldStatement, DefineIndexStatement};
 use crate::expr::{
@@ -7,6 +6,7 @@ use crate::expr::{
 	With,
 	order::{OrderList, Ordering},
 };
+use crate::expr::{BooleanOperation, FlowResultExt as _};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
@@ -494,6 +494,9 @@ impl<'a> TreeBuilder<'a> {
 				Index::Uniq => self.eval_index_operator(ixr, op, n, p, *col),
 				Index::Search {
 					..
+				}
+				| Index::FullText {
+					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
 				Index::MTree(_) if *col == 0 => self.eval_mtree_knn(e, op, n)?,
 				Index::Hnsw(_) if *col == 0 => self.eval_hnsw_knn(e, op, n)?,
@@ -522,8 +525,12 @@ impl<'a> TreeBuilder<'a> {
 
 	fn eval_matches_operator(op: &Operator, n: &Node) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
-			if let Operator::Matches(mr) = op {
-				return Some(IndexOperator::Matches(v.to_raw_string(), *mr));
+			if let Operator::Matches(mr, bo) = op {
+				return Some(IndexOperator::Matches(
+					v.to_raw_string(),
+					*mr,
+					bo.clone().unwrap_or(BooleanOperation::And),
+				));
 			}
 		}
 		None

@@ -1,19 +1,19 @@
 //! Stores Doc list for each term
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::idx::ft::terms::TermId;
+use crate::idx::ft::search::terms::TermId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Bc<'a> {
+pub(crate) struct Bc<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: NamespaceId,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: DatabaseId,
+	pub db: &'a str,
 	_c: u8,
 	pub tb: &'a str,
 	_d: u8,
@@ -23,7 +23,10 @@ pub struct Bc<'a> {
 	_g: u8,
 	pub term_id: TermId,
 }
-impl_key!(Bc<'a>);
+
+impl KVKey for Bc<'_> {
+	type ValueType = RoaringTreemap;
+}
 
 impl Categorise for Bc<'_> {
 	fn categorise(&self) -> Category {
@@ -32,7 +35,7 @@ impl Categorise for Bc<'_> {
 }
 
 impl<'a> Bc<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, term_id: TermId) -> Self {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, term_id: TermId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -54,23 +57,18 @@ impl<'a> Bc<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bc::new(
-			NamespaceId(1),
-			DatabaseId(2),
+			"testns",
+			"testdb",
 			"testtb",
 			"testix",
 			7
 		);
-		let enc = Bc::encode(&val).unwrap();
-		assert_eq!(enc, b"/*1\0*2\0*testtb\0+testix\0!bc\0\0\0\0\0\0\0\x07");
-
-		let dec = Bc::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Bc::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bc\0\0\0\0\0\0\0\x07");
 	}
 }

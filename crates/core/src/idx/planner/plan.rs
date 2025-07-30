@@ -1,3 +1,4 @@
+use crate::expr::operator::BooleanOperation;
 use crate::expr::with::With;
 use crate::expr::{Array, Expression, Idiom, Number, Object};
 use crate::expr::{Operator, Value};
@@ -328,7 +329,7 @@ pub(super) enum IndexOperator {
 	Union(Arc<Value>),
 	Join(Vec<IndexOption>),
 	RangePart(Operator, Arc<Value>),
-	Matches(String, Option<MatchRef>),
+	Matches(String, Option<MatchRef>, BooleanOperation),
 	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
 	/// false = ascending, true = descending
@@ -404,8 +405,11 @@ impl IndexOption {
 				let joins = Value::from(joins);
 				e.insert("joins", joins);
 			}
-			IndexOperator::Matches(qs, a) => {
-				e.insert("operator", Value::from(Operator::Matches(*a).to_string()));
+			IndexOperator::Matches(qs, a, o) => {
+				e.insert(
+					"operator",
+					Value::from(Operator::Matches(*a, Some(o.clone())).to_string()),
+				);
 				e.insert("value", Value::from(qs.to_owned()));
 			}
 			IndexOperator::RangePart(op, v) => {
