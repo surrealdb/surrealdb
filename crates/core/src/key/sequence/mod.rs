@@ -2,9 +2,12 @@
 pub mod ba;
 pub mod st;
 
-use crate::kvs::{KeyEncode, impl_key};
+use std::ops::Range;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::kvs::KVKey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Prefix<'a> {
@@ -21,7 +24,10 @@ pub(crate) struct Prefix<'a> {
 	_g: u8,
 	_h: u8,
 }
-impl_key!(Prefix<'a>);
+
+impl KVKey for Prefix<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl<'a> Prefix<'a> {
 	fn new(ns: &'a str, db: &'a str, sq: &'a str, g: u8, h: u8) -> Self {
@@ -41,28 +47,20 @@ impl<'a> Prefix<'a> {
 		}
 	}
 
-	pub(crate) fn new_ba_range(
-		ns: &'a str,
-		db: &'a str,
-		sq: &'a str,
-	) -> Result<(Vec<u8>, Vec<u8>)> {
-		let mut beg = Self::new(ns, db, sq, b'b', b'a').encode()?;
-		let mut end = Self::new(ns, db, sq, b'b', b'a').encode()?;
+	pub(crate) fn new_ba_range(ns: &'a str, db: &'a str, sq: &'a str) -> Result<Range<Vec<u8>>> {
+		let mut beg = Self::new(ns, db, sq, b'b', b'a').encode_key()?;
+		let mut end = Self::new(ns, db, sq, b'b', b'a').encode_key()?;
 		beg.extend_from_slice(&[0x00; 9]);
 		end.extend_from_slice(&[0xFF; 9]);
-		Ok((beg, end))
+		Ok(beg..end)
 	}
 
-	pub(crate) fn new_st_range(
-		ns: &'a str,
-		db: &'a str,
-		sq: &'a str,
-	) -> Result<(Vec<u8>, Vec<u8>)> {
-		let mut beg = Self::new(ns, db, sq, b's', b't').encode()?;
-		let mut end = Self::new(ns, db, sq, b's', b't').encode()?;
+	pub(crate) fn new_st_range(ns: &'a str, db: &'a str, sq: &'a str) -> Result<Range<Vec<u8>>> {
+		let mut beg = Self::new(ns, db, sq, b's', b't').encode_key()?;
+		let mut end = Self::new(ns, db, sq, b's', b't').encode_key()?;
 		beg.extend_from_slice(&[0x00; 9]);
 		end.extend_from_slice(&[0xFF; 9]);
-		Ok((beg, end))
+		Ok(beg..end)
 	}
 }
 
@@ -72,8 +70,11 @@ mod tests {
 
 	#[test]
 	fn ba_range() {
-		let (beg, end) = Prefix::new_ba_range("testns", "testdb", "testsq").unwrap();
-		assert_eq!(beg, b"/*testns\0*testdb\0!sqtestsq\0!ba\0\0\0\0\0\0\0\0\0");
-		assert_eq!(end, b"/*testns\0*testdb\0!sqtestsq\0!ba\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+		let range = Prefix::new_ba_range("testns", "testdb", "testsq").unwrap();
+		assert_eq!(range.start, b"/*testns\0*testdb\0!sqtestsq\0!ba\0\0\0\0\0\0\0\0\0");
+		assert_eq!(
+			range.end,
+			b"/*testns\0*testdb\0!sqtestsq\0!ba\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+		);
 	}
 }

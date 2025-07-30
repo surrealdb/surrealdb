@@ -5,6 +5,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Array, Number, Object, Strand, Thing, Uuid, Value, escape::EscapeRid};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::Result;
 use nanoid::nanoid;
 use range::IdRange;
@@ -42,6 +43,8 @@ pub enum Id {
 	Generate(Gen),
 	Range(Box<IdRange>),
 }
+
+impl_kv_value_revisioned!(Id);
 
 impl From<i64> for Id {
 	fn from(v: i64) -> Self {

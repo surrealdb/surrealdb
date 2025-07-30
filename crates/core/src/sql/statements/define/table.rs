@@ -1,10 +1,7 @@
-use super::DefineFieldStatement;
 use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::paths::{IN, OUT};
 
-use crate::kvs::Transaction;
 use crate::sql::{Ident, Permissions, Strand, View, changefeed::ChangeFeed};
-use crate::sql::{Idiom, Kind, TableType};
+use crate::sql::{Kind, TableType};
 use anyhow::Result;
 
 use revision::Error as RevisionError;
@@ -68,52 +65,6 @@ impl DefineTableStatement {
 	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
 		matches!(self.kind, TableType::Normal | TableType::Any)
-	}
-	/// Used to add relational fields to existing table records
-	pub async fn add_in_out_fields(
-		txn: &Transaction,
-		ns: &str,
-		db: &str,
-		tb: &mut DefineTableStatement,
-	) -> Result<()> {
-		// Add table relational fields
-		if let TableType::Relation(rel) = &tb.kind {
-			// Set the `in` field as a DEFINE FIELD definition
-			{
-				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
-				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
-				txn.set(
-					key,
-					revision::to_vec(&DefineFieldStatement {
-						name: Idiom::from(IN.to_vec()),
-						what: tb.name.clone(),
-						kind: Some(val),
-						..Default::default()
-					})?,
-					None,
-				)
-				.await?;
-			}
-			// Set the `out` field as a DEFINE FIELD definition
-			{
-				let key = crate::key::table::fd::new(ns, db, &tb.name, "out");
-				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
-				txn.set(
-					key,
-					revision::to_vec(&DefineFieldStatement {
-						name: Idiom::from(OUT.to_vec()),
-						what: tb.name.clone(),
-						kind: Some(val),
-						..Default::default()
-					})?,
-					None,
-				)
-				.await?;
-			}
-			// Refresh the table cache for the fields
-			tb.cache_fields_ts = Uuid::now_v7();
-		}
-		Ok(())
 	}
 }
 

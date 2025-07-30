@@ -121,7 +121,7 @@ where
 		}
 		let removed = mem::take(&mut self.removed);
 		for (node_id, node_key) in removed {
-			tx.del(node_key).await?;
+			tx.del(&node_key).await?;
 			new_cache.remove_node(&node_id).await;
 		}
 

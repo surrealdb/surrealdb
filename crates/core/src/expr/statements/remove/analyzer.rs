@@ -40,7 +40,7 @@ impl RemoveAnalyzerStatement {
 		};
 		// Delete the definition
 		let key = crate::key::database::az::new(ns, db, &az.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Clear the cache
 		txn.clear();
 		// Cleanup in-memory mappers if not used anymore
