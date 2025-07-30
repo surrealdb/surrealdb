@@ -45,7 +45,54 @@ impl Data {
 		ctx: &Context,
 		opt: &Options,
 	) -> Result<Option<Value>> {
-		self.pick(stk, ctx, opt, &*ID).await
+		// Handle subquery expressions (inline SELECT)
+		if let Self::ContentExpression(Value::Subquery(sub_query)) = self {
+			let result = Box::pin(sub_query.compute(stk, ctx, opt, None)).await.catch_return()?;
+			return Ok(result.pick(&*ID).some());
+		}
+
+		// For all other cases, use a synchronous approach to avoid recursion
+		match self {
+			Self::ContentExpression(Value::Param(param)) => {
+				// For param values, compute them and extract id
+				Ok(param.compute(stk, ctx, opt, None).await?.pick(&*ID).some())
+			}
+			Self::ContentExpression(Value::Object(obj)) => {
+				// For objects, extract id field directly
+				Ok(obj.get("id").cloned())
+			}
+			Self::ContentExpression(Value::Thing(thing)) => {
+				// For things, return the thing itself as the id
+				Ok(Some(Value::Thing(thing.clone())))
+			}
+			Self::ContentExpression(Value::Idiom(idiom)) => {
+				// For idiom expressions (like .content), compute the underlying value and extract id
+				Ok(idiom.compute(stk, ctx, opt, None).await.catch_return()?.pick(&*ID).some())
+			}
+			Self::ContentExpression(Value::Function(func)) => {
+				// For function calls, compute them and extract id
+				Ok(func.compute(stk, ctx, opt, None).await.catch_return()?.pick(&*ID).some())
+			}
+			Self::ContentExpression(Value::Constant(constant)) => {
+				// For constant expressions, compute them and extract id
+				Ok(constant.compute()?.pick(&*ID).some())
+			}
+			Self::ContentExpression(Value::Expression(expr)) => {
+				// For expression types, compute them and extract id
+				Ok(expr.compute(stk, ctx, opt, None).await.catch_return()?.pick(&*ID).some())
+			}
+			Self::SetExpression(vec) => {
+				// For set expressions, find the id field if it exists
+				if let Some((_, _, val)) = vec.iter().find(|f| f.0.is_field(&*ID)) {
+					// For now, just return the value as-is to avoid recursion
+					Ok(Some(val.clone()))
+				} else {
+					Ok(None)
+				}
+			}
+			// For all other cases, return None to avoid recursion
+			_ => Ok(None),
+		}
 	}
 	/// Fetch a field path value if one is specified
 	pub(crate) async fn pick(

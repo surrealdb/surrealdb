@@ -9,6 +9,7 @@ use crate::expr::FlowResultExt;
 use crate::expr::data::Data;
 use crate::expr::operator::Operator;
 use crate::expr::paths::EDGE;
+use crate::expr::paths::ID;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::value::Value;
@@ -33,15 +34,30 @@ impl Document {
 		if let Some(tb) = &self.r#gen {
 			// This is a CREATE, UPSERT, UPDATE statement
 			if let Workable::Normal = &self.extras {
+				// Check if the document already has an ID from the current data
+				let existing_id = self.current.doc.pick(&*ID);
+				if !existing_id.is_none() {
+					// The document already has an ID, use it
+					let id = existing_id.generate(tb, false)?;
+					self.id = Some(Arc::new(id));
+					return Ok(());
+				}
+
 				// Fetch the record id if specified
 				let id = match stm.data() {
 					// There is a data clause so fetch a record id
-					Some(data) => match data.rid(stk, ctx, opt).await? {
-						// Generate a new id from the id field
-						Some(id) => id.generate(tb, false)?,
-						// Generate a new random table id
-						None => tb.generate(),
-					},
+					Some(data) => {
+						match data.rid(stk, ctx, opt).await? {
+							// Generate a new id from the id field (including Thing values)
+							Some(id) => id
+								.compute(stk, ctx, opt, None)
+								.await
+								.unwrap_or(id.clone())
+								.generate(tb, false)?,
+							// Generate a new random table id
+							None => tb.generate(),
+						}
+					}
 					// There is no data clause so create a record id
 					None => tb.generate(),
 				};
