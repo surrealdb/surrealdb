@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value, changefeed::ChangeFeed};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -25,6 +26,8 @@ pub struct DefineDatabaseStatement {
 	#[revision(start = 3)]
 	pub overwrite: bool,
 }
+
+impl_kv_value_revisioned!(DefineDatabaseStatement);
 
 impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
@@ -54,8 +57,8 @@ impl DefineDatabaseStatement {
 		let key = crate::key::namespace::db::new(ns, &self.name);
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineDatabaseStatement {
+			&key,
+			&DefineDatabaseStatement {
 				id: match (self.id, nsv.id) {
 					(Some(id), _) => Some(id),
 					(None, Some(nsv_id)) => Some(txn.lock().await.get_next_db_id(nsv_id).await?),
@@ -65,7 +68,7 @@ impl DefineDatabaseStatement {
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

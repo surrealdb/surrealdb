@@ -1,13 +1,14 @@
 //! Stores a DEFINE SEQUENCE config definition
+use crate::expr::statements::define::DefineSequenceStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Sq<'a> {
+pub(crate) struct Sq<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -18,15 +19,19 @@ pub struct Sq<'a> {
 	_e: u8,
 	pub sq: &'a str,
 }
-impl_key!(Sq<'a>);
+
+impl KVKey for Sq<'_> {
+	type ValueType = DefineSequenceStatement;
+}
+
 pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"*sq\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"*sq\xff");
 	Ok(k)
 }
@@ -55,20 +60,18 @@ impl<'a> Sq<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
             let val = Sq::new(
             "ns",
             "db",
             "test",
         );
-		let enc = Sq::encode(&val).unwrap();
+		let enc = Sq::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*ns\0*db\0*sqtest\0");
-		let dec = Sq::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

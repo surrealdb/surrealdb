@@ -6,6 +6,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fetchs, Fields, FlowResultExt as _, Uuid, Value};
 use crate::iam::Auth;
 use crate::kvs::Live;
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 
 use reblessive::tree::Stk;
@@ -37,6 +38,8 @@ pub struct LiveStatement {
 	// runtime when storing the live query to storage.
 	pub(crate) session: Option<Value>,
 }
+
+impl_kv_value_revisioned!(LiveStatement);
 
 impl LiveStatement {
 	pub fn new(expr: Fields) -> Self {
@@ -105,10 +108,10 @@ impl LiveStatement {
 				txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, id);
-				txn.replace(key, revision::to_vec(&lq)?).await?;
+				txn.replace(&key, &lq).await?;
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, id);
-				txn.replace(key, revision::to_vec(&stm)?).await?;
+				txn.replace(&key, &stm).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
 					cache.new_live_queries_version(ns, db, &tb);

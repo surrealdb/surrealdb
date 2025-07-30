@@ -11,7 +11,7 @@ use crate::kvs::savepoint::SaveOperation;
 use crate::kvs::savepoint::SavePoints;
 use crate::kvs::savepoint::SavePrepare;
 use crate::kvs::savepoint::SavedValue;
-use crate::kvs::{Key, KeyEncode, Val, Version, batch::Batch};
+use crate::kvs::{Key, Val, Version, batch::Batch};
 use crate::vs::VersionStamp;
 use anyhow::Result;
 use anyhow::ensure;
@@ -220,9 +220,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		ensure!(!self.closed(), Error::TxFinished);
 		// Continue with function logic
 		let mut out = vec![];
-		let beg: Key = rng.start.encode()?;
-		let end: Key = rng.end.encode()?;
-		let mut next = Some(beg..end);
+		let mut next = Some(rng);
 		while let Some(rng) = next {
 			let res = self.batch_keys_vals(rng, *NORMAL_FETCH_SIZE, version).await?;
 			next = res.next;
@@ -257,9 +255,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is writable
 		ensure!(self.writeable(), Error::TxReadonly);
 		// Continue with function logic
-		let beg: Key = rng.start.encode()?;
-		let end: Key = rng.end.encode()?;
-		let mut next = Some(beg..end);
+		let mut next = Some(rng);
 		while let Some(rng) = next {
 			let res = self.batch_keys(rng, *NORMAL_FETCH_SIZE, None).await?;
 			next = res.next;
@@ -294,9 +290,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is writable
 		ensure!(self.writeable(), Error::TxReadonly);
 		// Continue with function logic
-		let beg: Key = rng.start.encode()?;
-		let end: Key = rng.end.encode()?;
-		let mut next = Some(beg..end);
+		let mut next = Some(rng);
 		while let Some(rng) = next {
 			let res = self.batch_keys(rng, *NORMAL_FETCH_SIZE, None).await?;
 			next = res.next;
@@ -316,9 +310,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		ensure!(!self.closed(), Error::TxFinished);
 		// Continue with function logic
 		let mut len = 0;
-		let beg: Key = rng.start.encode()?;
-		let end: Key = rng.end.encode()?;
-		let mut next = Some(beg..end);
+		let mut next = Some(rng);
 		while let Some(rng) = next {
 			let res = self.batch_keys(rng, *COUNT_BATCH_SIZE, None).await?;
 			next = res.next;
@@ -352,10 +344,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Continue with function logic
-		let beg: Key = rng.start.encode()?;
-		let end: Key = rng.end.encode()?;
+		let end = rng.end.clone();
 		// Scan for the next batch
-		let res = self.keys(beg..end.clone(), batch, version).await?;
+		let res = self.keys(rng, batch, version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
 			Ok(Batch::<Key>::new(None, res))
@@ -393,10 +384,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Continue with function logic
-		let beg: Key = rng.start.encode()?;
-		let end: Key = rng.end.encode()?;
+		let end = rng.end.clone();
 		// Scan for the next batch
-		let res = self.scan(beg..end.clone(), batch, version).await?;
+		let res = self.scan(rng, batch, version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
 			Ok(Batch::<(Key, Val)>::new(None, res))
@@ -434,10 +424,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Continue with function logic
-		let beg: Key = rng.start.encode()?;
-		let end: Key = rng.end.encode()?;
+		let end = rng.end.clone();
 		// Scan for the next batch
-		let res = self.scan_all_versions(beg..end.clone(), batch).await?;
+		let res = self.scan_all_versions(rng, batch).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
 			Ok(Batch::<(Key, Val, Version, bool)>::new(None, res))
@@ -471,8 +460,6 @@ pub trait Transaction: requirements::TransactionRequirements {
 	async fn get_timestamp(&mut self, key: Key) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
-		// Calculate the version key
-		let key = key.encode()?;
 		// Calculate the version number
 		let ver = match self.get(key.clone(), None).await? {
 			Some(prev) => VersionStamp::from_slice(prev.as_slice())?
@@ -501,9 +488,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 		ensure!(self.writeable(), Error::TxReadonly);
 		// Continue with function logic
 		let ts = self.get_timestamp(ts_key).await?;
-		let mut k: Vec<u8> = prefix.encode()?;
+		let mut k: Vec<u8> = prefix;
 		k.extend_from_slice(&ts.as_bytes());
-		suffix.encode_into(&mut k)?;
+		k.extend_from_slice(&suffix);
 		self.set(k, val, None).await
 	}
 

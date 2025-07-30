@@ -1,14 +1,14 @@
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
 use crate::idx::trees::bkeys::TrieKeys;
 use crate::idx::trees::btree::{BState, BStatistics, BTree, BTreeStore, Payload};
 use crate::idx::trees::store::TreeNodeProvider;
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, TransactionType};
+use crate::kvs::{Transaction, TransactionType};
 use anyhow::Result;
 
 pub(super) struct DocLengths {
-	state_key: Key,
+	ikb: IndexKeyBase,
 	btree: BTree<TrieKeys>,
 	store: BTreeStore<TrieKeys>,
 }
@@ -21,23 +21,23 @@ impl DocLengths {
 		tt: TransactionType,
 		cache_size: u32,
 	) -> Result<Self> {
-		let state_key: Key = ikb.new_bl_key(None)?;
-		let state: BState = if let Some(val) = tx.get(state_key.clone(), None).await? {
-			VersionedStore::try_from(val)?
+		let state_key = ikb.new_bl_root_key();
+		let state: BState = if let Some(val) = tx.get(&state_key, None).await? {
+			val
 		} else {
 			BState::new(default_btree_order)
 		};
 		let store = tx
 			.index_caches()
 			.get_store_btree_trie(
-				TreeNodeProvider::DocLengths(ikb),
+				TreeNodeProvider::DocLengths(ikb.clone()),
 				state.generation(),
 				tt,
 				cache_size as usize,
 			)
 			.await?;
 		Ok(Self {
-			state_key,
+			ikb,
 			btree: BTree::new(state),
 			store,
 		})
@@ -84,7 +84,8 @@ impl DocLengths {
 	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let state = self.btree.inc_generation();
-			tx.set(self.state_key.clone(), VersionedStore::try_into(state)?, None).await?;
+			let state_key = self.ikb.new_bl_root_key();
+			tx.set(&state_key, state, None).await?;
 			tx.index_caches().advance_store_btree_trie(new_cache);
 		}
 		Ok(())

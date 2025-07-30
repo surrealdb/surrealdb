@@ -4,7 +4,7 @@ use crate::expr::statements::show::ShowSince;
 use crate::key::change;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
-use crate::kvs::{KeyDecode, Transaction};
+use crate::kvs::Transaction;
 use crate::vs::VersionStamp;
 use anyhow::{Result, bail};
 
@@ -55,7 +55,8 @@ pub async fn read(
 		#[cfg(debug_assertions)]
 		trace!("Reading change feed entry: {}", k.sprint());
 		// Decode the changefeed entry key
-		let dec = crate::key::change::Cf::decode(&k).unwrap();
+		let dec = crate::key::change::Cf::decode_key(&k).unwrap();
+
 		// Check the change is for the desired table
 		if tb.is_some_and(|tb| tb != dec.tb) {
 			continue;
