@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Array, Base, Ident, Strand, Value, filter::Filter, tokenizer::Tokenizer};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -27,6 +28,8 @@ pub struct DefineAnalyzerStatement {
 	#[revision(start = 4)]
 	pub overwrite: bool,
 }
+
+impl_kv_value_revisioned!(DefineAnalyzerStatement);
 
 impl DefineAnalyzerStatement {
 	pub(crate) async fn compute(
@@ -61,7 +64,7 @@ impl DefineAnalyzerStatement {
 			..self.clone()
 		};
 		ctx.get_index_stores().mappers().load(&az).await?;
-		txn.set(key, revision::to_vec(&az)?, None).await?;
+		txn.set(&key, &az, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

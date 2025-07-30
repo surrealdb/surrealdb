@@ -1,13 +1,13 @@
 //! Stores the next and available freed IDs for documents
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 
 // Table ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ti {
+pub(crate) struct Ti {
 	__: u8,
 	_a: u8,
 	pub ns: u32,
@@ -17,7 +17,10 @@ pub struct Ti {
 	_d: u8,
 	_e: u8,
 }
-impl_key!(Ti);
+
+impl KVKey for Ti {
+	type ValueType = Vec<u8>;
+}
 
 pub fn new(ns: u32, db: u32) -> Ti {
 	Ti::new(ns, db)
@@ -46,17 +49,17 @@ impl Ti {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ti::new(
 			123u32,
 			234u32,
 		);
-		let enc = Ti::encode(&val).unwrap();
-		let dec = Ti::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Ti::encode_key(&val).unwrap();
+		// [47, 43, 0, 0, 0, 123, 42, 0, 0, 0, 234, 33, 116, 105]
+		assert_eq!(&enc, b"/+\x00\x00\x00\x7b*\x00\x00\x00\xea!\x74\x69");
 	}
 }

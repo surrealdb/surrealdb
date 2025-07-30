@@ -6,6 +6,7 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Permission, Strand, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -27,6 +28,8 @@ pub struct DefineModelStatement {
 	#[revision(start = 3)]
 	pub overwrite: bool,
 }
+
+impl_kv_value_revisioned!(DefineModelStatement);
 
 impl DefineModelStatement {
 	/// Process this type returning a computed simple Value
@@ -56,13 +59,13 @@ impl DefineModelStatement {
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineModelStatement {
+			&key,
+			&DefineModelStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

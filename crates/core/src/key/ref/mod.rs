@@ -2,8 +2,8 @@
 use crate::expr::id::Id;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::KeyEncode;
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,10 @@ struct Prefix<'a> {
 	_d: u8,
 	pub id: Id,
 }
-impl_key!(Prefix<'a>);
+
+impl KVKey for Prefix<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl<'a> Prefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Self {
@@ -50,7 +53,10 @@ struct PrefixFt<'a> {
 	pub id: Id,
 	pub ft: &'a str,
 }
-impl_key!(PrefixFt<'a>);
+
+impl KVKey for PrefixFt<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl<'a> PrefixFt<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, ft: &'a str) -> Self {
@@ -83,7 +89,10 @@ struct PrefixFf<'a> {
 	pub ft: &'a str,
 	pub ff: &'a str,
 }
-impl_key!(PrefixFf<'a>);
+
+impl KVKey for PrefixFf<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl<'a> PrefixFf<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, ft: &'a str, ff: &'a str) -> Self {
@@ -109,8 +118,7 @@ impl<'a> PrefixFf<'a> {
 // - all references for a given record, filtered by a origin table and an origin field
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ref<'a> {
+pub(crate) struct Ref<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -124,7 +132,16 @@ pub struct Ref<'a> {
 	pub ff: &'a str,
 	pub fk: Id,
 }
-impl_key!(Ref<'a>);
+
+impl KVKey for Ref<'_> {
+	type ValueType = ();
+}
+
+impl Ref<'_> {
+	pub fn decode_key(k: &[u8]) -> Result<Ref<'_>> {
+		Ok(storekey::deserialize(k)?)
+	}
+}
 
 pub fn new<'a>(
 	ns: &'a str,
@@ -139,37 +156,37 @@ pub fn new<'a>(
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
-	let mut k = Prefix::new(ns, db, tb, id).encode_owned()?;
+	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
-	let mut k = Prefix::new(ns, db, tb, id).encode_owned()?;
+	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
 pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
-	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
+	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
 pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str) -> Result<Vec<u8>> {
-	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_owned()?;
+	let mut k = PrefixFt::new(ns, db, tb, id, ft).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
 pub fn ffprefix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
-	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode()?;
+	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
 pub fn ffsuffix(ns: &str, db: &str, tb: &str, id: &Id, ft: &str, ff: &str) -> Result<Vec<u8>> {
-	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode()?;
+	let mut k = PrefixFf::new(ns, db, tb, id, ft, ff).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
@@ -209,11 +226,10 @@ impl<'a> Ref<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode as _;
+	use super::*;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ref::new(
 			"testns",
@@ -224,13 +240,10 @@ mod tests {
 			"test.*",
 			"otherid".into(),
 		);
-		let enc = Ref::encode(&val).unwrap();
+		let enc = Ref::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\x00&\0\0\0\x01testid\0othertb\0test.*\0\0\0\0\x01otherid\0"
 		);
-
-		let dec = Ref::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

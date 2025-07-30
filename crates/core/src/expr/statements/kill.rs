@@ -2,7 +2,6 @@ use crate::dbs::{Action, Notification, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Value;
-use crate::kvs::Live;
 use crate::{ctx::Context, expr::FlowResultExt as _, expr::Uuid};
 use anyhow::{Result, bail};
 
@@ -53,16 +52,14 @@ impl KillStatement {
 		// Fetch the live query key
 		let key = crate::key::node::lq::new(nid, lid);
 		// Fetch the live query key if it exists
-		match txn.get(key, None).await? {
+		match txn.get(&key, None).await? {
 			Some(val) => {
-				// Decode the data for this live query
-				let val: Live = revision::from_slice(&val)?;
 				// Delete the node live query
 				let key = crate::key::node::lq::new(nid, lid);
-				txn.clr(key).await?;
+				txn.clr(&key).await?;
 				// Delete the table live query
 				let key = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, lid);
-				txn.clr(key).await?;
+				txn.clr(&key).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
 					cache.new_live_queries_version(&val.ns, &val.db, &val.tb);

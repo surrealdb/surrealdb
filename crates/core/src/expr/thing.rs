@@ -6,7 +6,7 @@ use crate::doc::CursorDoc;
 use crate::expr::{Strand, Value, escape::EscapeRid, id::Id};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
-use crate::kvs::KeyDecode as _;
+use crate::kvs::impl_kv_value_revisioned;
 use crate::syn;
 use anyhow::Result;
 use futures::StreamExt;
@@ -30,6 +30,8 @@ pub struct Thing {
 	pub tb: String,
 	pub id: Id,
 }
+
+impl_kv_value_revisioned!(Thing);
 
 impl Thing {
 	/// Convert `Thing` to `Cond`
@@ -173,7 +175,7 @@ impl Thing {
 		while let Some(res) = stream.next().await {
 			yield_now!();
 			let x = res?;
-			let key = Ref::decode(&x)?;
+			let key = Ref::decode_key(&x)?;
 			ids.push(Thing {
 				tb: key.ft.to_string(),
 				id: key.fk,

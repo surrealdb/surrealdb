@@ -8,7 +8,7 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ConfigKind, ResourceKind};
-
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 use api::ApiConfig;
 use graphql::GraphQLConfig;
@@ -25,6 +25,8 @@ pub struct DefineConfigStatement {
 	pub if_not_exists: bool,
 	pub overwrite: bool,
 }
+
+impl_kv_value_revisioned!(DefineConfigStatement);
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -67,7 +69,7 @@ impl DefineConfigStatement {
 		let key = crate::key::database::cg::new(ns, db, cg);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.replace(key, revision::to_vec(self)?).await?;
+		txn.replace(&key, self).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good
