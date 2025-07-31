@@ -763,13 +763,13 @@ mod test {
 		let one = Expr::Literal(Literal::Integer(1));
 
 		let expected = Expr::Binary {
-			left: Box::new(one.clone()),
-			op: BinaryOperator::Subtract,
-			right: Box::new(Expr::Binary {
+			left: Box::new(Expr::Binary {
 				left: Box::new(one.clone()),
 				op: BinaryOperator::Subtract,
 				right: Box::new(one.clone()),
 			}),
+			op: BinaryOperator::Subtract,
+			right: Box::new(one.clone()),
 		};
 		assert_eq!(expected, out);
 	}

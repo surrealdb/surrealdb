@@ -543,7 +543,7 @@ async fn select_unsupported_unary_operator() -> Result<()> {
 				},
 				{
 					detail: {
-						reason: 'unary expressions not supported'
+						reason: 'Unsupported expression: !param.subparam'
 					},
 					operation: 'Fallback'
 				},

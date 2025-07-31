@@ -247,7 +247,7 @@ impl<'a> TreeBuilder<'a> {
 				Ok(Node::Computable)
 			}
 			Expr::Literal(Literal::Array(a)) => self.eval_array(stk, a).await,
-			_ => Ok(Node::Unsupported(format!("Unsupported value: {}", v))),
+			_ => Ok(Node::Unsupported(format!("Unsupported expression: {}", v))),
 		}
 	}
 
@@ -255,7 +255,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(if n == Node::Computable {
 			match stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await {
 				Ok(v) => Node::Computed(v.into()),
-				Err(_) => Node::Unsupported(format!("Unsupported value: {}", v)),
+				Err(_) => Node::Unsupported(format!("Unsupported expression: {}", v)),
 			}
 		} else {
 			n
