@@ -18,11 +18,14 @@ use reblessive::tree::Stk;
 use std::sync::Arc;
 
 impl Document {
-	/// Generates a new record id for this document.
-	/// This only happens when a document does not
-	/// have a record id, because we are attempting
-	/// to create a new record, and are leaving the
-	/// id generation up to the document processor.
+	/// Generate a record ID for CREATE, UPSERT, and UPDATE statements
+	///
+	/// This method handles record ID generation from various sources:
+	/// - Existing document IDs
+	/// - Data clause specified IDs (including function calls and expressions)
+	/// - Randomly generated IDs when no ID is specified
+	///
+	/// The method ensures that all expressions are properly evaluated before being used as record IDs.
 	pub(super) async fn generate_record_id(
 		&mut self,
 		stk: &mut Stk,
@@ -49,11 +52,13 @@ impl Document {
 					Some(data) => {
 						match data.rid(stk, ctx, opt).await? {
 							// Generate a new id from the id field (including Thing values)
-							Some(id) => id
-								.compute(stk, ctx, opt, None)
-								.await
-								.unwrap_or(id.clone())
-								.generate(tb, false)?,
+							// IMPORTANT: Always compute the value before generating the record ID
+							// This ensures that function calls like type::string(8) are evaluated
+							// to their final value before being used as a record ID
+							Some(id) => {
+								let computed = id.compute(stk, ctx, opt, None).await.unwrap_or(id.clone());
+								computed.generate(tb, false)?
+							},
 							// Generate a new random table id
 							None => tb.generate(),
 						}
