@@ -57,7 +57,7 @@ async fn post_handler(
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {
 				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
-				Ok(Output::json(&v))
+				Ok(Output::json_value(&v))
 			}
 			Some(Accept::ApplicationCbor) => {
 				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
@@ -93,7 +93,9 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 				// Execute the received sql query
 				let _ = match db.execute(sql, &session, None).await {
 					// Convert the response to JSON
-					Ok(v) => match serde_json::to_string(&v) {
+					Ok(v) => match surrealdb_core::rpc::format::json::encode_str(Value::from(
+						v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>(),
+					)) {
 						// Send the JSON response to the client
 						Ok(v) => tx.send(Message::Text(v)).await,
 						// There was an error converting to JSON

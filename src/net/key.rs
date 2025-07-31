@@ -21,8 +21,8 @@ use surrealdb::dbs::capabilities::RouteTarget;
 use surrealdb::iam::check::check_ns_db;
 use surrealdb_core::dbs::Variables;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::syn;
 use surrealdb_core::val::{Strand, Value};
+use surrealdb_core::{sql, syn};
 use tower_http::limit::RequestBodyLimitLayer;
 
 #[derive(Default, Deserialize, Debug, Clone)]
@@ -68,15 +68,27 @@ async fn execute_and_return(
 	db: &Datastore,
 	sql: &str,
 	session: &Session,
-	vars: Variables,
+	mut vars: Variables,
 	accept: Option<&Accept>,
+	expr: Option<sql::Expr>,
 ) -> Result<Output, anyhow::Error> {
+	let vars = if let Some(expr) = expr {
+		let mut value =
+			db.process(sql::Ast::single_expr(expr), session, Some(vars.clone())).await?;
+		if let Some(resp) = value.pop() {
+			vars.insert("data".to_owned(), resp.result?);
+		}
+		vars
+	} else {
+		vars
+	};
+
 	match db.execute(sql, session, Some(vars)).await {
 		Ok(res) => match accept {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {
 				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
-				Ok(Output::json(&v))
+				Ok(Output::json_value(&v))
 			}
 			Some(Accept::ApplicationCbor) => {
 				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
@@ -134,7 +146,9 @@ async fn select_all(
 		String::from("limit") => Value::from(query.limit.unwrap_or(100)),
 		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(|x| unsafe{ Strand::new_unchecked(x) }).map(Value::from).collect(),
 	});
-	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), None)
+		.await
+		.map_err(ResponseError)
 }
 
 async fn create_all(
@@ -154,18 +168,17 @@ async fn create_all(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the request body as JSON
-	match syn::value(data) {
+	match syn::expr(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "CREATE type::table($table) CONTENT $data";
 			// Specify the request variables
 			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
-				String::from("data") => data,
 				=> params.parse()
 			});
 
-			execute_and_return(db, sql, &session, vars, accept.as_deref())
+			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
 				.await
 				.map_err(ResponseError)
 		}
@@ -190,17 +203,16 @@ async fn update_all(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the request body as JSON
-	match syn::value(data) {
+	match syn::expr(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPDATE type::table($table) CONTENT $data";
 			// Specify the request variables
 			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
-				String::from("data") => data,
 				=> params.parse()
 			});
-			execute_and_return(db, sql, &session, vars, accept.as_deref())
+			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
 				.await
 				.map_err(ResponseError)
 		}
@@ -225,17 +237,16 @@ async fn modify_all(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Parse the request body as JSON
-	match syn::value(data) {
+	match syn::expr(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPDATE type::table($table) MERGE $data";
 			// Specify the request variables
 			let vars = Variables::from(map! {
 				String::from("table") => table.into(),
-				String::from("data") => data,
 				=> params.parse()
 			});
-			execute_and_return(db, sql, &session, vars, accept.as_deref())
+			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
 				.await
 				.map_err(ResponseError)
 		}
@@ -264,7 +275,9 @@ async fn delete_all(
 		=> params.parse()
 	});
 	// Execute the query and return the result
-	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), None)
+		.await
+		.map_err(ResponseError)
 }
 
 // ------------------------------
@@ -301,7 +314,9 @@ async fn select_one(
 		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(|x| unsafe{ Strand::new_unchecked(x) }).map(Value::from).collect::<Value>(),
 	});
 	// Execute the query and return the result
-	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), None)
+		.await
+		.map_err(ResponseError)
 }
 
 async fn create_one(
@@ -326,7 +341,7 @@ async fn create_one(
 		Err(_) => id.into(),
 	};
 	// Parse the request body as JSON
-	match syn::value(data) {
+	match syn::expr(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "CREATE type::thing($table, $id) CONTENT $data";
@@ -334,11 +349,10 @@ async fn create_one(
 			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
 				String::from("id") => rid,
-				String::from("data") => data,
 				=> params.parse()
 			});
 			// Execute the query and return the result
-			execute_and_return(db, sql, &session, vars, accept.as_deref())
+			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
 				.await
 				.map_err(ResponseError)
 		}
@@ -368,7 +382,7 @@ async fn update_one(
 		Err(_) => id.into(),
 	};
 	// Parse the request body as JSON
-	match syn::value(data) {
+	match syn::expr(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPSERT type::thing($table, $id) CONTENT $data";
@@ -376,11 +390,10 @@ async fn update_one(
 			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
 				String::from("id") => rid,
-				String::from("data") => data,
 				=> params.parse()
 			});
 			// Execute the query and return the result
-			execute_and_return(db, sql, &session, vars, accept.as_deref())
+			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
 				.await
 				.map_err(ResponseError)
 		}
@@ -410,7 +423,7 @@ async fn modify_one(
 		Err(_) => id.into(),
 	};
 	// Parse the request body as JSON
-	match syn::value(data) {
+	match syn::expr(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPSERT type::thing($table, $id) MERGE $data";
@@ -418,11 +431,10 @@ async fn modify_one(
 			let vars = Variables::from(map! {
 				String::from("table") => Value::from(table),
 				String::from("id") => rid,
-				String::from("data") => data,
 				=> params.parse()
 			});
 			// Execute the query and return the result
-			execute_and_return(db, sql, &session, vars, accept.as_deref())
+			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
 				.await
 				.map_err(ResponseError)
 		}
@@ -455,5 +467,7 @@ async fn delete_one(
 		String::from("id") => rid,
 	});
 	// Execute the query and return the result
-	execute_and_return(db, sql, &session, vars, accept.as_deref()).await.map_err(ResponseError)
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), None)
+		.await
+		.map_err(ResponseError)
 }

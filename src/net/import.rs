@@ -56,7 +56,7 @@ async fn handler(
 					//
 					// this will serialize structs differently then they should.
 					let res = res.into_iter().map(|x| x.into_value()).collect::<Value>();
-					Ok(Output::json(&res))
+					Ok(Output::json_value(&res))
 				}
 				Some(Accept::ApplicationCbor) => {
 					// TODO(3.0): This code here is using the wrong serialization method which might

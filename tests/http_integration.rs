@@ -1047,13 +1047,17 @@ mod http_integration {
 		table: &str,
 		num_records: usize,
 	) -> Result<(), Box<dyn std::error::Error>> {
+		let end = num_records + 1;
 		let res = client
 			.post(format!("http://{addr}/sql"))
 			.basic_auth(USER, Some(PASS))
-			.body(format!("CREATE |`{table}`:1..{num_records}| SET default = 'content'"))
+			.body(format!("CREATE |`{table}`:1..{end}| SET default = 'content'"))
 			.send()
 			.await?;
-		let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+
+		let text = res.text().await?;
+		println!("{text}");
+		let body: serde_json::Value = serde_json::from_str(&text).unwrap();
 
 		assert_eq!(
 			body[0]["result"].as_array().unwrap().len(),
@@ -1233,10 +1237,13 @@ mod http_integration {
 				.body(r#"{"name": "record_name"}"#)
 				.send()
 				.await?;
-			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+			let status = res.status();
+			let body = res.text().await?;
+			println!("{}", body);
+			assert_eq!(status, 200);
 
 			// Verify the records were updated
-			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
+			let res = client.get(dbg!(url)).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 

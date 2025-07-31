@@ -72,7 +72,7 @@ async fn handler(
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization
 					Some(Accept::ApplicationJson) => {
-						Ok(Output::json(&Success::new(v.token, v.refresh)))
+						Ok(Output::json_other(&Success::new(v.token, v.refresh)))
 					}
 					Some(Accept::ApplicationCbor) => {
 						Ok(Output::cbor(&Success::new(v.token, v.refresh)))
