@@ -56,9 +56,10 @@ impl Document {
 							// This ensures that function calls like type::string(8) are evaluated
 							// to their final value before being used as a record ID
 							Some(id) => {
-								let computed = id.compute(stk, ctx, opt, None).await.unwrap_or(id.clone());
+								let computed =
+									id.compute(stk, ctx, opt, None).await.unwrap_or(id.clone());
 								computed.generate(tb, false)?
-							},
+							}
 							// Generate a new random table id
 							None => tb.generate(),
 						}
