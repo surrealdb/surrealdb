@@ -145,7 +145,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Log the authentication type
 	trace!("Attempting token authentication");
 	// Decode the token without verifying
-	let token_data = dbg!(decode::<Claims>(token, &KEY, &DUD))?;
+	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Convert the token to a SurrealQL object value
 	let value = Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used
@@ -1739,10 +1739,10 @@ mod tests {
 				claims.ns = level.ns.map(|s| s.to_string());
 				claims.db = level.db.map(|s| s.to_string());
 				claims.iss = case.iss_claim.map(|s| s.to_string());
-				claims.aud = dbg!(case.aud_claim.clone());
+				claims.aud = case.aud_claim.clone();
 
 				// Create the token
-				let enc = encode(&HEADER, dbg!(&claims), &key).unwrap();
+				let enc = encode(&HEADER, &claims, &key).unwrap();
 
 				// Signin with the token
 				let mut sess = Session::default();

@@ -674,7 +674,6 @@ impl Executor {
 		opt: Options,
 		qry: LogicalPlan,
 	) -> Result<Vec<Response>> {
-		//dbg!(&qry);
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
 	}

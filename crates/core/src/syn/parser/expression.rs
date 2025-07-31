@@ -613,7 +613,7 @@ impl Parser<'_> {
 			let token = self.peek();
 
 			if let Some(bp) = self.postfix_binding_power(token.kind) {
-				if bp < min_bp {
+				if bp <= min_bp {
 					break;
 				}
 
@@ -632,7 +632,7 @@ impl Parser<'_> {
 				break;
 			};
 
-			if bp < min_bp {
+			if bp <= min_bp {
 				break;
 			}
 
