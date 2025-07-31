@@ -426,7 +426,7 @@ impl Parser<'_> {
 				}
 			}
 			t!("..") => {
-				if self.peek_whitespace().kind == t!("=") {
+				if dbg!(self.peek_whitespace().kind == t!("=")) {
 					self.pop_peek();
 					BinaryOperator::RangeInclusive
 				} else {
