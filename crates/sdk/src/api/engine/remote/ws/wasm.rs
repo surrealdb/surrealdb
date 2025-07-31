@@ -1,7 +1,7 @@
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
 use crate::api::conn::{self, Command, DbResponse, RequestData, Route, Router};
+use crate::api::engine::remote::Response;
 use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
-use crate::api::engine::remote::{Response, deserialize, serialize};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
@@ -165,7 +165,7 @@ async fn router_handle_request(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", req);
-		let payload = serialize(&req, true).unwrap();
+		let payload = surrealdb_core::rpc::format::revision::encode(&req).unwrap();
 		Message::Binary(payload)
 	};
 
@@ -268,7 +268,9 @@ async fn router_handle_response(
 											uuid: live_query_id.0,
 										}
 										.into_router_request(None);
-										let value = serialize(&request, true).unwrap();
+										let value =
+											surrealdb_core::rpc::format::revision::encode(&request)
+												.unwrap();
 										Message::Binary(value)
 									};
 									if let Err(error) = state.sink.send(kill).await {
@@ -297,7 +299,7 @@ async fn router_handle_response(
 			if let Message::Binary(binary) = response {
 				if let Ok(Response {
 					id,
-				}) = deserialize(&mut &binary[..], true)
+				}) = surrealdb_core::rpc::format::revision::decode(&binary)
 				{
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
@@ -349,7 +351,8 @@ async fn router_reconnect(
 				};
 				for (_, message) in &state.replay {
 					let message = message.clone().into_router_request(None);
-					let message = serialize(&message, true).unwrap();
+
+					let message = surrealdb_core::rpc::format::revision::encode(&message).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
@@ -364,7 +367,8 @@ async fn router_reconnect(
 					}
 					.into_router_request(None);
 					trace!("Request {:?}", request);
-					let serialize = serialize(&request, false).unwrap();
+					let serialize =
+						surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 					if let Err(error) = state.sink.send(Message::Binary(serialize)).await {
 						trace!("{error}");
 						time::sleep(Duration::from_secs(1)).await;
@@ -417,7 +421,7 @@ pub(crate) async fn run_router(
 		let mut request = BTreeMap::new();
 		request.insert("method".to_owned(), "ping".into());
 		let value = CoreValue::from(request);
-		let value = serialize(&value, true).unwrap();
+		let value = surrealdb_core::rpc::format::revision::encode(&value).unwrap();
 		Message::Binary(value)
 	};
 
@@ -515,15 +519,10 @@ impl Response {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => {
-				deserialize(&mut &binary[..], true).map(Some).map_err(|error| {
-					Error::ResponseFromBinary {
-						binary: binary.clone(),
-						error: bincode::ErrorKind::Custom(error.to_string()).into(),
-					}
-					.into()
-				})
-			}
+			Message::Binary(binary) => surrealdb_core::rpc::format::revision::decode(&binary)
+				.map(Some)
+				.map_err(|error| Error::InvalidResponse(error))
+				.map_err(anyhow::Error::new),
 		}
 	}
 }
