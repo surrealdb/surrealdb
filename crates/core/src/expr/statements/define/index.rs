@@ -149,6 +149,8 @@ impl DefineIndexStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<()> {
+		use crate::expr::Expr;
+
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
@@ -164,7 +166,7 @@ impl DefineIndexStatement {
 			let opt = &opt.new_with_force(Force::Index(Arc::new([self.clone()])));
 			// Update the index data
 			let stm = UpdateStatement {
-				what: Values(vec![Value::Table(self.what.clone().into())]),
+				what: vec![Expr::Table(self.what.clone().into())],
 				output: Some(Output::None),
 				..UpdateStatement::default()
 			};

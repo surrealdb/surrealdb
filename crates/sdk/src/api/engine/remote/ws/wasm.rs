@@ -20,7 +20,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::AtomicI64;
 use std::time::Duration;
-use surrealdb_core::expr::Value as CoreValue;
+use surrealdb_core::val::Value as CoreValue;
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -75,7 +75,6 @@ async fn router_handle_request(
 		response,
 	}: Route,
 	state: &mut RouterState,
-	endpoint: &Endpoint,
 ) -> HandleResult {
 	let RequestData {
 		id,
@@ -166,11 +165,7 @@ async fn router_handle_request(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", req);
-		let payload = if endpoint.config.ast_payload {
-			serialize(&req, true).unwrap()
-		} else {
-			serialize(&req.stringify_queries(), true).unwrap()
-		};
+		let payload = serialize(&req, true).unwrap();
 		Message::Binary(payload)
 	};
 
@@ -454,7 +449,7 @@ pub(crate) async fn run_router(
 						break 'router;
 					};
 
-					match router_handle_request(route, &mut state,&endpoint).await {
+					match router_handle_request(route, &mut state).await {
 						HandleResult::Ok => {},
 						HandleResult::Disconnected => {
 							router_reconnect(&mut state, &mut events, &endpoint, capacity).await;
