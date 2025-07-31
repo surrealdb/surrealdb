@@ -1,6 +1,7 @@
 //! Stores change feeds
+use crate::cf::TableMutations;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
 use crate::vs::VersionStamp;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -8,8 +9,7 @@ use std::str;
 
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Cf<'a> {
+pub(crate) struct Cf<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -21,7 +21,16 @@ pub struct Cf<'a> {
 	_c: u8,
 	pub tb: &'a str,
 }
-impl_key!(Cf<'a>);
+
+impl KVKey for Cf<'_> {
+	type ValueType = TableMutations;
+}
+
+impl Cf<'_> {
+	pub fn decode_key(k: &[u8]) -> Result<Cf<'_>> {
+		Ok(storekey::deserialize(k)?)
+	}
+}
 
 #[expect(unused)]
 pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
@@ -29,7 +38,7 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
 }
 
 pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode()?;
+	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"#");
 	Ok(k)
 }
@@ -46,7 +55,7 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.
 pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode()?;
+	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"#");
 	k.extend_from_slice(&vs.as_bytes());
 	Ok(k)
@@ -55,14 +64,14 @@ pub fn prefix_ts(ns: &str, db: &str, vs: VersionStamp) -> Result<Vec<u8>> {
 /// Returns the prefix for the whole database change feeds
 #[expect(unused)]
 pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode()?;
+	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"#");
 	Ok(k)
 }
 
 /// Returns the suffix for the whole database change feeds
 pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode()?;
+	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(&[b'#', 0xff]);
 	Ok(k)
 }
@@ -91,13 +100,12 @@ impl<'a> Cf<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
 	use crate::vs::*;
 	use std::ascii::escape_default;
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Cf::new(
 			"test",
@@ -105,10 +113,8 @@ mod tests {
 			VersionStamp::try_from_u128(12345).unwrap(),
 			"test",
 		);
-		let enc = Cf::encode(&val).unwrap();
+		let enc = Cf::encode_key(&val).unwrap();
 		println!("enc={}", show(&enc));
-		let dec = Cf::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

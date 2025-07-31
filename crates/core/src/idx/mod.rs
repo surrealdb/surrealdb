@@ -10,40 +10,41 @@ use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::bc::Bc;
-use crate::key::index::bd::Bd;
+use crate::key::index::bd::{Bd, BdRoot};
 use crate::key::index::bf::Bf;
 use crate::key::index::bi::Bi;
 use crate::key::index::bk::Bk;
-use crate::key::index::bl::Bl;
+use crate::key::index::bl::{Bl, BlRoot};
 use crate::key::index::bo::Bo;
-use crate::key::index::bp::Bp;
+use crate::key::index::bp::{Bp, BpRoot};
 use crate::key::index::bs::Bs;
-use crate::key::index::bt::Bt;
+use crate::key::index::bt::{Bt, BtRoot};
 use crate::key::index::bu::Bu;
-use crate::key::index::hd::Hd;
+use crate::key::index::hd::{Hd, HdRoot};
 use crate::key::index::he::He;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::id::Id as IdKey;
-use crate::key::index::vm::Vm;
+use crate::key::index::ii::Ii;
+use crate::key::index::vm::{Vm, VmRoot};
 
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
+#[cfg(not(target_family = "wasm"))]
 use crate::key::index::ia::Ia;
 use crate::key::index::ib::Ib;
+#[cfg(not(target_family = "wasm"))]
 use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
-use crate::key::index::td::Td;
+use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
 use crate::key::root::ic::Ic;
-use crate::kvs::{Key, KeyEncode as _, Val};
-use crate::val::{RecordId, RecordIdKey};
+use crate::kvs::Key;
+use crate::val::RecordIdKey;
 use anyhow::Result;
-use revision::Revisioned;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use std::ops::Range;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -82,107 +83,141 @@ impl IndexKeyBase {
 		self.0.ix == ic.ix && self.0.tb == ic.tb && self.0.db == ic.db && self.0.ns == ic.ns
 	}
 
-	fn new_bc_key(&self, term_id: TermId) -> Result<Key> {
-		Bc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id).encode()
+	fn new_bc_key(&self, term_id: TermId) -> Bc<'_> {
+		Bc::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id)
 	}
 
-	fn new_bd_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Bd::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
+	fn new_bd_root_key(&self) -> BdRoot<'_> {
+		BdRoot::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
-	fn new_bk_key(&self, doc_id: DocId) -> Result<Key> {
-		Bk::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id).encode()
+	fn new_bd_key(&self, node_id: NodeId) -> Bd<'_> {
+		Bd::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id)
 	}
 
-	fn new_bl_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Bl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
+	fn new_bk_key(&self, doc_id: DocId) -> Bk<'_> {
+		Bk::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
 
-	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Result<Key> {
-		Bo::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id, term_id).encode()
+	fn new_bl_root_key(&self) -> BlRoot<'_> {
+		BlRoot::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
-	fn new_bp_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Bp::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
+	fn new_bl_key(&self, node_id: NodeId) -> Bl<'_> {
+		Bl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id)
 	}
 
-	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Result<Key> {
-		Bf::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id, doc_id).encode()
+	fn new_bo_key(&self, doc_id: DocId, term_id: TermId) -> Bo<'_> {
+		Bo::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id, term_id)
 	}
 
-	fn new_bt_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Bt::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
+	fn new_bp_root_key(&self) -> BpRoot<'_> {
+		BpRoot::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
-	fn new_bs_key(&self) -> Result<Key> {
-		Bs::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix).encode()
+	fn new_bp_key(&self, node_id: NodeId) -> Bp<'_> {
+		Bp::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id)
 	}
 
-	fn new_bu_key(&self, term_id: TermId) -> Result<Key> {
-		Bu::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id).encode()
+	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Bf<'_> {
+		Bf::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id, doc_id)
 	}
 
-	fn new_hd_key(&self, doc_id: Option<DocId>) -> Result<Key> {
-		Hd::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id).encode()
+	fn new_bt_root_key(&self) -> BtRoot<'_> {
+		BtRoot::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
-	fn new_he_key(&self, element_id: ElementId) -> Result<Key> {
-		He::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, element_id).encode()
+	fn new_bt_key(&self, node_id: NodeId) -> Bt<'_> {
+		Bt::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id)
 	}
 
-	fn new_hi_key(&self, id: RecordIdKey) -> Result<Key> {
-		Hi::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id).encode()
+	fn new_bs_key(&self) -> Bs<'_> {
+		Bs::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
-	fn new_hl_key(&self, layer: u16, chunk: u32) -> Result<Key> {
-		Hl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, layer, chunk).encode()
+	fn new_bu_key(&self, term_id: TermId) -> Bu<'_> {
+		Bu::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term_id)
 	}
 
-	fn new_hv_key(&self, vec: Arc<SerializedVector>) -> Result<Key> {
-		Hv::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, vec).encode()
+	fn new_hd_root_key(&self) -> HdRoot<'_> {
+		HdRoot::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
-	fn new_hs_key(&self) -> Result<Key> {
-		Hs::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix).encode()
+	fn new_hd_key(&self, doc_id: DocId) -> Hd<'_> {
+		Hd::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
 
-	fn new_vm_key(&self, node_id: Option<NodeId>) -> Result<Key> {
-		Vm::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id).encode()
+	fn new_he_key(&self, element_id: ElementId) -> He<'_> {
+		He::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, element_id)
 	}
 
-	fn new_bi_key(&self, doc_id: DocId) -> Bi {
+	fn new_hi_key(&self, id: RecordIdKey) -> Hi<'_> {
+		Hi::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
+	}
+
+	fn new_hl_key(&self, layer: u16, chunk: u32) -> Hl<'_> {
+		Hl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, layer, chunk)
+	}
+
+	fn new_hv_key(&self, vec: Arc<SerializedVector>) -> Hv<'_> {
+		Hv::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, vec)
+	}
+
+	fn new_hs_key(&self) -> Hs<'_> {
+		Hs::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
+	}
+
+	fn new_vm_root_key(&self) -> VmRoot<'_> {
+		VmRoot::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
+	}
+
+	fn new_vm_key(&self, node_id: NodeId) -> Vm<'_> {
+		Vm::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, node_id)
+	}
+
+	fn new_bi_key(&self, doc_id: DocId) -> Bi<'_> {
 		Bi::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
+	}
+
+	fn new_ii_key(&self, doc_id: DocId) -> Ii<'_> {
+		Ii::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
 
 	fn new_id_key(&self, id: RecordIdKey) -> IdKey {
 		IdKey::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 
-	pub(crate) fn new_ia_key(&self, i: u32) -> Ia {
+	#[cfg(not(target_family = "wasm"))]
+	pub(crate) fn new_ia_key(&self, i: u32) -> Ia<'_> {
 		Ia::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, i)
 	}
 
+	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip {
 		Ip::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, id)
 	}
 
-	pub(crate) fn new_ib_key(&self, start: i64) -> Result<Key> {
-		Ib::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, start).encode()
+	pub(crate) fn new_ib_key(&self, start: i64) -> Ib<'_> {
+		Ib::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, start)
 	}
 
 	pub(crate) fn new_ic_key(&self, nid: Uuid) -> Ic {
 		Ic::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, nid, Uuid::now_v7())
 	}
 
-	pub(crate) fn new_ib_range(&self) -> Result<(Key, Key)> {
+	pub(crate) fn new_ib_range(&self) -> Result<Range<Key>> {
 		Ib::new_range(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
-	pub(crate) fn new_is_key(&self, nid: Uuid) -> Result<Key> {
-		Is::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, nid).encode()
+	pub(crate) fn new_is_key(&self, nid: Uuid) -> Is<'_> {
+		Is::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, nid)
 	}
 
-	fn new_td<'a>(&'a self, term: &'a str, doc_id: Option<DocId>) -> Td<'a> {
+	fn new_td_root<'a>(&'a self, term: &'a str) -> TdRoot<'a> {
+		TdRoot::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term)
+	}
+
+	fn new_td<'a>(&'a self, term: &'a str, doc_id: DocId) -> Td<'a> {
 		Td::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, term, doc_id)
 	}
 
@@ -217,7 +252,7 @@ impl IndexKeyBase {
 		Dc::range(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix)
 	}
 
-	fn new_dl(&self, doc_id: DocId) -> Dl {
+	fn new_dl(&self, doc_id: DocId) -> Dl<'_> {
 		Dl::new(&self.0.ns, &self.0.db, &self.0.tb, &self.0.ix, doc_id)
 	}
 
@@ -225,26 +260,8 @@ impl IndexKeyBase {
 		&self.0.tb
 	}
 
+	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn index(&self) -> &str {
 		&self.0.ix
 	}
 }
-
-/// This trait provides `Revision` based default implementations for serialization/deserialization
-/// TODO: Look at this trait, is it really nessecary?
-trait VersionedStore
-where
-	Self: Sized + Serialize + DeserializeOwned + Revisioned,
-{
-	fn try_into(&self) -> Result<Val> {
-		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
-		Ok(val)
-	}
-
-	fn try_from(val: Val) -> Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
-	}
-}
-
-impl VersionedStore for RecordId {}

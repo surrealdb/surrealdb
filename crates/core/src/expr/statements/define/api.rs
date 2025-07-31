@@ -7,6 +7,7 @@ use crate::expr::fmt::{Fmt, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Object, Strand};
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -87,7 +88,7 @@ impl DefineApiStatement {
 			config,
 			comment: self.comment.clone(),
 		};
-		txn.set(key, revision::to_vec(&ap)?, None).await?;
+		txn.set(&key, &ap, None).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
@@ -154,6 +155,8 @@ pub struct ApiDefinition {
 	pub config: ApiConfigStore,
 	pub comment: Option<Strand>,
 }
+
+impl_kv_value_revisioned!(ApiDefinition);
 
 impl ApiDefinition {
 	/// Finds the api definition which most closely matches the segments of the path.

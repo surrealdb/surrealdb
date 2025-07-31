@@ -6,6 +6,7 @@ use crate::expr::changefeed::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -26,6 +27,8 @@ pub struct DefineDatabaseStatement {
 	pub comment: Option<Strand>,
 	pub changefeed: Option<ChangeFeed>,
 }
+
+impl_kv_value_revisioned!(DefineDatabaseStatement);
 
 impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
@@ -61,8 +64,8 @@ impl DefineDatabaseStatement {
 		let key = crate::key::namespace::db::new(ns, &self.name);
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineDatabaseStatement {
+			&key,
+			&DefineDatabaseStatement {
 				id: match (self.id, nsv.id) {
 					(Some(id), _) => Some(id),
 					(None, Some(nsv_id)) => Some(txn.lock().await.get_next_db_id(nsv_id).await?),
@@ -71,7 +74,7 @@ impl DefineDatabaseStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				kind: DefineKind::Default,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

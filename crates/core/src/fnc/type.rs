@@ -217,7 +217,7 @@ pub mod is {
 	use anyhow::Result;
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
-		Ok((&arg).is_array().into())
+		Ok((arg).is_array().into())
 	}
 
 	pub fn bool((arg,): (Value,)) -> Result<Value> {

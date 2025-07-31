@@ -145,8 +145,7 @@ impl MTreeChecker<'_> {
 		let txn = self.ctx.tx();
 		for (doc_id, dist) in res {
 			if let Some(key) = doc_ids.get_doc_key(&txn, doc_id).await? {
-				let rid: RecordId = revision::from_slice(&key)?;
-				result.push_back((rid.into(), dist, None));
+				result.push_back((key.into(), dist, None));
 			}
 		}
 		Ok(result)
@@ -232,11 +231,7 @@ impl MTreeCondChecker<'_> {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
 				let txn = self.ctx.tx();
-				let rid = doc_ids
-					.get_doc_key(&txn, doc_id)
-					.await?
-					.map(|k| revision::from_slice(&k))
-					.transpose()?;
+				let rid = doc_ids.get_doc_key(&txn, doc_id).await?;
 				let ent =
 					CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
 						.await?;

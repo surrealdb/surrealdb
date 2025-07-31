@@ -39,7 +39,7 @@ impl RemoveFunctionStatement {
 		};
 		// Delete the definition
 		let key = crate::key::database::fc::new(ns, db, &fc.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

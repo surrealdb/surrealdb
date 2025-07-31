@@ -1,11 +1,12 @@
 //! Stores FullText index states
+use crate::idx::ft::search::SearchIndexState;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Bs<'a> {
+pub(crate) struct Bs<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -18,7 +19,10 @@ pub struct Bs<'a> {
 	_f: u8,
 	pub ix: &'a str,
 }
-impl_key!(Bs<'a>);
+
+impl KVKey for Bs<'_> {
+	type ValueType = SearchIndexState;
+}
 
 impl Categorise for Bs<'_> {
 	fn categorise(&self) -> Category {
@@ -46,10 +50,10 @@ impl<'a> Bs<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bs::new(
 			"testns",
@@ -57,10 +61,7 @@ mod tests {
 			"testtb",
 			"testix",
 		);
-		let enc = Bs::encode(&val).unwrap();
+		let enc = Bs::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0!bstestix\0");
-
-		let dec = Bs::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

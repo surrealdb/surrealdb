@@ -143,16 +143,16 @@ impl AlterFieldStatement {
 
 		// Set the table definition
 		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
-		txn.set(key, revision::to_vec(&df)?, None).await?;
+		txn.set(&key, &df, None).await?;
 		// Refresh the table cache
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&DefineTableStatement {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

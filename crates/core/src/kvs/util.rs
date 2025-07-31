@@ -1,11 +1,10 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::kvs::KVKey;
 use revision::Revisioned;
 
 use anyhow::Result;
-
-use super::KeyEncode;
 
 /// Advances a key to the next value,
 /// can be used to skip over a certain key.
@@ -18,8 +17,8 @@ pub fn advance_key(key: &mut [u8]) {
 	}
 }
 
-pub fn to_prefix_range<K: KeyEncode>(key: K) -> Result<Range<Vec<u8>>> {
-	let start = key.encode_owned()?;
+pub fn to_prefix_range<K: KVKey>(key: K) -> Result<Range<Vec<u8>>> {
+	let start = key.encode_key()?;
 	let mut end = start.clone();
 	end.push(0xff);
 	Ok(Range {

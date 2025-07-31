@@ -1,6 +1,7 @@
 use crate::cnf::ID_CHARS;
 use crate::expr::escape::EscapeRid;
 use crate::expr::{self, Ident};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Number, Object, Range, Strand, Uuid, Value};
 use nanoid::nanoid;
 use revision::revisioned;
@@ -157,6 +158,9 @@ pub enum RecordIdKey {
 	Object(Object),
 	Range(Box<RecordIdKeyRange>),
 }
+
+impl_kv_value_revisioned!(RecordIdKey);
+
 impl RecordIdKey {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
@@ -330,6 +334,8 @@ pub struct RecordId {
 	pub table: String,
 	pub key: RecordIdKey,
 }
+
+impl_kv_value_revisioned!(RecordId);
 
 impl RecordId {
 	/// Creates a new record id from the given table and key

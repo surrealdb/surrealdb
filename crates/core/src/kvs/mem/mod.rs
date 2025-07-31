@@ -8,7 +8,7 @@ use anyhow::{Result, bail, ensure};
 use std::ops::Range;
 use surrealkv::{Options, Store, Transaction as Tx};
 
-use super::{Check, KeyEncode};
+use super::Check;
 
 #[cfg(not(target_family = "wasm"))]
 use std::sync::OnceLock;
@@ -178,8 +178,6 @@ impl super::api::Transaction for Transaction {
 	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
-		// Get the arguments
-		let key = key.encode_owned()?;
 		// Get the inner transaction
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;

@@ -8,6 +8,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 use argon2::Argon2;
@@ -34,6 +35,8 @@ pub struct DefineUserStatement {
 	pub duration: UserDuration,
 	pub comment: Option<Strand>,
 }
+
+impl_kv_value_revisioned!(DefineUserStatement);
 
 impl DefineUserStatement {
 	pub fn new_with_password(base: Base, user: Strand, pass: &str, role: Ident) -> Self {
@@ -87,12 +90,12 @@ impl DefineUserStatement {
 				// Process the statement
 				let key = crate::key::root::us::new(&self.name);
 				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
+					&key,
+					&DefineUserStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						kind: DefineKind::Default,
 						..self.clone()
-					})?,
+					},
 					None,
 				)
 				.await?;
@@ -123,12 +126,12 @@ impl DefineUserStatement {
 				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
+					&key,
+					&DefineUserStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						kind: DefineKind::Default,
 						..self.clone()
-					})?,
+					},
 					None,
 				)
 				.await?;
@@ -162,12 +165,12 @@ impl DefineUserStatement {
 				txn.get_or_add_ns(ns, opt.strict).await?;
 				txn.get_or_add_db(ns, db, opt.strict).await?;
 				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
+					&key,
+					&DefineUserStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						kind: DefineKind::Default,
 						..self.clone()
-					})?,
+					},
 					None,
 				)
 				.await?;

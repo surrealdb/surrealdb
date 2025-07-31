@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 
 use crate::key::database::sq::Sq;
@@ -25,6 +26,8 @@ pub struct DefineSequenceStatement {
 	pub start: i64,
 	pub timeout: Option<Timeout>,
 }
+
+impl_kv_value_revisioned!(DefineSequenceStatement);
 
 impl DefineSequenceStatement {
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
@@ -59,12 +62,12 @@ impl DefineSequenceStatement {
 			..self.clone()
 		};
 		// Set the definition
-		txn.set(key, revision::to_vec(&sq)?, None).await?;
+		txn.set(&key, &sq, None).await?;
 		// Clear any pre-existing sequence records
-		let (beg, end) = Prefix::new_ba_range(ns, db, &sq.name)?;
-		txn.delr(beg..end).await?;
-		let (beg, end) = Prefix::new_st_range(ns, db, &sq.name)?;
-		txn.delr(beg..end).await?;
+		let ba_range = Prefix::new_ba_range(ns, db, &sq.name)?;
+		txn.delr(ba_range).await?;
+		let st_range = Prefix::new_st_range(ns, db, &sq.name)?;
+		txn.delr(st_range).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

@@ -47,11 +47,7 @@ impl Document {
 			// set and update the key, without checking if the key
 			// already exists in the storage engine.
 			Statement::Insert(_) if self.is_iteration_initial() => {
-				match ctx
-					.tx()
-					.put(key, revision::to_vec(doc_without_id.as_ref())?, opt.version)
-					.await
-				{
+				match ctx.tx().put(&key, doc_without_id.as_ref(), opt.version).await {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
@@ -73,11 +69,7 @@ impl Document {
 			// key does not exist.  If the record value exists then we
 			// retry and attempt to update the record which exists.
 			Statement::Upsert(_) if self.is_iteration_initial() => {
-				match ctx
-					.tx()
-					.put(key, revision::to_vec(doc_without_id.as_ref())?, opt.version)
-					.await
-				{
+				match ctx.tx().put(&key, doc_without_id.as_ref(), opt.version).await {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
@@ -99,11 +91,7 @@ impl Document {
 			// key does not exist. If it already exists, then we
 			// return an error, and the statement fails.
 			Statement::Create(_) => {
-				match ctx
-					.tx()
-					.put(key, revision::to_vec(doc_without_id.as_ref())?, opt.version)
-					.await
-				{
+				match ctx.tx().put(&key, doc_without_id.as_ref(), opt.version).await {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
@@ -118,7 +106,7 @@ impl Document {
 				}
 			}
 			// Let's update the stored value for the specified key
-			_ => ctx.tx().set(key, revision::to_vec(doc_without_id.as_ref())?, opt.version).await,
+			_ => ctx.tx().set(&key, doc_without_id.as_ref(), opt.version).await,
 		}?;
 		// Update the cache
 		ctx.tx().set_record_cache(ns, db, &rid.table, &rid.key, doc_without_id.as_arc())?;

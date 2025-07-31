@@ -1,13 +1,15 @@
 //! Stores doc keys for doc_ids
 use crate::idx::docids::DocId;
-use crate::key::category::{Categorise, Category};
+use crate::key::category::Categorise;
+use crate::key::category::Category;
 use crate::kvs::KVKey;
-use crate::val::RecordId;
+use crate::val::RecordIdKey;
+
 use serde::{Deserialize, Serialize};
 
-/// Id inverted. DocId -> Thing
+/// Id inverted. DocId -> Id
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Bi<'a> {
+pub(crate) struct Ii<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -23,19 +25,19 @@ pub(crate) struct Bi<'a> {
 	pub id: DocId,
 }
 
-impl KVKey for Bi<'_> {
-	type ValueType = RecordId;
+impl KVKey for Ii<'_> {
+	type ValueType = RecordIdKey;
 }
 
-impl Categorise for Bi<'_> {
+impl Categorise for Ii<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexDocKeys
 	}
 }
 
-impl<'a> Bi<'a> {
+impl<'a> Ii<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, id: DocId) -> Self {
-		Bi {
+		Ii {
 			__: b'/',
 			_a: b'*',
 			ns,
@@ -46,28 +48,9 @@ impl<'a> Bi<'a> {
 			_d: b'+',
 			ix,
 			_e: b'!',
-			_f: b'b',
+			_f: b'i',
 			_g: b'i',
 			id,
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn key() {
-		#[rustfmt::skip]
-		let val = Bi::new(
-			"testns",
-			"testdb",
-			"testtb",
-			"testix",
-			7
-		);
-		let enc = Bi::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bi\0\0\0\0\0\0\0\x07");
 	}
 }

@@ -1,12 +1,12 @@
 //! Stores the term list for doc_ids
 use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Bk<'a> {
+pub(crate) struct Bk<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -21,7 +21,10 @@ pub struct Bk<'a> {
 	_g: u8,
 	pub doc_id: DocId,
 }
-impl_key!(Bk<'a>);
+
+impl KVKey for Bk<'_> {
+	type ValueType = RoaringTreemap;
+}
 
 impl Categorise for Bk<'_> {
 	fn categorise(&self) -> Category {
@@ -51,10 +54,10 @@ impl<'a> Bk<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bk::new(
 			"testns",
@@ -63,10 +66,7 @@ mod tests {
 			"testix",
 			7
 		);
-		let enc = Bk::encode(&val).unwrap();
+		let enc = Bk::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bk\0\0\0\0\0\0\0\x07");
-
-		let dec = Bk::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

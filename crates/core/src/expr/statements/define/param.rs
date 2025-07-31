@@ -6,6 +6,7 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, FlowResultExt as _, Ident, Permission};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -24,6 +25,7 @@ pub struct DefineParamStore {
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
 }
+impl_kv_value_revisioned!(DefineParamStore);
 
 impl InfoStructure for DefineParamStore {
 	fn structure(self) -> Value {
@@ -83,15 +85,15 @@ impl DefineParamStatement {
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineParamStore {
+			&key,
+			&DefineParamStore {
 				// Compute the param
 				value,
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				name: self.name.clone(),
 				comment: self.comment.clone(),
 				permissions: self.permissions.clone(),
-			})?,
+			},
 			None,
 		)
 		.await?;

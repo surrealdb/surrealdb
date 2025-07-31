@@ -1,4 +1,4 @@
-use super::{KeyDecode as _, Transaction};
+use super::Transaction;
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{EDGE, IN, OUT};
@@ -510,7 +510,7 @@ impl Transaction {
 				chn.send(bytes!("BEGIN;")).await?;
 			}
 
-			let k = thing::Thing::decode(&k)?;
+			let k = thing::Thing::decode_key(&k)?;
 			let v: Value = if v.is_empty() {
 				Value::None
 			} else {
@@ -591,7 +591,7 @@ impl Transaction {
 
 		// Process each regular value.
 		for (k, v) in regular_values {
-			let k = thing::Thing::decode(&k)?;
+			let k = thing::Thing::decode_key(&k)?;
 			let v: Value = revision::from_slice(&v)?;
 			// Process the value and categorize it into records_relate or records_normal.
 			Self::process_value(k, v, &mut records_relate, &mut records_normal, None, None);

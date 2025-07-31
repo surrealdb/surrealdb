@@ -51,7 +51,7 @@ impl AlterSequenceStatement {
 		}
 		// Set the table definition
 		let key = Sq::new(ns, db, &self.name);
-		txn.set(key, revision::to_vec(&sq)?, None).await?;
+		txn.set(&key, &sq, None).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

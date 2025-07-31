@@ -1,13 +1,11 @@
 use super::CreateDs;
-use crate::kvs::KeyEncode;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::dbs::Session;
 use crate::dbs::node::Timestamp;
-use crate::kvs::LockType::*;
-use crate::kvs::TransactionType::*;
 use crate::kvs::clock::{FakeClock, SizedClock};
+use crate::kvs::{KVKey, LockType::*, TransactionType::*};
 
 // Timestamp to versionstamp tests
 // This translation mechanism is currently used by the garbage collector to determine which change feed entries to delete.
@@ -85,14 +83,20 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	assert!(vs1 < vs2);
 
 	// Scan range
-	let start = crate::key::database::ts::new("myns", "mydb", 0).encode_owned().unwrap();
-	let end = crate::key::database::ts::new("myns", "mydb", u64::MAX).encode_owned().unwrap();
+	let start = crate::key::database::ts::new("myns", "mydb", 0).encode_key().unwrap();
+	let end = crate::key::database::ts::new("myns", "mydb", u64::MAX).encode_key().unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	let scanned = tx.scan(start.clone()..end.clone(), u32::MAX, None).await.unwrap();
 	tx.commit().await.unwrap();
 	assert_eq!(scanned.len(), 2);
-	assert_eq!(scanned[0].0, crate::key::database::ts::new("myns", "mydb", 0).encode().unwrap());
-	assert_eq!(scanned[1].0, crate::key::database::ts::new("myns", "mydb", 1).encode().unwrap());
+	assert_eq!(
+		scanned[0].0,
+		crate::key::database::ts::new("myns", "mydb", 0).encode_key().unwrap()
+	);
+	assert_eq!(
+		scanned[1].0,
+		crate::key::database::ts::new("myns", "mydb", 1).encode_key().unwrap()
+	);
 
 	// Repeating tick
 	ds.changefeed_process_at(None, 1).await.unwrap();
@@ -102,9 +106,18 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	let scanned = tx.scan(start..end, u32::MAX, None).await.unwrap();
 	tx.commit().await.unwrap();
 	assert_eq!(scanned.len(), 3);
-	assert_eq!(scanned[0].0, crate::key::database::ts::new("myns", "mydb", 0).encode().unwrap());
-	assert_eq!(scanned[1].0, crate::key::database::ts::new("myns", "mydb", 1).encode().unwrap());
-	assert_eq!(scanned[2].0, crate::key::database::ts::new("myns", "mydb", 2).encode().unwrap());
+	assert_eq!(
+		scanned[0].0,
+		crate::key::database::ts::new("myns", "mydb", 0).encode_key().unwrap()
+	);
+	assert_eq!(
+		scanned[1].0,
+		crate::key::database::ts::new("myns", "mydb", 1).encode_key().unwrap()
+	);
+	assert_eq!(
+		scanned[2].0,
+		crate::key::database::ts::new("myns", "mydb", 2).encode_key().unwrap()
+	);
 }
 
 macro_rules! define_tests {

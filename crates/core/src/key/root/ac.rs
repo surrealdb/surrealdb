@@ -1,18 +1,22 @@
 //! Stores a DEFINE ACCESS ON ROOT configuration
+use crate::expr::statements::define::DefineAccessStatement;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ac<'a> {
+pub(crate) struct Ac<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
 	pub ac: &'a str,
 }
-impl_key!(Ac<'a>);
+
+impl KVKey for Ac<'_> {
+	type ValueType = DefineAccessStatement;
+}
 
 pub fn new(ac: &str) -> Ac<'_> {
 	Ac::new(ac)
@@ -50,16 +54,14 @@ impl<'a> Ac<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ac::new("testac");
-		let enc = Ac::encode(&val).unwrap();
+		let enc = Ac::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!actestac\x00");
-		let dec = Ac::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

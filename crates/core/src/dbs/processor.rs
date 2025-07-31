@@ -9,7 +9,7 @@ use crate::expr::graph::ComputedGraphSubject;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
-use crate::kvs::{Key, KeyDecode, KeyEncode, Transaction, Val};
+use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::{RecordId, RecordIdKeyRange, Value};
 use anyhow::{Result, bail};
 use futures::StreamExt;
@@ -126,7 +126,7 @@ impl Collected {
 		rid_only: bool,
 	) -> Result<Processed> {
 		// Parse the data from the store
-		let gra: graph::Graph = graph::Graph::decode(&key)?;
+		let gra: graph::Graph = graph::Graph::decode_key(&key)?;
 		// Fetch the data from the store
 		let val = if rid_only {
 			Arc::new(Value::Null)
@@ -151,7 +151,7 @@ impl Collected {
 	}
 
 	async fn process_range_key(key: Key) -> Result<Processed> {
-		let key = thing::Thing::decode(&key)?;
+		let key = thing::Thing::decode_key(&key)?;
 		let val = Value::Null;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
@@ -171,7 +171,7 @@ impl Collected {
 	}
 
 	async fn process_table_key(key: Key) -> Result<Processed> {
-		let key = thing::Thing::decode(&key)?;
+		let key = thing::Thing::decode_key(&key)?;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
 			key: key.id,
@@ -332,7 +332,7 @@ impl Collected {
 	}
 
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
-		let key = thing::Thing::decode(&key)?;
+		let key = thing::Thing::decode_key(&key)?;
 		let mut val: Value = revision::from_slice(&val)?;
 		let rid = RecordId {
 			table: key.tb.to_owned(),
@@ -697,9 +697,9 @@ pub(super) trait Collector {
 		// Prepare the range start key
 		let beg = match &r.start {
 			Bound::Unbounded => thing::prefix(ns, db, tb)?,
-			Bound::Included(v) => thing::new(ns, db, tb, v).encode()?,
+			Bound::Included(v) => thing::new(ns, db, tb, v).encode_key()?,
 			Bound::Excluded(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode()?;
+				let mut key = thing::new(ns, db, tb, v).encode_key()?;
 				key.push(0x00);
 				key
 			}
@@ -707,9 +707,9 @@ pub(super) trait Collector {
 		// Prepare the range end key
 		let end = match &r.end {
 			Bound::Unbounded => thing::suffix(ns, db, tb)?,
-			Bound::Excluded(v) => thing::new(ns, db, tb, v).encode()?,
+			Bound::Excluded(v) => thing::new(ns, db, tb, v).encode_key()?,
 			Bound::Included(v) => {
-				let mut key = thing::new(ns, db, tb, v).encode()?;
+				let mut key = thing::new(ns, db, tb, v).encode_key()?;
 				key.push(0x00);
 				key
 			}

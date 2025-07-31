@@ -1,4 +1,5 @@
 use crate::expr::statements::info::InfoStructure;
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Object, Value};
 use revision::{Error, revisioned};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,8 @@ pub struct Node {
 	#[revision(end = 2, convert_fn = "convert_heartbeat")]
 	pub heartbeat: Timestamp,
 }
+
+impl_kv_value_revisioned!(Node);
 
 impl Node {
 	/// Create a new Node entry

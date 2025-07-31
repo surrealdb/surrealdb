@@ -8,7 +8,7 @@ use crate::idx::ft::search::SearchHitsIterator;
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::key::index::Index;
-use crate::kvs::{Key, KeyEncode, Transaction, Val};
+use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::{Array, Number, RecordId, Value};
 use anyhow::Result;
 use radix_trie::Trie;
@@ -960,7 +960,7 @@ impl UniqueEqualThingIterator {
 		ix: &DefineIndexStatement,
 		a: &Array,
 	) -> Result<Self> {
-		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode()?;
+		let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode_key()?;
 		Ok(Self {
 			irf,
 			key: Some(key),
@@ -969,7 +969,7 @@ impl UniqueEqualThingIterator {
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B> {
 		if let Some(key) = self.key.take() {
-			if let Some(val) = tx.get(key, None).await? {
+			if let Some(val) = tx.get(&key, None).await? {
 				let rid: RecordId = revision::from_slice(&val)?;
 				let record = IndexItemRecord::new_key(rid, self.irf.into());
 				return Ok(B::from_one(record));
@@ -980,7 +980,7 @@ impl UniqueEqualThingIterator {
 
 	async fn next_count(&mut self, tx: &Transaction) -> Result<usize> {
 		if let Some(key) = self.key.take() {
-			if tx.exists(key, None).await? {
+			if tx.exists(&key, None).await? {
 				return Ok(1);
 			}
 		}
@@ -1054,7 +1054,7 @@ impl UniqueRangeThingIterator {
 		if from.value == Value::None {
 			return value_type.prefix_beg(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.clone()), None).encode()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(from.value.clone()), None).encode_key()
 	}
 
 	fn compute_end(
@@ -1068,7 +1068,7 @@ impl UniqueRangeThingIterator {
 		if to.value == Value::None {
 			return value_type.prefix_end(ns, db, ix_what, ix_name);
 		}
-		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.clone()), None).encode()
+		Index::new(ns, db, ix_what, ix_name, &Array::from(to.value.clone()), None).encode_key()
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1257,7 +1257,7 @@ impl UniqueUnionThingIterator {
 		let mut keys = VecDeque::with_capacity(vals.len());
 		let (ns, db) = opt.ns_db()?;
 		for a in vals {
-			let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode()?;
+			let key = Index::new(ns, db, &ix.what, &ix.name, a, None).encode_key()?;
 			keys.push_back(key);
 		}
 		Ok(Self {
@@ -1279,7 +1279,7 @@ impl UniqueUnionThingIterator {
 			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
-			if let Some(val) = tx.get(key, None).await? {
+			if let Some(val) = tx.get(&key, None).await? {
 				count += 1;
 				let rid: RecordId = revision::from_slice(&val)?;
 				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
@@ -1298,7 +1298,7 @@ impl UniqueUnionThingIterator {
 			if ctx.is_done(count % 100 == 0).await? {
 				break;
 			}
-			if tx.exists(key, None).await? {
+			if tx.exists(&key, None).await? {
 				count += 1;
 				if count >= limit {
 					break;

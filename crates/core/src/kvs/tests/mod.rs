@@ -158,7 +158,7 @@ mod fdb {
 		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-		tx.delp(vec![]).await.unwrap();
+		tx.delp(&vec![]).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		(ds, Kvs::Fdb)

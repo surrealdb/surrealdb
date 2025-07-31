@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -23,6 +24,8 @@ pub struct DefineNamespaceStatement {
 	pub name: Ident,
 	pub comment: Option<Strand>,
 }
+
+impl_kv_value_revisioned!(DefineNamespaceStatement);
 
 impl DefineNamespaceStatement {
 	/// Process this type returning a computed simple Value
@@ -53,8 +56,8 @@ impl DefineNamespaceStatement {
 		// Process the statement
 		let key = crate::key::root::ns::new(&self.name);
 		txn.set(
-			key,
-			revision::to_vec(&DefineNamespaceStatement {
+			&key,
+			&DefineNamespaceStatement {
 				id: match self.id {
 					Some(id) => Some(id),
 					None => Some(txn.lock().await.get_next_ns_id().await?),
@@ -62,7 +65,7 @@ impl DefineNamespaceStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				kind: DefineKind::Default,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

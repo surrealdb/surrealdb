@@ -1,11 +1,11 @@
 //! Stores the key prefix for all keys under an index
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct All<'a> {
+pub(crate) struct AllIndexRoot<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -16,19 +16,22 @@ pub struct All<'a> {
 	_d: u8,
 	pub ix: &'a str,
 }
-impl_key!(All<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> All<'a> {
-	All::new(ns, db, tb, ix)
+impl KVKey for AllIndexRoot<'_> {
+	type ValueType = Vec<u8>;
 }
 
-impl Categorise for All<'_> {
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> AllIndexRoot<'a> {
+	AllIndexRoot::new(ns, db, tb, ix)
+}
+
+impl Categorise for AllIndexRoot<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexRoot
 	}
 }
 
-impl<'a> All<'a> {
+impl<'a> AllIndexRoot<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -46,21 +49,26 @@ impl<'a> All<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+
+	use super::*;
+
+	#[test]
+	fn root() {
+		let val = AllIndexRoot::new("testns", "testdb", "testtb", "testix");
+		let enc = AllIndexRoot::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0");
+	}
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
-		let val = All::new(
+		let val = AllIndexRoot::new(
 			"testns",
 			"testdb",
 			"testtb",
 			"testix",
 		);
-		let enc = All::encode(&val).unwrap();
+		let enc = AllIndexRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0");
-
-		let dec = All::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

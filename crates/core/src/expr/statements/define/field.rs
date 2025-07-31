@@ -10,7 +10,7 @@ use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Part, Permissions, Relation, TableType};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::Transaction;
+use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail, ensure};
 
@@ -51,6 +51,8 @@ pub struct DefineFieldStatement {
 	pub comment: Option<Strand>,
 	pub reference: Option<Reference>,
 }
+
+impl_kv_value_revisioned!(DefineFieldStatement);
 
 impl DefineFieldStatement {
 	/// Process this type returning a computed simple Value
@@ -97,13 +99,13 @@ impl DefineFieldStatement {
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineFieldStatement {
+			&key,
+			&DefineFieldStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				//
 				kind: DefineKind::Default,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
@@ -111,11 +113,11 @@ impl DefineFieldStatement {
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&DefineTableStatement {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
@@ -151,7 +153,7 @@ impl DefineFieldStatement {
 							}),
 							..tb.as_ref().to_owned()
 						};
-						txn.set(key, revision::to_vec(&val)?, None).await?;
+						txn.set(&key, &val, None).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
@@ -186,7 +188,7 @@ impl DefineFieldStatement {
 							}),
 							..tb.as_ref().to_owned()
 						};
-						txn.set(key, revision::to_vec(&val)?, None).await?;
+						txn.set(&key, &val, None).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
 							cache.clear_tb(ns, db, &self.what);
@@ -256,7 +258,7 @@ impl DefineFieldStatement {
 						..Default::default()
 					}
 				};
-				txn.set(key, revision::to_vec(&val)?, None).await?;
+				txn.set(&key, &val, None).await?;
 				// Process to any sub field
 				if let Some(new_kind) = new_kind {
 					cur_kind = new_kind;

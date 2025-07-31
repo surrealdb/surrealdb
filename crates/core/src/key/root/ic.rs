@@ -9,7 +9,8 @@
 //! intervals defined by the `index_compaction_interval` configuration option.
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -22,8 +23,7 @@ use uuid::Uuid;
 /// Compaction helps optimize index performance by consolidating changes and
 /// removing unnecessary data.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ic<'a> {
+pub(crate) struct Ic<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -37,7 +37,10 @@ pub struct Ic<'a> {
 	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 }
-impl_key!(Ic<'a>);
+
+impl KVKey for Ic<'_> {
+	type ValueType = ();
+}
 
 impl Categorise for Ic<'_> {
 	fn categorise(&self) -> Category {
@@ -71,12 +74,16 @@ impl<'a> Ic<'a> {
 			uid,
 		}
 	}
+
+	pub fn decode_key(k: &[u8]) -> anyhow::Result<Ic<'_>> {
+		Ok(storekey::deserialize(k)?)
+	}
 }
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::key::root::ic::Ic;
-	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn range() {
@@ -85,12 +92,9 @@ mod tests {
 
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Ic::new("testns", "testdb", "testtb", "testix", Uuid::from_u128(1), Uuid::from_u128(2));
-		let enc = Ic::encode(&val).unwrap();
+		let enc = Ic::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!ictestns\0testdb\0testtb\0testix\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
-		let dec = Ic::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

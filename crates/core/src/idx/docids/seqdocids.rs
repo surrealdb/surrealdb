@@ -1,9 +1,8 @@
 use crate::ctx::Context;
-use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, Resolved};
+use crate::kvs::Transaction;
 use crate::kvs::sequences::SequenceDomain;
-use crate::kvs::{Key, KeyEncode, Transaction, Val};
 use crate::val::RecordIdKey;
 use anyhow::Result;
 use std::sync::Arc;
@@ -67,31 +66,7 @@ impl SeqDocIds {
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
 		let id_key = self.ikb.new_id_key(id.clone());
-		if let Some(v) = tx.get(id_key, None).await? {
-			return Ok(Some(Self::val_to_doc_id(v)?));
-		}
-		Ok(None)
-	}
-
-	/// Converts a raw value to a document ID
-	///
-	/// Validates and converts a byte array to a document ID.
-	///
-	/// # Arguments
-	/// * `val` - The raw value to convert
-	///
-	/// # Returns
-	/// * `Ok(DocId)` - The converted document ID
-	/// * `Err` - If the value has an invalid format
-	fn val_to_doc_id(val: Val) -> Result<DocId> {
-		// Validate the length and convert to array (zero copy)
-		let val: [u8; 8] = val.as_slice().try_into().map_err(|_| {
-			Error::Internal(format!(
-				"invalid stored DocId length: expected 8 bytes, got {}",
-				val.len()
-			))
-		})?;
-		Ok(u64::from_be_bytes(val))
+		tx.get(&id_key, None).await
 	}
 
 	/// Resolves a record ID to a document ID, creating a new one if needed
@@ -115,8 +90,7 @@ impl SeqDocIds {
 		let id_key = self.ikb.new_id_key(id.clone());
 		let tx = ctx.tx();
 		// Do we already have an ID?
-		if let Some(val) = tx.get(id_key.clone(), None).await? {
-			let doc_id = Self::val_to_doc_id(val)?;
+		if let Some(doc_id) = tx.get(&id_key, None).await? {
 			return Ok(Resolved::Existing(doc_id));
 		}
 		// If not, let's get one from the sequence
@@ -125,13 +99,11 @@ impl SeqDocIds {
 			.next_val_fts_idx(ctx, self.nid, self.domain.clone(), self.batch)
 			.await? as DocId;
 		{
-			let val = new_doc_id.to_be_bytes();
-			tx.set(id_key, &val, None).await?;
+			tx.set(&id_key, &new_doc_id, None).await?;
 		}
 		{
-			let k = self.ikb.new_bi_key(new_doc_id);
-			let v = revision::to_vec(&id)?;
-			tx.set(k, v, None).await?;
+			let k = self.ikb.new_ii_key(new_doc_id);
+			tx.set(&k, &id, None).await?;
 		}
 		Ok(Resolved::New(new_doc_id))
 	}
@@ -154,11 +126,7 @@ impl SeqDocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<RecordIdKey>> {
-		if let Some(v) = tx.get(ikb.new_bi_key(doc_id), None).await? {
-			Ok(Some(revision::from_slice(&v)?))
-		} else {
-			Ok(None)
-		}
+		tx.get(&ikb.new_ii_key(doc_id), None).await
 	}
 
 	/// Removes a document ID and its associated record ID
@@ -174,11 +142,10 @@ impl SeqDocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<()> {
-		let k: Key = self.ikb.new_bi_key(doc_id).encode()?;
-		if let Some(v) = tx.get(k.clone(), None).await? {
-			let id: RecordIdKey = revision::from_slice(&v)?;
-			tx.del(self.ikb.new_id_key(id)).await?;
-			tx.del(k).await?;
+		let k = self.ikb.new_ii_key(doc_id);
+		if let Some(id) = tx.get(&k, None).await? {
+			tx.del(&self.ikb.new_id_key(id)).await?;
+			tx.del(&k).await?;
 		}
 		Ok(())
 	}
@@ -454,11 +421,11 @@ mod tests {
 					TEST_IX,
 					Strand::new(id.to_owned()).unwrap().into(),
 				);
-				assert!(!tx.exists(id, None).await.unwrap());
+				assert!(!tx.exists(&id, None).await.unwrap());
 			}
 			for doc_id in 0..=3 {
 				let bi = Bi::new(TEST_NS, TEST_DB, TEST_TB, TEST_IX, doc_id);
-				assert!(!tx.exists(bi, None).await.unwrap());
+				assert!(!tx.exists(&bi, None).await.unwrap());
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 //! Stores a LIVE SELECT query definition on the table
+use crate::expr::LiveStatement;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,8 +11,7 @@ use uuid::Uuid;
 ///
 /// The value of the lv is the statement.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Lq<'a> {
+pub(crate) struct Lq<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -25,20 +25,23 @@ pub struct Lq<'a> {
 	#[serde(with = "uuid::serde::compact")]
 	pub lq: Uuid,
 }
-impl_key!(Lq<'a>);
+
+impl KVKey for Lq<'_> {
+	type ValueType = LiveStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, lq: Uuid) -> Lq<'a> {
 	Lq::new(ns, db, tb, lq)
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!lq\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode()?;
+	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	Ok(k)
 }
@@ -65,25 +68,26 @@ impl<'a> Lq<'a> {
 			lq,
 		}
 	}
+
+	pub fn decode_key(k: &[u8]) -> anyhow::Result<Lq<'_>> {
+		Ok(storekey::deserialize(k)?)
+	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 		let val = Lq::new("testns", "testdb", "testtb", live_query_id);
-		let enc = Lq::encode(&val).unwrap();
+		let enc = Lq::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\x00*testdb\x00*testtb\x00!lq\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
 		);
-
-		let dec = Lq::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

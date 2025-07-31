@@ -9,7 +9,7 @@ use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ConfigKind, ResourceKind};
-
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 use api::{ApiConfig, ApiConfigStore};
 use graphql::GraphQLConfig;
@@ -43,6 +43,7 @@ pub enum ConfigStore {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfigStore),
 }
+impl_kv_value_revisioned!(ConfigStore);
 
 impl DefineConfigStatement {
 	/// Process this type returning a computed simple Value
@@ -87,7 +88,7 @@ impl DefineConfigStatement {
 		let key = crate::key::database::cg::new(ns, db, cg);
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
-		txn.replace(key, revision::to_vec(&store)?).await?;
+		txn.replace(&key, &store).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

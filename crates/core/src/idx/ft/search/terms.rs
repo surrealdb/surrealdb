@@ -1,9 +1,9 @@
 use crate::err::Error;
+use crate::idx::IndexKeyBase;
 use crate::idx::trees::bkeys::FstKeys;
 use crate::idx::trees::btree::{BState, BState1, BState1skip, BStatistics, BTree, BTreeStore};
 use crate::idx::trees::store::TreeNodeProvider;
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::kvs::{KVValue, Transaction, TransactionType};
 use anyhow::Result;
 use revision::{Revisioned, revisioned};
 use roaring::RoaringTreemap;
@@ -13,7 +13,6 @@ pub(crate) type TermId = u64;
 pub(crate) type TermLen = u32;
 
 pub(in crate::idx) struct SearchTerms {
-	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<FstKeys>,
 	store: BTreeStore<FstKeys>,
@@ -29,11 +28,11 @@ impl SearchTerms {
 		tt: TransactionType,
 		cache_size: u32,
 	) -> Result<Self> {
-		let state_key: Key = index_key_base.new_bt_key(None)?;
-		let state: State = if let Some(val) = tx.get(state_key.clone(), None).await? {
-			VersionedStore::try_from(val)?
+		let state_key = index_key_base.new_bt_root_key();
+		let state: SearchTermsState = if let Some(val) = tx.get(&state_key, None).await? {
+			val
 		} else {
-			State::new(default_btree_order)
+			SearchTermsState::new(default_btree_order)
 		};
 		let store = tx
 			.index_caches()
@@ -45,7 +44,6 @@ impl SearchTerms {
 			)
 			.await?;
 		Ok(Self {
-			state_key,
 			index_key_base,
 			btree: BTree::new(state.btree),
 			store,
@@ -79,7 +77,7 @@ impl SearchTerms {
 			}
 		}
 		let term_id = self.get_next_term_id();
-		tx.set(self.index_key_base.new_bu_key(term_id)?, term_key.clone(), None).await?;
+		tx.set(&self.index_key_base.new_bu_key(term_id), &term_key, None).await?;
 		self.btree.insert(tx, &mut self.store, term_key, term_id).await?;
 		Ok(term_id)
 	}
@@ -89,10 +87,10 @@ impl SearchTerms {
 	}
 
 	pub(super) async fn remove_term_id(&mut self, tx: &Transaction, term_id: TermId) -> Result<()> {
-		let term_id_key = self.index_key_base.new_bu_key(term_id)?;
-		if let Some(term_key) = tx.get(term_id_key.clone(), None).await? {
+		let term_id_key = self.index_key_base.new_bu_key(term_id);
+		if let Some(term_key) = tx.get(&term_id_key, None).await? {
 			self.btree.delete(tx, &mut self.store, term_key.clone()).await?;
-			tx.del(term_id_key).await?;
+			tx.del(&term_id_key).await?;
 			if let Some(available_ids) = &mut self.available_ids {
 				available_ids.insert(term_id);
 			} else {
@@ -111,12 +109,13 @@ impl SearchTerms {
 	pub(super) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if let Some(new_cache) = self.store.finish(tx).await? {
 			let btree = self.btree.inc_generation().clone();
-			let state = State {
+			let state = SearchTermsState {
 				btree,
 				available_ids: self.available_ids.take(),
 				next_term_id: self.next_term_id,
 			};
-			tx.set(self.state_key.clone(), VersionedStore::try_into(&state)?, None).await?;
+			let state_key = self.index_key_base.new_bt_root_key();
+			tx.set(&state_key, &state, None).await?;
 			tx.index_caches().advance_store_btree_fst(new_cache);
 		}
 		Ok(())
@@ -125,7 +124,7 @@ impl SearchTerms {
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
-struct State {
+pub(crate) struct SearchTermsState {
 	btree: BState,
 	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
@@ -139,8 +138,6 @@ struct State1 {
 	next_term_id: TermId,
 }
 
-impl VersionedStore for State1 {}
-
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
 struct State1skip {
@@ -149,9 +146,7 @@ struct State1skip {
 	next_term_id: TermId,
 }
 
-impl VersionedStore for State1skip {}
-
-impl From<State1> for State {
+impl From<State1> for SearchTermsState {
 	fn from(state: State1) -> Self {
 		Self {
 			btree: state.btree.into(),
@@ -161,7 +156,7 @@ impl From<State1> for State {
 	}
 }
 
-impl From<State1skip> for State {
+impl From<State1skip> for SearchTermsState {
 	fn from(state: State1skip) -> Self {
 		Self {
 			btree: state.btree.into(),
@@ -171,7 +166,7 @@ impl From<State1skip> for State {
 	}
 }
 
-impl State {
+impl SearchTermsState {
 	fn new(default_btree_order: u32) -> Self {
 		Self {
 			btree: BState::new(default_btree_order),
@@ -181,8 +176,16 @@ impl State {
 	}
 }
 
-impl VersionedStore for State {
-	fn try_from(val: Val) -> Result<Self> {
+impl KVValue for SearchTermsState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -201,9 +204,10 @@ impl VersionedStore for State {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::TermFrequency;
-	use crate::idx::ft::search::terms::{SearchTerms, State};
-	use crate::idx::{IndexKeyBase, VersionedStore};
+	use crate::idx::ft::search::terms::{SearchTerms, SearchTermsState};
 	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, Transaction, TransactionType};
@@ -213,9 +217,9 @@ mod tests {
 
 	#[test]
 	fn test_state_serde() {
-		let s = State::new(3);
-		let val = VersionedStore::try_into(&s).unwrap();
-		let s: State = VersionedStore::try_from(val).unwrap();
+		let s = SearchTermsState::new(3);
+		let val = s.kv_encode_value().unwrap();
+		let s: SearchTermsState = SearchTermsState::kv_decode_value(val).unwrap();
 		assert_eq!(s.btree.generation(), 0);
 		assert_eq!(s.next_term_id, 0);
 	}

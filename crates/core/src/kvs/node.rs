@@ -4,7 +4,7 @@ use crate::err::Error;
 use crate::expr::statements::LiveStatement;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::kvs::{Datastore, KeyDecode as _, Live};
+use crate::kvs::{Datastore, Live};
 use anyhow::Result;
 use std::time::Duration;
 
@@ -28,8 +28,8 @@ impl Datastore {
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::Nd::new(id);
 		let now = self.clock_now().await;
-		let val = revision::to_vec(&Node::new(id, now, false))?;
-		let res = run!(txn, txn.put(key, val, None).await);
+		let node = Node::new(id, now, false);
+		let res = run!(txn, txn.put(&key, &node, None).await);
 		match res {
 			Err(e) => {
 				if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
@@ -61,8 +61,8 @@ impl Datastore {
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(id);
 		let now = self.clock_now().await;
-		let val = Node::new(id, now, false);
-		run!(txn, txn.replace(key, revision::to_vec(&val)?).await)
+		let node = Node::new(id, now, false);
+		run!(txn, txn.replace(&key, &node).await)
 	}
 
 	/// Deletes a node from the cluster.
@@ -80,8 +80,8 @@ impl Datastore {
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(id);
 		let val = catch!(txn, txn.get_node(id).await);
-		let val = val.as_ref().archive();
-		run!(txn, txn.replace(key, revision::to_vec(&val)?).await)
+		let node = val.as_ref().archive();
+		run!(txn, txn.replace(&key, &node).await)
 	}
 
 	/// Expires nodes which have timedout from the cluster.
@@ -121,11 +121,11 @@ impl Datastore {
 				// Log the live query scanning
 				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
 				// Mark the node as archived
-				let val = nd.archive();
+				let node = nd.archive();
 				// Get the key for the node entry
 				let key = crate::key::root::nd::new(nd.id);
 				// Update the node entry
-				catch!(txn, txn.replace(key, revision::to_vec(&val)?).await);
+				catch!(txn, txn.replace(&key, &node).await);
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);
@@ -173,15 +173,15 @@ impl Datastore {
 						// Decode the data for this live query
 						let val: Live = revision::from_slice(v)?;
 						// Get the key for this node live query
-						let nlq = catch!(txn, crate::key::node::lq::Lq::decode(k));
+						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k.clone()));
 						// Check that the node for this query is archived
 						if archived.contains(&nlq.nd) {
 							// Get the key for this table live query
 							let tlq = crate::key::table::lq::new(&val.ns, &val.db, &val.tb, nlq.lq);
 							// Delete the table live query
-							catch!(txn, txn.clr(tlq).await);
+							catch!(txn, txn.clr(&tlq).await);
 							// Delete the node live query
-							catch!(txn, txn.clr(nlq).await);
+							catch!(txn, txn.clr(&nlq).await);
 						}
 					}
 					// Pause and yield execution
@@ -194,7 +194,7 @@ impl Datastore {
 				// Get the key for the node entry
 				let key = crate::key::root::nd::new(*id);
 				// Delete the cluster node entry
-				catch!(txn, txn.clr(key).await);
+				catch!(txn, txn.clr(&key).await);
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);
@@ -269,13 +269,13 @@ impl Datastore {
 							// Check that the node for this query is archived
 							if archived.contains(&stm.node) {
 								// Get the key for this node live query
-								let tlq = catch!(txn, crate::key::table::lq::Lq::decode(k));
+								let tlq = catch!(txn, crate::key::table::lq::Lq::decode_key(k));
 								// Get the key for this table live query
 								let nlq = crate::key::node::lq::new(nid, lid);
 								// Delete the node live query
-								catch!(txn, txn.clr(nlq).await);
+								catch!(txn, txn.clr(&nlq).await);
 								// Delete the table live query
-								catch!(txn, txn.clr(tlq).await);
+								catch!(txn, txn.clr(&tlq).await);
 							}
 						}
 						// Pause and yield execution
@@ -309,17 +309,15 @@ impl Datastore {
 			// Get the key for this node live query
 			let nlq = crate::key::node::lq::new(self.id(), id);
 			// Fetch the LIVE meta data node entry
-			if let Some(val) = catch!(txn, txn.get(nlq, None).await) {
-				// Decode the data for this live query
-				let lq: Live = revision::from_slice(&val)?;
+			if let Some(lq) = catch!(txn, txn.get(&nlq, None).await) {
 				// Get the key for this node live query
 				let nlq = crate::key::node::lq::new(self.id(), id);
 				// Get the key for this table live query
 				let tlq = crate::key::table::lq::new(&lq.ns, &lq.db, &lq.tb, id);
 				// Delete the table live query
-				catch!(txn, txn.clr(tlq).await);
+				catch!(txn, txn.clr(&tlq).await);
 				// Delete the node live query
-				catch!(txn, txn.clr(nlq).await);
+				catch!(txn, txn.clr(&nlq).await);
 			}
 		}
 		// Commit the changes

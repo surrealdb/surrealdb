@@ -30,7 +30,7 @@ async fn handler(Extension(state): Extension<AppState>) -> Result<(), NetError> 
 			// Cancel the transaction
 			trace!("Health endpoint cancelling transaction");
 			// Attempt to fetch data
-			match tx.get(vec![0x00], None).await {
+			match tx.get(&vec![0x00], None).await {
 				Err(_) => {
 					// Ensure the transaction is cancelled
 					let _ = tx.cancel().await;

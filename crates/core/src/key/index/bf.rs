@@ -1,13 +1,13 @@
 //! Stores Term/Doc frequency
 use crate::idx::docids::DocId;
+use crate::idx::ft::TermFrequency;
 use crate::idx::ft::search::terms::TermId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Bf<'a> {
+pub(crate) struct Bf<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -23,7 +23,10 @@ pub struct Bf<'a> {
 	pub term_id: TermId,
 	pub doc_id: DocId,
 }
-impl_key!(Bf<'a>);
+
+impl KVKey for Bf<'_> {
+	type ValueType = TermFrequency;
+}
 
 impl Categorise for Bf<'_> {
 	fn categorise(&self) -> Category {
@@ -61,8 +64,7 @@ impl<'a> Bf<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::key::index::bf::Bf;
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
 
 	#[test]
 	fn key() {
@@ -75,13 +77,10 @@ mod tests {
 			7,
 			13
 		);
-		let enc = Bf::encode(&val).unwrap();
+		let enc = Bf::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*testns\0*testdb\0*testtb\0+testix\0!bf\0\0\0\0\0\0\0\x07\0\0\0\0\0\0\0\x0d"
 		);
-
-		let dec = Bf::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

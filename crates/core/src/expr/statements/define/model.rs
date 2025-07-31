@@ -6,6 +6,7 @@ use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Permission};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -26,6 +27,8 @@ pub struct DefineModelStatement {
 	pub comment: Option<Strand>,
 	pub permissions: Permission,
 }
+
+impl_kv_value_revisioned!(DefineModelStatement);
 
 impl DefineModelStatement {
 	/// Process this type returning a computed simple Value
@@ -59,12 +62,12 @@ impl DefineModelStatement {
 		txn.get_or_add_ns(ns, opt.strict).await?;
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineModelStatement {
+			&key,
+			&DefineModelStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				kind: DefineKind::Default,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

@@ -4,6 +4,7 @@ use crate::err::Error;
 use crate::expr::fmt::Pretty;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, Ident, Kind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
@@ -83,7 +84,10 @@ pub enum Value {
 	Range(Box<Range>),
 	#[serde(skip)]
 	Closure(Box<Closure>),
+	// Add new variants here
 }
+
+impl_kv_value_revisioned!(Value);
 
 impl Eq for Value {}
 

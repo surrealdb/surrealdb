@@ -1,13 +1,13 @@
-use crate::err::Error;
+use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
-use crate::idx::{IndexKeyBase, VersionedStore};
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{KVValue, Transaction};
 use crate::val::{RecordId, RecordIdKey};
-use anyhow::{Result, bail};
+use anyhow::Result;
+use revision::Revisioned;
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
@@ -16,20 +16,16 @@ use std::sync::Arc;
 pub(in crate::idx) struct HnswDocs {
 	tb: String,
 	ikb: IndexKeyBase,
-	state_key: Key,
 	state_updated: bool,
-	state: State,
+	state: HnswDocsState,
 }
 
 #[revisioned(revision = 1)]
 #[derive(Default, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-struct State {
+pub(crate) struct HnswDocsState {
 	available: RoaringTreemap,
 	next_doc_id: DocId,
 }
-
-impl VersionedStore for State {}
 
 impl HnswDocs {
 	pub(in crate::idx) async fn new(
@@ -37,31 +33,25 @@ impl HnswDocs {
 		tb: String,
 		ikb: IndexKeyBase,
 	) -> Result<Self> {
-		let state_key = ikb.new_hd_key(None)?;
-		let state = if let Some(k) = tx.get(state_key.clone(), None).await? {
-			VersionedStore::try_from(k)?
-		} else {
-			State::default()
-		};
+		let state_key = ikb.new_hd_root_key();
+		let state = tx.get(&state_key, None).await?.unwrap_or_default();
 		Ok(Self {
 			tb,
 			ikb,
 			state_updated: false,
-			state_key,
 			state,
 		})
 	}
 
 	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKey) -> Result<DocId> {
-		let id_key = self.ikb.new_hi_key(id.clone())?;
-		if let Some(v) = tx.get(id_key.clone(), None).await? {
-			let doc_id = u64::from_be_bytes(v.try_into().unwrap());
+		if let Some(doc_id) = tx.get(&self.ikb.new_hi_key(id.clone()), None).await? {
 			Ok(doc_id)
 		} else {
 			let doc_id = self.next_doc_id();
-			tx.set(id_key, doc_id.to_be_bytes(), None).await?;
-			let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
-			tx.set(doc_key, revision::to_vec(id)?, None).await?;
+			let id_key = self.ikb.new_hi_key(id.clone());
+			tx.set(&id_key, &doc_id, None).await?;
+			let doc_key = self.ikb.new_hd_key(doc_id);
+			tx.set(&doc_key, id, None).await?;
 			Ok(doc_id)
 		}
 	}
@@ -83,9 +73,8 @@ impl HnswDocs {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<RecordId>> {
-		let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
-		if let Some(val) = tx.get(doc_key, None).await? {
-			let id: RecordIdKey = revision::from_slice(&val)?;
+		let doc_key = self.ikb.new_hd_key(doc_id);
+		if let Some(id) = tx.get(&doc_key, None).await? {
 			Ok(Some(RecordId {
 				table: self.tb.clone(),
 				key: id,
@@ -100,15 +89,11 @@ impl HnswDocs {
 		tx: &Transaction,
 		id: RecordIdKey,
 	) -> Result<Option<DocId>> {
-		let id_key = self.ikb.new_hi_key(id)?;
-		if let Some(v) = tx.get(id_key.clone(), None).await? {
-			let Ok(array) = v.try_into() else {
-				bail!(Error::CorruptedIndex("Invalid HNSW index id"));
-			};
-			let doc_id = u64::from_be_bytes(array);
-			let doc_key = self.ikb.new_hd_key(Some(doc_id))?;
-			tx.del(doc_key).await?;
-			tx.del(id_key).await?;
+		let id_key = self.ikb.new_hi_key(id);
+		if let Some(doc_id) = tx.get(&id_key, None).await? {
+			let doc_key = self.ikb.new_hd_key(doc_id);
+			tx.del(&doc_key).await?;
+			tx.del(&id_key).await?;
 			self.state.available.insert(doc_id);
 			Ok(Some(doc_id))
 		} else {
@@ -118,22 +103,48 @@ impl HnswDocs {
 
 	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if self.state_updated {
-			tx.set(self.state_key.clone(), VersionedStore::try_into(&self.state)?, None).await?;
+			let state_key = self.ikb.new_hd_root_key();
+			tx.set(&state_key, &self.state, None).await?;
 			self.state_updated = true;
 		}
 		Ok(())
 	}
 }
 
+impl KVValue for HnswDocsState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
-#[non_exhaustive]
-struct ElementDocs {
+pub(crate) struct ElementDocs {
 	e_id: ElementId,
 	docs: Ids64,
 }
 
-impl VersionedStore for ElementDocs {}
+impl KVValue for ElementDocs {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+	}
+}
 
 pub(in crate::idx) struct VecDocs {
 	ikb: IndexKeyBase,
@@ -147,9 +158,8 @@ impl VecDocs {
 	}
 
 	pub(super) async fn get_docs(&self, tx: &Transaction, pt: &Vector) -> Result<Option<Ids64>> {
-		let key = self.ikb.new_hv_key(Arc::new(pt.into()))?;
-		if let Some(val) = tx.get(key, None).await? {
-			let ed: ElementDocs = VersionedStore::try_from(val)?;
+		let key = self.ikb.new_hv_key(Arc::new(pt.into()));
+		if let Some(ed) = tx.get(&key, None).await? {
 			Ok(Some(ed.docs))
 		} else {
 			Ok(None)
@@ -164,11 +174,10 @@ impl VecDocs {
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let ser_vec = Arc::new(SerializedVector::from(&o));
-		let key = self.ikb.new_hv_key(ser_vec)?;
-		if let Some(ed) = match tx.get(key.clone(), None).await? {
-			Some(val) => {
+		let key = self.ikb.new_hv_key(ser_vec);
+		if let Some(ed) = match tx.get(&key, None).await? {
+			Some(mut ed) => {
 				// We already have the vector
-				let mut ed: ElementDocs = VersionedStore::try_from(val)?;
 				ed.docs.insert(d).map(|new_docs| {
 					ed.docs = new_docs;
 					ed
@@ -184,8 +193,7 @@ impl VecDocs {
 				Some(ed)
 			}
 		} {
-			let val: Val = VersionedStore::try_into(&ed)?;
-			tx.set(key, val, None).await?;
+			tx.set(&key, &ed, None).await?;
 		}
 		Ok(())
 	}
@@ -197,17 +205,15 @@ impl VecDocs {
 		d: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<()> {
-		let key = self.ikb.new_hv_key(Arc::new(o.into()))?;
-		if let Some(val) = tx.get(key.clone(), None).await? {
-			let mut ed: ElementDocs = VersionedStore::try_from(val)?;
+		let key = self.ikb.new_hv_key(Arc::new(o.into()));
+		if let Some(mut ed) = tx.get(&key, None).await? {
 			if let Some(new_docs) = ed.docs.remove(d) {
 				if new_docs.is_empty() {
-					tx.del(key).await?;
+					tx.del(&key).await?;
 					h.remove(tx, ed.e_id).await?;
 				} else {
 					ed.docs = new_docs;
-					let val: Val = VersionedStore::try_into(&ed)?;
-					tx.set(key, val, None).await?;
+					tx.set(&key, &ed, None).await?;
 				}
 			}
 		};

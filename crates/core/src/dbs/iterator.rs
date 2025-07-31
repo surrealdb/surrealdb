@@ -616,24 +616,102 @@ impl Iterator {
 		Ok(())
 	}
 
-	/// Check if the iteration can be limited per iterator
+	/// Determines whether START/LIMIT clauses can be optimized at the storage level.
+	///
+	/// This method enables a critical performance optimization where START and LIMIT clauses
+	/// can be applied directly at the storage/iterator level (using `start_skip` and
+	/// `cancel_on_limit`) rather than after all query processing is complete.
+	///
+	/// ## The Optimization
+	///
+	/// When this method returns `true`, the query engine can:
+	/// - Skip records at the storage level before any processing (`start_skip`)
+	/// - Cancel iteration early when the limit is reached (`cancel_on_limit`)
+	///
+	/// This provides significant performance benefits for queries with large result sets,
+	/// as it avoids unnecessary processing of records that would be filtered out anyway.
+	///
+	/// ## Safety Conditions
+	///
+	/// The optimization is only safe when the order of records at the storage level
+	/// matches the order of records in the final result set. This method returns `false`
+	/// when any of the following conditions would change the record order or filtering:
+	///
+	/// ### GROUP BY clauses
+	/// Grouping operations fundamentally change the result structure and record count,
+	/// making storage-level limiting meaningless.
+	///
+	/// ### Multiple iterators
+	/// When multiple iterators are involved (e.g., JOINs, UNIONs), records from different
+	/// sources need to be merged, so individual iterator limits would be incorrect.
+	///
+	/// ### WHERE clauses
+	/// Filtering operations change which records appear in the final result set.
+	/// START should skip records from the filtered set, not from the raw storage.
+	///
+	/// Example problem:
+	/// ```sql
+	/// -- Given: t:1(f=true), t:2(f=true), t:3(f=false), t:4(f=false)
+	/// SELECT * FROM t WHERE !f START 1;
+	/// -- Correct: Skip first filtered record → [t:4]
+	/// -- Wrong with optimization: Skip t:1 at storage, then filter → [t:3, t:4]
+	/// ```
+	///
+	/// ### ORDER BY clauses (conditional)
+	/// When there's an ORDER BY clause, the optimization is only safe if:
+	/// - There's exactly one iterator
+	/// - The iterator is backed by a sorted index
+	/// - The index sort order matches the ORDER BY clause
+	///
+	/// ## Performance Impact
+	///
+	/// - **When enabled**: Significant performance improvement for large result sets
+	/// - **When disabled**: Slight performance cost as all records must be processed
+	///   before START/LIMIT is applied
+	///
+	/// ## Returns
+	///
+	/// - `true`: Safe to apply START/LIMIT optimization at storage level
+	/// - `false`: Must apply START/LIMIT after all query processing is complete
 	fn check_set_start_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
-		// If there are groups we can't
+		// GROUP BY operations change the result structure and count, making
+		// storage-level limiting meaningless
 		if stm.group().is_some() {
 			return false;
 		}
 
-		// If there is no specified order, we can
+		// Multiple iterators require merging records from different sources,
+		// so individual iterator limits would be incorrect
+		if self.entries.len() != 1 {
+			return false;
+		}
+
+		// Check for WHERE clause
+		if let Some(cond) = stm.cond() {
+			// WHERE clauses filter records, so START should skip from the filtered set,
+			// not from the raw storage. However, if there's exactly one index iterator
+			// and the index is handling both the WHERE condition and ORDER BY clause,
+			// then the optimization is safe because the index iterator is already
+			// doing the appropriate filtering and ordering.
+			if let Some(Iterable::Index(t, irf, _)) = self.entries.first() {
+				if let Some(qp) = ctx.get_query_planner() {
+					if let Some(exe) = qp.get_query_executor(t) {
+						if exe.is_iterator_expression(*irf, &cond.0) {
+							return true;
+						}
+					}
+				}
+			}
+			return false;
+		}
+
+		// Without ORDER BY, the natural storage order is acceptable for START/LIMIT
 		if stm.order().is_none() {
 			return true;
 		}
 
-		// If there is more than 1 iterator, we can't
-		if self.entries.len() != 1 {
-			return false;
-		}
-		// If the iterator is backed by a sorted index
-		// and the sorting matches the first ORDER entry, we can
+		// With ORDER BY, optimization is only safe if the iterator is backed by
+		// a sorted index that matches the ORDER BY clause exactly
 		if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
 			if let Some(qp) = ctx.get_query_planner() {
 				if qp.is_order(irf) {

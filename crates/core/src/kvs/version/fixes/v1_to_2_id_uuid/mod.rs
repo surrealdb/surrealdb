@@ -2,7 +2,7 @@ mod deps;
 use deps::*;
 use std::sync::Arc;
 
-use crate::kvs::{KeyDecode as _, KeyEncode as _, Transaction};
+use crate::kvs::{KVKey, Transaction};
 use anyhow::Result;
 
 pub async fn v1_to_2_id_uuid(tx: Arc<Transaction>) -> Result<()> {
@@ -40,7 +40,7 @@ async fn migrate_tb_records(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) 
 		beg.extend_from_slice(b"\0");
 
 		for enc in keys.into_iter() {
-			let dec = key::Thing::decode(&enc).unwrap();
+			let dec = key::Thing::decode_key(&enc).unwrap();
 			// Check if the id is affected
 			if dec.id.is_affected() {
 				// This ID needs fixing, add to queue
@@ -49,16 +49,16 @@ async fn migrate_tb_records(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) 
 		}
 	}
 
-	for enc in queue.iter() {
-		let broken = key::Thing::decode(enc).unwrap();
+	for enc in queue.into_iter() {
+		let broken = key::Thing::decode_key(&enc).unwrap();
 		// Get a fixed id
 		let fixed = broken.fix().unwrap();
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let val = tx.get(broken.clone(), None).await?.unwrap();
+		let val = tx.get(&broken, None).await?.unwrap();
 		// Delete the old key
-		tx.del(broken.clone()).await?;
+		tx.del(&broken).await?;
 		// Set the fixed key
-		tx.set(fixed, val, None).await?;
+		tx.set(&fixed, &val, None).await?;
 	}
 
 	Ok(())
@@ -66,9 +66,9 @@ async fn migrate_tb_records(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) 
 
 async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) -> Result<()> {
 	// mutable beg, as we update it each iteration to the last record id + a null byte
-	let mut beg = crate::key::table::all::new(ns, db, tb).encode_owned()?;
+	let mut beg = crate::key::table::all::new(ns, db, tb).encode_key()?;
 	beg.extend_from_slice(&[b'~', 0x00]);
-	let mut end = crate::key::table::all::new(ns, db, tb).encode_owned()?;
+	let mut end = crate::key::table::all::new(ns, db, tb).encode_key()?;
 	end.extend_from_slice(&[b'~', 0xff]);
 
 	// We need to scan ALL keys and queue them first,
@@ -86,7 +86,7 @@ async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) ->
 		beg.extend_from_slice(b"\0");
 
 		for enc in keys.into_iter() {
-			let dec = key::Graph::decode(&enc).unwrap();
+			let dec = key::Graph::decode_key(&enc).unwrap();
 			// Check if the id is affected
 			if dec.id.is_affected() || dec.fk.is_affected() {
 				// This ID needs fixing, add to queue
@@ -95,16 +95,16 @@ async fn migrate_tb_edges(tx: Arc<Transaction>, ns: &str, db: &str, tb: &str) ->
 		}
 	}
 
-	for enc in queue.iter() {
-		let broken = key::Graph::decode(enc)?;
+	for enc in queue.into_iter() {
+		let broken = key::Graph::decode_key(&enc)?;
 		// Get a fixed id
 		let fixed = broken.fix().unwrap();
 		// Get the value for the old key. We can unwrap the option, as we know that the key exists in the KV store
-		let val = tx.get(broken.clone(), None).await?.unwrap();
+		tx.get(&broken, None).await?.unwrap();
 		// Delete the old key
-		tx.del(broken.clone()).await?;
+		tx.del(&broken).await?;
 		// Set the fixed key
-		tx.set(fixed, val, None).await?;
+		tx.set(&fixed, &(), None).await?;
 	}
 
 	Ok(())

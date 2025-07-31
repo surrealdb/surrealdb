@@ -55,16 +55,16 @@ impl RemoveTableStatement {
 		// Delete the definition
 		let key = crate::key::database::tb::new(ns, db, &self.name);
 		if self.expunge {
-			txn.clr(key).await?
+			txn.clr(&key).await?
 		} else {
-			txn.del(key).await?
+			txn.del(&key).await?
 		};
 		// Remove the resource data
 		let key = crate::key::table::all::new(ns, db, &self.name);
 		if self.expunge {
-			txn.clrp(key).await?
+			txn.clrp(&key).await?
 		} else {
-			txn.delp(key).await?
+			txn.delp(&key).await?
 		};
 		// Process each attached foreign table
 		for ft in fts.iter() {
@@ -72,11 +72,11 @@ impl RemoveTableStatement {
 			let key = crate::key::database::tb::new(ns, db, &ft.name);
 			let tb = txn.get_tb(ns, db, &ft.name).await?;
 			txn.set(
-				key,
-				revision::to_vec(&DefineTableStatement {
+				&key,
+				&DefineTableStatement {
 					cache_tables_ts: Uuid::now_v7(),
 					..tb.as_ref().clone()
-				})?,
+				},
 				None,
 			)
 			.await?;
@@ -87,16 +87,16 @@ impl RemoveTableStatement {
 			for ft in view.what.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
-				txn.del(key).await?;
+				txn.del(&key).await?;
 				// Refresh the table cache for foreign tables
 				let key = crate::key::database::tb::new(ns, db, ft);
 				let tb = txn.get_tb(ns, db, ft).await?;
 				txn.set(
-					key,
-					revision::to_vec(&DefineTableStatement {
+					&key,
+					&DefineTableStatement {
 						cache_tables_ts: Uuid::now_v7(),
 						..tb.as_ref().clone()
-					})?,
+					},
 					None,
 				)
 				.await?;

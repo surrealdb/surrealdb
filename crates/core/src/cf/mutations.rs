@@ -1,5 +1,6 @@
 use crate::expr::Operation;
 use crate::expr::statements::DefineTableStatement;
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Object, RecordId, Value};
 use crate::vs::VersionStamp;
 use revision::revisioned;
@@ -42,6 +43,8 @@ impl From<DefineTableStatement> for Value {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct TableMutations(pub String, pub Vec<TableMutation>);
+
+impl_kv_value_revisioned!(TableMutations);
 
 impl TableMutations {
 	pub fn new(tb: String) -> Self {
@@ -205,10 +208,11 @@ impl Default for WriteMutationSet {
 mod tests {
 	use crate::expr::Ident;
 
+	use super::*;
+	use std::collections::HashMap;
+
 	#[test]
 	fn serialization() {
-		use super::*;
-		use std::collections::HashMap;
 		let cs = ChangeSet(
 			VersionStamp::from_u64(1),
 			DatabaseMutation(vec![TableMutations(
@@ -248,8 +252,6 @@ mod tests {
 
 	#[test]
 	fn serialization_rev2() {
-		use super::*;
-		use std::collections::HashMap;
 		let cs = ChangeSet(
 			VersionStamp::from_u64(1),
 			DatabaseMutation(vec![TableMutations(

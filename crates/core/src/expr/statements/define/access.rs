@@ -6,6 +6,7 @@ use crate::expr::access::AccessDuration;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{AccessType, Base, Expr, Ident};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -29,6 +30,8 @@ pub struct DefineAccessStatement {
 	pub duration: AccessDuration,
 	pub comment: Option<Strand>,
 }
+
+impl_kv_value_revisioned!(DefineAccessStatement);
 
 impl DefineAccessStatement {
 	/// Generate a random key to be used to sign session tokens
@@ -90,12 +93,12 @@ impl DefineAccessStatement {
 				// Process the statement
 				let key = crate::key::root::ac::new(&self.name);
 				txn.set(
-					key,
-					revision::to_vec(&DefineAccessStatement {
+					&key,
+					&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						kind: DefineKind::Default,
 						..self.clone()
-					})?,
+					},
 					None,
 				)
 				.await?;
@@ -127,12 +130,12 @@ impl DefineAccessStatement {
 				let key = crate::key::namespace::ac::new(opt.ns()?, &self.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
 				txn.set(
-					key,
-					revision::to_vec(&DefineAccessStatement {
+					&key,
+					&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						kind: DefineKind::Default,
 						..self.clone()
-					})?,
+					},
 					None,
 				)
 				.await?;
@@ -166,12 +169,12 @@ impl DefineAccessStatement {
 				txn.get_or_add_ns(ns, opt.strict).await?;
 				txn.get_or_add_db(ns, db, opt.strict).await?;
 				txn.set(
-					key,
-					revision::to_vec(&DefineAccessStatement {
+					&key,
+					&DefineAccessStatement {
 						// Don't persist the `IF NOT EXISTS` clause to schema
 						kind: DefineKind::Default,
 						..self.clone()
-					})?,
+					},
 					None,
 				)
 				.await?;

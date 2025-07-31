@@ -44,10 +44,10 @@ impl RemoveAccessStatement {
 				};
 				// Delete the definition
 				let key = crate::key::root::ac::new(&ac.name);
-				txn.del(key).await?;
+				txn.del(&key).await?;
 				// Delete any associated data including access grants.
 				let key = crate::key::root::access::all::new(&ac.name);
-				txn.delp(key).await?;
+				txn.delp(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -71,10 +71,10 @@ impl RemoveAccessStatement {
 				};
 				// Delete the definition
 				let key = crate::key::namespace::ac::new(opt.ns()?, &ac.name);
-				txn.del(key).await?;
+				txn.del(&key).await?;
 				// Delete any associated data including access grants.
 				let key = crate::key::namespace::access::all::new(opt.ns()?, &ac.name);
-				txn.delp(key).await?;
+				txn.delp(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -99,10 +99,10 @@ impl RemoveAccessStatement {
 				};
 				// Delete the definition
 				let key = crate::key::database::ac::new(ns, db, &ac.name);
-				txn.del(key).await?;
+				txn.del(&key).await?;
 				// Delete any associated data including access grants.
 				let key = crate::key::database::access::all::new(ns, db, &ac.name);
-				txn.delp(key).await?;
+				txn.delp(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

@@ -10,7 +10,7 @@ use crate::expr::statements::UpdateStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Ident, Idiom, Kind, Output, Permissions, TableType, View};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::Transaction;
+use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{Strand, Value};
 use anyhow::{Result, bail};
 
@@ -44,6 +44,8 @@ pub struct DefineTableStatement {
 	/// The last time that a DEFINE INDEX was added to this table
 	pub cache_indexes_ts: Uuid,
 }
+
+impl_kv_value_revisioned!(DefineTableStatement);
 
 impl DefineTableStatement {
 	pub(crate) async fn compute(
@@ -97,7 +99,7 @@ impl DefineTableStatement {
 		// Add table relational fields
 		Self::add_in_out_fields(&txn, ns, db, &mut dt).await?;
 		// Set the table definition
-		txn.set(key, revision::to_vec(&dt)?, None).await?;
+		txn.set(&key, &dt, None).await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.name);
@@ -114,21 +116,21 @@ impl DefineTableStatement {
 			let opt = &opt.new_with_force(Force::Table(Arc::new([dt])));
 			// Remove the table data
 			let key = crate::key::table::all::new(ns, db, &self.name);
-			txn.delp(key).await?;
+			txn.delp(&key).await?;
 			// Process each foreign table
 			for ft in view.what.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
-				txn.set(key, revision::to_vec(self)?, None).await?;
+				txn.set(&key, self, None).await?;
 				// Refresh the table cache
 				let key = crate::key::database::tb::new(ns, db, ft);
 				let tb = txn.get_tb(ns, db, ft).await?;
 				txn.set(
-					key,
-					revision::to_vec(&DefineTableStatement {
+					&key,
+					&DefineTableStatement {
 						cache_tables_ts: Uuid::now_v7(),
 						..tb.as_ref().clone()
-					})?,
+					},
 					None,
 				)
 				.await?;
@@ -185,13 +187,13 @@ impl DefineTableStatement {
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
 				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
-					key,
-					revision::to_vec(&DefineFieldStatement {
+					&key,
+					&DefineFieldStatement {
 						name: Idiom::from(IN.to_vec()),
 						what: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
-					})?,
+					},
 					None,
 				)
 				.await?;
@@ -201,13 +203,13 @@ impl DefineTableStatement {
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "out");
 				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
 				txn.set(
-					key,
-					revision::to_vec(&DefineFieldStatement {
+					&key,
+					&DefineFieldStatement {
 						name: Idiom::from(OUT.to_vec()),
 						what: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
-					})?,
+					},
 					None,
 				)
 				.await?;

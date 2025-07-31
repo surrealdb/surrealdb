@@ -38,7 +38,7 @@ impl RemoveParamStatement {
 		};
 		// Delete the definition
 		let key = crate::key::database::pa::new(ns, db, &pa.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

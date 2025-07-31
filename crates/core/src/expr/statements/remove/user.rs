@@ -43,7 +43,7 @@ impl RemoveUserStatement {
 				};
 				// Process the statement
 				let key = crate::key::root::us::new(&us.name);
-				txn.del(key).await?;
+				txn.del(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -67,7 +67,7 @@ impl RemoveUserStatement {
 				};
 				// Delete the definition
 				let key = crate::key::namespace::us::new(opt.ns()?, &us.name);
-				txn.del(key).await?;
+				txn.del(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -92,7 +92,7 @@ impl RemoveUserStatement {
 				};
 				// Delete the definition
 				let key = crate::key::database::us::new(ns, db, &us.name);
-				txn.del(key).await?;
+				txn.del(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

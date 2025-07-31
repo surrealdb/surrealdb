@@ -1,12 +1,11 @@
 //! Stores terms for term_ids
 use crate::idx::ft::search::terms::TermId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Bu<'a> {
+pub(crate) struct Bu<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -21,7 +20,10 @@ pub struct Bu<'a> {
 	_g: u8,
 	pub term_id: TermId,
 }
-impl_key!(Bu<'a>);
+
+impl KVKey for Bu<'_> {
+	type ValueType = Vec<u8>;
+}
 
 impl Categorise for Bu<'_> {
 	fn categorise(&self) -> Category {
@@ -51,10 +53,10 @@ impl<'a> Bu<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bu::new(
 			"testns",
@@ -63,10 +65,7 @@ mod tests {
 			"testix",
 			7
 		);
-		let enc = Bu::encode(&val).unwrap();
+		let enc = Bu::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bu\0\0\0\0\0\0\0\x07");
-
-		let dec = Bu::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

@@ -11,7 +11,6 @@ use crate::expr::statements::DefineFieldStatement;
 use crate::expr::statements::define::DefineDefault;
 use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
-use crate::kvs::KeyEncode as _;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
@@ -728,19 +727,18 @@ impl FieldEditContext<'_> {
 				// Create the reference, if it does not exist yet.
 				RefAction::Set(thing) => {
 					let (ns, db) = self.opt.ns_db()?;
+					let name = self.def.name.to_string();
 					let key = crate::key::r#ref::new(
 						ns,
 						db,
 						&thing.table,
 						&thing.key,
 						&self.rid.table,
-						&self.def.name.to_string(),
+						&name,
 						&self.rid.key,
-					)
-					.encode_owned()
-					.unwrap();
+					);
 
-					self.ctx.tx().set(key, vec![], None).await?;
+					self.ctx.tx().set(&key, &(), None).await?;
 
 					Ok(())
 				}
@@ -756,11 +754,9 @@ impl FieldEditContext<'_> {
 							&self.rid.table,
 							&ff,
 							&self.rid.key,
-						)
-						.encode_owned()
-						.unwrap();
+						);
 
-						self.ctx.tx().del(key).await?;
+						self.ctx.tx().del(&key).await?;
 					}
 
 					Ok(())

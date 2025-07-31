@@ -1,8 +1,7 @@
 use crate::err::Error;
-use crate::idx::VersionedStore;
 use crate::idx::trees::bkeys::BKeys;
 use crate::idx::trees::store::{NodeId, StoreGeneration, StoredNode, TreeNode, TreeStore};
-use crate::kvs::{Key, Transaction, Val};
+use crate::kvs::{KVValue, Key, Transaction, Val};
 use crate::val::{Object, Value};
 #[cfg(debug_assertions)]
 use ahash::HashSet;
@@ -40,8 +39,16 @@ pub struct BState {
 	generation: StoreGeneration,
 }
 
-impl VersionedStore for BState {
-	fn try_from(val: Val) -> Result<Self> {
+impl KVValue for BState {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
 		match Self::deserialize_revisioned(&mut val.as_slice()) {
 			Ok(r) => Ok(r),
 			// If it fails here, there is the chance it was an old version of BState
@@ -1003,28 +1010,25 @@ where
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::VersionedStore;
-	use crate::idx::trees::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::trees::btree::{
-		BState, BStatistics, BStoredNode, BTree, BTreeNode, BTreeStore, Payload,
+	use std::{cmp::Ordering, collections::BTreeMap, sync::Arc};
+
+	use crate::{
+		idx::trees::{
+			bkeys::{FstKeys, TrieKeys},
+			store::TreeNodeProvider,
+		},
+		kvs::{Datastore, LockType, TransactionType},
 	};
-	use crate::idx::trees::store::{NodeId, TreeNode, TreeNodeProvider};
-	use crate::kvs::LockType::*;
-	use crate::kvs::{Datastore, Key, Transaction, TransactionType};
-	use anyhow::Result;
-	use rand::prelude::SliceRandom;
-	use rand::thread_rng;
-	use std::cmp::Ordering;
-	use std::collections::{BTreeMap, VecDeque};
-	use std::fmt::Debug;
-	use std::sync::Arc;
+
+	use super::*;
+	use rand::{seq::SliceRandom, thread_rng};
 	use test_log::test;
 
 	#[test]
 	fn test_btree_state_serde() {
 		let s = BState::new(3);
-		let val = VersionedStore::try_into(&s).unwrap();
-		let s: BState = VersionedStore::try_from(val).unwrap();
+		let val = s.kv_encode_value().unwrap();
+		let s: BState = BState::kv_decode_value(val).unwrap();
 		assert_eq!(s.minimum_degree, 3);
 		assert_eq!(s.root, None);
 		assert_eq!(s.next_node_id, 0);
@@ -1095,7 +1099,7 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, LockType::Optimistic).await.unwrap();
 		let st = tx
 			.index_caches()
 			.get_store_btree_fst(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)
@@ -1113,7 +1117,7 @@ mod tests {
 	where
 		BK: BKeys + Debug + Clone,
 	{
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt, LockType::Optimistic).await.unwrap();
 		let st = tx
 			.index_caches()
 			.get_store_btree_trie(TreeNodeProvider::Debug, t.state.generation, tt, cache_size)

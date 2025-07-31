@@ -5,7 +5,7 @@ use crate::expr::fmt::Fmt;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Ident, Idiom, Limit, RecordIdKeyRangeLit, Splits};
-use crate::kvs::KeyEncode;
+use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -171,7 +171,7 @@ impl ComputedGraphSubject {
 							key: v.clone(),
 						},
 					)
-					.encode(),
+					.encode_key(),
 					Bound::Excluded(v) => crate::key::graph::new(
 						ns,
 						db,
@@ -183,7 +183,7 @@ impl ComputedGraphSubject {
 							key: v.to_owned(),
 						},
 					)
-					.encode()
+					.encode_key()
 					.map(|mut v| {
 						v.push(0x00);
 						v
@@ -203,7 +203,7 @@ impl ComputedGraphSubject {
 							key: v.to_owned(),
 						},
 					)
-					.encode(),
+					.encode_key(),
 					Bound::Included(v) => crate::key::graph::new(
 						ns,
 						db,
@@ -215,7 +215,7 @@ impl ComputedGraphSubject {
 							key: v.to_owned(),
 						},
 					)
-					.encode()
+					.encode_key()
 					.map(|mut v| {
 						v.push(0x00);
 						v

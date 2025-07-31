@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::expr::statements::DefineTableStatement;
-use crate::kvs::{Key, KeyEncode};
+use crate::kvs::{KVKey, Key};
 use crate::val::RecordId;
 use anyhow::Result;
 
@@ -133,7 +133,7 @@ impl Writer {
 			mutations,
 		) in self.buf.b.iter()
 		{
-			let ts_key: Key = crate::key::database::vs::new(ns, db).encode()?;
+			let ts_key: Key = crate::key::database::vs::new(ns, db).encode_key()?;
 			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(ns, db)?;
 			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
 			let value = revision::to_vec(mutations)?;
@@ -461,11 +461,11 @@ mod tests {
 
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let ns_root = crate::key::root::ns::new(NS);
-		tx.put(&ns_root, revision::to_vec(&dns).unwrap(), None).await.unwrap();
+		tx.put(&ns_root, &dns, None).await.unwrap();
 		let db_root = crate::key::namespace::db::new(NS, DB);
-		tx.put(&db_root, revision::to_vec(&ddb).unwrap(), None).await.unwrap();
+		tx.put(&db_root, &ddb, None).await.unwrap();
 		let tb_root = crate::key::database::tb::new(NS, DB, TB);
-		tx.put(&tb_root, revision::to_vec(&dtb).unwrap(), None).await.unwrap();
+		tx.put(&tb_root, &dtb, None).await.unwrap();
 		tx.commit().await.unwrap();
 		ds
 	}
