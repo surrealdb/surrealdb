@@ -1,12 +1,21 @@
-use crate::rpc::RpcError;
-use crate::val::Value;
+use bincode::Options;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
-pub fn encode(value: &Value) -> Result<Vec<u8>, RpcError> {
-	let mut res = Vec::new();
-	bincode::serialize_into(&mut res, value).map_err(|e| RpcError::Serialize(e.to_string()))?;
-	Ok(res)
+pub fn encode<S: Serialize>(value: &S) -> Result<Vec<u8>, String> {
+	bincode::options()
+		.with_no_limit()
+		.with_little_endian()
+		.with_varint_encoding()
+		.serialize(value)
+		.map_err(|e| e.to_string())
 }
 
-pub fn decode(value: &[u8]) -> Result<Value, RpcError> {
-	bincode::deserialize_from(value).map_err(|e| RpcError::Deserialize(e.to_string()))
+pub fn decode<D: DeserializeOwned>(value: &[u8]) -> Result<D, String> {
+	bincode::options()
+		.with_no_limit()
+		.with_little_endian()
+		.with_varint_encoding()
+		.deserialize_from(value)
+		.map_err(|e| e.to_string())
 }

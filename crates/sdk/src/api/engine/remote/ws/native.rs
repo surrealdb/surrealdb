@@ -1,7 +1,7 @@
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
 use crate::api::conn::{self, Command, DbResponse, RequestData, Route, Router};
+use crate::api::engine::remote::Response;
 use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
-use crate::api::engine::remote::{Response, deserialize, serialize};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
@@ -229,7 +229,10 @@ async fn router_handle_route(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", request);
-		let payload = serialize(&request, true).unwrap();
+
+		// Unwrap because a router request cannot fail to serialize.
+		let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+
 		Message::Binary(payload)
 	};
 
@@ -335,7 +338,12 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 											}
 											.into_router_request(None)
 											.unwrap();
-											let value = serialize(&request, true).unwrap();
+
+											let value =
+												surrealdb_core::rpc::format::revision::encode(
+													&request,
+												)
+												.unwrap();
 											Message::Binary(value)
 										};
 										if let Err(error) = state.sink.send(kill).await {
@@ -363,7 +371,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 
 			// Let's try to find out the ID of the response that failed to deserialise
 			if let Message::Binary(binary) = response {
-				match deserialize(&binary, true) {
+				match surrealdb_core::rpc::format::revision::decode(&binary) {
 					Ok(ErrorResponse {
 						id,
 					}) => {
@@ -411,7 +419,7 @@ async fn router_reconnect(
 						.into_router_request(None)
 						.expect("replay commands should always convert to route requests");
 
-					let message = serialize(&request, true).unwrap();
+					let message = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
@@ -427,7 +435,8 @@ async fn router_reconnect(
 					.into_router_request(None)
 					.unwrap();
 					trace!("Request {:?}", request);
-					let payload = serialize(&request, true).unwrap();
+					let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+
 					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
@@ -455,7 +464,7 @@ pub(crate) async fn run_router(
 ) {
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
-		let value = serialize(&request, true).unwrap();
+		let value = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 		Message::Binary(value)
 	};
 
@@ -589,13 +598,11 @@ impl Response {
 				trace!("Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => deserialize(binary, true).map(Some).map_err(|error| {
-				Error::ResponseFromBinary {
-					binary: binary.clone(),
-					error: bincode::ErrorKind::Custom(error.to_string()).into(),
-				}
-				.into()
-			}),
+			Message::Binary(binary) => surrealdb_core::rpc::format::revision::decode(binary)
+				.map(Some)
+				.map_err(|x| format!("Failed to deserialize revision payload: {x}"))
+				.map_err(crate::api::Error::InvalidResponse)
+				.map_err(anyhow::Error::new),
 			Message::Ping(..) => {
 				trace!("Received a ping from the server");
 				Ok(None)
@@ -618,7 +625,6 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
-	use super::serialize;
 	use bincode::Options;
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
@@ -710,7 +716,8 @@ mod tests {
 		const COMPRESSED_UNVERSIONED: &str = "Compressed Unversioned Vec<Value>";
 		{
 			// Unversioned
-			let (duration, payload) = timed(&|| serialize(&vector, false).unwrap());
+			let (duration, payload) =
+				timed(&|| surrealdb_core::rpc::format::bincode::encode(&vector).unwrap());
 			results.push((
 				payload.len(),
 				UNVERSIONED,
@@ -733,7 +740,8 @@ mod tests {
 		const COMPRESSED_VERSIONED: &str = "Compressed Versioned Vec<Value>";
 		{
 			// Versioned
-			let (duration, payload) = timed(&|| serialize(&vector, true).unwrap());
+			let (duration, payload) =
+				timed(&|| surrealdb_core::rpc::format::revision::encode(&vector).unwrap());
 			results.push((payload.len(), VERSIONED, duration, payload.len() as f32 / ref_payload));
 
 			// Compressed Versioned

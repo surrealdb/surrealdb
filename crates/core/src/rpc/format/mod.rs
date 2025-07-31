@@ -3,9 +3,6 @@ pub mod cbor;
 pub mod json;
 pub mod revision;
 
-use super::{RpcError, request::Request};
-use crate::val::Value;
-
 pub const PROTOCOLS: [&str; 4] = [
 	"json",     // For basic JSON serialisation
 	"cbor",     // For basic CBOR serialisation
@@ -14,7 +11,6 @@ pub const PROTOCOLS: [&str; 4] = [
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum Format {
 	Json,        // For basic JSON serialisation
 	Cbor,        // For basic CBOR serialisation
@@ -35,6 +31,7 @@ impl From<&str> for Format {
 	}
 }
 
+/*
 impl Format {
 	/// Process a request using the specified format
 	pub fn req(&self, val: &[u8]) -> Result<Request, RpcError> {
@@ -64,4 +61,4 @@ impl Format {
 			Self::Unsupported => Err(RpcError::InvalidRequest),
 		}
 	}
-}
+}*/

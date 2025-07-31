@@ -22,6 +22,7 @@ use surrealdb_core::api::invocation::ApiInvocation;
 use surrealdb_core::api::method::Method as ApiMethod;
 use surrealdb_core::api::response::ResponseInstruction;
 use surrealdb_core::expr::statements::define::ApiDefinition;
+use surrealdb_core::rpc::RpcError;
 use surrealdb_core::val::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -154,9 +155,16 @@ async fn handler(
 				}
 
 				let (header, val) = match format {
-					Format::Json => ("application/json", json::encode(body)?),
-					Format::Cbor => ("application/cbor", cbor::encode(body)?),
-					Format::Revision => ("application/surrealdb", revision::encode(&body)?),
+					Format::Json => {
+						("application/json", json::encode(body).map_err(|_| RpcError::ParseError)?)
+					}
+					Format::Cbor => {
+						("application/cbor", cbor::encode(body).map_err(|_| RpcError::ParseError)?)
+					}
+					Format::Revision => (
+						"application/surrealdb",
+						revision::encode(&body).map_err(|_| RpcError::ParseError)?,
+					),
 					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
 				};
 

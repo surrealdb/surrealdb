@@ -247,6 +247,12 @@ pub enum Error {
 	#[error("failed to deserialize from a Value: {0}")]
 	Deserializer(String),
 
+	#[error("The server returned an unexpected response: {0}")]
+	InvalidResponse(String),
+
+	#[error("Tried to send a value which could not be serialized: {0}")]
+	UnserializableValue(String),
+
 	/// Tried to convert an value which contained something like for example a query or future.
 	#[error(
 		"tried to convert from a value which contained non-primitive values to a value which only allows primitive values."

@@ -1,8 +1,8 @@
 mod convert;
 
-use crate::{rpc::RpcError, val::Value};
+use crate::val::Value;
 
-pub fn encode(v: Value) -> Result<Vec<u8>, RpcError> {
+pub fn encode(v: Value) -> Result<Vec<u8>, String> {
 	let encoding = convert::from_value(v)?;
 	let mut res = Vec::new();
 	//TODO: Check if this can ever panic.
@@ -10,7 +10,7 @@ pub fn encode(v: Value) -> Result<Vec<u8>, RpcError> {
 	Ok(res)
 }
 
-pub fn decode(bytes: &[u8]) -> Result<Value, RpcError> {
-	let encoding = ciborium::from_reader(bytes).map_err(|_| RpcError::ParseError)?;
-	convert::to_value(encoding).map_err(|x| RpcError::Thrown(x.to_owned()))
+pub fn decode(bytes: &[u8]) -> Result<Value, String> {
+	let encoding = ciborium::from_reader(bytes).map_err(|e| e.to_string())?;
+	convert::to_value(encoding).map_err(|x| x.to_owned())
 }

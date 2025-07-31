@@ -1,7 +1,6 @@
 //! HTTP engine
 use crate::api;
 use crate::api::conn::{Command, DbResponse, RequestData, RouterRequest};
-use crate::api::engine::remote::{deserialize, serialize};
 use crate::api::err::Error;
 use crate::api::{Connect, Result, Surreal};
 use crate::engine::remote::Response;
@@ -233,7 +232,10 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 			}
 		}
 	} else {
-		let response: Vec<QueryMethodResponse> = deserialize(&res.bytes().await?, false)?;
+		let response: Vec<QueryMethodResponse> =
+			surrealdb_core::rpc::format::bincode::decode(&res.bytes().await?)
+				.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
+				.map_err(crate::api::Error::InvalidResponse)?;
 		for res in response {
 			if let Status::Err = res.status {
 				return Err(Error::Query(res.result.0.as_raw_string()).into());
@@ -257,12 +259,19 @@ async fn send_request(
 	auth: &Option<Auth>,
 ) -> Result<DbResponse> {
 	let url = base_url.join(RPC_PATH).unwrap();
-	let http_req =
-		client.post(url).headers(headers.clone()).auth(auth).body(serialize(&req, false)?);
+
+	let body = surrealdb_core::rpc::format::bincode::encode(&req)
+		.map_err(|x| format!("Failed to serialized to bincode: {x}"))
+		.map_err(crate::api::Error::UnserializableValue)?;
+
+	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 
-	let response: Response = deserialize(&bytes, false)?;
+	let response: Response = surrealdb_core::rpc::format::bincode::decode(&bytes)
+		.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
+		.map_err(crate::api::Error::InvalidResponse)?;
+
 	DbResponse::from_server_result(response.result)
 }
 
@@ -426,7 +435,7 @@ async fn router(
 			let config_value: val::Value = config.into();
 			let request = client
 				.post(req_path)
-				.body(rpc::format::json::encode_str(config_value)?)
+				.body(rpc::format::json::encode_str(config_value).map_err(anyhow::Error::msg)?)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")
@@ -443,7 +452,7 @@ async fn router(
 			let config_value: val::Value = config.into();
 			let request = client
 				.post(req_path)
-				.body(rpc::format::json::encode_str(config_value)?)
+				.body(rpc::format::json::encode_str(config_value).map_err(anyhow::Error::msg)?)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")

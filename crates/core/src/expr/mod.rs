@@ -61,7 +61,6 @@ pub(crate) mod view;
 pub(crate) mod with;
 
 pub mod index;
-pub mod serde;
 pub mod statements;
 
 pub use self::access::{Access, Accesses};

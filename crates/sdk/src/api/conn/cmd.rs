@@ -820,16 +820,8 @@ mod test {
 
 		assert_converts(
 			&request,
-			|i| bincode::serialize(i).unwrap(),
-			|b| bincode::deserialize(&b).unwrap(),
-		);
-
-		println!("test convert json");
-
-		assert_converts(
-			&request,
-			|i| serde_json::to_string(i).unwrap(),
-			|b| serde_json::from_str(&b).unwrap(),
+			|i| surrealdb_core::rpc::format::bincode::encode(i).unwrap(),
+			|b| surrealdb_core::rpc::format::bincode::decode(&b).unwrap(),
 		);
 
 		println!("test convert revisioned");
