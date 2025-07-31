@@ -50,7 +50,7 @@ impl Data {
 	/// The fix adds support for:
 	/// - Value::Subquery: Inline SELECT statements (e.g., SELECT id FROM person WHERE name = 'John')
 	/// - Value::Param: Parameter values (e.g., $user_id)
-	/// - Value::Idiom: Field references (e.g., .content.id)
+	/// - Value::Idiom: Field references (e.g., content.id)
 	/// - Value::Function: Function calls (e.g., type::string(8))
 	/// - Value::Thing: Record references (e.g., person:john)
 	/// - Value::Constant: Mathematical constants (e.g., math::pi)
@@ -64,7 +64,7 @@ impl Data {
 		opt: &Options,
 	) -> Result<Option<Value>> {
 		// Handle subquery expressions (inline SELECT) - these are the most complex case
-		// Example: UPSERT person CONTENT { id: SELECT id FROM person WHERE name = 'John' }
+		// Example: UPSERT person CONTENT { id: (SELECT id FROM person LIMIT 1).id }
 		if let Self::ContentExpression(Value::Subquery(sub_query)) = self {
 			let result = Box::pin(sub_query.compute(stk, ctx, opt, None)).await.catch_return()?;
 			return Ok(result.pick(&*ID).some());
@@ -89,7 +89,7 @@ impl Data {
 			}
 			Self::ContentExpression(Value::Idiom(idiom)) => {
 				// For idiom expressions (like .content), compute the underlying value and extract id
-				// Example: UPSERT person CONTENT { id: .content.id }
+				// Example: UPSERT person CONTENT { id: content.id }
 				Ok(idiom.compute(stk, ctx, opt, None).await.catch_return()?.pick(&*ID).some())
 			}
 			Self::ContentExpression(Value::Function(func)) => {
