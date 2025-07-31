@@ -1243,6 +1243,7 @@ async fn router(
 			key,
 			value,
 		} => {
+			surrealdb_core::rpc::check_protected_param(&key)?;
 			// Need to compute because certain keys might not be allowed to be set and those should
 			// be rejected by an error.
 			match value {

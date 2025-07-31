@@ -389,6 +389,7 @@ async fn router(
 			key,
 			value,
 		} => {
+			surrealdb_core::rpc::check_protected_param(&key)?;
 			vars.insert(key, value);
 			Ok(DbResponse::Other(val::Value::None))
 		}

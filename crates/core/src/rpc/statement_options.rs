@@ -44,7 +44,7 @@ impl RpcData {
 			"replace" => Ok(RpcData::Replace(v)),
 			"content" => Ok(RpcData::Content(v)),
 			"single" => Ok(RpcData::Single(v)),
-			_ => Err(RpcError::InvalidParams),
+			unexpected => Err(RpcError::InvalidParams(format!("Expected 'patch', 'merge', 'replace', 'content', or 'single', got {unexpected}"))),
 		}
 	}
 }
@@ -139,7 +139,7 @@ impl StatementOptions {
 				if let Value::Strand(v) = v {
 					self.data = Some(RpcData::from_string(v.to_string(), data.value().to_owned())?);
 				} else {
-					return Err(RpcError::InvalidParams);
+					return Err(RpcError::InvalidParams("Expected 'data_expr' to be string".to_string()));
 				}
 			}
 		}
@@ -149,7 +149,7 @@ impl StatementOptions {
 			if let Value::Strand(v) = v {
 				self.fields = Some(syn::fields_with_capabilities(v.as_str(), capabilities)?)
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'fields' to be string".to_string()));
 			}
 		}
 
@@ -158,7 +158,7 @@ impl StatementOptions {
 			if let Value::Strand(v) = v {
 				self.output = Some(syn::output_with_capabilities(v.as_str(), capabilities)?)
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'return' to be string".to_string()));
 			}
 		}
 
@@ -167,7 +167,7 @@ impl StatementOptions {
 			if let Value::Number(Number::Int(i)) = v {
 				self.limit = Some(Limit(Expr::Literal(Literal::Integer(i))))
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'limit' to be number".to_string()));
 			}
 		}
 
@@ -176,7 +176,7 @@ impl StatementOptions {
 			if let Value::Number(Number::Int(i)) = v {
 				self.start = Some(Start(Expr::Literal(Literal::Integer(i))))
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'start' to be number".to_string()));
 			}
 		}
 
@@ -186,7 +186,7 @@ impl StatementOptions {
 				let v = syn::expr_with_capabilities(v.as_str(), capabilities)?;
 				self.cond = Some(Cond(v))
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'cond' to be string".to_string()));
 			}
 		}
 
@@ -196,7 +196,7 @@ impl StatementOptions {
 				Value::Datetime(d) => Expr::Literal(Literal::Datetime(d)),
 				Value::Strand(v) => syn::expr_with_capabilities(v.as_str(), capabilities)?,
 				_ => {
-					return Err(RpcError::InvalidParams);
+					return Err(RpcError::InvalidParams("Expected 'version' to be string or datetime".to_string()));
 				}
 			};
 
@@ -208,7 +208,7 @@ impl StatementOptions {
 			if let Value::Duration(v) = v {
 				self.timeout = Some(Timeout(v))
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'timeout' to be duration".to_string()));
 			}
 		}
 
@@ -217,7 +217,7 @@ impl StatementOptions {
 			if let Value::Bool(v) = v {
 				self.only = v;
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'only' to be boolean".to_string()));
 			}
 		}
 
@@ -226,7 +226,7 @@ impl StatementOptions {
 			if let Value::Bool(v) = v {
 				self.relation = v;
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'relation' to be boolean".to_string()));
 			}
 		}
 
@@ -235,7 +235,7 @@ impl StatementOptions {
 			if let Value::Bool(v) = v {
 				self.unique = v;
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'unique' to be boolean".to_string()));
 			}
 		}
 
@@ -244,7 +244,7 @@ impl StatementOptions {
 			if let Value::Object(v) = v {
 				self.vars = Some(v.into())
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'vars' to be object".to_string()));
 			}
 		}
 
@@ -252,13 +252,13 @@ impl StatementOptions {
 		if let Some(v) = obj.remove("diff") {
 			if self.fields.is_some() {
 				// diff and fields cannot co-exist, as diff overwrites the fields
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("'diff' and 'fields' cannot co-exist".to_string()));
 			}
 
 			if let Value::Bool(v) = v {
 				self.diff = v;
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'diff' to be boolean".to_string()));
 			}
 		}
 
@@ -267,7 +267,7 @@ impl StatementOptions {
 			if let Value::Strand(v) = v {
 				self.fetch = Some(syn::fetchs_with_capabilities(v.as_str(), capabilities)?)
 			} else {
-				return Err(RpcError::InvalidParams);
+				return Err(RpcError::InvalidParams("Expected 'fetch' to be string".to_string()));
 			}
 		}
 

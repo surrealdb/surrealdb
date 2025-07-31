@@ -30,7 +30,7 @@ use crate::api_integration::ApiRecordId;
 
 use super::{CreateDb, NS};
 
-const LQ_TIMEOUT: Duration = Duration::from_secs(1);
+const LQ_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_NOTIFICATIONS: usize = 100;
 
 pub async fn live_select_table(new_db: impl CreateDb) {

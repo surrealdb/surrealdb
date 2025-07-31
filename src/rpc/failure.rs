@@ -60,7 +60,7 @@ impl From<RpcError> for Failure {
 			RpcError::ParseError => Failure::PARSE_ERROR,
 			RpcError::InvalidRequest => Failure::INVALID_REQUEST,
 			RpcError::MethodNotFound => Failure::METHOD_NOT_FOUND,
-			RpcError::InvalidParams => Failure::INVALID_PARAMS,
+			RpcError::InvalidParams(_) => Failure::INVALID_PARAMS,
 			RpcError::InternalError(_) => Failure::custom(err.to_string()),
 			RpcError::Thrown(_) => Failure::custom(err.to_string()),
 			_ => Failure::custom(err.to_string()),

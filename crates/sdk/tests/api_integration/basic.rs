@@ -698,7 +698,7 @@ pub async fn insert_relation_table(new_db: impl CreateDb) {
 	let vals = r#"[
 		{ in: person:b, out: thing:a },
 		{ id: likes:2, in: person:c, out: thing:a },
-		{ id: hates:3, in: person:d, out: thing:a },
+		{ id: likes:3, in: person:d, out: thing:a },
 	]"#
 	.parse::<Value>()
 	.unwrap();
