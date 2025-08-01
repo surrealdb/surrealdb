@@ -27,6 +27,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod record;
+pub mod schema;
 pub mod script;
 pub mod search;
 pub mod sequence;
@@ -87,6 +88,7 @@ pub async fn run(
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.eq("schema::table::exists")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -588,6 +590,8 @@ pub async fn asynchronous(
 		//
 		"value::diff" => value::diff((stk, ctx, Some(opt), doc)).await,
 		"value::patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+		//
+		"schema::table::exists" => schema::table::exists((ctx, Some(opt))).await,
 	)
 }
 
