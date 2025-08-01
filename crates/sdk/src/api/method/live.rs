@@ -16,7 +16,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
 use surrealdb_core::expr::{
-	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, LiveStatement, TopLevelExpr,
+	BinaryOperator, Cond, Expr, Fields, Ident, Idiom, Literal, LiveStatement, TopLevelExpr,
 };
 use surrealdb_core::val;
 use uuid::Uuid;
@@ -48,12 +48,12 @@ where
 			}
 			Resource::RecordId(record) => {
 				let record = record.into_inner();
-				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table) });
+				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table.clone()) });
 				let ident = Ident::new("id".to_string()).unwrap();
 				let cond = Expr::Binary {
 					left: Box::new(Expr::Idiom(Idiom::field(ident))),
 					op: BinaryOperator::Equal,
-					right: Box::new(record.key.into_value().into_literal()),
+					right: Box::new(Expr::Literal(Literal::RecordId(record.into_literal()))),
 				};
 				stmt.cond = Some(Cond(cond));
 			}
@@ -66,7 +66,7 @@ where
 					panic!("invalid resource?");
 				};
 
-				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table) });
+				stmt.what = Expr::Table(unsafe { Ident::new_unchecked(record.table.clone()) });
 
 				let id = Expr::Idiom(Idiom::field(Ident::new("id".to_string()).unwrap()));
 
@@ -74,12 +74,22 @@ where
 					std::ops::Bound::Included(x) => Some(Expr::Binary {
 						left: Box::new(id.clone()),
 						op: BinaryOperator::MoreThanEqual,
-						right: Box::new(x.into_value().into_literal()),
+						right: Box::new(Expr::Literal(Literal::RecordId(
+							surrealdb_core::expr::RecordIdLit {
+								tb: record.table.clone(),
+								id: x.into_literal(),
+							},
+						))),
 					}),
 					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
 						left: Box::new(id.clone()),
 						op: BinaryOperator::MoreThan,
-						right: Box::new(x.into_value().into_literal()),
+						right: Box::new(Expr::Literal(Literal::RecordId(
+							surrealdb_core::expr::RecordIdLit {
+								tb: record.table.clone(),
+								id: x.into_literal(),
+							},
+						))),
 					}),
 					std::ops::Bound::Unbounded => None,
 				};
@@ -87,12 +97,22 @@ where
 					std::ops::Bound::Included(x) => Some(Expr::Binary {
 						left: Box::new(id),
 						op: BinaryOperator::LessThanEqual,
-						right: Box::new(x.into_value().into_literal()),
+						right: Box::new(Expr::Literal(Literal::RecordId(
+							surrealdb_core::expr::RecordIdLit {
+								tb: record.table,
+								id: x.into_literal(),
+							},
+						))),
 					}),
 					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
 						left: Box::new(id),
 						op: BinaryOperator::LessThan,
-						right: Box::new(x.into_value().into_literal()),
+						right: Box::new(Expr::Literal(Literal::RecordId(
+							surrealdb_core::expr::RecordIdLit {
+								tb: record.table,
+								id: x.into_literal(),
+							},
+						))),
 					}),
 					std::ops::Bound::Unbounded => None,
 				};
