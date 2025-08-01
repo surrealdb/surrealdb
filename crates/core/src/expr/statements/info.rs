@@ -108,7 +108,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)?;
 				// Get the NS
-				let ns = ctx.get_ns_id(opt)?;
+				let ns = ctx.get_ns_id(opt).await?;
 				// Get the transaction
 				let txn = ctx.tx();
 				// Create the result set
@@ -147,7 +147,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
-				let (ns, db) = ctx.get_ns_db_ids(opt)?;
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(v.compute(stk, ctx, opt, None).await?),
@@ -255,7 +255,7 @@ impl InfoStatement {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
-				let (ns, db) = ctx.get_ns_db_ids(opt)?;
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(v.compute(stk, ctx, opt, None).await?),
@@ -322,11 +322,11 @@ impl InfoStatement {
 				let res = match base {
 					Base::Root => txn.expect_root_user(user).await?,
 					Base::Ns => {
-						let ns = ctx.get_ns_id(opt)?;
+						let ns = ctx.get_ns_id(opt).await?;
 						txn.expect_ns_user(ns, user).await?
-					},
+					}
 					Base::Db => {
-						let (ns, db) = ctx.get_ns_db_ids(opt)?;
+						let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 						txn.expect_db_user(ns, db, user).await?
 					}
 					_ => bail!(Error::InvalidLevel(base.to_string())),
@@ -350,7 +350,7 @@ impl InfoStatement {
 
 					if let Some(ib) = ctx.get_index_builder() {
 						// Obtain the index
-						let (ns, db) = ctx.get_ns_db_ids(opt)?;
+						let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 						let res = txn.get_tb_index(ns, db, table, index).await?;
 						let status = ib.get_status(ns, db, &res).await;
 						let mut out = Object::default();

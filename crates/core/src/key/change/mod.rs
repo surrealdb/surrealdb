@@ -10,8 +10,6 @@ use crate::kvs::KVKey;
 use crate::vs::VersionStamp;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
-use std::str;
 
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -107,7 +105,6 @@ impl DatabaseChangeFeedTsPrefix {
 impl KVKey for DatabaseChangeFeedTsPrefix {
 	type ValueType = TableMutations;
 }
-
 
 /// Returns the prefix for the whole database change feeds since the
 /// specified versionstamp.

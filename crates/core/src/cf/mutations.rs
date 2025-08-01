@@ -1,9 +1,9 @@
 use crate::catalog::TableDefinition;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::Operation;
 use crate::expr::array::Array;
 use crate::expr::object::Object;
 use crate::expr::statements::DefineTableStatement;
+use crate::expr::statements::info::InfoStructure;
 use crate::expr::thing::Thing;
 use crate::expr::value::Value;
 use crate::kvs::impl_kv_value_revisioned;
@@ -216,7 +216,7 @@ impl Default for WriteMutationSet {
 mod tests {
 	use crate::catalog::{DatabaseId, NamespaceId, TableId};
 
-use super::*;
+	use super::*;
 	use std::collections::HashMap;
 
 	#[test]
@@ -299,7 +299,12 @@ use super::*;
 								"note" => Value::from("surreal"),
 						})),
 					),
-					TableMutation::Def(TableDefinition::new(NamespaceId(1), DatabaseId(2), TableId(3), "mytb")),
+					TableMutation::Def(TableDefinition::new(
+						NamespaceId(1),
+						DatabaseId(2),
+						TableId(3),
+						"mytb",
+					)),
 				],
 			)]),
 		);

@@ -872,7 +872,7 @@ impl Scorer {
 mod tests {
 	use super::{FullTextIndex, TermDocument};
 	use crate::catalog::{DatabaseId, NamespaceId};
-use crate::ctx::{Context, MutableContext};
+	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::index::FullTextParams;
 	use crate::expr::statements::DefineAnalyzerStatement;

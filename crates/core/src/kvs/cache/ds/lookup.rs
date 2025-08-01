@@ -1,5 +1,5 @@
-use crate::catalog::{DatabaseId, NamespaceId};
 use super::key::Key;
+use crate::catalog::{DatabaseId, NamespaceId};
 use quick_cache::Equivalent;
 use uuid::Uuid;
 

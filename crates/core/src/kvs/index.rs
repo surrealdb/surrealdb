@@ -160,10 +160,12 @@ impl IndexBuilder {
 		&self,
 		ctx: &Context,
 		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: Arc<DefineIndexStatement>,
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<IndexBuilding> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
 		let b = building.clone();
 		let jh = task::spawn(async move {
 			let r = b.run().await;
@@ -183,10 +185,11 @@ impl IndexBuilder {
 		&self,
 		ctx: &Context,
 		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: Arc<DefineIndexStatement>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		let (ns, db) = ctx.get_ns_db_ids(&opt)?;
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
@@ -203,12 +206,12 @@ impl IndexBuilder {
 						name: e.key().ix.clone(),
 					}
 				);
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
 				e.replace_entry(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
 				e.insert(ib);
 			}
 		};
@@ -246,7 +249,13 @@ impl IndexBuilder {
 		}
 	}
 
-	pub(crate) fn remove_index(&self, ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Result<()> {
+	pub(crate) fn remove_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &str,
+	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
 		if let Some((_, b)) = self.indexes.remove(&key) {
 			b.0.abort();
@@ -328,9 +337,10 @@ impl Building {
 		ctx: &Context,
 		tf: TransactionFactory,
 		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		ix: Arc<DefineIndexStatement>,
 	) -> Result<Self> {
-		let (ns, db) = ctx.get_ns_db_ids(&opt)?;
 		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		Ok(Self {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
@@ -404,7 +414,7 @@ impl Building {
 	}
 
 	async fn run(&self) -> Result<()> {
-		let (ns, db) = self.ctx.get_ns_db_ids(&self.opt)?;
+		let (ns, db) = self.ctx.get_ns_db_ids(&self.opt).await?;
 		// Remove the index data
 		{
 			self.set_status(BuildingStatus::Cleaning).await;
@@ -550,8 +560,16 @@ impl Building {
 			}
 
 			// Index the record
-			let mut io =
-				IndexOperation::new(ctx, &self.opt, self.ns, self.db, &self.ix, None, opt_values.clone(), &rid);
+			let mut io = IndexOperation::new(
+				ctx,
+				&self.opt,
+				self.ns,
+				self.db,
+				&self.ix,
+				None,
+				opt_values.clone(),
+				&rid,
+			);
 			stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
 
 			// Increment the count and update the status
@@ -588,8 +606,16 @@ impl Building {
 			if let Some(a) = tx.get(&ia, None).await? {
 				tx.del(&ia).await?;
 				let rid = Thing::from((self.ikb.table().to_string(), a.id));
-				let mut io =
-					IndexOperation::new(ctx, &self.opt, self.ns, self.db, &self.ix, a.old_values, a.new_values, &rid);
+				let mut io = IndexOperation::new(
+					ctx,
+					&self.opt,
+					self.ns,
+					self.db,
+					&self.ix,
+					a.old_values,
+					a.new_values,
+					&rid,
+				);
 				stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
 
 				// We can delete the ip record if any

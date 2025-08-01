@@ -1,11 +1,16 @@
-use std::fmt::Display;
-
-use crate::{catalog::{DatabaseId, NamespaceId}, kvs::impl_kv_value_revisioned, sql::ToSql};
-use revision::{revisioned, Revisioned};
+use crate::{
+	catalog::{DatabaseId, NamespaceId},
+	kvs::impl_kv_value_revisioned,
+	sql::ToSql,
+};
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{catalog::ViewDefinition, expr::{statements::info::InfoStructure, ChangeFeed, Kind, Permissions, Value}};
+use crate::{
+	catalog::ViewDefinition,
+	expr::{ChangeFeed, Kind, Permissions, Value, statements::info::InfoStructure},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
@@ -14,32 +19,31 @@ pub struct TableId(pub u32);
 impl_kv_value_revisioned!(TableId);
 
 impl Revisioned for TableId {
-    fn revision() -> u16 {
-        1
-    }
+	fn revision() -> u16 {
+		1
+	}
 
-    #[inline]
+	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-        self.0.serialize_revisioned(writer)
+		self.0.serialize_revisioned(writer)
 	}
 
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-        Revisioned::deserialize_revisioned(reader).map(TableId)
+		Revisioned::deserialize_revisioned(reader).map(TableId)
 	}
 }
-
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct TableDefinition {
-    pub namespace_id: NamespaceId,
-    pub database_id: DatabaseId,
+	pub namespace_id: NamespaceId,
+	pub database_id: DatabaseId,
 	pub table_id: TableId,
 
 	pub name: String,
@@ -64,46 +68,51 @@ pub struct TableDefinition {
 impl_kv_value_revisioned!(TableDefinition);
 
 impl TableDefinition {
-    pub fn new(namespace_id: NamespaceId, database_id: DatabaseId, table_id: TableId, name: String) -> Self {
-        let now = Uuid::now_v7();
-        Self {
-            namespace_id,
-            database_id,
-            table_id,
-            name,
-            drop: false,
-            schemafull: false,
-            view: None,
-            permissions: Permissions::default(),
-            changefeed: None,
-            comment: None,
-            kind: TableKind::Normal,
-            cache_fields_ts: now,
-            cache_events_ts: now,
-            cache_tables_ts: now,
-            cache_indexes_ts: now,
-        }
-    }
+	pub fn new(
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		name: String,
+	) -> Self {
+		let now = Uuid::now_v7();
+		Self {
+			namespace_id,
+			database_id,
+			table_id,
+			name,
+			drop: false,
+			schemafull: false,
+			view: None,
+			permissions: Permissions::default(),
+			changefeed: None,
+			comment: None,
+			kind: TableKind::Normal,
+			cache_fields_ts: now,
+			cache_events_ts: now,
+			cache_tables_ts: now,
+			cache_indexes_ts: now,
+		}
+	}
 
-    pub fn with_changefeed(mut self, changefeed: ChangeFeed) -> Self {
-        self.changefeed = Some(changefeed);
-        self
-    }
+	pub fn with_changefeed(mut self, changefeed: ChangeFeed) -> Self {
+		self.changefeed = Some(changefeed);
+		self
+	}
 
-    /// Checks if this table allows normal records / documents
+	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
 		matches!(self.kind, TableKind::Normal | TableKind::Any)
 	}
-    /// Checks if this table allows graph edges / relations
+	/// Checks if this table allows graph edges / relations
 	pub fn allows_relation(&self) -> bool {
 		matches!(self.kind, TableKind::Relation(_) | TableKind::Any)
 	}
 }
 
 impl ToSql for TableDefinition {
-    fn to_sql(&self) -> String {
-        format!("DEFINE TABLE {} {}", self.name, self.kind.to_sql())
-    }
+	fn to_sql(&self) -> String {
+		format!("DEFINE TABLE {} {}", self.name, self.kind.to_sql())
+	}
 }
 
 impl InfoStructure for TableDefinition {
@@ -135,7 +144,7 @@ pub enum TableKind {
 
 impl ToSql for TableKind {
 	fn to_sql(&self) -> String {
-        let mut sql = String::new();
+		let mut sql = String::new();
 		match self {
 			TableKind::Normal => {
 				sql.push_str("NORMAL");
@@ -190,4 +199,3 @@ pub struct Relation {
 	pub to: Option<Kind>,
 	pub enforced: bool,
 }
-

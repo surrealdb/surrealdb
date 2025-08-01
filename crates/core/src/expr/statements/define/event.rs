@@ -3,7 +3,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value, Values};
 use crate::iam::{Action, ResourceKind};
@@ -46,7 +45,7 @@ impl DefineEventStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
@@ -87,17 +86,10 @@ impl DefineEventStatement {
 		};
 
 		let key = crate::key::database::tb::new(ns, db, &self.what);
-		txn.set(
-			&key,
-			&tb_def,
-			None,
-		)
-		.await?;
+		txn.set(&key, &tb_def, None).await?;
 
 		// Update the cache
 		if let Some(cache) = ctx.get_cache() {
-			// TODO: STU: Instead of clearing the table cache, is it okay to just update the cache?
-			// cache.clear_tb(ns, db, &self.what);
 			cache.insert(ds::Lookup::Tb(ns, db, &tb.name), ds::Entry::Any(Arc::new(tb_def)));
 		}
 		// Clear the cache

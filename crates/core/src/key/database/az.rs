@@ -1,7 +1,7 @@
 //! Stores a DEFINE ANALYZER config definition
-use crate::expr::statements::define::DefineAnalyzerStatement;
 use crate::catalog::DatabaseId;
 use crate::catalog::NamespaceId;
+use crate::expr::statements::define::DefineAnalyzerStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;

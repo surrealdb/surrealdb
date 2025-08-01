@@ -66,7 +66,13 @@ impl Categorise for Ib<'_> {
 }
 
 impl<'a> Ib<'a> {
-	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, start: i64) -> Self {
+	pub(crate) fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+		start: i64,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

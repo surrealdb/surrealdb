@@ -38,13 +38,16 @@ impl RemoveNamespaceStatement {
 
 				return Err(Error::NsNotFound {
 					name: self.name.to_string(),
-				}.into());
+				}
+				.into());
 			}
 		};
 
 		// Remove the index stores
 		#[cfg(not(target_family = "wasm"))]
-		ctx.get_index_stores().namespace_removed(ctx.get_index_builder(), &txn, ns.namespace_id).await?;
+		ctx.get_index_stores()
+			.namespace_removed(ctx.get_index_builder(), &txn, ns.namespace_id)
+			.await?;
 		#[cfg(target_family = "wasm")]
 		ctx.get_index_stores().namespace_removed(&txn, ns.namespace_id).await?;
 		// Remove the sequences

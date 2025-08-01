@@ -74,7 +74,7 @@ impl DefineTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
@@ -115,16 +115,11 @@ impl DefineTableStatement {
 		// Add table relational fields
 		Self::add_in_out_fields(&txn, ns, db, &mut tb_def).await?;
 
-
 		// Update the catalog
 		{
 			let (ns, db) = opt.ns_db()?;
 			let catalog_key = crate::key::catalog::tb::new(ns, db, &self.name);
-			txn.set(
-				&catalog_key,
-				&tb_def,
-				None,
-			).await?;
+			txn.set(&catalog_key, &tb_def, None).await?;
 		}
 		{
 			let key = crate::key::database::tb::new(ns, db, &self.name);
@@ -156,7 +151,6 @@ impl DefineTableStatement {
 				txn.set(&key, &tb_def, None).await?;
 				// Refresh the table cache
 				let Some(foreign_tb) = txn.get_tb(ns, db, ft).await? else {
-					// TODO: STU: This is what the previous code did, but should this just continue instead?
 					bail!(Error::TbNotFound {
 						name: ft.to_string(),
 					});
@@ -216,7 +210,7 @@ impl DefineTableStatement {
 		matches!(self.kind, TableKind::Normal | TableKind::Any)
 	}
 	/// Used to add relational fields to existing table records
-	/// 
+	///
 	/// Returns the cache key ts.
 	pub async fn add_in_out_fields(
 		txn: &Transaction,

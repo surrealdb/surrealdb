@@ -1,6 +1,6 @@
 //! Stores a DEFINE INDEX config definition
-use crate::expr::statements::define::DefineIndexStatement;
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::expr::statements::define::DefineIndexStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;

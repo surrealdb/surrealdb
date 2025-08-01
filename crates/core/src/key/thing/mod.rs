@@ -1,10 +1,9 @@
 //! Stores a record document
-use crate::catalog::{NamespaceId, DatabaseId};
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::Id;
 use crate::expr::Value;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::table::all::TableRoot;
 use crate::kvs::KVKey;
 
 use anyhow::Result;

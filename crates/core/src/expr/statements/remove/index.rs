@@ -2,7 +2,6 @@ use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
@@ -29,7 +28,7 @@ impl RemoveIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Clear the index store cache
@@ -59,7 +58,8 @@ impl RemoveIndexStatement {
 		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
 			return Err(Error::TbNotFound {
 				name: self.what.to_string(),
-			}.into());
+			}
+			.into());
 		};
 
 		txn.set(

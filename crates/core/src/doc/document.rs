@@ -4,14 +4,12 @@ use crate::ctx::Context;
 use crate::ctx::MutableContext;
 use crate::dbs::Options;
 use crate::dbs::Workable;
-use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::FlowResultExt as _;
 use crate::expr::permission::Permission;
 use crate::expr::statements::define::DefineEventStatement;
 use crate::expr::statements::define::DefineFieldStatement;
 use crate::expr::statements::define::DefineIndexStatement;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::live::LiveStatement;
 use crate::expr::table::Table;
 use crate::expr::thing::Thing;
@@ -415,7 +413,7 @@ impl Document {
 	/// Get the table for this document
 	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<TableDefinition>> {
 		// Get the NS + DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Get the record id
 		let id = self.id()?;
 		// Get transaction
@@ -467,7 +465,7 @@ impl Document {
 	/// Get the foreign tables for this document
 	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[TableDefinition]>> {
 		// Get the NS + DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -496,7 +494,7 @@ impl Document {
 	/// Get the events for this document
 	pub async fn ev(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineEventStatement]>> {
 		// Get the NS + DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -525,7 +523,7 @@ impl Document {
 	/// Get the fields for this document
 	pub async fn fd(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineFieldStatement]>> {
 		// Get the NS + DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -554,7 +552,7 @@ impl Document {
 	/// Get the indexes for this document
 	pub async fn ix(&self, ctx: &Context, opt: &Options) -> Result<Arc<[DefineIndexStatement]>> {
 		// Get the NS + DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context
@@ -583,7 +581,7 @@ impl Document {
 	// Get the lives for this document
 	pub async fn lv(&self, ctx: &Context, opt: &Options) -> Result<Arc<[LiveStatement]>> {
 		// Get the NS + DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb(ctx, opt).await?;
 		// Get the cache from the context

@@ -15,7 +15,6 @@ use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 
 use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::expr;
 use crate::expr::thing::Thing;
 use crate::kvs::KVValue;
 use crate::kvs::key::KVKey;
@@ -620,7 +619,11 @@ impl Transactor {
 	}
 
 	/// Gets the next table id for the given namespace and database
-	pub(crate) async fn get_next_tb_id(&mut self, ns: NamespaceId, db: DatabaseId) -> Result<TableId> {
+	pub(crate) async fn get_next_tb_id(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<TableId> {
 		let key = crate::key::database::ti::new(ns, db).encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();

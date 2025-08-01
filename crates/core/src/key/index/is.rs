@@ -20,11 +20,11 @@
 //! - `tb`: Table identifier
 //! - `ix`: Index identifier
 //! - `nid`: Node UUID (16 bytes, compact serialized)
+use crate::catalog::DatabaseId;
+use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::KVKey;
 use crate::kvs::sequences::SequenceState;
-use crate::catalog::DatabaseId;
-use crate::catalog::NamespaceId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -57,7 +57,13 @@ impl Categorise for Is<'_> {
 }
 
 impl<'a> Is<'a> {
-	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, nid: Uuid) -> Self {
+	pub(crate) fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+		nid: Uuid,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

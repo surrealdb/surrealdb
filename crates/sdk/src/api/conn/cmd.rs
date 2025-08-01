@@ -7,7 +7,7 @@ use serde::{Serialize, ser::SerializeMap as _};
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
-use surrealdb_core::{dbs::Notification, rpc::V1Object};
+use surrealdb_core::dbs::Notification;
 #[allow(unused_imports)]
 use surrealdb_core::expr::{
 	Array as CoreArray, Object as CoreObject, Query as CoreQuery, Value as CoreValue,
@@ -30,68 +30,68 @@ pub(crate) enum Command {
 		database: Option<String>,
 	},
 	Signup {
-		credentials: V1Object,
+		credentials: CoreObject,
 	},
 	Signin {
-		credentials: V1Object,
+		credentials: CoreObject,
 	},
 	Authenticate {
 		token: String,
 	},
 	Invalidate,
 	Create {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<V1Value>,
+		data: Option<CoreValue>,
 	},
 	Upsert {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<V1Value>,
+		data: Option<CoreValue>,
 	},
 	Update {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<V1Value>,
+		data: Option<CoreValue>,
 	},
 	Insert {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		// inserts can only be on a table.
 		what: Option<String>,
-		data: V1Value,
+		data: CoreValue,
 	},
 	InsertRelation {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		what: Option<String>,
-		data: V1Value,
+		data: CoreValue,
 	},
 	Patch {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<V1Value>,
+		data: Option<CoreValue>,
 		upsert: bool,
 	},
 	Merge {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		what: Resource,
-		data: Option<V1Value>,
+		data: Option<CoreValue>,
 		upsert: bool,
 	},
 	Select {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		what: Resource,
 	},
 	Delete {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		what: Resource,
 	},
 	Query {
-		txn: Option<V1Uu>,
+		txn: Option<Uuid>,
 		query: CoreSqlQuery,
 		variables: CoreObject,
 	},
 	RawQuery {
-		txn: Option<V1Uuid>,
+		txn: Option<Uuid>,
 		query: Cow<'static, str>,
 		variables: CoreObject,
 	},
@@ -121,7 +121,7 @@ pub(crate) enum Command {
 	Version,
 	Set {
 		key: String,
-		value: V1Value,
+		value: CoreValue,
 	},
 	Unset {
 		key: String,
@@ -136,7 +136,7 @@ pub(crate) enum Command {
 	Run {
 		name: String,
 		version: Option<String>,
-		args: V1Array,
+		args: CoreArray,
 	},
 }
 
@@ -518,7 +518,7 @@ pub(crate) struct RouterRequest {
 	method: &'static str,
 	params: Option<CoreValue>,
 	#[allow(dead_code)]
-	transaction: Option<V1Uuid>,
+	transaction: Option<Uuid>,
 }
 
 #[cfg(feature = "protocol-ws")]

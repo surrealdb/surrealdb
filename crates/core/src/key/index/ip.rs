@@ -53,7 +53,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ip::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", Id::from("id".to_string()));
+		let val =
+			Ip::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", Id::from("id".to_string()));
 		let enc = Ip::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

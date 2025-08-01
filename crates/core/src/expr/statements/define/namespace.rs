@@ -3,7 +3,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::impl_kv_value_revisioned;
@@ -64,20 +63,10 @@ impl DefineNamespaceStatement {
 			name: self.name.to_string(),
 			comment: self.comment.clone().map(|c| c.to_string()),
 		};
-		txn.set(
-			&catalog_key,
-			&ns_def,
-			None,
-		).await?;
+		txn.set(&catalog_key, &ns_def, None).await?;
 
-		
 		let key = crate::key::root::ns::new(namespace_id);
-		txn.set(
-			&key,
-			&ns_def,
-			None,
-		)
-		.await?;
+		txn.set(&key, &ns_def, None).await?;
 		// Clear the cache
 		txn.clear();
 		// Ok all good

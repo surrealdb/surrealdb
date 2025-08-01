@@ -27,7 +27,12 @@ impl Datastore {
 				// TODO(SUR-341): This is incorrect, it's a [ns,db] to vs pair
 				// It's safe for now, as it is unused but either the signature must change
 				// to include {(ns, db): (ts, vs)} mapping, or we don't return it
-				vs = Some(txn.lock().await.set_timestamp_for_versionstamp(ts, db.namespace_id, db.database_id).await?);
+				vs = Some(
+					txn.lock()
+						.await
+						.set_timestamp_for_versionstamp(ts, db.namespace_id, db.database_id)
+						.await?,
+				);
 			}
 			// Possibly renew the lease
 			if let Some(lh) = lh {

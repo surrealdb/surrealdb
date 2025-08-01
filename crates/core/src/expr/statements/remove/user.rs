@@ -40,7 +40,8 @@ impl RemoveUserStatement {
 
 						return Err(Error::UserRootNotFound {
 							name: self.name.to_string(),
-						}.into());
+						}
+						.into());
 					}
 				};
 
@@ -56,7 +57,7 @@ impl RemoveUserStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let ns = ctx.get_ns_id(opt)?;
+				let ns = ctx.get_ns_id(opt).await?;
 				let us = match txn.get_ns_user(ns, &self.name).await? {
 					Some(x) => x,
 					None => {
@@ -67,7 +68,8 @@ impl RemoveUserStatement {
 						return Err(Error::UserNsNotFound {
 							ns: opt.ns()?.to_string(),
 							name: self.name.to_string(),
-						}.into());
+						}
+						.into());
 					}
 				};
 				// Delete the definition
@@ -82,7 +84,7 @@ impl RemoveUserStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let (ns, db) = ctx.get_ns_db_ids(opt)?;
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 				let us = match txn.get_db_user(ns, db, &self.name).await? {
 					Some(x) => x,
 					None => {
@@ -94,7 +96,8 @@ impl RemoveUserStatement {
 							ns: opt.ns()?.to_string(),
 							db: opt.db()?.to_string(),
 							name: self.name.to_string(),
-						}.into());
+						}
+						.into());
 					}
 				};
 				// Delete the definition

@@ -38,7 +38,8 @@ impl RemoveDatabaseStatement {
 				} else {
 					return Err(Error::DbNotFound {
 						name: self.name.to_string(),
-					}.into());
+					}
+					.into());
 				}
 			}
 		};

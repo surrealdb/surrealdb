@@ -9,7 +9,6 @@ pub(in crate::idx) mod tree;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::err::Error;
 use crate::expr::with::With;
 use crate::expr::{Cond, Fields, Groups, Table, order::Ordering};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
@@ -72,9 +71,14 @@ pub(crate) enum GrantedPermission {
 }
 
 impl<'a> StatementContext<'a> {
-	pub(crate) fn new(ctx: &'a Context, opt: &'a Options, stm: &'a Statement<'a>) -> Result<Self> {
+	pub(crate) fn new(
+		ctx: &'a Context,
+		opt: &'a Options,
+		ns: NamespaceId,
+		db: DatabaseId,
+		stm: &'a Statement<'a>,
+	) -> Result<Self> {
 		let is_perm = opt.check_perms(stm.into())?;
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
 		Ok(Self {
 			ctx,
 			opt,
@@ -115,8 +119,7 @@ impl<'a> StatementContext<'a> {
 				}
 			}
 			None => {
-				// TODO: STU: This previously fell through to Full permissions. Should it actually be None?
-				return Ok(GrantedPermission::None);
+				// Fall through to full permissions.
 			}
 		}
 		Ok(GrantedPermission::Full)

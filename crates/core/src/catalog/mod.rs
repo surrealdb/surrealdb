@@ -1,4 +1,3 @@
-
 mod database;
 mod namespace;
 mod table;

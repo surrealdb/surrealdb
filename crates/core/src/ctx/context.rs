@@ -1,6 +1,6 @@
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
-use crate::catalog::{DatabaseId, NamespaceId, TableId};
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -267,33 +267,16 @@ impl MutableContext {
 		Ok(x)
 	}
 
-	pub(crate) fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
+	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
-		// self.tx().get_ns_id(ns)
-		todo!("STU: GO DO THIS")
+		let ns_def = self.tx().get_or_add_ns(ns, opt.strict).await?;
+		Ok(ns_def.namespace_id)
 	}
 
-	pub(crate) fn get_db_id(&self, ns: &str, db: &str) -> Result<DatabaseId> {
-		// self.tx().get_db_id(ns, db)
-		todo!("STU: GO DO THIS")
-	}
-
-	pub(crate) fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
-		// let (ns, db) = opt.ns_db()?;
-		// let ns_id = self.get_ns_id(ns)?;
-		// let db_id = self.get_db_id(ns, db)?;
-		// Ok((ns_id, db_id))
-		todo!("STU: GO DO THIS")
-	}
-
-	pub(crate) fn get_tb_id(&self, ns: &str, db: &str, tb: &str) -> Result<TableId> {
-		// self.tx().get_tb_id(ns, db, tb)
-		todo!("STU: GO DO THIS")
-	}
-
-	pub(crate) fn get_ns_db_tb_ids(&self, ns: &str, db: &str, tb: &str) -> Result<(NamespaceId, DatabaseId, TableId)> {
-		// self.tx().get_ns_db_tb_ids(ns, db, tb)
-		todo!("STU: GO DO THIS")
+	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
+		let (ns, db) = opt.ns_db()?;
+		let db_def = self.tx().get_or_add_db(ns, db, opt.strict).await?;
+		Ok((db_def.namespace_id, db_def.database_id))
 	}
 
 	/// Add a value to the context. It overwrites any previously set values

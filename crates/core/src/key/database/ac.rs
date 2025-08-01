@@ -1,6 +1,6 @@
 //! Stores a DEFINE ACCESS ON DATABASE configuration
-use crate::expr::statements::define::DefineAccessStatement;
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::expr::statements::define::DefineAccessStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;

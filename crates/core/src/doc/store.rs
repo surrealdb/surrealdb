@@ -23,7 +23,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Get NS & DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Store the record data
 		let key = crate::key::thing::new(ns, db, &rid.tb, &rid.id);
 		// Remove the id field from the doc so that it's not duplicated,

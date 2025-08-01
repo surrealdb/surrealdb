@@ -39,7 +39,7 @@ impl DefineBucketStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Bucket, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
 		if txn.get_db_bucket(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {

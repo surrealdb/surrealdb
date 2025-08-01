@@ -7,6 +7,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Value;
 use crate::expr::operator::BindingPower;
+use crate::sql::ToSql;
 use crate::syn;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -16,7 +17,6 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr;
-use crate::sql::ToSql;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 

@@ -4,8 +4,8 @@ use super::access::{
 };
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
-use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
@@ -147,9 +147,12 @@ pub async fn db_access(
 
 	let db_def = match tx.get_db_by_name(&ns, &db).await? {
 		Some(db) => db,
-		None => return Err(Error::DbNotFound {
-			name: db.to_string(),
-		}.into()),
+		None => {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		}
 	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
@@ -160,9 +163,10 @@ pub async fn db_access(
 			ac: ac.to_string(),
 			ns: ns.to_string(),
 			db: db.to_string(),
-		}.into());
+		}
+		.into());
 	};
-	
+
 	// Check the provided access method exists
 	// Check the access method type
 	// All access method types are supported except for JWT
@@ -176,7 +180,16 @@ pub async fn db_access(
 				None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 			};
 
-			signin_bearer(kvs, session, Some((db_def.namespace_id, ns)), Some((db_def.database_id, db)), Arc::clone(&access), &at, key).await
+			signin_bearer(
+				kvs,
+				session,
+				Some((db_def.namespace_id, ns)),
+				Some((db_def.database_id, db)),
+				Arc::clone(&access),
+				&at,
+				key,
+			)
+			.await
 		}
 		AccessType::Record(at) => {
 			// Check if the record access method supports issuing tokens
@@ -235,8 +248,7 @@ pub async fn db_access(
 									// AUTHENTICATE clause
 									if let Some(au) = &access.authenticate {
 										// Setup the system session for finding the signin record
-										let mut sess =
-											Session::editor().with_ns(&ns).with_db(&db);
+										let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 										sess.rd = Some(rid.clone().into());
 										sess.tk = Some((&claims).into());
 										sess.ip.clone_from(&session.ip);
@@ -270,13 +282,9 @@ pub async fn db_access(
 										None => None,
 									};
 									// Log the authenticated access method info
-									trace!(
-										"Signing in to database with access method `{}`",
-										ac
-									);
+									trace!("Signing in to database with access method `{}`", ac);
 									// Create the authentication token
-									let enc =
-										encode(&Header::new(iss.alg.into()), &claims, &key);
+									let enc = encode(&Header::new(iss.alg.into()), &claims, &key);
 									// Set the authentication on the session
 									session.tk = Some((&claims).into());
 									session.ns = Some(ns.clone());
@@ -296,9 +304,7 @@ pub async fn db_access(
 											token,
 											refresh,
 										}),
-										_ => Err(anyhow::Error::new(
-											Error::TokenMakingFailed,
-										)),
+										_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 									}
 								}
 								_ => Err(anyhow::Error::new(Error::NoRecordFound)),
@@ -321,9 +327,7 @@ pub async fn db_access(
 								if *INSECURE_FORWARD_ACCESS_ERRORS {
 									Err(e)
 								} else {
-									Err(anyhow::Error::new(
-										Error::AccessRecordSigninQueryFailed,
-									))
+									Err(anyhow::Error::new(Error::AccessRecordSigninQueryFailed))
 								}
 							}
 						},
@@ -403,9 +407,12 @@ pub async fn ns_access(
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	let ns_def = match tx.get_ns_by_name(&ns).await? {
 		Some(ns) => ns,
-		None => return Err(Error::NsNotFound {
-			name: ns.to_string(),
-		}.into()),
+		None => {
+			return Err(Error::NsNotFound {
+				name: ns.to_string(),
+			}
+			.into());
+		}
 	};
 
 	// Ensure that the readonly transaction is cancelled
@@ -416,10 +423,10 @@ pub async fn ns_access(
 		return Err(Error::AccessNsNotFound {
 			ac: ac.to_string(),
 			ns: ns.to_string(),
-		}.into());
+		}
+		.into());
 	};
 
-	
 	// Check the provided access method exists
 	match &access.kind {
 		AccessType::Bearer(at) => {
@@ -429,7 +436,16 @@ pub async fn ns_access(
 				None => bail!(Error::AccessBearerMissingKey),
 			};
 
-			signin_bearer(kvs, session, Some((ns_def.namespace_id, ns)), None, Arc::clone(&access), &at, key).await
+			signin_bearer(
+				kvs,
+				session,
+				Some((ns_def.namespace_id, ns)),
+				None,
+				Arc::clone(&access),
+				&at,
+				key,
+			)
+			.await
 		}
 		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 	}
@@ -541,18 +557,19 @@ pub async fn root_access(
 ) -> Result<SigninData> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
-	
+
 	// Fetch the specified access method from storage
 	let Some(access) = tx.get_root_access(&ac).await? else {
 		tx.cancel().await?;
 		return Err(Error::AccessRootNotFound {
 			ac: ac.to_string(),
-		}.into());
+		}
+		.into());
 	};
 
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
-	
+
 	// Check the provided access method exists
 	// Check the access method type
 	match access.kind.clone() {
@@ -595,9 +612,7 @@ pub async fn signin_bearer(
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access grant from storage
 	let gr = match (&ns, &db) {
-		(Some((ns, _)), Some((db, _))) => {
-			tx.get_db_access_grant(*ns, *db, &av.name, &kid).await
-		},
+		(Some((ns, _)), Some((db, _))) => tx.get_db_access_grant(*ns, *db, &av.name, &kid).await,
 		(Some((ns, _)), None) => tx.get_ns_access_grant(*ns, &av.name, &kid).await,
 		(None, None) => tx.get_root_access_grant(&av.name, &kid).await,
 		(None, Some(_)) => bail!(Error::NsEmpty),
@@ -624,11 +639,13 @@ pub async fn signin_bearer(
 		let tx = kvs.transaction(Read, Optimistic).await?;
 		// Fetch the specified user from storage.
 		let user = match (&ns, &db) {
-			(Some((ns, _)), Some((db, _))) => tx.expect_db_user(*ns, *db, user).await.map_err(|e| {
-				debug!("Error retrieving user for bearer access to database `{ns}/{db}`: {e}");
-				// Return opaque error to avoid leaking grant subject existence.
-				Error::InvalidAuth
-			}),
+			(Some((ns, _)), Some((db, _))) => {
+				tx.expect_db_user(*ns, *db, user).await.map_err(|e| {
+					debug!("Error retrieving user for bearer access to database `{ns}/{db}`: {e}");
+					// Return opaque error to avoid leaking grant subject existence.
+					Error::InvalidAuth
+				})
+			}
 			(Some((ns, _)), None) => tx.expect_ns_user(*ns, user).await.map_err(|e| {
 				debug!("Error retrieving user for bearer access to namespace `{ns}`: {e}");
 				// Return opaque error to avoid leaking grant subject existence.

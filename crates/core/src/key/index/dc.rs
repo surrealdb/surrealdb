@@ -116,7 +116,12 @@ impl<'a> Dc<'a> {
 	///
 	/// # Returns
 	/// The encoded root key as a byte vector
-	pub(crate) fn new_root(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Result<Vec<u8>> {
+	pub(crate) fn new_root(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+	) -> Result<Vec<u8>> {
 		DcPrefix::new(ns, db, tb, ix).encode_key()
 	}
 

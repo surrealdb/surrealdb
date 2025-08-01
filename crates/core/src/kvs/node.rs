@@ -253,8 +253,10 @@ impl Datastore {
 					// Log the namespace
 					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
 					// Iterate over the table live queries
-					let beg = crate::key::table::lq::prefix(db.namespace_id, db.database_id, &tb.name)?;
-					let end = crate::key::table::lq::suffix(db.namespace_id, db.database_id, &tb.name)?;
+					let beg =
+						crate::key::table::lq::prefix(db.namespace_id, db.database_id, &tb.name)?;
+					let end =
+						crate::key::table::lq::suffix(db.namespace_id, db.database_id, &tb.name)?;
 					let mut next = Some(beg..end);
 					let txn = self.transaction(Write, Optimistic).await?;
 					while let Some(rng) = next {

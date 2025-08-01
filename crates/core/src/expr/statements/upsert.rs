@@ -54,7 +54,9 @@ impl UpsertStatement {
 		let ctx = stm.setup_timeout(ctx)?;
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
-		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
+
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let stm_ctx = StatementContext::new(&ctx, opt, ns, db, &stm)?;
 		// Loop over the upsert targets
 		for w in self.what.0.iter() {
 			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;

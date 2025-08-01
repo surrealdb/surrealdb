@@ -26,14 +26,15 @@ impl RemoveBucketStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let Some(bu) = txn.get_db_bucket(ns, db, &self.name).await? else {
 			if self.if_exists {
 				return Ok(Value::None);
 			} else {
 				return Err(Error::BuNotFound {
 					name: self.name.to_raw(),
-				}.into());
+				}
+				.into());
 			}
 		};
 

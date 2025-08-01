@@ -8,9 +8,13 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	err::Error, expr::{
-		fmt::{fmt_separated_by, Fmt}, Kind, Object, Value
-	}, sql::ToSql, syn
+	err::Error,
+	expr::{
+		Kind, Object, Value,
+		fmt::{Fmt, fmt_separated_by},
+	},
+	sql::ToSql,
+	syn,
 };
 
 #[revisioned(revision = 1)]

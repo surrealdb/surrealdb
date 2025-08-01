@@ -43,7 +43,7 @@ impl DefineApiStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
 		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
 			if self.if_not_exists {

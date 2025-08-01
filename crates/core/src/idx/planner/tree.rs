@@ -721,7 +721,7 @@ struct SchemaCache {
 
 impl SchemaCache {
 	async fn new(ctx: &Context, opt: &Options, table: &Table, tx: &Transaction) -> Result<Self> {
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let indexes = tx.all_tb_indexes(ns, db, table).await?;
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;
 		Ok(Self {

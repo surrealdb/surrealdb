@@ -1,8 +1,6 @@
-use super::{Datastore, LockType, TransactionType};
 use crate::err::Error;
 use crate::kvs::KVValue;
 use anyhow::Result;
-use std::sync::Arc;
 
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub struct MajorVersion(u16);

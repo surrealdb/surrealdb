@@ -1,10 +1,14 @@
 use std::fmt::{Display, Formatter};
 
+use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
-use revision::{revisioned, Revisioned};
 
-use crate::{catalog::NamespaceId, expr::{statements::info::InfoStructure, ChangeFeed, Value}, kvs::impl_kv_value_revisioned, sql::ToSql};
-
+use crate::{
+	catalog::NamespaceId,
+	expr::{ChangeFeed, Value, statements::info::InfoStructure},
+	kvs::impl_kv_value_revisioned,
+	sql::ToSql,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
@@ -13,22 +17,22 @@ pub struct DatabaseId(pub u32);
 impl_kv_value_revisioned!(DatabaseId);
 
 impl Revisioned for DatabaseId {
-    fn revision() -> u16 {
-        1
-    }
+	fn revision() -> u16 {
+		1
+	}
 
-    #[inline]
+	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-        self.0.serialize_revisioned(writer)
-    }
+		self.0.serialize_revisioned(writer)
+	}
 
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-        Revisioned::deserialize_revisioned(reader).map(DatabaseId)
-    }
+		Revisioned::deserialize_revisioned(reader).map(DatabaseId)
+	}
 }
 
 impl Display for DatabaseId {
@@ -52,7 +56,11 @@ impl_kv_value_revisioned!(DatabaseDefinition);
 
 impl ToSql for DatabaseDefinition {
 	fn to_sql(&self) -> String {
-		format!("DEFINE DATABASE {} {}", self.name, self.comment.as_ref().map(|c| format!("COMMENT {}", c)).unwrap_or_default())
+		format!(
+			"DEFINE DATABASE {} {}",
+			self.name,
+			self.comment.as_ref().map(|c| format!("COMMENT {}", c)).unwrap_or_default()
+		)
 	}
 }
 

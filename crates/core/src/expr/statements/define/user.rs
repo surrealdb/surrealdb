@@ -108,7 +108,7 @@ impl DefineUserStatement {
 			Base::Ns => {
 				// Fetch the transaction
 				let txn = ctx.tx();
-				let ns = ctx.get_ns_id(opt)?;
+				let ns = ctx.get_ns_id(opt).await?;
 				// Check if the definition exists
 				if txn.get_ns_user(ns, &self.name).await.is_ok() {
 					if self.if_not_exists {
@@ -148,7 +148,7 @@ impl DefineUserStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				let (ns, db) = ctx.get_ns_db_ids(opt)?;
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 				if txn.get_db_user(ns, db, &self.name).await.is_ok() {
 					if self.if_not_exists {
 						return Ok(Value::None);
@@ -168,7 +168,8 @@ impl DefineUserStatement {
 				};
 
 				// Process the statement
-				let key = crate::key::database::us::new(db.namespace_id, db.database_id, &self.name);
+				let key =
+					crate::key::database::us::new(db.namespace_id, db.database_id, &self.name);
 				txn.set(
 					&key,
 					&DefineUserStatement {

@@ -1,19 +1,18 @@
 use super::Transaction;
 use crate::catalog::TableDefinition;
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::Value;
 use crate::expr::paths::EDGE;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
-use crate::expr::statements::DefineTableStatement;
 use crate::key::thing;
 use crate::sql::ToSql;
 use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
-use crate::catalog::{DatabaseId, NamespaceId};
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -228,8 +227,11 @@ impl Transaction {
 		cfg: Config,
 		chn: Sender<Vec<u8>>,
 	) -> Result<()> {
-		let db = self.get_db_by_name(ns, db).await?.ok_or_else(|| anyhow::Error::new(Error::DbNotFound { name: db.to_owned() }))?;
-
+		let db = self.get_db_by_name(ns, db).await?.ok_or_else(|| {
+			anyhow::Error::new(Error::DbNotFound {
+				name: db.to_owned(),
+			})
+		})?;
 
 		// Output USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
 		self.export_metadata(&cfg, &chn, db.namespace_id, db.database_id).await?;

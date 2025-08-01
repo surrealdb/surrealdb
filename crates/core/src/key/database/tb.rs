@@ -1,7 +1,7 @@
 //! Stores a DEFINE TABLE config definition
 
-use crate::catalog::{DatabaseId, NamespaceId};
 use crate::catalog::TableDefinition;
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;

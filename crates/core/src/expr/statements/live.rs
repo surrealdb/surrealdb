@@ -95,7 +95,7 @@ impl LiveStatement {
 				// Store the current Node ID
 				stm.node = nid.into();
 				// Get the NS and DB
-				let (ns, db) = ctx.get_ns_db_ids(opt)?;
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 				// Store the live info
 				let lq = Live {
 					ns,

@@ -46,7 +46,7 @@ impl Document {
 		// Get the record id
 		if let Some(rid) = &self.id {
 			// Get the namespace / database
-			let (ns, db) = ctx.get_ns_db_ids(opt)?;
+			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 			// Purge the record data
 			txn.del_record(ns, db, &rid.tb, &rid.id).await?;
 			// Purge the record edges
@@ -109,7 +109,8 @@ impl Document {
 					let Some(fd) = txn.get_tb_field(ns, db, ref_key.ft, ref_key.ff).await? else {
 						return Err(Error::FdNotFound {
 							name: ref_key.ff.to_string(),
-						}.into());
+						}
+						.into());
 					};
 					// Check if there is a reference defined on the field
 					if let Some(reference) = &fd.reference {

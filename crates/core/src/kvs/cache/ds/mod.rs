@@ -50,7 +50,12 @@ impl DatastoreCache {
 		self.cache.clear();
 	}
 
-	pub fn get_live_queries_version(&self, ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Uuid> {
+	pub fn get_live_queries_version(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+	) -> Result<Uuid> {
 		// Get the live-queries cache version
 		let key = Lookup::Lvv(ns, db, tb);
 		let version = match self.get(&key) {

@@ -12,7 +12,6 @@ use crate::expr::order::Ordering;
 use crate::expr::output::Output;
 use crate::expr::split::Splits;
 use crate::expr::start::Start;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::access::AccessStatement;
 use crate::expr::statements::create::CreateStatement;
 use crate::expr::statements::delete::DeleteStatement;

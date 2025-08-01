@@ -1,6 +1,6 @@
 //! Stores a DEFINE PARAM config definition
-use crate::expr::statements::define::DefineParamStatement;
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::expr::statements::define::DefineParamStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
 use crate::kvs::KVKey;

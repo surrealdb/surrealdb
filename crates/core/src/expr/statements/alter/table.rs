@@ -1,12 +1,12 @@
 use crate::catalog::TableKind;
-use crate::expr::Kind;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::Kind;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Ident, Permissions, Strand, Value};
+use crate::expr::{Base, ChangeFeed, Ident, Permissions, Value};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
 
@@ -51,7 +51,7 @@ impl AlterTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 
@@ -64,7 +64,8 @@ impl AlterTableStatement {
 				} else {
 					return Err(Error::TbNotFound {
 						name: self.name.to_string(),
-					}.into());
+					}
+					.into());
 				}
 			}
 		};

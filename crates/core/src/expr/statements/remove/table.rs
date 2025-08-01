@@ -2,7 +2,6 @@ use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::{self, Notification, Options};
 use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Value};
 use crate::iam::{Action, ResourceKind};
 
@@ -30,7 +29,7 @@ impl RemoveTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Remove the index stores
@@ -48,7 +47,8 @@ impl RemoveTableStatement {
 
 			return Err(Error::TbNotFound {
 				name: self.name.to_string(),
-			}.into());
+			}
+			.into());
 		};
 
 		// Get the foreign tables

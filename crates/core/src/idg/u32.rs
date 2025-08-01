@@ -58,6 +58,7 @@ impl U32 {
 		doc_id
 	}
 
+	#[expect(unused)]
 	pub(crate) fn remove_id(&mut self, id: Id) {
 		if let Some(available_ids) = &mut self.available_ids {
 			available_ids.insert(id);

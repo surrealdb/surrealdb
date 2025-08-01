@@ -37,7 +37,11 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	tr.commit().await.unwrap();
 	// Get the versionstamp for timestamp 0
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs1 = tr.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id).await.unwrap().unwrap();
+	let vs1 = tr
+		.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id)
+		.await
+		.unwrap()
+		.unwrap();
 	tr.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 1
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
@@ -45,7 +49,11 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	tr.commit().await.unwrap();
 	// Get the versionstamp for timestamp 1
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs2 = tr.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id).await.unwrap().unwrap();
+	let vs2 = tr
+		.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id)
+		.await
+		.unwrap()
+		.unwrap();
 	tr.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 2
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
@@ -53,7 +61,11 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	tr.commit().await.unwrap();
 	// Get the versionstamp for timestamp 2
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs3 = tr.get_versionstamp_from_timestamp(2, db.namespace_id, db.database_id).await.unwrap().unwrap();
+	let vs3 = tr
+		.get_versionstamp_from_timestamp(2, db.namespace_id, db.database_id)
+		.await
+		.unwrap()
+		.unwrap();
 	tr.commit().await.unwrap();
 	assert!(vs1 < vs2);
 	assert!(vs2 < vs3);
@@ -78,7 +90,11 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 
 	// Get the versionstamp for timestamp 0
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs1 = tx.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id).await.unwrap().unwrap();
+	let vs1 = tx
+		.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id)
+		.await
+		.unwrap()
+		.unwrap();
 	tx.commit().await.unwrap();
 
 	// Give the current versionstamp a timestamp of 1
@@ -88,14 +104,21 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 
 	// Get the versionstamp for timestamp 1
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs2 = tx.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id).await.unwrap().unwrap();
+	let vs2 = tx
+		.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id)
+		.await
+		.unwrap()
+		.unwrap();
 	tx.commit().await.unwrap();
 
 	assert!(vs1 < vs2);
 
 	// Scan range
-	let start = crate::key::database::ts::new(db.namespace_id, db.database_id, 0).encode_key().unwrap();
-	let end = crate::key::database::ts::new(db.namespace_id, db.database_id, u64::MAX).encode_key().unwrap();
+	let start =
+		crate::key::database::ts::new(db.namespace_id, db.database_id, 0).encode_key().unwrap();
+	let end = crate::key::database::ts::new(db.namespace_id, db.database_id, u64::MAX)
+		.encode_key()
+		.unwrap();
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	let scanned = tx.scan(start.clone()..end.clone(), u32::MAX, None).await.unwrap();
 	tx.commit().await.unwrap();

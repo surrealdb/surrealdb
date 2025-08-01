@@ -1,8 +1,8 @@
 //! Stores the key prefix for all keys under a database
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::namespace::all::NamespaceRoot;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
+use crate::key::namespace::all::NamespaceRoot;
 use crate::kvs::KVKey;
 
 use serde::{Deserialize, Serialize};

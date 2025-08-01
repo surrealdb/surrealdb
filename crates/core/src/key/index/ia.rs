@@ -1,6 +1,9 @@
 //! Store appended records for concurrent index building
-use crate::{catalog::{DatabaseId, NamespaceId}, kvs::KVKey};
 use crate::kvs::index::Appending;
+use crate::{
+	catalog::{DatabaseId, NamespaceId},
+	kvs::KVKey,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 

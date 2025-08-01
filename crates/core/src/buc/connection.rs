@@ -1,5 +1,7 @@
 use crate::{
-	catalog::{DatabaseId, NamespaceId}, cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED}, err::Error
+	catalog::{DatabaseId, NamespaceId},
+	cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED},
+	err::Error,
 };
 use dashmap::DashMap;
 use std::sync::Arc;

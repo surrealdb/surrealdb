@@ -1,6 +1,5 @@
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
-use crate::dbs::Options;
 use crate::expr::statements::DefineIndexStatement;
 use crate::expr::{Array, Ident, Number, Thing, Value};
 use crate::idx::docids::DocId;
@@ -411,7 +410,13 @@ pub(super) enum ValueType {
 }
 
 impl ValueType {
-	fn prefix_beg(&self, ns: NamespaceId, db: DatabaseId, ix_what: &Ident, ix_name: &Ident) -> Result<Vec<u8>> {
+	fn prefix_beg(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix_what: &Ident,
+		ix_name: &Ident,
+	) -> Result<Vec<u8>> {
 		match self {
 			Self::None => Index::prefix_beg(ns, db, ix_what, ix_name),
 			Self::NumberInt => Index::prefix_ids_beg(
@@ -438,7 +443,13 @@ impl ValueType {
 		}
 	}
 
-	fn prefix_end(&self, ns: NamespaceId, db: DatabaseId, ix_what: &Ident, ix_name: &Ident) -> Result<Vec<u8>> {
+	fn prefix_end(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix_what: &Ident,
+		ix_name: &Ident,
+	) -> Result<Vec<u8>> {
 		match self {
 			Self::None => Index::prefix_end(ns, db, ix_what, ix_name),
 			Self::NumberInt => Index::prefix_ids_end(
@@ -872,7 +883,8 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<B>
 	where
-		F: Fn(NamespaceId, DatabaseId, &DefineIndexStatement, Value) -> Result<ThingIterator> + Copy,
+		F: Fn(NamespaceId, DatabaseId, &DefineIndexStatement, Value) -> Result<ThingIterator>
+			+ Copy,
 	{
 		while !ctx.is_done(true).await? {
 			if let Some(current_local) = &mut self.current_local {
@@ -896,7 +908,8 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<usize>
 	where
-		F: Fn(NamespaceId, DatabaseId, &DefineIndexStatement, Value) -> Result<ThingIterator> + Copy,
+		F: Fn(NamespaceId, DatabaseId, &DefineIndexStatement, Value) -> Result<ThingIterator>
+			+ Copy,
 	{
 		while !ctx.is_done(true).await? {
 			if let Some(current_local) = &mut self.current_local {
@@ -932,20 +945,22 @@ impl IndexJoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B> {
-		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement, value: Value| {
-			let array = Array::from(value);
-			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array)?;
-			Ok(ThingIterator::IndexEqual(it))
-		};
+		let new_iter =
+			|ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement, value: Value| {
+				let array = Array::from(value);
+				let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+				Ok(ThingIterator::IndexEqual(it))
+			};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
 
 	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
-		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement, value: Value| {
-			let array = Array::from(value);
-			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array)?;
-			Ok(ThingIterator::IndexEqual(it))
-		};
+		let new_iter =
+			|ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement, value: Value| {
+				let array = Array::from(value);
+				let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+				Ok(ThingIterator::IndexEqual(it))
+			};
 		self.1.next_count(ctx, tx, limit, new_iter).await
 	}
 }
@@ -1331,20 +1346,22 @@ impl UniqueJoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<B> {
-		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement, value: Value| {
-			let array = Array::from(value.clone());
-			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
-			Ok(ThingIterator::UniqueEqual(it))
-		};
+		let new_iter =
+			|ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement, value: Value| {
+				let array = Array::from(value.clone());
+				let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+				Ok(ThingIterator::UniqueEqual(it))
+			};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
 
 	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
-		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement, value: Value| {
-			let array = Array::from(value.clone());
-			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
-			Ok(ThingIterator::UniqueEqual(it))
-		};
+		let new_iter =
+			|ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement, value: Value| {
+				let array = Array::from(value.clone());
+				let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
+				Ok(ThingIterator::UniqueEqual(it))
+			};
 		self.1.next_count(ctx, tx, limit, new_iter).await
 	}
 }

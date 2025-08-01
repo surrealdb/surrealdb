@@ -56,7 +56,7 @@ impl RemoveAccessStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let ns = ctx.get_ns_id(opt)?;
+				let ns = ctx.get_ns_id(opt).await?;
 				let Some(ac) = txn.get_ns_access(ns, &self.name).await? else {
 					if self.if_exists {
 						return Ok(Value::None);
@@ -83,7 +83,7 @@ impl RemoveAccessStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let (ns, db) = ctx.get_ns_db_ids(opt)?;
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 				let Some(ac) = txn.get_db_access(ns, db, &self.name).await? else {
 					if self.if_exists {
 						return Ok(Value::None);

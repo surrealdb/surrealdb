@@ -29,7 +29,14 @@ impl KVKey for Hl<'_> {
 }
 
 impl<'a> Hl<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, layer: u16, chunk: u32) -> Self {
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+		layer: u16,
+		chunk: u32,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

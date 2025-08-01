@@ -4,7 +4,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, Ident, Permissions, Strand, Value};
 use crate::expr::{Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
@@ -48,7 +47,7 @@ impl AlterFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the table definition
@@ -60,7 +59,10 @@ impl AlterFieldStatement {
 					return Ok(Value::None);
 				}
 
-				return Err(Error::FdNotFound { name: name }.into());
+				return Err(Error::FdNotFound {
+					name,
+				}
+				.into());
 			}
 		};
 		// Process the statement
@@ -119,7 +121,8 @@ impl AlterFieldStatement {
 		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
 			return Err(Error::TbNotFound {
 				name: self.what.to_string(),
-			}.into());
+			}
+			.into());
 		};
 		txn.set(
 			&key,

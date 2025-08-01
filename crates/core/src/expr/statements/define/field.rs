@@ -1,5 +1,5 @@
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableKind};
 use crate::catalog::Relation;
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableKind};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -7,7 +7,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::reference::Reference;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::expr::{Literal, Part};
@@ -72,7 +71,7 @@ impl DefineFieldStatement {
 		};
 
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db).await?;
@@ -91,7 +90,7 @@ impl DefineFieldStatement {
 				});
 			}
 		}
-		
+
 		let tb = {
 			let (ns, db) = opt.ns_db()?;
 			txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?
@@ -99,7 +98,7 @@ impl DefineFieldStatement {
 
 		// Process the statement
 		let key = crate::key::table::fd::new(ns, db, &tb.name, &fd);
-		
+
 		txn.set(
 			&key,
 			&DefineFieldStatement {
@@ -120,12 +119,7 @@ impl DefineFieldStatement {
 		};
 
 		let key = crate::key::database::tb::new(ns, db, &self.what);
-		txn.set(
-			&key,
-			&tb_def,
-			None,
-		)
-		.await?;
+		txn.set(&key, &tb_def, None).await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear_tb(ns, db, &self.what);
@@ -351,8 +345,9 @@ impl DefineFieldStatement {
 
 		if let Some(Kind::References(Some(ft), Some(ff))) = &self.kind {
 			// Obtain the field definition
-			let (ns, db) = ctx.get_ns_db_ids(opt)?;
-			let Some(fd) = ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await? else {
+			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+			let Some(fd) = ctx.tx().get_tb_field(ns, db, &ft.to_string(), &ff.to_string()).await?
+			else {
 				return Ok(None);
 			};
 

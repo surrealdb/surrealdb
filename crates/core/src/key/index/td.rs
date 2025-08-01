@@ -53,7 +53,13 @@ impl Categorise for TdRoot<'_> {
 }
 
 impl<'a> TdRoot<'a> {
-	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, term: &'a str) -> Self {
+	pub(crate) fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+		term: &'a str,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

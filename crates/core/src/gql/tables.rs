@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::dbs::Session;
 use crate::expr::order::{OrderList, Ordering};
-use crate::expr::statements::{DefineFieldStatement, DefineTableStatement, SelectStatement};
+use crate::expr::statements::{DefineFieldStatement, SelectStatement};
 use crate::expr::{self, Table};
 use crate::expr::{Cond, Fields};
 use crate::expr::{Expression, Value as SqlValue};

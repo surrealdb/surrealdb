@@ -63,9 +63,6 @@ impl DefineDatabaseStatement {
 			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
 		};
 
-		
-		let database_id = txn.lock().await.get_next_db_id(nsv.namespace_id).await?;
-		
 		// Set the database definition, keyed by namespace name and database name.
 		let catalog_key = crate::key::catalog::db::new(ns, &self.name);
 		let db_def = DatabaseDefinition {
@@ -75,29 +72,20 @@ impl DefineDatabaseStatement {
 			comment: self.comment.clone().map(|s| s.to_raw()),
 			changefeed: self.changefeed.clone(),
 		};
-		txn.set(
-			&catalog_key,
-			&db_def,
-			None,
-		)
-		.await?;
+		txn.set(&catalog_key, &db_def, None).await?;
 
 		// Set the database definition, keyed by namespace ID and database ID.
 		let key = crate::key::namespace::db::new(nsv.namespace_id, database_id);
-		txn.set(
-			&key,
-			&db_def,
-			None,
-		)
-		.await?;
+		txn.set(&key, &db_def, None).await?;
 
 		// Clear the cache
-		// TODO: STU: Do we need to clear the cache now that we're ID based?
-		// if let Some(cache) = ctx.get_cache() {
-		// 	cache.clear();
-		// }
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear();
+		}
+
 		// Clear the cache
 		txn.clear();
+
 		// Ok all good
 		Ok(Value::None)
 	}

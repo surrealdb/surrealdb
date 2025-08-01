@@ -1,7 +1,10 @@
 //! Stores Vector of an HNSW index
-use crate::{catalog::{DatabaseId, NamespaceId}, idx::trees::hnsw::ElementId};
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::KVKey;
+use crate::{
+	catalog::{DatabaseId, NamespaceId},
+	idx::trees::hnsw::ElementId,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +30,13 @@ impl KVKey for He<'_> {
 }
 
 impl<'a> He<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str, element_id: ElementId) -> Self {
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: &'a str,
+		element_id: ElementId,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

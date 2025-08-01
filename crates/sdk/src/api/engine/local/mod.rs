@@ -520,10 +520,6 @@ async fn export_file(
 	chn: async_channel::Sender<Vec<u8>>,
 	config: Option<DbExportConfig>,
 ) -> Result<()> {
-    let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-
-
-
 	let res = match config {
 		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,
 		None => kvs.export(sess, chn).await?.await,
@@ -551,16 +547,25 @@ async fn export_ml(
 		version,
 	}: MlExportConfig,
 ) -> Result<()> {
-	// Ensure a NS and DB are set
 	let (nsv, dbv) = check_ns_db(sess)?;
 	// Check the permissions level
 	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
-	// Start a new readonly transaction
+
+	// Ensure a NS and DB are set
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+	let Some(db) = tx.get_db_by_name(&nsv, &dbv).await? else {
+		anyhow::bail!("Database not found".to_string());
+	};
+	tx.cancel().await?;
+
 	// Attempt to get the model definition
-	let info = tx.get_db_model(&nsv, &dbv, &name, &version).await?;
+	let Some(model) = tx.get_db_model(db.namespace_id, db.database_id, &name, &version).await?
+	else {
+		// Attempt to get the model definition
+		anyhow::bail!("Model not found".to_string());
+	};
 	// Export the file data in to the store
-	let mut data = crate::obs::stream(info.hash.clone()).await?;
+	let mut data = crate::obs::stream(model.hash.clone()).await?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {

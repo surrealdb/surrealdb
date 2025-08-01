@@ -53,7 +53,13 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hi::new(NamespaceId(1), DatabaseId(2), "testtb", "testix", Id::String("testid".to_string()));
+		let val = Hi::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			"testtb",
+			"testix",
+			Id::String("testid".to_string()),
+		);
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

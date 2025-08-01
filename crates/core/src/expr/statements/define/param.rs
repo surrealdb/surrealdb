@@ -49,7 +49,7 @@ impl DefineParamStatement {
 		let txn = ctx.tx();
 
 		// Check if the definition exists
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		if txn.get_db_param(ns, db, &self.name).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);

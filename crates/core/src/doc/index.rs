@@ -76,7 +76,7 @@ impl Document {
 		n: Option<Vec<Value>>,
 		rid: &Thing,
 	) -> Result<()> {
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 
 		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
@@ -306,7 +306,14 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index> {
-		Ok(key::index::Index::new(self.ns, self.db, &self.ix.what, &self.ix.name, v, Some(&self.rid.id)))
+		Ok(key::index::Index::new(
+			self.ns,
+			self.db,
+			&self.ix.what,
+			&self.ix.name,
+			v,
+			Some(&self.rid.id),
+		))
 	}
 
 	async fn index_unique(&mut self, ctx: &Context) -> Result<()> {
@@ -395,7 +402,8 @@ impl<'a> IndexOperation<'a> {
 	async fn index_search(&mut self, stk: &mut Stk, ctx: &Context, p: &SearchParams) -> Result<()> {
 		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.what, &self.ix.name);
 
-		let mut ft = SearchIndex::new(ctx, self.ns, self.db, &p.az, ikb, p, TransactionType::Write).await?;
+		let mut ft =
+			SearchIndex::new(ctx, self.ns, self.db, &p.az, ikb, p, TransactionType::Write).await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(stk, ctx, self.opt, self.rid, n).await?;
@@ -411,7 +419,7 @@ impl<'a> IndexOperation<'a> {
 		ctx: &Context,
 		p: &FullTextParams,
 	) -> Result<()> {
-		let (ns, db) = ctx.get_ns_db_ids(self.opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(self.opt).await?;
 		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
 		let tx = ctx.tx();
 		// Build a FullText instance
@@ -439,7 +447,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_mtree(&mut self, stk: &mut Stk, ctx: &Context, p: &MTreeParams) -> Result<()> {
 		let txn = ctx.tx();
-		let (ns, db) = ctx.get_ns_db_ids(self.opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(self.opt).await?;
 		let ikb = IndexKeyBase::new(ns, db, &self.ix.what, &self.ix.name);
 		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data

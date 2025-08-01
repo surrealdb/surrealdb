@@ -4,10 +4,10 @@ mod lru;
 mod mapper;
 pub(crate) mod tree;
 
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::Index;
 use crate::expr::index::HnswParams;
 use crate::expr::statements::DefineIndexStatement;
@@ -239,7 +239,7 @@ impl IndexStores {
 		ix: &DefineIndexStatement,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
 	}
@@ -309,7 +309,12 @@ impl IndexStores {
 		Ok(())
 	}
 
-	async fn remove_index(&self, ns: NamespaceId, db: DatabaseId, ix: &DefineIndexStatement) -> Result<()> {
+	async fn remove_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &DefineIndexStatement,
+	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
 			let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 			self.remove_hnsw_index(ikb).await?;

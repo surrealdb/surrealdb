@@ -5,7 +5,6 @@ use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
@@ -55,8 +54,8 @@ impl DefineIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
-		
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let tb = {
@@ -89,7 +88,8 @@ impl DefineIndexStatement {
 				let Some(Part::Field(first)) = idiom.0.first() else {
 					continue;
 				};
-				txn.get_tb_field(tb.namespace_id, tb.database_id, &self.what, &first.to_string()).await?;
+				txn.get_tb_field(tb.namespace_id, tb.database_id, &self.what, &first.to_string())
+					.await?;
 			}
 		}
 
@@ -177,10 +177,11 @@ impl DefineIndexStatement {
 		_doc: Option<&CursorDoc>,
 		blocking: bool,
 	) -> Result<()> {
+		let (ns, db) = ctx.get_ns_db_ids(&opt).await?;
 		let rcv = ctx
 			.get_index_builder()
 			.ok_or_else(|| Error::unreachable("No Index Builder"))?
-			.build(ctx, opt.clone(), self.clone().into(), blocking)?;
+			.build(ctx, opt.clone(), ns, db, self.clone().into(), blocking)?;
 		if let Some(rcv) = rcv {
 			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
 		} else {

@@ -45,13 +45,15 @@ pub async fn generate_schema(
 		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
 	};
 
-	let cg = tx.get_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(|e| {
-		if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
-			GqlError::NotConfigured
-		} else {
-			GqlError::DbError(e)
-		}
-	})?;
+	let cg = tx.get_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(
+		|e| {
+			if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
+				GqlError::NotConfigured
+			} else {
+				GqlError::DbError(e)
+			}
+		},
+	)?;
 	let config = cg.inner.clone().try_into_graphql()?;
 
 	let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
@@ -101,7 +103,17 @@ pub async fn generate_schema(
 
 	match tbs {
 		Some(tbs) if !tbs.is_empty() => {
-			query = process_tbs(tbs, query, &mut types, &tx, db_def.namespace_id, db_def.database_id, session, datastore).await?;
+			query = process_tbs(
+				tbs,
+				query,
+				&mut types,
+				&tx,
+				db_def.namespace_id,
+				db_def.database_id,
+				session,
+				datastore,
+			)
+			.await?;
 		}
 		_ => {}
 	}

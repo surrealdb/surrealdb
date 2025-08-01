@@ -55,7 +55,7 @@ impl DefineConfigStatement {
 			ConfigInner::Api(_) => "api",
 		};
 		// Check if the definition exists
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		if txn.get_db_config(ns, db, cg).await.is_ok() {
 			if self.if_not_exists {
 				return Ok(Value::None);

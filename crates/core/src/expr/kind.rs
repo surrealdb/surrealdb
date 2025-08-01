@@ -411,7 +411,9 @@ impl ToSql for Kind {
 			Kind::Literal(l) => sql.push_str(&format!("{}", l)),
 			Kind::References(t, i) => match (t, i) {
 				(Some(t), None) => sql.push_str(&format!("references<{}>", t.to_string())),
-				(Some(t), Some(i)) => sql.push_str(&format!("references<{}, {}>", t.to_string(), i.to_string())),
+				(Some(t), Some(i)) => {
+					sql.push_str(&format!("references<{}, {}>", t.to_string(), i.to_string()))
+				}
 				(None, _) => sql.push_str("references"),
 			},
 			Kind::File(k) => {

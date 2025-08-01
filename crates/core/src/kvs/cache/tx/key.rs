@@ -1,5 +1,8 @@
 use super::lookup::Lookup;
-use crate::{catalog::{DatabaseId, NamespaceId}, expr::id::Id};
+use crate::{
+	catalog::{DatabaseId, NamespaceId},
+	expr::id::Id,
+};
 use uuid::Uuid;
 
 #[derive(Clone, Hash, Eq, PartialEq)]

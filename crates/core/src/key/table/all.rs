@@ -1,7 +1,7 @@
 //! Stores the key prefix for all keys under a table
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::catalog::{NamespaceId, DatabaseId};
 use crate::key::database::all::DatabaseRoot;
 use crate::kvs::KVKey;
 

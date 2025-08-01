@@ -2,7 +2,6 @@ use crate::catalog::TableDefinition;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::{Base, Ident, Idiom, Value};
 use crate::iam::{Action, ResourceKind};
 use anyhow::Result;
@@ -29,21 +28,22 @@ impl RemoveFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the field name
 		let name = self.name.to_string();
 		// Get the definition
-		let fd = match txn.get_tb_field(ns, db, &self.table_name, &name).await? {
+		let _fd = match txn.get_tb_field(ns, db, &self.table_name, &name).await? {
 			Some(x) => x,
 			None => {
 				if self.if_exists {
 					return Ok(Value::None);
 				} else {
 					return Err(Error::FdNotFound {
-						name: name,
-					}.into());
+						name,
+					}
+					.into());
 				}
 			}
 		};
@@ -55,7 +55,8 @@ impl RemoveFieldStatement {
 		let Some(tb) = txn.get_tb(ns, db, &self.table_name).await? else {
 			return Err(Error::TbNotFound {
 				name: self.table_name.to_string(),
-			}.into());
+			}
+			.into());
 		};
 
 		txn.set(

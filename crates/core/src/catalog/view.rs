@@ -1,8 +1,7 @@
-use revision::revisioned;
-use crate::expr::{Fields, Tables, Cond, Groups, Value};
 use crate::expr::statements::info::InfoStructure;
-use crate::map;
+use crate::expr::{Cond, Fields, Groups, Tables, Value};
 use crate::sql::ToSql;
+use revision::revisioned;
 
 use serde::{Deserialize, Serialize};
 
@@ -34,4 +33,3 @@ impl InfoStructure for ViewDefinition {
 		self.to_sql().into()
 	}
 }
-

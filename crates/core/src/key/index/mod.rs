@@ -183,17 +183,35 @@ impl<'a> Index<'a> {
 		Ok(beg)
 	}
 
-	fn prefix_ids(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
+	fn prefix_ids(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &str,
+		fd: &Array,
+	) -> Result<Vec<u8>> {
 		PrefixIds::new(ns, db, tb, ix, fd).encode_key()
 	}
 
-	pub fn prefix_ids_beg(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
+	pub fn prefix_ids_beg(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &str,
+		fd: &Array,
+	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0x00]);
 		Ok(beg)
 	}
 
-	pub fn prefix_ids_end(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str, fd: &Array) -> Result<Vec<u8>> {
+	pub fn prefix_ids_end(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &str,
+		fd: &Array,
+	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
 		beg.extend_from_slice(&[0xff]);
 		Ok(beg)
@@ -257,11 +275,13 @@ mod tests {
 		let fd = vec!["testfd1"].into();
 
 		let enc =
-			Index::prefix_ids_composite_beg(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd).unwrap();
+			Index::prefix_ids_composite_beg(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd)
+				.unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\x00");
 
 		let enc =
-			Index::prefix_ids_composite_end(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd).unwrap();
+			Index::prefix_ids_composite_end(NamespaceId(1), DatabaseId(2), "testtb", "testix", &fd)
+				.unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0*\0\0\0\x04testfd1\0\xff");
 	}
 }

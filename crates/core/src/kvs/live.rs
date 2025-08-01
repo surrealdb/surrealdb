@@ -1,4 +1,7 @@
-use crate::{catalog::{DatabaseId, NamespaceId}, kvs::impl_kv_value_revisioned};
+use crate::{
+	catalog::{DatabaseId, NamespaceId},
+	kvs::impl_kv_value_revisioned,
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 

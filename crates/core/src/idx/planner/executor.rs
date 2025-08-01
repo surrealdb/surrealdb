@@ -1,3 +1,4 @@
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -8,7 +9,6 @@ use crate::expr::{
 	Array, BooleanOperation, Cond, Expression, FlowResultExt as _, Idiom, Number, Object, Table,
 	Thing, Value,
 };
-use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::btdocids::BTreeDocIds;
 use crate::idx::ft::MatchRef;
@@ -160,7 +160,7 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let (ns, db) = ctx.get_ns_db_ids(opt)?;
+							let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 							let ix: &DefineIndexStatement = e.key();
 							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 							let si = SearchIndex::new(
@@ -201,7 +201,7 @@ impl InnerQueryExecutor {
 							}
 						}
 						Entry::Vacant(e) => {
-							let (ns, db) = ctx.get_ns_db_ids(opt)?;
+							let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 							let ix: &DefineIndexStatement = e.key();
 							let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 							let ft = FullTextIndex::new(
@@ -252,7 +252,7 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
-								let (ns, db) = ctx.get_ns_db_ids(opt)?;
+								let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 								let ix: &DefineIndexStatement = e.key();
 								let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
 								let tx = ctx.tx();
@@ -496,22 +496,14 @@ impl QueryExecutor {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::IndexRangeReverse(
-							IndexRangeReverseThingIterator::full_range(
-								ir,
-								ns,
-								db,
-								ix,
-							)?,
+							IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
 					None
 				} else {
 					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
-						ir,
-						ns,
-						db,
-						ix,
+						ir, ns, db, ix,
 					)?))
 				}
 			}
@@ -820,7 +812,9 @@ impl QueryExecutor {
 				let ranges = Self::get_ranges_variants(from, to);
 				if let Some(ranges) = ranges {
 					if ranges.len() == 1 {
-						return Ok(Some(Self::new_index_range_iterator(ir, ns, db, ix, &ranges[0])?));
+						return Ok(Some(Self::new_index_range_iterator(
+							ir, ns, db, ix, &ranges[0],
+						)?));
 					} else {
 						return Ok(Some(Self::new_multiple_index_range_iterator(
 							ir, ns, db, ix, &ranges,
@@ -839,7 +833,9 @@ impl QueryExecutor {
 				let ranges = Self::get_ranges_variants(from, to);
 				if let Some(ranges) = ranges {
 					if ranges.len() == 1 {
-						return Ok(Some(Self::new_unique_range_iterator(ir, ns, db, ix, &ranges[0])?));
+						return Ok(Some(Self::new_unique_range_iterator(
+							ir, ns, db, ix, &ranges[0],
+						)?));
 					} else {
 						return Ok(Some(Self::new_multiple_unique_range_iterator(
 							ir, ns, db, ix, &ranges,
@@ -961,22 +957,14 @@ impl QueryExecutor {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::UniqueRangeReverse(
-							UniqueRangeReverseThingIterator::full_range(
-								irf,
-								ns,
-								db,
-								ixr,
-							)?,
+							UniqueRangeReverseThingIterator::full_range(irf, ns, db, ixr)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
 					None
 				} else {
 					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
-						irf,
-						ns,
-						db,
-						ixr,
+						irf, ns, db, ixr,
 					)?))
 				}
 			}

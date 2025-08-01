@@ -1,4 +1,4 @@
-use crate::catalog::{TableKind, Relation};
+use crate::catalog::{Relation, TableKind};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
@@ -28,7 +28,7 @@ impl Document {
 		// Store the record edges
 		if let Workable::Relate(l, r, _) = &self.extras {
 			// Get the namespace / database
-			let (ns, db) = ctx.get_ns_db_ids(opt)?;
+			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 			// Get the record id
 			let rid = self.id()?;
 			// Get the transaction

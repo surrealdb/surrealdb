@@ -28,7 +28,7 @@ impl RemoveModelStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the defined model
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let ml = match txn.get_db_model(ns, db, &self.name, &self.version).await? {
 			Some(x) => x,
 			None => {
@@ -37,7 +37,8 @@ impl RemoveModelStatement {
 				}
 				return Err(Error::MlNotFound {
 					name: format!("{}<{}>", self.name, self.version),
-				}.into());
+				}
+				.into());
 			}
 		};
 		// Delete the definition

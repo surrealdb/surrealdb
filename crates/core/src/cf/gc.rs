@@ -30,7 +30,12 @@ pub async fn gc_all_at(lh: Option<&LeaseHandler>, tx: &Transaction, ts: u64) -> 
 
 // gc_ns deletes all change feed entries in the given namespace that are older than the given watermark.
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx, lh))]
-pub async fn gc_ns(lh: Option<&LeaseHandler>, tx: &Transaction, ts: u64, ns: NamespaceId) -> Result<()> {
+pub async fn gc_ns(
+	lh: Option<&LeaseHandler>,
+	tx: &Transaction,
+	ts: u64,
+	ns: NamespaceId,
+) -> Result<()> {
 	// Fetch all databases
 	let dbs = tx.all_db(ns).await?;
 	// Loop over each database
@@ -61,8 +66,11 @@ pub async fn gc_ns(lh: Option<&LeaseHandler>, tx: &Transaction, ts: u64, ns: Nam
 		// Calculate the watermark expiry window
 		let watermark_ts = ts - cf_expiry;
 		// Calculate the watermark versionstamp
-		let watermark_vs =
-			tx.lock().await.get_versionstamp_from_timestamp(watermark_ts, db.namespace_id, db.database_id).await?;
+		let watermark_vs = tx
+			.lock()
+			.await
+			.get_versionstamp_from_timestamp(watermark_ts, db.namespace_id, db.database_id)
+			.await?;
 		// If a versionstamp exists, then garbage collect
 		if let Some(watermark_vs) = watermark_vs {
 			gc_range(tx, db.namespace_id, db.database_id, watermark_vs).await?;
@@ -79,7 +87,12 @@ pub async fn gc_ns(lh: Option<&LeaseHandler>, tx: &Transaction, ts: u64, ns: Nam
 
 // gc_db deletes all change feed entries in the given database that are older than the given watermark.
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
-pub async fn gc_range(tx: &Transaction, ns: NamespaceId, db: DatabaseId, vt: VersionStamp) -> Result<()> {
+pub async fn gc_range(
+	tx: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	vt: VersionStamp,
+) -> Result<()> {
 	// Calculate the range
 	let beg = change::prefix_ts(ns, db, VersionStamp::ZERO).encode_key()?;
 	let end = change::prefix_ts(ns, db, vt).encode_key()?;

@@ -139,7 +139,7 @@ impl Sequences {
 		opt: &Options,
 		sq: &str,
 	) -> Result<i64> {
-		let (ns, db) = ctx.get_ns_db_ids(opt)?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let seq = ctx.tx().get_db_sequence(ns, db, sq).await?;
 		let key = Arc::new(SequenceDomain::new_user(ns, db, sq));
 		self.next_val(ctx, opt.id()?, key, seq.batch, move || {

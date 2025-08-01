@@ -149,6 +149,7 @@ impl SeqDocIds {
 
 #[cfg(test)]
 mod tests {
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::Context;
 	use crate::expr::Id;
 	use crate::idx::IndexKeyBase;
@@ -158,7 +159,6 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::catalog::{DatabaseId, NamespaceId};
 	use uuid::Uuid;
 
 	const TEST_NS_ID: NamespaceId = NamespaceId(1);
@@ -339,8 +339,13 @@ mod tests {
 			let (ctx, _) = new_operation(&ds, Read).await;
 			let tx = ctx.tx();
 			for id in ["Foo", "Bar", "Hello", "World"] {
-				let id =
-					crate::key::index::id::Id::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX, id.into());
+				let id = crate::key::index::id::Id::new(
+					TEST_NS_ID,
+					TEST_DB_ID,
+					TEST_TB,
+					TEST_IX,
+					id.into(),
+				);
 				assert!(!tx.exists(&id, None).await.unwrap());
 			}
 			for doc_id in 0..=3 {

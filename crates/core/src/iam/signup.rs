@@ -75,9 +75,12 @@ pub async fn db_access(
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	let db_def = match tx.get_db_by_name(&ns, &db).await? {
 		Some(db) => db,
-		None => return Err(Error::DbNotFound {
-			name: db.to_string(),
-		}.into()),
+		None => {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		}
 	};
 	// Fetch the specified access method from storage
 	let access = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await;

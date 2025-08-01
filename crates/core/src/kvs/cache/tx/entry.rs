@@ -4,7 +4,6 @@ use crate::expr::Value;
 use crate::expr::statements::AccessGrant;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::statements::DefineAnalyzerStatement;
-use crate::expr::statements::DefineDatabaseStatement;
 use crate::expr::statements::DefineEventStatement;
 use crate::expr::statements::DefineFieldStatement;
 use crate::expr::statements::DefineFunctionStatement;

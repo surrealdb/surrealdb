@@ -4,7 +4,6 @@ use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::{TableMutation, TableMutations};
 use crate::doc::CursorValue;
 use crate::expr::Idiom;
-use crate::expr::statements::DefineTableStatement;
 use crate::expr::thing::Thing;
 use crate::kvs::{KVKey, Key};
 use anyhow::Result;
@@ -113,13 +112,14 @@ impl Writer {
 		}
 	}
 
-	pub(crate) fn define_table(&mut self, ns: NamespaceId, db: DatabaseId, tb: &str, dt: &TableDefinition) {
-		self.buf.push(
-			ns,
-			db,
-			tb.to_string(),
-			TableMutation::Def(dt.to_owned()),
-		)
+	pub(crate) fn define_table(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		dt: &TableDefinition,
+	) {
+		self.buf.push(ns, db, tb.to_string(), TableMutation::Def(dt.to_owned()))
 	}
 
 	// get returns all the mutations buffered for this transaction,
@@ -151,8 +151,10 @@ impl Writer {
 mod tests {
 	use std::time::Duration;
 
-	use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition, TableId};
-use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
+	use crate::catalog::{
+		DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition, TableId,
+	};
+	use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 	use crate::expr::Datetime;
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::id::Id;
@@ -440,15 +442,11 @@ use crate::cf::{ChangeSet, DatabaseMutation, TableMutation, TableMutations};
 			}),
 			comment: None,
 		};
-		let dtb = TableDefinition::new(
-			namespace_id,
-			database_id,
-			table_id,
-			TB.to_string(),
-		).with_changefeed(ChangeFeed {
-			expiry: Duration::from_secs(10 * 60),
-			store_diff,
-		});
+		let dtb = TableDefinition::new(namespace_id, database_id, table_id, TB.to_string())
+			.with_changefeed(ChangeFeed {
+				expiry: Duration::from_secs(10 * 60),
+				store_diff,
+			});
 
 		let ds = Datastore::new("memory").await.unwrap();
 

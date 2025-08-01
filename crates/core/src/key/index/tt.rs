@@ -276,7 +276,8 @@ mod tests {
 
 	#[test]
 	fn term_range() {
-		let (beg, end) = Tt::term_range(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term").unwrap();
+		let (beg, end) =
+			Tt::term_range(NamespaceId(1), DatabaseId(2), "testtb", "testix", "term").unwrap();
 		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
@@ -286,7 +287,8 @@ mod tests {
 
 	#[test]
 	fn terms_range() {
-		let (beg, end) = Tt::terms_range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
+		let (beg, end) =
+			Tt::terms_range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
 		assert_eq!(beg, b"/*testns\0*testdb\0*testtb\0+testix\0!tt\0");
 		assert_eq!(end, b"/*testns\0*testdb\0*testtb\0+testix\0!tt\xff");
 	}

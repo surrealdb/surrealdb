@@ -1,11 +1,10 @@
 //! Stores a graph edge pointer
-use crate::catalog::{NamespaceId, DatabaseId};
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::dir::Dir;
 use crate::expr::id::Id;
 use crate::expr::thing::Thing;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::key::table::all::TableRoot;
 use crate::kvs::KVKey;
 
 use anyhow::Result;
@@ -177,13 +176,27 @@ pub fn egsuffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, eg: &Dir) ->
 	Ok(k)
 }
 
-pub fn ftprefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
+pub fn ftprefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &Id,
+	eg: &Dir,
+	ft: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
+pub fn ftsuffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &Id,
+	eg: &Dir,
+	ft: &str,
+) -> Result<Vec<u8>> {
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -196,7 +209,14 @@ impl Categorise for Graph<'_> {
 }
 
 impl<'a> Graph<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: Id, eg: Dir, fk: &'a Thing) -> Self {
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		id: Id,
+		eg: Dir,
+		fk: &'a Thing,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -210,31 +230,6 @@ impl<'a> Graph<'a> {
 			eg,
 			ft: &fk.tb,
 			fk: fk.id.clone(),
-		}
-	}
-
-	pub fn new_from_id(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a str,
-		id: Id,
-		eg: Dir,
-		ft: &'a str,
-		fk: Id,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb,
-			_d: b'~',
-			id,
-			eg,
-			ft,
-			fk,
 		}
 	}
 }
