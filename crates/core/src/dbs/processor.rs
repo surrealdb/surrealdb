@@ -10,6 +10,7 @@ use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, thing};
 use crate::kvs::{KVKey, Key, Transaction, Val};
+use crate::syn;
 use crate::val::{RecordId, RecordIdKeyRange, Value};
 use anyhow::{Result, bail};
 use futures::StreamExt;
@@ -273,11 +274,20 @@ impl Collected {
 	}
 
 	fn process_value(v: Value) -> Processed {
-		// Pass the value through
+		// Try to extract the id field if present and parse as Thing
+		let rid = match &v {
+			Value::Object(obj) => match obj.get("id") {
+				Some(Value::Strand(strand)) => syn::thing(strand.as_str()).ok().map(Arc::new),
+				Some(Value::Thing(thing)) => Some(Arc::new(thing.clone())),
+				_ => None,
+			},
+			Value::Thing(thing) => Some(Arc::new(thing.clone())),
+			_ => None,
+		};
 		Processed {
 			rs: RecordStrategy::KeysAndValues,
 			generate: None,
-			rid: None,
+			rid,
 			ir: None,
 			val: Operable::Value(v.into()),
 		}

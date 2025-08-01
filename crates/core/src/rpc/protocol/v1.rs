@@ -778,9 +778,9 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Process the method arguments
 		let (what, data, diff) = extract_args::<(Value, Option<Value>, Option<Value>)>(params.0)
-			.ok_or(RpcError::InvalidParams(format!(
-				"Expected (what:Value, data:Value, diff:Value)"
-			)))?;
+			.ok_or(RpcError::InvalidParams(
+				"Expected (what:Value, data:Value, diff:Value)".to_string(),
+			))?;
 
 		// Process the method arguments
 		let only = match what {
@@ -1162,10 +1162,6 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(Value::Strand(out.into()).into())
 			*/
 	}
-
-	// ------------------------------
-	// Private methods
-	// ------------------------------
 }
 
 enum QueryForm<'a> {

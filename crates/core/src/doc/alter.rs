@@ -4,7 +4,7 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::err::Error;
 use crate::expr::data::Data;
-use crate::expr::paths::{EDGE, IN, OUT};
+use crate::expr::paths::{EDGE, ID, IN, OUT};
 use crate::expr::{AssignOperator, FlowResultExt};
 use crate::val::{RecordId, Value};
 use anyhow::{Result, bail, ensure};
@@ -12,11 +12,14 @@ use reblessive::tree::Stk;
 use std::sync::Arc;
 
 impl Document {
-	/// Generates a new record id for this document.
-	/// This only happens when a document does not
-	/// have a record id, because we are attempting
-	/// to create a new record, and are leaving the
-	/// id generation up to the document processor.
+	/// Generate a record ID for CREATE, UPSERT, and UPDATE statements
+	///
+	/// This method handles record ID generation from various sources:
+	/// - Existing document IDs
+	/// - Data clause specified IDs (including function calls and expressions)
+	/// - Randomly generated IDs when no ID is specified
+	///
+	/// The method ensures that all expressions are properly evaluated before being used as record IDs.
 	pub(super) async fn generate_record_id(
 		&mut self,
 		stk: &mut Stk,
@@ -28,6 +31,15 @@ impl Document {
 		if let Some(tb) = &self.r#gen {
 			// This is a CREATE, UPSERT, UPDATE statement
 			if let Workable::Normal = &self.extras {
+				// Check if the document already has an ID from the current data
+				let existing_id = self.current.doc.pick(&*ID);
+				if !existing_id.is_none() {
+					// The document already has an ID, use it
+					let id = existing_id.generate(tb.clone().into_strand(), false)?;
+					self.id = Some(Arc::new(id));
+					return Ok(());
+				}
+
 				// Fetch the record id if specified
 				let id = match stm.data() {
 					// There is a data clause so fetch a record id

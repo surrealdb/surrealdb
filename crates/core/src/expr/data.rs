@@ -64,7 +64,7 @@ impl Data {
 	/// This function computes the expression it has again. This is a mistake. I causes issues with
 	/// subqueries where queries are executed twice if they are in a field picked by this method.
 	///
-	/// Take `CREATE foo SET id = (CREATE bar:1)`. This query will complain about bar:1 being
+	/// Take `CREATE foo SET id = (CREATE bar:1)`. This query will complain about br:1 being
 	/// created twice, because it is. the subquery create is being computed twice. This issue
 	/// cannot be fixed without a proper and major restructuring of the executor.
 	pub(crate) async fn pick(
