@@ -13,7 +13,6 @@ use std::fmt::{self, Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveSequenceStatement {
 	pub name: Ident,
 	pub if_exists: bool,

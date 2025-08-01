@@ -9,6 +9,7 @@ pub use table::AlterTableStatement;
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AlterKind<T> {
 	#[default]
 	None,

@@ -17,8 +17,6 @@ use std::fmt::{Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
@@ -48,8 +46,6 @@ impl Display for RebuildStatement {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RebuildIndexStatement {
 	pub name: Ident,
 	pub what: Ident,

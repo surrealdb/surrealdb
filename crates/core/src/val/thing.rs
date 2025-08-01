@@ -13,7 +13,6 @@ use ulid::Ulid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	pub end: Bound<RecordIdKey>,
@@ -147,7 +146,6 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Id")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecordIdKey {
 	Number(i64),
 	//TODO: This should definitely be strand, not string as null bytes here can cause a lot of
@@ -329,7 +327,6 @@ impl fmt::Display for RecordIdKey {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::RecordId")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordId {
 	pub table: String,
 	pub key: RecordIdKey,

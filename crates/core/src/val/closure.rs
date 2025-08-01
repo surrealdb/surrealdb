@@ -14,7 +14,6 @@ use std::fmt;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::Closure")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Closure {
 	pub args: Vec<(Ident, Kind)>,
 	pub returns: Option<Kind>,

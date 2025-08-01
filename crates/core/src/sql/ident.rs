@@ -6,6 +6,7 @@ use std::{
 
 /// An identifier.
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Ident(String);
 
 impl Ident {

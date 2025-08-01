@@ -61,7 +61,6 @@ pub struct Null;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::Value")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Value {
 	#[default]
 	None,

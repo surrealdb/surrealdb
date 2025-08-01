@@ -39,7 +39,6 @@ impl InfoStructure for DefineParamStore {
 }
 
 #[revisioned(revision = 1)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,

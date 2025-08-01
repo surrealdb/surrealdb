@@ -20,7 +20,6 @@ use std::sync::Arc;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,

@@ -24,7 +24,6 @@ use super::DefineKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DefineDefault {
 	#[default]
 	None,
@@ -34,7 +33,6 @@ pub enum DefineDefault {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Idiom,

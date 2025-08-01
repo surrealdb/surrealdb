@@ -19,8 +19,6 @@ use std::{fmt, str};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Part {
 	All,
 	Flatten,
@@ -404,7 +402,6 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DestructurePart {
 	All(Ident),
 	Field(Ident),
@@ -455,8 +452,6 @@ impl fmt::Display for DestructurePart {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Recurse {
 	Fixed(u32),
 	Range(Option<u32>, Option<u32>),
@@ -508,7 +503,6 @@ impl fmt::Display for Recurse {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?

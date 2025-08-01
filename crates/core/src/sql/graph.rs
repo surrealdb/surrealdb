@@ -6,6 +6,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use super::Ident;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Graph {
 	pub dir: Dir,
 	pub expr: Option<Fields>,

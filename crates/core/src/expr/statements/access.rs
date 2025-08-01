@@ -32,7 +32,6 @@ pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
 	Show(AccessStatementShow),     // Show access grants.
@@ -42,7 +41,6 @@ pub enum AccessStatement {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementGrant {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -51,7 +49,6 @@ pub struct AccessStatementGrant {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementShow {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -61,7 +58,6 @@ pub struct AccessStatementShow {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementRevoke {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -71,7 +67,6 @@ pub struct AccessStatementRevoke {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementPurge {
 	pub ac: Ident,
 	pub base: Option<Base>,
@@ -82,7 +77,6 @@ pub struct AccessStatementPurge {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessGrantStore {
 	pub id: Ident,                    // Unique grant identifier.
 	pub ac: Ident,                    // Access method used to create the grant.
@@ -170,7 +164,6 @@ impl AccessGrantStore {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessGrant {
 	pub id: Ident,                    // Unique grant identifier.
 	pub ac: Ident,                    // Access method used to create the grant.
@@ -203,7 +196,6 @@ impl AccessGrant {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum SubjectStore {
 	Record(RecordId),
 	User(Ident),
@@ -221,7 +213,6 @@ impl SubjectStore {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Subject {
 	Record(RecordIdLit),
 	User(Ident),
@@ -246,7 +237,6 @@ impl Subject {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Grant {
 	Jwt(GrantJwt),
 	Record(GrantRecord),
@@ -266,8 +256,6 @@ impl Grant {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
 	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
@@ -275,8 +263,6 @@ pub struct GrantJwt {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct GrantRecord {
 	pub rid: Uuid,             // Record ID
 	pub jti: Uuid,             // JWT ID
@@ -285,8 +271,6 @@ pub struct GrantRecord {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct GrantBearer {
 	pub id: Ident, // Key ID
 	// Key. Will not be stored and be returned as redacted.

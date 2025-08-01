@@ -17,8 +17,6 @@ use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineBucketStatement {
 	pub kind: DefineKind,
 	pub name: Ident,
@@ -148,7 +146,6 @@ impl InfoStructure for DefineBucketStatement {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
 pub struct BucketDefinition {
 	pub id: Option<u32>,
 	pub name: Ident,

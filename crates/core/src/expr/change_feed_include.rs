@@ -4,9 +4,7 @@ use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// ChangeFeedInclude statements are an appendix
-#[non_exhaustive]
 pub enum ChangeFeedInclude {
 	Original,
 }

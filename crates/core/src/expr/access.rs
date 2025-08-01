@@ -11,7 +11,6 @@ use std::str;
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, Hash, Clone, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 // Durations representing the expiration of different elements of the access method
 // In this context, the None variant represents that the element does not expire
 pub struct AccessDuration {
@@ -40,8 +39,6 @@ impl Default for AccessDuration {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Accesses(pub Vec<Access>);
 
 impl From<Access> for Accesses {
@@ -66,8 +63,6 @@ impl Display for Accesses {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Access")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Access(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Access {

@@ -13,7 +13,6 @@ use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RelateStatement {
 	pub only: bool,
 	/// The expression resulting in the table through which we create a relation

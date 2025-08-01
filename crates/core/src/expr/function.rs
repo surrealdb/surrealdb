@@ -16,7 +16,6 @@ use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Function {
 	Normal(String),
 	Custom(String),
@@ -272,7 +271,6 @@ impl Function {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct FunctionCall {
 	pub receiver: Function,
 	pub arguments: Vec<Expr>,

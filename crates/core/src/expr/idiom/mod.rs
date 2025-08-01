@@ -18,7 +18,6 @@ pub mod recursion;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -50,7 +49,6 @@ impl InfoStructure for Idioms {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {

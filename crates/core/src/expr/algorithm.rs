@@ -6,8 +6,6 @@ use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Algorithm {
 	EdDSA,
 	Es256,

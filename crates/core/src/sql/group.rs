@@ -3,6 +3,7 @@ use crate::sql::idiom::Idiom;
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Groups(pub Vec<Group>);
 
 impl Display for Groups {
@@ -28,6 +29,7 @@ impl From<crate::expr::Groups> for Groups {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Group(pub Idiom);
 
 impl Display for Group {

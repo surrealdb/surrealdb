@@ -12,7 +12,6 @@ use std::ops::Bound;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdKeyRangeLit {
 	pub start: Bound<RecordIdKeyLit>,
 	pub end: Bound<RecordIdKeyLit>,

@@ -16,7 +16,6 @@ use std::ops::{Deref, DerefMut};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::Object")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {

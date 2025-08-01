@@ -14,7 +14,6 @@ use std::fmt::{self, Display};
 /// The api configuration as it is received from ast.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiConfig {
 	pub middleware: Vec<Middleware>,
 	pub permissions: Permission,
@@ -23,7 +22,6 @@ pub struct ApiConfig {
 /// The api middleware as it is received from ast.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,
@@ -32,7 +30,6 @@ pub struct Middleware {
 /// The api config as it is stored on disk.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiConfigStore {
 	pub middleware: Vec<MiddlewareStore>,
 	pub permissions: Permission,
@@ -41,7 +38,6 @@ pub struct ApiConfigStore {
 /// The api middleware as it is stored on disk.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct MiddlewareStore {
 	pub name: String,
 	pub args: Vec<Value>,

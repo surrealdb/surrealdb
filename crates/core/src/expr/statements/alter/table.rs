@@ -19,7 +19,6 @@ use super::AlterKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterTableStatement {
 	pub name: Ident,
 	pub if_exists: bool,

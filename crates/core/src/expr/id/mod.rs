@@ -19,7 +19,6 @@ pub use range::RecordIdKeyRangeLit;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Gen {
 	Rand,
 	Ulid,
@@ -38,7 +37,6 @@ impl Gen {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecordIdKeyLit {
 	Number(i64),
 	String(Strand),

@@ -13,6 +13,7 @@ use rand::rngs::OsRng;
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum PassType {
 	#[default]
 	Unset,

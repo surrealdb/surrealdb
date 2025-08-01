@@ -11,7 +11,6 @@ use anyhow::{Result, bail};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);
 
 pub type CollectedMiddleware<'a> = Vec<(&'a String, &'a Vec<Value>)>;

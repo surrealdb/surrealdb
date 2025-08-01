@@ -16,8 +16,6 @@ use std::ops::Bound;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Graph {
 	pub dir: Dir,
 	pub expr: Option<Fields>,
@@ -88,7 +86,6 @@ impl Display for Graph {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum GraphSubject {
 	Table(Ident),
 	Range {

@@ -40,7 +40,6 @@ impl Iterator for IntoIter {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Mock {
 	Count(String, u64),
 	Range(String, u64, u64),

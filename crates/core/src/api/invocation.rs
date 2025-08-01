@@ -19,12 +19,10 @@ use reblessive::TreeStack;
 use reblessive::tree::Stk;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiInvocation {
 	pub params: Object,
 	pub method: Method,
 	pub query: BTreeMap<String, String>,
-	#[cfg_attr(feature = "arbitrary", arbitrary(value = HeaderMap::new()))]
 	pub headers: HeaderMap,
 }
 

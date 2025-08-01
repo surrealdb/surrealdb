@@ -8,7 +8,6 @@ use std::{cmp, fmt};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Ordering {
 	Random,
 	Order(OrderList),
@@ -25,7 +24,6 @@ impl fmt::Display for Ordering {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OrderList(pub Vec<Order>);
 
 impl Deref for OrderList {
@@ -64,7 +62,6 @@ impl OrderList {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Order {
 	/// The value to order by
 	pub value: Idiom,

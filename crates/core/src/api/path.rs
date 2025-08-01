@@ -13,7 +13,6 @@ use crate::val::{Array, Object, Strand, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Path(pub Vec<Segment>);
 
 impl<'a> Path {
@@ -220,7 +219,6 @@ impl FromStr for Path {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Segment {
 	Fixed(String),
 	Dynamic(String, Option<Kind>),

@@ -6,8 +6,6 @@ use crate::expr::{Ident, escape::EscapeIdent};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct UseStatement {
 	pub ns: Option<Ident>,
 	pub db: Option<Ident>,

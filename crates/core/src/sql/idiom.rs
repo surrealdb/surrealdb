@@ -5,6 +5,7 @@ use std::ops::Deref;
 
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -40,6 +41,7 @@ impl From<crate::expr::Idioms> for Idioms {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Idiom(pub Vec<Part>);
 
 impl Idiom {

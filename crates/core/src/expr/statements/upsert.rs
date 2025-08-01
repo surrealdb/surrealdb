@@ -15,7 +15,6 @@ use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Default, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct UpsertStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,

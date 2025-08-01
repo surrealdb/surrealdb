@@ -20,7 +20,6 @@ use super::DefineKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Ident,

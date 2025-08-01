@@ -20,7 +20,6 @@ use std::fmt::{self, Display};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineConfigStatement {
 	pub kind: DefineKind,
 	pub inner: ConfigInner,
@@ -29,7 +28,6 @@ pub struct DefineConfigStatement {
 /// The config struct as a computation target.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
@@ -38,7 +36,6 @@ pub enum ConfigInner {
 /// The config struct as it is stored on disk.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ConfigStore {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfigStore),

@@ -13,8 +13,6 @@ use std::fmt;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Reference")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
@@ -37,8 +35,6 @@ impl InfoStructure for Reference {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::ReferenceDeleteStrategy")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ReferenceDeleteStrategy {
 	Reject,
 	Ignore,
@@ -68,7 +64,6 @@ impl InfoStructure for ReferenceDeleteStrategy {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Refs")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Refs(pub Vec<(Option<Ident>, Option<Idiom>)>);
 
 impl Refs {

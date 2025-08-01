@@ -8,6 +8,7 @@ use std::fmt::{self, Display, Formatter, Write};
 
 /// The kind, or data type, of a value or field.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
@@ -237,6 +238,7 @@ impl Display for Kind {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum KindLiteral {
 	String(Strand),
 	Integer(i64),

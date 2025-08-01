@@ -12,7 +12,6 @@ use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Data {
 	EmptyExpression,
 	SetExpression(Vec<Assignment>),
@@ -28,7 +27,6 @@ pub enum Data {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Assignment {
 	pub place: Idiom,
 	pub operator: AssignOperator,

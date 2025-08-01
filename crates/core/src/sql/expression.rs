@@ -13,6 +13,7 @@ use crate::sql::{
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Expr {
 	Literal(Literal),
 

@@ -26,7 +26,6 @@ use std::hash::{Hash, Hasher};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Literal {
 	None,
 	Null,
@@ -252,7 +251,6 @@ impl fmt::Display for Literal {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,

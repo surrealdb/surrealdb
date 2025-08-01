@@ -40,7 +40,6 @@ use std::fmt::{self, Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),

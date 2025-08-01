@@ -14,7 +14,6 @@ use std::fmt::{Display, Formatter};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Index {
 	/// (Basic) non unique
 	#[default]
@@ -33,7 +32,6 @@ pub enum Index {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SearchParams {
 	pub az: Ident,
 	pub hl: bool,
@@ -50,7 +48,6 @@ pub struct SearchParams {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct FullTextParams {
 	pub analyzer: Ident,
 	pub highlight: bool,
@@ -59,7 +56,6 @@ pub struct FullTextParams {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct MTreeParams {
 	pub dimension: u16,
 	pub distance: Distance,
@@ -72,7 +68,6 @@ pub struct MTreeParams {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Distance1 {
 	#[default]
 	Euclidean,
@@ -84,7 +79,6 @@ pub enum Distance1 {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct HnswParams {
 	pub dimension: u16,
 	pub distance: Distance,
@@ -126,7 +120,6 @@ impl HnswParams {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Distance {
 	Chebyshev,
 	Cosine,
@@ -171,8 +164,6 @@ impl Display for Distance {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum VectorType {
 	#[default]
 	F64,

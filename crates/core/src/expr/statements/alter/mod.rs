@@ -17,7 +17,6 @@ pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AlterKind<T> {
 	#[default]
 	None,
@@ -73,7 +72,6 @@ impl<T: Revisioned> Revisioned for AlterKind<T> {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AlterStatement {
 	Table(AlterTableStatement),
 	Sequence(AlterSequenceStatement),

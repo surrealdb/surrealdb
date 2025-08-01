@@ -6,7 +6,6 @@ use super::Expr;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Cond(pub Expr);
 
 impl fmt::Display for Cond {

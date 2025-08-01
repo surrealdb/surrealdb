@@ -20,8 +20,6 @@ use super::DefineKind;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,
 	pub name: Ident,

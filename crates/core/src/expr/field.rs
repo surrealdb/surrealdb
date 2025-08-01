@@ -20,8 +20,6 @@ use super::paths::ID;
 /// TODO: Convert this to a struct and document what the boolean does.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
 	///
@@ -386,8 +384,6 @@ impl ExactSizeIterator for FieldsIter<'_> {}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]

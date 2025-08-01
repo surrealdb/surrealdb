@@ -18,8 +18,6 @@ use std::hash::{Hash, Hasher};
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	Any,
@@ -426,8 +424,6 @@ impl InfoStructure for Kind {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum KindLiteral {
 	String(Strand),
 	Integer(i64),

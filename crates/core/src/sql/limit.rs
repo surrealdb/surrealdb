@@ -2,6 +2,7 @@ use crate::sql::Expr;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Limit(pub Expr);
 
 impl fmt::Display for Limit {

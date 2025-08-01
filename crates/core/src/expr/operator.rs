@@ -9,7 +9,6 @@ use std::fmt;
 //TODO(3.0): Rename to prefix operator after idiom overhaul.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum PrefixOperator {
 	/// `!`
 	Not,
@@ -39,7 +38,6 @@ impl fmt::Display for PrefixOperator {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum PostfixOperator {
 	Range,
 	RangeSkip,
@@ -65,7 +63,6 @@ impl fmt::Display for PostfixOperator {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum BinaryOperator {
 	/// `-`
 	Subtract,
@@ -151,7 +148,6 @@ pub enum BinaryOperator {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct MatchesOperator {
 	pub rf: Option<MatchRef>,
 	pub operator: BooleanOperator,
@@ -176,7 +172,6 @@ impl fmt::Display for MatchesOperator {
 /// Boolean operation executed by the full-text index
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum BooleanOperator {
 	And,
 	Or,
@@ -193,7 +188,6 @@ impl fmt::Display for BooleanOperator {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum NearestNeighbor {
 	/// `<|k, dist|>`
 	K(u32, Distance),
@@ -265,7 +259,6 @@ impl fmt::Display for BinaryOperator {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AssignOperator {
 	Assign,
 	Add,

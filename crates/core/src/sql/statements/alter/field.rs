@@ -7,6 +7,7 @@ use std::fmt::{self, Display};
 use super::AlterKind;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum AlterDefault {
 	#[default]
 	None,

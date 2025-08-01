@@ -18,7 +18,6 @@ use super::FlowResultExt as _;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Fetchs(pub Vec<Fetch>);
 
 impl Deref for Fetchs {
@@ -50,7 +49,6 @@ impl InfoStructure for Fetchs {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Fetch(pub Expr);
 
 impl Fetch {

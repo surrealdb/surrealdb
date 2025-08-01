@@ -37,6 +37,7 @@ pub use api::ApiAction;
 use std::fmt::{self, Display};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DefineKind {
 	#[default]
 	Default,

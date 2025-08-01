@@ -58,7 +58,6 @@ pub enum DefineKind {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),

@@ -11,7 +11,6 @@ use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdLit {
 	/// Table name
 	pub tb: String,

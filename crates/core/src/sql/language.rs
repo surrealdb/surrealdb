@@ -2,6 +2,7 @@ use std::fmt;
 use std::fmt::Display;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Language {
 	Arabic,
 	Danish,

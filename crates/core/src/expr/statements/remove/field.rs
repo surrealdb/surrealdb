@@ -13,8 +13,6 @@ use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,

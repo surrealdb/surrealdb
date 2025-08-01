@@ -51,6 +51,7 @@ impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,

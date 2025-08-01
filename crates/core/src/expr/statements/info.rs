@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.

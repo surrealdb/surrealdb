@@ -28,7 +28,6 @@ use super::SleepStatement;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Expr {
 	Literal(Literal),
 	Param(Param),

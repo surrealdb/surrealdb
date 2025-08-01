@@ -20,7 +20,6 @@ use super::{CursorDoc, DefineKind};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineApiStatement {
 	pub kind: DefineKind,
 	pub path: Expr,
@@ -231,7 +230,6 @@ impl fmt::Display for ApiDefinition {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiAction {
 	pub methods: Vec<Method>,
 	pub action: Expr,
@@ -261,7 +259,6 @@ impl InfoStructure for ApiAction {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ApiActionStore {
 	pub methods: Vec<Method>,
 	pub action: Expr,

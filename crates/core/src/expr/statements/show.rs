@@ -13,7 +13,6 @@ use std::fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ShowSince {
 	Timestamp(Datetime),
 	Versionstamp(u64),
@@ -35,7 +34,6 @@ impl ShowSince {
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ShowStatement {
 	pub table: Option<Ident>,
 	pub since: ShowSince,

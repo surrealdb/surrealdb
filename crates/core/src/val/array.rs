@@ -13,7 +13,6 @@ use std::ops::{Deref, DerefMut};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::Array")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {

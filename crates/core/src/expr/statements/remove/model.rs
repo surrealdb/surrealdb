@@ -11,8 +11,6 @@ use std::fmt::{self, Display};
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveModelStatement {
 	pub name: Ident,
 	pub version: String,

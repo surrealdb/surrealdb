@@ -23,7 +23,6 @@ use uuid::Uuid;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
