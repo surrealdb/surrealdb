@@ -93,7 +93,10 @@ impl Document {
 
 		self.modify_for_update_retry(retry, val);
 
-		self.generate_record_id(stk, ctx, opt, stm).await?;
+		// Skip generate_record_id in retry mode since the ID is already set correctly
+		if !self.retry {
+			self.generate_record_id(stk, ctx, opt, stm).await?;
+		}
 
 		self.upsert_update(stk, ctx, opt, stm).await
 	}
