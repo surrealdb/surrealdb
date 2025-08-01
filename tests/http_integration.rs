@@ -1243,7 +1243,7 @@ mod http_integration {
 			assert_eq!(status, 200);
 
 			// Verify the records were updated
-			let res = client.get(dbg!(url)).basic_auth(USER, Some(PASS)).send().await?;
+			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), num_records, "body: {body}");
 

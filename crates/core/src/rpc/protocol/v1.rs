@@ -95,7 +95,8 @@ pub trait RpcProtocolV1: RpcContext {
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
 		// To be able to select a namespace, and then list resources in that namespace, as an example
-		let (ns, db) = extract_args::<(Value, Value)>(params.0.clone()).ok_or(RpcError::InvalidParams(format!("Expected (ns, db)")))?;
+		let (ns, db) = extract_args::<(Value, Value)>(params.0.clone())
+			.ok_or(RpcError::InvalidParams("Expected (ns, db)".to_string()))?;
 		// Get the context lock
 		let mutex = self.lock().clone();
 		// Lock the context for update
@@ -108,7 +109,9 @@ pub trait RpcProtocolV1: RpcContext {
 			Value::Null => session.ns = None,
 			Value::Strand(ns) => session.ns = Some(ns.into_string()),
 			unexpected => {
-				return Err(RpcError::InvalidParams(format!("Expected ns to be string, got {unexpected:?}")));
+				return Err(RpcError::InvalidParams(format!(
+					"Expected ns to be string, got {unexpected:?}"
+				)));
 			}
 		}
 		// Update the selected database
@@ -117,7 +120,9 @@ pub trait RpcProtocolV1: RpcContext {
 			Value::Null => session.db = None,
 			Value::Strand(db) => session.db = Some(db.into_string()),
 			unexpected => {
-				return Err(RpcError::InvalidParams(format!("Expected db to be string, got {unexpected:?}")));
+				return Err(RpcError::InvalidParams(format!(
+					"Expected db to be string, got {unexpected:?}"
+				)));
 			}
 		}
 		// Clear any residual database
@@ -137,7 +142,7 @@ pub trait RpcProtocolV1: RpcContext {
 	async fn signup(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Some(Value::Object(params)) = extract_args(params.0) else {
-			return Err(RpcError::InvalidParams(format!("Expected (params:object)")));
+			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
 		};
 		// Get the context lock
 		let mutex = self.lock().clone();
@@ -169,7 +174,7 @@ pub trait RpcProtocolV1: RpcContext {
 	async fn signin(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Some(Value::Object(params)) = extract_args(params.0) else {
-			return Err(RpcError::InvalidParams(format!("Expected (params:object)")));
+			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
 		};
 		// Get the context lock
 		let mutex = self.lock().clone();
@@ -193,7 +198,7 @@ pub trait RpcProtocolV1: RpcContext {
 	async fn authenticate(&self, params: Array) -> Result<Data, RpcError> {
 		// Process the method arguments
 		let Some(Value::Strand(token)) = extract_args(params.0) else {
-			return Err(RpcError::InvalidParams(format!("Expected (token:string)")));
+			return Err(RpcError::InvalidParams("Expected (token:string)".to_string()));
 		};
 		// Get the context lock
 		let mutex = self.lock().clone();
@@ -299,21 +304,26 @@ pub trait RpcProtocolV1: RpcContext {
 		// Process the method arguments
 		let Some((Value::Strand(key), val)) = extract_args::<(Value, Option<Value>)>(params.0)
 		else {
-			return Err(RpcError::InvalidParams(format!("Expected (key:string, value:Value)")));
+			return Err(RpcError::InvalidParams("Expected (key:string, value:Value)".to_string()));
 		};
 		// TODO(3.0.0): The value inversion PR has removed the ability to set a value from an
 		// expression.
-		// Maybe reintroduce.
+		// Maybe reintroduce somehow.
 
 		let mutex = self.lock();
 		let guard = mutex.acquire().await.unwrap();
 		let mut session = self.session().as_ref().clone();
+
+		if session.expired() {
+			return Err(anyhow::Error::new(Error::ExpiredSession).into());
+		}
+
 		match val {
 			None | Some(Value::None) => session.variables.remove(key.as_str()),
 			Some(val) => {
 				crate::rpc::check_protected_param(&key)?;
 				session.variables.insert(key.into_string(), val)
-			},
+			}
 		}
 		self.set_session(Arc::new(session));
 
@@ -330,7 +340,7 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Process the method arguments
 		let Some(Value::Strand(key)) = extract_args(params.0) else {
-			return Err(RpcError::InvalidParams(format!("Expected (key)")));
+			return Err(RpcError::InvalidParams("Expected (key)".to_string()));
 		};
 
 		// Get the context lock
@@ -354,7 +364,8 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (id,) = extract_args::<(Value,)>(params.0).ok_or(RpcError::InvalidParams(format!("Expected (id)")))?;
+		let (id,) = extract_args::<(Value,)>(params.0)
+			.ok_or(RpcError::InvalidParams("Expected (id)".to_string()))?;
 		// Specify the SQL query string
 		let ast = Ast {
 			expressions: vec![TopLevelExpr::Kill(KillStatement {
@@ -375,8 +386,8 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, diff) =
-			extract_args::<(Value, Option<Value>)>(params.0).ok_or(RpcError::InvalidParams(format!("Expected (what, diff)")))?;
+		let (what, diff) = extract_args::<(Value, Option<Value>)>(params.0)
+			.ok_or(RpcError::InvalidParams("Expected (what, diff)".to_string()))?;
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
@@ -417,7 +428,8 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what,) = extract_args::<(Value,)>(params.0).ok_or(RpcError::InvalidParams(format!("Expected (what:Value)")))?;
+		let (what,) = extract_args::<(Value,)>(params.0)
+			.ok_or(RpcError::InvalidParams("Expected (what:Value)".to_string()))?;
 
 		// If the what is a single record with a non range value, make it return only a single
 		// result.
@@ -476,8 +488,8 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) =
-			extract_args::<(Value, Value)>(params.0).ok_or(RpcError::InvalidParams(format!("Expected (what:Value, data:Value)")))?;
+		let (what, data) = extract_args::<(Value, Value)>(params.0)
+			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let into = match what {
 			Value::Strand(x) => Some(Expr::Table(Ident::from_strand(x))),
@@ -516,8 +528,8 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) =
-			extract_args::<(Value, Value)>(params.0.clone()).ok_or(RpcError::InvalidParams(format!("Expected (what, data)")))?;
+		let (what, data) = extract_args::<(Value, Value)>(params.0.clone())
+			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
 
 		let what = match what {
 			Value::Null | Value::None => None,
@@ -562,8 +574,8 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) =
-			extract_args::<(Value, Option<Value>)>(params.0).ok_or(RpcError::InvalidParams(format!("Expected (what:Value, data:Value)")))?;
+		let (what, data) = extract_args::<(Value, Option<Value>)>(params.0)
+			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
 			Value::Strand(_) => true,
@@ -612,11 +624,10 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) =
-			extract_args::<(Value, Option<Value>)>(params.0).ok_or(RpcError::InvalidParams(format!("Expected (what:Value, data:Value)")))?;
+		let (what, data) = extract_args::<(Value, Option<Value>)>(params.0)
+			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::Strand(_) => true,
 			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
@@ -666,11 +677,10 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what, data) =
-			extract_args::<(Value, Option<Value>)>(params.0.clone()).ok_or(RpcError::InvalidParams(format!("Expected (what, data)")))?;
+		let (what, data) = extract_args::<(Value, Option<Value>)>(params.0.clone())
+			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
 
 		let only = match what {
-			Value::Strand(_) => true,
 			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
@@ -683,7 +693,7 @@ pub trait RpcProtocolV1: RpcContext {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::SingleExpression(x.into_literal().into()));
+			.map(|x| SqlData::ContentExpression(x.into_literal().into()));
 		// Specify the SQL query string
 		let sql = UpdateStatement {
 			only,
@@ -720,10 +730,9 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(Value, Option<Value>)>(params.0)
-			.ok_or(RpcError::InvalidParams(format!("Expected (what:Value, data:Value)")))?;
+			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::Strand(_) => true,
 			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
@@ -769,11 +778,12 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Process the method arguments
 		let (what, data, diff) = extract_args::<(Value, Option<Value>, Option<Value>)>(params.0)
-			.ok_or(RpcError::InvalidParams(format!("Expected (what:Value, data:Value, diff:Value)")))?;
+			.ok_or(RpcError::InvalidParams(format!(
+				"Expected (what:Value, data:Value, diff:Value)"
+			)))?;
 
 		// Process the method arguments
 		let only = match what {
-			Value::Strand(_) => true,
 			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
@@ -828,9 +838,12 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (from, kind, with, data) =
-			extract_args::<(Value, Value, Value, Option<Value>)>(params.0)
-				.ok_or(RpcError::InvalidParams(format!("Expected (from:Value, kind:Value, with:Value, data:Value)")))?;
+		let (from, kind, with, data) = extract_args::<(Value, Value, Value, Option<Value>)>(
+			params.0,
+		)
+		.ok_or(RpcError::InvalidParams(format!(
+			"Expected (from:Value, kind:Value, with:Value, data:Value)"
+		)))?;
 
 		// Returns if selecting on this value returns a single result.
 		let only = singular(&from) && singular(&with);
@@ -879,7 +892,8 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (what,) = extract_args::<(Value,)>(params.0).ok_or(RpcError::InvalidParams(format!("Expected (what:Value)")))?;
+		let (what,) = extract_args::<(Value,)>(params.0)
+			.ok_or(RpcError::InvalidParams("Expected (what:Value)".to_string()))?;
 		// Specify the SQL query string
 		let sql = Expr::Delete(Box::new(DeleteStatement {
 			only: singular(&what),
@@ -925,11 +939,11 @@ pub trait RpcProtocolV1: RpcContext {
 			return Err(RpcError::MethodNotAllowed);
 		}
 		// Process the method arguments
-		let (query, vars) =
-			extract_args::<(Value, Option<Value>)>(params.0).ok_or(RpcError::InvalidParams(format!("Expected (query:string, vars:object)")))?;
+		let (query, vars) = extract_args::<(Value, Option<Value>)>(params.0)
+			.ok_or(RpcError::InvalidParams("Expected (query:string, vars:object)".to_string()))?;
 
 		let Value::Strand(query) = query else {
-			return Err(RpcError::InvalidParams(format!("Expected query to be string")));
+			return Err(RpcError::InvalidParams("Expected query to be string".to_string()));
 		};
 
 		// Specify the query variables
@@ -939,7 +953,11 @@ pub trait RpcProtocolV1: RpcContext {
 				Some(self.session().variables.merged(v))
 			}
 			None | Some(Value::None | Value::Null) => Some(self.session().variables.clone()),
-			unexpected => return Err(RpcError::InvalidParams(format!("Expected vars to be object, got {unexpected:?}"))),
+			unexpected => {
+				return Err(RpcError::InvalidParams(format!(
+					"Expected vars to be object, got {unexpected:?}"
+				)));
+			}
 		};
 
 		let res = run_query(self, QueryForm::Text(&query), vars).await?;
@@ -957,17 +975,27 @@ pub trait RpcProtocolV1: RpcContext {
 		}
 		// Process the method arguments
 		let (name, version, args) = extract_args::<(Value, Option<Value>, Option<Value>)>(params.0)
-			.ok_or(RpcError::InvalidParams(format!("Expected (name:string, version:string, args:array)")))?;
+			.ok_or(RpcError::InvalidParams(
+				"Expected (name:string, version:string, args:array)".to_string(),
+			))?;
 		// Parse the function name argument
 		let name = match name {
 			Value::Strand(v) => v.into_string(),
-			unexpected => return Err(RpcError::InvalidParams(format!("Expected name to be string, got {unexpected:?}"))),
+			unexpected => {
+				return Err(RpcError::InvalidParams(format!(
+					"Expected name to be string, got {unexpected:?}"
+				)));
+			}
 		};
 		// Parse any function version argument
 		let version = match version {
 			Some(Value::Strand(v)) => Some(v.into_string()),
 			None | Some(Value::None | Value::Null) => None,
-			unexpected => return Err(RpcError::InvalidParams(format!("Expected version to be string, got {unexpected:?}"))),
+			unexpected => {
+				return Err(RpcError::InvalidParams(format!(
+					"Expected version to be string, got {unexpected:?}"
+				)));
+			}
 		};
 		// Parse the function arguments if specified
 		let args = match args {
@@ -975,7 +1003,11 @@ pub trait RpcProtocolV1: RpcContext {
 				args.into_iter().map(|x| x.into_literal().into()).collect::<Vec<Expr>>()
 			}
 			None | Some(Value::None | Value::Null) => vec![],
-			unexpected => return Err(RpcError::InvalidParams(format!("Expected args to be array, got {unexpected:?}"))),
+			unexpected => {
+				return Err(RpcError::InvalidParams(format!(
+					"Expected args to be array, got {unexpected:?}"
+				)));
+			}
 		};
 
 		let name = if let Some(rest) = name.strip_prefix("fn::") {
@@ -984,7 +1016,9 @@ pub trait RpcProtocolV1: RpcContext {
 			let name = rest.to_owned();
 			Function::Model(Model {
 				name,
-				version: version.ok_or(RpcError::InvalidParams(format!("Expected version to be set for model function")))?,
+				version: version.ok_or(RpcError::InvalidParams(format!(
+					"Expected version to be set for model function"
+				)))?,
 			})
 		} else {
 			Function::Normal(name)
