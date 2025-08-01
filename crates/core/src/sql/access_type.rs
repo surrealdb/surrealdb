@@ -1,10 +1,10 @@
 use crate::err::Error;
 
-use crate::sql::escape::QuoteStr;
 use crate::sql::Algorithm;
+use crate::sql::escape::QuoteStr;
 use anyhow::Result;
-use rand::distributions::Alphanumeric;
 use rand::Rng;
+use rand::distributions::Alphanumeric;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
