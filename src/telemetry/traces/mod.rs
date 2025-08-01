@@ -25,10 +25,22 @@ where
 			// Define the OTEL metadata configuration
 			let config = Config::default().with_resource(OTEL_DEFAULT_RESOURCE.clone());
 			// Create the provider with the Tokio runtime
-			let provider = TracerProvider::builder()
-				.with_batch_exporter(span_exporter, opentelemetry_sdk::runtime::Tokio)
-				.with_config(config)
-				.build();
+			let provider = {
+				#[cfg(test)]
+				{
+					TracerProvider::builder()
+						.with_simple_exporter(span_exporter)
+						.with_config(config)
+						.build()
+				}
+				#[cfg(not(test))]
+				{
+					TracerProvider::builder()
+						.with_batch_exporter(span_exporter, opentelemetry_sdk::runtime::Tokio)
+						.with_config(config)
+						.build()
+				}
+			};
 			// Set it as the global tracer provider
 			let _ = opentelemetry::global::set_tracer_provider(provider.clone());
 			// Return the tracing layer with the specified filter

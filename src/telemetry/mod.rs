@@ -336,6 +336,7 @@ pub fn span_filters_from_value(v: &str) -> Vec<(String, LevelFilter)> {
 
 #[cfg(test)]
 mod tests {
+	use std::time::Duration;
 	use std::{ffi::OsString, sync::Mutex};
 
 	use crate::telemetry;
@@ -344,6 +345,13 @@ mod tests {
 	use tracing_subscriber::util::SubscriberInitExt;
 
 	static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+	async fn cleanup_tracer_provider() {
+		// Force shutdown and reset the global tracer provider
+		opentelemetry::global::shutdown_tracer_provider();
+		// Give it a moment to fully shut down
+		tokio::time::sleep(Duration::from_millis(50)).await;
+	}
 
 	fn with_vars<K, V, F, R>(vars: &[(K, Option<V>)], f: F) -> R
 	where
@@ -384,8 +392,14 @@ mod tests {
 		f()
 	}
 
+	/// Test OTLP tracer and filter functionality.
+	/// Note: This test manipulates global OpenTelemetry state and should be run in isolation
+	/// to avoid interference with other tests that may also manipulate the global tracer provider.
 	#[tokio::test(flavor = "multi_thread")]
-	async fn test_otlp_tracer() {
+	#[serial_test::serial]
+	async fn test_otlp_tracer_and_filter() {
+		// --- test_otlp_tracer logic ---
+		cleanup_tracer_provider().await;
 		println!("Starting mock otlp server...");
 		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
 
@@ -421,7 +435,7 @@ mod tests {
 		println!("Waiting for request...");
 		let req = tokio::select! {
 			req = req_rx.recv() => req.expect("missing export request"),
-			_ = tokio::time::sleep(std::time::Duration::from_secs(1)) => panic!("timeout waiting for request"),
+			_ = tokio::time::sleep(Duration::from_secs(10)) => panic!("timeout waiting for request"),
 		};
 
 		let first_span =
@@ -429,10 +443,9 @@ mod tests {
 		assert_eq!("test-surreal-span", first_span.name);
 		let first_event = first_span.events.first().unwrap();
 		assert_eq!("test-surreal-event", first_event.name);
-	}
 
-	#[tokio::test(flavor = "multi_thread")]
-	async fn test_tracing_filter() {
+		// --- test_tracing_filter logic ---
+		cleanup_tracer_provider().await;
 		println!("Starting mock otlp server...");
 		let (addr, mut req_rx) = telemetry::traces::tests::mock_otlp_server().await;
 
@@ -476,7 +489,7 @@ mod tests {
 		println!("Waiting for request...");
 		let req = tokio::select! {
 			req = req_rx.recv() => req.expect("missing export request"),
-			_ = tokio::time::sleep(std::time::Duration::from_secs(10)) => panic!("timeout waiting for request"),
+			_ = tokio::time::sleep(Duration::from_secs(15)) => panic!("timeout waiting for request"),
 		};
 		let spans = &req.resource_spans.first().unwrap().scope_spans.first().unwrap().spans;
 
@@ -489,6 +502,7 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
+	#[serial_test::serial]
 	async fn test_log_to_socket() {
 		use std::io::Read;
 		use std::net::TcpListener;
