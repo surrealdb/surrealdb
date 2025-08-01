@@ -391,6 +391,7 @@ run_task = { name = [
     "start-tikv",
     "test-kvs",
     "stop-tikv",
+    "sleep",
     "start-tikv",
     "test-api-integration",
     "stop-tikv",
@@ -469,8 +470,6 @@ script = """
     #!/bin/bash -ex
 	echo "Installing TiKV playground..."
     ${HOME}/.tiup/bin/tiup install pd tikv playground
-	echo "Cleaning TiKV playground..."
-	${HOME}/.tiup/bin/tiup clean --all
 	echo "Starting TiKV playground..."
 	nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor > /tmp/tiup.log &
 	set +e
@@ -493,9 +492,9 @@ script = """
 [tasks.stop-tikv]
 category = "CI - SERVICES"
 script = """
-${HOME}/.tiup/bin/tiup clean --all
+    #!/bin/bash -ex
+    ${HOME}/.tiup/bin/tiup clean --all
 """
-
 
 [tasks.clear-fdb]
 category = "CI - SERVICES"
@@ -508,6 +507,11 @@ args = [
     "--timeout",
     "20",
 ]
+
+[tasks.sleep]
+category = "CI - SERVICES"
+command = "sleep"
+args = ["30"]
 
 #
 # Builds
