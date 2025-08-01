@@ -1,13 +1,15 @@
 //! Stores doc keys for doc_ids
+use crate::expr::Thing;
 use crate::idx::docids::DocId;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::impl_key;
+use crate::kvs::KVKey;
+
 use serde::{Deserialize, Serialize};
 
+/// Id inverted. DocId -> Thing
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Bi<'a> {
+pub(crate) struct Bi<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -22,7 +24,10 @@ pub struct Bi<'a> {
 	_g: u8,
 	pub id: DocId,
 }
-impl_key!(Bi<'a>);
+
+impl KVKey for Bi<'_> {
+	type ValueType = Thing;
+}
 
 impl Categorise for Bi<'_> {
 	fn categorise(&self) -> Category {
@@ -52,10 +57,10 @@ impl<'a> Bi<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Bi::new(
 			"testns",
@@ -64,10 +69,7 @@ mod tests {
 			"testix",
 			7
 		);
-		let enc = Bi::encode(&val).unwrap();
+		let enc = Bi::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!bi\0\0\0\0\0\0\0\x07");
-
-		let dec = Bi::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

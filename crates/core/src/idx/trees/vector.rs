@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::expr::index::{Distance, VectorType};
 use crate::expr::{Number, Value};
 use crate::fnc::util::math::ToFloat;
-use crate::idx::VersionedStore;
+use crate::kvs::KVValue;
 use ahash::AHasher;
 use ahash::HashSet;
 use anyhow::{Result, ensure};
@@ -10,7 +10,7 @@ use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
-use revision::revisioned;
+use revision::{Revisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::PartialEq;
@@ -40,7 +40,19 @@ pub enum SerializedVector {
 	I16(Vec<i16>),
 }
 
-impl VersionedStore for SerializedVector {}
+impl KVValue for SerializedVector {
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		self.serialize_revisioned(&mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
+		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+	}
+}
 
 impl From<&Vector> for SerializedVector {
 	fn from(value: &Vector) -> Self {

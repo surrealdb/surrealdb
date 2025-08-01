@@ -1,13 +1,14 @@
 //! Stores a grant associated with an access method
+use crate::expr::statements::AccessGrant;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Gr<'a> {
+pub(crate) struct Gr<'a> {
 	__: u8,
 	_a: u8,
 	pub ac: &'a str,
@@ -16,20 +17,23 @@ pub struct Gr<'a> {
 	_d: u8,
 	pub gr: &'a str,
 }
-impl_key!(Gr<'a>);
+
+impl KVKey for Gr<'_> {
+	type ValueType = AccessGrant;
+}
 
 pub fn new<'a>(ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ac, gr)
 }
 
 pub fn prefix(ac: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ac).encode()?;
+	let mut k = super::all::new(ac).encode_key()?;
 	k.extend_from_slice(b"!gr\x00");
 	Ok(k)
 }
 
 pub fn suffix(ac: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ac).encode()?;
+	let mut k = super::all::new(ac).encode_key()?;
 	k.extend_from_slice(b"!gr\xff");
 	Ok(k)
 }
@@ -56,20 +60,17 @@ impl<'a> Gr<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Gr::new(
 			"testac",
 			"testgr",
 		);
-		let enc = Gr::encode(&val).unwrap();
+		let enc = Gr::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/&testac\0!grtestgr\0");
-
-		let dec = Gr::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

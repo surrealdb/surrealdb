@@ -1,13 +1,14 @@
 //! Stores a DEFINE DATABASE config definition
+use crate::expr::statements::define::DefineDatabaseStatement;
 use crate::key::category::Categorise;
 use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
+use crate::kvs::KVKey;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Db<'a> {
+pub(crate) struct Db<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -16,20 +17,23 @@ pub struct Db<'a> {
 	_d: u8,
 	pub db: &'a str,
 }
-impl_key!(Db<'a>);
+
+impl KVKey for Db<'_> {
+	type ValueType = DefineDatabaseStatement;
+}
 
 pub fn new<'a>(ns: &'a str, db: &'a str) -> Db<'a> {
 	Db::new(ns, db)
 }
 
 pub fn prefix(ns: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns).encode()?;
+	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!db\x00");
 	Ok(k)
 }
 
 pub fn suffix(ns: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns).encode()?;
+	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!db\xff");
 	Ok(k)
 }
@@ -56,20 +60,17 @@ impl<'a> Db<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Db::new(
 			"testns",
 			"testdb",
 		);
-		let enc = Db::encode(&val).unwrap();
+		let enc = Db::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*testns\0!dbtestdb\0");
-
-		let dec = Db::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

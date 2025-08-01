@@ -44,16 +44,16 @@ impl RemoveEventStatement {
 		};
 		// Delete the definition
 		let key = crate::key::table::ev::new(ns, db, &ev.what, &ev.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Refresh the table cache for events
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&DefineTableStatement {
 				cache_events_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

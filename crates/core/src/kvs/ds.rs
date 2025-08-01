@@ -1,7 +1,7 @@
+use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::Version;
-use super::{KeyDecode, export};
 use crate::buc::BucketConnections;
 use crate::cf;
 use crate::ctx::MutableContext;
@@ -571,28 +571,13 @@ impl Datastore {
 		// Create the key where the version is stored
 		let key = crate::key::version::new();
 		// Check if a version is already set in storage
-		let val = match catch!(txn, txn.get(key.clone(), None).await) {
+		let val = match catch!(txn, txn.get(&key, None).await) {
 			// There is a version set in the storage
-			Some(v) => {
-				// Attempt to decode the current stored version
-				let val = TryInto::<Version>::try_into(v);
-				// Check for errors, and cancel the transaction
-				match val {
-					// There was en error getting the version
-					Err(err) => {
-						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel().await);
-						// Return the error
-						bail!(err);
-					}
-					// We could decode the version correctly
-					Ok(val) => {
-						// We didn't write anything, so just rollback
-						catch!(txn, txn.cancel().await);
-						// Return the current version
-						val
-					}
-				}
+			Some(val) => {
+				// We didn't write anything, so just rollback
+				catch!(txn, txn.cancel().await);
+				// Return the current version
+				val
 			}
 			// There is no version set in the storage
 			None => {
@@ -600,21 +585,19 @@ impl Datastore {
 				let rng = crate::key::version::proceeding();
 				let keys = catch!(txn, txn.keys(rng, 1, None).await);
 				// Check the storage if there are any other keys set
-				let val = if keys.is_empty() {
+				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
 					Version::latest()
 				} else {
 					// There were keys in storage, so this is an upgrade
 					Version::v1()
 				};
-				// Convert the version to binary
-				let bytes: Vec<u8> = val.into();
 				// Attempt to set the current version in storage
-				catch!(txn, txn.replace(key, bytes).await);
+				catch!(txn, txn.replace(&key, &version).await);
 				// We set the version, so commit the transaction
 				catch!(txn, txn.commit().await);
 				// Return the current version
-				val
+				version
 			}
 		};
 		// Everything ok
@@ -835,7 +818,7 @@ impl Datastore {
 			for (k, _) in txn.getr(range.clone(), None).await? {
 				count += 1;
 				lh.try_maintain_lease().await?;
-				let ic = Ic::decode(&k)?;
+				let ic = Ic::decode_key(&k)?;
 				// If the index has already been compacted, we can ignore the task
 				if let Some(p) = &previous {
 					if p.match_ic(&ic) {

@@ -6,6 +6,7 @@ use crate::expr::statements::define::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Ident, Strand, Value, Values};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::impl_kv_value_revisioned;
 use anyhow::{Result, bail};
 
 use revision::revisioned;
@@ -28,6 +29,8 @@ pub struct DefineEventStatement {
 	#[revision(start = 3)]
 	pub overwrite: bool,
 }
+
+impl_kv_value_revisioned!(DefineEventStatement);
 
 impl DefineEventStatement {
 	/// Process this type returning a computed simple Value
@@ -59,13 +62,13 @@ impl DefineEventStatement {
 		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.get_or_add_tb(ns, db, &self.what, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineEventStatement {
+			&key,
+			&DefineEventStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
 				..self.clone()
-			})?,
+			},
 			None,
 		)
 		.await?;
@@ -73,11 +76,11 @@ impl DefineEventStatement {
 		let key = crate::key::database::tb::new(ns, db, &self.what);
 		let tb = txn.get_tb(ns, db, &self.what).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+			&key,
+			&DefineTableStatement {
 				cache_events_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
+			},
 			None,
 		)
 		.await?;

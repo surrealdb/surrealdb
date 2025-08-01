@@ -402,6 +402,14 @@ impl QueryExecutor {
 		}
 	}
 
+	pub(crate) fn is_iterator_condition(&self, ir: IteratorRef, cond: &Cond) -> bool {
+		if let Value::Expression(e) = &cond.0 {
+			self.is_iterator_expression(ir, e)
+		} else {
+			false
+		}
+	}
+
 	pub(crate) fn explain(&self, ir: IteratorRef) -> Value {
 		match self.0.it_entries.get(ir) {
 			Some(ie) => ie.explain(),
