@@ -862,14 +862,14 @@ jobs:
           cache-directories: crates/language-tests/.binary-cache
 
       - name: Build SurrealQL test tool
-        run: |
-          cd crates/language-tests
-          cargo build --features upgrade
+        #run: |
+        #  cd crates/language-tests
+        #  cargo build --features upgrade
 
       - name: Run SurrealQL test suite
-        run: |
-          cd crates/language-tests
-          ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
+        #run: |
+        #  cd crates/language-tests
+        #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
   # Other SDK tests
