@@ -263,11 +263,20 @@ impl Collected {
 	}
 
 	fn process_value(v: Value) -> Processed {
-		// Pass the value through
+		// Try to extract the id field if present and parse as Thing
+		let rid = match &v {
+			Value::Object(obj) => match obj.get("id") {
+				Some(Value::Strand(strand)) => strand.parse::<Thing>().ok().map(Arc::new),
+				Some(Value::Thing(thing)) => Some(Arc::new(thing.clone())),
+				_ => None,
+			},
+			Value::Thing(thing) => Some(Arc::new(thing.clone())),
+			_ => None,
+		};
 		Processed {
 			rs: RecordStrategy::KeysAndValues,
 			generate: None,
-			rid: None,
+			rid,
 			ir: None,
 			val: Operable::Value(v.into()),
 		}

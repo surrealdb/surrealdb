@@ -9,6 +9,7 @@ use crate::expr::FlowResultExt;
 use crate::expr::data::Data;
 use crate::expr::operator::Operator;
 use crate::expr::paths::EDGE;
+use crate::expr::paths::ID;
 use crate::expr::paths::IN;
 use crate::expr::paths::OUT;
 use crate::expr::value::Value;
@@ -17,11 +18,14 @@ use reblessive::tree::Stk;
 use std::sync::Arc;
 
 impl Document {
-	/// Generates a new record id for this document.
-	/// This only happens when a document does not
-	/// have a record id, because we are attempting
-	/// to create a new record, and are leaving the
-	/// id generation up to the document processor.
+	/// Generate a record ID for CREATE, UPSERT, and UPDATE statements
+	///
+	/// This method handles record ID generation from various sources:
+	/// - Existing document IDs
+	/// - Data clause specified IDs (including function calls and expressions)
+	/// - Randomly generated IDs when no ID is specified
+	///
+	/// The method ensures that all expressions are properly evaluated before being used as record IDs.
 	pub(super) async fn generate_record_id(
 		&mut self,
 		stk: &mut Stk,
@@ -33,15 +37,33 @@ impl Document {
 		if let Some(tb) = &self.r#gen {
 			// This is a CREATE, UPSERT, UPDATE statement
 			if let Workable::Normal = &self.extras {
+				// Check if the document already has an ID from the current data
+				let existing_id = self.current.doc.pick(&*ID);
+				if !existing_id.is_none() {
+					// The document already has an ID, use it
+					let id = existing_id.generate(tb, false)?;
+					self.id = Some(Arc::new(id));
+					return Ok(());
+				}
+
 				// Fetch the record id if specified
 				let id = match stm.data() {
 					// There is a data clause so fetch a record id
-					Some(data) => match data.rid(stk, ctx, opt).await? {
-						// Generate a new id from the id field
-						Some(id) => id.generate(tb, false)?,
-						// Generate a new random table id
-						None => tb.generate(),
-					},
+					Some(data) => {
+						match data.rid(stk, ctx, opt).await? {
+							// Generate a new id from the id field (including Thing values)
+							// IMPORTANT: Always compute the value before generating the record ID
+							// This ensures that function calls like type::string(8) are evaluated
+							// to their final value before being used as a record ID
+							Some(id) => {
+								let computed =
+									id.compute(stk, ctx, opt, None).await.unwrap_or(id.clone());
+								computed.generate(tb, false)?
+							}
+							// Generate a new random table id
+							None => tb.generate(),
+						}
+					}
 					// There is no data clause so create a record id
 					None => tb.generate(),
 				};
