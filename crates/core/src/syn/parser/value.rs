@@ -164,6 +164,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				let peek = self.peek_whitespace().kind;
 				if peek == t!("=") {
+					self.pop_peek();
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
 					Value::Range(Box::new(Range {
 						start: Bound::Unbounded,
@@ -201,6 +202,7 @@ impl Parser<'_> {
 				expected!(self, t!(".."));
 				let peek = self.peek_whitespace().kind;
 				if peek == t!("=") {
+					self.pop_peek();
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
 					Ok(Value::Range(Box::new(Range {
 						start: Bound::Excluded(res),
@@ -224,6 +226,7 @@ impl Parser<'_> {
 
 				let peek = self.peek_whitespace().kind;
 				if peek == t!("=") {
+					self.pop_peek();
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
 					Ok(Value::Range(Box::new(Range {
 						start: Bound::Included(res),

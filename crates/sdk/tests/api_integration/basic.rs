@@ -1637,12 +1637,13 @@ pub async fn run(new_db: impl CreateDb) {
 	};
 	DEFINE FUNCTION fn::bar($val: any) {
 	   CREATE foo:1 set val = $val;
+	   RETURN NONE;
 	};
 	DEFINE FUNCTION fn::baz() {
 	   RETURN SELECT VALUE val FROM ONLY foo:1;
 	};
 	";
-	let _ = db.query(sql).await;
+	let _ = db.query(sql).await.unwrap();
 
 	let tmp: i32 = db.run("fn::foo").await.unwrap();
 	assert_eq!(tmp, 42);

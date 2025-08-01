@@ -578,7 +578,7 @@ pub trait RpcProtocolV1: RpcContext {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
-			Value::Strand(_) => true,
+			Value::Strand(_) | Value::Table(_) => true,
 			Value::Thing(ref x) => !matches!(x.key, RecordIdKey::Range(_)),
 			_ => false,
 		};
@@ -841,9 +841,9 @@ pub trait RpcProtocolV1: RpcContext {
 		let (from, kind, with, data) = extract_args::<(Value, Value, Value, Option<Value>)>(
 			params.0,
 		)
-		.ok_or(RpcError::InvalidParams(format!(
-			"Expected (from:Value, kind:Value, with:Value, data:Value)"
-		)))?;
+		.ok_or(RpcError::InvalidParams(
+			"Expected (from:Value, kind:Value, with:Value, data:Value)".to_string(),
+		))?;
 
 		// Returns if selecting on this value returns a single result.
 		let only = singular(&from) && singular(&with);
@@ -1016,9 +1016,9 @@ pub trait RpcProtocolV1: RpcContext {
 			let name = rest.to_owned();
 			Function::Model(Model {
 				name,
-				version: version.ok_or(RpcError::InvalidParams(format!(
-					"Expected version to be set for model function"
-				)))?,
+				version: version.ok_or(RpcError::InvalidParams(
+					"Expected version to be set for model function".to_string(),
+				))?,
 			})
 		} else {
 			Function::Normal(name)
